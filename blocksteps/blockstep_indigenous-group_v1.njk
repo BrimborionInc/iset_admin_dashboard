@@ -1,0 +1,48 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Applicant Details",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/radios/macro.njk" import govukRadios %}    {{ govukRadios({     name: "example-radio",     fieldset: {       legend: {         text: "Which Indigenous group do you belong to?",         isPageHeading: false,         classes: "govuk-fieldset__legend--l"       }     },     hint: {       text: "This information is required to confirm your eligibility for the ISET program. You must be a member of a recognized Indigenous group (First Nations, Métis, or Inuit) to apply. This information will be kept confidential in accordance with Canadian privacy laws."     },     classes: "govuk-radios",     formGroup: {       classes: props.formGroup.classes     },     disabled: false,     items: [
+  {
+<<<<<<< HEAD
+    "text": "First Nations (Status)",
+    "value": "1"
+  },
+  {
+    "text": "First Nations (Non-status)",
+    "value": "2"
+  },
+  {
+    "text": "Métis",
+    "value": "3"
+  },
+  {
+    "text": "Inuit",
+    "value": "4"
+=======
+    "text": "First Nations",
+    "value": "FN"
+  },
+  {
+    "text": "Metis",
+    "value": "M"
+  },
+  {
+    "text": "Inuit",
+    "value": "I"
+>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399
+  }
+]}) }}

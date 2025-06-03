@@ -1,0 +1,23 @@
+{
+  "blockstep_id": "blockstep_q2_v1",
+  "version": "1.0",
+  "name": "Q2: Text Input",
+  "components": [
+    {
+      "type": "input",
+      "label": "What is your age?",
+      "props": {
+        "name": "userAge",
+        "type": "number",
+        "label": {
+          "text": "Age",
+          "classes": "govuk-label--l"
+        },
+        "hint": {
+          "text": "Enter your age in years."
+        },
+        "storage_key": "userAge"
+      }
+    }
+  ]
+}

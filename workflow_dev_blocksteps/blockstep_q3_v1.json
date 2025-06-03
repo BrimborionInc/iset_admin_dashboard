@@ -1,0 +1,14 @@
+{
+  "blockstep_id": "blockstep_q3_v1",
+  "version": "1.0",
+  "name": "Q3: Summary Screen",
+  "components": [
+    {
+      "type": "summary",
+      "label": "Thank you!",
+      "props": {
+        "text": "Thank you for completing the form. You can now submit your responses."
+      }
+    }
+  ]
+}

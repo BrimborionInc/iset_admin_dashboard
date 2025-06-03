@@ -1,0 +1,43 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Contact Information",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/character-count/macro.njk" import govukCharacterCount %}
+
+{{ govukCharacterCount({
+  id: "",
+  name: "message",
+  rows: "5",
+  maxlength: "200",
+  threshold: "75",
+  autocomplete: "",
+  spellcheck: false,
+  value: "",
+  classes: "",
+  label: {
+    text: "What is your home address?",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "For example: Apt. 3B, 456 River Street Enter the address where you currently live."
+  },
+  errorMessage: {
+    text: ""
+  },
+  formGroup: {
+    classes: ""
+  }
+}) }}

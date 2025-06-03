@@ -1,0 +1,43 @@
+.component-workflow-container [class^="awsui_row"] {
+    height: 41px;  /* Adjust this value for perfect alignment */
+    display: flex;
+    padding-top: 15px;  /* Fine-tune vertical spacing */
+    justify-content: flex-end; /* Corrected alignment property */
+}
+
+.component-workflow-container [class^="awsui_thead"] {
+    display: none;
+}
+
+.component-workflow-container [class^="awsui_table"] {
+    padding-top: 11px;  /* Fine-tune vertical spacing */
+}
+
+/* Custom CSS to control the size of the icons */
+.component-workflow-container .awsui_button-icon {
+    font-size: 24px; /* Adjust the font size to control the icon size */
+}
+
+.component-workflow-container [class^="awsui_form-header"] {
+    display: none !important;
+}
+
+/* Custom button styles */
+.component-workflow-container .custom-button {
+    background-color: transparent;
+    border: 1px solid;
+    font-size: 10px;
+    cursor: pointer;
+    padding: 2px;
+    margin: 0 2px;
+}
+
+.component-workflow-container .custom-button:disabled {
+    color: #ccc;
+    cursor: not-allowed;
+}
+
+/* Hide the first column */
+.component-workflow-container .awsui_table .awsui_table-column-0 {
+    display: none;
+}

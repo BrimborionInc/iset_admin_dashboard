@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "chrome",
+      "request": "launch",
+      "name": "Launch Chrome against localhost",
+      "url": "http://localhost:3001",
+      "webRoot": "${workspaceFolder}",
+      "disableNetworkCache": true,
+      "sourceMapPathOverrides": {
+        "webpack:///./*": "${webRoot}/*",
+        "webpack:///*": "*",
+        "webpack:///src/*": "${webRoot}/src/*"
+      }
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug isetadminserver.js",
+      "program": "${workspaceFolder}/isetadminserver.js",
+      "env": {
+        "REACT_APP_API_BASE_URL": "http://localhost:5001",
+        "NODE_ENV": "development",
+        "DB_HOST": "localhost",
+        "DB_USER": "root",
+        "DB_PASS": "3^ochThR3&d",
+        "DB_NAME": "iset_intake",
+        "ALLOWED_ORIGIN": "http://localhost:3001"
+      },
+      "skipFiles": ["<node_internals>/**"],
+      "runtimeArgs": ["--nolazy"],
+      "console": "integratedTerminal"
+    }
+  ]
+}

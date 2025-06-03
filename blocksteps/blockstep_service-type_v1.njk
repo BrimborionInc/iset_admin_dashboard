@@ -1,0 +1,31 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if true %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Book an appointment",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if true %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/radios/macro.njk" import govukRadios %}    {{ govukRadios({     name: "example-radio",     fieldset: {       legend: {         text: "Which service do you require?",         isPageHeading: false,         classes: "govuk-fieldset__legend--l"       }     },     hint: {       text: "Please select one of the following options to proceed. You will have an opportunity to add family or group members and request additional service options later in the booking process. Hover over the item for a description of the service."     },     classes: "govuk-radios",     formGroup: {       classes: props.formGroup.classes     },     disabled: false,     items: [
+  {
+    "text": "Biometric Collection",
+    "value": "1"
+  },
+  {
+    "text": "Document Submission",
+    "value": "2"
+  },
+  {
+    "text": "Interview",
+    "value": "3"
+  }
+]}) }}

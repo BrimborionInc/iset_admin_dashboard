@@ -1,0 +1,305 @@
+{
+  "name": "Indigenous Group",
+  "status": "active",
+  "components": [
+    {
+      "id": 4,
+      "type": "label",
+      "label": "Label",
+      "description": "A label component used in other input components. To see an example of it in use, see the text input component.",
+      "props": {
+        "for": "",
+        "html": "",
+<<<<<<< HEAD
+<<<<<<<< HEAD:blocksteps/blockstep_indigenous-group_v1.json
+        "text": "Applicant Details",
+        "classes": "",
+        "isPageHeading": false,
+========
+        "text": "Book an appointment",
+        "classes": "",
+        "isPageHeading": true,
+>>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399:blocksteps/blockstep_service-type_v1.json
+=======
+        "text": "Applicant Details",
+        "classes": "",
+        "isPageHeading": false,
+>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399
+        "items": []
+      },
+      "editable_fields": [
+        {
+          "key": "text",
+          "path": "text",
+          "type": "text",
+          "label": "Label Text"
+        },
+        {
+          "key": "html",
+          "path": "html",
+          "type": "textarea",
+          "label": "HTML (overrides text)"
+        },
+        {
+          "key": "classes",
+          "path": "classes",
+          "type": "select",
+          "label": "Label Classes",
+          "options": [
+            {
+              "label": "None",
+              "value": ""
+            },
+            {
+              "label": "S",
+              "value": "govuk-label--s"
+            },
+            {
+              "label": "M",
+              "value": "govuk-label--m"
+            },
+            {
+              "label": "L",
+              "value": "govuk-label--l"
+            },
+            {
+              "label": "XL",
+              "value": "govuk-label--xl"
+            }
+          ]
+        },
+        {
+          "key": "for",
+          "path": "for",
+          "type": "text",
+          "label": "For Attribute"
+        },
+        {
+          "key": "isPageHeading",
+          "path": "isPageHeading",
+          "type": "select",
+          "label": "Is Page Heading?",
+          "options": [
+            {
+              "label": "True",
+              "value": true
+            },
+            {
+              "label": "False",
+              "value": false
+            }
+          ]
+        }
+      ],
+      "nunjucks_template": "\n{% from \"govuk/components/label/macro.njk\" import govukLabel %}\n\n{% if props.isPageHeading %}\n  <h1 class=\"govuk-label-wrapper\">\n{% endif %}\n  {{ govukLabel({\n    text: props.text,\n    html: props.html,\n    classes: props.classes,\n    for: props.for\n  }) }}\n{% if props.isPageHeading %}\n  </h1>\n{% endif %}\n",
+      "status": "active",
+      "created_at": "2025-03-25T21:46:41.000Z",
+      "updated_at": "2025-04-02T16:35:50.000Z",
+      "has_options": 0,
+      "option_schema": null
+    },
+    {
+      "id": 1,
+      "type": "radio",
+      "label": "Radio Group",
+      "description": "A group of radio buttons to let users select one option from a list.",
+      "props": {
+        "hint": {
+          "text": "This information is required to confirm your eligibility for the ISET program. You must be a member of a recognized Indigenous group (First Nations, Métis, or Inuit) to apply. This information will be kept confidential in accordance with Canadian privacy laws."
+        },
+        "name": "example-radio",
+        "items": [
+          {
+<<<<<<< HEAD
+            "text": "First Nations (Status)",
+            "value": "1"
+          },
+          {
+<<<<<<<< HEAD:blocksteps/blockstep_indigenous-group_v1.json
+            "text": "First Nations (Non-status)",
+            "value": "2"
+          },
+          {
+            "text": "Métis",
+            "value": "3"
+          },
+          {
+            "text": "Inuit",
+            "value": "4"
+========
+            "text": "Document Submission",
+            "value": "2"
+          },
+          {
+            "text": "Interview",
+            "value": "3"
+>>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399:blocksteps/blockstep_service-type_v1.json
+=======
+            "text": "First Nations",
+            "value": "FN"
+          },
+          {
+            "text": "Metis",
+            "value": "M"
+          },
+          {
+            "text": "Inuit",
+            "value": "I"
+>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399
+          }
+        ],
+        "classes": "govuk-radios",
+        "disabled": false,
+        "fieldset": {
+          "legend": {
+            "text": "Which Indigenous group do you belong to?",
+            "classes": "govuk-fieldset__legend--l",
+            "isPageHeading": false
+          }
+        },
+        "attributes": {
+          "data-options-endpoint": "$.props.endpoint"
+<<<<<<< HEAD
+=======
+        },
+        "props": {
+          "mode": "static",
+          "endpoint": null,
+          "attributes": null
+>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399
+        }
+      },
+      "editable_fields": [
+        {
+          "key": "legendText",
+          "path": "fieldset.legend.text",
+          "type": "text",
+          "label": "Legend Text"
+        },
+        {
+          "key": "hintText",
+          "path": "hint.text",
+          "type": "text",
+          "label": "Hint Text"
+        },
+        {
+          "key": "legendClasses",
+          "path": "fieldset.legend.classes",
+          "type": "select",
+          "label": "Legend Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Small (s)",
+              "value": "govuk-fieldset__legend--s"
+            },
+            {
+              "label": "Medium (m)",
+              "value": "govuk-fieldset__legend--m"
+            },
+            {
+              "label": "Large (l)",
+              "value": "govuk-fieldset__legend--l"
+            },
+            {
+              "label": "Extra Large (xl)",
+              "value": "govuk-fieldset__legend--xl"
+            }
+          ]
+        },
+        {
+          "key": "isPageHeading",
+          "path": "fieldset.legend.isPageHeading",
+          "type": "select",
+          "label": "Is Page Heading?",
+          "options": [
+            {
+              "label": "Yes",
+              "value": true
+            },
+            {
+              "label": "No",
+              "value": false
+            }
+          ]
+        },
+        {
+          "key": "name",
+          "path": "name",
+          "type": "text",
+          "label": "Radio Group Name"
+        },
+        {
+          "key": "classes",
+          "path": "classes",
+          "type": "select",
+          "label": "Container Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Inline",
+              "value": "govuk-radios--inline"
+            },
+            {
+              "label": "Small",
+              "value": "govuk-radios--small"
+            }
+          ]
+        },
+        {
+          "key": "formGroupClasses",
+          "path": "formGroup.classes",
+          "type": "select",
+          "label": "Form Group Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Error State",
+              "value": "govuk-form-group--error"
+            }
+          ]
+        },
+        {
+          "key": "disabled",
+          "path": "disabled",
+          "type": "select",
+          "label": "Disabled",
+          "options": [
+            {
+              "label": "Yes",
+              "value": true
+            },
+            {
+              "label": "No",
+              "value": false
+            }
+          ]
+        },
+        {
+          "key": "options",
+          "path": "items",
+          "type": "optionList",
+          "label": "Options"
+        }
+      ],
+      "nunjucks_template": "{% from \"govuk/components/radios/macro.njk\" import govukRadios %}\r \r   {{ govukRadios({\r     name: props.name,\r     fieldset: {\r       legend: {\r         text: props.fieldset.legend.text,\r         isPageHeading: props.fieldset.legend.isPageHeading,\r         classes: props.fieldset.legend.classes\r       }\r     },\r     hint: {\r       text: props.hint.text\r     },\r     classes: props.classes,\r     formGroup: {\r       classes: props.formGroup.classes\r     },\r     disabled: props.disabled,\r     items: props.items}) }}",
+      "status": "active",
+      "created_at": "2025-03-25T14:10:39.000Z",
+      "updated_at": "2025-04-02T18:19:29.000Z",
+      "has_options": 1,
+      "option_schema": [
+        "text",
+        "value"
+      ]
+    }
+  ]
+}

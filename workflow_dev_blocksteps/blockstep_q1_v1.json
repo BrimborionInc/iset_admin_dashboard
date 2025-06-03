@@ -1,0 +1,20 @@
+{
+  "blockstep_id": "blockstep_q1_v1",
+  "version": "1.0",
+  "name": "Q1: Yes/No Question",
+  "components": [
+    {
+      "type": "decision",
+      "label": "Do you want to proceed?",
+      "props": {
+        "name": "proceedChoice",
+        "type": "radio",
+        "options": [
+          { "value": "yes", "label": "Yes" },
+          { "value": "no", "label": "No" }
+        ],
+        "storage_key": "proceedChoice"
+      }
+    }
+  ]
+}

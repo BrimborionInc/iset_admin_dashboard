@@ -1,0 +1,60 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Employment Goals",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/checkboxes/macro.njk" import govukCheckboxes %}    {{ govukCheckboxes({     idPrefix: "example-checkboxes",     name: "employment-goals",     fieldset: {       legend: {         text: "What barriers are you currently facing in reaching your employment goal?",         isPageHeading: false | default(false),         classes: "govuk-fieldset__legend--l"       }     },     hint: {       text: "Understanding the challenges you face helps us determine what support you may be eligible for. Select all that apply."     },     items: [
+  {
+    "text": "Education",
+    "value": "1"
+  },
+  {
+    "text": "Funding",
+    "value": "2"
+  },
+  {
+    "text": "Lack of job opportunities",
+    "value": "3"
+  },
+  {
+    "text": "Location (remote community)",
+    "value": "4"
+  },
+  {
+    "text": "Other (show a text field if selected)",
+    "value": "5"
+  }
+],     classes: "govuk-checkboxes"}) }}
+
+
+{% from "govuk/components/input/macro.njk" import govukInput %}
+
+{{ govukInput({
+  name: "first-name",
+  type: "text",
+  label: {
+    text: "",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "Other barriers"
+  },
+  classes: "govuk-input",
+  autocomplete: "given-name",
+  formGroup: {
+    classes: props.formGroup.classes
+  },
+  disabled: false
+}) }}
