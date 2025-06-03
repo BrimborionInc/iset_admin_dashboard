@@ -1,0 +1,87 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Applicant Details",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+
+{% from "govuk/components/date-input/macro.njk" import govukDateInput %}
+
+{{ govukDateInput({
+  id: "dob",
+  namePrefix: "dob",
+  fieldset: {
+    legend: {
+      text: "What is your date of birth?",
+      isPageHeading: props.fieldset.legend.isPageHeading | default(false),
+      classes: "govuk-fieldset__legend--l"
+    }
+  },
+  hint: {
+<<<<<<< HEAD
+    text: "Hint text"
+=======
+    text: "For example, 31 3 1980"
+>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399
+  },
+  items: [
+  {
+    "name": "day",
+    "classes": "govuk-input--width-2"
+  },
+  {
+    "name": "month",
+    "classes": "govuk-input--width-2"
+  },
+  {
+    "name": "year",
+    "classes": "govuk-input--width-4"
+  }
+],
+  formGroup: {
+    classes: props.formGroup.classes
+  },
+  disabled: false
+}) }}
+<<<<<<< HEAD
+
+
+{% from "govuk/components/textarea/macro.njk" import govukTextarea %}
+
+{{ govukTextarea({
+  id: "more-detail",
+  name: "more-detail",
+  label: {
+    text: "Can you provide more detail?",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "Don't include personal or financial information, eg your National Insurance number or credit card details."
+  },
+  errorMessage: {
+    text: "You must provide more detail."
+  },
+  classes: "govuk-textarea",
+  rows: "5"
+}) }}
+
+{% from "govuk/components/inset-text/macro.njk" import govukInsetText %}
+
+{{ govukInsetText({
+  text: "This section contains important background information.",
+  id: "",
+  classes: ""
+}) }}
+=======
+>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399

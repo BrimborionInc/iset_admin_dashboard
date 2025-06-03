@@ -1,0 +1,12 @@
+.demoNavigation {
+  background-color: rgb(241, 245, 195); /* Example background color */
+  padding: 0.5em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.buttonGroup {
+  display: flex;
+  gap: 0.5em; /* Small space between buttons */
+}

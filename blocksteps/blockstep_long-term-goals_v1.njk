@@ -1,0 +1,43 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Employment Goals",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/character-count/macro.njk" import govukCharacterCount %}
+
+{{ govukCharacterCount({
+  id: "employment-goals",
+  name: "employment-goals",
+  rows: "5",
+  maxlength: "250",
+  threshold: "75",
+  autocomplete: "",
+  spellcheck: true,
+  value: "",
+  classes: "",
+  label: {
+    text: "What are your long-term employment goals?",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "Tell us what kind of work or career you would like to pursue. Be as specific as you can — for example, “heavy equipment operator,” “early childhood educator,” or “self-employed graphic designe"
+  },
+  errorMessage: {
+    text: ""
+  },
+  formGroup: {
+    classes: ""
+  }
+}) }}

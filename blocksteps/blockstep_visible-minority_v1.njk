@@ -1,0 +1,27 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Applicant Details",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/radios/macro.njk" import govukRadios %}    {{ govukRadios({     name: "example-radio",     fieldset: {       legend: {         text: "Other than Indigenous, do you belong to a visible minority group?",         isPageHeading: false,         classes: "govuk-fieldset__legend--l"       }     },     hint: {       text: "This question supports program equity and reporting. It refers to individuals, other than Indigenous peoples, who are non-Caucasian in race or non-white in colour, as defined by the Government of Canada"     },     classes: "govuk-radios",     formGroup: {       classes: props.formGroup.classes     },     disabled: false,     items: [
+  {
+    "text": "Yes",
+    "value": "1"
+  },
+  {
+    "text": "No",
+    "value": "2"
+  }
+]}) }}

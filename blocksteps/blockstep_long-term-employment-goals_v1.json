@@ -1,0 +1,224 @@
+{
+  "name": "Long-term Employment Goals",
+  "status": "active",
+  "components": [
+    {
+      "id": 4,
+      "type": "label",
+      "label": "Label",
+      "description": "A label component used in other input components. To see an example of it in use, see the text input component.",
+      "props": {
+        "for": "",
+        "html": "",
+        "text": "Employment Goals",
+        "classes": "",
+        "isPageHeading": false,
+        "items": []
+      },
+      "editable_fields": [
+        {
+          "key": "text",
+          "path": "text",
+          "type": "text",
+          "label": "Label Text"
+        },
+        {
+          "key": "html",
+          "path": "html",
+          "type": "textarea",
+          "label": "HTML (overrides text)"
+        },
+        {
+          "key": "classes",
+          "path": "classes",
+          "type": "select",
+          "label": "Label Classes",
+          "options": [
+            {
+              "label": "None",
+              "value": ""
+            },
+            {
+              "label": "S",
+              "value": "govuk-label--s"
+            },
+            {
+              "label": "M",
+              "value": "govuk-label--m"
+            },
+            {
+              "label": "L",
+              "value": "govuk-label--l"
+            },
+            {
+              "label": "XL",
+              "value": "govuk-label--xl"
+            }
+          ]
+        },
+        {
+          "key": "for",
+          "path": "for",
+          "type": "text",
+          "label": "For Attribute"
+        },
+        {
+          "key": "isPageHeading",
+          "path": "isPageHeading",
+          "type": "select",
+          "label": "Is Page Heading?",
+          "options": [
+            {
+              "label": "True",
+              "value": true
+            },
+            {
+              "label": "False",
+              "value": false
+            }
+          ]
+        }
+      ],
+      "nunjucks_template": "\n{% from \"govuk/components/label/macro.njk\" import govukLabel %}\n\n{% if props.isPageHeading %}\n  <h1 class=\"govuk-label-wrapper\">\n{% endif %}\n  {{ govukLabel({\n    text: props.text,\n    html: props.html,\n    classes: props.classes,\n    for: props.for\n  }) }}\n{% if props.isPageHeading %}\n  </h1>\n{% endif %}\n",
+      "status": "active",
+      "created_at": "2025-03-25T21:46:41.000Z",
+      "updated_at": "2025-04-02T16:35:50.000Z",
+      "has_options": 0,
+      "option_schema": null
+    },
+    {
+      "id": 16,
+      "type": "textarea",
+      "label": "Textarea",
+      "description": "A component for multi-line text input.",
+      "props": {
+        "id": "more-detail",
+        "hint": {
+          "text": "Tell us what kind of work or career you would like to pursue. Be as specific as you can — for example, “heavy equipment operator,” “early childhood educator,” or “self-employed graphic designe"
+        },
+        "name": "more-detail",
+        "rows": "5",
+        "label": {
+          "text": "What are your long-term employment goals?",
+          "classes": "govuk-label--l"
+        },
+        "classes": "govuk-textarea",
+        "disabled": false,
+        "attributes": {
+          "data-example": "true"
+        },
+        "spellcheck": true,
+        "errorMessage": {
+          "text": "You must provide more detail."
+        },
+        "items": []
+      },
+      "editable_fields": [
+        {
+          "key": "labelText",
+          "path": "label.text",
+          "type": "text",
+          "label": "Label Text"
+        },
+        {
+          "key": "hintText",
+          "path": "hint.text",
+          "type": "text",
+          "label": "Hint Text"
+        },
+        {
+          "key": "labelClasses",
+          "path": "label.classes",
+          "type": "select",
+          "label": "Label Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Small (s)",
+              "value": "govuk-label--s"
+            },
+            {
+              "label": "Medium (m)",
+              "value": "govuk-label--m"
+            },
+            {
+              "label": "Large (l)",
+              "value": "govuk-label--l"
+            }
+          ]
+        },
+        {
+          "key": "name",
+          "path": "name",
+          "type": "text",
+          "label": "Textarea Name"
+        },
+        {
+          "key": "id",
+          "path": "id",
+          "type": "text",
+          "label": "Textarea ID"
+        },
+        {
+          "key": "rows",
+          "path": "rows",
+          "type": "text",
+          "label": "Rows"
+        },
+        {
+          "key": "autocomplete",
+          "path": "autocomplete",
+          "type": "text",
+          "label": "Autocomplete"
+        },
+        {
+          "key": "classes",
+          "path": "classes",
+          "type": "text",
+          "label": "CSS Classes"
+        },
+        {
+          "key": "formGroupClasses",
+          "path": "formGroup.classes",
+          "type": "select",
+          "label": "Form Group Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Error State",
+              "value": "govuk-form-group--error"
+            }
+          ]
+        },
+        {
+          "key": "disabled",
+          "path": "disabled",
+          "type": "select",
+          "label": "Disabled",
+          "options": [
+            {
+              "label": "Yes",
+              "value": true
+            },
+            {
+              "label": "No",
+              "value": false
+            }
+          ]
+        }
+      ],
+      "nunjucks_template": "{% from \"govuk/components/textarea/macro.njk\" import govukTextarea %}\n\n{{ govukTextarea({\n  id: props.id,\n  name: props.name,\n  label: {\n    text: props.label.text,\n    classes: props.label.classes\n  },\n  hint: {\n    text: props.hint.text\n  },\n  errorMessage: {\n    text: props.errorMessage.text\n  },\n  classes: props.classes,\n  rows: props.rows\n}) }}",
+      "status": "active",
+      "created_at": "2025-03-26T18:41:05.000Z",
+      "updated_at": "2025-03-28T13:49:25.000Z",
+      "has_options": 0,
+      "option_schema": null
+    }
+  ]
+}

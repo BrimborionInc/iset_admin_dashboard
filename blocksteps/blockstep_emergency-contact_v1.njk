@@ -1,0 +1,37 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Contact Details",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+
+{% from "govuk/components/input/macro.njk" import govukInput %}
+
+{{ govukInput({
+  name: "first-name",
+  type: "text",
+  label: {
+    text: "Who should we contact in case of emergency?",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "Please provide details of someone we can contact if we cannot reach you. This could be a family member, close friend, or someone who knows how to reach you quickly."
+  },
+  classes: "govuk-input",
+  autocomplete: "given-name",
+  formGroup: {
+    classes: props.formGroup.classes
+  },
+  disabled: false
+}) }}

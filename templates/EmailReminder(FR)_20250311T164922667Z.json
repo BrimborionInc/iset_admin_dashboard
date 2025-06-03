@@ -1,0 +1,8 @@
+{
+  "name": "Email Reminder (FR)",
+  "type": "Email",
+  "status": "Draft",
+  "language": "French",
+  "subject": "Rappel de Rendez-vous",
+  "content": "Cher/Chère {applicant_name},\n\nCeci est un rappel de votre rendez-vous prévu le {appointment_date} à {VAC_address}.\n\nVeuillez apporter:\n\n- Votre numéro de référence de rendez-vous.\n- Votre lettre d’instructions biométriques (uniquement pour un rendez-vous de collecte biométrique).\n- Tout autre document demandé par IRCC.\n\nSi vous devez annuler ou reprogrammer votre rendez-vous, veuillez vous connecter à votre compte ou nous appeler au {contact_number}.\n\nÀ bientôt !\nL’équipe du CRDV"
+}
