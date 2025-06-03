@@ -1,0 +1,238 @@
+{
+  "name": "Highest Education Year",
+  "status": "active",
+  "components": [
+    {
+      "id": 4,
+      "type": "label",
+      "label": "Label",
+      "description": "A label component used in other input components. To see an example of it in use, see the text input component.",
+      "props": {
+        "for": "",
+        "html": "",
+        "text": "Education",
+        "classes": "",
+        "isPageHeading": false,
+        "items": []
+      },
+      "editable_fields": [
+        {
+          "key": "text",
+          "path": "text",
+          "type": "text",
+          "label": "Label Text"
+        },
+        {
+          "key": "html",
+          "path": "html",
+          "type": "textarea",
+          "label": "HTML (overrides text)"
+        },
+        {
+          "key": "classes",
+          "path": "classes",
+          "type": "select",
+          "label": "Label Classes",
+          "options": [
+            {
+              "label": "None",
+              "value": ""
+            },
+            {
+              "label": "S",
+              "value": "govuk-label--s"
+            },
+            {
+              "label": "M",
+              "value": "govuk-label--m"
+            },
+            {
+              "label": "L",
+              "value": "govuk-label--l"
+            },
+            {
+              "label": "XL",
+              "value": "govuk-label--xl"
+            }
+          ]
+        },
+        {
+          "key": "for",
+          "path": "for",
+          "type": "text",
+          "label": "For Attribute"
+        },
+        {
+          "key": "isPageHeading",
+          "path": "isPageHeading",
+          "type": "select",
+          "label": "Is Page Heading?",
+          "options": [
+            {
+              "label": "True",
+              "value": true
+            },
+            {
+              "label": "False",
+              "value": false
+            }
+          ]
+        }
+      ],
+      "nunjucks_template": "\n{% from \"govuk/components/label/macro.njk\" import govukLabel %}\n\n{% if props.isPageHeading %}\n  <h1 class=\"govuk-label-wrapper\">\n{% endif %}\n  {{ govukLabel({\n    text: props.text,\n    html: props.html,\n    classes: props.classes,\n    for: props.for\n  }) }}\n{% if props.isPageHeading %}\n  </h1>\n{% endif %}\n",
+      "status": "active",
+      "created_at": "2025-03-25T21:46:41.000Z",
+      "updated_at": "2025-04-02T16:35:50.000Z",
+      "has_options": 0,
+      "option_schema": null
+    },
+    {
+      "id": 13,
+      "type": "date-input",
+      "label": "Date Input",
+      "description": "A component for inputting a date with day, month, and year fields.",
+      "props": {
+        "id": "dob",
+        "hint": {
+          "text": "What year did you complete your highest level of education"
+        },
+        "items": [
+          {
+            "name": "day",
+            "classes": "govuk-input--width-2"
+          },
+          {
+            "name": "month",
+            "classes": "govuk-input--width-2"
+          },
+          {
+            "name": "year",
+            "classes": "govuk-input--width-4"
+          }
+        ],
+        "disabled": false,
+        "fieldset": {
+          "legend": {
+            "text": "Year completed highest education?",
+            "classes": "govuk-fieldset__legend--l"
+          }
+        },
+        "namePrefix": "dob"
+      },
+      "editable_fields": [
+        {
+          "key": "fieldsetLegendText",
+          "path": "fieldset.legend.text",
+          "type": "text",
+          "label": "Legend Text"
+        },
+        {
+          "key": "hintText",
+          "path": "hint.text",
+          "type": "text",
+          "label": "Hint Text"
+        },
+        {
+          "key": "legendClasses",
+          "path": "fieldset.legend.classes",
+          "type": "select",
+          "label": "Legend Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Small (s)",
+              "value": "govuk-fieldset__legend--s"
+            },
+            {
+              "label": "Medium (m)",
+              "value": "govuk-fieldset__legend--m"
+            },
+            {
+              "label": "Large (l)",
+              "value": "govuk-fieldset__legend--l"
+            },
+            {
+              "label": "Extra Large (xl)",
+              "value": "govuk-fieldset__legend--xl"
+            }
+          ]
+        },
+        {
+          "key": "fieldsetLegendIsPageHeading",
+          "path": "fieldset.legend.isPageHeading",
+          "type": "select",
+          "label": "Is Page Heading?",
+          "options": [
+            {
+              "label": "Yes",
+              "value": true
+            },
+            {
+              "label": "No",
+              "value": false
+            }
+          ]
+        },
+        {
+          "key": "id",
+          "path": "id",
+          "type": "text",
+          "label": "Date Input ID"
+        },
+        {
+          "key": "namePrefix",
+          "path": "namePrefix",
+          "type": "text",
+          "label": "Name Prefix"
+        },
+        {
+          "key": "formGroupClasses",
+          "path": "formGroup.classes",
+          "type": "select",
+          "label": "Form Group Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Error State",
+              "value": "govuk-form-group--error"
+            }
+          ]
+        },
+        {
+          "key": "disabled",
+          "path": "disabled",
+          "type": "select",
+          "label": "Disabled",
+          "options": [
+            {
+              "label": "Yes",
+              "value": true
+            },
+            {
+              "label": "No",
+              "value": false
+            }
+          ]
+        },
+        {
+          "key": "items",
+          "path": "items",
+          "type": "optionList",
+          "label": "Input Fields"
+        }
+      ],
+      "nunjucks_template": "\n{% from \"govuk/components/date-input/macro.njk\" import govukDateInput %}\n\n{{ govukDateInput({\n  id: props.id,\n  namePrefix: props.namePrefix,\n  fieldset: {\n    legend: {\n      text: props.fieldset.legend.text,\n      isPageHeading: props.fieldset.legend.isPageHeading | default(false),\n      classes: props.fieldset.legend.classes\n    }\n  },\n  hint: {\n    text: props.hint.text\n  },\n  items: props.items,\n  formGroup: {\n    classes: props.formGroup.classes\n  },\n  disabled: props.disabled\n}) }}\n",
+      "status": "active",
+      "created_at": "2025-03-26T18:33:20.000Z",
+      "updated_at": "2025-03-27T16:39:46.000Z",
+      "has_options": 0,
+      "option_schema": null
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "workflow_q1_q2_q3",
+  "name": "Sequential Q1-Q2-Q3 Workflow",
+  "version": "1.0",
+  "description": "A simple workflow with three sequential steps.",
+  "steps": [
+    {
+      "id": "Q1",
+      "blockstep_id": "blockstep_q1_v1",
+      "output": {
+        "next": "Q2"
+      }
+    },
+    {
+      "id": "Q2",
+      "blockstep_id": "blockstep_q2_v1",
+      "output": {
+        "next": "Q3"
+      }
+    },
+    {
+      "id": "Q3",
+      "blockstep_id": "blockstep_q3_v1",
+      "output": {
+        "next": null
+      }
+    }
+  ]
+}

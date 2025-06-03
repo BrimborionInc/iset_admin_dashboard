@@ -1,0 +1,45 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Employment Goals",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/radios/macro.njk" import govukRadios %}
+{% from "govuk/components/input/macro.njk" import govukInput %}
+
+{% set targetHtml %}
+{{ govukInput({
+  id: "target-employer",
+  name: "target-employer",
+  type: "text",
+  autocomplete: "target-employer",
+  spellcheck: false,
+  classes: "govuk-!-width-one-third",
+  label: {
+    text: "Name of target employer or program"
+  }
+}) }}
+{% endset -%}    {{ govukRadios({     name: "example-radio",     fieldset: {       legend: {         text: "Have you already identified a training program or employment opportunity?",         isPageHeading: false,         classes: "govuk-fieldset__legend--l"       }     },     hint: {       text: "Let us know if you've found a program, job, or placement you're planning to apply to or have been accepted into."     },     classes: "govuk-radios",     formGroup: {       classes: props.formGroup.classes     },     disabled: false,     items: [
+  {
+    "text": "Yes",
+    "value": "1",
+    conditional: {
+        html: targetHtml 
+      }
+  },
+  {
+    "text": "No",
+    "value": "2"
+  }
+]}) }}

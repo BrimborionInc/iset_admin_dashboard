@@ -1,0 +1,417 @@
+{
+  "name": "Date of Birth",
+  "status": "active",
+  "components": [
+    {
+      "id": 4,
+      "type": "label",
+      "label": "Label",
+      "description": "A label component used in other input components. To see an example of it in use, see the text input component.",
+      "props": {
+        "for": "",
+        "html": "",
+        "text": "Applicant Details",
+        "classes": "",
+        "isPageHeading": false,
+        "items": []
+      },
+      "editable_fields": [
+        {
+          "key": "text",
+          "path": "text",
+          "type": "text",
+          "label": "Label Text"
+        },
+        {
+          "key": "html",
+          "path": "html",
+          "type": "textarea",
+          "label": "HTML (overrides text)"
+        },
+        {
+          "key": "classes",
+          "path": "classes",
+          "type": "select",
+          "label": "Label Classes",
+          "options": [
+            {
+              "label": "None",
+              "value": ""
+            },
+            {
+              "label": "S",
+              "value": "govuk-label--s"
+            },
+            {
+              "label": "M",
+              "value": "govuk-label--m"
+            },
+            {
+              "label": "L",
+              "value": "govuk-label--l"
+            },
+            {
+              "label": "XL",
+              "value": "govuk-label--xl"
+            }
+          ]
+        },
+        {
+          "key": "for",
+          "path": "for",
+          "type": "text",
+          "label": "For Attribute"
+        },
+        {
+          "key": "isPageHeading",
+          "path": "isPageHeading",
+          "type": "select",
+          "label": "Is Page Heading?",
+          "options": [
+            {
+              "label": "True",
+              "value": true
+            },
+            {
+              "label": "False",
+              "value": false
+            }
+          ]
+        }
+      ],
+      "nunjucks_template": "\n{% from \"govuk/components/label/macro.njk\" import govukLabel %}\n\n{% if props.isPageHeading %}\n  <h1 class=\"govuk-label-wrapper\">\n{% endif %}\n  {{ govukLabel({\n    text: props.text,\n    html: props.html,\n    classes: props.classes,\n    for: props.for\n  }) }}\n{% if props.isPageHeading %}\n  </h1>\n{% endif %}\n",
+      "status": "active",
+      "created_at": "2025-03-25T21:46:41.000Z",
+      "updated_at": "2025-04-02T16:35:50.000Z",
+      "has_options": 0,
+      "option_schema": null
+    },
+    {
+      "id": 13,
+      "type": "date-input",
+      "label": "Date Input",
+      "description": "A component for inputting a date with day, month, and year fields.",
+      "props": {
+        "id": "dob",
+        "hint": {
+<<<<<<< HEAD
+          "text": "Hint text"
+=======
+          "text": "For example, 31 3 1980"
+>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399
+        },
+        "items": [
+          {
+            "name": "day",
+            "classes": "govuk-input--width-2"
+          },
+          {
+            "name": "month",
+            "classes": "govuk-input--width-2"
+          },
+          {
+            "name": "year",
+            "classes": "govuk-input--width-4"
+          }
+        ],
+        "disabled": false,
+        "fieldset": {
+          "legend": {
+            "text": "What is your date of birth?",
+            "classes": "govuk-fieldset__legend--l"
+          }
+        },
+        "namePrefix": "dob"
+      },
+      "editable_fields": [
+        {
+          "key": "fieldsetLegendText",
+          "path": "fieldset.legend.text",
+          "type": "text",
+          "label": "Legend Text"
+        },
+        {
+          "key": "hintText",
+          "path": "hint.text",
+          "type": "text",
+          "label": "Hint Text"
+        },
+        {
+          "key": "legendClasses",
+          "path": "fieldset.legend.classes",
+          "type": "select",
+          "label": "Legend Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Small (s)",
+              "value": "govuk-fieldset__legend--s"
+            },
+            {
+              "label": "Medium (m)",
+              "value": "govuk-fieldset__legend--m"
+            },
+            {
+              "label": "Large (l)",
+              "value": "govuk-fieldset__legend--l"
+            },
+            {
+              "label": "Extra Large (xl)",
+              "value": "govuk-fieldset__legend--xl"
+            }
+          ]
+        },
+        {
+          "key": "fieldsetLegendIsPageHeading",
+          "path": "fieldset.legend.isPageHeading",
+          "type": "select",
+          "label": "Is Page Heading?",
+          "options": [
+            {
+              "label": "Yes",
+              "value": true
+            },
+            {
+              "label": "No",
+              "value": false
+            }
+          ]
+        },
+        {
+          "key": "id",
+          "path": "id",
+          "type": "text",
+          "label": "Date Input ID"
+        },
+        {
+          "key": "namePrefix",
+          "path": "namePrefix",
+          "type": "text",
+          "label": "Name Prefix"
+        },
+        {
+          "key": "formGroupClasses",
+          "path": "formGroup.classes",
+          "type": "select",
+          "label": "Form Group Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Error State",
+              "value": "govuk-form-group--error"
+            }
+          ]
+        },
+        {
+          "key": "disabled",
+          "path": "disabled",
+          "type": "select",
+          "label": "Disabled",
+          "options": [
+            {
+              "label": "Yes",
+              "value": true
+            },
+            {
+              "label": "No",
+              "value": false
+            }
+          ]
+        },
+        {
+          "key": "items",
+          "path": "items",
+          "type": "optionList",
+          "label": "Input Fields"
+        }
+      ],
+      "nunjucks_template": "\n{% from \"govuk/components/date-input/macro.njk\" import govukDateInput %}\n\n{{ govukDateInput({\n  id: props.id,\n  namePrefix: props.namePrefix,\n  fieldset: {\n    legend: {\n      text: props.fieldset.legend.text,\n      isPageHeading: props.fieldset.legend.isPageHeading | default(false),\n      classes: props.fieldset.legend.classes\n    }\n  },\n  hint: {\n    text: props.hint.text\n  },\n  items: props.items,\n  formGroup: {\n    classes: props.formGroup.classes\n  },\n  disabled: props.disabled\n}) }}\n",
+      "status": "active",
+      "created_at": "2025-03-26T18:33:20.000Z",
+      "updated_at": "2025-03-27T16:39:46.000Z",
+      "has_options": 0,
+      "option_schema": null
+<<<<<<< HEAD
+    },
+    {
+      "id": 16,
+      "type": "textarea",
+      "label": "Textarea",
+      "description": "A component for multi-line text input.",
+      "props": {
+        "id": "more-detail",
+        "hint": {
+          "text": "Don't include personal or financial information, eg your National Insurance number or credit card details."
+        },
+        "name": "more-detail",
+        "rows": "5",
+        "label": {
+          "text": "Can you provide more detail?",
+          "classes": "govuk-label--l"
+        },
+        "classes": "govuk-textarea",
+        "disabled": false,
+        "attributes": {
+          "data-example": "true"
+        },
+        "spellcheck": true,
+        "errorMessage": {
+          "text": "You must provide more detail."
+        },
+        "items": []
+      },
+      "editable_fields": [
+        {
+          "key": "labelText",
+          "path": "label.text",
+          "type": "text",
+          "label": "Label Text"
+        },
+        {
+          "key": "hintText",
+          "path": "hint.text",
+          "type": "text",
+          "label": "Hint Text"
+        },
+        {
+          "key": "labelClasses",
+          "path": "label.classes",
+          "type": "select",
+          "label": "Label Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Small (s)",
+              "value": "govuk-label--s"
+            },
+            {
+              "label": "Medium (m)",
+              "value": "govuk-label--m"
+            },
+            {
+              "label": "Large (l)",
+              "value": "govuk-label--l"
+            }
+          ]
+        },
+        {
+          "key": "name",
+          "path": "name",
+          "type": "text",
+          "label": "Textarea Name"
+        },
+        {
+          "key": "id",
+          "path": "id",
+          "type": "text",
+          "label": "Textarea ID"
+        },
+        {
+          "key": "rows",
+          "path": "rows",
+          "type": "text",
+          "label": "Rows"
+        },
+        {
+          "key": "autocomplete",
+          "path": "autocomplete",
+          "type": "text",
+          "label": "Autocomplete"
+        },
+        {
+          "key": "classes",
+          "path": "classes",
+          "type": "text",
+          "label": "CSS Classes"
+        },
+        {
+          "key": "formGroupClasses",
+          "path": "formGroup.classes",
+          "type": "select",
+          "label": "Form Group Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Error State",
+              "value": "govuk-form-group--error"
+            }
+          ]
+        },
+        {
+          "key": "disabled",
+          "path": "disabled",
+          "type": "select",
+          "label": "Disabled",
+          "options": [
+            {
+              "label": "Yes",
+              "value": true
+            },
+            {
+              "label": "No",
+              "value": false
+            }
+          ]
+        }
+      ],
+      "nunjucks_template": "{% from \"govuk/components/textarea/macro.njk\" import govukTextarea %}\n\n{{ govukTextarea({\n  id: props.id,\n  name: props.name,\n  label: {\n    text: props.label.text,\n    classes: props.label.classes\n  },\n  hint: {\n    text: props.hint.text\n  },\n  errorMessage: {\n    text: props.errorMessage.text\n  },\n  classes: props.classes,\n  rows: props.rows\n}) }}",
+      "status": "active",
+      "created_at": "2025-03-26T18:41:05.000Z",
+      "updated_at": "2025-03-28T13:49:25.000Z",
+      "has_options": 0,
+      "option_schema": null
+    },
+    {
+      "id": 22,
+      "type": "inset-text",
+      "label": "Inset Text",
+      "description": "Displays a block of subdued content, often used for notes or hints.",
+      "props": {
+        "id": "",
+        "text": "This section contains important background information.",
+        "classes": "",
+        "items": []
+      },
+      "editable_fields": [
+        {
+          "key": "text",
+          "path": "text",
+          "type": "text",
+          "label": "Inset Text"
+        },
+        {
+          "key": "id",
+          "path": "id",
+          "type": "text",
+          "label": "Component ID"
+        },
+        {
+          "key": "classes",
+          "path": "classes",
+          "type": "text",
+          "label": "CSS Classes"
+        }
+      ],
+      "nunjucks_template": "{% from \"govuk/components/inset-text/macro.njk\" import govukInsetText %}\n\n{{ govukInsetText({\n  text: props.text,\n  id: props.id,\n  classes: props.classes\n}) }}",
+      "status": "active",
+      "created_at": "2025-03-27T21:11:50.000Z",
+      "updated_at": "2025-03-27T21:11:50.000Z",
+      "has_options": 0,
+      "option_schema": null
+=======
+>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399
+    }
+  ]
+}

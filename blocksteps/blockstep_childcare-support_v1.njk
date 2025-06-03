@@ -1,0 +1,96 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Employment Goals",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/radios/macro.njk" import govukRadios %}    {{ govukRadios({     name: "example-radio",     fieldset: {       legend: {         text: "Are you requesting childcare support?",         isPageHeading: false,         classes: "govuk-fieldset__legend--l"       }     },     hint: {       text: "If you need childcare in order to attend training or work, you may be eligible for funding. Select “Yes” even if you're already receiving partial support."     },     classes: "govuk-radios--inline",     formGroup: {       classes: props.formGroup.classes     },     disabled: false,     items: [
+  {
+    "text": "Yes",
+    "value": "1"
+  },
+  {
+    "text": "No",
+    "value": "2"
+  }
+]}) }}
+
+{% from "govuk/components/select/macro.njk" import govukSelect %}
+
+{{ govukSelect({
+  name: "example-select",
+  label: {
+    text: "",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "What childcare funding are you currently receiving?"
+  },
+  classes: "govuk-select",
+  items: [
+  {
+    "text": "EI/CRF",
+    "value": "1"
+  },
+  {
+    "text": "Provincial funding/subsidy",
+    "value": "2"
+  },
+  {
+    "text": "FNICCI",
+    "value": "3"
+  },
+  {
+    "text": "No funding received",
+    "value": "4"
+  },
+  {
+    "text": "Daycare not available",
+    "value": "5"
+  },
+  {
+    "text": "Assisted by family",
+    "value": "6"
+  },
+  {
+    "text": "Self-funded",
+    "value": "7"
+  },
+  {
+    "text": "Other (please specify)",
+    "value": "8"
+  }
+]
+}) }}
+
+
+{% from "govuk/components/input/macro.njk" import govukInput %}
+
+{{ govukInput({
+  name: "first-name",
+  type: "text",
+  label: {
+    text: "",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "What other source of childcare funding are you currently receiving?"
+  },
+  classes: "govuk-input",
+  autocomplete: "given-name",
+  formGroup: {
+    classes: props.formGroup.classes
+  },
+  disabled: false
+}) }}

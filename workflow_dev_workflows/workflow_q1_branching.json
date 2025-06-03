@@ -1,0 +1,38 @@
+{
+  "id": "workflow_q1_branching",
+  "name": "Branching Q1-Q2-Q3 Workflow",
+  "version": "1.0",
+  "description": "A workflow with branching logic based on a yes/no question.",
+  "steps": [
+    {
+      "id": "Q1",
+      "blockstep_id": "blockstep_q1_v1",
+      "output": {
+        "conditions": [
+          {
+            "value": "yes",
+            "next": "Q2"
+          },
+          {
+            "value": "no",
+            "next": "Q3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "Q2",
+      "blockstep_id": "blockstep_q2_v1",
+      "output": {
+        "next": "Q3"
+      }
+    },
+    {
+      "id": "Q3",
+      "blockstep_id": "blockstep_q3_v1",
+      "output": {
+        "next": null
+      }
+    }
+  ]
+}
