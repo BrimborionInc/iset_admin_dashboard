@@ -47,9 +47,9 @@ const columnDefinitions = [
     maxWidth: 250
   },
   {
-    id: 'assigned_user_ptma_name',
+    id: 'assigned_user_ptmas',
     header: 'PTMA Name',
-    cell: item => item.assigned_user_ptma_name || '',
+    cell: item => item.assigned_user_ptmas || '',
     minWidth: 200,
     maxWidth: 350
   }
@@ -60,11 +60,11 @@ const defaultVisibleColumns = [
   'applicant_name',
   'submitted_at',
   'assigned_user_name',
-  'assigned_user_ptma_name',
+  'assigned_user_ptmas',
   'edit'
 ];
 
-const AssignedCasesWidget = ({ actions }) => {
+const AssignedCasesWidget = ({ actions, refreshKey }) => {
   const history = useHistory();
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +91,7 @@ const AssignedCasesWidget = ({ actions }) => {
       }
     };
     fetchData();
-  }, []);
+  }, [refreshKey]);
 
   // Filtering
   const filteredItems = cases.filter(item => {
@@ -100,7 +100,7 @@ const AssignedCasesWidget = ({ actions }) => {
       (item.tracking_id && item.tracking_id.toLowerCase().includes(search)) ||
       (item.applicant_name && item.applicant_name.toLowerCase().includes(search)) ||
       (item.assigned_user_name && item.assigned_user_name.toLowerCase().includes(search)) ||
-      (item.assigned_user_ptma_name && item.assigned_user_ptma_name.toLowerCase().includes(search))
+      (item.assigned_user_ptmas && item.assigned_user_ptmas.toLowerCase().includes(search))
     );
   });
 

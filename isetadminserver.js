@@ -66,30 +66,33 @@ const pool = mysql.createPool(dbConfig);
 /**
  * GET /api/intake-officers
  *
- * Returns all users with RoleID = 6 (Intake Officers), including the name of the PTMA they are assigned to.
- *
- * Output:
- * - id: user ID
- * - name: user name
- * - email: user email
- * - ptma_name: name of the linked PTMA (nullable)
+ * Returns all evaluators (both roles) with their PTMA assignments (if any).
+ * - Only active evaluators are included.
+ * - If an evaluator has multiple PTMAs, they appear once per PTMA.
+ * - If an evaluator has no PTMA, ptma fields are null and label is 'Not assigned to a PTMA'.
  */
-
 app.get('/api/intake-officers', async (req, res) => {
   try {
     const [rows] = await pool.query(`
       SELECT 
-        u.id,
-        u.name,
-        u.email,
-        p.name AS ptma_name
-      FROM user u
-      JOIN user_role_link ur ON u.id = ur.UserID
-      LEFT JOIN ptma p ON u.ptma_id = p.id
-      WHERE ur.RoleID = 6
-      ORDER BY u.name
+        e.id AS evaluator_id,
+        e.name AS evaluator_name,
+        e.email AS evaluator_email,
+        e.role AS evaluator_role,
+        p.id AS ptma_id,
+        p.name AS ptma_name,
+        p.iset_code AS ptma_code,
+        p.iset_full_name AS ptma_full_name,
+        p.iset_status AS ptma_status,
+        p.iset_province AS ptma_province,
+        p.iset_indigenous_group AS ptma_indigenous_group,
+        IFNULL(p.name, 'Not assigned to a PTMA') AS ptma_label
+      FROM iset_evaluators e
+      LEFT JOIN iset_evaluator_ptma ep ON e.id = ep.evaluator_id AND (ep.unassigned_at IS NULL OR ep.unassigned_at > CURDATE())
+      LEFT JOIN ptma p ON ep.ptma_id = p.id
+      WHERE e.status = 'active'
+      ORDER BY e.name, p.name
     `);
-
     res.status(200).json(rows);
   } catch (error) {
     console.error('Error fetching intake officers:', error);
@@ -101,12 +104,13 @@ app.get('/api/intake-officers', async (req, res) => {
 /**
  * POST /api/cases
  *
- * Creates a new ISET case for a submitted application and assigns it to a specific intake officer.
- * 
+ * Creates a new ISET case for a submitted application and assigns it to a specific evaluator (from iset_evaluators).
+ *
  * Expected JSON body:
  * {
  *   application_id: number,          // ID from iset_application
- *   assigned_to_user_id: number,     // Evaluator (intake officer) user ID
+ *   assigned_to_user_id: number,     // Evaluator (iset_evaluators.id)
+ *   ptma_id: number | null,          // PTMA (ptma.id) or null
  *   priority: 'low' | 'medium' | 'high' (optional) // Defaults to 'medium'
  * }
  *
@@ -118,14 +122,10 @@ app.get('/api/intake-officers', async (req, res) => {
  *     - stage: 'intake_review'
  *     - opened_at: now (default in schema)
  *     - priority: provided or 'medium'
- *     - application_id and assigned_to_user_id as given
- *
- * Notes:
- * - Assumes supervisor permission, but does not enforce it (auth not implemented yet).
+ *     - application_id, assigned_to_user_id, ptma_id as given
  */
-
 app.post('/api/cases', async (req, res) => {
-  const { application_id, assigned_to_user_id, priority = 'medium' } = req.body;
+  const { application_id, assigned_to_user_id, ptma_id = null, priority = 'medium' } = req.body;
 
   if (!application_id || !assigned_to_user_id) {
     return res.status(400).json({ error: 'Missing required fields: application_id and assigned_to_user_id' });
@@ -142,12 +142,12 @@ app.post('/api/cases', async (req, res) => {
       return res.status(409).json({ error: 'A case already exists for this application.' });
     }
 
-    // Create new case
+    // Create new case (assigned_to_user_id now refers to iset_evaluators.id)
     const [result] = await pool.query(
       `INSERT INTO iset_case (
-        application_id, assigned_to_user_id, status, priority, stage, opened_at
-      ) VALUES (?, ?, 'open', ?, 'intake_review', NOW())`,
-      [application_id, assigned_to_user_id, priority]
+        application_id, assigned_to_user_id, ptma_id, status, priority, stage, opened_at
+      ) VALUES (?, ?, ?, 'open', ?, 'intake_review', NOW())`,
+      [application_id, assigned_to_user_id, ptma_id, priority]
     );
 
     const case_id = result.insertId;
@@ -192,6 +192,43 @@ app.post('/api/cases', async (req, res) => {
         fileIds
       );
     }
+
+    // Log case assignment event
+    const event_type = 'case_assigned';
+    // Fetch evaluator name and PTMA code for event message
+    let evaluatorName = '';
+    let ptmaCode = '';
+    try {
+      const [[evalRow]] = await pool.query(
+        'SELECT name FROM iset_evaluators WHERE id = ?',
+        [assigned_to_user_id]
+      );
+      evaluatorName = evalRow ? evalRow.name : '';
+      if (ptma_id) {
+        const [[ptmaRow]] = await pool.query(
+          'SELECT iset_code FROM ptma WHERE id = ?',
+          [ptma_id]
+        );
+        ptmaCode = ptmaRow ? ptmaRow.iset_code : '';
+      }
+    } catch (e) {
+      evaluatorName = '';
+      ptmaCode = '';
+    }
+    const event_data = {
+      message: `Case assigned to ${evaluatorName} of ${ptmaCode} with priority ${priority}`,
+      application_id,
+      assigned_to_user_id,
+      assigned_to_user_name: evaluatorName,
+      ptma_id,
+      ptma_code: ptmaCode,
+      priority,
+      timestamp: new Date().toISOString()
+    };
+    await pool.query(
+      'INSERT INTO iset_case_event (case_id, user_id, event_type, event_data, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
+      [case_id, applicant_user_id, event_type, JSON.stringify(event_data)]
+    );
 
     res.status(201).json({ message: 'Case created', case_id });
   } catch (error) {
@@ -349,23 +386,34 @@ const generateSystemTasks = async () => {
   }
 };
 
+app.get('/api/applicants/:id/documents', async (req, res) => {
+  const applicantId = req.params.id;
+  try {
+    // Query all documents uploaded by this user (applicant), regardless of case_id
+    const [rows] = await pool.query(
+      `SELECT id, case_id, uploaded_by_user_id, file_name, file_path, label, uploaded_at
+       FROM iset_case_document
+       WHERE uploaded_by_user_id = ?
+       ORDER BY uploaded_at DESC`,
+      [applicantId]
+    );
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Error fetching applicant documents:', error);
+    res.status(500).json({ error: 'Failed to fetch applicant documents' });
+  }
+});
 
 /**
  * GET /api/cases
  *
  * Returns all ISET cases with:
  * - Full case data from iset_case
- * - Assigned evaluator's name, email, and PTMA
+ * - Assigned evaluator's name and email (from iset_evaluators)
  * - Linked application's tracking ID and submitted_at timestamp
- * - Applicant name and email
- *
- * Joins:
- * - user u (assigned_to_user_id)
- * - ptma p (via user.ptma_id)
- * - iset_application a (via application_id)
- * - user applicant (via a.user_id)
+ * - Applicant name and email (from user)
+ * - PTMA assignments for the evaluator (if any, as a comma-separated string)
  */
-
 app.get('/api/cases', async (req, res) => {
   try {
     const [rows] = await pool.query(`
@@ -382,9 +430,9 @@ app.get('/api/cases', async (req, res) => {
         c.closed_at,
         c.last_activity_at,
 
-        u.name AS assigned_user_name,
-        u.email AS assigned_user_email,
-        p.name AS assigned_user_ptma_name,
+        e.name AS assigned_user_name,
+        e.email AS assigned_user_email,
+        GROUP_CONCAT(p.iset_code SEPARATOR ', ') AS assigned_user_ptmas,
 
         a.tracking_id,
         a.created_at AS submitted_at,
@@ -392,10 +440,12 @@ app.get('/api/cases', async (req, res) => {
         applicant.email AS applicant_email
 
       FROM iset_case c
-      JOIN user u ON c.assigned_to_user_id = u.id
-      LEFT JOIN ptma p ON u.ptma_id = p.id
+      JOIN iset_evaluators e ON c.assigned_to_user_id = e.id
+      LEFT JOIN iset_evaluator_ptma ep ON e.id = ep.evaluator_id AND (ep.unassigned_at IS NULL OR ep.unassigned_at > CURDATE())
+      LEFT JOIN ptma p ON ep.ptma_id = p.id
       JOIN iset_application a ON c.application_id = a.id
       JOIN user applicant ON a.user_id = applicant.id
+      GROUP BY c.id
       ORDER BY c.last_activity_at DESC
     `);
 
@@ -472,47 +522,39 @@ app.get('/api/cases/:id', async (req, res) => {
  * - alert_variant      → from iset_event_type (info, success, warning, error)
  */
 app.get('/api/case-events', async (req, res) => {
-  const userId = 18; // Replace with req.user.id when auth is active
-  const { unread, type, limit = 25 } = req.query;
-
-  let query = `
-    SELECT
-      e.id,
-      e.case_id,
-      e.event_type,
-      e.event_data,
-      e.is_read,
-      e.created_at,
-      a.tracking_id,
-      et.label,
-      et.alert_variant
-    FROM iset_case_event e
-    JOIN iset_case c ON e.case_id = c.id
-    JOIN iset_application a ON c.application_id = a.id
-    JOIN iset_event_type et ON e.event_type = et.event_type
-    WHERE e.user_id = ?
-  `;
-
-  const params = [userId];
-
-  if (unread === 'true') {
-    query += ' AND e.is_read = FALSE';
+  const userId = req.query.user_id;
+  const limit = Number(req.query.limit) || 50;
+  const offset = Number(req.query.offset) || 0;
+  if (!userId) {
+    return res.status(400).json({ error: 'Missing user_id parameter' });
   }
-
-  if (type) {
-    query += ' AND e.event_type = ?';
-    params.push(type);
-  }
-
-  query += ' ORDER BY e.created_at DESC LIMIT ?';
-  params.push(parseInt(limit, 10));
-
   try {
-    const [rows] = await pool.query(query, params);
-    res.json(rows);
-  } catch (err) {
-    console.error('Error fetching case events:', err);
-    res.status(500).json({ error: 'Failed to fetch case events' });
+    const [rows] = await pool.query(`
+      SELECT
+        e.id AS event_id,
+        e.case_id,
+        e.user_id,
+        e.event_type,
+        et.label AS event_type_label,
+        et.alert_variant,
+        e.event_data,
+        e.is_read,
+        e.created_at,
+        a.tracking_id,
+        u.name AS user_name
+      FROM iset_case_event e
+      LEFT JOIN iset_case c ON e.case_id = c.id
+      LEFT JOIN iset_application a ON c.application_id = a.id
+      JOIN iset_event_type et ON e.event_type = et.event_type
+      JOIN user u ON e.user_id = u.id
+      WHERE e.user_id = ?
+      ORDER BY e.created_at DESC
+      LIMIT ? OFFSET ?
+    `, [userId, limit, offset]);
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Error fetching case events for user:', error);
+    res.status(500).json({ error: 'Failed to fetch case events for user' });
   }
 });
 
@@ -556,6 +598,43 @@ app.put('/api/case-events/:id/read', async (req, res) => {
   } catch (err) {
     console.error('Error updating event read status:', err);
     res.status(500).json({ error: 'Failed to update event status' });
+  }
+});
+
+
+/**
+ * POST /api/case-events
+ *
+ * Request body:
+ * {
+ *   user_id: number (required),
+ *   case_id: number | null (nullable),
+ *   event_type: string (required, must match iset_event_type),
+ *   event_data: object (required, valid JSON)
+ * }
+ *
+ * Response: { id, message }
+ */
+app.post('/api/case-events', async (req, res) => {
+  const { user_id, case_id = null, event_type, event_data } = req.body;
+  if (!user_id || !event_type || typeof event_data === 'undefined' ) {
+    return res.status(400).json({ error: 'Missing required fields: user_id, event_type, event_data' });
+  }
+  try {
+    // Validate event_type exists in iset_event_type
+    const [eventTypeRows] = await pool.query('SELECT event_type FROM iset_event_type WHERE event_type = ?', [event_type]);
+    if (eventTypeRows.length === 0) {
+      return res.status(400).json({ error: 'Invalid event_type' });
+    }
+    // Insert event
+    const [result] = await pool.query(
+      'INSERT INTO iset_case_event (case_id, user_id, event_type, event_data, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
+      [case_id, user_id, event_type, JSON.stringify(event_data)]
+    );
+    res.status(201).json({ id: result.insertId, message: 'Event created' });
+  } catch (error) {
+    console.error('Error creating case event:', error);
+    res.status(500).json({ error: 'Failed to create case event' });
   }
 });
 
@@ -692,9 +771,9 @@ app.delete('/api/counter-session/:counterId', async (req, res) => {
     `, [counterId]);
 
     if (result.affectedRows > 0) {
-      res.status(200).send({ message: 'Counter session ended successfully.' });
+      res.status(200).send({ message: 'Counter session ended successfully' });
     } else {
-      res.status(200).send({ message: 'No active session to end.' });
+      res.status(200).send({ message: 'No active session to end' });
     }
 
   } catch (error) {
@@ -1544,78 +1623,103 @@ app.get('/api/ptmas/:ptmaId/evaluators', async (req, res) => {
 app.get('/api/applications/:id', async (req, res) => {
   const applicationId = req.params.id;
   try {
-    const [rows] = await pool.query('SELECT * FROM iset_application WHERE id = ?', [applicationId]);
-    if (rows.length === 0) {
+    // Get application data
+    const [[application]] = await pool.query(
+      'SELECT * FROM iset_application WHERE id = ?',
+      [applicationId]
+    );
+    if (!application) {
       return res.status(404).json({ error: 'Application not found' });
     }
-    res.status(200).json(rows[0]);
+
+    // Get case info (if exists)
+    const [[caseRow]] = await pool.query(
+      `SELECT id, assigned_to_user_id, status, priority, stage, program_type, case_summary, opened_at, closed_at, last_activity_at, ptma_id FROM iset_case WHERE application_id = ?`,
+      [applicationId]
+    );
+
+    let evaluator = null;
+    let ptma = null;
+    if (caseRow) {
+      // Get evaluator info
+      const [[evalRow]] = await pool.query(
+        'SELECT id, name, email, role, status FROM iset_evaluators WHERE id = ?',
+        [caseRow.assigned_to_user_id]
+      );
+      evaluator = evalRow || null;
+      // Get PTMA info directly from iset_case.ptma_id
+      if (caseRow.ptma_id) {
+        const [[ptmaRow]] = await pool.query(
+          'SELECT id, name, iset_code FROM ptma WHERE id = ?',
+          [caseRow.ptma_id]
+        );
+        ptma = ptmaRow || null;
+      }
+    }
+
+    res.status(200).json({ ...application, assigned_evaluator: evaluator, ptma, case: caseRow || null });
   } catch (error) {
     console.error('Error fetching application:', error);
     res.status(500).json({ error: 'Failed to fetch application' });
   }
 });
 
-// Get PTMA name and code for a given application id
+/**
+ * GET /api/applications/:id/ptma
+ *
+ * Returns the PTMA(s) for the assigned evaluator of the given application, or null if not assigned.
+ */
 app.get('/api/applications/:id/ptma', async (req, res) => {
   const applicationId = req.params.id;
   try {
-    const [rows] = await pool.query(`
-      SELECT p.name AS ptma_name, p.iset_code AS ptma_code, c.status, c.priority, c.stage, c.case_summary
-      FROM iset_case c
-      JOIN user u ON c.assigned_to_user_id = u.id
-      JOIN ptma p ON u.ptma_id = p.id
-      WHERE c.application_id = ?
-    `, [applicationId]);
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'PTMA/case not found for this application' });
-    }
-    res.status(200).json(rows[0]);
-  } catch (error) {
-    console.error('Error fetching PTMA/case for application:', error);
-    res.status(500).json({ error: 'Failed to fetch PTMA/case for application' });
-  }
-});
-
-// Update PTMA/case summary (and future fields) for an application
-app.put('/api/applications/:id/ptma-case-summary', async (req, res) => {
-  const { id } = req.params; // id = iset_application.id
-  const { case_summary, status, priority, stage } = req.body; // Accept future fields
-  try {
-    // Find the case for this application
+    // Get assigned evaluator for this application (via iset_case)
     const [[caseRow]] = await pool.query(
-      'SELECT id FROM iset_case WHERE application_id = ?',
-      [id]
+      'SELECT assigned_to_user_id FROM iset_case WHERE application_id = ?',
+      [applicationId]
     );
-    if (!caseRow) return res.status(404).json({ error: 'Case not found for application' });
-    // Update the case record (expandable for future fields)
-    await pool.query(
-      `UPDATE iset_case SET case_summary = COALESCE(?, case_summary), status = COALESCE(?, status), priority = COALESCE(?, priority), stage = COALESCE(?, stage) WHERE id = ?`,
-      [case_summary, status, priority, stage, caseRow.id]
+    if (!caseRow) {
+      return res.status(200).json({ ptmas: [] });
+    }
+    // Get all current PTMA assignments for this evaluator
+    const [ptmaRows] = await pool.query(
+      `SELECT p.id, p.name, p.iset_code, p.iset_full_name, p.iset_status, p.iset_province, p.iset_indigenous_group
+       FROM iset_evaluator_ptma ep
+       JOIN ptma p ON ep.ptma_id = p.id
+       WHERE ep.evaluator_id = ? AND (ep.unassigned_at IS NULL OR ep.unassigned_at > CURDATE())`,
+      [caseRow.assigned_to_user_id]
     );
-    // Return updated case fields
-    const [[updatedCase]] = await pool.query('SELECT case_summary, status, priority, stage FROM iset_case WHERE id = ?', [caseRow.id]);
-    res.json(updatedCase);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to update case summary' });
+    res.status(200).json({ ptmas: ptmaRows });
+  } catch (error) {
+    console.error('Error fetching ptma for application:', error);
+    res.status(500).json({ error: 'Failed to fetch ptma for application' });
   }
 });
 
-/**
- * GET /api/applicants/:user_id/documents
- * Returns all documents uploaded by the applicant (from iset_case_document)
- */
-app.get('/api/applicants/:user_id/documents', async (req, res) => {
-  const userId = req.params.user_id;
+// Update case_summary for a given application
+app.put('/api/applications/:id/ptma-case-summary', async (req, res) => {
+  const applicationId = req.params.id;
+  const { case_summary } = req.body;
+  if (!case_summary) {
+    return res.status(400).json({ error: 'Missing case_summary in request body' });
+  }
   try {
-    const [rows] = await pool.query(
-      `SELECT * FROM iset_case_document WHERE uploaded_by_user_id = ? ORDER BY uploaded_at DESC`,
-      [userId]
+    // Update the case_summary in iset_case for the given application_id
+    const [result] = await pool.query(
+      'UPDATE iset_case SET case_summary = ? WHERE application_id = ?',
+      [case_summary, applicationId]
     );
-    res.status(200).json(rows);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Case not found for this application' });
+    }
+    // Return the updated case_summary (and optionally the full case row)
+    const [[updatedCase]] = await pool.query(
+      'SELECT case_summary FROM iset_case WHERE application_id = ?',
+      [applicationId]
+    );
+    res.status(200).json({ case_summary: updatedCase.case_summary });
   } catch (error) {
-    console.error('Error fetching applicant documents:', error);
-    res.status(500).json({ error: 'Failed to fetch applicant documents' });
+    console.error('Error updating case summary:', error);
+    res.status(500).json({ error: 'Failed to update case summary' });
   }
 });
 
@@ -1625,5 +1729,57 @@ app.use('/uploads', express.static('X:/ISET/ISET-intake/uploads'));
 app.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
   console.log(`CORS allowed origin: ${corsOptions.origin}`);
+});
+
+// Get all events for a specific case (with user name, event type label, and alert variant)
+app.get('/api/cases/:case_id/events', async (req, res) => {
+  const caseId = req.params.case_id;
+  const { limit = 50, offset = 0 } = req.query;
+  try {
+    const [rows] = await pool.query(`
+      SELECT 
+        e.id AS event_id,
+        e.case_id,
+        e.event_type,
+        et.label AS event_type_label,
+        et.alert_variant,
+        e.event_data,
+        e.created_at,
+        u.id AS user_id,
+        u.name AS user_name
+      FROM iset_case_event e
+      JOIN user u ON e.user_id = u.id
+      JOIN iset_event_type et ON e.event_type = et.event_type
+      WHERE e.case_id = ?
+      ORDER BY e.created_at DESC
+      LIMIT ? OFFSET ?
+    `, [caseId, Number(limit), Number(offset)]);
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Error fetching case events:', error);
+    res.status(500).json({ error: 'Failed to fetch case events' });
+  }
+});
+
+
+/**
+ * POST /api/purge-cases
+ *
+ * Deletes all rows from iset_case_document, iset_case_event, iset_case_note, iset_case_task, then iset_case.
+ * Used for demo reset purposes only.
+ */
+app.post('/api/purge-cases', async (req, res) => {
+  try {
+    // Delete from child tables first due to foreign key constraints
+    await pool.query('DELETE FROM iset_case_document');
+    await pool.query('DELETE FROM iset_case_event');
+    await pool.query('DELETE FROM iset_case_note');
+    await pool.query('DELETE FROM iset_case_task');
+    await pool.query('DELETE FROM iset_case');
+    res.status(200).json({ message: 'All cases and related data purged.' });
+  } catch (error) {
+    console.error('Error purging cases:', error);
+    res.status(500).json({ error: 'Failed to purge cases' });
+  }
 });
 

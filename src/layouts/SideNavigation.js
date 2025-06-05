@@ -5,17 +5,17 @@ const SideNavigation = () => {
   const navItems = [
     {
       type: 'section',
-      text: 'ISET Supervision',
+      text: 'NWAC Administrator',
       items: [
-        { type: 'link', text: 'Case Assignment', href: '/case-assignment-dashboard' },
+        { type: 'link', text: 'Application Assignment', href: '/case-assignment-dashboard' }, // relabeled
         { type: 'link', text: 'PTMA Management', href: '/ptma-management' },
       ],
     },
     {
       type: 'section',
-      text: 'ISET Evaluator',
+      text: 'Regional Coordinator',
       items: [
-        { type: 'link', text: 'Case Management Dashboard', href: '/case-management' },
+        { type: 'link', text: 'Application Management', href: '/case-management' }, // relabeled
       ],
     },
     {

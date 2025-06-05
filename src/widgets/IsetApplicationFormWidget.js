@@ -26,16 +26,14 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
     if (!application_id) return;
     fetch(`${process.env.REACT_APP_API_BASE_URL}/api/applications/${application_id}`)
       .then(res => res.json())
-      .then(setApplication)
-      .catch(() => setApplication(null));
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/applications/${application_id}/ptma`)
-      .then(res => res.ok ? res.json() : { ptma_name: '', ptma_code: '' })
       .then(data => {
-        setPtma(data);
-        setCaseSummary(data.case_summary || '');
-        setInitialCaseSummary(data.case_summary || '');
+        setApplication(data);
+        setPtma(data.ptma || { ptma_name: '', ptma_code: '' });
+        setCaseSummary(data.case?.case_summary || '');
+        setInitialCaseSummary(data.case?.case_summary || '');
       })
       .catch(() => {
+        setApplication(null);
         setPtma({ ptma_name: '', ptma_code: '' });
         setCaseSummary('');
         setInitialCaseSummary('');
@@ -57,7 +55,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
         return res.json();
       })
       .then(data => {
-        setInitialCaseSummary(data.case_summary || '');
+        setInitialCaseSummary(data.case_summary || data.case?.case_summary || '');
         setIsChanged(false);
         setFlashMessages([{ type: 'success', content: 'Case summary saved successfully', dismissible: true, onDismiss: () => setFlashMessages([]) }]);
       })
@@ -91,6 +89,36 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
       Loading...
     </BoardItem>
   );
+
+  // Helper to sum numeric values in an array of items
+  const sumTable = items => items.reduce((sum, item) => {
+    const val = parseFloat(item.value);
+    return sum + (isNaN(val) ? 0 : val);
+  }, 0);
+
+  // Prepare income and expense items (handle nulls as 0)
+  const safe = v => v == null ? 0 : v;
+  const incomeItems = [
+    { label: 'Employment Income', value: safe(application.employment_income) },
+    { label: 'Spousal Income', value: safe(application.spousal_income) },
+    { label: 'Social Assistance', value: safe(application.social_assistance) },
+    { label: 'Child Tax Benefit', value: safe(application.child_tax_benefit) },
+    { label: 'Jordan’s Principle', value: safe(application.jordans_principle) },
+    { label: 'Band Funding', value: safe(application.band_funding) },
+    { label: 'Other Income Description', value: application.other_income_desc || '' },
+    { label: 'Other Income Amount', value: safe(application.other_income_amount) }
+  ];
+  const expenseItems = [
+    { label: 'Rent/Mortgage', value: safe(application.rent_mortgage) },
+    { label: 'Utilities', value: safe(application.utilities) },
+    { label: 'Groceries', value: safe(application.groceries) },
+    { label: 'Transit Pass', value: safe(application.transit_pass) },
+    { label: 'Childcare', value: safe(application.childcare) },
+    { label: 'Other Expenses Description', value: application.other_expenses_desc || '' },
+    { label: 'Other Expenses Amount', value: safe(application.other_expenses_amount) }
+  ];
+  const incomeTotal = sumTable(incomeItems);
+  const expenseTotal = sumTable(expenseItems);
 
   return (
     <BoardItem
@@ -127,9 +155,9 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
           { colspan: 2 }, // PTMA Code
         ]}>
           <FormField label="Tracking ID"><ReadOnlyInput value={caseData?.tracking_id} /></FormField>
-          <FormField label="Assigned Evaluator"><ReadOnlyInput value={caseData?.assigned_user_name} /></FormField>
-          <FormField label="PTMA Name"><ReadOnlyInput value={ptma.ptma_name} /></FormField>
-          <FormField label="PTMA Code"><ReadOnlyInput value={ptma.ptma_code} /></FormField>
+          <FormField label="Assigned Evaluator"><ReadOnlyInput value={application?.assigned_evaluator?.name || ''} /></FormField>
+          <FormField label="PTMA Name"><ReadOnlyInput value={ptma?.name || ''} /></FormField>
+          <FormField label="PTMA Code"><ReadOnlyInput value={ptma?.iset_code || ''} /></FormField>
         </Grid>
         {/* Row 2: Submitted (2), Last Update (2), Status (2), Priority (2), Stage (4) */}
         <Grid gridDefinition={[
@@ -141,9 +169,9 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
         ]}>
           <FormField label="Submitted"><ReadOnlyInput value={caseData?.submitted_at?.slice(0,10)} /></FormField>
           <FormField label="Last Update"><ReadOnlyInput value={caseData?.last_activity_at?.slice(0,10)} /></FormField>
-          <FormField label="Status"><ReadOnlyInput value={ptma.status} /></FormField>
-          <FormField label="Priority"><ReadOnlyInput value={ptma.priority} /></FormField>
-          <FormField label="Stage"><ReadOnlyInput value={ptma.stage} /></FormField>
+          <FormField label="Status"><ReadOnlyInput value={application?.case?.status || ''} /></FormField>
+          <FormField label="Priority"><ReadOnlyInput value={application?.case?.priority || ''} /></FormField>
+          <FormField label="Stage"><ReadOnlyInput value={application?.case?.stage || ''} /></FormField>
         </Grid>
         {/* Row 3: Case Summary (full width, editable textarea) */}
         <Grid gridDefinition={[{ colspan: 12 }]}> 
@@ -233,14 +261,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
             { id: 'value', header: 'Amount ($)', cell: item => item.value }
           ]}
           items={[
-            { label: 'Employment Income', value: application.employment_income },
-            { label: 'Spousal Income', value: application.spousal_income },
-            { label: 'Social Assistance', value: application.social_assistance },
-            { label: 'Child Tax Benefit', value: application.child_tax_benefit },
-            { label: 'Jordan’s Principle', value: application.jordans_principle },
-            { label: 'Band Funding', value: application.band_funding },
-            { label: 'Other Income Description', value: application.other_income_desc },
-            { label: 'Other Income Amount', value: application.other_income_amount }
+            ...incomeItems,
+            { label: 'Total', value: incomeTotal.toFixed(2) }
           ]}
           variant="embedded"
           wrapLines
@@ -254,13 +276,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
             { id: 'value', header: 'Amount ($)', cell: item => item.value }
           ]}
           items={[
-            { label: 'Rent/Mortgage', value: application.rent_mortgage },
-            { label: 'Utilities', value: application.utilities },
-            { label: 'Groceries', value: application.groceries },
-            { label: 'Transit Pass', value: application.transit_pass },
-            { label: 'Childcare', value: application.childcare },
-            { label: 'Other Expenses Description', value: application.other_expenses_desc },
-            { label: 'Other Expenses Amount', value: application.other_expenses_amount }
+            ...expenseItems,
+            { label: 'Total', value: expenseTotal.toFixed(2) }
           ]}
           variant="embedded"
           wrapLines

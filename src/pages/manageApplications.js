@@ -1,35 +1,19 @@
 import React, { useState } from 'react';
 import { ContentLayout, Header, Alert, Box } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
-import CaseTable from '../widgets/caseTable';
-import CaseUpdates from '../widgets/caseUpdates'; // Import the new widget
-import CaseTasks from '../widgets/caseTasks'; // Import the CaseTasks widget
+import CaseManagementDemoControlsWidget from '../widgets/CaseManagementDemoControlsWidget';
+import CaseManagementDemoControlsHelp from '../helpPanelContents/CaseManagementDemoControlsHelp';
 
-const ManageApplications = () => {
+const ManageApplications = ({ toggleHelpPanel }) => {
   const [items, setItems] = useState([
     {
-      id: 'case-updates',
-      columnOffset: 0,
-      columnSpan: 2,
-      rowSpan: 4,
-      data: { actions: { removeItem: () => {} } },
-    },
-    {
-      id: 'case-tasks', // Add CaseTasks widget
-      columnOffset: 0,
-      columnSpan: 2,
-      rowSpan: 4,
-      data: { actions: { removeItem: () => {} } },
-    },
-    {
-      id: 'case-table',
+      id: 'case-management-demo-controls',
       columnOffset: 0,
       columnSpan: 4,
-      rowSpan: 4,
-      data: { actions: { removeItem: () => {} } },
+      rowSpan: 1,
+      data: { actions: { removeItem: () => {} }, toggleHelpPanel },
     },
-
-  ]);
+  ]); // Initial state with the demo controls widget
 
   const [alertVisible, setAlertVisible] = useState(true); // State to control alert visibility
 
@@ -49,14 +33,8 @@ const ManageApplications = () => {
       )}
       <Board
         renderItem={(item) => {
-          if (item.id === 'case-table') {
-            return <CaseTable actions={item.data.actions} />;
-          }
-          if (item.id === 'case-updates') {
-            return <CaseUpdates actions={item.data.actions} />;
-          }
-          if (item.id === 'case-tasks') { // Render CaseTasks widget
-            return <CaseTasks actions={item.data.actions} />;
+          if (item.id === 'case-management-demo-controls') {
+            return <CaseManagementDemoControlsWidget actions={item.data.actions} toggleHelpPanel={toggleHelpPanel} />;
           }
           return null;
         }}
