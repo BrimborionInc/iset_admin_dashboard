@@ -1,8 +1,9 @@
 import React from 'react';
 import { Box, Header, ButtonDropdown, Link } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
+import CaseManagementDemoControlsHelp from '../helpPanelContents/CaseManagementDemoControlsHelp';
 
-const BlankTemplate = ({ actions, toggleHelpPanel, HelpContent }) => {
+const CaseManagementDemoControlsWidget = ({ actions, toggleHelpPanel }) => {
   return (
     <BoardItem
       header={
@@ -11,13 +12,13 @@ const BlankTemplate = ({ actions, toggleHelpPanel, HelpContent }) => {
           info={
             <Link
               variant="info"
-              onFollow={() => toggleHelpPanel && HelpContent && toggleHelpPanel(<HelpContent />, 'Blank Template Help')}
+              onFollow={() => toggleHelpPanel && toggleHelpPanel(<CaseManagementDemoControlsHelp />, "Testing and Demo Controls Help")}
             >
               Info
             </Link>
           }
         >
-          Blank Template
+          Testing and Demo Controls
         </Header>
       }
       i18nStrings={{
@@ -26,20 +27,22 @@ const BlankTemplate = ({ actions, toggleHelpPanel, HelpContent }) => {
         resizeHandleAriaLabel: 'Resize handle',
         resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.',
       }}
+      columnSpan={4}
+      rowSpan={1}
       settings={
         <ButtonDropdown
           items={[{ id: 'remove', text: 'Remove' }]}
           ariaLabel="Board item settings"
           variant="icon"
-          onItemClick={() => actions.removeItem()}
+          onItemClick={() => actions && actions.removeItem && actions.removeItem()}
         />
       }
     >
       <Box>
-        {/* Add content for the widget here */}
+        For testing and demo purposes only so you can change which evaluator is viweing this page, without logging out every time.  Will not be included in the actual solution
       </Box>
     </BoardItem>
   );
 };
 
-export default BlankTemplate;
+export default CaseManagementDemoControlsWidget;
