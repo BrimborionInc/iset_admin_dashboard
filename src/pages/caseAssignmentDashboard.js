@@ -10,6 +10,10 @@ const CaseAssignmentDashboard = ({ header = 'Case Assignment', headerInfo, toggl
     { id: 'unassigned-applications', rowSpan: 4, columnSpan: 4, data: { title: 'Unassigned Applications' } },
     { id: 'assigned-cases', rowSpan: 4, columnSpan: 4, data: { title: 'Assigned Cases' } },
   ]);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Handler to trigger refresh in child widgets
+  const handleRefresh = () => setRefreshKey(k => k + 1);
 
   return (
     <ContentLayout
@@ -20,10 +24,10 @@ const CaseAssignmentDashboard = ({ header = 'Case Assignment', headerInfo, toggl
             return <BlankTemplate actions={actions} />;
           }
           if (item.id === 'unassigned-applications') {
-            return <UnassignedApplicationsWidget actions={actions} />;
+            return <UnassignedApplicationsWidget actions={actions} onCaseAssigned={handleRefresh} refreshKey={refreshKey} />;
           }
           if (item.id === 'assigned-cases') {
-            return <AssignedCasesWidget actions={actions} />;
+            return <AssignedCasesWidget actions={actions} refreshKey={refreshKey} />;
           }
           return null;
         }}

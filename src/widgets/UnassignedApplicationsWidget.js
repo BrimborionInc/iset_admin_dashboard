@@ -58,7 +58,7 @@ const defaultVisibleColumns = [
   'submitted_at'
 ];
 
-const UnassignedApplicationsWidget = ({ actions }) => {
+const UnassignedApplicationsWidget = ({ actions, onCaseAssigned, refreshKey }) => {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -73,6 +73,7 @@ const UnassignedApplicationsWidget = ({ actions }) => {
   const [officersLoading, setOfficersLoading] = useState(false);
   const [officersError, setOfficersError] = useState(null);
   const [selectedOfficerId, setSelectedOfficerId] = useState(null);
+  const [selectedPtmaId, setSelectedPtmaId] = useState(null);
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState(null);
   const [urgent, setUrgent] = useState(false);
@@ -95,7 +96,7 @@ const UnassignedApplicationsWidget = ({ actions }) => {
       }
     };
     fetchData();
-  }, []);
+  }, [refreshKey]);
 
   // Fetch intake officers when modal opens
   useEffect(() => {
@@ -130,6 +131,7 @@ const UnassignedApplicationsWidget = ({ actions }) => {
         body: JSON.stringify({
           application_id: selectedApplication.application_id,
           assigned_to_user_id: selectedOfficerId,
+          ptma_id: selectedPtmaId, // Pass the selected PTMA ID (can be null)
           priority: urgent ? 'high' : 'medium'
         })
       });
@@ -139,7 +141,9 @@ const UnassignedApplicationsWidget = ({ actions }) => {
       setModalVisible(false);
       setSelectedApplication(null);
       setSelectedOfficerId(null);
+      setSelectedPtmaId(null);
       setUrgent(false);
+      if (onCaseAssigned) onCaseAssigned();
     } catch (err) {
       setAssignError('Failed to assign application');
     } finally {
@@ -326,24 +330,26 @@ const UnassignedApplicationsWidget = ({ actions }) => {
             <SpaceBetween size="m">
               <Select
                 selectedOption={
-                  intakeOfficers.find(o => o.id === selectedOfficerId)
+                  selectedOfficerId !== null && intakeOfficers.length > 0
                     ? {
-                        value: selectedOfficerId,
+                        value: `${selectedOfficerId}|${selectedPtmaId || ''}`,
                         label: (() => {
-                          const officer = intakeOfficers.find(o => o.id === selectedOfficerId);
-                          return officer.ptma_name
-                            ? `${officer.name} — ${officer.ptma_name}`
-                            : officer.name;
+                          const officer = intakeOfficers.find(o => o.evaluator_id === selectedOfficerId && (o.ptma_id === selectedPtmaId || (!o.ptma_id && !selectedPtmaId)));
+                          return officer ? `${officer.evaluator_name} — ${officer.ptma_label}` : '';
                         })()
                       }
                     : null
                 }
-                onChange={({ detail }) => setSelectedOfficerId(detail.selectedOption.value)}
+                onChange={({ detail }) => {
+                  const [evalId, ptmaId] = detail.selectedOption.value.split('|');
+                  setSelectedOfficerId(Number(evalId));
+                  setSelectedPtmaId(ptmaId ? Number(ptmaId) : null);
+                }}
                 options={intakeOfficers.map(o => ({
-                  value: o.id,
-                  label: o.ptma_name ? `${o.name} — ${o.ptma_name}` : o.name
+                  value: `${o.evaluator_id}|${o.ptma_id || ''}`,
+                  label: `${o.evaluator_name} — ${o.ptma_label}`
                 }))}
-                placeholder="Select intake officer"
+                placeholder="Select evaluator"
                 disabled={officersLoading}
               />
               <FormField label="Urgent">
