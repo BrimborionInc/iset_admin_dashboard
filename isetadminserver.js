@@ -142,7 +142,7 @@ app.post('/api/cases', async (req, res) => {
       return res.status(409).json({ error: 'A case already exists for this application.' });
     }
 
-    // Create new case (assigned_to_user_id now refers to iset_evaluators.id)
+    // Insert new case with updated schema fields only
     const [result] = await pool.query(
       `INSERT INTO iset_case (
         application_id, assigned_to_user_id, ptma_id, status, priority, stage, opened_at
@@ -424,8 +424,6 @@ app.get('/api/cases', async (req, res) => {
         c.status,
         c.priority,
         c.stage,
-        c.program_type,
-        c.case_summary,
         c.opened_at,
         c.closed_at,
         c.last_activity_at,
@@ -461,6 +459,7 @@ app.get('/api/cases', async (req, res) => {
 app.get('/api/cases/:id', async (req, res) => {
   const caseId = req.params.id;
   try {
+    // Fetch case and joined application fields
     const [rows] = await pool.query(`
       SELECT 
         c.id,
@@ -474,20 +473,40 @@ app.get('/api/cases/:id', async (req, res) => {
         c.opened_at,
         c.closed_at,
         c.last_activity_at,
-
-        u.name AS assigned_user_name,
-        u.email AS assigned_user_email,
+        c.ptma_id,
+        c.assessment_date_of_assessment,
+        c.assessment_employment_goals,
+        c.assessment_previous_iset,
+        c.assessment_previous_iset_details,
+        c.assessment_employment_barriers,
+        c.assessment_local_area_priorities,
+        c.assessment_other_funding_details,
+        c.assessment_esdc_eligibility,
+        c.assessment_intervention_start_date,
+        c.assessment_intervention_end_date,
+        c.assessment_institution,
+        c.assessment_program_name,
+        c.assessment_itp,
+        c.assessment_wage,
+        c.assessment_recommendation,
+        c.assessment_justification,
+        c.assessment_nwac_review,
+        c.assessment_nwac_reason,
+        e.name AS assigned_user_name,
+        e.email AS assigned_user_email,
         p.name AS assigned_user_ptma_name,
-
         a.tracking_id,
         a.created_at AS submitted_at,
         applicant.name AS applicant_name,
         applicant.email AS applicant_email,
-        applicant.id AS applicant_user_id
-
+        applicant.id AS applicant_user_id,
+        -- Application fields for assessment pre-population
+        a.employment_goals,
+        a.employment_barriers,
+        a.target_employer AS institution
       FROM iset_case c
-      JOIN user u ON c.assigned_to_user_id = u.id
-      LEFT JOIN ptma p ON u.ptma_id = p.id
+      JOIN iset_evaluators e ON c.assigned_to_user_id = e.id
+      LEFT JOIN ptma p ON c.ptma_id = p.id
       JOIN iset_application a ON c.application_id = a.id
       JOIN user applicant ON a.user_id = applicant.id
       WHERE c.id = ?
@@ -1199,6 +1218,39 @@ app.post('/api/admin/messages', async (req, res) => {
   }
 });
 
+// Mark a message as deleted
+app.put('/api/admin/messages/:id/delete', async (req, res) => {
+  const messageId = req.params.id;
+  try {
+    const [result] = await pool.query(
+      'UPDATE messages SET deleted = 1 WHERE id = ?',
+      [messageId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+    res.status(200).json({ message: 'Message deleted' });
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    res.status(500).json({ error: 'Failed to delete message' });
+  }
+});
+
+// Update message status (PUT /api/admin/messages/:id/status)
+app.put('/api/admin/messages/:id/status', async (req, res) => {
+  const messageId = req.params.id;
+  const { status } = req.body;
+  if (!status) {
+    return res.status(400).json({ error: 'Missing status' });
+  }
+  try {
+    await pool.query('UPDATE messages SET status = ? WHERE id = ?', [status, messageId]);
+    res.status(200).json({ message: 'Status updated' });
+  } catch (error) {
+    console.error('Error updating message status:', error);
+    res.status(500).json({ error: 'Failed to update message status' });
+  }
+});
 
 app.get('/api/location-services/:locationId', async (req, res) => {
   const { locationId } = req.params;
@@ -1780,6 +1832,202 @@ app.post('/api/purge-cases', async (req, res) => {
   } catch (error) {
     console.error('Error purging cases:', error);
     res.status(500).json({ error: 'Failed to purge cases' });
+  }
+});
+
+
+/**
+ * GET /api/admin/messages/:id/attachments
+ *
+ * Returns all attachments for a given message_id from message_attachment table.
+ */
+app.get('/api/admin/messages/:id/attachments', async (req, res) => {
+  const messageId = req.params.id;
+  const caseIdFromQuery = req.query.case_id ? parseInt(req.query.case_id, 10) : null;
+  try {
+    // Get all attachments for this message
+    const [attachments] = await pool.query(
+      `SELECT id, message_id, file_path, original_filename, uploaded_at, user_id, application_id
+       FROM message_attachment
+       WHERE message_id = ?
+       ORDER BY uploaded_at ASC`,
+      [messageId]
+    );
+
+    // Get the message to determine sender/recipient
+    const [[message]] = await pool.query(
+      `SELECT * FROM messages WHERE id = ?`,
+      [messageId]
+    );
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    // Use case_id from query if provided, else fallback to previous logic (which will not work if no application_id)
+    let caseId = caseIdFromQuery;
+    // (Optional: fallback logic if you want to support legacy messages)
+
+    // For each attachment, add to iset_case_document if not already present
+    if (caseId) {
+      for (const att of attachments) {
+        // Ensure file_path is relative (e.g., 'uploads/filename.pdf')
+        let relativeFilePath = att.file_path;
+        // Normalize slashes for Windows/Unix
+        relativeFilePath = relativeFilePath.replace(/\\/g, '/');
+        // Remove everything before and including 'uploads/'
+        const uploadsIndex = relativeFilePath.lastIndexOf('uploads/');
+        if (uploadsIndex !== -1) {
+          relativeFilePath = relativeFilePath.substring(uploadsIndex);
+        }
+        // Always use forward slashes in DB
+        relativeFilePath = relativeFilePath.replace(/\\/g, '/');
+        try {
+          await pool.query(
+            `INSERT INTO iset_case_document (case_id, uploaded_by_user_id, file_name, file_path, label, uploaded_at)
+             VALUES (?, ?, ?, ?, ?, ?)` ,
+            [
+              caseId,
+              att.user_id || message.sender_id || message.recipient_id,
+              att.original_filename,
+              relativeFilePath,
+              'Secure Message Attachment',
+              att.uploaded_at || new Date()
+            ]
+          );
+        } catch (err) {
+          if (err && (err.code === 'ER_DUP_ENTRY' || err.code === '23505')) {
+            continue;
+          } else {
+            console.error('Error inserting into iset_case_document:', err);
+            throw err;
+          }
+        }
+      }
+    }
+
+    res.status(200).json(attachments);
+  } catch (error) {
+    console.error('Error fetching message attachments:', error);
+    res.status(500).json({ error: 'Failed to fetch message attachments' });
+  }
+});
+
+// Hard delete a message and its attachments
+app.delete('/api/admin/messages/:id/hard-delete', async (req, res) => {
+  const messageId = req.params.id;
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    // Delete attachments first
+    await conn.query('DELETE FROM message_attachment WHERE message_id = ?', [messageId]);
+    // Delete the message
+    const [result] = await conn.query('DELETE FROM messages WHERE id = ?', [messageId]);
+    await conn.commit();
+    if (result.affectedRows === 0) {
+      res.status(404).json({ error: 'Message not found' });
+    } else {
+      res.status(200).json({ message: 'Message and attachments deleted' });
+    }
+  } catch (error) {
+    await conn.rollback();
+    console.error('Error hard deleting message:', error);
+    res.status(500).json({ error: 'Failed to hard delete message' });
+  } finally {
+    conn.release();
+  }
+});
+
+// Update assessment fields for a case
+app.put('/api/cases/:id', async (req, res) => {
+  const caseId = req.params.id;
+  const {
+    assessment_date_of_assessment,
+    assessment_employment_goals,
+    assessment_previous_iset,
+    assessment_previous_iset_details,
+    assessment_employment_barriers,
+    assessment_local_area_priorities,
+    assessment_other_funding_details,
+    assessment_esdc_eligibility,
+    assessment_intervention_start_date,
+    assessment_intervention_end_date,
+    assessment_institution,
+    assessment_program_name,
+    assessment_itp,
+    assessment_wage,
+    assessment_recommendation,
+    assessment_justification,
+    assessment_nwac_review,
+    assessment_nwac_reason
+  } = req.body;
+
+  // Helper: convert blank to null
+  const toNull = v => (v === undefined || v === null || v === '' ? null : v);
+  // Helper: ensure JSON fields are valid and currency fields are 0 if blank
+  const safeJson = (obj) => {
+    if (!obj || typeof obj !== 'object') return JSON.stringify([]);
+    // For each row, set blank/NaN amount to 0
+    return JSON.stringify(
+      Array.isArray(obj)
+        ? obj.map(row => ({
+            ...row,
+            amount: row.amount === undefined || row.amount === null || row.amount === '' || isNaN(Number(row.amount)) ? 0 : Number(row.amount)
+          }))
+        : []
+    );
+  };
+
+  try {
+    const [result] = await pool.query(
+      `UPDATE iset_case SET
+        assessment_date_of_assessment = ?,
+        assessment_employment_goals = ?,
+        assessment_previous_iset = ?,
+        assessment_previous_iset_details = ?,
+        assessment_employment_barriers = ?,
+        assessment_local_area_priorities = ?,
+        assessment_other_funding_details = ?,
+        assessment_esdc_eligibility = ?,
+        assessment_intervention_start_date = ?,
+        assessment_intervention_end_date = ?,
+        assessment_institution = ?,
+        assessment_program_name = ?,
+        assessment_itp = ?,
+        assessment_wage = ?,
+        assessment_recommendation = ?,
+        assessment_justification = ?,
+        assessment_nwac_review = ?,
+        assessment_nwac_reason = ?
+      WHERE id = ?`,
+      [
+        toNull(assessment_date_of_assessment),
+        toNull(assessment_employment_goals),
+        toNull(assessment_previous_iset),
+        toNull(assessment_previous_iset_details),
+        assessment_employment_barriers ? JSON.stringify(assessment_employment_barriers) : null,
+        assessment_local_area_priorities ? JSON.stringify(assessment_local_area_priorities) : null,
+        toNull(assessment_other_funding_details),
+        toNull(assessment_esdc_eligibility),
+        toNull(assessment_intervention_start_date),
+        toNull(assessment_intervention_end_date),
+        toNull(assessment_institution),
+        toNull(assessment_program_name),
+        safeJson(assessment_itp),
+        safeJson(assessment_wage),
+        toNull(assessment_recommendation),
+        toNull(assessment_justification),
+        toNull(assessment_nwac_review),
+        toNull(assessment_nwac_reason),
+        caseId
+      ]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, error: 'Case not found' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating assessment:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

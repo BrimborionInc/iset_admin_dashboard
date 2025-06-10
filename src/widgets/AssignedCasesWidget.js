@@ -64,7 +64,7 @@ const defaultVisibleColumns = [
   'edit'
 ];
 
-const AssignedCasesWidget = ({ actions, refreshKey }) => {
+const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
   const history = useHistory();
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -80,9 +80,14 @@ const AssignedCasesWidget = ({ actions, refreshKey }) => {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases`);
+        let url = `${process.env.REACT_APP_API_BASE_URL}/api/cases`;
+        const response = await fetch(url);
         if (!response.ok) throw new Error('Failed to fetch');
-        const data = await response.json();
+        let data = await response.json();
+        // Filter by evaluator if simulatedUser is set
+        if (simulatedUser && simulatedUser.evaluator_id) {
+          data = data.filter(c => c.assigned_to_user_id === simulatedUser.evaluator_id);
+        }
         setCases(data);
       } catch (err) {
         setError('Failed to load assigned cases.');
@@ -91,7 +96,7 @@ const AssignedCasesWidget = ({ actions, refreshKey }) => {
       }
     };
     fetchData();
-  }, [refreshKey]);
+  }, [refreshKey, simulatedUser]);
 
   // Filtering
   const filteredItems = cases.filter(item => {
@@ -115,17 +120,17 @@ const AssignedCasesWidget = ({ actions, refreshKey }) => {
   };
 
   // Inline action column
-  const editColumn = {
+  const actionsColumn = {
     id: 'edit',
-    header: '',
+    header: 'Actions',
     cell: item => (
-      <Button variant="inline-link" onClick={() => history.push(`/application-case/${item.id}`)}>Edit</Button>
+      <Button variant="inline-link" onClick={() => history.push(`/application-case/${item.id}`)}>Open</Button>
     ),
     minWidth: 80,
     maxWidth: 100
   };
 
-  const allColumns = [...columnDefinitions, editColumn];
+  const allColumns = [...columnDefinitions, actionsColumn];
 
   return (
     <BoardItem

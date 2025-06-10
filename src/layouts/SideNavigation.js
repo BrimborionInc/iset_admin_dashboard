@@ -7,7 +7,7 @@ const SideNavigation = () => {
       type: 'section',
       text: 'NWAC Administrator',
       items: [
-        { type: 'link', text: 'Application Assignment', href: '/case-assignment-dashboard' }, // relabeled
+        { type: 'link', text: 'Application Assignment', href: '/case-assignment-dashboard' },
         { type: 'link', text: 'PTMA Management', href: '/ptma-management' },
       ],
     },
@@ -15,12 +15,12 @@ const SideNavigation = () => {
       type: 'section',
       text: 'Regional Coordinator',
       items: [
-        { type: 'link', text: 'Application Management', href: '/case-management' }, // relabeled
+        { type: 'link', text: 'Application Management', href: '/case-management' }, // relabeled and updated href to match Case Management
       ],
     },
     {
       type: 'section',
-      text: 'ISET Caseworking', // Renamed group
+      text: 'Other Dashboards', // Renamed group
       items: [
         { type: 'link', text: 'Case Management', href: '/case-management' }, // Update the link and text
         { type: 'link', text: 'Reminders and Notifications', href: '/manage-notifications' }, // Correct the link and relabel

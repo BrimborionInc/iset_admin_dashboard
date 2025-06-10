@@ -1,10 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ContentLayout, Header, Alert, Box } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import CaseManagementDemoControlsWidget from '../widgets/CaseManagementDemoControlsWidget';
 import CaseManagementDemoControlsHelp from '../helpPanelContents/CaseManagementDemoControlsHelp';
+import AssignedCasesWidget from '../widgets/AssignedCasesWidget';
 
 const ManageApplications = ({ toggleHelpPanel }) => {
+  // Simulated user state
+  const [simulatedUser, setSimulatedUser] = useState(null);
+  const [evaluators, setEvaluators] = useState([]);
+
+  // Fetch evaluators on mount
+  useEffect(() => {
+    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/intake-officers`)
+      .then((res) => res.json())
+      .then((data) => {
+        setEvaluators(data);
+        if (!simulatedUser && data.length > 0) {
+          setSimulatedUser(data[0]); // Default to first evaluator
+        }
+      });
+  }, []);
+
   const [items, setItems] = useState([
     {
       id: 'case-management-demo-controls',
@@ -13,7 +30,14 @@ const ManageApplications = ({ toggleHelpPanel }) => {
       rowSpan: 1,
       data: { actions: { removeItem: () => {} }, toggleHelpPanel },
     },
-  ]); // Initial state with the demo controls widget
+    {
+      id: 'assigned-cases-widget',
+      columnOffset: 4,
+      columnSpan: 8,
+      rowSpan: 1,
+      data: {},
+    },
+  ]); // Initial state with the demo controls widget and assigned cases widget
 
   const [alertVisible, setAlertVisible] = useState(true); // State to control alert visibility
 
@@ -34,7 +58,18 @@ const ManageApplications = ({ toggleHelpPanel }) => {
       <Board
         renderItem={(item) => {
           if (item.id === 'case-management-demo-controls') {
-            return <CaseManagementDemoControlsWidget actions={item.data.actions} toggleHelpPanel={toggleHelpPanel} />;
+            return (
+              <CaseManagementDemoControlsWidget
+                actions={item.data.actions}
+                toggleHelpPanel={toggleHelpPanel}
+                evaluators={evaluators}
+                simulatedUser={simulatedUser}
+                setSimulatedUser={setSimulatedUser}
+              />
+            );
+          }
+          if (item.id === 'assigned-cases-widget') {
+            return <AssignedCasesWidget simulatedUser={simulatedUser} />;
           }
           return null;
         }}

@@ -1,9 +1,16 @@
-import React from 'react';
-import { Box, Header, ButtonDropdown, Link } from '@cloudscape-design/components';
+import React, { useState, useEffect } from 'react';
+import { Box, Header, ButtonDropdown, Link, Select } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import CaseManagementDemoControlsHelp from '../helpPanelContents/CaseManagementDemoControlsHelp';
 
-const CaseManagementDemoControlsWidget = ({ actions, toggleHelpPanel }) => {
+const CaseManagementDemoControlsWidget = ({ actions, toggleHelpPanel, evaluators = [], simulatedUser, setSimulatedUser }) => {
+  // Handle select change
+  const handleUserChange = (event) => {
+    const selectedId = event.detail.selectedOption.value;
+    const user = evaluators.find(e => e.evaluator_id === selectedId);
+    setSimulatedUser(user);
+  };
+
   return (
     <BoardItem
       header={
@@ -38,8 +45,19 @@ const CaseManagementDemoControlsWidget = ({ actions, toggleHelpPanel }) => {
         />
       }
     >
-      <Box>
-        For testing and demo purposes only so you can change which evaluator is viweing this page, without logging out every time.  Will not be included in the actual solution
+      <Box margin={{ bottom: 's' }}>
+        <b>Current simulated user:</b> {simulatedUser ? simulatedUser.evaluator_name : 'None'}
+      </Box>
+      <Select
+        selectedOption={simulatedUser ? { label: simulatedUser.evaluator_name, value: simulatedUser.evaluator_id } : null}
+        onChange={handleUserChange}
+        options={evaluators.map(e => ({ label: e.evaluator_name, value: e.evaluator_id }))}
+        placeholder="Select evaluator..."
+        ariaLabel="Select evaluator"
+        expandToViewport
+      />
+      <Box margin={{ top: 's' }}>
+        For testing and demo purposes only so you can change which evaluator is viewing this page, without logging out every time. Will not be included in the actual solution
       </Box>
     </BoardItem>
   );
