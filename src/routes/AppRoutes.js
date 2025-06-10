@@ -58,6 +58,7 @@ import ManageApplications from '../pages/manageApplications.js'; // Import the n
 import ManageOrganisations from '../pages/manageOrganisations.js'; // Import the new component
 import CaseAssignmentDashboard from '../pages/caseAssignmentDashboard.js'; // Import the new component
 import ApplicationCaseDashboard from '../pages/applicationCaseDashboard.js'; // Import the new component
+import ArmsReportingDashboard from '../pages/armsReportingDashboard.js'; // Import the new component
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -265,7 +266,13 @@ const AppRoutes = ({
         ], 'Case Assignment', 'caseAssignment')}
       </Route>
       <Route path="/application-case/:id">
-        {renderContent(ApplicationCaseDashboard, [{ text: 'Home', href: '/' }, { text: 'Case Management', href: '/case-management' }, { text: 'Application' }], 'Application', 'applicationCaseDashboard')}
+        {renderContent(ApplicationCaseDashboard, [{ text: 'Home', href: '/' }, { text: 'Case Management', href: '/case-management' }, { text: 'Application' }], 'ISET Application Management', 'applicationCaseDashboard')}
+      </Route>
+      <Route path="/arms-reporting">
+        {renderContent(ArmsReportingDashboard, [
+          { text: 'Home', href: '/' },
+          { text: 'ARMS Reporting', href: '/arms-reporting' }
+        ], 'ARMS Reporting', 'armsReporting')}
       </Route>
       <Route path="/">
         {renderContent(AdminDashboard, [{ text: 'Home', href: '/' }, { text: 'Admin Console', href: '#' }], 'Secure Solution Suite Admin Console', AdminDashboardHelp.aiContext)}

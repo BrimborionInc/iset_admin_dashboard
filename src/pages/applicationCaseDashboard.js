@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { ContentLayout, Header, SpaceBetween, Box } from '@cloudscape-design/components';
+import { ContentLayout, SpaceBetween, Box } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import { useParams } from 'react-router-dom';
 import IsetApplicationFormWidget from '../widgets/IsetApplicationFormWidget';
 import SupportingDocumentsWidget from '../widgets/SupportingDocumentsWidget';
 import ApplicationEvents from '../widgets/applicationEvents';
+import SecureMessagesWidget from '../widgets/SecureMessagesWidget';
+import CoordinatorAssessmentWidget from '../widgets/CoordinatorAssessmentWidget';
 
-const ApplicationCaseDashboard = ({ headerInfo, updateBreadcrumbs }) => {
+const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs }) => {
   const { id } = useParams(); // id = iset_case.id
   const [caseData, setCaseData] = useState(null);
   const [boardItems, setBoardItems] = useState([
@@ -21,8 +23,8 @@ const ApplicationCaseDashboard = ({ headerInfo, updateBreadcrumbs }) => {
         setCaseData(data);
         updateBreadcrumbs && updateBreadcrumbs([
           { text: 'Home', href: '/' },
-          { text: 'Case Management', href: '/case-management' },
-          { text: `Application ${data.tracking_id || id}` }
+          { text: 'Application Management', href: '/case-management' },
+          { text: data.tracking_id || id }
         ]);
       })
       .catch(err => setCaseData(null));
@@ -32,7 +34,9 @@ const ApplicationCaseDashboard = ({ headerInfo, updateBreadcrumbs }) => {
     if (caseData) {
       setBoardItems([
         { id: 'iset-application-form', rowSpan: 6, columnSpan: 2, data: { title: 'ISET Application Form', application_id: caseData.application_id, caseData } },
-        { id: 'supporting-documents', rowSpan: 6, columnSpan: 2, data: { title: 'Supporting Documents', application_id: caseData.application_id, caseData } },
+        { id: 'coordinator-assessment', rowSpan: 6, columnSpan: 2, data: { title: 'Coordinator Assessment', application_id: caseData.application_id, caseData } },
+        { id: 'supporting-documents', rowSpan: 3, columnSpan: 2, data: { title: 'Supporting Documents', application_id: caseData.application_id, caseData } },
+        { id: 'secure-messages', rowSpan: 3, columnSpan: 2, data: { title: 'Secure Messages', application_id: caseData.application_id, caseData } },
         { id: 'application-events', rowSpan: 4, columnSpan: 4, data: { title: 'Events', application_id: caseData.application_id, caseData } }
       ]);
     }
@@ -43,26 +47,26 @@ const ApplicationCaseDashboard = ({ headerInfo, updateBreadcrumbs }) => {
   }
 
   return (
-    <ContentLayout
-      header={
-        <Header variant="h1" info={headerInfo}>
-          Application {caseData.tracking_id || id}
-        </Header>
-      }
-    >
+    <ContentLayout>
       <SpaceBetween size="l">
         <Board
           items={boardItems}
           onItemsChange={event => setBoardItems(event.detail.items)}
           renderItem={(item, actions) => {
             if (item.id === 'iset-application-form') {
-              return <IsetApplicationFormWidget actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} />;
+              return <IsetApplicationFormWidget actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} toggleHelpPanel={toggleHelpPanel} />;
+            }
+            if (item.id === 'coordinator-assessment') {
+              return <CoordinatorAssessmentWidget actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} toggleHelpPanel={toggleHelpPanel} />;
             }
             if (item.id === 'supporting-documents') {
               return <SupportingDocumentsWidget actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} />;
             }
             if (item.id === 'application-events') {
               return <ApplicationEvents actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} />;
+            }
+            if (item.id === 'secure-messages') {
+              return <SecureMessagesWidget actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} toggleHelpPanel={toggleHelpPanel} />;
             }
             return null;
           }}
