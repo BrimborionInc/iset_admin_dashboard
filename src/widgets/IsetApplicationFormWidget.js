@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Header, Grid, FormField, Input, Box, Table, SpaceBetween, ColumnLayout, Textarea, Flashbar, Button } from '@cloudscape-design/components';
+import { Header, Grid, FormField, Input, Box, Table, SpaceBetween, ColumnLayout, Textarea, Flashbar, Button, Link } from '@cloudscape-design/components';
+import IsetApplicationFormHelpPanelContent from '../helpPanelContents/isetApplicationFormHelpPanelContent';
 
 const sectionHeader = (label) => (
   <Box variant="h3" margin={{ top: 'l', bottom: 's' }}>{label}</Box>
@@ -14,7 +15,7 @@ const ReadOnlyTextarea = ({ value }) => (
   <Textarea value={value || ''} readOnly />
 );
 
-const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
+const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHelpPanel }) => {
   const [application, setApplication] = useState(null);
   const [ptma, setPtma] = useState({ ptma_name: '', ptma_code: '' });
   const [caseSummary, setCaseSummary] = useState('');
@@ -71,7 +72,16 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
 
   if (!application) return (
     <BoardItem
-      header={<Header>ISET Application Form</Header>}
+      header={<Header
+        info={
+          <Link
+            variant="info"
+            onFollow={() => toggleHelpPanel && toggleHelpPanel(<IsetApplicationFormHelpPanelContent />, 'ISET Application Form Help')}
+          >
+            Info
+          </Link>
+        }
+      >ISET Application Form</Header>}
       i18nStrings={{
         dragHandleAriaLabel: 'Drag handle',
         dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
@@ -129,6 +139,14 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
             <Button variant="link" onClick={handleCancel} disabled={!isChanged}>Cancel</Button>
           </SpaceBetween>
         }
+        info={
+          <Link
+            variant="info"
+            onFollow={() => toggleHelpPanel && toggleHelpPanel(<IsetApplicationFormHelpPanelContent />, 'ISET Application Form Help')}
+          >
+            Info
+          </Link>
+        }
       >ISET Application Form</Header>}
       i18nStrings={{
         dragHandleAriaLabel: 'Drag handle',
@@ -173,12 +191,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
           <FormField label="Priority"><ReadOnlyInput value={application?.case?.priority || ''} /></FormField>
           <FormField label="Stage"><ReadOnlyInput value={application?.case?.stage || ''} /></FormField>
         </Grid>
-        {/* Row 3: Case Summary (full width, editable textarea) */}
-        <Grid gridDefinition={[{ colspan: 12 }]}> 
-          <FormField label="Case Summary">
-            <Textarea value={caseSummary} onChange={e => setCaseSummary(e.detail.value)} />
-          </FormField>
-        </Grid>
         {sectionHeader('Personal Details')}
         <Grid gridDefinition={[{ colspan: 3 }, { colspan: 3 }, { colspan: 3 }, { colspan: 3 }]}> 
           <FormField label="SIN Number"><ReadOnlyInput value={application.sin_number} /></FormField>
@@ -186,7 +198,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData }) => {
           <FormField label="First Name"><ReadOnlyInput value={application.first_name} /></FormField>
           <FormField label="Middle Names"><ReadOnlyInput value={application.middle_names} /></FormField>
           <FormField label="Preferred Name"><ReadOnlyInput value={application.preferred_name} /></FormField>
-          <FormField label="Date of Birth"><ReadOnlyInput value={application.date_of_birth} /></FormField>
+          <FormField label="Date of Birth"><ReadOnlyInput value={application.date_of_birth ? application.date_of_birth.slice(0, 10) : ''} /></FormField>
           <FormField label="Gender"><ReadOnlyInput value={application.gender} /></FormField>
           <FormField label="Indigenous Registration Number"><ReadOnlyInput value={application.indigenous_registration_number} /></FormField>
           <FormField label="Home Community"><ReadOnlyInput value={application.indigenous_home_community} /></FormField>
