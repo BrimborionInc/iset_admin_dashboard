@@ -159,16 +159,14 @@ const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
                     id: "applications",
                     header: "Applications",
                     cell: e => (
-                      // Placeholder for number of ISET applications in process
-                      <span>-</span>
+                      <span>{e.applications}</span>
                     )
                   },
                   {
                     id: "cases",
                     header: "Cases",
                     cell: e => (
-                      // Placeholder for number of ISET participants being managed by caseworkers
-                      <span>-</span>
+                      <span>{e.cases}</span>
                     )
                   },
                   {

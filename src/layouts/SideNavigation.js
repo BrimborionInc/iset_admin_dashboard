@@ -5,17 +5,19 @@ const SideNavigation = () => {
   const navItems = [
     {
       type: 'section',
-      text: 'NWAC Administrator',
+      text: 'ISET Administration',
       items: [
         { type: 'link', text: 'Application Assignment', href: '/case-assignment-dashboard' },
         { type: 'link', text: 'PTMA Management', href: '/ptma-management' },
+        { type: 'link', text: 'Notification Settings', href: '/manage-notifications' },
+        { type: 'link', text: 'ARMS Integration', href: '/ptma-management' },
       ],
     },
     {
       type: 'section',
-      text: 'Regional Coordinator',
+      text: 'ISET Assessment',
       items: [
-        { type: 'link', text: 'Application Management', href: '/case-management' }, // relabeled and updated href to match Case Management
+        { type: 'link', text: 'Application Assessment', href: '/case-management' }, // relabeled and updated href to match Case Management
       ],
     },
     {
@@ -27,7 +29,6 @@ const SideNavigation = () => {
         { type: 'link', text: 'Secure Messaging', href: '/manage-messages' }, // Add the new link
         { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' }, // Update the link to the new page
         { type: 'link', text: 'Intake Editor', href: '/manage-components' }, // Update the link to the new page
-        { type: 'link', text: 'Manage ISET Holders', href: '/manage-organisations' }, // Add the new link
       ],
     },
     // Removed "Applicant Feedback" section
