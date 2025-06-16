@@ -3,11 +3,18 @@ import { Container, Header, Table, Link, SpaceBetween, Alert } from '@cloudscape
 import Board from '@cloudscape-design/board-components/board';
 import ManageTemplates from '../widgets/manageTemplates';
 import ConfigureNotifications from '../widgets/configureNotifications'; // Import the new widget
+import NotificationSettingsWidget from '../widgets/notificationSettingsWidget';
 
 const ManageNotifications = ({ toggleHelpPanel, updateBreadcrumbs, setSplitPanelOpen, splitPanelOpen, setSplitPanelSize, splitPanelSize, setAvailableItems }) => {
   const [notifications, setNotifications] = useState([]);
   const [alertVisible, setAlertVisible] = useState(true);
   const [items, setItems] = useState([
+    {
+      id: 'notification-settings-widget',
+      rowSpan: 7,
+      columnSpan: 4,
+      data: { title: 'Notifications Settings' },
+    },
     {
       id: 'manage-templates',
       rowSpan: 7,
@@ -41,6 +48,14 @@ const ManageNotifications = ({ toggleHelpPanel, updateBreadcrumbs, setSplitPanel
     <SpaceBetween size="l">
       <Board
         renderItem={(item, actions) => {
+          if (item.id === 'notification-settings-widget') {
+            return (
+              <NotificationSettingsWidget
+                actions={actions}
+                toggleHelpPanel={toggleHelpPanel}
+              />
+            );
+          }
           if (item.id === 'manage-templates') {
             return (
               <ManageTemplates

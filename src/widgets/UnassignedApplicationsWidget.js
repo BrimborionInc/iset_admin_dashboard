@@ -307,7 +307,7 @@ const UnassignedApplicationsWidget = ({ actions, onCaseAssigned, refreshKey }) =
         <Modal
           visible={modalVisible}
           onDismiss={() => { setModalVisible(false); setSelectedOfficerId(null); setSelectedApplication(null); setAssignError(null); setUrgent(false); }}
-          header="Assign to Intake Officer"
+          header="Assign to Regional Coordinator"
           footer={
             <SpaceBetween direction="horizontal" size="xs">
               <Button variant="link" onClick={() => { setModalVisible(false); setSelectedOfficerId(null); setSelectedApplication(null); setAssignError(null); setUrgent(false); }}>Cancel</Button>
