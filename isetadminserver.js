@@ -64,6 +64,28 @@ const dbConfig = {
 const pool = mysql.createPool(dbConfig);
 
 /**
+ * Helper to insert a new event into iset_case_event.
+ * @param {Object} params
+ * @param {number} params.user_id - Required. User ID for the event.
+ * @param {string} params.event_type - Required. Event type (must match iset_event_type).
+ * @param {Object} params.event_data - Required. Event data as JS object (will be stored as JSON).
+ * @param {number|null} [params.case_id=null] - Optional. Case ID (nullable).
+ * @param {boolean} [params.is_read=false] - Optional. Mark event as read (default false).
+ * @returns {Promise<number>} The inserted event's ID.
+ */
+async function addCaseEvent({ user_id, event_type, event_data, case_id = null, is_read = false }) {
+  if (!user_id || !event_type || typeof event_data === 'undefined') {
+    throw new Error('Missing required fields for addCaseEvent');
+  }
+  const [result] = await pool.query(
+    `INSERT INTO iset_case_event (user_id, case_id, event_type, event_data, is_read, created_at)
+     VALUES (?, ?, ?, ?, ?, NOW())`,
+    [user_id, case_id, event_type, JSON.stringify(event_data), is_read]
+  );
+  return result.insertId;
+}
+
+/**
  * GET /api/intake-officers
  *
  * Returns all evaluators (both roles) with their PTMA assignments (if any).
@@ -541,39 +563,67 @@ app.get('/api/cases/:id', async (req, res) => {
  * - alert_variant      → from iset_event_type (info, success, warning, error)
  */
 app.get('/api/case-events', async (req, res) => {
-  const userId = req.query.user_id;
+  const userId = req.query.user_id ? Number(req.query.user_id) : null;
+  const caseId = req.query.case_id ? Number(req.query.case_id) : null;
   const limit = Number(req.query.limit) || 50;
   const offset = Number(req.query.offset) || 0;
-  if (!userId) {
-    return res.status(400).json({ error: 'Missing user_id parameter' });
+  const eventType = req.query.type;
+  const unread = req.query.unread === 'true';
+
+  if (!userId && !caseId) {
+    return res.status(400).json({ error: 'user_id or case_id is required' });
   }
+
+  let whereClauses = [];
+  let params = [];
+
+  if (userId && caseId) {
+    whereClauses.push('(e.user_id = ? OR e.case_id = ?)');
+    params.push(userId, caseId);
+  } else if (userId) {
+    whereClauses.push('e.user_id = ?');
+    params.push(userId);
+  } else if (caseId) {
+    whereClauses.push('e.case_id = ?');
+    params.push(caseId);
+  }
+
+  if (eventType) {
+    whereClauses.push('e.event_type = ?');
+    params.push(eventType);
+  }
+  if (unread) {
+    whereClauses.push('e.is_read = 0');
+  }
+
+  const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
   try {
     const [rows] = await pool.query(`
-      SELECT
-        e.id AS event_id,
-        e.case_id,
-        e.user_id,
-        e.event_type,
-        et.label AS event_type_label,
-        et.alert_variant,
-        e.event_data,
-        e.is_read,
-        e.created_at,
+      SELECT 
+        e.id, e.case_id, e.event_type, e.event_data, e.is_read, e.created_at,
         a.tracking_id,
+        et.label, et.alert_variant,
         u.name AS user_name
       FROM iset_case_event e
       LEFT JOIN iset_case c ON e.case_id = c.id
       LEFT JOIN iset_application a ON c.application_id = a.id
-      JOIN iset_event_type et ON e.event_type = et.event_type
-      JOIN user u ON e.user_id = u.id
-      WHERE e.user_id = ?
+      LEFT JOIN iset_event_type et ON e.event_type = et.event_type
+      LEFT JOIN user u ON e.user_id = u.id
+      ${whereSql}
       ORDER BY e.created_at DESC
       LIMIT ? OFFSET ?
-    `, [userId, limit, offset]);
+    `, [...params, limit, offset]);
+    // Parse event_data JSON if needed
+    rows.forEach(row => {
+      if (typeof row.event_data === 'string') {
+        try { row.event_data = JSON.parse(row.event_data); } catch {}
+      }
+    });
     res.status(200).json(rows);
   } catch (error) {
-    console.error('Error fetching case events for user:', error);
-    res.status(500).json({ error: 'Failed to fetch case events for user' });
+    console.error('Error fetching case events:', error);
+    res.status(500).json({ error: 'Failed to fetch case events' });
   }
 });
 
@@ -1083,99 +1133,88 @@ app.get('/api/services', async (req, res) => {
   }
 });
 
-app.get('/api/templates', (req, res) => {
-  console.log('Received request to fetch templates'); // Add logging
+// --- Notification Templates API (DB-backed) ---
 
-  const templatesDir = path.join(__dirname, 'templates');
-  console.log('Templates directory:', templatesDir); // Add logging
-
-  fs.readdir(templatesDir, (err, files) => {
-    if (err) {
-      console.error('Error reading templates directory:', err);
-      return res.status(500).json({ message: 'Failed to load templates' });
-    }
-
-    console.log('Files in templates directory:', files); // Add logging
-
-    const templates = files.filter(file => file.endsWith('.json')).map(file => {
-      const filePath = path.join(templatesDir, file);
-      const fileContents = fs.readFileSync(filePath, 'utf8');
-      const templateData = JSON.parse(fileContents);
-      return {
-        id: file.replace('.json', ''),  // Use filename as ID
-        name: templateData.name,
-        type: templateData.type,
-        status: templateData.status,
-        language: templateData.language || '',  // Ensure language is a string
-        subject: templateData.subject || ''  // Ensure subject is a string
-      };
-    });
-
-    console.log('Templates to send:', templates); // Add logging
-
-    res.status(200).json(templates);
-  });
+// Get all templates
+app.get('/api/templates', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, name, type, status, language, subject, content, created_at, updated_at
+      FROM notification_template
+      ORDER BY name, language, type, status
+    `);
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error('Error fetching templates:', error);
+    res.status(500).json({ error: 'Failed to fetch templates' });
+  }
 });
 
-app.get('/api/templates/:templateId', (req, res) => {
+// Get a template by ID
+app.get('/api/templates/:templateId', async (req, res) => {
   const templateId = req.params.templateId;
-  const templatePath = path.join(__dirname, 'templates', `${templateId}.json`);
-
-  if (!fs.existsSync(templatePath)) {
-    return res.status(404).json({ message: 'Template not found' });
-  }
-
-  fs.readFile(templatePath, 'utf8', (err, data) => {
-    if (err) {
-      console.error('Error reading template file:', err);
-      return res.status(500).json({ message: 'Failed to load template' });
+  try {
+    const [rows] = await pool.query(
+      'SELECT id, name, type, status, language, subject, content, created_at, updated_at FROM notification_template WHERE id = ?',
+      [templateId]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Template not found' });
     }
-
-    res.status(200).json(JSON.parse(data));
-  });
+    res.status(200).json(rows[0]);
+  } catch (error) {
+    console.error('Error fetching template:', error);
+    res.status(500).json({ error: 'Failed to fetch template' });
+  }
 });
 
-app.post('/api/templates/:templateId', (req, res) => {
+// Save (create or update) a template by ID
+app.post('/api/templates/:templateId', async (req, res) => {
   const templateId = req.params.templateId;
-  const templateData = req.body;
-
-  if (!templateData.name || !templateData.type || !templateData.content || !templateData.subject) {
-    return res.status(400).json({ message: 'Missing required template fields' });
+  const { name, type, status, language, subject, content } = req.body;
+  if (!name || !type || !content || !subject) {
+    return res.status(400).json({ error: 'Missing required fields' });
   }
-
-  // Generate filename using template name and timestamp
-  const timestamp = new Date().toISOString().replace(/[-:.]/g, '');
-  const filename = `${templateData.name.replace(/\s+/g, '')}_${timestamp}.json`;
-  const templatePath = path.join(__dirname, 'templates', filename);
-
-  fs.writeFile(templatePath, JSON.stringify(templateData, null, 2), 'utf8', (err) => {
-    if (err) {
-      console.error('Error saving template:', err);
-      return res.status(500).json({ message: 'Failed to save template' });
+  try {
+    // If templateId is 'new' or not a number, insert; else update
+    if (templateId === 'new' || isNaN(Number(templateId))) {
+      const [result] = await pool.query(
+        `INSERT INTO notification_template (name, type, status, language, subject, content) VALUES (?, ?, ?, ?, ?, ?)`,
+        [name, type, status, language, subject, content]
+      );
+      res.status(201).json({ id: result.insertId, message: 'Template created' });
+    } else {
+      const [result] = await pool.query(
+        `UPDATE notification_template SET name=?, type=?, status=?, language=?, subject=?, content=? WHERE id=?`,
+        [name, type, status, language, subject, content, templateId]
+      );
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Template not found' });
+      }
+      res.status(200).json({ id: templateId, message: 'Template updated' });
     }
-
-    res.status(200).json({ message: 'Template saved successfully', templateId });
-  });
+  } catch (error) {
+    console.error('Error saving template:', error);
+    res.status(500).json({ error: 'Failed to save template' });
+  }
 });
 
-app.delete('/api/templates/:templateId', (req, res) => {
+// Delete a template by ID
+app.delete('/api/templates/:templateId', async (req, res) => {
   const templateId = req.params.templateId;
-  const templatePath = path.join(__dirname, 'templates', `${templateId}.json`);
-
-  // Check if the file exists
-  if (!fs.existsSync(templatePath)) {
-    return res.status(404).json({ message: 'Template not found' });
-  }
-
-  // Delete the file
-  fs.unlink(templatePath, (err) => {
-    if (err) {
-      console.error('Error deleting template:', err);
-      return res.status(500).json({ message: 'Failed to delete template' });
+  try {
+    const [result] = await pool.query(
+      'DELETE FROM notification_template WHERE id = ?',
+      [templateId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Template not found' });
     }
-
-    res.status(200).json({ message: 'Template deleted successfully', templateId });
-  });
+    res.status(200).json({ message: 'Template deleted' });
+  } catch (error) {
+    console.error('Error deleting template:', error);
+    res.status(500).json({ error: 'Failed to delete template' });
+  }
 });
 
 app.get('/api/admin/messages', async (req, res) => {
@@ -1475,11 +1514,31 @@ app.put('/api/queue', async (req, res) => {
 // List all PTMAs
 app.get('/api/ptmas', async (req, res) => {
   try {
+    // Get all PTMAs
     const [ptmas] = await pool.query(`
       SELECT id, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes
       FROM ptma
     `);
-    // Map DB fields to API fields for each PTMA
+
+    // Get applications (all cases per PTMA)
+    const [applicationCounts] = await pool.query(`
+      SELECT ptma_id, COUNT(*) AS applications
+      FROM iset_case
+      WHERE ptma_id IS NOT NULL
+      GROUP BY ptma_id
+    `);
+    // Get open cases per PTMA
+    const [openCaseCounts] = await pool.query(`
+      SELECT ptma_id, COUNT(*) AS cases
+      FROM iset_case
+      WHERE ptma_id IS NOT NULL AND status = 'open'
+      GROUP BY ptma_id
+    `);
+    // Build lookup maps
+    const applicationsMap = Object.fromEntries(applicationCounts.map(r => [r.ptma_id, r.applications]));
+    const casesMap = Object.fromEntries(openCaseCounts.map(r => [r.ptma_id, r.cases]));
+
+    // Map DB fields to API fields for each PTMA, adding counts
     const mapped = ptmas.map(db => ({
       id: db.id,
       full_name: db.iset_full_name,
@@ -1494,7 +1553,9 @@ app.get('/api/ptmas', async (req, res) => {
       contact_name: db.contact_name || null,
       contact_email: db.contact_email || null,
       contact_phone: db.contact_phone || null,
-      contact_notes: db.contact_notes || null
+      contact_notes: db.contact_notes || null,
+      applications: applicationsMap[db.id] || 0,
+      cases: casesMap[db.id] || 0
     }));
     res.status(200).json(mapped);
   } catch (error) {
@@ -1559,9 +1620,9 @@ app.post('/api/ptmas', async (req, res) => {
   } = req.body;
   try {
     const [result] = await pool.query(`
-      INSERT INTO ptma (name, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [location, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes]);
+          INSERT INTO ptma (name, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [location, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes]);
     const ptmaId = result.insertId;
     const [newPtma] = await pool.query(`
       SELECT id, name AS location, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes
@@ -1958,23 +2019,16 @@ app.put('/api/cases/:id', async (req, res) => {
     assessment_recommendation,
     assessment_justification,
     assessment_nwac_review,
-    assessment_nwac_reason
+    assessment_nwac_reason,
+    case_summary // <-- add this
   } = req.body;
 
   // Helper: convert blank to null
   const toNull = v => (v === undefined || v === null || v === '' ? null : v);
   // Helper: ensure JSON fields are valid and currency fields are 0 if blank
   const safeJson = (obj) => {
-    if (!obj || typeof obj !== 'object') return JSON.stringify([]);
-    // For each row, set blank/NaN amount to 0
-    return JSON.stringify(
-      Array.isArray(obj)
-        ? obj.map(row => ({
-            ...row,
-            amount: row.amount === undefined || row.amount === null || row.amount === '' || isNaN(Number(row.amount)) ? 0 : Number(row.amount)
-          }))
-        : []
-    );
+    if (!obj || typeof obj !== 'object') return JSON.stringify({});
+    return JSON.stringify(obj);
   };
 
   try {
@@ -1997,7 +2051,8 @@ app.put('/api/cases/:id', async (req, res) => {
         assessment_recommendation = ?,
         assessment_justification = ?,
         assessment_nwac_review = ?,
-        assessment_nwac_reason = ?
+        assessment_nwac_reason = ?,
+        case_summary = ?
       WHERE id = ?`,
       [
         toNull(assessment_date_of_assessment),
@@ -2018,16 +2073,166 @@ app.put('/api/cases/:id', async (req, res) => {
         toNull(assessment_justification),
         toNull(assessment_nwac_review),
         toNull(assessment_nwac_reason),
+        toNull(case_summary), // <-- add this
         caseId
       ]
     );
     if (result.affectedRows === 0) {
       return res.status(404).json({ success: false, error: 'Case not found' });
     }
+
+    // Fetch the updated case to get user_id, stage, and other info
+    const [[caseRow]] = await pool.query(
+      `SELECT c.*, a.user_id AS applicant_user_id, a.tracking_id, e.name AS evaluator_name
+       FROM iset_case c
+       JOIN iset_application a ON c.application_id = a.id
+       LEFT JOIN iset_evaluators e ON c.assigned_to_user_id = e.id
+       WHERE c.id = ?`,
+      [caseId]
+    );
+
+    // Log event for coordinator assessment submission
+    if (assessment_recommendation && assessment_justification) {
+      // Always use applicant's user id for event logging
+      const coordinatorName = caseRow.evaluator_name || '';
+      await addCaseEvent({
+        user_id: caseRow.applicant_user_id,
+        case_id: caseId,
+        event_type: 'assessment_submitted',
+        event_data: {
+          evaluator_name: coordinatorName || null,
+          tracking_id: caseRow.tracking_id || null,
+          message: coordinatorName
+            ? `Assessment submitted by coordinator: ${coordinatorName}.`
+            : 'Assessment submitted by coordinator.'
+        }
+      });
+    }
+    // Log event for NWAC review submission
+    if (assessment_nwac_review) {
+      // Always use applicant's user id for event logging
+      await addCaseEvent({
+        user_id: caseRow.applicant_user_id,
+        case_id: caseId,
+        event_type: 'nwac_review_submitted',
+        event_data: {
+          evaluator_name: caseRow.evaluator_name || null,
+          tracking_id: caseRow.tracking_id || null,
+          message: 'NWAC review submitted.'
+        }
+      });
+    }
+
     res.json({ success: true });
   } catch (error) {
     console.error('Error updating assessment:', error);
     res.status(500).json({ success: false, error: error.message });
   }
+});
+
+// Add API endpoint to update case stage
+app.put('/api/cases/:id/stage', async (req, res) => {
+  const caseId = req.params.id;
+  const { stage } = req.body;
+  if (!stage) {
+    return res.status(400).json({ error: 'Missing stage in request body' });
+  }
+  try {
+    const [result] = await pool.query(
+      'UPDATE iset_case SET stage = ?, last_activity_at = NOW() WHERE id = ?',
+      [stage, caseId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Case not found' });
+    }
+    // Optionally log event
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Error updating case stage:', error);
+    res.status(500).json({ error: 'Failed to update case stage' });
+  }
+});
+
+// Notification Settings Endpoints
+// GET all notification settings with template info
+app.get('/api/notifications', async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT ns.*, nt.name as template_name, nt.language as template_language
+            FROM notification_setting ns
+            LEFT JOIN notification_template nt ON ns.template_id = nt.id
+            ORDER BY ns.event, ns.role, ns.language
+        `);
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch notification settings' });
+    }
+});
+
+// POST create or update a notification setting
+app.post('/api/notifications', async (req, res) => {
+    const { id, event, role, template_id, language, enabled } = req.body;
+    try {
+        if (id) {
+            // Update existing
+            await pool.query(
+                `UPDATE notification_setting SET event=?, role=?, template_id=?, language=?, enabled=?, updated_at=NOW() WHERE id=?`,
+                [event, role, template_id, language, enabled, id]
+            );
+            res.json({ success: true, id });
+        } else {
+            // Insert new
+            const [result] = await pool.query(
+                `INSERT INTO notification_setting (event, role, template_id, language, enabled) VALUES (?, ?, ?, ?, ?)`,
+                [event, role, template_id, language, enabled]
+            );
+            res.json({ success: true, id: result.insertId });
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to save notification setting' });
+    }
+});
+
+// DELETE a notification setting
+app.delete('/api/notifications/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query(`DELETE FROM notification_setting WHERE id=?`, [id]);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to delete notification setting' });
+    }
+});
+
+// GET all notification events (from iset_event_type)
+app.get('/api/events', async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT event_type as value, label, description FROM iset_event_type ORDER BY sort_order, event_type');
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch events' });
+    }
+});
+
+// GET all roles (from iset_role or static list)
+app.get('/api/roles', async (req, res) => {
+    try {
+        // If you have a roles table, use it. Otherwise, use a static list:
+        // const [rows] = await pool.query('SELECT name as value, label FROM iset_role ORDER BY name');
+        const rows = [
+            { value: 'applicant', label: 'Applicant' },
+            { value: 'nwac_admin', label: 'NWAC Administrator' },
+            { value: 'regional_coordinator', label: 'Regional Coordinator' },
+            // Add more roles as needed
+        ];
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch roles' });
+    }
 });
 
