@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import enMessages from '@cloudscape-design/components/i18n/messages/all.en';
 import frMessages from '@cloudscape-design/components/i18n/messages/all.fr';
 import { DarkModeProvider } from "./context/DarkModeContext.js"; // Import the context provider
-import { BrowserRouter as Router, Route, Switch, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router } from 'react-router-dom';
 import {
   AppLayout,
   BreadcrumbGroup,
@@ -47,8 +47,16 @@ import SlotManagementWidget from './widgets/slotManagementWidget.js';
 
 import '@cloudscape-design/global-styles/index.css';
 
+const roleOptions = [
+  { label: 'Program Administrator', value: 'Program Administrator' },
+  { label: 'Regional Coordinator', value: 'Regional Coordinator' },
+  { label: 'PTMA Staff', value: 'PTMA Staff' },
+  { label: 'System Administrator', value: 'System Administrator' },
+];
+
 const App = () => {
   const [currentLanguage, setCurrentLanguage] = useState('fr');
+  const [currentRole, setCurrentRole] = useState(roleOptions[0]);
 
   const handleLanguageChange = (lang) => {
     setCurrentLanguage(lang);
@@ -65,14 +73,22 @@ const App = () => {
         messages={currentLanguage === 'en' ? [frMessages] : [enMessages]}
       >
         <Router>
-          <DemoNavigation currentLanguage={currentLanguage} onLanguageChange={handleLanguageChange} />
-
-          <TopNavigation currentLanguage={currentLanguage} onLanguageChange={handleLanguageChange} />
+          <DemoNavigation
+            currentLanguage={currentLanguage}
+            onLanguageChange={handleLanguageChange}
+            currentRole={currentRole}
+            setCurrentRole={setCurrentRole}
+          />
+          <TopNavigation
+            currentLanguage={currentLanguage}
+            onLanguageChange={handleLanguageChange}
+            currentRole={currentRole}
+            setCurrentRole={setCurrentRole}
+          />
           <ErrorBoundary>
-            <AppContent />
+            <AppContent currentRole={currentRole} />
           </ErrorBoundary>
           <BottomFooter />
-
         </Router>
       </I18nProvider>
     </DarkModeProvider>

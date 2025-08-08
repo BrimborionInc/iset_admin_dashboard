@@ -70,7 +70,7 @@ const BlockStepLibrary = ({ actions, setSelectedBlockStep }) => { // Add setSele
             </Button>
           }
         >
-          Block Step Library
+          Intake Step Library
         </Header>
       }
       i18nStrings={{
@@ -104,7 +104,7 @@ const BlockStepLibrary = ({ actions, setSelectedBlockStep }) => { // Add setSele
             },
             {
               id: 'name',
-              header: 'Name',
+              header: 'Intake Step',
               cell: item => (
                 <Link onClick={() => handleSelect(item)}>
                   {item.name}
@@ -142,7 +142,7 @@ const BlockStepLibrary = ({ actions, setSelectedBlockStep }) => { // Add setSele
           }
           filter={
             <TextFilter
-              filteringPlaceholder="Find resources"
+              filteringPlaceholder="Find intake step"
               filteringText={filteringText}
               onChange={({ detail }) => setFilteringText(detail.filteringText)}
               countText={`${blockSteps.length} matches`}

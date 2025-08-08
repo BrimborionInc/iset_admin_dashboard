@@ -5,18 +5,18 @@ import {
   ButtonDropdown,
   Table,
   Spinner,
-  Button,
   TextFilter,
   Pagination,
   CollectionPreferences,
-  SpaceBetween
+  SpaceBetween,
+  Button
 } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useHistory } from 'react-router-dom';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
-const columnDefinitions = [
+const baseColumnDefinitions = [
   {
     id: 'tracking_id',
     header: 'Tracking ID',
@@ -33,38 +33,46 @@ const columnDefinitions = [
     maxWidth: 250
   },
   {
-    id: 'submitted_at',
-    header: 'Submitted At',
-    cell: item => new Date(item.submitted_at).toLocaleDateString(),
-    minWidth: 140,
-    maxWidth: 180
-  },
-  {
     id: 'assigned_user_name',
-    header: 'Assigned To',
+    header: 'Assessor',
     cell: item => item.assigned_user_name,
     minWidth: 150,
     maxWidth: 250
   },
   {
-    id: 'assigned_user_ptmas',
-    header: 'PTMA Name',
-    cell: item => item.assigned_user_ptmas || '',
-    minWidth: 200,
-    maxWidth: 350
+    id: 'submitted_at',
+    header: 'Submitted',
+    cell: item => item.submitted_at ? new Date(item.submitted_at).toLocaleDateString() : '',
+    minWidth: 120,
+    maxWidth: 180
+  },
+  {
+    id: 'last_activity_at',
+    header: 'Last Updated',
+    cell: item => item.last_activity_at ? new Date(item.last_activity_at).toLocaleDateString() : '',
+    minWidth: 120,
+    maxWidth: 180
+  },
+  {
+    id: 'priority',
+    header: 'Priority',
+    cell: item => item.priority,
+    minWidth: 100,
+    maxWidth: 120
   }
 ];
 
 const defaultVisibleColumns = [
   'tracking_id',
   'applicant_name',
-  'submitted_at',
   'assigned_user_name',
-  'assigned_user_ptmas',
-  'edit'
+  'submitted_at',
+  'last_activity_at',
+  'priority',
+  'actions'
 ];
 
-const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
+const AssessedCasesWidget = ({ actions, refreshKey }) => {
   const history = useHistory();
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -75,28 +83,35 @@ const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
   const [visibleColumns, setVisibleColumns] = useState(defaultVisibleColumns);
   const [selectedItems, setSelectedItems] = useState([]);
 
+  // Add the actions column with access to history
+  const columnDefinitions = [
+    ...baseColumnDefinitions,
+    {
+      id: 'actions',
+      header: 'Actions',
+      cell: item => <Button variant="inline-link" onClick={() => history.push(`/application-case/${item.id}`)}>Open</Button>,
+      minWidth: 80,
+      maxWidth: 100
+    }
+  ];
+
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        let url = `${process.env.REACT_APP_API_BASE_URL}/api/cases`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('Failed to fetch');
-        let data = await response.json();
-        // Filter by evaluator if simulatedUser is set
-        if (simulatedUser && simulatedUser.evaluator_id) {
-          data = data.filter(c => c.assigned_to_user_id === simulatedUser.evaluator_id);
-        }
+    setLoading(true);
+    setError(null);
+    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases?stage=assessment_submitted`)
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch cases');
+        return res.json();
+      })
+      .then(data => {
         setCases(data);
-      } catch (err) {
-        setError('Failed to load assigned cases.');
-      } finally {
         setLoading(false);
-      }
-    };
-    fetchData();
-  }, [refreshKey, simulatedUser]);
+      })
+      .catch(err => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, [refreshKey]);
 
   // Filtering
   const filteredItems = cases.filter(item => {
@@ -105,7 +120,7 @@ const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
       (item.tracking_id && item.tracking_id.toLowerCase().includes(search)) ||
       (item.applicant_name && item.applicant_name.toLowerCase().includes(search)) ||
       (item.assigned_user_name && item.assigned_user_name.toLowerCase().includes(search)) ||
-      (item.assigned_user_ptmas && item.assigned_user_ptmas.toLowerCase().includes(search))
+      (item.priority && item.priority.toLowerCase().includes(search))
     );
   });
 
@@ -119,22 +134,9 @@ const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
     contentDisplay: columnDefinitions.map(col => ({ id: col.id, visible: visibleColumns.includes(col.id) }))
   };
 
-  // Inline action column
-  const actionsColumn = {
-    id: 'edit',
-    header: 'Actions',
-    cell: item => (
-      <Button variant="inline-link" onClick={() => history.push(`/application-case/${item.id}`)}>Open</Button>
-    ),
-    minWidth: 80,
-    maxWidth: 100
-  };
-
-  const allColumns = [...columnDefinitions, actionsColumn];
-
   return (
     <BoardItem
-      header={<Header variant="h2">Assigned Cases</Header>}
+      header={<Header variant="h2">Assessed Cases</Header>}
       i18nStrings={{
         dragHandleAriaLabel: 'Drag handle',
         dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
@@ -152,7 +154,7 @@ const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
     >
       <SpaceBetween direction="vertical" size="xs">
         <Box variant="small">
-          This widget shows cases that have been assigned for assessment.  NWAC Admins and Regional Coordinators can use the open button to view the case details.  Case assignments are logged, and depending on notification settings may send a secure message and email alert to the person the case is assigned to.
+          This widget lists cases that have completed the assessment stage and are ready for review. Use the table controls to filter, sort, and view details. Only cases with <b>stage = 'assessment_submitted'</b> are shown here.
         </Box>
         <Box>
           {loading ? (
@@ -161,10 +163,10 @@ const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
             <Box color="error" textAlign="center">{error}</Box>
           ) : (
             <Table
-              columnDefinitions={allColumns.filter(col => visibleColumns.includes(col.id) || col.id === 'edit')}
+              columnDefinitions={columnDefinitions.filter(col => visibleColumns.includes(col.id))}
               items={pagedItems}
               loading={false}
-              empty={<Box textAlign="center">No assigned cases</Box>}
+              empty={<Box textAlign="center">No assessed cases found.</Box>}
               variant="embedded"
               wrapLines
               resizableColumns
@@ -174,11 +176,11 @@ const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
               selectedItems={selectedItems}
               onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
               ariaLabels={{
-                selectionGroupLabel: 'Assigned cases',
+                selectionGroupLabel: 'Assessed cases',
                 allItemsSelectionLabel: () => 'select all',
                 itemSelectionLabel: ({ selectedItems }, item) => item.tracking_id,
-                tableLabel: 'Assigned cases table',
-                header: 'Assigned cases',
+                tableLabel: 'Assessed cases table',
+                header: 'Assessed cases',
                 rowHeader: 'Tracking ID',
               }}
               renderAriaLive={({ firstIndex, lastIndex, totalItemsCount }) =>
@@ -207,7 +209,7 @@ const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
                       : `(${filteredItems.length})`
                   }
                 >
-                  Assigned Cases
+                  Assessed Cases
                 </Header>
               }
               pagination={
@@ -229,11 +231,11 @@ const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
                   }}
                   contentDisplayPreference={{
                     title: 'Select visible columns',
-                    options: columnDefinitions.map(col => ({
+                    options: baseColumnDefinitions.map(col => ({
                       id: col.id,
                       label: col.header,
                       alwaysVisible: col.id === 'tracking_id',
-                    })).concat([{ id: 'edit', label: 'Edit', alwaysVisible: true }])
+                    })).concat([{ id: 'actions', label: 'Actions', alwaysVisible: true }])
                   }}
                   onConfirm={({ detail }) => {
                     setPageSize(detail.pageSize);
@@ -250,4 +252,4 @@ const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
   );
 };
 
-export default AssignedCasesWidget;
+export default AssessedCasesWidget;

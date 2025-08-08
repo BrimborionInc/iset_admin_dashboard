@@ -9,7 +9,7 @@ const PreviewNunjucks = ({ selectedBlockStep }) => {
 
   useEffect(() => {
     if (selectedBlockStep && selectedBlockStep.config_path) {
-      const url = `${process.env.REACT_APP_API_BASE_URL}/api/get-njk-file?template_path=${selectedBlockStep.config_path}`;
+      const url = `${process.env.REACT_APP_API_BASE_URL}/api/load-njk-template?path=${selectedBlockStep.config_path}`;
       fetch(url)
         .then(response => response.text())
         .then(data => {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Header, Grid, FormField, Input, Box, Table, SpaceBetween, ColumnLayout, Textarea, Flashbar, Button, Link } from '@cloudscape-design/components';
+import { Header, Grid, FormField, Input, Box, Table, SpaceBetween, ColumnLayout, Textarea, Flashbar, Button, Link, ButtonDropdown } from '@cloudscape-design/components';
 import IsetApplicationFormHelpPanelContent from '../helpPanelContents/isetApplicationFormHelpPanelContent';
 
 const sectionHeader = (label) => (
@@ -133,12 +133,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   return (
     <BoardItem
       header={<Header
-        actions={
-          <SpaceBetween direction="horizontal" size="s">
-            <Button variant="primary" onClick={handleSave} disabled={!isChanged}>Save</Button>
-            <Button variant="link" onClick={handleCancel} disabled={!isChanged}>Cancel</Button>
-          </SpaceBetween>
-        }
+
         info={
           <Link
             variant="info"
@@ -155,13 +150,18 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.'
       }}
       settings={
-        actions && actions.removeItem && (
-          <SpaceBetween direction="horizontal" size="xs">
-            {/* Add more settings if needed */}
-          </SpaceBetween>
-        )
+        actions && actions.removeItem &&
+          <ButtonDropdown
+            items={[{ id: 'remove', text: 'Remove' }]}
+            ariaLabel="Board item settings"
+            variant="icon"
+            onItemClick={() => actions && actions.removeItem && actions.removeItem()}
+          />
       }
     >
+      <Box variant="small" margin={{ bottom: 's' }}>
+        This form displays a read-only record of the information submitted by the applicant.
+      </Box>
       <Flashbar items={flashMessages} />
       <Box>
         {sectionHeader('Application Details')}

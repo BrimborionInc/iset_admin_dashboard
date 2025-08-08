@@ -105,6 +105,9 @@ const ApplicationEvents = ({ actions, application_id, caseData, user_id: propUse
         />
       }
     >
+      <Box variant="small" margin={{ bottom: 's' }}>
+        This widget displays a timeline of key events and actions related to the applicant’s case, including status changes, messages, and other important updates.
+      </Box>
       {loading ? (
         <Box textAlign="center" padding="m"><Spinner /> Loading events…</Box>
       ) : error ? (

@@ -26,7 +26,7 @@ import { useDarkMode } from './context/DarkModeContext'; // Import global dark m
 import ExpandableSection from "@cloudscape-design/components/expandable-section"; // Import ExpandableSection
 import AdminDashboardHelp from './helpPanelContents/adminDashboardHelp.js';
 
-const AppContent = () => {
+const AppContent = ({ currentRole }) => {
   const [currentHelpContent, setCurrentHelpContent] = useState(helpMessages.overview);
   const [isHelpPanelOpen, setIsHelpPanelOpen] = useState(false);
   const [helpPanelTitle, setHelpPanelTitle] = useState("Help Panel");
@@ -163,7 +163,7 @@ const AppContent = () => {
       <AppLayout
         navigationOpen={isNavigationOpen}
         onNavigationChange={({ detail }) => setIsNavigationOpen(detail.open)}
-        navigation={<SideNavigation />}
+        navigation={<SideNavigation currentRole={currentRole} />}
         notifications={
           <Flashbar
             items={flashbarItems}

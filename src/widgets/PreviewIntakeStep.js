@@ -77,7 +77,7 @@ const PreviewBlockStep = ({ selectedBlockStep, actions }) => {
   if (!selectedBlockStep) {
     return (
       <BoardItem
-        header={<Header variant="h2">Preview</Header>}
+        header={<Header variant="h2">Preview Intake Step</Header>}
         i18nStrings={{
           dragHandleAriaLabel: 'Drag handle',
           dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',

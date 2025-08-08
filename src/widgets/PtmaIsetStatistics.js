@@ -16,7 +16,7 @@ const PtmaIsetStatistics = () => {
                 <Header
                     description=""
                 >
-                    PTMA ISET Statistics (demo data)
+                    Location Statistics (demo dummy data in current build)
                 </Header>
             }
         >
