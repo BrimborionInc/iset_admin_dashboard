@@ -34,7 +34,7 @@ const ManageApplications = ({ toggleHelpPanel }) => {
       id: 'assigned-cases-widget',
       columnOffset: 4,
       columnSpan: 8,
-      rowSpan: 1,
+      rowSpan: 6,
       data: {},
     },
   ]); // Initial state with the demo controls widget and assigned cases widget

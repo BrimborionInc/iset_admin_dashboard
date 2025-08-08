@@ -7,99 +7,59 @@ import {
   Button,
   Header,
   ButtonDropdown,
-  Pagination,
-  CollectionPreferences,
-  Link,
-  Modal,
   Flashbar,
   StatusIndicator,
+  Link
 } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import BoardItem from '@cloudscape-design/board-components/board-item';
 import { useHistory } from 'react-router-dom';
 
-const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
+const NWACHubManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
   const history = useHistory();
   const [selectedItems, setSelectedItems] = useState([]);
-  const [ptmas, setPtmas] = useState([]);
+  const [hubs, setHubs] = useState([]);
   const [items, setItems] = useState([
     {
-      id: 'locations-table',
+      id: 'nwac-hubs-table',
       rowSpan: 7,
       columnSpan: 4,
-      data: { title: 'Locations Table', content: null },
+      data: { title: 'NWAC Hubs Table', content: null },
       dragHandleAriaLabel: 'Drag handle',
       resizeHandleAriaLabel: 'Resize handle'
     }
   ]);
-  const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
-  const [locationToDelete, setLocationToDelete] = useState(null);
-  const [deleteWarning, setDeleteWarning] = useState('');
-  const [flashMessages, setFlashMessages] = useState([]); // Define flashMessages state
+  const [flashMessages, setFlashMessages] = useState([]);
 
-  const fetchPtmas = () => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ptmas?type=PTMA`)
+  // Placeholder fetch for NWAC Hubs
+  const fetchHubs = () => {
+    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ptmas?type=Hub`)
       .then(response => response.json())
       .then(data => {
-        setPtmas(data);
+        setHubs(data);
       })
-      .catch(error => console.error('Error fetching PTMAs:', error));
+      .catch(error => console.error('Error fetching Hubs:', error));
   };
 
   useEffect(() => {
-    fetchPtmas();
+    fetchHubs();
   }, []);
 
-  const handleNewPtma = () => {
-    history.push('/new-ptma');
-  };
-
-  const handleDeleteClick = (ptma) => {
-    // If you have a check-booked-slots endpoint for PTMA, update here. Otherwise, skip this check or implement as needed.
-    setLocationToDelete(ptma);
-    setIsDeleteModalVisible(true);
-  };
-
-  const handleDeleteConfirm = () => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ptmas/${locationToDelete.id}`, {
-      method: 'DELETE',
-    })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-      })
-      .then(data => {
-        setFlashMessages([{ type: 'success', content: 'PTMA deleted successfully', dismissible: true, onDismiss: () => setFlashMessages([]) }]);
-        fetchPtmas(); // Refresh the PTMAs list
-        setIsDeleteModalVisible(false);
-        setLocationToDelete(null);
-      })
-      .catch(error => {
-        setFlashMessages([{ type: 'error', content: 'Error deleting PTMA', dismissible: true, onDismiss: () => setFlashMessages([]) }]);
-        console.error('Error deleting PTMA:', error);
-        setIsDeleteModalVisible(false);
-        setLocationToDelete(null);
-      });
-  };
-
-  const handleDeleteCancel = () => {
-    setIsDeleteModalVisible(false);
-    setLocationToDelete(null);
+  const handleNewHub = () => {
+    // Placeholder for navigation to new hub form
+    history.push('/new-nwac-hub');
   };
 
   return (
-    <ContentLayout
-    >
+    <ContentLayout>
       <Board
         renderItem={(item) => (
           <BoardItem
             key={item.id}
             {...item}
             header={
-              <Header variant="h2" info={<Link variant="info" onClick={() => toggleHelpPanel(item.id)}>Info</Link>}>
-                {item.data.title.replace('Locations', 'PTMAs').replace('Location', 'PTMA')}
+              <Header variant="h2" info={<Link variant="info" onClick={() => toggleHelpPanel && toggleHelpPanel(item.id)}>Info</Link>}>
+                NWAC Hubs
               </Header>
             }
             dragHandleAriaLabel={item.dragHandleAriaLabel}
@@ -113,7 +73,7 @@ const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
                 'Use Space or Enter to activate resize, arrow keys to move, Space or Enter to submit, or Escape to discard.',
             }}
           >
-            {item.id === 'locations-table' && (
+            {item.id === 'nwac-hubs-table' && (
               <Table
                 renderAriaLive={({ firstIndex, lastIndex, totalItemsCount }) =>
                   `Displaying items ${firstIndex} to ${lastIndex} of ${totalItemsCount}`
@@ -123,12 +83,12 @@ const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
                 ariaLabels={{
                   selectionGroupLabel: "Items selection",
                   allItemsSelectionLabel: () => "select all",
-                  itemSelectionLabel: ({ selectedItems }, item) => item.full_name,
+                  itemSelectionLabel: ({ selectedItems }, item) => item.name,
                 }}
                 columnDefinitions={[
                   {
                     id: "full_name",
-                    header: "PTMA Name",
+                    header: "Hub Name",
                     cell: e => e.full_name,
                     sortingField: "full_name",
                     isRowHeader: true
@@ -140,10 +100,10 @@ const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
                     sortingField: "code"
                   },
                   {
-                    id: "indigenous_group",
-                    header: "Type",
-                    cell: e => e.indigenous_group,
-                    sortingField: "indigenous_group"
+                    id: "province",
+                    header: "Province",
+                    cell: e => e.province,
+                    sortingField: "province"
                   },
                   {
                     id: "alerts",
@@ -181,56 +141,48 @@ const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
                         >
                           Modify
                         </Button>
-                        <Button
-                          variant="inline-link"
-                          ariaLabel={`Delete ${item.full_name}`}
-                          onClick={() => handleDeleteClick(item)}
-                        >
-                          Delete
-                        </Button>
                       </SpaceBetween>
                     ),
-                    minWidth: 170
+                    minWidth: 100
                   }
                 ]}
                 columnDisplay={[
                   { id: "full_name", visible: true },
                   { id: "code", visible: true },
-                  { id: "indigenous_group", visible: true },
+                  { id: "province", visible: true },
                   { id: "alerts", visible: true },
                   { id: "applications", visible: true },
                   { id: "cases", visible: true },
                   { id: "actions", visible: true }
                 ]}
                 enableKeyboardNavigation
-                items={ptmas}
+                items={hubs}
                 loadingText="Loading resources"
                 stripedRows
                 trackBy="id"
                 empty={
                   <Box margin={{ vertical: "xs" }} textAlign="center" color="inherit">
                     <SpaceBetween size="m">
-                      <b>No PTMAs</b>
-                      <Button onClick={handleNewPtma}>Create PTMA</Button>
+                      <b>No NWAC Hubs</b>
+                      <Button onClick={handleNewHub}>Create NWAC Hub</Button>
                     </SpaceBetween>
                   </Box>
                 }
                 header={
                   <Header
                     variant="h2"
-                    counter={selectedItems.length ? `(${selectedItems.length}/10)` : "(17)"}
                     actions={
                       <SpaceBetween direction="horizontal" size="xs">
                         <ButtonDropdown
                           items={[
-                            { text: "Delete", id: "delete", disabled: false },
-                            { text: "Deactivate", id: "deactivate", disabled: false },
-                            { text: "Suspend", id: "suspend", disabled: false }
+                            { text: "Delete", id: "delete", disabled: true },
+                            { text: "Deactivate", id: "deactivate", disabled: true },
+                            { text: "Suspend", id: "suspend", disabled: true }
                           ]}
                         >
                           Actions
                         </ButtonDropdown>
-                        <Button variant="primary" onClick={handleNewPtma}>New PTMA</Button>
+                        <Button variant="primary" onClick={handleNewHub}>New NWAC Hub</Button>
                       </SpaceBetween>
                     }
                   >
@@ -282,24 +234,9 @@ const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
           navigationItemAriaLabel: (item) => (item ? item.data.title : 'Empty'),
         }}
       />
-      <Modal
-        visible={isDeleteModalVisible}
-        onDismiss={handleDeleteCancel}
-        header="Delete PTMA"
-        footer={
-          <SpaceBetween direction="horizontal" size="s">
-            <Button variant="link" onClick={handleDeleteCancel}>Cancel</Button>
-            <Button variant="primary" onClick={handleDeleteConfirm} disabled={!!deleteWarning}>Delete</Button>
-          </SpaceBetween>
-        }
-      >
-        <p>Are you sure you want to delete the PTMA <strong>{locationToDelete?.location}</strong>? This action cannot be undone.</p>
-        <p>Deleting this PTMA will remove all associated configuration information. If there are any booked appointment slots, you will need to remove them first.</p>
-        {deleteWarning && <p style={{ color: 'red' }}>{deleteWarning}</p>}
-      </Modal>
       <Flashbar items={flashMessages} />
     </ContentLayout>
   );
 };
 
-export default PTMAManagementDashboard;
+export default NWACHubManagementDashboard;

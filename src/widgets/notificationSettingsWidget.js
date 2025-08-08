@@ -41,6 +41,7 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
             enabled: setting ? !!setting.enabled : false,
             template: template ? { value: template.id, label: template.name } : null,
             settingId: setting ? setting.id : null,
+            emailAlert: setting ? !!setting.email_alert : false,
           };
         });
         return {
@@ -93,6 +94,21 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
     markDirty();
   };
 
+  // Add emailAlert to event children and handle toggle
+  const handleEmailAlertToggle = (parentIdx, childIdx) => {
+    setEvents(events => events.map((event, i) =>
+      i === parentIdx
+        ? {
+            ...event,
+            children: event.children.map((child, j) =>
+              j === childIdx ? { ...child, emailAlert: !child.emailAlert } : child
+            ),
+          }
+        : event
+    ));
+    markDirty();
+  };
+
   // Save all changes to backend
   const handleSave = async () => {
     setSaving(true);
@@ -105,7 +121,8 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
         if (
           !savedChild ||
           savedChild.enabled !== child.enabled ||
-          (savedChild.template?.value || null) !== (child.template?.value || null)
+          (savedChild.template?.value || null) !== (child.template?.value || null) ||
+          (!!savedChild.emailAlert !== !!child.emailAlert)
         ) {
           changed.push({
             id: child.settingId,
@@ -114,6 +131,7 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
             template_id: child.template ? child.template.value : null,
             language: DEFAULT_LANGUAGE,
             enabled: child.enabled,
+            email_alert: child.emailAlert ? 1 : 0,
           });
         }
       });
@@ -149,6 +167,7 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
           enabled: setting ? !!setting.enabled : false,
           template: template ? { value: template.id, label: template.name } : null,
           settingId: setting ? setting.id : null,
+          emailAlert: setting ? !!setting.email_alert : false,
         };
       });
       return {
@@ -205,12 +224,6 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
       minWidth: 180,
     },
     {
-      id: 'description',
-      header: 'Description',
-      cell: item => item.isParent ? item.description : '',
-      minWidth: 220,
-    },
-    {
       id: 'role',
       header: 'Role',
       cell: item => item.isParent ? '' : item.role.label,
@@ -247,6 +260,18 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
       },
       minWidth: 200,
     },
+    {
+      id: 'emailAlert',
+      header: 'Email alert?',
+      cell: item => item.isParent ? '' : (
+        <Toggle
+          checked={!!item.emailAlert}
+          onChange={() => handleEmailAlertToggle(item.parentIdx, item.childIdx)}
+          ariaLabel={`Enable email alert for ${events[item.parentIdx].eventLabel} (${item.role.label})`}
+        />
+      ),
+      minWidth: 120,
+    },
   ];
 
   return (
@@ -281,7 +306,7 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
           onItemClick={() => actions.removeItem()}
         />
       }
-    >
+    ><p>Events in the ISET application process can be assigned notifications and linked to message templates.  Current build: English Only and doesn't use the template (i.e. just standard "<i>application submitted</i>" type messages).  Messages are sent by secure messaging, and may or may not be accompanied by a regulat email saying "<i>you have a new secure message</i>"</p>
       {flashMessages.length > 0 && <Flashbar items={flashMessages} />}
       <Box>
         <Table
@@ -302,7 +327,6 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
             },
           }}
           items={items}
-          header={<Header variant="h3">Event Notification Settings (Grouped by Event)</Header>}
           variant="embedded"
           stripedRows
           loading={loading}

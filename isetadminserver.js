@@ -438,7 +438,8 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
  */
 app.get('/api/cases', async (req, res) => {
   try {
-    const [rows] = await pool.query(`
+    const { stage } = req.query;
+    let sql = `
       SELECT 
         c.id,
         c.application_id,
@@ -465,10 +466,15 @@ app.get('/api/cases', async (req, res) => {
       LEFT JOIN ptma p ON ep.ptma_id = p.id
       JOIN iset_application a ON c.application_id = a.id
       JOIN user applicant ON a.user_id = applicant.id
-      GROUP BY c.id
-      ORDER BY c.last_activity_at DESC
-    `);
+    `;
+    const params = [];
+    if (stage) {
+      sql += 'WHERE c.stage = ?\n';
+      params.push(stage);
+    }
+    sql += 'GROUP BY c.id\nORDER BY c.last_activity_at DESC';
 
+    const [rows] = await pool.query(sql, params);
     res.status(200).json(rows);
   } catch (error) {
     console.error('Error fetching cases:', error);
@@ -611,7 +617,7 @@ app.get('/api/case-events', async (req, res) => {
       LEFT JOIN iset_event_type et ON e.event_type = et.event_type
       LEFT JOIN user u ON e.user_id = u.id
       ${whereSql}
-      ORDER BY e.created_at DESC
+      ORDER BY e.created_at DESC, e.id DESC
       LIMIT ? OFFSET ?
     `, [...params, limit, offset]);
     // Parse event_data JSON if needed
@@ -1076,35 +1082,6 @@ app.get('/api/search-users', async (req, res) => {
 });
 
 
-//This is probably safe to remove. It was from when I stoed jsons, not nunjucks.
-app.get('/api/blockstep-json', (req, res) => {
-  const { config_path } = req.query;
-
-  if (!config_path) {
-    console.error('config_path query parameter is required'); // Add logging
-    return res.status(400).json({ error: 'config_path query parameter is required' });
-  }
-
-  const filePath = path.join(__dirname, config_path);
-  console.log('Reading BlockStep JSON from:', filePath); // Add logging
-
-  fs.readFile(filePath, 'utf8', (err, data) => {
-    if (err) {
-      console.error('Error reading BlockStep JSON:', err); // Add logging
-      return res.status(500).json({ error: 'Failed to load BlockStep JSON' });
-    }
-
-    try {
-      const jsonData = JSON.parse(data);
-      res.json(jsonData);
-    } catch (parseError) {
-      console.error('Error parsing JSON file:', parseError); // Add logging
-      res.status(500).json({ error: 'Invalid JSON format' });
-    }
-  });
-});
-
-
 // Save slot search criteria to a separate variable
 let slotSearchCriteria = {};
 let appointmentData = {};
@@ -1511,23 +1488,31 @@ app.put('/api/queue', async (req, res) => {
 
 // --- PTMA Endpoints ---
 
-// List all PTMAs
+// List all PTMAs or Hubs (filter by type if provided)
 app.get('/api/ptmas', async (req, res) => {
   try {
-    // Get all PTMAs
+    const type = req.query.type;
+    let whereClause = '';
+    let params = [];
+    if (type === 'PTMA' || type === 'Hub') {
+      whereClause = 'WHERE type = ?';
+      params = [type];
+    }
+    // Get all PTMAs or Hubs
     const [ptmas] = await pool.query(`
       SELECT id, iset_full_name, iset_code, iset_status, iset_province, iset_indigenous_group, iset_full_address, iset_agreement_id, iset_notes, website_url, contact_name, contact_email, contact_phone, contact_notes
       FROM ptma
-    `);
+      ${whereClause}
+    `, params);
 
-    // Get applications (all cases per PTMA)
+    // Get applications (all cases per PTMA/Hub)
     const [applicationCounts] = await pool.query(`
       SELECT ptma_id, COUNT(*) AS applications
       FROM iset_case
       WHERE ptma_id IS NOT NULL
       GROUP BY ptma_id
     `);
-    // Get open cases per PTMA
+    // Get open cases per PTMA/Hub
     const [openCaseCounts] = await pool.query(`
       SELECT ptma_id, COUNT(*) AS cases
       FROM iset_case
@@ -1538,7 +1523,7 @@ app.get('/api/ptmas', async (req, res) => {
     const applicationsMap = Object.fromEntries(applicationCounts.map(r => [r.ptma_id, r.applications]));
     const casesMap = Object.fromEntries(openCaseCounts.map(r => [r.ptma_id, r.cases]));
 
-    // Map DB fields to API fields for each PTMA, adding counts
+    // Map DB fields to API fields for each PTMA/Hub, adding counts
     const mapped = ptmas.map(db => ({
       id: db.id,
       full_name: db.iset_full_name,
@@ -1717,12 +1702,19 @@ app.get('/api/ptmas/:ptmaId/evaluators', async (req, res) => {
   const { ptmaId } = req.params;
   try {
     const [evaluators] = await pool.query(`
-      SELECT u.id, u.name, u.email, r.RoleName AS role
-      FROM user u
-      JOIN user_role_link ur ON u.id = ur.UserID
-      JOIN role r ON ur.RoleID = r.RoleID
-      WHERE r.RoleName = 'Intake Officer' AND u.ptma_id = ?
-      ORDER BY u.name
+      SELECT 
+        e.id, 
+        e.name, 
+        e.email, 
+        e.role,
+        ep.assigned_at,
+        ep.unassigned_at
+      FROM iset_evaluators e
+      JOIN iset_evaluator_ptma ep 
+        ON e.id = ep.evaluator_id
+      WHERE ep.ptma_id = ?
+        AND (ep.unassigned_at IS NULL OR ep.unassigned_at > CURDATE())
+      ORDER BY e.name
     `, [ptmaId]);
     res.status(200).json(evaluators);
   } catch (error) {
@@ -1896,12 +1888,291 @@ app.post('/api/purge-cases', async (req, res) => {
   }
 });
 
+// Purge all applications, drafts, and files (for demo reset)
+app.post('/api/purge-applications', async (req, res) => {
+  try {
+    // Delete from child tables first to avoid FK constraint errors
+    await pool.query('DELETE FROM iset_application_file');
+    await pool.query('DELETE FROM iset_application_draft');
+    await pool.query('DELETE FROM iset_application');
+    res.status(200).json({ message: 'All applications, drafts, and files have been deleted.' });
+  } catch (error) {
+    console.error('Error purging applications:', error);
+    res.status(500).json({ error: 'Failed to purge applications.' });
+  }
+});
 
-/**
- * GET /api/admin/messages/:id/attachments
- *
- * Returns all attachments for a given message_id from message_attachment table.
- */
+// Endpoint to get the content of a .njk file
+app.get('/api/get-njk-file', (req, res) => {
+  const templatePath = req.query.template_path;
+  const filePath = path.join(__dirname, templatePath); // Corrected path
+
+  fs.readFile(filePath, 'utf8', (err, data) => {
+    if (err) {
+      console.error('Error reading .njk file:', err);
+      return res.status(500).send('Error reading .njk file');
+    }
+    res.send(data);
+  });
+});
+
+//This is probably safe to remove. It was from when I stoed jsons, not nunjucks.
+app.get('/api/blockstep-json', (req, res) => {
+  const { config_path } = req.query;
+
+  if (!config_path) {
+    console.error('config_path query parameter is required'); // Add logging
+    return res.status(400).json({ error: 'config_path query parameter is required' });
+  }
+
+  const filePath = path.join(__dirname, config_path);
+  console.log('Reading BlockStep JSON from:', filePath); // Add logging
+
+  fs.readFile(filePath, 'utf8', (err, data) => {
+    if (err) {
+      console.error('Error reading BlockStep JSON:', err); // Add logging
+      return res.status(500).json({ error: 'Failed to load BlockStep JSON' });
+    }
+
+    try {
+      const jsonData = JSON.parse(data);
+      res.json(jsonData);
+    } catch (parseError) {
+      console.error('Error parsing JSON file:', parseError); // Add logging
+      res.status(500).json({ error: 'Invalid JSON format' });
+    }
+  });
+});
+
+app.post('/api/generate-static-njk-template', (req, res) => {
+  const { components } = req.body;
+
+  if (!Array.isArray(components)) {
+    return res.status(400).json({ error: 'Missing or invalid components array' });
+  }
+
+  const flattenProps = (obj, prefix = '') => {
+    return Object.entries(obj).reduce((acc, [key, value]) => {
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (
+        value &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        !(value instanceof Date)
+      ) {
+        Object.assign(acc, flattenProps(value, path));
+      } else {
+        acc[path] = value;
+      }
+      return acc;
+    }, {});
+  };
+
+  try {
+    const rendered = components.map((component) => {
+      const mergedProps = {
+        ...component.props,
+        ...component.props?.props
+      };
+
+      const templateBeforeInjection = component.nunjucks_template || '';
+      let template = templateBeforeInjection;
+
+      const shouldInjectAttributes =
+        mergedProps.mode === 'dynamic' &&
+        mergedProps.endpoint &&
+        !template.includes('attributes:');
+
+      if (shouldInjectAttributes) {
+        const match = template.match(/(govukRadios|govukSelect|govukCheckboxes)\s*\(\s*{([\s\S]*?)\}\s*\)/);
+        if (match) {
+          const componentName = match[1];
+          const innerProps = match[2];
+
+          const injectedValue = JSON.stringify(
+            { 'data-options-endpoint': mergedProps.endpoint },
+            null,
+            2
+          ).replace(/^/gm, '  '); // indent for Nunjucks readability
+
+          const insertion = `attributes: ${injectedValue},\n`;
+          const modifiedInner = insertion + innerProps;
+
+          template = template.replace(innerProps, modifiedInner);
+        }
+      }
+
+      const flatProps = flattenProps(mergedProps);
+
+      for (const [path, value] of Object.entries(flatProps)) {
+        const pattern = new RegExp(`props\\.${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g');
+
+        let stringified;
+        if (value === undefined || value === null) {
+          stringified = '';
+        } else if (typeof value === 'string') {
+          stringified = `"${value}"`;
+        } else if (Array.isArray(value) || typeof value === 'object') {
+          stringified = JSON.stringify(value, null, 2);
+        } else {
+          stringified = String(value);
+        }
+
+        template = template.replace(pattern, stringified);
+      }
+
+      template = template.replace(/,\s*([}\]])/g, '$1');
+
+      return template;
+    });
+
+    const output = rendered.filter(Boolean).join('\n\n');
+    res.send(output);
+  } catch (err) {
+    console.error('Error generating static Nunjucks template:', err);
+    res.status(500).json({ error: 'Failed to generate static Nunjucks template' });
+  }
+});
+
+app.post('/api/save-blockstep-json', (req, res) => {
+  const { json_path, content } = req.body;
+
+  if (!json_path || !content) {
+    return res.status(400).json({ message: 'Missing json_path or content' });
+  }
+
+  const fullPath = path.join(__dirname, json_path);
+
+  fs.writeFile(fullPath, content, 'utf8', (err) => {
+    if (err) {
+      console.error('Error saving JSON file:', err);
+      return res.status(500).json({ message: 'Failed to save JSON file' });
+    }
+
+    res.status(200).json({ message: 'JSON file saved successfully' });
+  });
+});
+
+
+// Endpoint to save the content of a .njk file
+app.post('/api/save-njk-file', (req, res) => {
+  const templatePath = req.body.template_path;
+  const content = req.body.content;
+  const filePath = path.join(__dirname, templatePath); // Corrected path
+
+  fs.writeFile(filePath, content, 'utf8', (err) => {
+    if (err) {
+      console.error('Error saving .njk file:', err);
+      return res.status(500).send('Error saving .njk file');
+    }
+    res.send('File saved successfully');
+  });
+});
+
+// Endpoint to fetch all components
+app.get('/api/govuk-components', async (req, res) => {
+  try {
+    const [components] = await pool.query('SELECT * FROM govuk_component');
+    res.status(200).json(components);
+  } catch (error) {
+    console.error('Error fetching components:', error);
+    res.status(500).json({ message: 'Failed to fetch components' });
+  }
+});
+
+// Endpoint to fetch a single component by ID
+app.get('/api/govuk-components/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [components] = await pool.query('SELECT * FROM govuk_component WHERE id = ?', [id]);
+    if (components.length === 0) {
+      return res.status(404).json({ message: 'Component not found' });
+    }
+    res.status(200).json(components[0]);
+  } catch (error) {
+    console.error('Error fetching component:', error);
+    res.status(500).json({ message: 'Failed to fetch component' });
+  }
+});
+
+// Endpoint to create a new component
+app.post('/api/govuk-components', async (req, res) => {
+  const { type, label, props } = req.body;
+  try {
+    const [result] = await pool.query('INSERT INTO govuk_component (type, label, props) VALUES (?, ?, ?)', [type, label, JSON.stringify(props)]);
+    res.status(201).json({ id: result.insertId, type, label, props });
+  } catch (error) {
+    console.error('Error creating component:', error);
+    res.status(500).json({ message: 'Failed to create component' });
+  }
+});
+
+// Endpoint to update an existing component
+app.put('/api/govuk-components/:id', async (req, res) => {
+  const { id } = req.params;
+  const { type, label, props } = req.body;
+  try {
+    await pool.query('UPDATE govuk_component SET type = ?, label = ?, props = ? WHERE id = ?', [type, label, JSON.stringify(props), id]);
+    res.status(200).json({ id, type, label, props });
+  } catch (error) {
+    console.error('Error updating component:', error);
+    res.status(500).json({ message: 'Failed to update component' });
+  }
+});
+
+// Endpoint to delete a component
+app.delete('/api/govuk-components/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM govuk_component WHERE id = ?', [id]);
+    res.status(200).json({ message: 'Component deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting component:', error);
+    res.status(500).json({ message: 'Failed to delete component' });
+  }
+});
+
+app.get('/api/load-blockstep-json', (req, res) => {
+  const { path: jsonPath } = req.query;
+
+  if (!jsonPath) {
+    return res.status(400).json({ message: 'Missing path parameter' });
+  }
+
+  const fullPath = path.join(__dirname, jsonPath);
+
+  fs.readFile(fullPath, 'utf8', (err, data) => {
+    if (err) {
+      console.error('Error reading JSON file:', err.message);
+      return res.status(500).json({ message: 'Failed to read JSON file' });
+    }
+
+    try {
+      const jsonData = JSON.parse(data);
+      res.status(200).json(jsonData);
+    } catch (parseErr) {
+      console.error('Invalid JSON format:', parseErr.message);
+      res.status(500).json({ message: 'Invalid JSON format' });
+    }
+  });
+});
+
+app.post('/api/render-njk', (req, res) => {
+  const { template, props } = req.body;
+
+  if (!template || typeof template !== 'string') {
+    return res.status(400).json({ error: 'Missing or invalid template' });
+  }
+
+  try {
+    const renderedHtml = nunjucks.renderString(template, { props });
+    res.send(renderedHtml);
+  } catch (err) {
+    console.error('Nunjucks render error:', err);
+    res.status(500).json({ error: 'Failed to render Nunjucks template' });
+  }
+});
+
 app.get('/api/admin/messages/:id/attachments', async (req, res) => {
   const messageId = req.params.id;
   const caseIdFromQuery = req.query.case_id ? parseInt(req.query.case_id, 10) : null;
@@ -1910,6 +2181,7 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
     const [attachments] = await pool.query(
       `SELECT id, message_id, file_path, original_filename, uploaded_at, user_id, application_id
        FROM message_attachment
+      
        WHERE message_id = ?
        ORDER BY uploaded_at ASC`,
       [messageId]
@@ -2020,7 +2292,8 @@ app.put('/api/cases/:id', async (req, res) => {
     assessment_justification,
     assessment_nwac_review,
     assessment_nwac_reason,
-    case_summary // <-- add this
+    case_summary, // <-- add this
+    status // <-- add this
   } = req.body;
 
   // Helper: convert blank to null
@@ -2052,7 +2325,8 @@ app.put('/api/cases/:id', async (req, res) => {
         assessment_justification = ?,
         assessment_nwac_review = ?,
         assessment_nwac_reason = ?,
-        case_summary = ?
+        case_summary = ?,
+        status = COALESCE(?, status)
       WHERE id = ?`,
       [
         toNull(assessment_date_of_assessment),
@@ -2074,6 +2348,7 @@ app.put('/api/cases/:id', async (req, res) => {
         toNull(assessment_nwac_review),
         toNull(assessment_nwac_reason),
         toNull(case_summary), // <-- add this
+        toNull(status), // <-- add this
         caseId
       ]
     );
@@ -2172,20 +2447,20 @@ app.get('/api/notifications', async (req, res) => {
 
 // POST create or update a notification setting
 app.post('/api/notifications', async (req, res) => {
-    const { id, event, role, template_id, language, enabled } = req.body;
+    const { id, event, role, template_id, language, enabled, email_alert } = req.body;
     try {
         if (id) {
             // Update existing
             await pool.query(
-                `UPDATE notification_setting SET event=?, role=?, template_id=?, language=?, enabled=?, updated_at=NOW() WHERE id=?`,
-                [event, role, template_id, language, enabled, id]
+                `UPDATE notification_setting SET event=?, role=?, template_id=?, language=?, enabled=?, email_alert=?, updated_at=NOW() WHERE id=?`,
+                [event, role, template_id, language, enabled, email_alert ?? 0, id]
             );
             res.json({ success: true, id });
         } else {
             // Insert new
             const [result] = await pool.query(
-                `INSERT INTO notification_setting (event, role, template_id, language, enabled) VALUES (?, ?, ?, ?, ?)`,
-                [event, role, template_id, language, enabled]
+                `INSERT INTO notification_setting (event, role, template_id, language, enabled, email_alert) VALUES (?, ?, ?, ?, ?, ?)`,
+                [event, role, template_id, language, enabled, email_alert ?? 0]
             );
             res.json({ success: true, id: result.insertId });
         }
@@ -2221,18 +2496,49 @@ app.get('/api/events', async (req, res) => {
 // GET all roles (from iset_role or static list)
 app.get('/api/roles', async (req, res) => {
     try {
-        // If you have a roles table, use it. Otherwise, use a static list:
-        // const [rows] = await pool.query('SELECT name as value, label FROM iset_role ORDER BY name');
-        const rows = [
-            { value: 'applicant', label: 'Applicant' },
-            { value: 'nwac_admin', label: 'NWAC Administrator' },
-            { value: 'regional_coordinator', label: 'Regional Coordinator' },
-            // Add more roles as needed
-        ];
-        res.json(rows);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to fetch roles' });
+        const [roles] = await pool.query('SELECT RoleID as id, RoleName as name, RoleDescription as description FROM role');
+        res.status(200).send(roles);
+    } catch (error) {
+        console.error('Error fetching roles:', error);
+        res.status(500).send({ message: 'Failed to fetch roles' });
     }
+});
+
+// New endpoints for users and roles
+app.get('/api/users', async (req, res) => {
+  try {
+    const [users] = await pool.query(`
+      SELECT u.id, u.name, u.email, GROUP_CONCAT(r.RoleName) as role
+      FROM user u
+      LEFT JOIN user_role_link ur ON u.id = ur.UserID
+      LEFT JOIN role r ON ur.RoleID = r.RoleID
+      GROUP BY u.id
+    `);
+
+    // Anonymise user names
+    const anonymisedUsers = users.map(user => ({
+      ...user,
+      name: maskName(user.name)
+    }));
+
+    res.status(200).send(anonymisedUsers);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).send({ message: 'Failed to fetch users' });
+  }
+});
+
+app.get('/api/users/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [user] = await pool.query('SELECT id, name FROM user WHERE id = ?', [id]);
+    if (user.length === 0) {
+      return res.status(404).send({ message: 'User not found' });
+    }
+    res.status(200).send(user[0]);
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).send({ message: 'Failed to fetch user' });
+  }
 });
 

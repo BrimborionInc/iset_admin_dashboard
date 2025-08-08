@@ -1,37 +1,47 @@
 import React from 'react';
 import { SideNavigation as CloudscapeSideNavigation, Badge } from '@cloudscape-design/components';
 
-const SideNavigation = () => {
+const commonFooterItems = [
+  { type: 'divider' },
+  { type: 'link', text: 'Notifications', href: '/notifications', info: <Badge color="red">23</Badge> },
+  { type: 'link', text: 'Documentation', href: 'https://example.com', external: true },
+];
+
+const SideNavigation = ({ currentRole }) => {
   const navItems = [
     {
       type: 'section',
       text: 'ISET Administration',
       items: [
         { type: 'link', text: 'Application Assignment', href: '/case-assignment-dashboard' },
+                { type: 'link', text: 'NWAC Hub Management', href: '/nwac-hub-management' }, // Placeholder link
         { type: 'link', text: 'PTMA Management', href: '/ptma-management' },
-        { type: 'link', text: 'Notification Settings', href: '/manage-notifications' },
-        { type: 'link', text: 'ARMS Integration', href: '/ptma-management' },
+
+        // Only show Notification Settings for System Administrator
+        ...(currentRole?.value === 'System Administrator' ? [{ type: 'link', text: 'Notification Settings', href: '/manage-notifications' }] : []),
+        { type: 'link', text: 'ARMS Reporting', href: '/arms-reporting' },
+        { type: 'link', text: 'Assessment Review', href: '/assessment-review' },
       ],
     },
     {
       type: 'section',
       text: 'ISET Assessment',
       items: [
-        { type: 'link', text: 'Application Assessment', href: '/case-management' }, // relabeled and updated href to match Case Management
+        { type: 'link', text: 'Application Assessment', href: '/case-management' },
       ],
     },
     {
       type: 'section',
-      text: 'Other Dashboards', // Renamed group
+      text: 'Other Dashboards',
       items: [
-        { type: 'link', text: 'Case Management', href: '/case-management' }, // Update the link and text
-        { type: 'link', text: 'Reminders and Notifications', href: '/manage-notifications' }, // Correct the link and relabel
-        { type: 'link', text: 'Secure Messaging', href: '/manage-messages' }, // Add the new link
-        { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' }, // Update the link to the new page
-        { type: 'link', text: 'Intake Editor', href: '/manage-components' }, // Update the link to the new page
+        { type: 'link', text: 'Case Management', href: '/case-management' },
+        { type: 'link', text: 'Reminders and Notifications', href: '/manage-notifications' },
+        { type: 'link', text: 'Secure Messaging', href: '/manage-messages' },
+        { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },
+  { type: 'link', text: 'Intake Editor', href: '/manage-components' },
+  { type: 'link', text: 'Manage Workflows', href: '/manage-workflows' },
       ],
     },
-    // Removed "Applicant Feedback" section
     {
       type: 'section',
       text: 'Analytics Dashboard',
@@ -44,7 +54,6 @@ const SideNavigation = () => {
         { type: 'link', text: 'Custom Dashboards', href: '/custom-dashboards-dashboard' },
       ],
     },
-    { type: 'divider' },
     {
       type: 'section',
       text: 'Configuration',
@@ -53,11 +62,13 @@ const SideNavigation = () => {
         { type: 'link', text: 'User Management', href: '/user-management-dashboard' },
         { type: 'link', text: 'Release Management', href: '/release-management-dashboard' },
         { type: 'link', text: 'Options', href: '/options-dashboard' },
-        { type: 'link', text: 'Visual Settings', href: '/visual-settings' }, // Update the link
-        { type: 'link', text: 'Notification Settings', href: '/notification-settings-dashboard' },
+        { type: 'link', text: 'Visual Settings', href: '/visual-settings' },
+        // Only show Notification Settings for System Administrator
+        ...(currentRole?.value === 'System Administrator' ? [{ type: 'link', text: 'Notification Settings', href: '/notification-settings-dashboard' }] : []),
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
         { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
-        { type: 'link', text: 'Test Config Dashboard', href: '/test-config-dashboard' }, // Update the link
+        { type: 'link', text: 'Test Config Dashboard', href: '/test-config-dashboard' },
+        { type: 'link', text: 'Intake Editor', href: '/manage-components' },
       ],
     },
     {
@@ -68,10 +79,9 @@ const SideNavigation = () => {
         { type: 'link', text: 'Options', href: '/security-options-dashboard' },
         { type: 'link', text: 'Visual Settings', href: '/security-visual-settings-dashboard' },
         { type: 'link', text: 'Audit and Logs', href: '/audit-logs-dashboard' },
-        { type: 'link', text: 'Security Settings', href: '/manage-security-options' }, // Update the link
+        { type: 'link', text: 'Security Settings', href: '/manage-security-options' },
       ],
     },
-    { type: 'divider' },
     {
       type: 'section',
       text: 'Support',
@@ -81,10 +91,98 @@ const SideNavigation = () => {
         { type: 'link', text: 'Help and Support', href: '/help-support-dashboard' },
       ],
     },
-    { type: 'divider' },
-    { type: 'link', text: 'Notifications', href: '/notifications', info: <Badge color="red">23</Badge> },
-    { type: 'link', text: 'Documentation', href: 'https://example.com', external: true },
   ];
+
+  function filterNavItemsForRole(role) {
+    const roleValue = role?.value || role;
+    if (roleValue === 'System Administrator') return [...navItems, ...commonFooterItems];
+    if (roleValue === 'Program Administrator') {
+      const filteredSections = navItems.map(section => {
+        if (section.type === 'section' && section.text === 'ISET Administration') {
+          const newItems = section.items.filter(item => item.text !== 'ARMS Integration');
+          // Do not push another Assessment Review link here
+          return { ...section, items: newItems };
+        }
+        if (section.type === 'section' && section.text === 'Other Dashboards') {
+          return {
+            ...section,
+            items: section.items.filter(item =>
+              item.text !== 'Intake Editor' && item.text !== 'Reminders and Notifications'
+            ),
+          };
+        }
+        if (section.type === 'section' && section.text === 'Configuration') {
+          return {
+            ...section,
+            items: section.items.filter(item =>
+              item.text === 'Options' || item.text === 'Visual Settings'
+            ),
+          };
+        }
+        return section;
+      });
+      return [...filteredSections, ...commonFooterItems];
+    }
+    if (roleValue === 'Regional Coordinator') {
+      const filteredSections = navItems.map(section => {
+        if (section.type === 'section' && section.text === 'ISET Administration') {
+          return {
+            ...section,
+            items: section.items.filter(item =>
+              item.text === 'Application Assignment' || item.text === 'PTMA Management'
+            ),
+          };
+        }
+        if (section.type === 'section' && section.text === 'ISET Assessment') {
+          return section;
+        }
+        if (section.type === 'section' && section.text === 'Other Dashboards') {
+          return {
+            ...section,
+            items: section.items.filter(item =>
+              item.text === 'Secure Messaging' || item.text === 'Reporting and Monitoring'
+            ),
+          };
+        }
+        if (section.type === 'section' && section.text === 'Configuration') {
+          return {
+            ...section,
+            items: section.items.filter(item =>
+              item.text === 'User Management' || item.text === 'Options' || item.text === 'Visual Settings'
+            ),
+          };
+        }
+        return section;
+      });
+      return [...filteredSections, ...commonFooterItems];
+    }
+    if (roleValue === 'PTMA Staff') {
+      const filteredSections = navItems
+        .map(section => {
+          if (section.type === 'section' && section.text === 'ISET Assessment') {
+            return {
+              ...section,
+              items: section.items.filter(item => item.text === 'Application Assessment'),
+            };
+          }
+          if (section.type === 'section' && section.text === 'Other Dashboards') {
+            return {
+              ...section,
+              items: section.items.filter(item => item.text === 'Secure Messaging'),
+            };
+          }
+          if (section.type === 'section' && section.text === 'Support') {
+            return section;
+          }
+          return null;
+        })
+        .filter(Boolean);
+      return [...filteredSections, ...commonFooterItems];
+    }
+    return [];
+  }
+
+  const filteredNavItems = filterNavItemsForRole(currentRole);
 
   return (
     <CloudscapeSideNavigation
@@ -92,7 +190,7 @@ const SideNavigation = () => {
         href: '/',
         text: 'Admin Console',
       }}
-      items={navItems}
+      items={filteredNavItems}
       //onFollow={handleNavigation}
     />
   );

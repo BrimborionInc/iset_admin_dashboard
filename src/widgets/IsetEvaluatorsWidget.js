@@ -39,7 +39,7 @@ const IsetEvaluatorsWidget = ({ ptmaId, actions = {} }) => {
 
   return (
     <BoardItem
-      header={<Header variant="h2">ISET Evaluators</Header>}
+      header={<Header variant="h2">ISET Staff</Header>}
       i18nStrings={{
         dragHandleAriaLabel: 'Drag handle',
         dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
@@ -57,13 +57,13 @@ const IsetEvaluatorsWidget = ({ ptmaId, actions = {} }) => {
     >
       {loading ? (
         <Box textAlign="center" color="inherit" padding="m">
-          <StatusIndicator type="loading">Loading evaluators...</StatusIndicator>
+          <StatusIndicator type="loading">Loading staff...</StatusIndicator>
         </Box>
       ) : evaluators.length === 0 ? (
         <Box textAlign="center" color="inherit" padding="m">
-          <b>No evaluators to display.</b>
+          <b>No staff to display.</b>
           <Box margin={{ top: "s" }}>
-            <Button onClick={handleAddEvaluator}>Add Evaluator</Button>
+            <Button onClick={handleAddEvaluator}>Add Staff</Button>
           </Box>
         </Box>
       ) : (
@@ -104,10 +104,10 @@ const IsetEvaluatorsWidget = ({ ptmaId, actions = {} }) => {
           header={
             <Header
               actions={
-                <Button onClick={handleAddEvaluator}>Add Evaluator</Button>
+                <Button onClick={handleAddEvaluator}>Add Staff Member</Button>
               }
             >
-              Evaluators
+              Staff List
             </Header>
           }
         />

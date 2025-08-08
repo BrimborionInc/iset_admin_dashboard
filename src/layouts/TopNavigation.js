@@ -1,7 +1,22 @@
 import React from 'react';
 import { TopNavigation } from '@cloudscape-design/components';
 
-const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
+function getEmailForRole(role) {
+  switch (role?.value || role) {
+    case 'Program Administrator':
+      return 'admin@nwac.ca';
+    case 'Regional Coordinator':
+      return 'coordinator@nwac.ca';
+    case 'System Administrator':
+      return 'sysadmin@nwac.ca';
+    case 'PTMA Staff':
+      return 'staff@ptma.org';
+    default:
+      return 'user@nwac.ca';
+  }
+}
+
+const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) => {
   console.log('TopNavigation received onLanguageChange:', onLanguageChange);
   return (
     <div>
@@ -48,19 +63,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
           },
           {
             type: 'menu-dropdown',
-            text: 'Europe, Central Asia',
-            ariaLabel: 'Select Region',
-            items: [
-              { id: 'region-1', text: 'Europe, Central Asia' },
-              { id: 'region-2', text: 'Africa, Middle East' },
-              { id: 'region-3', text: 'Americas, Caribbean' },
-              { id: 'region-4', text: 'Asia, Pacific' },
-              { id: 'region-5', text: 'South Asia' },
-            ],
-          },
-          {
-            type: 'menu-dropdown',
-            text: 'admin@supplier.com',
+            text: getEmailForRole(currentRole),
             ariaLabel: 'Account Options',
             items: [
               { id: 'profile', text: 'My Profile' },

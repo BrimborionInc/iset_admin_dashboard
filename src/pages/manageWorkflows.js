@@ -1,35 +1,34 @@
-import React, { useState, useEffect } from 'react';
-import {
-  ContentLayout,
-  Header,
-  Box,
-} from '@cloudscape-design/components';
+import React, { useState } from 'react';
+import { ContentLayout } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
-import IntakeStepTableWidget from '../widgets/IntakeStepTableWidget'; // Import the renamed IntakeStepTableWidget
-import PreviewIntakeStep from '../widgets/PreviewIntakeStep'; // Import the renamed PreviewIntakeStep
-import PreviewNunjucks from '../widgets/PreviewNunjucks'; // Import the PreviewNunjucks widget
+import WorkflowListWidget from '../widgets/WorkflowListWidget';
+import WorkflowPreviewWidget from '../widgets/WorkflowPreviewWidget';
 
-const ManageIntakeSteps = ({ header, headerInfo, toggleHelpPanel, updateBreadcrumbs }) => { // Rename component
-  const [selectedBlockStep, setSelectedBlockStep] = useState(null);
+const initialItems = [
+  { id: 'workflowList', rowSpan: 4, columnSpan: 2, data: { title: 'Workflow List' } },
+  { id: 'workflowPreview', rowSpan: 4, columnSpan: 2, data: { title: 'Workflow Preview' } },
+];
 
-  const items = [
-    { id: 'blockStepLibrary', rowSpan: 4, columnSpan: 2, data: { title: 'Block Step Library', content: <IntakeStepTableWidget setSelectedBlockStep={setSelectedBlockStep} /> } },
-    { id: 'previewBlockStep', rowSpan: 4, columnSpan: 2, data: { title: 'Preview', content: <PreviewIntakeStep selectedBlockStep={selectedBlockStep} /> } },
-    { id: 'previewNunjucks', rowSpan: 6, columnSpan: 4, data: { title: 'Preview Nunjucks', content: <PreviewNunjucks selectedBlockStep={selectedBlockStep} /> } },
-  ];
+const ManageWorkflows = () => {
+  const [items, setItems] = useState(initialItems);
+  const [selectedWorkflow, setSelectedWorkflow] = useState(null);
+
+  const renderItem = item => {
+    if (item.id === 'workflowList') {
+      return <WorkflowListWidget onSelectWorkflow={setSelectedWorkflow} />;
+    }
+    if (item.id === 'workflowPreview') {
+      return <WorkflowPreviewWidget selectedWorkflow={selectedWorkflow} />;
+    }
+    return null;
+  };
 
   return (
-    <ContentLayout
-      header={
-        <Header variant="h1" info={headerInfo}>
-          {header}
-        </Header>
-      }
-    >
+    <ContentLayout>
       <Board
-  renderItem={(item) => item.data.content}
-  items={items}
-  onItemsChange={() => {}}
+        renderItem={renderItem}
+        items={items}
+        onItemsChange={event => setItems(event.detail.items)}
         i18nStrings={{
           liveAnnouncementDndStarted: (operationType) =>
             operationType === 'resize' ? 'Resizing' : 'Dragging',
@@ -63,4 +62,4 @@ const ManageIntakeSteps = ({ header, headerInfo, toggleHelpPanel, updateBreadcru
   );
 };
 
-export default ManageIntakeSteps; // Rename export
+export default ManageWorkflows;

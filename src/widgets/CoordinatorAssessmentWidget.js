@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table } from '@cloudscape-design/components';
+import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 
 const BARRIERS = [
@@ -45,6 +45,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [isEditingAssessment, setIsEditingAssessment] = useState(false);
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
+  const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
   const alertAnchorRef = useRef(null);
 
   // Pre-populate fields from application form as placeholders
@@ -386,10 +387,13 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   // For NWAC review validation
   const validateNWACReview = (assessment) => {
     const errors = {};
+    if (!assessment.nwacReviewStatus) {
+      errors.nwacReviewStatus = 'Approve/Reject selection is required.';
+    }
     if (!assessment.nwacReview) {
       errors.nwacReview = 'NWAC review outcome is required.';
     }
-    if (assessment.nwacReview === 'disagree' && (!assessment.nwacReason || !assessment.nwacReason.trim())) {
+    if (assessment.nwacReviewStatus === 'reject' && (!assessment.nwacReason || !assessment.nwacReason.trim())) {
       errors.nwacReason = 'Reason for denial by NWAC is required.';
     }
     return errors;
@@ -431,9 +435,11 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       assessment_justification: assessment.justification || null,
       assessment_nwac_review: assessment.nwacReview || null,
       assessment_nwac_reason: assessment.nwacReason || null,
-      case_summary: assessment.overview || null
+      case_summary: assessment.overview || null,
+      status: assessment.nwacReviewStatus === 'approve' ? 'approved' : 'rejected'
     };
     try {
+      // 1. Update case with NWAC review and status
       const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases/${caseData.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -441,14 +447,48 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       });
       const result = await res.json();
       if (!res.ok || !result.success) throw new Error(result.error || 'Failed to save NWAC review.');
-      // Update stage to 'review_complete'
+      // 2. Update stage to 'review_complete'
       const stageRes = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases/${caseData.id}/stage`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stage: 'review_complete' })
       });
       if (!stageRes.ok) throw new Error('Failed to update case stage to review_complete.');
-      // Refresh caseData to reflect new stage
+      // 3. Log NWAC review submitted event
+      const userId = caseData?.user_id || caseData?.applicant_user_id || null;
+      if (userId) {
+        await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/case-events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            case_id: caseData.id,
+            event_type: 'nwac_review_submitted',
+            event_data: {
+              message: 'NWAC review submitted.',
+              nwac_review: assessment.nwacReview,
+              timestamp: new Date().toISOString()
+            }
+          })
+        });
+        // 4. Log event for approval/rejection
+        await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/case-events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            case_id: caseData.id,
+            event_type: assessment.nwacReviewStatus === 'approve' ? 'case_approved' : 'case_rejected',
+            event_data: {
+              message: assessment.nwacReviewStatus === 'approve' ? 'Case approved by NWAC.' : 'Case rejected by NWAC.',
+              reason: assessment.nwacReason || '',
+              nwac_review: assessment.nwacReview,
+              timestamp: new Date().toISOString()
+            }
+          })
+        });
+      }
+      // 5. Refresh caseData to reflect new stage
       if (typeof actions?.refreshCaseData === 'function') {
         await actions.refreshCaseData();
       }
@@ -510,6 +550,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       }
     >
       <Box>
+        <Box variant="small" margin={{ bottom: 's' }}>
+          This form is used by the coordinator to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, NWAC review fields will become available.
+        </Box>
         <div ref={alertAnchorRef} style={{ height: 0, margin: 0, padding: 0, border: 0 }} aria-hidden="true" />
         {alert && (
           <Alert type={alert.type} dismissible={alert.dismissible} onDismiss={() => setAlert(null)}>
@@ -521,6 +564,27 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
             {sectionHeader('NWAC Review')}
             <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
               <FormField label="NWAC Review" errorText={hasSubmitted && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}>
+                <SpaceBetween direction="horizontal" size="xs">
+                  <RadioGroup
+                    value={assessment.nwacReviewStatus || ''}
+                    onChange={({ detail }) => {
+                      if (detail.value === 'approve' && assessment.nwacReason) {
+                        setShowApproveConfirmModal(true);
+                      } else {
+                        handleField('nwacReviewStatus', detail.value);
+                        if (detail.value === 'approve') handleField('nwacReason', '');
+                      }
+                    }}
+                    items={[
+                      { value: 'approve', label: 'Approve' },
+                      { value: 'reject', label: 'Reject' }
+                    ]}
+                    ariaLabel="NWAC Review Status"
+                    disabled={isReviewComplete}
+                  />
+                </SpaceBetween>
+              </FormField>
+              <FormField label="NWAC Review (Original)" errorText={hasSubmitted && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}>
                 <Select
                   selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
                   onChange={({ detail }) => handleField('nwacReview', detail.selectedOption.value)}
@@ -532,12 +596,35 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
                   disabled={isReviewComplete}
                 />
               </FormField>
-              <FormField label="Reason for Denial by NWAC" stretch={true} >
-                <Box width="100%">
-                  <Textarea value={assessment.nwacReason} onChange={({ detail }) => handleField('nwacReason', detail.value)} disabled={isReviewComplete} />
-                </Box>
-              </FormField>
             </Grid>
+            {/* Move Reason for Denial outside the 6-6 grid for full width */}
+            {assessment.nwacReviewStatus === 'reject' && (
+              <Grid gridDefinition={[{ colspan: 12 }]}> 
+                <FormField label="Reason for Denial by NWAC" stretch={true} >
+                  <Box width="100%">
+                    <Textarea value={assessment.nwacReason} onChange={({ detail }) => handleField('nwacReason', detail.value)} disabled={isReviewComplete} />
+                  </Box>
+                </FormField>
+              </Grid>
+            )}
+            {/* Approve confirmation modal */}
+            <Modal
+              visible={showApproveConfirmModal}
+              onDismiss={() => setShowApproveConfirmModal(false)}
+              header="Clear Reason for Denial?"
+              footer={
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Button variant="primary" onClick={() => {
+                    handleField('nwacReason', '');
+                    handleField('nwacReviewStatus', 'approve');
+                    setShowApproveConfirmModal(false);
+                  }}>Clear and Approve</Button>
+                  <Button variant="normal" onClick={() => setShowApproveConfirmModal(false)}>Cancel</Button>
+                </SpaceBetween>
+              }
+            >
+              <Box>Switching to "Approve" will clear the Reason for Denial. Do you want to continue?</Box>
+            </Modal>
           </>
         )}
         {sectionHeader('Assessment Overview')}
@@ -550,14 +637,16 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           </FormField>
         </Grid>
         <Grid gridDefinition={[{ colspan: 12 }]}> 
-          <FormField label="Client Application Overview & Request" stretch={true} errorText={hasSubmitted && fieldErrors.overview ? fieldErrors.overview : undefined}>
+          <FormField label="Client Application Overview & Request" stretch={true} errorText={hasSubmitted && fieldErrors.overview ? fieldErrors.overview : undefined}
+            description="Summarize the client's application, background, and the specific request or intervention being considered. Include any relevant context from the application form.">
             <Box width="100%">
               <Textarea placeholder={initialAssessment.overview} value={assessment.overview} onChange={({ detail }) => handleField('overview', detail.value)} data-error-focus={hasSubmitted && fieldErrors.overview ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
             </Box>
           </FormField>
         </Grid>
         <Grid gridDefinition={[{ colspan: 12 }]}> 
-          <FormField label="Client’s Employment Goal(s)" stretch={true} errorText={hasSubmitted && fieldErrors.employmentGoals ? fieldErrors.employmentGoals : undefined}>
+          <FormField label="Client’s Employment Goal(s)" stretch={true} errorText={hasSubmitted && fieldErrors.employmentGoals ? fieldErrors.employmentGoals : undefined}
+            description="Describe the client's short- and long-term employment goals as discussed during assessment. Reference the goals stated in the application form if available.">
             <Box width="100%">
               <Textarea placeholder={initialAssessment.employmentGoals} value={assessment.employmentGoals} onChange={({ detail }) => handleField('employmentGoals', detail.value)} data-error-focus={hasSubmitted && fieldErrors.employmentGoals ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
             </Box>
@@ -565,12 +654,14 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         </Grid>
         {sectionHeader('Previous ISET Funding')}
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
-          <FormField label="Was the Client previously funded under the ISET Program?">
+          <FormField label="Was the Client previously funded under the ISET Program?"
+            description="Indicate if the client has received ISET funding in the past. If yes, provide details below.">
             <Checkbox checked={assessment.previousISET === 'yes'} onChange={({ detail }) => handleField('previousISET', detail.checked ? 'yes' : 'no')} disabled={isAssessmentDisabled}>Yes</Checkbox>
           </FormField>
           {assessment.previousISET === 'yes' && (
             <Grid gridDefinition={[{ colspan: 12 }]}> 
-              <FormField label="If Yes, provide dates and specifics" stretch={true} errorText={hasSubmitted && fieldErrors.previousISETDetails ? fieldErrors.previousISETDetails : undefined}>
+              <FormField label="If Yes, provide dates and specifics" stretch={true} errorText={hasSubmitted && fieldErrors.previousISETDetails ? fieldErrors.previousISETDetails : undefined}
+                description="List the dates and details of any previous ISET funding the client has received.">
                 <Box width="100%">
                   <Textarea value={assessment.previousISETDetails} onChange={({ detail }) => handleField('previousISETDetails', detail.value)} data-error-focus={hasSubmitted && fieldErrors.previousISETDetails ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
                 </Box>
@@ -579,8 +670,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           )}
         </Grid>
         {sectionHeader('Barriers to Employment')}
-        <Grid gridDefinition={[{ colspan: 12 }]}>
-          <FormField label="Barriers (select all that apply)" errorText={hasSubmitted && fieldErrors.barriers ? fieldErrors.barriers : undefined}>
+        <Grid gridDefinition={[{ colspan: 12 }]}> 
+          <FormField label="Barriers (select all that apply)" errorText={hasSubmitted && fieldErrors.barriers ? fieldErrors.barriers : undefined}
+            description="Select all barriers that may impact the client's ability to obtain or maintain employment. These may be self-identified or observed during assessment.">
             <ColumnLayout columns={3} borders="horizontal">
               {BARRIERS.map(barrier => (
                 <Checkbox
@@ -598,7 +690,8 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         </Grid>
         {sectionHeader('Local Area Priorities (Target Areas)')}
         <Grid gridDefinition={[{ colspan: 12 }]}> 
-          <FormField label="Priority Population Groups (select all that apply)">
+          <FormField label="Priority Population Groups (select all that apply)"
+            description="Identify if the client belongs to any priority population groups targeted by your local area or program.">
             <ColumnLayout columns={3} borders="horizontal">
               {PRIORITIES.map(priority => (
                 <Checkbox
@@ -616,15 +709,17 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         </Grid>
         {sectionHeader('Other Funding Sources')}
         <Grid gridDefinition={[{ colspan: 12 }]}> 
-          <FormField label="Has the Client received any other sources of funding for this intervention?" stretch={true} >
+          <FormField label="Has the Client received any other sources of funding for this intervention?" stretch={true}
+            description="Describe any other funding the client has received or applied for in relation to this intervention.">
             <Box width="100%">
               <Textarea placeholder={initialAssessment.otherFunding} value={assessment.otherFunding} onChange={({ detail }) => handleField('otherFunding', detail.value)} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
             </Box>
           </FormField>
         </Grid>
         {sectionHeader('ESDC Eligibility')}
-        <Grid gridDefinition={[{ colspan: 12 }]}>
-          <FormField label="Eligibility" errorText={hasSubmitted && fieldErrors.esdcEligibility ? fieldErrors.esdcEligibility : undefined}>
+        <Grid gridDefinition={[{ colspan: 12 }]}> 
+          <FormField label="Eligibility" errorText={hasSubmitted && fieldErrors.esdcEligibility ? fieldErrors.esdcEligibility : undefined}
+            description="Select the client's eligibility category for ESDC funding. This is required for reporting and program compliance.">
             <Select
               selectedOption={ESDC_OPTIONS.find(o => o.value === assessment.esdcEligibility) || null}
               onChange={({ detail }) => handleField('esdcEligibility', detail.selectedOption.value)}
@@ -639,18 +734,22 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         </Grid>
         {sectionHeader('Intervention Details')}
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
-          <FormField label="Start Date" errorText={hasSubmitted && fieldErrors.startDate ? fieldErrors.startDate : undefined}>
+          <FormField label="Start Date" errorText={hasSubmitted && fieldErrors.startDate ? fieldErrors.startDate : undefined}
+            description="Enter the planned start date for the intervention or training.">
             <DatePicker onChange={({ detail }) => handleField('startDate', detail.value)} value={assessment.startDate} ariaLabel="Start Date" data-error-focus={hasSubmitted && fieldErrors.startDate ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
           </FormField>
-          <FormField label="End Date" errorText={hasSubmitted && fieldErrors.endDate ? fieldErrors.endDate : undefined}>
+          <FormField label="End Date" errorText={hasSubmitted && fieldErrors.endDate ? fieldErrors.endDate : undefined}
+            description="Enter the planned end date for the intervention or training.">
             <DatePicker onChange={({ detail }) => handleField('endDate', detail.value)} value={assessment.endDate} ariaLabel="End Date" data-error-focus={hasSubmitted && fieldErrors.endDate ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
           </FormField>
         </Grid>
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
-          <FormField label="Training Institution/Employer" errorText={hasSubmitted && fieldErrors.institution ? fieldErrors.institution : undefined}>
+          <FormField label="Training Institution/Employer" errorText={hasSubmitted && fieldErrors.institution ? fieldErrors.institution : undefined}
+            description="Provide the name of the training institution or employer for this intervention.">
             <Input value={assessment.institution} onChange={({ detail }) => handleField('institution', detail.value)} ariaLabel="Training Institution/Employer" data-error-focus={hasSubmitted && fieldErrors.institution ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
           </FormField>
-          <FormField label="Program Name" errorText={hasSubmitted && fieldErrors.programName ? fieldErrors.programName : undefined}>
+          <FormField label="Program Name" errorText={hasSubmitted && fieldErrors.programName ? fieldErrors.programName : undefined}
+            description="Enter the name of the program or position the client will participate in.">
             <Input value={assessment.programName} onChange={({ detail }) => handleField('programName', detail.value)} ariaLabel="Program Name" data-error-focus={hasSubmitted && fieldErrors.programName ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
           </FormField>
         </Grid>
@@ -764,8 +863,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           }
         />
         {sectionHeader('Coordinator’s Recommendation')}
-        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-          <FormField label="Recommendation" errorText={hasSubmitted && fieldErrors.recommendation ? fieldErrors.recommendation : undefined}>
+        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
+          <FormField label="Recommendation" errorText={hasSubmitted && fieldErrors.recommendation ? fieldErrors.recommendation : undefined}
+            description="Select your recommendation for this application. If not recommending funding, provide an alternative or rationale below.">
             <Select
               selectedOption={RECOMMEND_OPTIONS.find(o => o.value === assessment.recommendation) || null}
               onChange={({ detail }) => handleField('recommendation', detail.selectedOption.value)}
@@ -777,7 +877,8 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
               disabled={isAssessmentDisabled}
             />
           </FormField>
-          <FormField label="Justification" stretch={true} errorText={hasSubmitted && fieldErrors.justification ? fieldErrors.justification : undefined} >
+          <FormField label="Justification" stretch={true} errorText={hasSubmitted && fieldErrors.justification ? fieldErrors.justification : undefined}
+            description="Provide a clear justification for your recommendation, referencing the client's needs, goals, and eligibility.">
             <Box width="100%">
               <Textarea  value={assessment.justification} onChange={({ detail }) => handleField('justification', detail.value)} data-error-focus={hasSubmitted && fieldErrors.justification ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
             </Box>

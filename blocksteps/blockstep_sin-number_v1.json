@@ -104,7 +104,10 @@
         "classes": "govuk-input",
         "disabled": false,
         "autocomplete": "given-name",
-        "items": []
+        "items": [],
+        "formGroup": {
+          "classes": ""
+        }
       },
       "editable_fields": [
         {

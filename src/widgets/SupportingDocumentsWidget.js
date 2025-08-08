@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Header, Table, Box, Button } from '@cloudscape-design/components';
+import { Header, Table, Box, Button, ButtonDropdown } from '@cloudscape-design/components';
 
 const SupportingDocumentsWidget = ({ actions, caseData }) => {
   const [documents, setDocuments] = useState([]);
@@ -31,8 +31,20 @@ const SupportingDocumentsWidget = ({ actions, caseData }) => {
         resizeHandleAriaLabel: 'Resize handle',
         resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.'
       }}
-      settings={actions && actions.removeItem && (<></>)}
+      settings={
+        actions && actions.removeItem && (
+          <ButtonDropdown
+            items={[{ id: 'remove', text: 'Remove' }]}
+            ariaLabel="Board item settings"
+            variant="icon"
+            onItemClick={() => actions && actions.removeItem && actions.removeItem()}
+          />
+        )
+      }
     >
+      <Box variant="small" margin={{ bottom: 's' }}>
+        This widget displays all documents related to the applicant, including those submitted with the application and any uploaded as secure message attachments.
+      </Box>
       <Box padding="m">
         <Table
           loading={loading}

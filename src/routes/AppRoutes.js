@@ -1,5 +1,7 @@
+import ManageWorkflows from '../pages/manageWorkflows.js';
 import React from 'react';
 import { Route, Switch, useLocation } from 'react-router-dom';
+import ModifyWorkflow from '../pages/modifyWorkflow.js';
 import {
   ContentLayout,
   Header,
@@ -58,7 +60,9 @@ import ManageApplications from '../pages/manageApplications.js'; // Import the n
 import ManageOrganisations from '../pages/manageOrganisations.js'; // Import the new component
 import CaseAssignmentDashboard from '../pages/caseAssignmentDashboard.js'; // Import the new component
 import ApplicationCaseDashboard from '../pages/applicationCaseDashboard.js'; // Import the new component
-import ArmsReportingDashboard from '../pages/armsReportingDashboard.js'; // Import the new component
+import ArmsReportingDashboard from '../pages/armsReporting.js'; // Import the new component
+import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Import the NWAC Hub Management dashboard
+import AssessmentReviewDashboard from '../pages/assessmentReview.js'; // Import the new Assessment Review dashboard
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -108,6 +112,20 @@ const AppRoutes = ({
 
   return (
     <Switch>
+      <Route path="/manage-workflows">
+        {renderContent(ManageWorkflows, [
+          { text: 'Home', href: '/' },
+          { text: 'Intake Editor', href: '/manage-components' },
+          { text: 'Manage Workflows', href: '/manage-workflows' }
+        ], 'Manage Workflows', 'manageWorkflows')}
+      </Route>
+        <Route path="/modify-workflow">
+          {renderContent(ModifyWorkflow, [
+            { text: 'Home', href: '/' },
+            { text: 'Manage Workflows', href: '/manage-workflows' },
+            { text: 'Modify Workflow', href: '/modify-workflow' }
+          ], 'Modify Workflow', 'modifyWorkflow')}
+        </Route>
       <Route path="/experiment">
         {renderContent(Experiment, [{ text: 'Home', href: '/' }, { text: 'Experiment', href: '/experiment' }], 'Experiment Page', 'experiment')}
       </Route>
@@ -124,7 +142,7 @@ const AppRoutes = ({
         {renderContent(LocationsManagementDashboard, [{ text: 'Home', href: '/' }, { text: 'Manage Locations', href: '/locations-management-dashboard' }], 'Manage Locations', ManageLocationsHelp.aiContext)}
       </Route>
       <Route path="/modify-ptma/:id">
-        {renderContent(ModifyLocation, [{ text: 'Home', href: '/' }, { text: 'Manage PTMAs', href: '/ptma-management' }, { text: 'Modify PTMA', href: '/modify-ptma/:id' }], 'Modify PTMA', 'modifyPtma')}
+        {renderContent(ModifyLocation, [{ text: 'Home', href: '/' }, { text: 'Manage Locations', href: '/ptma-management' }, { text: 'Modify Location', href: '/modify-ptma/:id' }], 'Manage Location', 'modifyPtma')}
       </Route>
       <Route path="/user-management-dashboard">
         {renderContent(UserManagementDashboard, [{ text: 'Home', href: '/' }, { text: 'User Management', href: '/user-management-dashboard' }], 'User Management', 'userManagement')}
@@ -241,8 +259,7 @@ const AppRoutes = ({
         {renderContent(ManageSecurityOptions, [{ text: 'Home', href: '/' }, { text: 'Security Settings', href: '/manage-security-options' }], 'Security Settings', 'manageSecurityOptions')}
       </Route>
       <Route path="/manage-components">
-        {renderContent(ManageIntakeSteps, [{ text: 'Home', href: '/' }, { text: 'Manage Intake Steps', href: '/manage-components' }], 'Manage Intake Steps', <ManageIntakeStepsHelpPanel />)}
-        {renderContent(ManageIntakeSteps, [{ text: 'Home', href: '/' }, { text: 'Manage Intake Steps', href: '/manage-components' }], 'Manage Intake Steps', <ManageIntakeStepsHelpPanel />)}
+  {renderContent(ManageIntakeSteps, [{ text: 'Home', href: '/' }, { text: 'Manage Intake Steps', href: '/manage-components' }], 'Manage Intake Steps', <ManageIntakeStepsHelpPanel />)}
       </Route>
       <Route path="/test-table">
         {renderContent(TestTable, [{ text: 'Home', href: '/' }, { text: 'Test Table', href: '/test-table' }], 'Test Table', 'testTable')}
@@ -273,6 +290,23 @@ const AppRoutes = ({
           { text: 'Home', href: '/' },
           { text: 'ARMS Reporting', href: '/arms-reporting' }
         ], 'ARMS Reporting', 'armsReporting')}
+      </Route>
+      <Route path="/nwac-hub-management">
+        {renderContent(
+          NWACHubManagementDashboard,
+          [
+            { text: 'Home', href: '/' },
+            { text: 'NWAC Hub Management', href: '/nwac-hub-management' }
+          ],
+          'NWAC Hub Management',
+          'nwacHubManagement'
+        )}
+      </Route>
+      <Route path="/assessment-review">
+        {renderContent(AssessmentReviewDashboard, [
+          { text: 'Home', href: '/' },
+          { text: 'Assessment Review', href: '/assessment-review' }
+        ], 'Assessment Review', 'assessmentReview')}
       </Route>
       <Route path="/">
         {renderContent(AdminDashboard, [{ text: 'Home', href: '/' }, { text: 'Admin Console', href: '#' }], 'Secure Solution Suite Admin Console', AdminDashboardHelp.aiContext)}

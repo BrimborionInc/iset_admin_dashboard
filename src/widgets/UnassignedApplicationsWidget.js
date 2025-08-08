@@ -177,7 +177,7 @@ const UnassignedApplicationsWidget = ({ actions, onCaseAssigned, refreshKey }) =
     header: 'Assign',
     cell: item => (
       <Button
-        variant="primary"
+        variant="inline-link"
         onClick={() => {
           setSelectedApplication(item);
           setModalVisible(true);
@@ -210,97 +210,102 @@ const UnassignedApplicationsWidget = ({ actions, onCaseAssigned, refreshKey }) =
         />
       }
     >
-      <Box>
-        {loading ? (
-          <Box textAlign="center" padding="m"><Spinner /> Loading...</Box>
-        ) : error ? (
-          <Box color="error" textAlign="center">{error}</Box>
-        ) : (
-          <Table
-            columnDefinitions={allColumns.filter(col => visibleColumns.includes(col.id) || col.id === 'assign')}
-            items={pagedItems}
-            loading={false}
-            empty={<Box textAlign="center">No unassigned applications</Box>}
-            variant="embedded"
-            wrapLines
-            resizableColumns
-            stickyHeader
-            stripedRows
-            selectionType="multi"
-            selectedItems={selectedItems}
-            onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
-            ariaLabels={{
-              selectionGroupLabel: 'Unassigned applications',
-              allItemsSelectionLabel: () => 'select all',
-              itemSelectionLabel: ({ selectedItems }, item) => item.tracking_id,
-              tableLabel: 'Unassigned applications table',
-              header: 'Unassigned applications',
-              rowHeader: 'Tracking ID',
-            }}
-            renderAriaLive={({ firstIndex, lastIndex, totalItemsCount }) =>
-              `Displaying items ${firstIndex} to ${lastIndex} of ${totalItemsCount}`
-            }
-            filter={
-              <TextFilter
-                filteringPlaceholder="Find applications"
-                filteringText={filteringText}
-                onChange={({ detail }) => {
-                  setFilteringText(detail.filteringText);
-                  setCurrentPageIndex(1);
-                }}
-                countText={
-                  filteringText && filteredItems.length !== applications.length
-                    ? `${filteredItems.length} match${filteredItems.length === 1 ? '' : 'es'}`
-                    : ''
-                }
-              />
-            }
-            header={
-              <Header
-                counter={
-                  selectedItems.length
-                    ? `(${selectedItems.length}/${filteredItems.length})`
-                    : `(${filteredItems.length})`
-                }
-              >
-                Unassigned Applications
-              </Header>
-            }
-            pagination={
-              <Pagination
-                currentPageIndex={currentPageIndex}
-                pagesCount={pagesCount}
-                onChange={({ detail }) => setCurrentPageIndex(detail.currentPageIndex)}
-              />
-            }
-            preferences={
-              <CollectionPreferences
-                title="Preferences"
-                confirmLabel="Confirm"
-                cancelLabel="Cancel"
-                preferences={preferences}
-                pageSizePreference={{
-                  title: 'Page size',
-                  options: PAGE_SIZE_OPTIONS.map(size => ({ value: size, label: `${size} applications` }))
-                }}
-                contentDisplayPreference={{
-                  title: 'Select visible columns',
-                  options: columnDefinitions.map(col => ({
-                    id: col.id,
-                    label: col.header,
-                    alwaysVisible: col.id === 'tracking_id',
-                  }))
-                }}
-                onConfirm={({ detail }) => {
-                  setPageSize(detail.pageSize);
-                  setVisibleColumns(detail.contentDisplay.filter(col => col.visible).map(col => col.id));
-                  setCurrentPageIndex(1);
-                }}
-              />
-            }
-          />
-        )}
-      </Box>
+      <SpaceBetween size="m">
+        <Box variant="small">
+          This widget shows applications that have not yet been assigned for assessment. NWAC Admins and Regional Coordinators can use the assign button to allocate the application to an assessor. Allocation is logged, and depending on notification settings may send a secure message and email alert to the person the application is being assigned to.
+        </Box>
+        <Box>
+          {loading ? (
+            <Box textAlign="center" padding="m"><Spinner /> Loading...</Box>
+          ) : error ? (
+            <Box color="error" textAlign="center">{error}</Box>
+          ) : (
+            <Table
+              columnDefinitions={allColumns.filter(col => visibleColumns.includes(col.id) || col.id === 'assign')}
+              items={pagedItems}
+              loading={false}
+              empty={<Box textAlign="center">No unassigned applications</Box>}
+              variant="embedded"
+              wrapLines
+              resizableColumns
+              stickyHeader
+              stripedRows
+              selectionType="multi"
+              selectedItems={selectedItems}
+              onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
+              ariaLabels={{
+                selectionGroupLabel: 'Unassigned applications',
+                allItemsSelectionLabel: () => 'select all',
+                itemSelectionLabel: ({ selectedItems }, item) => item.tracking_id,
+                tableLabel: 'Unassigned applications table',
+                header: 'Unassigned applications',
+                rowHeader: 'Tracking ID',
+              }}
+              renderAriaLive={({ firstIndex, lastIndex, totalItemsCount }) =>
+                `Displaying items ${firstIndex} to ${lastIndex} of ${totalItemsCount}`
+              }
+              filter={
+                <TextFilter
+                  filteringPlaceholder="Find applications"
+                  filteringText={filteringText}
+                  onChange={({ detail }) => {
+                    setFilteringText(detail.filteringText);
+                    setCurrentPageIndex(1);
+                  }}
+                  countText={
+                    filteringText && filteredItems.length !== applications.length
+                      ? `${filteredItems.length} match${filteredItems.length === 1 ? '' : 'es'}`
+                      : ''
+                  }
+                />
+              }
+              header={
+                <Header
+                  counter={
+                    selectedItems.length
+                      ? `(${selectedItems.length}/${filteredItems.length})`
+                      : `(${filteredItems.length})`
+                  }
+                >
+                  # of Unassigned Applications
+                </Header>
+              }
+              pagination={
+                <Pagination
+                  currentPageIndex={currentPageIndex}
+                  pagesCount={pagesCount}
+                  onChange={({ detail }) => setCurrentPageIndex(detail.currentPageIndex)}
+                />
+              }
+              preferences={
+                <CollectionPreferences
+                  title="Preferences"
+                  confirmLabel="Confirm"
+                  cancelLabel="Cancel"
+                  preferences={preferences}
+                  pageSizePreference={{
+                    title: 'Page size',
+                    options: PAGE_SIZE_OPTIONS.map(size => ({ value: size, label: `${size} applications` }))
+                  }}
+                  contentDisplayPreference={{
+                    title: 'Select visible columns',
+                    options: columnDefinitions.map(col => ({
+                      id: col.id,
+                      label: col.header,
+                      alwaysVisible: col.id === 'tracking_id',
+                    }))
+                  }}
+                  onConfirm={({ detail }) => {
+                    setPageSize(detail.pageSize);
+                    setVisibleColumns(detail.contentDisplay.filter(col => col.visible).map(col => col.id));
+                    setCurrentPageIndex(1);
+                  }}
+                />
+              }
+            />
+          )}
+        </Box>
+      </SpaceBetween>
 
       {/* Modal for assignment */}
       {modalVisible && (

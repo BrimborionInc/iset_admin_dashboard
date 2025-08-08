@@ -493,6 +493,9 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
       }
     >
       <Box>
+        <Box variant="small" margin={{ bottom: 's' }}>
+          This widget displays all secure messages between the evaluator and the applicant, including any attachments. Use this area to view, send, and manage confidential communications related to the application.
+        </Box>
         <Tabs
           activeTabId={activeTabId}
           onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
