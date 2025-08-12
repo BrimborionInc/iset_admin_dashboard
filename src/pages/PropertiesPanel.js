@@ -194,7 +194,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
         </>
       )}
 
-      {selectedComponent?.has_options === 1 && selectedComponent.editable_fields?.map((field) => {
+  {Boolean(selectedComponent?.has_options) && selectedComponent.editable_fields?.map((field) => {
         if (field.type !== 'optionList') return null;
         const options = get(selectedComponent.props, field.path) || [];
         const schema = getSchema();

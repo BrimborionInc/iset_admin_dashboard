@@ -38,7 +38,7 @@ const fs = require('fs');
 const app = express();
 const port = process.env.PORT || 5001; // Use port from .env
 
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '1mb' }));
 
 app.use('/api/', (req, res, next) => {
   res.setHeader('Content-Type', 'application/json');
@@ -62,6 +62,577 @@ const dbConfig = {
 };
 
 const pool = mysql.createPool(dbConfig);
+
+// --- Nunjucks environment for component preview ---------------------------
+// Existing global configuration already set above; we create a local reference.
+// We attempt to include GOV.UK frontend macros (path may vary depending on install structure).
+// Fallback: rely on previously configured nunjucks instance.
+let env;
+try {
+  // Reconfigure with additional search paths without breaking existing one.
+  env = nunjucks.configure([
+    path.join(__dirname, 'node_modules/govuk-frontend/dist'),
+    path.join(__dirname, 'node_modules/govuk-frontend')
+  ], { autoescape: true, noCache: true });
+} catch (e) {
+  console.warn('Nunjucks reconfigure for preview failed, using existing instance:', e.message);
+  env = nunjucks;
+}
+
+// Helper: render a single component template to HTML using export_njk_template from DB
+async function renderComponentHtml(comp) {
+  const templateKey = comp.template_key || comp.templateKey || comp.templateKey || null;
+  const type = comp.type || null;
+  let rows;
+  if (templateKey) {
+    [rows] = await pool.query(
+      `SELECT export_njk_template FROM iset_intake.component_template
+       WHERE status='active' AND template_key=? ORDER BY version DESC LIMIT 1`,
+      [templateKey]
+    );
+  } else if (type) {
+    [rows] = await pool.query(
+      `SELECT export_njk_template FROM iset_intake.component_template
+       WHERE status='active' AND type=? ORDER BY version DESC LIMIT 1`,
+      [type]
+    );
+  } else {
+    return '<!-- component missing template reference -->';
+  }
+  const tpl = rows?.[0]?.export_njk_template;
+  if (!tpl) return `<!-- missing template for ${templateKey || type} -->`;
+  try {
+    return env.renderString(tpl, { props: comp.props || {} });
+  } catch (e) {
+    console.error('NJK render error:', e);
+    return `<!-- render error for ${templateKey || type}: ${e.message} -->`;
+  }
+}
+
+// Wrap rendered fragments in a standalone GOV.UK HTML document
+// Expose local GOV.UK frontend dist (once) so iframe can load assets
+if (!app.locals.__govukStaticMounted) {
+  const govukDistPath = path.join(__dirname, 'node_modules', 'govuk-frontend', 'dist', 'govuk');
+  app.use('/assets/govuk', express.static(govukDistPath));
+  app.locals.__govukStaticMounted = true;
+}
+
+function wrapGovukDoc(innerHtml) {
+  // Inline GOV.UK assets to avoid separate network fetches inside iframe which may 404 or be blocked.
+  let css = '';
+  let js = '';
+  try {
+    css = fs.readFileSync(path.join(__dirname, 'node_modules', 'govuk-frontend', 'dist', 'govuk', 'govuk-frontend.min.css'), 'utf8');
+  } catch (e) {
+    css = '/* failed to inline govuk css: ' + e.message + ' */';
+  }
+  try {
+    js = fs.readFileSync(path.join(__dirname, 'node_modules', 'govuk-frontend', 'dist', 'govuk', 'govuk-frontend.min.js'), 'utf8');
+  } catch (e) {
+    js = '/* failed to inline govuk js: ' + e.message + ' */';
+  }
+  return `<!doctype html>
+  <html lang="en" class="govuk-template">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Preview</title>
+      <style>${css}\nbody { margin:16px; }</style>
+    </head>
+    <body class="govuk-template__body">
+      <script>document.body.className = document.body.className ? document.body.className + ' js-enabled' : 'js-enabled';</script>
+      <div class="govuk-width-container">${innerHtml}</div>
+      <script>${js}; window.GOVUKFrontend && window.GOVUKFrontend.initAll();</script>
+    </body>
+  </html>`;
+}
+
+// POST /api/preview/step : render array of components to full HTML doc
+app.post('/api/preview/step', async (req, res) => {
+  try {
+    const comps = Array.isArray(req.body?.components) ? req.body.components : [];
+    let html = '';
+    for (const raw of comps) {
+      const comp = { ...raw, props: typeof raw.props === 'object' && raw.props !== null ? raw.props : {} };
+      // Normalise possible key naming
+      if (!comp.template_key && comp.templateKey) comp.template_key = comp.templateKey;
+      html += await renderComponentHtml(comp) + '\n';
+    }
+    res.status(200).type('text/html').send(wrapGovukDoc(html));
+  } catch (err) {
+    console.error('POST /api/preview/step failed:', err);
+    res.status(500).json({ error: 'Failed to render preview' });
+  }
+});
+
+// POST /api/render/component
+// Body: { templateKey?, version?, templateId?, props: {...} }
+// Returns raw HTML rendered via the template's export_njk_template and provided props.
+app.post('/api/render/component', async (req, res) => {
+  try {
+    const { templateKey, version, templateId, props } = req.body || {};
+    if (!props) return res.status(400).json({ error: 'props required' });
+
+    let rows;
+    if (templateId) {
+      [rows] = await pool.query(
+        `SELECT export_njk_template
+           FROM iset_intake.component_template
+          WHERE id = ? AND status = 'active'`,
+        [templateId]
+      );
+    } else if (templateKey) {
+      const v = Number.isInteger(version) ? version : 1;
+      [rows] = await pool.query(
+        `SELECT export_njk_template
+           FROM iset_intake.component_template
+          WHERE template_key = ? AND version = ? AND status = 'active'`,
+        [templateKey, v]
+      );
+    } else {
+      return res.status(400).json({ error: 'templateKey or templateId required' });
+    }
+
+    const tpl = rows?.[0]?.export_njk_template;
+    if (!tpl) return res.status(404).json({ error: 'Missing or inactive template' });
+
+    let html;
+    try {
+      html = env.renderString(tpl, { props });
+    } catch (e) {
+      console.error('Nunjucks render error:', e);
+      return res.status(500).json({ error: 'Render failed', details: String(e).slice(0, 200) });
+    }
+    res.type('html').send(html);
+  } catch (err) {
+    console.error('POST /api/render/component failed:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Utility: resolve simple JSONPath-like strings used in prop_schema, e.g. "label.text", "items[0].value"
+function getByPath(obj, path) {
+  try {
+    if (!path) return undefined;
+    const tokens = path
+      .replace(/\[(\d+)\]/g, '.$1') // items[0].value -> items.0.value
+      .split('.')
+      .filter(Boolean);
+    return tokens.reduce((acc, k) => (acc == null ? acc : acc[k]), obj);
+  } catch {
+    return undefined;
+  }
+}
+
+// GET /api/audit/component-templates
+// Optional query: ?limit=nn
+app.get('/api/audit/component-templates', async (req, res) => {
+  try {
+    const limit = Math.max(0, parseInt(req.query.limit || '0', 10)) || null;
+    const [rows] = await pool.query(
+      `SELECT id, template_key, version, type, status,
+              default_props, prop_schema, has_options, option_schema, export_njk_template
+         FROM iset_intake.component_template
+         ORDER BY template_key, version`
+    );
+    const slice = limit ? rows.slice(0, limit) : rows;
+
+    const results = [];
+    for (const r of slice) {
+      const issues = [];
+      let renderOk = false;
+      let renderError = null;
+
+      let props = {};
+      try {
+        props = typeof r.default_props === 'string' ? JSON.parse(r.default_props) : (r.default_props || {});
+      } catch (e) {
+        issues.push({ code: 'DEFAULT_PROPS_INVALID_JSON', detail: String(e).slice(0, 160) });
+      }
+
+      // Check prop_schema paths exist in default_props
+      let schema = [];
+      try {
+        schema = typeof r.prop_schema === 'string' ? JSON.parse(r.prop_schema) : (r.prop_schema || []);
+      } catch (e) {
+        issues.push({ code: 'PROP_SCHEMA_INVALID_JSON', detail: String(e).slice(0, 160) });
+      }
+      const missingPaths = [];
+      if (Array.isArray(schema)) {
+        for (const fld of schema) {
+          const pth = fld?.path;
+          if (pth) {
+            const val = getByPath(props, pth);
+            if (typeof val === 'undefined') {
+              missingPaths.push({ key: fld.key || null, path: pth });
+            }
+          }
+        }
+      }
+      if (missingPaths.length) {
+        issues.push({ code: 'PROP_SCHEMA_PATH_MISSING_IN_DEFAULTS', detail: missingPaths });
+      }
+
+      // Option sanity checks
+      const itemsVal = getByPath(props, 'items');
+      if (r.has_options) {
+        if (!Array.isArray(itemsVal) || itemsVal.length === 0) {
+          issues.push({ code: 'HAS_OPTIONS_BUT_NO_ITEMS', detail: 'has_options=1 but default_props.items missing/empty' });
+        }
+      }
+      if ((r.type === 'radio' || r.type === 'checkboxes')) {
+        const legendText = getByPath(props, 'fieldset.legend.text');
+        if (!legendText) {
+          issues.push({ code: 'FIELDSET_LEGEND_TEXT_MISSING', detail: 'fieldset.legend.text should exist for radios/checkboxes' });
+        }
+        if (!Array.isArray(itemsVal) || itemsVal.length === 0) {
+          issues.push({ code: 'CHOICE_ITEMS_MISSING', detail: 'radios/checkboxes should define props.items[]' });
+        }
+      }
+
+      // Render test (only if template present)
+      if (!r.export_njk_template || !String(r.export_njk_template).trim()) {
+        issues.push({ code: 'MISSING_TEMPLATE', detail: 'export_njk_template empty' });
+      } else {
+        try {
+          // Render using real GOV.UK macros; macro imports live inside export_njk_template text.
+          const html = env.renderString(r.export_njk_template, { props });
+          if (!html || !html.trim()) {
+            renderError = 'Empty HTML output';
+          } else {
+            renderOk = true;
+          }
+        } catch (e) {
+          renderError = String(e && e.message ? e.message : e).slice(0, 300);
+        }
+      }
+      if (renderError) {
+        issues.push({ code: 'RENDER_ERROR', detail: renderError });
+      }
+
+      results.push({
+        id: r.id,
+        template_key: r.template_key,
+        version: r.version,
+        type: r.type,
+        status: r.status,
+        ok: issues.length === 0,
+        warnings: issues.filter(i => i.code !== 'RENDER_ERROR' && i.code !== 'MISSING_TEMPLATE'),
+        errors: issues.filter(i => i.code === 'RENDER_ERROR' || i.code === 'MISSING_TEMPLATE')
+      });
+    }
+
+    const summary = {
+      total: results.length,
+      ok: results.filter(r => r.ok).length,
+      withErrors: results.filter(r => r.errors.length).length,
+      withWarnings: results.filter(r => r.warnings.length).length
+    };
+    res.json({ summary, results });
+  } catch (err) {
+    console.error('GET /api/audit/component-templates failed:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// --- helpers ---------------------------------------------------------------
+function normaliseJson(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') {
+    try { return JSON.parse(v); } catch { return v; }
+  }
+  return v;
+}
+
+// --- Steps API (DB-only, versioned component templates) --------------------
+// List steps for the Workflow Editor's library
+app.get('/api/steps', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, name, status
+      FROM iset_intake.step
+      ORDER BY name
+    `);
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error('GET /api/steps failed:', err);
+    res.status(500).json({ error: 'Failed to fetch steps' });
+  }
+});
+
+// --- Component Templates API (for Step Editor library) ---------------------
+// Returns the catalogue of reusable component templates (active only by default)
+app.get('/api/component-templates', async (req, res) => {
+  try {
+    const onlyActive = (req.query.status ?? 'active') === 'active';
+    const where = onlyActive ? "WHERE status = 'active'" : '';
+    const [rows] = await pool.query(`
+      SELECT
+        id,
+        template_key,
+        version,
+        type,
+        label,
+        description,
+        default_props,
+        prop_schema,
+        has_options,
+        option_schema,
+        status
+      FROM iset_intake.component_template
+      ${where}
+      ORDER BY label, template_key, version
+    `);
+    // parse JSON safely locally (don't rely on other helpers for forward compatibility)
+    const parseJson = v => {
+      if (v == null) return null;
+      if (typeof v === 'object') return v; // already parsed
+      try { return JSON.parse(v); } catch { return null; }
+    };
+    const out = rows.map(r => ({
+      id: r.id,
+      key: r.template_key,
+      version: r.version,
+      type: r.type,
+      label: r.label,
+      description: r.description ?? null,
+      props: parseJson(r.default_props) ?? {},
+      editable_fields: parseJson(r.prop_schema) ?? [],
+      has_options: !!r.has_options,
+      option_schema: parseJson(r.option_schema) ?? null,
+      status: r.status
+    }));
+    res.status(200).json(out);
+  } catch (err) {
+    console.error('GET /api/component-templates failed:', err);
+    res.status(500).json({ error: 'Failed to fetch component templates' });
+  }
+});
+
+// Step detail with composed components (ordered)
+app.get('/api/steps/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [[step]] = await pool.query(
+      `SELECT id, name, status, ui_meta FROM iset_intake.step WHERE id = ?`,
+      [id]
+    );
+    if (!step) return res.status(404).json({ error: 'Step not found' });
+
+    const [components] = await pool.query(
+      `SELECT
+         sc.id,
+         sc.position,
+         sc.template_id,
+         ct.template_key,
+         ct.version,
+         sc.props_overrides
+       FROM iset_intake.step_component sc
+       JOIN iset_intake.component_template ct ON ct.id = sc.template_id
+       WHERE sc.step_id = ?
+       ORDER BY sc.position`,
+      [id]
+    );
+
+    const mapped = components.map(c => ({
+      id: c.id,
+      position: c.position,
+      templateId: c.template_id,
+      templateKey: c.template_key,
+      templateVersion: c.version,
+      props: normaliseJson(c.props_overrides)
+    }));
+
+    res.status(200).json({
+      id: step.id,
+      name: step.name,
+      status: step.status,
+      ui_meta: normaliseJson(step.ui_meta),
+      components: mapped
+    });
+  } catch (err) {
+    console.error('GET /api/steps/:id failed:', err);
+    res.status(500).json({ error: 'Failed to fetch step' });
+  }
+});
+
+// --- helpers for transactional writes --------------------------------------
+async function withTx(fn) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const result = await fn(conn);
+    await conn.commit();
+    return result;
+  } catch (e) {
+    try { await conn.rollback(); } catch (_) {}
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
+// Resolve component template references: supports templateId or template_key
+async function resolveTemplateIds(components, conn) {
+  // Collect missing IDs keyed by template_key
+  const missingKeys = Array.from(new Set(
+    components
+      .filter(c => !c || typeof c !== 'object')
+      .map(() => null)
+  ));
+  const keys = Array.from(new Set(
+    components
+      .filter(c => c && !c.templateId && c.template_key)
+      .map(c => String(c.template_key))
+  ));
+
+  const map = new Map();
+  if (keys.length) {
+    const [rows] = await conn.query(
+      `SELECT id, template_key, version
+       FROM iset_intake.component_template
+       WHERE status='active' AND template_key IN (${keys.map(() => '?').join(',')})
+       ORDER BY template_key, version DESC`,
+      keys
+    );
+    // take highest version per key
+    for (const row of rows) {
+      if (!map.has(row.template_key)) map.set(row.template_key, row.id);
+    }
+  }
+
+  return components.map((c, i) => {
+    if (!c || typeof c !== 'object') {
+      throw Object.assign(new Error(`Invalid component at index ${i}`), { code: 400 });
+    }
+    const templateId = c.templateId || map.get(c.template_key) || null;
+    if (!templateId) {
+      throw Object.assign(new Error(`Missing template reference for component at index ${i}`), { code: 400 });
+    }
+    return {
+      templateId: Number(templateId),
+      props: c.props ? (typeof c.props === 'string' ? normaliseJson(c.props) : c.props) : null
+    };
+  });
+}
+
+// --- Create a new step ------------------------------------------------------
+// Body: { name: string, status: 'active'|'inactive', components: [{ templateId:number|, template_key?:string, props?:object }], ui_meta?: any }
+app.post('/api/steps', async (req, res) => {
+  const { name, status = 'active', components = [], ui_meta = null } = req.body || {};
+  if (!name || !Array.isArray(components)) {
+    return res.status(400).json({ error: 'name and components[] are required' });
+  }
+  try {
+    const stepId = await withTx(async (conn) => {
+      const [r] = await conn.query(
+        `INSERT INTO iset_intake.step (name, status, ui_meta) VALUES (?,?,?)`,
+        [name, status, ui_meta ? JSON.stringify(ui_meta) : null]
+      );
+      const newId = r.insertId;
+      if (components.length) {
+        const resolved = await resolveTemplateIds(components, conn);
+        const values = resolved.map((c, i) => [
+          newId,
+          i + 1,
+          c.templateId,
+          c.props ? JSON.stringify(c.props) : null,
+        ]);
+        await conn.query(
+          `INSERT INTO iset_intake.step_component (step_id, position, template_id, props_overrides)
+           VALUES ?`,
+          [values]
+        );
+      }
+      return newId;
+    });
+    res.status(201).json({ id: stepId });
+  } catch (err) {
+    if (err.code === 400) return res.status(400).json({ error: err.message });
+    console.error('POST /api/steps failed:', err);
+    res.status(500).json({ error: 'Failed to create step' });
+  }
+});
+
+// --- Update a step (replace components) -------------------------------------
+// Body: { name?: string, status?: string, components?: [{ templateId|template_key, props }], ui_meta?: any }
+app.put('/api/steps/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, status, components, ui_meta } = req.body || {};
+  try {
+    await withTx(async (conn) => {
+      // ensure step exists
+      const [[exists]] = await conn.query(
+        `SELECT id FROM iset_intake.step WHERE id = ?`,
+        [id]
+      );
+      if (!exists) throw Object.assign(new Error('Not found'), { code: 404 });
+
+      if (name != null || status != null || typeof ui_meta !== 'undefined') {
+        await conn.query(
+          `UPDATE iset_intake.step SET
+             name = COALESCE(?, name),
+             status = COALESCE(?, status),
+             ui_meta = ?
+           WHERE id = ?`,
+          [
+            name ?? null,
+            status ?? null,
+            typeof ui_meta === 'undefined' ? null : JSON.stringify(ui_meta),
+            id
+          ]
+        );
+      }
+
+      if (Array.isArray(components)) {
+        // replace all components atomically
+        await conn.query(`DELETE FROM iset_intake.step_component WHERE step_id = ?`, [id]);
+        if (components.length) {
+          const resolved = await resolveTemplateIds(components, conn);
+          const values = resolved.map((c, i) => [
+            id,
+            i + 1,
+            c.templateId,
+            c.props ? JSON.stringify(c.props) : null,
+          ]);
+          await conn.query(
+            `INSERT INTO iset_intake.step_component (step_id, position, template_id, props_overrides)
+             VALUES ?`,
+            [values]
+          );
+        }
+      }
+    });
+    res.status(200).json({ id, message: 'Step updated' });
+  } catch (err) {
+    if (err.code === 404) return res.status(404).json({ error: 'Step not found' });
+    if (err.code === 400) return res.status(400).json({ error: err.message });
+    console.error('PUT /api/steps/:id failed:', err);
+    res.status(500).json({ error: 'Failed to update step' });
+  }
+});
+
+// --- Delete a step ----------------------------------------------------------
+app.delete('/api/steps/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [[ref]] = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM iset_intake.workflow_step WHERE step_id = ?`,
+      [id]
+    );
+    if (ref.cnt > 0) {
+      return res.status(409).json({ error: `Step is used by ${ref.cnt} workflow(s)` });
+    }
+    await withTx(async (conn) => {
+      await conn.query(`DELETE FROM iset_intake.step_component WHERE step_id = ?`, [id]);
+      await conn.query(`DELETE FROM iset_intake.step WHERE id = ?`, [id]);
+    });
+    res.status(200).json({ message: 'Step deleted' });
+  } catch (err) {
+    console.error('DELETE /api/steps/:id failed:', err);
+    res.status(500).json({ error: 'Failed to delete step' });
+  }
+});
 
 /**
  * Helper to insert a new event into iset_case_event.

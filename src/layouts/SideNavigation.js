@@ -34,7 +34,7 @@ const SideNavigation = ({ currentRole }) => {
       type: 'section',
       text: 'Other Dashboards',
       items: [
-        { type: 'link', text: 'Case Management', href: '/case-management' },
+  // Removed duplicate href '/case-management' (already present as Application Assessment above)
         { type: 'link', text: 'Reminders and Notifications', href: '/manage-notifications' },
         { type: 'link', text: 'Secure Messaging', href: '/manage-messages' },
         { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },
@@ -68,7 +68,7 @@ const SideNavigation = ({ currentRole }) => {
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
         { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
         { type: 'link', text: 'Test Config Dashboard', href: '/test-config-dashboard' },
-        { type: 'link', text: 'Intake Editor', href: '/manage-components' },
+  // Removed duplicate href '/manage-components' (already present under Other Dashboards)
       ],
     },
     {

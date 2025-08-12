@@ -1,60 +1,49 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+// Ensure GOV.UK styles are available in-editor
+import "../css/govuk-frontend.min.css";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
-import { Grid, Box, Header, Button, Input, FormField, Container, SpaceBetween, Alert, Select } from "@cloudscape-design/components";
+import { Grid, Box, Header, Button, Container, SpaceBetween, Alert } from "@cloudscape-design/components";
 import { useParams, useHistory } from "react-router-dom";
-import { generateNunjucksFromComponents, generateRemoteStaticNunjucksFromComponents } from '../utils/nunjucksBuilder';
 import PropertiesPanel from './PropertiesPanel.js';
+
+const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5001';
 
 const setComponentConfigValue = (path, value, selectedComponent) => {
   if (!selectedComponent || !selectedComponent.props) return;
   const keys = path.split('.');
   let current = selectedComponent.props;
-
   for (let i = 0; i < keys.length - 1; i++) {
     if (!(keys[i] in current)) current[keys[i]] = {};
     current = current[keys[i]];
   }
-
   current[keys[keys.length - 1]] = value;
 };
 
-const ComponentItem = ({ component, onAdd }) => {
-  return (
-    <div
-      style={{ padding: "8px", border: "1px solid #ccc", cursor: "pointer" }}
-      onClick={() => {
-        onAdd(component);
-      }}
-    >
-      {component.label}
-    </div>
-  );
-};
+const ComponentItem = ({ component, onAdd }) => (
+  <div
+    style={{ padding: "8px", border: "1px solid #ccc", cursor: "pointer" }}
+    onClick={() => onAdd(component)}
+  >
+    {component.label}
+  </div>
+);
 
-const PreviewArea = ({ components, setComponents, handleSelectComponent, selectedComponent, template }) => {
+const PreviewArea = ({ components, setComponents, handleSelectComponent, selectedComponent }) => {
   const moveComponent = (dragIndex, hoverIndex) => {
-    setComponents((prevComponents) => {
-      if (
-        dragIndex < 0 ||
-        hoverIndex < 0 ||
-        dragIndex >= prevComponents.length ||
-        hoverIndex >= prevComponents.length
-      ) {
-        return prevComponents; // Ensure valid indices
+    setComponents(prevComponents => {
+      if (dragIndex < 0 || hoverIndex < 0 || dragIndex >= prevComponents.length || hoverIndex >= prevComponents.length) {
+        return prevComponents;
       }
-
-      const updatedComponents = [...prevComponents];
-      const [movedItem] = updatedComponents.splice(dragIndex, 1);
-      updatedComponents.splice(hoverIndex, 0, movedItem);
-
-      return updatedComponents;
+      const updated = [...prevComponents];
+      const [moved] = updated.splice(dragIndex, 1);
+      updated.splice(hoverIndex, 0, moved);
+      return updated;
     });
   };
-
   return (
-    <div style={{ minHeight: "200px", border: "2px dashed #ccc", padding: "10px", backgroundColor: "#f5f3e5" }}>
-      {components.map((comp, index) => (
+    <div className="stage">
+    {components.map((comp, index) => (
         <DraggablePreviewItem
           key={comp.type + index}
           index={index}
@@ -62,9 +51,14 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
           moveComponent={moveComponent}
           setComponents={setComponents}
           handleSelectComponent={handleSelectComponent}
-          selectedComponent={selectedComponent}
+      selectedComponent={selectedComponent}
         />
       ))}
+      {components.length === 0 && (
+        <Box color="inherit" textAlign="center" padding="m" variant="div" style={{ color: '#777' }}>
+          Drag from the library or click a component to add it here
+        </Box>
+      )}
     </div>
   );
 };
@@ -73,98 +67,103 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
   const [{ isDragging }, drag] = useDrag(() => ({
     type: "REORDER_COMPONENT",
     item: { index },
-    collect: (monitor) => ({
-      isDragging: !!monitor.isDragging(),
-    }),
+    collect: monitor => ({ isDragging: !!monitor.isDragging() })
   }));
 
-  const [, drop] = useDrop(() => ({
+  const [, drop] = useDrop({
     accept: "REORDER_COMPONENT",
-    hover: (draggedItem) => {
-      if (draggedItem.index !== index && draggedItem.index !== undefined) {
-        moveComponent(draggedItem.index, index);
-        draggedItem.index = index;
+    hover: (dragged) => {
+      if (dragged.index !== index && dragged.index !== undefined) {
+        moveComponent(dragged.index, index);
+        dragged.index = index;
       }
-    },
-  }));
+    }
+  });
 
-  const handleDelete = (e) => {
+  const handleDelete = e => {
     e.stopPropagation();
-    setComponents((prev) => {
-      const updatedComponents = prev.filter((_, i) => i !== index);
-      if (selectedComponent?.index === index) {
-        handleSelectComponent(null);
-      }
-      return updatedComponents;
+    setComponents(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      if (selectedComponent?.index === index) handleSelectComponent(null);
+      return updated;
     });
   };
 
-  const handleClick = () => {
-    handleSelectComponent(index);
-  };
+  const handleClick = () => handleSelectComponent(index);
 
-  const getClassName = (type) => {
-    switch (type) {
-      case "header":
-        return "govuk-caption-l";
-      case "question":
-        return "govuk-heading-l";
-      case "hint":
-        return "govuk-hint";
-      case "select":
-        return "govuk-form-group";
-      case "radio":
-        return "govuk-form-group";
-      default:
-        return "";
+  // Server-rendered GOV.UK component (nunjucks output)
+  function useNunjucksHTML({ templateKey, templateId, version = 1, props }) {
+    const [html, setHtml] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const abortRef = useRef(null);
+    const debounceRef = useRef(null);
+
+    useEffect(() => {
+      if (!props || !(templateKey || templateId)) { setHtml(''); setError(''); return; }
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(async () => {
+        if (abortRef.current) abortRef.current.abort();
+        const ac = new AbortController(); abortRef.current = ac;
+        setLoading(true); setError('');
+        try {
+          const res = await fetch(`${API_BASE}/api/render/component`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ templateKey, templateId, version, props }),
+            signal: ac.signal
+          });
+          const txt = await res.text();
+          if (!res.ok) throw new Error(txt || `HTTP ${res.status}`);
+          setHtml(txt);
+        } catch (e) {
+          if (e.name !== 'AbortError') setError(String(e.message || e));
+        } finally {
+          setLoading(false);
+        }
+      }, 150);
+      return () => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        if (abortRef.current) abortRef.current.abort();
+      };
+    }, [templateKey, templateId, version, JSON.stringify(props)]);
+
+    return { html, loading, error };
+  }
+
+  const RenderComponentCard = ({ comp }) => {
+    // Prefer templateId from DB, fall back to key/type.
+    const templateId  = comp?.templateId ?? comp?.template_id ?? comp?.id ?? null;
+    const templateKey = comp?.template_key ?? comp?.type ?? null;
+    const { html, loading, error } = useNunjucksHTML({
+      templateId,
+      templateKey,
+      version: comp?.version ?? 1,
+      props: comp?.props || {}
+    });
+    if (!templateId && !templateKey) {
+      return <div className="govuk-hint" style={{ color: '#b00' }}>Missing template reference</div>;
     }
+    if (error) return <div className="govuk-hint" style={{ color: '#b00' }}>Render error: {error}</div>;
+    if (loading && !html) return <div className="govuk-hint">Rendering…</div>;
+    return <div className="govuk-embedded" dangerouslySetInnerHTML={{ __html: html }} />;
   };
-
-  const [renderedHtml, setRenderedHtml] = useState("");
-
-  useEffect(() => {
-    const render = async () => {
-      const template = generateNunjucksFromComponents([comp]);
-      try {
-        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/render-njk`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ template, props: comp.props }),
-        });
-        const html = await response.text();
-        setRenderedHtml(html);
-      } catch (err) {}
-    };
-    render();
-  }, [comp]);
 
   return (
     <div
-      ref={(node) => drag(drop(node))}
-      style={{
-        marginBottom: "10px",
-        border: "1px solid #000",
-        padding: "8px",
-        position: "relative",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        backgroundColor: isDragging ? "#f0f0f0" : "white",
-        cursor: "grab",
-        backgroundColor: selectedComponent?.index === index ? "#e0e0e0" : "white",
-      }}
-      onClick={(e) => {
-        if (selectedComponent?.index !== index) {
-          handleSelectComponent(index);
-        }
+      ref={node => drag(drop(node))}
+      className={`stage-card${selectedComponent?.index === index ? ' selected' : ''}`}
+      style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'grab', opacity: isDragging ? 0.9 : 1 }}
+      onClick={e => {
+        if (selectedComponent?.index !== index) handleSelectComponent(index);
         e.stopPropagation();
       }}
     >
-      <div style={{ padding: "5px", fontWeight: "bold", userSelect: "none" }}>⠿</div>
-      <div className={getClassName(comp.type)} onClick={handleClick} style={{ flex: 1 }}>
-        <div dangerouslySetInnerHTML={{ __html: renderedHtml }} />
+      <div className="handle" style={{ padding: 5, fontWeight: 'bold', userSelect: 'none' }}>⠿</div>
+      <div onClick={handleClick} style={{ flex: 1 }}>
+        <RenderComponentCard comp={comp} />
       </div>
-      <Button onClick={handleDelete} iconName="close" variant="icon" />
+      <Button className="delete" onClick={handleDelete} iconName="close" variant="icon" />
     </div>
   );
 };
@@ -175,91 +174,122 @@ const ModifyComponent = () => {
   const [selectedComponent, setSelectedComponent] = useState(null);
   const [availableComponents, setAvailableComponents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [configPath, setConfigPath] = useState("");
+  // DB-only model (no file paths)
+  // template lookups (filled after library fetch)
+  const tplById = useMemo(() => new Map(availableComponents.map(t => [t.id, t])), [availableComponents]);
   const { id } = useParams();
   const history = useHistory();
-  const [template, setTemplate] = useState('');
   const [alert, setAlert] = useState(null);
   const [name, setName] = useState('');
   const [status, setStatus] = useState('');
   const [initialName, setInitialName] = useState('');
   const [initialStatus, setInitialStatus] = useState('');
+  // compute hasChanges (deep) to gate buttons
+  const hasChanges = useMemo(() => {
+    const a = { name, status, components };
+    const b = { name: initialName, status: initialStatus, components: initialComponents };
+    return JSON.stringify(a) !== JSON.stringify(b);
+  }, [name, status, components, initialName, initialStatus, initialComponents]);
 
   useEffect(() => {
     if (id === 'new') {
       setComponents([]);
       setName('Untitled BlockStep');
       setStatus('active');
-      setConfigPath('');
       setInitialComponents([]);
       setInitialName('Untitled BlockStep');
       setInitialStatus('active');
       setLoading(false);
     } else if (id) {
-      const fetchBlockStepDetails = async () => {
+      // DB-backed step load
+      const fetchStep = async () => {
         try {
-          const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/blocksteps/${id}`);
-
-          if (!response.ok) {
-            throw new Error(`Failed to fetch BlockStep details: ${response.statusText}`);
+          const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps/${id}`);
+          if (res.status === 404) {
+            // Step not found: initialize a draft instead of failing
+            setAlert({ type: 'warning', message: `Step ${id} not found. Starting a new draft.` });
+            setName('Untitled BlockStep');
+            setStatus('active');
+            setComponents([]);
+            setInitialComponents([]);
+            setInitialName('Untitled BlockStep');
+            setInitialStatus('active');
+            return; // finally still runs (loading -> false)
           }
-
-          const data = await response.json();
-
-          if (!data.config_path) {
-            throw new Error("No config_path found in BlockStep data.");
-          }
-
-          setConfigPath(data.config_path);
-          setName(data.name);
-          setStatus(data.status);
-          setInitialName(data.name);
-          setInitialStatus(data.status);
-
-          const jsonPath = data.config_path.replace('.njk', '.json');
-          try {
-            const jsonRes = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/load-blockstep-json?path=${encodeURIComponent(jsonPath)}`);
-            if (!jsonRes.ok) {
-              throw new Error(`Failed to load JSON: ${jsonRes.statusText}`);
-            }
-            const jsonData = await jsonRes.json();
-            setComponents(jsonData.components || []);
-            setInitialComponents(jsonData.components || []);
-            setLoading(false);
-            return;
-          } catch (jsonError) {}
-
-          setLoading(false);
-        } catch (error) {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          setName(data.name || 'Untitled BlockStep');
+          setStatus(data.status || 'active');
+          setInitialName(data.name || 'Untitled BlockStep');
+          setInitialStatus(data.status || 'active');
+          const comps = Array.isArray(data.components) ? data.components : [];
+          setComponents(comps);
+          setInitialComponents(comps);
+        } catch (e) {
+          console.error('Failed to load step', e);
+        } finally {
           setLoading(false);
         }
       };
-
-      fetchBlockStepDetails();
+      fetchStep();
     }
   }, [id]);
 
   useEffect(() => {
     const fetchAvailableComponents = async () => {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/govuk-components`);
-        const data = await response.json();
-
+        const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/component-templates`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
         const parsed = data
-          .filter((component) => component.status === 'active')
-          .map((c) => ({
-            ...c,
-            props: typeof c.props === 'string' ? JSON.parse(c.props) : c.props,
+          .filter(t => t.status === 'active')
+          .map(t => ({
+            id: t.id,
+            type: t.type,
+            label: t.label,
+            description: t.description ?? '',
+            props: JSON.parse(JSON.stringify(t.props || {})),
+            editable_fields: t.editable_fields || [],
+            has_options: !!t.has_options,
+            option_schema: t.option_schema || null,
+            template_key: t.key,
+            version: t.version
           }));
-
         setAvailableComponents(parsed);
-      } catch (error) {}
+      } catch (err) {
+        console.error('Failed to load component templates:', err);
+        setAvailableComponents([]);
+      }
     };
-
     fetchAvailableComponents();
   }, []);
 
-  const handleSelectComponent = (index) => {
+  // Enrich components (loaded from DB) with template metadata once templates are known.
+  useEffect(() => {
+    if (!components.length || !availableComponents.length) return;
+    setComponents(prev =>
+      prev.map(c => {
+        // if already enriched, keep as-is
+        if (c.editable_fields && c.editable_fields.length) return c;
+        const tpl =
+          tplById.get(c.templateId ?? c.template_id ?? c.id) ||
+          availableComponents.find(t => t.template_key === c.template_key || t.type === c.type);
+        if (!tpl) return c;
+        return {
+          ...c,
+          type: c.type ?? tpl.type,
+          label: c.label ?? tpl.label,
+          template_key: c.template_key ?? tpl.template_key,
+          version: c.version ?? tpl.version,
+          editable_fields: tpl.editable_fields || [],
+          has_options: !!tpl.has_options,
+          option_schema: tpl.option_schema || null
+        };
+      })
+    );
+  }, [components.length, availableComponents, tplById]);
+
+  const handleSelectComponent = index => {
     setSelectedComponent(
       index !== null
         ? {
@@ -268,9 +298,22 @@ const ModifyComponent = () => {
             props: {
               ...components[index].props,
               items: components[index].props?.items ?? [],
-              mode: components[index].props?.props?.mode || "static",
-              endpoint: components[index].props?.props?.endpoint || null,
+              mode: components[index].props?.props?.mode || 'static',
+              endpoint: components[index].props?.props?.endpoint || null
             },
+            // surface schema to properties panel (merge from template if missing)
+            editable_fields: (() => {
+              const existing = components[index].editable_fields;
+              if (existing && existing.length) return existing;
+              const tpl =
+                tplById.get(
+                  components[index].templateId ?? components[index].template_id ?? components[index].id
+                ) ||
+                availableComponents.find(
+                  t => t.template_key === components[index].template_key || t.type === components[index].type
+                );
+              return tpl?.editable_fields || [];
+            })()
           }
         : null
     );
@@ -289,140 +332,113 @@ const ModifyComponent = () => {
 
   const updateComponentProperty = (path, value, isNested = false) => {
     if (!selectedComponent) return;
-
-    setComponents((prevComponents) => {
-      const newComponents = prevComponents.map((comp, idx) => {
+    setComponents(prev => {
+      const newComponents = prev.map((comp, idx) => {
         if (idx !== selectedComponent.index) return comp;
-
         const updatedProps = { ...comp.props };
-
-        if (isNested) {
-          setNestedProp(updatedProps, path, value);
-        } else {
-          updatedProps[path] = value;
-        }
-
+        if (isNested) setNestedProp(updatedProps, path, value); else updatedProps[path] = value;
         return { ...comp, props: updatedProps };
       });
-
-      setSelectedComponent((prev) => {
-        if (!prev) return null;
-        return {
-          ...newComponents[selectedComponent.index],
-          index: selectedComponent.index,
-        };
-      });
-
+      setSelectedComponent(prevSel => prevSel ? { ...newComponents[selectedComponent.index], index: selectedComponent.index } : null);
       return newComponents;
     });
-
     setInitialComponents([]);
   };
 
+  // normalise editor components to API payload
+  const toApiComponents = (arr) =>
+    (Array.isArray(arr) ? arr : []).map(c => ({
+      templateId: c.templateId ?? c.template_id ?? c.id, // be forgiving
+      props: c.props || {}
+    }));
+
   const handleSaveTemplate = async () => {
-    if (!components || components.length === 0) {
-      setAlert({ type: 'error', message: "No components to save." });
-      return;
-    }
-
-    const updatedTemplate = await generateRemoteStaticNunjucksFromComponents(components);
-
-    if (id === 'new') {
-      try {
-        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/blocksteps`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, status, components, njkContent: updatedTemplate }),
+    // DB-only save of step JSON
+    try {
+      const payload = { name, status, components: toApiComponents(components) };
+      if (id === 'new') {
+        const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
         });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-          throw new Error(`Failed to create new BlockStep: ${result.message}`);
-        }
-
-        setAlert({ type: 'success', message: "New BlockStep created successfully!" });
-        history.push(`/modify-component/${result.id}`);
-      } catch (error) {
-        setAlert({ type: 'error', message: "Failed to create new BlockStep." });
+        const out = await res.json();
+        if (!res.ok) throw new Error(out?.error || `HTTP ${res.status}`);
+        setAlert({ type: 'success', message: 'Created new Step.' });
+        history.push(`/modify-component/${out.id}`);
+      } else {
+        const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const out = await res.json();
+        if (!res.ok) throw new Error(out?.error || `HTTP ${res.status}`);
+        setAlert({ type: 'success', message: 'Saved changes.' });
       }
-    } else {
-      if (!configPath) {
+      setInitialComponents(components);
+      setInitialName(name);
+      setInitialStatus(status);
+    } catch (e) {
+      console.error('Save step failed', e);
+      setAlert({ type: 'error', message: 'Failed to save step.' });
+    }
+  };
+
+  const handleSaveAsNew = async () => {
+    try {
+      const payload = { name: `${name} (copy)`, status, components: toApiComponents(components) };
+      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out?.error || `HTTP ${res.status}`);
+      setAlert({ type: 'success', message: 'Copied as new Step.' });
+      history.push(`/modify-component/${out.id}`);
+    } catch (e) {
+      console.error('Save-as-new failed', e);
+      setAlert({ type: 'error', message: 'Failed to create copy.' });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (id === 'new') return;
+    if (!window.confirm('Delete this step? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps/${id}`, { method: 'DELETE' });
+      const out = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        setAlert({ type: 'warning', message: out?.error || 'Step is referenced by a workflow.' });
         return;
       }
-
-      try {
-        let newConfigPath = configPath;
-        const jsonPath = configPath.replace('.njk', '.json');
-
-        // Check if the name has changed and rename files if necessary
-        if (name !== initialName) {
-          const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-          newConfigPath = `blocksteps/blockstep_${slug}_v1.njk`;
-          const newJsonPath = newConfigPath.replace('.njk', '.json');
-
-          // Rename the Nunjucks file
-          await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/save-njk-file`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ template_path: newConfigPath, content: updatedTemplate }),
-          });
-
-          // Rename the JSON file
-          await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/save-blockstep-json`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ json_path: newJsonPath, content: JSON.stringify({ name, status, components }, null, 2) }),
-          });
-
-          // Update the database entry with the new config path
-          await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/blocksteps/${id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, status, config_path: newConfigPath }),
-          });
-
-          setConfigPath(newConfigPath); // Update the local state
-        } else {
-          // Save the Nunjucks file
-          await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/save-njk-file`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ template_path: configPath, content: updatedTemplate }),
-          });
-
-          // Save the JSON file
-          await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/save-blockstep-json`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ json_path: jsonPath, content: JSON.stringify({ name, status, components }, null, 2) }),
-          });
-
-          // Update the database entry if status has changed
-          if (status !== initialStatus) {
-            await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/blocksteps/${id}`, {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name, status }),
-            });
-          }
-        }
-
-        setAlert({ type: 'success', message: "Template and components JSON saved successfully!" });
-      } catch (error) {
-        setAlert({ type: 'error', message: "Failed to save template or components JSON." });
-      }
+      if (!res.ok) throw new Error(out?.error || `HTTP ${res.status}`);
+      setAlert({ type: 'success', message: 'Step deleted.' });
+      history.push('/modify-component/new');
+    } catch (e) {
+      console.error('Delete step failed', e);
+      setAlert({ type: 'error', message: 'Failed to delete step.' });
     }
   };
 
-  const handleCancel = () => {
-    history.push('/manage-components');
-  };
+  const handleCancel = () => history.push('/manage-components');
 
-  const hasChanges = JSON.stringify(components) !== JSON.stringify(initialComponents) || name !== initialName || status !== initialStatus;
+  /* existing state & effects unchanged */
 
   return (
     <DndProvider backend={HTML5Backend}>
+      <style>{`
+        .stage { padding: 8px; background: #fafafa; min-height: 160px; border: 1px dashed #d5dbdb; }
+        .stage-card { background:#fff; border:1px solid #d5dbdb; border-radius:8px; padding:12px; margin-bottom:12px; position:relative; }
+        .stage-card.selected { box-shadow: 0 0 0 2px #0972d3 inset; }
+        .stage-card .handle { cursor:grab; position:absolute; left:8px; top:8px; opacity:0.6; }
+        .stage-card .delete { cursor:pointer; position:absolute; right:8px; top:8px; opacity:0.7; }
+  .stage .govuk-embedded { background:#fff; }
+        /* GOV.UK background normalised inside editor */
+        .stage .govuk-form-group { margin-bottom: 20px; }
+        .stage .govuk-label, .stage .govuk-fieldset__legend { margin-bottom: 5px; }
+      `}</style>
       <Container
         header={
           <Header
@@ -431,7 +447,9 @@ const ModifyComponent = () => {
             actions={
               <SpaceBetween direction="horizontal" size="xs">
                 <Button onClick={handleCancel}>Cancel</Button>
-                <Button onClick={handleSaveTemplate} disabled={!hasChanges}>Save Changes</Button>
+                {id !== 'new' && <Button onClick={handleSaveAsNew} variant="normal">Save as New</Button>}
+                {id !== 'new' && <Button onClick={handleDelete} variant="normal">Delete</Button>}
+                <Button onClick={handleSaveTemplate} disabled={!hasChanges} variant="primary">Save Changes</Button>
               </SpaceBetween>
             }
           >
@@ -456,28 +474,38 @@ const ModifyComponent = () => {
               <ComponentItem
                 key={index}
                 component={comp}
-                onAdd={(component) => {
+        onAdd={component => {
                   const defaultProps = {
-                    ...component.props,
-                    items: component.props?.items ?? []
+                    ...(component.props || {}),
+                    items: (component.props && component.props.items) ? [...component.props.items] : []
                   };
-                  const newComponent = { ...component, props: defaultProps };
-                  setComponents((prev) => [...prev, newComponent]);
+                  const newComponent = {
+                    type: component.type,
+                    label: component.label,
+          props: defaultProps,
+          // for backend saves
+          templateId: component.id,
+          // for preview/template lookup
+          template_key: component.template_key, // specify backend template to render
+                    // carry schema through so Properties panel can render controls
+                    editable_fields: component.editable_fields || [],
+                    has_options: component.has_options || false,
+                    option_schema: component.option_schema || null
+                  };
+                  setComponents(prev => [...prev, newComponent]);
                 }}
               />
             ))}
           </Box>
 
-          <Box padding="m">
+      <Box padding="m">
             <Header variant="h3">Working Area</Header>
-
             {!loading && (
               <PreviewArea
                 components={components}
                 setComponents={setComponents}
                 handleSelectComponent={handleSelectComponent}
-                selectedComponent={selectedComponent}
-                template={template}
+        selectedComponent={selectedComponent}
               />
             )}
           </Box>
