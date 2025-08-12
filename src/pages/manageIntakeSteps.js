@@ -13,8 +13,8 @@ const ManageIntakeSteps = ({ header, headerInfo, toggleHelpPanel, updateBreadcru
   const [selectedBlockStep, setSelectedBlockStep] = useState(null);
 
   const items = [
-    { id: 'blockStepLibrary', rowSpan: 4, columnSpan: 2, data: { title: 'Block Step Library', content: <IntakeStepTableWidget setSelectedBlockStep={setSelectedBlockStep} /> } },
-    { id: 'previewBlockStep', rowSpan: 4, columnSpan: 2, data: { title: 'Preview', content: <PreviewIntakeStep selectedBlockStep={selectedBlockStep} /> } },
+    { id: 'stepLibrary', rowSpan: 4, columnSpan: 2, data: { title: 'Intake Step Library', content: <IntakeStepTableWidget setSelectedBlockStep={setSelectedBlockStep} /> } },
+    { id: 'previewStep', rowSpan: 4, columnSpan: 2, data: { title: 'Preview', content: <PreviewIntakeStep selectedBlockStep={selectedBlockStep} /> } },
     { id: 'previewNunjucks', rowSpan: 6, columnSpan: 4, data: { title: 'Preview Nunjucks', content: <PreviewNunjucks selectedBlockStep={selectedBlockStep} /> } },
   ];
 

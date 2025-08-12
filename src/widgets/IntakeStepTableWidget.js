@@ -3,53 +3,52 @@ import { Box, Header, Button, SpaceBetween, Table, TextFilter, ButtonDropdown, L
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useHistory } from 'react-router-dom';
 
-const BlockStepLibrary = ({ actions, setSelectedBlockStep }) => { // Add setSelectedBlockStep to props
-  const [blockSteps, setBlockSteps] = useState([]);
+const IntakeStepTableWidget = ({ actions, setSelectedBlockStep }) => {
+  const [steps, setSteps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filteringText, setFilteringText] = useState('');
   const history = useHistory();
 
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/blocksteps`)
+    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps`)
       .then(response => response.json())
       .then(data => {
-        setBlockSteps(data);
+        setSteps(data);
         setLoading(false);
       })
       .catch(error => {
-        console.error('Error fetching block steps:', error);
+        console.error('Error fetching steps:', error);
         setLoading(false);
       });
   }, []);
 
-  const handleModify = (blockStep) => {
-    history.push(`/modify-component/${blockStep.id}`);
+  const handleModify = (step) => {
+    history.push(`/modify-component/${step.id}`);
   };
 
-  const handleDelete = async (blockStep) => {
-    if (window.confirm(`Are you sure you want to delete BlockStep "${blockStep.name}"?`)) {
+  const handleDelete = async (step) => {
+    if (window.confirm(`Delete intake step "${step.name}"? This cannot be undone.`)) {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/blocksteps/${blockStep.id}`, {
+        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps/${step.id}`, {
           method: 'DELETE',
         });
 
         if (response.ok) {
-          setBlockSteps(prev => prev.filter(item => item.id !== blockStep.id));
-          alert('BlockStep deleted successfully.');
+          setSteps(prev => prev.filter(item => item.id !== step.id));
+          alert('Step deleted.');
         } else {
-          const error = await response.json();
-          alert(`Failed to delete BlockStep: ${error.message}`);
+          const error = await response.json().catch(() => ({}));
+          alert(`Failed to delete step: ${error.error || error.message || response.status}`);
         }
       } catch (error) {
-        console.error('Error deleting BlockStep:', error);
-        alert('An error occurred while deleting the BlockStep.');
+        console.error('Error deleting step:', error);
+        alert('An error occurred while deleting the step.');
       }
     }
   };
 
-  const handleSelect = (blockStep) => {
-    console.log("Selected BlockStep:", blockStep); // Debugging output
-    setSelectedBlockStep(blockStep); // Use setSelectedBlockStep from props
+  const handleSelect = (step) => {
+    setSelectedBlockStep?.(step);
   };
 
   const handleCreateNew = () => {
@@ -60,13 +59,13 @@ const BlockStepLibrary = ({ actions, setSelectedBlockStep }) => { // Add setSele
     <BoardItem
       header={
         <Header
-          description="Manage and modify the WCAG frontend blocks that are used to assemble intake workflows."
+          description="Manage and modify intake steps used in workflows."
           actions={
             <Button
               iconAlign="right"
               onClick={handleCreateNew} // Add onClick handler
             >
-              Create New
+              Create New Step
             </Button>
           }
         >
@@ -129,14 +128,14 @@ const BlockStepLibrary = ({ actions, setSelectedBlockStep }) => { // Add setSele
               )
             }
           ]}
-          items={blockSteps.filter(item => item.name.toLowerCase().includes(filteringText.toLowerCase()))}
+          items={steps.filter(item => item.name.toLowerCase().includes(filteringText.toLowerCase()))}
           loading={loading}
           loadingText="Loading resources"
           empty={
             <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
               <SpaceBetween size="m">
                 <b>No resources</b>
-                <Button>Create resource</Button>
+                <Button onClick={handleCreateNew}>Create step</Button>
               </SpaceBetween>
             </Box>
           }
@@ -145,7 +144,7 @@ const BlockStepLibrary = ({ actions, setSelectedBlockStep }) => { // Add setSele
               filteringPlaceholder="Find intake step"
               filteringText={filteringText}
               onChange={({ detail }) => setFilteringText(detail.filteringText)}
-              countText={`${blockSteps.length} matches`}
+              countText={`${steps.length} matches`}
             />
           }
         />
@@ -154,4 +153,4 @@ const BlockStepLibrary = ({ actions, setSelectedBlockStep }) => { // Add setSele
   );
 };
 
-export default BlockStepLibrary;
+export default IntakeStepTableWidget;

@@ -4,36 +4,37 @@ import ReactFlow, { ReactFlowProvider, useEdgesState, useNodesState } from 'reac
 import 'reactflow/dist/style.css';
 import ELK from 'elkjs/lib/elk.bundled.js';
 
-// API base from .env (CRA injects REACT_APP_* at build time)
+// API base from .env (CRA exposes REACT_APP_* at build time)
 const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
 
-// ----- Demo data fallback -----
+// ----- Demo library (left panel fallback if API empty) -----
 const sampleBlockSteps = [
   { id: 'lib-1', name: 'Collect Personal Info' },
   { id: 'lib-2', name: 'Programme Type' },
   { id: 'lib-3', name: 'Document Upload' }
 ];
 
-const initialSteps = [
-  { id: 'A', name: 'Collect Personal Info', routing: { mode: 'linear', next: 'B' } },
-  {
-    id: 'B',
-    name: 'Programme Type',
-    routing: {
-      mode: 'byOption',
-      fieldKey: 'programme',
-      options: ['Training', 'Wage Subsidy', 'Other'],
-      mapping: { Training: 'C', 'Wage Subsidy': 'C' },
-      defaultNext: 'D'
-    }
-  },
-  { id: 'C', name: 'Eligibility Check', routing: { mode: 'linear', next: 'D' } },
-  { id: 'D', name: 'Document Upload', routing: { mode: 'linear' } }
-];
+// Start with an empty workflow canvas
+const initialSteps = [];
 
 // ----- Helpers -----
 const elk = new ELK();
 const NODE_SIZE = { width: 220, height: 90 };
+
+// Compute the bounding box of laid-out nodes (flow coordinates)
+function calcBounds(laidOutNodes) {
+  if (!laidOutNodes.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of laidOutNodes) {
+    const w = (n.style && n.style.width) || NODE_SIZE.width;
+    const h = (n.style && n.style.height) || NODE_SIZE.height;
+    const x1 = n.position.x, y1 = n.position.y;
+    const x2 = x1 + w, y2 = y1 + h;
+    if (x1 < minX) minX = x1; if (y1 < minY) minY = y1;
+    if (x2 > maxX) maxX = x2; if (y2 > maxY) maxY = y2;
+  }
+  return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
+}
 
 function nextStepId(steps) {
   let max = 0;
@@ -151,7 +152,8 @@ async function elkLayout(steps, edges) {
     nodes: steps.map(s => ({
       id: s.id,
       position: { x: byId.get(s.id)?.x || 0, y: byId.get(s.id)?.y || 0 },
-      data: { label: s.name, stepId: s.id },
+  // carry through referenced DB step id (if any) for properties panel field fetching
+  data: { label: s.name, stepId: s.stepId },
       targetPosition: 'top',
       sourcePosition: 'bottom',
       style: { width: NODE_SIZE.width, height: NODE_SIZE.height, border: '1px solid #d5dbdb', borderRadius: 8, background: 'white', padding: 8 }
@@ -170,6 +172,71 @@ function PropertiesPanel({ steps, selectedId, onChange, onDelete }) {
   const step = steps.find(s => s.id === selectedId) || null;
   const stepOpts = useMemo(() => (step ? stepOptionsFrom(steps, step.id) : []), [steps, step?.id]);
   const routing = step?.routing || { mode: 'linear' };
+
+  // Dynamic field/options from backend step definition (radio/select items)
+  const [fieldChoices, setFieldChoices] = useState([]); // [{label,value}]
+  const [optionsByField, setOptionsByField] = useState({}); // { fieldKey: [{value,label}] }
+  const [labelByValue, setLabelByValue] = useState({}); // { value: label }
+  const [loadingFields, setLoadingFields] = useState(false);
+  const [fieldErr, setFieldErr] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setFieldErr(null);
+      setFieldChoices([]); setOptionsByField({}); setLabelByValue({});
+      if (!step?.stepId) return; // no DB backing
+      try {
+        setLoadingFields(true);
+        const res = await fetch(`${API_BASE}/api/steps/${step.stepId}`, { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const choices = [];
+        const map = {};
+        (data.components || []).forEach(c => {
+          const key = (c.props && c.props.name) || null;
+          const tkey = c.templateKey || '';
+          if (!key) return;
+          if (tkey === 'radio' || tkey === 'select') {
+            const items = Array.isArray(c.props?.items) ? c.props.items : [];
+            const opts = items.map(it => ({ value: String(it?.value ?? ''), label: String(it?.text ?? String(it?.value ?? '')) })).filter(o => o.value.length > 0);
+            if (opts.length) { choices.push({ label: key, value: key }); map[key] = opts; }
+          }
+        });
+        if (cancelled) return;
+        setFieldChoices(choices);
+        setOptionsByField(map);
+        if (step && step.routing?.mode === 'byOption') {
+          const currentKey = step.routing.fieldKey;
+            const useKey = (currentKey && map[currentKey]) ? currentKey : (choices[0]?.value || currentKey);
+          if (useKey && (!currentKey || !Array.isArray(step.routing.options))) {
+            const newOpts = (map[useKey] || []).map(o => o.value);
+            onChange({ ...step, routing: { mode: 'byOption', fieldKey: useKey, options: newOpts, mapping: {}, defaultNext: undefined } });
+          }
+          const forLabels = (useKey && map[useKey]) ? map[useKey] : [];
+          setLabelByValue(Object.fromEntries(forLabels.map(o => [o.value, o.label])));
+        }
+        setLoadingFields(false);
+      } catch (e) {
+        if (!cancelled) { setFieldErr(String(e)); setLoadingFields(false); }
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [step?.stepId]);
+
+  useEffect(() => {
+    if (!step || step.routing?.mode !== 'byOption') return;
+    const fk = step.routing.fieldKey;
+    if (!fk) { setLabelByValue({}); return; }
+    const list = optionsByField[fk] || [];
+    setLabelByValue(Object.fromEntries(list.map(o => [o.value, o.label])));
+    const values = list.map(o => o.value);
+    if (values.length && JSON.stringify(values) !== JSON.stringify(step.routing.options || [])) {
+      onChange({ ...step, routing: { ...step.routing, options: values, mapping: {} } });
+    }
+  }, [optionsByField, step?.routing?.fieldKey]);
+
   if (!step) return (
     <Box textAlign="center" color="inherit" padding="m">
       <span style={{ color: '#888' }}>[Select a step]</span>
@@ -180,10 +247,7 @@ function PropertiesPanel({ steps, selectedId, onChange, onDelete }) {
     <SpaceBetween size="s">
       <Container header={<Header variant="h3">{step.name}</Header>}>
         <FormField label="Step title">
-          <Input
-            value={step.name}
-            onChange={({ detail }) => onChange({ ...step, name: detail.value })}
-          />
+          <Input value={step.name} onChange={({ detail }) => onChange({ ...step, name: detail.value })} />
         </FormField>
         <FormField label="Routing mode">
           <Select
@@ -193,7 +257,15 @@ function PropertiesPanel({ steps, selectedId, onChange, onDelete }) {
               if (mode === 'linear') setRouting({ mode: 'linear', next: undefined });
               else {
                 const existing = routing.mode === 'byOption' ? routing : null;
-                setRouting({ mode: 'byOption', fieldKey: existing?.fieldKey || 'optionField', options: existing?.options || ['Option A', 'Option B'], mapping: existing?.mapping || {}, defaultNext: existing?.defaultNext });
+                const firstKey = fieldChoices[0]?.value || existing?.fieldKey || 'optionField';
+                const values = (optionsByField[firstKey] || []).map(o => o.value);
+                setRouting({
+                  mode: 'byOption',
+                  fieldKey: firstKey,
+                  options: values.length ? values : (existing?.options || []),
+                  mapping: existing?.mapping || {},
+                  defaultNext: existing?.defaultNext
+                });
               }
             }}
             options={[{ label: 'Linear', value: 'linear' }, { label: 'By option', value: 'byOption' }]}
@@ -214,9 +286,15 @@ function PropertiesPanel({ steps, selectedId, onChange, onDelete }) {
           <SpaceBetween size="s">
             <FormField label="Option field (on this step)">
               <Select
-                selectedOption={{ label: routing.fieldKey, value: routing.fieldKey }}
-                onChange={({ detail }) => setRouting({ ...routing, fieldKey: detail.selectedOption.value })}
-                options={[{ label: routing.fieldKey, value: routing.fieldKey }]}
+                placeholder={loadingFields ? 'Loading…' : (fieldErr ? 'Failed to load fields' : 'Choose a field')}
+                selectedOption={routing.fieldKey ? selectObj(routing.fieldKey, fieldChoices) : null}
+                onChange={({ detail }) => {
+                  const fk = detail.selectedOption?.value; if (!fk) return;
+                  const values = (optionsByField[fk] || []).map(o => o.value);
+                  setRouting({ ...routing, fieldKey: fk, options: values, mapping: {} });
+                }}
+                options={fieldChoices}
+                filteringType="auto"
               />
             </FormField>
             <Container header={<Header variant="h4">Option mappings</Header>}>
@@ -224,12 +302,13 @@ function PropertiesPanel({ steps, selectedId, onChange, onDelete }) {
                 {routing.options.map(opt => {
                   const selected = selectObj(routing.mapping?.[opt], stepOpts);
                   return (
-                    <FormField key={opt} label={opt}>
+                    <FormField key={opt} label={labelByValue[opt] || opt}>
                       <Select
                         placeholder="Choose next step"
                         selectedOption={selected}
                         onChange={({ detail }) => {
                           const next = detail.selectedOption?.value;
+                          console.log('[map]', step.id, routing.fieldKey, `${opt} -> ${next}`);
                           setRouting({ ...routing, mapping: { ...(routing.mapping || {}), [opt]: next } });
                         }}
                         options={stepOpts}
@@ -261,12 +340,17 @@ export default function ModifyWorkflowEditorWidget() {
   const rfWrapRef = useRef(null);
   const [steps, setSteps] = useState(initialSteps);
   const [selectedId, setSelectedId] = useState(null);
-  const [library, setLibrary] = useState(sampleBlockSteps);
+  // (removed old fitRAF throttling)
+  const [library, setLibrary] = useState([]); // loaded from /api/steps
   const [libStatus, setLibStatus] = useState('idle'); // 'idle' | 'loading' | 'error' | 'done'
   const edgesModel = useMemo(() => buildEdgesFromModel(steps), [steps]);
   const [nodes, setNodes] = useNodesState([]);
   const [edges, setEdges] = useEdgesState([]);
   const [rf, setRf] = useState(null);
+  // Fit logic: wait for container size to stabilise before fitting
+  const needFitRef = useRef(false);
+  const fitTimerRef = useRef(0);
+  const sizeRef = useRef({ w: 0, h: 0 });
 
   // Validation state
   const validation = useMemo(() => validateWorkflow(steps), [steps]);
@@ -281,34 +365,82 @@ export default function ModifyWorkflowEditorWidget() {
 
   useEffect(() => { setNodes(ns => ns.map(n => ({ ...n, selected: n.id === selectedId }))); }, [selectedId, setNodes]);
 
+  // Layout on structure change
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const { nodes: laidOutNodes, edges: laidOutEdges } = await elkLayout(steps, edgesModel);
-      if (!cancelled) { setNodes(laidOutNodes); setEdges(laidOutEdges); }
+      if (!cancelled) {
+        const withSel = laidOutNodes.map(n => ({ ...n, selected: n.id === selectedId }));
+        setNodes(withSel);
+        setEdges(laidOutEdges);
+        // request a fit once the wrapper has settled
+        needFitRef.current = true;
+        // small debounce in case multiple changes batch together
+        if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
+        fitTimerRef.current = setTimeout(() => {
+          fitTimerRef.current = 0;
+            if (needFitRef.current && rf && nodes.length + laidOutNodes.length >= 0) {
+            try { rf.fitView({ padding: 0.2, includeHiddenNodes: true }); } catch {}
+            needFitRef.current = false;
+          }
+        }, 120);
+      }
     })();
     return () => { cancelled = true; };
-  }, [steps, edgesModel, setNodes, setEdges]);
+  }, [steps, edgesModel, setNodes, setEdges, rf, selectedId]);
 
-  useEffect(() => { if (rf && nodes.length) rf.fitView({ padding: 0.2, includeHiddenNodes: true }); }, [rf, nodes.length, edges.length]);
-  useEffect(() => { const el = rfWrapRef.current; if (el) console.log('RF wrapper size:', el.clientWidth, el.clientHeight); });
+  // Observe container resizes; when width/height change, re-fit after a brief idle
+  useEffect(() => {
+    const el = rfWrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const cr = entries[0]?.contentRect;
+      if (!cr) return;
+      const w = Math.round(cr.width), h = Math.round(cr.height);
+      if (w === 0 || h === 0) return;
+      if (w !== sizeRef.current.w || h !== sizeRef.current.h) {
+        sizeRef.current = { w, h };
+        needFitRef.current = true;
+        if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
+        fitTimerRef.current = setTimeout(() => {
+          fitTimerRef.current = 0;
+          if (needFitRef.current && rf) {
+            try { rf.fitView({ padding: 0.2, includeHiddenNodes: true }); } catch {}
+            needFitRef.current = false;
+          }
+        }, 120);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [rf]);
+  // Log RF container size once (avoid spam on every render)
+  useEffect(() => {
+    const el = rfWrapRef.current;
+    if (el) console.log('RF wrapper size:', el.clientWidth, el.clientHeight);
+  }, []);
 
-  // Load Blockstep Library from API
+  // Keyboard affordance: Esc clears selection
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setSelectedId(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Load Step Library from API (/api/steps)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         setLibStatus('loading');
-        const res = await fetch(`${API_BASE}/api/blocksteps`, { headers: { Accept: 'application/json' } });
+        const res = await fetch(`${API_BASE}/api/steps`, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const rows = await res.json();
         if (cancelled) return;
-        const items = rows.map(r => ({
-          id: `lib-${r.id}`,
-          name: r.name,
-          templateId: r.id,
-          type: r.type
-        }));
+  const items = rows.map(r => ({ id: `step-${r.id}`, stepId: r.id, name: r.name }));
         setLibrary(items);
         setLibStatus('done');
       } catch (e) {
@@ -322,7 +454,7 @@ export default function ModifyWorkflowEditorWidget() {
   const addFromLibrary = useCallback((lib) => {
     setSteps(prev => {
       const newId = nextStepId(prev);
-      const newStep = { id: newId, name: lib.name, routing: { mode: 'linear' } };
+      const newStep = { id: newId, name: lib.name, stepId: lib.stepId, routing: { mode: 'linear' } };
       const copy = prev.map(s => ({ ...s, routing: deepCloneRouting(s.routing) }));
       if (selectedId) {
         const idx = copy.findIndex(s => s.id === selectedId);
@@ -427,6 +559,12 @@ export default function ModifyWorkflowEditorWidget() {
         </Box>
         <Box padding="m">
           <Header variant="h3">Working Area</Header>
+          {/* Clear-selection affordance (only when something is selected) */}
+          <div style={{ textAlign: 'right', marginBottom: 8 }}>
+            {selectedId && (
+              <Button variant="link" onClick={() => setSelectedId(null)}>Clear selection (Esc)</Button>
+            )}
+          </div>
           {/* Tiny toolbar */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <Button onClick={fit}>Fit</Button>
@@ -434,20 +572,29 @@ export default function ModifyWorkflowEditorWidget() {
             <Button onClick={insertAfterSelected} disabled={!selectedId}>Insert after selected</Button>
             <Button onClick={deleteSelected} disabled={!selectedId}>Delete</Button>
           </div>
-          <div ref={rfWrapRef} style={{ width: '100%', height: '70vh', overflow: 'auto', border: '1px solid #e0e0e0', borderRadius: 6, background: 'white' }}>
+          <div
+            ref={rfWrapRef}
+            style={{
+              width: '100%',
+              height: '70vh',
+              overflow: 'hidden',
+              border: '1px solid #e0e0e0',
+              borderRadius: 6,
+              background: 'white'
+            }}
+          >
             <ReactFlowProvider>
               <ReactFlow
                 onInit={setRf}
                 nodes={nodes}
                 edges={edges}
-                onNodeClick={(_, node) => setSelectedId(node.id)}
-                onPaneClick={() => setSelectedId(null)}
-                fitView
+                onNodeClick={(_, node) => { console.log('node click', node.id); setSelectedId(node.id); }}
+                onPaneClick={() => { console.log('pane click'); setSelectedId(null); }}
                 style={{ width: '100%', height: '100%' }}
                 nodesDraggable={false}
                 nodesConnectable={false}
                 elementsSelectable={false}
-                panOnDrag={true}
+                panOnDrag={false}
                 selectionOnDrag={false}
                 zoomOnScroll={false}
                 proOptions={{ hideAttribution: true }}
@@ -461,11 +608,27 @@ export default function ModifyWorkflowEditorWidget() {
         </Box>
       </Grid>
       <style>{`
-        .react-flow__node { display: flex; align-items: center; justify-content: center; font-weight: 500; }
+        .react-flow__node { display: flex; align-items: center; justify-content: center; font-weight: 500; cursor: pointer; transition: box-shadow 120ms ease, background-color 120ms ease; }
+        .react-flow__node:hover { box-shadow: 0 0 0 2px #6b7280 inset; background-color: #f9fafb; }
         .react-flow__node.selected { box-shadow: 0 0 0 2px #0972d3 inset; }
-  .node-error { box-shadow: 0 0 0 2px #d13212 inset !important; }
+        .node-error { box-shadow: 0 0 0 2px #d13212 inset !important; }
         .react-flow__edge-text, .react-flow__edge-textbg { pointer-events: none; }
       `}</style>
     </Box>
   );
+}
+
+// Dev-only: tame Chrome's noisy ResizeObserver loop error without hiding real errors
+if (typeof window !== 'undefined') {
+  const swallowROError = (ev) => {
+    const msg = (ev && ev.message) || (ev && ev.reason && ev.reason.message) || (ev && ev.error && ev.error.message) || '';
+    if (typeof msg === 'string' && (msg.includes('ResizeObserver loop limit exceeded') || msg.includes('ResizeObserver loop completed with undelivered notifications'))) {
+      ev.preventDefault && ev.preventDefault();
+      ev.stopImmediatePropagation && ev.stopImmediatePropagation();
+      return true;
+    }
+    return false;
+  };
+  window.addEventListener('error', swallowROError, true);
+  window.addEventListener('unhandledrejection', swallowROError, true);
 }
