@@ -3,10 +3,12 @@ import { ContentLayout } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import WorkflowListWidget from '../widgets/WorkflowListWidget';
 import WorkflowPreviewWidget from '../widgets/WorkflowPreviewWidget';
+import WorkflowPropertiesWidget from '../widgets/WorkflowPropertiesWidget';
 
 const initialItems = [
-  { id: 'workflowList', rowSpan: 4, columnSpan: 2, data: { title: 'Workflow List' } },
-  { id: 'workflowPreview', rowSpan: 4, columnSpan: 2, data: { title: 'Workflow Preview' } },
+  { id: 'workflowList', rowSpan: 6, columnSpan: 2, data: { title: 'Workflow Library' } },
+  { id: 'workflowPreview', rowSpan: 6, columnSpan: 2, data: { title: 'Workflow Preview' } },
+  { id: 'workflowProps', rowSpan: 2, columnSpan: 4, data: { title: 'Workflow Properties' } },
 ];
 
 const ManageWorkflows = () => {
@@ -19,6 +21,14 @@ const ManageWorkflows = () => {
     }
     if (item.id === 'workflowPreview') {
       return <WorkflowPreviewWidget selectedWorkflow={selectedWorkflow} />;
+    }
+    if (item.id === 'workflowProps') {
+      return (
+        <WorkflowPropertiesWidget
+          workflow={selectedWorkflow}
+          onWorkflowUpdated={setSelectedWorkflow}
+        />
+      );
     }
     return null;
   };

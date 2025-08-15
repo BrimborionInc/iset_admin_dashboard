@@ -15,6 +15,29 @@
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
     -->
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <script>
+      // Early filter: silence benign ResizeObserver loop errors before React's dev overlay sees them
+      // Context: Chromium sometimes emits these during rapid layout; they're harmless but trigger the overlay in dev.
+      (function () {
+        function isROMessage(msg) {
+          return typeof msg === 'string' && (
+            msg.indexOf('ResizeObserver loop limit exceeded') !== -1 ||
+            msg.indexOf('ResizeObserver loop completed with undelivered notifications') !== -1
+          );
+        }
+        function handler(ev) {
+          var msg = (ev && ev.message) || (ev && ev.reason && ev.reason.message) || (ev && ev.error && ev.error.message) || '';
+          if (isROMessage(msg)) {
+            ev.preventDefault && ev.preventDefault();
+            ev.stopImmediatePropagation && ev.stopImmediatePropagation();
+            return true;
+          }
+          return false;
+        }
+        window.addEventListener('error', handler, true);
+        window.addEventListener('unhandledrejection', handler, true);
+      })();
+    </script>
     <!--
       Notice the use of %PUBLIC_URL% in the tags above.
       It will be replaced with the URL of the `public` folder during the build.

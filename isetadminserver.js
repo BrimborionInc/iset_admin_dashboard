@@ -360,6 +360,548 @@ app.get('/api/steps', async (req, res) => {
   }
 });
 
+// --- Workflow CRUD API -----------------------------------------------------
+// Data model recap:
+// - workflow(id, name, status)
+// - workflow_step(workflow_id, step_id, is_start)
+// - workflow_route(workflow_id, source_step_id, mode('linear'|'by_option'), field_key, default_next_step_id)
+// - workflow_route_option(workflow_id, source_step_id, option_value, next_step_id)
+
+// Helpers
+async function stepsExist(stepIds, conn) {
+  if (!Array.isArray(stepIds) || stepIds.length === 0) return true;
+  const [rows] = await conn.query(
+    `SELECT id FROM iset_intake.step WHERE id IN (${stepIds.map(() => '?').join(',')})`,
+    stepIds
+  );
+  return rows.length === stepIds.length;
+}
+
+async function getWorkflowDetails(workflowId) {
+  const [[wf]] = await pool.query(
+    `SELECT id, name, status, created_at, updated_at
+       FROM iset_intake.workflow
+      WHERE id = ?`,
+    [workflowId]
+  );
+  if (!wf) return null;
+
+  const [steps] = await pool.query(
+    `SELECT ws.step_id AS id, s.name, ws.is_start
+       FROM iset_intake.workflow_step ws
+       JOIN iset_intake.step s ON s.id = ws.step_id
+      WHERE ws.workflow_id = ?
+      ORDER BY s.name`,
+    [workflowId]
+  );
+
+  const [routes] = await pool.query(
+    `SELECT workflow_id, source_step_id, mode, field_key, default_next_step_id
+       FROM iset_intake.workflow_route
+      WHERE workflow_id = ?
+      ORDER BY source_step_id`,
+    [workflowId]
+  );
+  const [opts] = await pool.query(
+    `SELECT workflow_id, source_step_id, option_value, next_step_id
+       FROM iset_intake.workflow_route_option
+      WHERE workflow_id = ?
+      ORDER BY source_step_id, option_value`,
+    [workflowId]
+  );
+  // Attach options to their route
+  const routesOut = routes.map(r => ({ ...r, options: [] }));
+  for (const o of opts) {
+    const idx = routesOut.findIndex(r => r.source_step_id === o.source_step_id);
+    if (idx >= 0) routesOut[idx].options.push({ option_value: o.option_value, next_step_id: o.next_step_id });
+  }
+
+  return { ...wf, steps, routes: routesOut };
+}
+
+// List workflows
+app.get('/api/workflows', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, name, status, created_at, updated_at
+         FROM iset_intake.workflow
+        ORDER BY updated_at DESC, id DESC`
+    );
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error('GET /api/workflows failed:', err);
+    res.status(500).json({ error: 'Failed to fetch workflows' });
+  }
+});
+
+// Get a single workflow with steps and routes
+app.get('/api/workflows/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const wf = await getWorkflowDetails(id);
+    if (!wf) return res.status(404).json({ error: 'Workflow not found' });
+    res.status(200).json(wf);
+  } catch (err) {
+    console.error('GET /api/workflows/:id failed:', err);
+    res.status(500).json({ error: 'Failed to fetch workflow' });
+  }
+});
+
+// Create workflow
+// Body: { name: string, status?: 'draft'|'active'|'inactive', steps: number[], start_step_id: number, routes?: [ { source_step_id, mode, field_key?, default_next_step_id?, options?: [{ option_value, next_step_id }] } ] }
+app.post('/api/workflows', async (req, res) => {
+  const { name, status = 'draft', steps = [], start_step_id = null, routes = [] } = req.body || {};
+  if (!name || !Array.isArray(steps) || steps.length === 0 || !start_step_id) {
+    return res.status(400).json({ error: 'name, steps[], and start_step_id are required' });
+  }
+  if (!steps.includes(start_step_id)) {
+    return res.status(400).json({ error: 'start_step_id must be included in steps[]' });
+  }
+  try {
+    const newId = await withTx(async (conn) => {
+      if (!(await stepsExist(steps, conn))) {
+        throw Object.assign(new Error('One or more step IDs are invalid'), { code: 400 });
+      }
+      const [ins] = await conn.query(
+        `INSERT INTO iset_intake.workflow (name, status) VALUES (?, ?)`,
+        [name, status]
+      );
+      const workflowId = ins.insertId;
+
+      // Insert membership and start flag
+      const wsValues = steps.map(stepId => [workflowId, stepId, stepId === start_step_id ? 1 : 0]);
+      await conn.query(
+        `INSERT INTO iset_intake.workflow_step (workflow_id, step_id, is_start) VALUES ?`,
+        [wsValues]
+      );
+
+      // Insert routes
+      if (Array.isArray(routes) && routes.length) {
+        // Basic validation
+        for (const r of routes) {
+          if (!r || !r.source_step_id || !r.mode) {
+            throw Object.assign(new Error('Each route requires source_step_id and mode'), { code: 400 });
+          }
+          if (r.mode === 'by_option' && !r.field_key) {
+            throw Object.assign(new Error('by_option routes require field_key'), { code: 400 });
+          }
+        }
+        const routeValues = routes.map(r => [workflowId, r.source_step_id, r.mode, r.field_key || null, r.default_next_step_id || null]);
+        await conn.query(
+          `INSERT INTO iset_intake.workflow_route (workflow_id, source_step_id, mode, field_key, default_next_step_id)
+           VALUES ?`,
+          [routeValues]
+        );
+
+        // Route options
+        const optValues = [];
+        for (const r of routes) {
+          if (Array.isArray(r.options) && r.options.length) {
+            for (const o of r.options) {
+              if (!o || !o.option_value || !o.next_step_id) {
+                throw Object.assign(new Error('route option requires option_value and next_step_id'), { code: 400 });
+              }
+              optValues.push([workflowId, r.source_step_id, String(o.option_value), o.next_step_id]);
+            }
+          }
+        }
+        if (optValues.length) {
+          await conn.query(
+            `INSERT INTO iset_intake.workflow_route_option (workflow_id, source_step_id, option_value, next_step_id)
+             VALUES ?`,
+            [optValues]
+          );
+        }
+      }
+
+      return workflowId;
+    });
+    res.status(201).json({ id: newId });
+  } catch (err) {
+    if (err.code === 400) return res.status(400).json({ error: err.message });
+    console.error('POST /api/workflows failed:', err);
+    res.status(500).json({ error: 'Failed to create workflow' });
+  }
+});
+
+// Update workflow
+// Body: { name?: string, status?: string, steps?: number[], start_step_id?: number, routes?: [...] }
+app.put('/api/workflows/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, status, steps, start_step_id, routes } = req.body || {};
+  try {
+    await withTx(async (conn) => {
+      // ensure workflow exists
+      const [[wf]] = await conn.query(`SELECT id FROM iset_intake.workflow WHERE id = ?`, [id]);
+      if (!wf) throw Object.assign(new Error('Workflow not found'), { code: 404 });
+
+      if (name != null || status != null) {
+        await conn.query(
+          `UPDATE iset_intake.workflow SET
+             name = COALESCE(?, name),
+             status = COALESCE(?, status)
+           WHERE id = ?`,
+          [name ?? null, status ?? null, id]
+        );
+      }
+
+      if (Array.isArray(steps)) {
+        if (steps.length === 0) throw Object.assign(new Error('steps[] cannot be empty'), { code: 400 });
+        const startId = start_step_id ?? null;
+        if (startId && !steps.includes(startId)) {
+          throw Object.assign(new Error('start_step_id must be in steps[]'), { code: 400 });
+        }
+        if (!(await stepsExist(steps, conn))) {
+          throw Object.assign(new Error('One or more step IDs are invalid'), { code: 400 });
+        }
+        await conn.query(`DELETE FROM iset_intake.workflow_step WHERE workflow_id = ?`, [id]);
+        const values = steps.map(stepId => [id, stepId, startId ? (stepId === startId ? 1 : 0) : 0]);
+        await conn.query(
+          `INSERT INTO iset_intake.workflow_step (workflow_id, step_id, is_start) VALUES ?`,
+          [values]
+        );
+      } else if (start_step_id != null) {
+        // Only update start flag
+        await conn.query(`UPDATE iset_intake.workflow_step SET is_start = 0 WHERE workflow_id = ?`, [id]);
+        await conn.query(`UPDATE iset_intake.workflow_step SET is_start = 1 WHERE workflow_id = ? AND step_id = ?`, [id, start_step_id]);
+      }
+
+      if (Array.isArray(routes)) {
+        // Replace routes
+        await conn.query(`DELETE FROM iset_intake.workflow_route_option WHERE workflow_id = ?`, [id]);
+        await conn.query(`DELETE FROM iset_intake.workflow_route WHERE workflow_id = ?`, [id]);
+        if (routes.length) {
+          for (const r of routes) {
+            if (!r || !r.source_step_id || !r.mode) {
+              throw Object.assign(new Error('Each route requires source_step_id and mode'), { code: 400 });
+            }
+            if (r.mode === 'by_option' && !r.field_key) {
+              throw Object.assign(new Error('by_option routes require field_key'), { code: 400 });
+            }
+          }
+          const routeValues = routes.map(r => [id, r.source_step_id, r.mode, r.field_key || null, r.default_next_step_id || null]);
+          await conn.query(
+            `INSERT INTO iset_intake.workflow_route (workflow_id, source_step_id, mode, field_key, default_next_step_id)
+             VALUES ?`,
+            [routeValues]
+          );
+          const optValues = [];
+          for (const r of routes) {
+            if (Array.isArray(r.options) && r.options.length) {
+              for (const o of r.options) {
+                if (!o || !o.option_value || !o.next_step_id) {
+                  throw Object.assign(new Error('route option requires option_value and next_step_id'), { code: 400 });
+                }
+                optValues.push([id, r.source_step_id, String(o.option_value), o.next_step_id]);
+              }
+            }
+          }
+          if (optValues.length) {
+            await conn.query(
+              `INSERT INTO iset_intake.workflow_route_option (workflow_id, source_step_id, option_value, next_step_id)
+               VALUES ?`,
+              [optValues]
+            );
+          }
+        }
+      }
+    });
+    res.status(200).json({ id, message: 'Workflow updated' });
+  } catch (err) {
+    if (err.code === 404) return res.status(404).json({ error: 'Workflow not found' });
+    if (err.code === 400) return res.status(400).json({ error: err.message });
+    console.error('PUT /api/workflows/:id failed:', err);
+    res.status(500).json({ error: 'Failed to update workflow' });
+  }
+});
+
+// Delete workflow (cascade removes children via FK)
+app.delete('/api/workflows/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [r] = await pool.query(`DELETE FROM iset_intake.workflow WHERE id = ?`, [id]);
+    if (r.affectedRows === 0) return res.status(404).json({ error: 'Workflow not found' });
+    res.status(200).json({ message: 'Workflow deleted' });
+  } catch (err) {
+    console.error('DELETE /api/workflows/:id failed:', err);
+    res.status(500).json({ error: 'Failed to delete workflow' });
+  }
+});
+
+// --- Publish workflow to Public Portal (v1: immediate push) -----------------
+// This builds a self-contained JSON array of steps (bilingual titles/descriptions only for now),
+// supporting linear and single-field option-based routing, and writes it to the portal project.
+// Target file (dev): ../ISET-intake/src/intakeFormSchema.json relative to this server file.
+app.post('/api/workflows/:id/publish', async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Load workflow basic
+    const [[wf]] = await pool.query(`SELECT id, name, status FROM iset_intake.workflow WHERE id = ?`, [id]);
+    if (!wf) return res.status(404).json({ error: 'Workflow not found' });
+
+    // Load steps
+    const [stepRows] = await pool.query(`
+      SELECT s.id AS step_id, s.name AS step_name, ws.is_start
+      FROM iset_intake.workflow_step ws
+      JOIN iset_intake.step s ON s.id = ws.step_id
+      WHERE ws.workflow_id = ?
+    `, [id]);
+
+    // Load routes
+    const [routeRows] = await pool.query(`
+      SELECT workflow_id, source_step_id, mode, field_key, default_next_step_id
+      FROM iset_intake.workflow_route WHERE workflow_id = ?
+    `, [id]);
+    const [optRows] = await pool.query(`
+      SELECT workflow_id, source_step_id, option_value, next_step_id
+      FROM iset_intake.workflow_route_option WHERE workflow_id = ?
+    `, [id]);
+
+    // Build route map per source step
+    const bySrc = new Map();
+    for (const r of routeRows) bySrc.set(r.source_step_id, { ...r, options: [] });
+    for (const o of optRows) {
+      const r = bySrc.get(o.source_step_id) || { options: [] };
+      r.options = r.options || [];
+      r.options.push({ option_value: String(o.option_value), next_step_id: o.next_step_id });
+      bySrc.set(o.source_step_id, r);
+    }
+
+    // Generate human-readable slugs per step name, unique within the workflow
+    const slugCounts = new Map();
+    const slugMap = new Map(); // step_id -> slug
+    function toSlug(name) {
+      const base = String(name || 'step').toLowerCase().normalize('NFKD')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'step';
+      const cnt = (slugCounts.get(base) || 0) + 1;
+      slugCounts.set(base, cnt);
+      return cnt === 1 ? base : `${base}-${cnt}`;
+    }
+    for (const s of stepRows) {
+      slugMap.set(s.step_id, toSlug(s.step_name));
+    }
+
+    // BFS from start to get a stable order (start first)
+    const idSet = new Set(stepRows.map(s => s.step_id));
+    const start = stepRows.find(s => s.is_start) || stepRows[0] || null;
+    const adj = new Map();
+    for (const s of stepRows) adj.set(s.step_id, []);
+    for (const r of routeRows) {
+      if (r.mode === 'linear' && r.default_next_step_id && idSet.has(r.default_next_step_id)) {
+        adj.get(r.source_step_id)?.push(r.default_next_step_id);
+      } else if (r.mode === 'by_option') {
+        const opts = (bySrc.get(r.source_step_id)?.options) || [];
+        for (const o of opts) if (idSet.has(o.next_step_id)) adj.get(r.source_step_id)?.push(o.next_step_id);
+        if (r.default_next_step_id && idSet.has(r.default_next_step_id)) adj.get(r.source_step_id)?.push(r.default_next_step_id);
+      }
+    }
+    const order = [];
+    const seen = new Set();
+    if (start) {
+      const q = [start.step_id];
+      seen.add(start.step_id);
+      while (q.length) {
+        const u = q.shift();
+        order.push(u);
+        for (const v of adj.get(u) || []) {
+          if (!seen.has(v)) { seen.add(v); q.push(v); }
+        }
+      }
+    }
+    // Append any disconnected nodes
+    for (const s of stepRows) if (!seen.has(s.step_id)) order.push(s.step_id);
+
+    // Helper: safe JSON parse
+    const safeParse = (v, fallback) => {
+      if (v == null) return fallback;
+      if (typeof v === 'object') return v;
+      try { return JSON.parse(v); } catch { return fallback; }
+    };
+    // Helper: deep merge defaults <- overrides
+    const deepMerge = (a, b) => {
+      if (Array.isArray(a) || Array.isArray(b)) return b ?? a;
+      if (a && typeof a === 'object' && b && typeof b === 'object') {
+        const out = { ...a };
+        for (const k of Object.keys(b)) {
+          out[k] = deepMerge(a[k], b[k]);
+        }
+        return out;
+      }
+      return b ?? a;
+    };
+    // Helper: generate component ID slug unique per step
+    const toIdSlug = (label, type, index, used) => {
+      const base = (String(label || `${type}-${index+1}`) || 'field').toLowerCase().normalize('NFKD')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || `${type}-${index+1}`;
+      let cand = base || `${type}-${index+1}`;
+      let i = 2;
+      while (used.has(cand)) { cand = `${base}-${i++}`; }
+      used.add(cand);
+      return cand;
+    };
+    // Helper: infer normalize rule
+    const inferNormalize = (tplType, props, options) => {
+      const t = String(tplType || '').toLowerCase();
+      if (t === 'date' || t === 'date-input') return 'date-iso';
+      if (t === 'number') return 'number';
+      if (t === 'input') {
+        const it = String(props?.type || '').toLowerCase();
+        if (it === 'number') return 'number';
+        if (it === 'email') return 'trim';
+        return 'trim';
+      }
+      if (t === 'textarea' || t === 'text') return 'trim';
+      if ((t === 'radio' || t === 'select') && Array.isArray(options) && options.length) {
+        const vals = options.map(o => o.value);
+        const allNum = vals.every(v => typeof v === 'number' || (/^-?\d+(?:\.\d+)?$/).test(String(v)));
+        if (allNum) return 'number';
+        const lc = vals.map(v => String(v).toLowerCase());
+        const allYN = lc.every(v => v === 'yes' || v === 'no' || v === 'true' || v === 'false');
+        if (allYN) return 'yn-01';
+      }
+      return 'none';
+    };
+
+    // Build portal JSON with components mapped from DB templates
+    const stepsOut = [];
+    const slugify = (s) => (String(s || '')
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')) || '';
+    const placeholderNames = new Set(['example-radio', 'first-name', 'last-name', 'input', 'text-input', 'field', 'checkboxes', 'radio']);
+    for (const stepId of order) {
+      const row = stepRows.find(s => s.step_id === stepId);
+      const route = bySrc.get(stepId) || null;
+      const stepSlug = slugMap.get(stepId);
+      const out = {
+        stepId: stepSlug,
+        type: 'schema',
+        title: { en: row?.step_name || 'Step', fr: row?.step_name || 'Step' },
+        description: { en: '', fr: '' },
+        components: []
+      };
+
+      // Attach routing
+      if (route) {
+        if (route.mode === 'linear') {
+          if (route.default_next_step_id && slugMap.get(route.default_next_step_id)) {
+            out.nextStepId = slugMap.get(route.default_next_step_id);
+          }
+        } else if (route.mode === 'by_option') {
+          const rules = [];
+          for (const o of (route.options || [])) {
+            const tgt = slugMap.get(o.next_step_id);
+            if (!tgt) continue;
+            rules.push({
+              condition: { '==': [ { var: route.field_key || '' }, String(o.option_value) ] },
+              nextStepId: tgt
+            });
+          }
+          if (rules.length) out.branching = rules;
+          if (route.default_next_step_id && slugMap.get(route.default_next_step_id)) {
+            out.defaultNextStepId = slugMap.get(route.default_next_step_id);
+          }
+        }
+      }
+
+      // Load components for this step and map to portal shape
+      const [compRows] = await pool.query(
+        `SELECT sc.position, ct.type AS tpl_type, ct.default_props, sc.props_overrides
+           FROM iset_intake.step_component sc
+           JOIN iset_intake.component_template ct ON ct.id = sc.template_id
+          WHERE sc.step_id = ?
+          ORDER BY sc.position`,
+        [stepId]
+      );
+
+      const usedIds = new Set();
+      for (let i = 0; i < compRows.length; i++) {
+        const c = compRows[i];
+        const defaults = safeParse(c.default_props, {});
+        const overrides = safeParse(c.props_overrides, {});
+        const props = deepMerge(defaults || {}, overrides || {});
+        const tplType = (c.tpl_type || '').toLowerCase();
+
+        // Extract label/hint based on GOV.UK macro conventions
+        const labelText = props?.fieldset?.legend?.text ?? props?.label?.text ?? props?.titleText ?? '';
+        const hintText = props?.hint?.text ?? props?.text ?? '';
+
+        // Extract options for choice components
+        let options = null;
+        if (tplType === 'radio' || tplType === 'checkboxes' || tplType === 'select') {
+          const items = Array.isArray(props?.items) ? props.items : [];
+          options = items.map(it => ({
+            label: it?.text ?? it?.html ?? String(it?.value ?? ''),
+            value: typeof it?.value !== 'undefined' ? it.value : (it?.text ?? it?.html ?? '')
+          }));
+        }
+
+        // Prefer a stable name/id from props when available (aligns with routing field_key)
+        const nameOrId = (props?.name || props?.id || '').toString().trim();
+        const labelSlug = slugify(labelText || `${tplType || 'field'}-${i+1}`);
+        // If this step drives option-based routing and field_key is set, lock to that name for consistency
+        const routeField = route && route.mode === 'by_option' ? (route.field_key || '').trim() : '';
+        let chosenKey = nameOrId || labelSlug;
+        if (!routeField) {
+          // Avoid generic placeholder names when not used in routing
+          const isPlaceholder = placeholderNames.has(chosenKey.toLowerCase());
+          const divergesFromLabel = chosenKey && labelSlug && !labelSlug.includes(chosenKey.toLowerCase()) && !chosenKey.toLowerCase().includes(labelSlug);
+          if (isPlaceholder || divergesFromLabel) {
+            chosenKey = labelSlug || chosenKey;
+          }
+        } else {
+          chosenKey = routeField; // enforce alignment with routing var
+        }
+        const id = toIdSlug(chosenKey || labelSlug, tplType || 'field', i, usedIds);
+
+        // Map to portal component shape
+        const component = {
+          id,
+          type: tplType === 'checkboxes' ? 'checkboxes' : tplType, // pass-through
+          label: { en: labelText || id, fr: labelText || id },
+          hint: hintText ? { en: hintText, fr: hintText } : undefined,
+          class: props?.classes || undefined,
+          required: !!props?.required,
+          // storageKey: prefer chosenKey (aligned with routing if applicable)
+          storageKey: chosenKey || id,
+        };
+
+        // Carry a few useful extras when present (non-breaking for the portal renderer)
+        if (tplType === 'input') {
+          if (props?.type) component.inputType = props.type;
+          if (props?.autocomplete) component.autocomplete = props.autocomplete;
+        }
+  if (tplType === 'date-input') {
+          if (props?.namePrefix) component.namePrefix = props.namePrefix;
+          if (Array.isArray(props?.items)) {
+            component.dateFields = props.items.map(f => ({ name: f?.name, classes: f?.classes })).filter(f => f.name);
+          }
+        }
+  if (options) component.options = options;
+  // Infer normalize (preserve any earlier explicit)
+  const inferred = inferNormalize(tplType, props, options || []);
+  component.normalize = component.normalize && component.normalize !== 'none' ? component.normalize : inferred;
+
+        out.components.push(component);
+      }
+
+      stepsOut.push(out);
+    }
+
+    // Write to Public Portal file
+    const portalPath = path.resolve(__dirname, '..', 'ISET-intake', 'src', 'intakeFormSchema.json');
+    fs.writeFileSync(portalPath, JSON.stringify(stepsOut, null, 2), 'utf8');
+
+    res.status(200).json({ message: 'Published', portalPath, steps: stepsOut.length });
+  } catch (err) {
+    console.error('Publish failed:', err);
+    res.status(500).json({ error: 'Failed to publish workflow' });
+  }
+});
+
 // --- Component Templates API (for Step Editor library) ---------------------
 // Returns the catalogue of reusable component templates (active only by default)
 app.get('/api/component-templates', async (req, res) => {
