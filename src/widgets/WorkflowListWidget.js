@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
-import { Box, Header, ButtonDropdown, Link, Table, Button, TextFilter, SpaceBetween } from '@cloudscape-design/components';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Box, Header, ButtonDropdown, Link, Table, Button, TextFilter, SpaceBetween, Spinner } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
+import axios from 'axios';
 
-const getColumnDefinitions = (onSelectWorkflow) => [
+const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
+
+const getColumnDefinitions = (onSelectWorkflow, onModify, onDelete) => [
   {
     id: 'id',
     header: 'ID',
@@ -27,33 +30,87 @@ const getColumnDefinitions = (onSelectWorkflow) => [
   {
     id: 'actions',
     header: 'Actions',
-    cell: item => (
+  cell: item => (
       <SpaceBetween direction="horizontal" size="xs">
-    <Button variant="inline-link" onClick={() => window.location.href = '/modify-workflow'}>Modify</Button>
-        <Button variant="inline-link">Delete</Button>
-        <Button variant="inline-link">Duplicate</Button>
+    <Button variant="inline-link" onClick={() => onModify(item)}>Modify</Button>
+    <Button variant="inline-link" onClick={() => onDelete(item)}>Delete</Button>
       </SpaceBetween>
     )
   }
 ];
 
-const mockData = [
-  { id: 1, name: 'ISET', description: 'Indigenous Skills and Employment Training workflow', lastModified: '2025-08-01' },
-  { id: 2, name: "Jordan's Principle", description: 'Child First Initiative workflow', lastModified: '2025-07-15' },
-];
+const formatDate = (dt) => dt ? new Date(dt).toISOString().slice(0, 10) : '';
 
 const WorkflowListWidget = ({ actions, onSelectWorkflow }) => {
   const [filteringText, setFilteringText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState([]);
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      const { data } = await axios.get(`${API_BASE}/api/workflows`);
+      const rows = (data || []).map(r => ({
+        id: r.id,
+        name: r.name,
+        lastModified: formatDate(r.updated_at || r.created_at),
+        status: r.status
+      }));
+      setItems(rows);
+    } catch (e) {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!mounted) return;
+      await load();
+    })();
+    return () => { mounted = false; };
+  }, []);
+  const onSelectWorkflowInternal = async (item) => {
+    try {
+      const { data } = await axios.get(`${API_BASE}/api/workflows/${item.id}`);
+      onSelectWorkflow && onSelectWorkflow(data);
+    } catch {
+      onSelectWorkflow && onSelectWorkflow(item);
+    }
+  };
+
+  const onModify = (item) => {
+    window.location.href = `/modify-workflow?id=${encodeURIComponent(item.id)}`;
+  };
+
+  const onDelete = async (item) => {
+    if (!window.confirm(`Delete workflow "${item.name}"? This cannot be undone.`)) return;
+    try {
+      await axios.delete(`${API_BASE}/api/workflows/${item.id}`);
+      await load();
+    } catch (e) {
+      alert('Failed to delete workflow');
+    }
+  };
+
+  const filtered = useMemo(() => {
+    const txt = (filteringText || '').toLowerCase();
+    return items.filter(i => i.name.toLowerCase().includes(txt));
+  }, [items, filteringText]);
 
   return (
     <BoardItem
       header={
         <Header
           actions={
-            <Button iconAlign="right">Create New</Button>
+            <Button iconAlign="right" onClick={() => (window.location.href = '/modify-workflow')}>
+              Create New
+            </Button>
           }
         >
-          Workflow List
+          Workflow Library
         </Header>
       }
       i18nStrings={{
@@ -78,15 +135,15 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow }) => {
           renderAriaLive={({ firstIndex, lastIndex, totalItemsCount }) =>
             `Displaying items ${firstIndex} to ${lastIndex} of ${totalItemsCount}`
           }
-          columnDefinitions={getColumnDefinitions(onSelectWorkflow)}
-          items={mockData.filter(item => item.name.toLowerCase().includes(filteringText.toLowerCase()))}
-          loading={false}
+      columnDefinitions={getColumnDefinitions(onSelectWorkflowInternal, onModify, onDelete)}
+      items={filtered}
+      loading={loading}
           loadingText="Loading resources"
           empty={
             <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
               <SpaceBetween size="m">
                 <b>No workflows</b>
-                <Button>Create workflow</Button>
+        <Button onClick={() => window.location.href = '/modify-workflow'}>Create workflow</Button>
               </SpaceBetween>
             </Box>
           }
@@ -95,7 +152,7 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow }) => {
               filteringPlaceholder="Find workflow"
               filteringText={filteringText}
               onChange={({ detail }) => setFilteringText(detail.filteringText)}
-              countText={`${mockData.length} matches`}
+        countText={`${filtered.length} matches`}
             />
           }
         />

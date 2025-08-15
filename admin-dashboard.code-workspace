@@ -2,6 +2,9 @@
   "folders": [
     {
       "path": "."
+    },
+    {
+      "path": "../ISET-intake"
     }
   ],
   "settings": {
