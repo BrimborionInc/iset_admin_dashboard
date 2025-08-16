@@ -19,6 +19,7 @@
     "axios": "^1.8.1",
     "browserify-zlib": "^0.2.0",
     "buffer": "^6.0.3",
+    "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",
     "cra-template": "1.2.0",
     "crypto-browserify": "^3.12.1",
@@ -26,6 +27,7 @@
     "env-cmd": "^10.1.0",
     "govuk-frontend": "^5.9.0",
     "https-browserify": "^1.0.0",
+    "iset-intake": "file:../ISET-intake",
     "lodash.template": "^4.5.0",
     "mysql": "^2.18.1",
     "mysql2": "^3.12.0",
@@ -51,7 +53,8 @@
     "build:production": "env-cmd -f .env.production react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "server": "node isetadminserver.js",
+  "server": "node isetadminserver.js",
+  "audit:parity": "node scripts/parity-audit.js",
     "deploy": "powershell -ExecutionPolicy Bypass -File deploy.ps1"
   },
   "eslintConfig": {
