@@ -34,6 +34,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const fs = require('fs');
+const cheerio = require('cheerio');
 
 const app = express();
 const port = process.env.PORT || 5001; // Use port from .env
@@ -62,6 +63,41 @@ const dbConfig = {
 };
 
 const pool = mysql.createPool(dbConfig);
+
+// ---------------------------------------------------------------------------
+// Supported component types in the Public Portal renderer (Milestone 6)
+// Keep this list in sync with ISET-intake/src/renderer/renderers.js registry keys
+// Aliases are included for safety (e.g., 'checkboxes' and 'checkbox', 'date' and 'date-input').
+const SUPPORTED_COMPONENT_TYPES = new Set([
+  'radio',
+  'panel',
+  'input',
+  'text',
+  'email',
+  'phone',
+  'password',
+  'password-input',
+  'number',
+  'textarea',
+  'select',
+  'checkbox',
+  'checkboxes',
+  'date',
+  'date-input',
+  'label',
+  'inset-text',
+  'warning-text',
+  'details',
+  'accordion',
+  'character-count',
+  'file-upload',
+  'summary-list',
+]);
+
+// Discoverable list for the Admin UI
+app.get('/api/publish/supported-component-types', (_req, res) => {
+  res.json({ supported: Array.from(SUPPORTED_COMPONENT_TYPES).sort() });
+});
 
 // --- Nunjucks environment for component preview ---------------------------
 // Existing global configuration already set above; we create a local reference.
@@ -206,6 +242,340 @@ app.post('/api/render/component', async (req, res) => {
     res.type('html').send(html);
   } catch (err) {
     console.error('POST /api/render/component failed:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/audit/parity-sample?templateKey=radio
+// Renders the latest active template and performs basic GOV.UK structure checks.
+app.get('/api/audit/parity-sample', async (req, res) => {
+  try {
+    const { templateKey } = req.query;
+    if (!templateKey) return res.status(400).json({ error: 'templateKey required' });
+    const [[row]] = await pool.query(
+      `SELECT export_njk_template, default_props, type
+         FROM iset_intake.component_template
+        WHERE template_key = ? AND status='active'
+        ORDER BY version DESC
+        LIMIT 1`,
+      [templateKey]
+    );
+    if (!row) return res.status(404).json({ error: 'Template not found' });
+    const props = (() => { try { return JSON.parse(row.default_props || '{}'); } catch { return {}; } })();
+    const html = env.renderString(row.export_njk_template, { props });
+    const $ = cheerio.load(html);
+    const issues = [];
+    // Minimal checks by type
+    const t = String(row.type || '').toLowerCase();
+    if (t === 'radio' || t === 'radios') {
+      if ($('.govuk-radios').length === 0) issues.push('Missing .govuk-radios container');
+      if ($('input.govuk-radios__input[type="radio"]').length === 0) issues.push('No radio inputs');
+      if ($('.govuk-fieldset__legend').length === 0) issues.push('Missing fieldset legend');
+    } else if (t === 'checkbox' || t === 'checkboxes') {
+      if ($('.govuk-checkboxes').length === 0) issues.push('Missing .govuk-checkboxes container');
+      if ($('input.govuk-checkboxes__input[type="checkbox"]').length === 0) issues.push('No checkbox inputs');
+      if ($('.govuk-fieldset__legend').length === 0) issues.push('Missing fieldset legend');
+    } else if (t === 'input' || t === 'text') {
+      if ($('input.govuk-input').length === 0) issues.push('No govuk input');
+      if ($('label.govuk-label').length === 0) issues.push('Missing label');
+    } else if (t === 'textarea' || t === 'character-count') {
+      if ($('textarea.govuk-textarea').length === 0 && $('.govuk-character-count').length === 0) issues.push('No textarea/character-count');
+    } else if (t === 'select') {
+      if ($('select.govuk-select').length === 0) issues.push('No govuk select');
+    } else if (t === 'date' || t === 'date-input') {
+      if ($('.govuk-date-input').length === 0) issues.push('No govuk date-input');
+    } else if (t === 'file-upload') {
+      if ($('input.govuk-file-upload[type="file"]').length === 0) issues.push('No file upload input');
+    }
+    res.json({ templateKey, type: t, issues, ok: issues.length === 0, html });
+  } catch (err) {
+    console.error('GET /api/audit/parity-sample failed:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Helper: run minimal GOV.UK structure checks by component type
+function parityChecks($, type, props) {
+  const t = String(type || '').toLowerCase();
+  const issues = [];
+  // Helper: form-group presence
+  const hasFormGroup = $('.govuk-form-group').length > 0;
+  const hasErrorGroup = $('.govuk-form-group--error').length > 0;
+  const expectOptions = Array.isArray(props?.items) && props.items.length > 0;
+  const expectLabel = !!(props?.label?.text || props?.fieldset?.legend?.text || props?.titleText);
+
+  if (t === 'radio' || t === 'radios') {
+    if ($('.govuk-radios').length === 0) issues.push('Missing .govuk-radios container');
+    if ($('input.govuk-radios__input[type="radio"]').length === 0) issues.push('No radio inputs');
+    if ($('fieldset.govuk-fieldset').length === 0) issues.push('Missing fieldset');
+    if ($('.govuk-fieldset__legend').length === 0) issues.push('Missing fieldset legend');
+    // All radios should share same name
+    const names = new Set();
+    $('input.govuk-radios__input[type="radio"]').each((_, el) => { const n = $(el).attr('name'); if (n) names.add(n); });
+    if (names.size > 1) issues.push('Radio inputs do not share the same name');
+    // Label-for association
+    $('input.govuk-radios__input[type="radio"]').each((_, el) => {
+      const id = $(el).attr('id');
+      if (!id) issues.push('Radio input missing id');
+      const lab = id ? $(`label.govuk-label[for="${id}"]`) : null;
+      if (id && (!lab || lab.length === 0)) issues.push(`Missing label[for=${id}]`);
+    });
+    if (!hasFormGroup) issues.push('Missing .govuk-form-group');
+  } else if (t === 'checkbox' || t === 'checkboxes') {
+    if ($('.govuk-checkboxes').length === 0) issues.push('Missing .govuk-checkboxes container');
+    if ($('input.govuk-checkboxes__input[type="checkbox"]').length === 0) issues.push('No checkbox inputs');
+    if ($('fieldset.govuk-fieldset').length === 0) issues.push('Missing fieldset');
+    if ($('.govuk-fieldset__legend').length === 0) issues.push('Missing fieldset legend');
+    // Label-for association
+    $('input.govuk-checkboxes__input[type="checkbox"]').each((_, el) => {
+      const id = $(el).attr('id');
+      if (!id) issues.push('Checkbox input missing id');
+      const lab = id ? $(`label.govuk-label[for="${id}"]`) : null;
+      if (id && (!lab || lab.length === 0)) issues.push(`Missing label[for=${id}]`);
+    });
+    if (!hasFormGroup) issues.push('Missing .govuk-form-group');
+  } else if (t === 'input' || t === 'text' || t === 'email' || t === 'number' || t === 'password' || t === 'phone' || t === 'password-input') {
+    if ($('input.govuk-input').length === 0) issues.push('No govuk input');
+    if ($('label.govuk-label').length === 0) issues.push('Missing label');
+    const input = $('input.govuk-input').first();
+    const id = input.attr('id');
+    if (!id) issues.push('Input missing id');
+    if (id && $(`label.govuk-label[for="${id}"]`).length === 0) issues.push('Label not associated via for=');
+    if (!hasFormGroup) issues.push('Missing .govuk-form-group');
+  } else if (t === 'textarea' || t === 'character-count') {
+    if ($('textarea.govuk-textarea').length === 0 && $('.govuk-character-count').length === 0) issues.push('No textarea/character-count');
+    const ta = $('textarea.govuk-textarea').first();
+    if (ta && ta.length) {
+      const id = ta.attr('id');
+      if (!id) issues.push('Textarea missing id');
+      if (id && $(`label.govuk-label[for="${id}"]`).length === 0) issues.push('Label not associated via for=');
+    }
+    if (!hasFormGroup) issues.push('Missing .govuk-form-group');
+  } else if (t === 'select') {
+    if ($('select.govuk-select').length === 0) issues.push('No govuk select');
+    const sel = $('select.govuk-select').first();
+    const id = sel.attr('id');
+    if (!id) issues.push('Select missing id');
+    if (id && $(`label.govuk-label[for="${id}"]`).length === 0) issues.push('Label not associated via for=');
+    if (expectOptions && $('select.govuk-select option').length === 0) issues.push('No options rendered');
+    if (!hasFormGroup) issues.push('Missing .govuk-form-group');
+  } else if (t === 'date' || t === 'date-input') {
+    if ($('.govuk-date-input').length === 0) issues.push('No govuk date-input');
+    const base = $('.govuk-date-input');
+    if (base.length) {
+      const inputs = base.find('input');
+      if (inputs.length < 3) issues.push('Date input missing parts');
+    }
+    if ($('.govuk-fieldset__legend').length === 0) issues.push('Missing fieldset legend');
+    if (!hasFormGroup) issues.push('Missing .govuk-form-group');
+  } else if (t === 'file-upload') {
+    if ($('input.govuk-file-upload[type="file"]').length === 0) issues.push('No file upload input');
+    const fu = $('input.govuk-file-upload[type="file"]').first();
+    const id = fu.attr('id');
+    if (!id) issues.push('File upload missing id');
+    if (id && $(`label.govuk-label[for="${id}"]`).length === 0) issues.push('Label not associated via for=');
+    if (!hasFormGroup) issues.push('Missing .govuk-form-group');
+  } else if (t === 'details') {
+    if ($('details.govuk-details').length === 0) issues.push('No govuk details');
+  } else if (t === 'accordion') {
+    if ($('.govuk-accordion').length === 0) issues.push('No govuk accordion');
+  } else if (t === 'label' || t === 'inset-text' || t === 'warning-text' || t === 'panel' || t === 'summary-list') {
+    // Content components: best-effort checks
+    // No strict checks beyond presence
+  }
+  return issues;
+}
+
+// GET /api/audit/parity-all?limit=50
+// Iterate active component templates and report basic parity issues per type
+app.get('/api/audit/parity-all', async (req, res) => {
+  try {
+    const limit = Math.max(0, parseInt(req.query.limit || '0', 10)) || null;
+    const [rows] = await pool.query(
+      `SELECT template_key, version, type, status, default_props, export_njk_template
+         FROM iset_intake.component_template
+        WHERE status='active'
+        ORDER BY template_key, version DESC`
+    );
+    const seen = new Set();
+    const list = [];
+    for (const r of rows) {
+      const key = r.template_key;
+      if (seen.has(key)) continue; // take highest version per key
+      seen.add(key);
+      list.push(r);
+      if (limit && list.length >= limit) break;
+    }
+    const results = [];
+    for (const r of list) {
+      let props = {};
+      try { props = typeof r.default_props === 'string' ? JSON.parse(r.default_props) : (r.default_props || {}); } catch {}
+      const t = String(r.type || '').toLowerCase();
+      // Inject minimal props for structure checks if missing
+      if (t === 'radio' || t === 'radios') {
+        if (!props.fieldset) props.fieldset = { legend: { text: 'Choose one' } };
+        if (!Array.isArray(props.items) || props.items.length === 0) props.items = [{ text: 'Option A', value: 'a' }, { text: 'Option B', value: 'b' }];
+      } else if (t === 'checkbox' || t === 'checkboxes') {
+        if (!props.fieldset) props.fieldset = { legend: { text: 'Select all that apply' } };
+        if (!Array.isArray(props.items) || props.items.length === 0) props.items = [{ text: 'Alpha', value: 'a' }, { text: 'Beta', value: 'b' }];
+      } else if (t === 'select') {
+        if (!props.label) props.label = { text: 'Pick one' };
+        if (!Array.isArray(props.items) || props.items.length === 0) props.items = [{ text: 'One', value: '1' }, { text: 'Two', value: '2' }];
+      } else if (t === 'input' || t === 'text' || t === 'email' || t === 'number' || t === 'password' || t === 'phone' || t === 'password-input') {
+        if (!props.label) props.label = { text: 'Label' };
+      } else if (t === 'textarea' || t === 'character-count') {
+        if (!props.label) props.label = { text: 'Label' };
+      } else if (t === 'date' || t === 'date-input') {
+        if (!props.fieldset) props.fieldset = { legend: { text: 'Date of birth' } };
+      } else if (t === 'file-upload') {
+        if (!props.label) props.label = { text: 'Upload a file' };
+      }
+      let issues = [];
+      let renderError = null;
+      try {
+        const html = env.renderString(r.export_njk_template || '', { props });
+        const $ = cheerio.load(html || '');
+        issues = parityChecks($, r.type, props);
+      } catch (e) {
+        renderError = String(e.message || e).slice(0, 300);
+      }
+      results.push({
+        template_key: r.template_key,
+        version: r.version,
+        type: r.type,
+        ok: !renderError && issues.length === 0,
+        issues,
+        error: renderError,
+      });
+    }
+    const summary = {
+      total: results.length,
+      ok: results.filter(x => x.ok).length,
+      withIssues: results.filter(x => x.issues && x.issues.length).length,
+      withErrors: results.filter(x => x.error).length,
+      byType: Object.fromEntries(
+        Array.from(new Set(results.map(r => String(r.type || '').toLowerCase())))
+          .map(t => [t, {
+            total: results.filter(r => String(r.type || '').toLowerCase() === t).length,
+            ok: results.filter(r => String(r.type || '').toLowerCase() === t && r.ok).length,
+          }])
+      )
+    };
+    res.json({ summary, results });
+  } catch (err) {
+    console.error('GET /api/audit/parity-all failed:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/audit/parity-portal?templateKey=radios
+// Compare NJK structure with a derived portal component shape for a single template
+app.get('/api/audit/parity-portal', async (req, res) => {
+  try {
+    const { templateKey } = req.query;
+    if (!templateKey) return res.status(400).json({ error: 'templateKey required' });
+    const [[tpl]] = await pool.query(
+      `SELECT template_key, version, type, default_props, export_njk_template
+         FROM iset_intake.component_template
+        WHERE template_key = ? AND status='active'
+        ORDER BY version DESC
+        LIMIT 1`,
+      [templateKey]
+    );
+    if (!tpl) return res.status(404).json({ error: 'Template not found' });
+    const props = (() => { try { return JSON.parse(tpl.default_props || '{}'); } catch { return {}; } })();
+    // Render NJK
+    let html = '';
+    try { html = env.renderString(tpl.export_njk_template || '', { props }); } catch (e) {}
+    const $ = cheerio.load(html || '');
+
+    // Derive portal component shape (minimal)
+    const tplType = String(tpl.type || '').toLowerCase();
+    const normalisedType = (tplType === 'checkbox' ? 'checkboxes' : (tplType === 'radios' ? 'radio' : tplType));
+    const labelText = props?.fieldset?.legend?.text ?? props?.label?.text ?? props?.titleText ?? '';
+    const hintText = props?.hint?.text ?? props?.text ?? '';
+    let options = [];
+    if (['radio', 'radios', 'checkbox', 'checkboxes', 'select'].includes(tplType)) {
+      const items = Array.isArray(props?.items) ? props.items : [];
+      options = items.map(it => ({
+        label: it?.text ?? it?.html ?? String(it?.value ?? ''),
+        value: typeof it?.value !== 'undefined' ? it.value : (it?.text ?? it?.html ?? '')
+      }));
+    }
+    const portal = {
+      type: normalisedType,
+      label: labelText,
+      hint: hintText,
+      optionsCount: options.length,
+    };
+
+    // NJK structural capture
+    const struct = { container: null, inputsCount: 0, legendText: null };
+    if (normalisedType === 'radio') {
+      struct.container = $('.govuk-radios').length > 0;
+      struct.inputsCount = $('input.govuk-radios__input[type="radio"]').length;
+      struct.legendText = $('.govuk-fieldset__legend').first().text().trim() || null;
+    } else if (normalisedType === 'checkboxes') {
+      struct.container = $('.govuk-checkboxes').length > 0;
+      struct.inputsCount = $('input.govuk-checkboxes__input[type="checkbox"]').length;
+      struct.legendText = $('.govuk-fieldset__legend').first().text().trim() || null;
+    } else if (normalisedType === 'select') {
+      struct.container = $('select.govuk-select').length > 0;
+      struct.inputsCount = $('select.govuk-select option').length;
+      struct.legendText = $('label.govuk-label').first().text().trim() || null;
+    } else if (normalisedType === 'input') {
+      struct.container = $('input.govuk-input').length > 0;
+      struct.inputsCount = $('input.govuk-input').length;
+      struct.legendText = $('label.govuk-label').first().text().trim() || null;
+    } else if (normalisedType === 'textarea') {
+      struct.container = $('textarea.govuk-textarea').length > 0;
+      struct.inputsCount = $('textarea.govuk-textarea').length;
+      struct.legendText = $('label.govuk-label').first().text().trim() || null;
+    } else if (normalisedType === 'date-input') {
+      struct.container = $('.govuk-date-input').length > 0;
+      struct.inputsCount = $('.govuk-date-input input').length;
+      struct.legendText = $('.govuk-fieldset__legend').first().text().trim() || null;
+    } else if (normalisedType === 'file-upload') {
+      struct.container = $('input.govuk-file-upload[type="file"]').length > 0;
+      struct.inputsCount = $('input.govuk-file-upload[type="file"]').length;
+      struct.legendText = $('label.govuk-label').first().text().trim() || null;
+    }
+
+    // Issues
+    const issues = [];
+    // Expect a visible label/legend when props include it
+    const expectsLabel = !!(props?.fieldset?.legend?.text || props?.label?.text || props?.titleText);
+    if (normalisedType === 'radio' || normalisedType === 'checkboxes') {
+      if (!struct.container) issues.push('Missing container');
+      if (portal.optionsCount && struct.inputsCount && portal.optionsCount !== struct.inputsCount) {
+        issues.push(`Input count mismatch: options=${portal.optionsCount} njk=${struct.inputsCount}`);
+      }
+      if (expectsLabel && (!struct.legendText || !struct.legendText.length)) {
+        issues.push('Missing legend text');
+      }
+      if (portal.label && struct.legendText && struct.legendText.length && !struct.legendText.toLowerCase().includes(String(portal.label).toLowerCase())) {
+        issues.push('Legend text does not include label');
+      }
+    } else if (['input','textarea','select','date-input','file-upload'].includes(normalisedType)) {
+      if (!struct.container) issues.push('Missing core container element');
+      if (normalisedType === 'select' && expectsLabel && (!struct.legendText || !struct.legendText.length)) {
+        issues.push('Missing select label');
+      }
+      if (normalisedType === 'select' && portal.optionsCount && struct.inputsCount && portal.optionsCount !== struct.inputsCount) {
+        issues.push(`Option count mismatch: options=${portal.optionsCount} njk=${struct.inputsCount}`);
+      }
+    }
+
+    res.json({
+      templateKey,
+      type: tpl.type,
+      portal,
+      njk: struct,
+      ok: issues.length === 0,
+      issues,
+    });
+  } catch (err) {
+    console.error('GET /api/audit/parity-portal failed:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -743,7 +1113,8 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
     };
     // Helper: infer normalize rule
     const inferNormalize = (tplType, props, options) => {
-      const t = String(tplType || '').toLowerCase();
+      const tRaw = String(tplType || '').toLowerCase();
+      const t = (tRaw === 'checkbox' ? 'checkboxes' : (tRaw === 'radios' ? 'radio' : tRaw));
       if (t === 'date' || t === 'date-input') return 'date-iso';
       if (t === 'number') return 'number';
       if (t === 'input') {
@@ -764,7 +1135,10 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
       return 'none';
     };
 
-    // Build portal JSON with components mapped from DB templates
+  // Build portal JSON with components mapped from DB templates
+  const usedTemplateIds = new Set();
+  const usedTemplateCounts = new Map();
+  const usedTemplateMeta = new Map();
     const stepsOut = [];
     const slugify = (s) => (String(s || '')
       .toLowerCase()
@@ -809,7 +1183,7 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
 
       // Load components for this step and map to portal shape
       const [compRows] = await pool.query(
-        `SELECT sc.position, ct.type AS tpl_type, ct.default_props, sc.props_overrides
+        `SELECT sc.position, ct.id AS template_id, ct.version AS template_version, ct.type AS tpl_type, ct.default_props, sc.props_overrides, ct.template_key
            FROM iset_intake.step_component sc
            JOIN iset_intake.component_template ct ON ct.id = sc.template_id
           WHERE sc.step_id = ?
@@ -820,18 +1194,45 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
       const usedIds = new Set();
       for (let i = 0; i < compRows.length; i++) {
         const c = compRows[i];
-        const defaults = safeParse(c.default_props, {});
+  const defaults = safeParse(c.default_props, {});
         const overrides = safeParse(c.props_overrides, {});
         const props = deepMerge(defaults || {}, overrides || {});
         const tplType = (c.tpl_type || '').toLowerCase();
+
+  // Track used templates for audit and meta
+  usedTemplateIds.add(c.template_id);
+  const tKey = c.template_key || 'unknown';
+  const tVer = Number(c.template_version) || 0;
+  const tType = tplType;
+  const k = `${tKey}@${tVer}`;
+  const cnt = (usedTemplateCounts.get(k) || 0) + 1;
+  usedTemplateCounts.set(k, cnt);
+  usedTemplateMeta.set(k, { id: c.template_id, template_key: tKey, version: tVer, type: tType });
+
+        // M6: Validate supported component types; block publish if unsupported
+        const candidateTypes = new Set([
+          tplType,
+          // Common macro-to-portal aliases
+          tplType === 'checkbox' ? 'checkboxes' : null,
+          tplType === 'radios' ? 'radio' : null,
+          tplType === 'date' ? 'date-input' : null,
+        ].filter(Boolean));
+        const isSupported = Array.from(candidateTypes).some(t => SUPPORTED_COMPONENT_TYPES.has(t));
+        if (!isSupported) {
+          const reason = `Unsupported component type: '${tplType}' (template_key=${c.template_key || 'n/a'})`;
+          const err = new Error(reason);
+          err.code = 400;
+          err.details = { step: row?.step_name, step_id: stepId, position: i + 1, template_key: c.template_key, type: tplType };
+          throw err;
+        }
 
         // Extract label/hint based on GOV.UK macro conventions
         const labelText = props?.fieldset?.legend?.text ?? props?.label?.text ?? props?.titleText ?? '';
         const hintText = props?.hint?.text ?? props?.text ?? '';
 
-        // Extract options for choice components
-        let options = null;
-        if (tplType === 'radio' || tplType === 'checkboxes' || tplType === 'select') {
+  // Extract options for choice components (handle aliases)
+  let options = null;
+  if (tplType === 'radio' || tplType === 'radios' || tplType === 'checkbox' || tplType === 'checkboxes' || tplType === 'select') {
           const items = Array.isArray(props?.items) ? props.items : [];
           options = items.map(it => ({
             label: it?.text ?? it?.html ?? String(it?.value ?? ''),
@@ -858,9 +1259,15 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
         const id = toIdSlug(chosenKey || labelSlug, tplType || 'field', i, usedIds);
 
         // Map to portal component shape
+        // Normalise type for the portal renderer
+        const normalisedType = (
+          tplType === 'checkbox' ? 'checkboxes' :
+          tplType === 'radios' ? 'radio' :
+          tplType
+        );
         const component = {
           id,
-          type: tplType === 'checkboxes' ? 'checkboxes' : tplType, // pass-through
+          type: normalisedType,
           label: { en: labelText || id, fr: labelText || id },
           hint: hintText ? { en: hintText, fr: hintText } : undefined,
           class: props?.classes || undefined,
@@ -891,12 +1298,74 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
       stepsOut.push(out);
     }
 
-    // Write to Public Portal file
+    // M9: Audit used component templates before writing
+    try {
+      if (usedTemplateIds.size) {
+        const ids = Array.from(usedTemplateIds);
+        const [tpls] = await pool.query(
+          `SELECT id, template_key, version, type, export_njk_template, default_props, status
+             FROM iset_intake.component_template
+            WHERE id IN (${Array(ids.length).fill('?').join(',')})`,
+          ids
+        );
+        const bad = [];
+        for (const r of tpls) {
+          if (!r.export_njk_template || !String(r.export_njk_template).trim()) {
+            bad.push({ template_key: r.template_key, version: r.version, reason: 'MISSING_TEMPLATE' });
+            continue;
+          }
+          try {
+            const p = typeof r.default_props === 'string' ? JSON.parse(r.default_props) : (r.default_props || {});
+            env.renderString(r.export_njk_template, { props: p });
+          } catch (e) {
+            bad.push({ template_key: r.template_key, version: r.version, reason: 'RENDER_ERROR', detail: String(e.message || e).slice(0, 200) });
+          }
+        }
+        if (bad.length) {
+          const err = new Error('Template audit failed');
+          err.code = 400;
+          err.details = { templates: bad };
+          throw err;
+        }
+      }
+    } catch (e) {
+      throw e;
+    }
+
+    // Write to Public Portal file (primary artifact remains a plain array for backward compatibility)
     const portalPath = path.resolve(__dirname, '..', 'ISET-intake', 'src', 'intakeFormSchema.json');
     fs.writeFileSync(portalPath, JSON.stringify(stepsOut, null, 2), 'utf8');
 
-    res.status(200).json({ message: 'Published', portalPath, steps: stepsOut.length });
+    // Also write a sidecar metadata file with schema versioning and build details (non-breaking)
+    // Build template catalog for meta
+    const templates = Array.from(usedTemplateCounts.keys()).map(k => ({
+      ...(usedTemplateMeta.get(k) || {}),
+      count: usedTemplateCounts.get(k) || 0,
+    }));
+    const meta = {
+      schemaVersion: '1.1',
+      generatedAt: new Date().toISOString(),
+      workflow: { id: wf.id, name: wf.name, status: wf.status },
+      counts: {
+        steps: stepsOut.length,
+        components: stepsOut.reduce((acc, s) => acc + (Array.isArray(s.components) ? s.components.length : 0), 0)
+      },
+      templates
+    };
+    const metaPath = path.resolve(__dirname, '..', 'ISET-intake', 'src', 'intakeFormSchema.meta.json');
+    try {
+      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf8');
+    } catch (e) {
+      console.warn('Failed to write workflow schema meta file:', e && e.message ? e.message : e);
+    }
+
+    res.status(200).json({ message: 'Published', portalPath, steps: stepsOut.length, metaPath });
   } catch (err) {
+    if (err && err.code === 400) {
+      const payload = { error: err.message || 'Validation failed' };
+      if (err.details) payload.details = err.details;
+      return res.status(400).json(payload);
+    }
     console.error('Publish failed:', err);
     res.status(500).json({ error: 'Failed to publish workflow' });
   }
