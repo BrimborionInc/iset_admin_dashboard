@@ -1,4 +1,5 @@
 import React from 'react';
+import { useHistory } from 'react-router-dom';
 import { SideNavigation as CloudscapeSideNavigation, Badge } from '@cloudscape-design/components';
 
 const commonFooterItems = [
@@ -8,6 +9,7 @@ const commonFooterItems = [
 ];
 
 const SideNavigation = ({ currentRole }) => {
+  const history = useHistory();
   const navItems = [
     {
       type: 'section',
@@ -38,8 +40,13 @@ const SideNavigation = ({ currentRole }) => {
         { type: 'link', text: 'Reminders and Notifications', href: '/manage-notifications' },
         { type: 'link', text: 'Secure Messaging', href: '/manage-messages' },
         { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },
-  { type: 'link', text: 'Intake Editor', href: '/manage-components' },
-  { type: 'link', text: 'Manage Workflows', href: '/manage-workflows' },
+        // Only System Administrators can see authoring/flow management links
+        ...(currentRole?.value === 'System Administrator'
+          ? [
+              { type: 'link', text: 'Manage Intake Steps', href: '/manage-components' },
+              { type: 'link', text: 'Manage Workflows', href: '/manage-workflows' },
+            ]
+          : []),
       ],
     },
     {
@@ -107,7 +114,9 @@ const SideNavigation = ({ currentRole }) => {
           return {
             ...section,
             items: section.items.filter(item =>
-              item.text !== 'Intake Editor' && item.text !== 'Reminders and Notifications'
+              item.text !== 'Manage Intake Steps' &&
+              item.text !== 'Manage Workflows' &&
+              item.text !== 'Reminders and Notifications'
             ),
           };
         }
@@ -179,7 +188,8 @@ const SideNavigation = ({ currentRole }) => {
         .filter(Boolean);
       return [...filteredSections, ...commonFooterItems];
     }
-    return [];
+    // Default: show all items for unknown role
+    return [...navItems, ...commonFooterItems];
   }
 
   const filteredNavItems = filterNavItemsForRole(currentRole);
@@ -188,10 +198,16 @@ const SideNavigation = ({ currentRole }) => {
     <CloudscapeSideNavigation
       header={{
         href: '/',
-        text: 'Admin Console',
+        text: 'ISET Admin',
       }}
       items={filteredNavItems}
-      //onFollow={handleNavigation}
+      onFollow={(e) => {
+        // Intercept to use SPA navigation and avoid full reloads
+        if (e.detail && e.detail.href && !e.detail.external) {
+          e.preventDefault();
+          history.push(e.detail.href);
+        }
+      }}
     />
   );
 };

@@ -56,7 +56,15 @@ const roleOptions = [
 
 const App = () => {
   const [currentLanguage, setCurrentLanguage] = useState('fr');
-  const [currentRole, setCurrentRole] = useState(roleOptions[0]);
+  // Initialize role from sessionStorage to make it sticky for the session
+  const [currentRole, setCurrentRole] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('currentRole');
+      return saved ? JSON.parse(saved) : roleOptions[0];
+    } catch {
+      return roleOptions[0];
+    }
+  });
 
   const handleLanguageChange = (lang) => {
     setCurrentLanguage(lang);
@@ -65,6 +73,13 @@ const App = () => {
   useEffect(() => {
     console.log(`I18nProvider locale: ${currentLanguage}`);
   }, [currentLanguage]);
+
+  // Persist role selection for the session
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('currentRole', JSON.stringify(currentRole));
+    } catch {}
+  }, [currentRole]);
 
   return (
     <DarkModeProvider>

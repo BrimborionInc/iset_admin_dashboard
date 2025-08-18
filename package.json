@@ -15,6 +15,7 @@
     "@testing-library/react": "^16.2.0",
     "ace-builds": "^1.39.1",
     "ace-code": "^1.39.0",
+    "ajv": "^8.12.0",
     "assert": "^2.1.0",
     "axios": "^1.8.1",
     "browserify-zlib": "^0.2.0",
@@ -53,8 +54,8 @@
     "build:production": "env-cmd -f .env.production react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-  "server": "node isetadminserver.js",
-  "audit:parity": "node scripts/parity-audit.js",
+    "server": "node isetadminserver.js",
+    "audit:parity": "node scripts/parity-audit.js",
     "deploy": "powershell -ExecutionPolicy Bypass -File deploy.ps1"
   },
   "eslintConfig": {

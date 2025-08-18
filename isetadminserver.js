@@ -64,6 +64,128 @@ const dbConfig = {
 
 const pool = mysql.createPool(dbConfig);
 
+// --- DEV-ONLY DB Inspector (read-only) ------------------------------------
+// Enable with ENABLE_DEV_DB_INSPECTOR=true and optional DEV_DB_KEY as a simple shared secret.
+// Endpoints:
+//   GET    /api/dev/db/tables                      -> list tables in the configured database
+//   GET    /api/dev/db/describe?table=NAME         -> describe columns for a table
+//   GET    /api/dev/db/sample?table=NAME&limit=100 -> sample rows from a table (default 50)
+//   POST   /api/dev/db/query { sql, params? }      -> run a read-only SELECT (LIMIT enforced)
+// Security:
+// - Only active when ENABLE_DEV_DB_INSPECTOR=true
+// - Optional header auth via x-dev-key matching DEV_DB_KEY
+// - Strictly read-only: only allows SQL starting with SELECT and blocks dangerous tokens
+// - Adds a default LIMIT if none provided
+// - Redacts sensitive-looking fields in results (password, token, sin/ssn, secret, etc.)
+const ENABLE_DEV_DB_INSPECTOR = process.env.ENABLE_DEV_DB_INSPECTOR === 'true';
+
+function devInspectorGuard(req, res, next) {
+  if (!ENABLE_DEV_DB_INSPECTOR) return res.status(404).json({ error: 'Not found' });
+  const key = process.env.DEV_DB_KEY || '';
+  if (key && req.get('x-dev-key') !== key) return res.status(403).json({ error: 'Forbidden' });
+  next();
+}
+
+function redactValue(key, val) {
+  if (val == null) return val;
+  const k = String(key || '').toLowerCase();
+  if (/(password|pass|secret|token|sin|ssn|nid|credit|card|cvv)/i.test(k)) return '***';
+  if (/email/.test(k)) {
+    const s = String(val);
+    const at = s.indexOf('@');
+    if (at > 1) return `${s[0]}***@${s.slice(at + 1)}`;
+    return '***';
+  }
+  return val;
+}
+
+function redactRow(row) {
+  if (!row || typeof row !== 'object') return row;
+  const out = {};
+  for (const [k, v] of Object.entries(row)) out[k] = redactValue(k, v);
+  return out;
+}
+
+function ensureSelectSQL(sql) {
+  if (typeof sql !== 'string') return { ok: false, reason: 'SQL must be a string' };
+  const s = sql.trim().replace(/;\s*$/g, '');
+  const low = s.toLowerCase();
+  if (!low.startsWith('select')) return { ok: false, reason: 'Only SELECT statements are allowed' };
+  if (/\b(update|delete|insert|drop|alter|truncate|create|grant|revoke|replace)\b/i.test(low)) {
+    return { ok: false, reason: 'Only read-only SELECT is permitted' };
+  }
+  // Disallow INTO OUTFILE and other file ops
+  if (/\binto\s+outfile\b|\bload_file\s*\(/i.test(low)) return { ok: false, reason: 'Dangerous SQL token' };
+  return { ok: true, sql: s };
+}
+
+function appendDefaultLimit(sql) {
+  const low = sql.toLowerCase();
+  if (/\blimit\s+\d+/i.test(low)) return sql;
+  return `${sql} LIMIT 100`;
+}
+
+// List tables in current database
+app.get('/api/dev/db/tables', devInspectorGuard, async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT TABLE_NAME AS table_name, TABLE_ROWS AS approx_rows
+         FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = ?
+        ORDER BY TABLE_NAME`,
+      [dbConfig.database]
+    );
+    res.json({ ok: true, tables: rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Describe columns for a table
+app.get('/api/dev/db/describe', devInspectorGuard, async (req, res) => {
+  const table = req.query.table;
+  if (!table) return res.status(400).json({ ok: false, error: 'Missing table' });
+  try {
+    const [rows] = await pool.query(
+      `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_KEY, EXTRA
+         FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+        ORDER BY ORDINAL_POSITION`,
+      [dbConfig.database, table]
+    );
+    res.json({ ok: true, columns: rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Sample rows
+app.get('/api/dev/db/sample', devInspectorGuard, async (req, res) => {
+  const table = req.query.table;
+  const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 1000);
+  if (!table) return res.status(400).json({ ok: false, error: 'Missing table' });
+  try {
+    const [rows] = await pool.query(`SELECT * FROM \`${table}\` LIMIT ${limit}`);
+    res.json({ ok: true, rows: rows.map(redactRow), limit });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Run a parameterized, read-only SELECT
+app.post('/api/dev/db/query', devInspectorGuard, async (req, res) => {
+  try {
+    const { sql, params } = req.body || {};
+    const check = ensureSelectSQL(sql);
+    if (!check.ok) return res.status(400).json({ ok: false, error: check.reason });
+    const finalSQL = appendDefaultLimit(check.sql);
+    const [rows] = await pool.query(finalSQL, Array.isArray(params) ? params : []);
+    res.json({ ok: true, rows: rows.map(redactRow), sql: finalSQL });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Supported component types in the Public Portal renderer (Milestone 6)
 // Keep this list in sync with ISET-intake/src/renderer/renderers.js registry keys
@@ -1240,21 +1362,32 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
           }));
         }
 
-        // Prefer a stable name/id from props when available (aligns with routing field_key)
-        const nameOrId = (props?.name || props?.id || '').toString().trim();
+        // Storage key precedence (first match wins):
+        // 1) route.field_key (when routing by option)
+        // 2) props.fieldName (aliases: field_name, fieldname)
+        // 3) props.name
+        // 4) props.id (if not a placeholder like input-1)
+        // 5) slugified label
         const labelSlug = slugify(labelText || `${tplType || 'field'}-${i+1}`);
-        // If this step drives option-based routing and field_key is set, lock to that name for consistency
         const routeField = route && route.mode === 'by_option' ? (route.field_key || '').trim() : '';
-        let chosenKey = nameOrId || labelSlug;
-        if (!routeField) {
-          // Avoid generic placeholder names when not used in routing
-          const isPlaceholder = placeholderNames.has(chosenKey.toLowerCase());
-          const divergesFromLabel = chosenKey && labelSlug && !labelSlug.includes(chosenKey.toLowerCase()) && !chosenKey.toLowerCase().includes(labelSlug);
-          if (isPlaceholder || divergesFromLabel) {
-            chosenKey = labelSlug || chosenKey;
-          }
-        } else {
+        const fieldNameProp = (props?.fieldName || props?.field_name || props?.fieldname || '').toString().trim();
+        const nameProp = (props?.name || '').toString().trim();
+        const idProp = (props?.id || '').toString().trim();
+        let chosenKey = '';
+        if (routeField) {
           chosenKey = routeField; // enforce alignment with routing var
+        } else if (fieldNameProp) {
+          chosenKey = fieldNameProp;
+        } else if (nameProp) {
+          chosenKey = nameProp;
+        } else if (idProp && !placeholderNames.has(idProp.toLowerCase())) {
+          chosenKey = idProp;
+        } else {
+          chosenKey = labelSlug;
+        }
+        // Final guard: if chosenKey somehow resolves to a placeholder, fall back to labelSlug
+        if (!chosenKey || placeholderNames.has(chosenKey.toLowerCase())) {
+          chosenKey = labelSlug;
         }
         const id = toIdSlug(chosenKey || labelSlug, tplType || 'field', i, usedIds);
 
@@ -1265,7 +1398,7 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
           tplType === 'radios' ? 'radio' :
           tplType
         );
-        const component = {
+  const component = {
           id,
           type: normalisedType,
           label: { en: labelText || id, fr: labelText || id },
@@ -1280,6 +1413,28 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
         if (tplType === 'input') {
           if (props?.type) component.inputType = props.type;
           if (props?.autocomplete) component.autocomplete = props.autocomplete;
+          if (props?.inputmode || props?.inputMode) component.inputMode = props.inputmode || props.inputMode;
+          if (props?.pattern) component.pattern = props.pattern;
+          if (typeof props?.spellcheck !== 'undefined') component.spellcheck = !!props.spellcheck;
+          if (typeof props?.disabled !== 'undefined') component.disabled = !!props.disabled;
+          // Prefix/suffix support from GOV.UK macro
+          if (props?.prefix && (props.prefix.text || props.prefix.html)) {
+            component.prefix = {
+              text: props.prefix.text || props.prefix.html,
+              classes: props.prefix.classes || undefined
+            };
+          }
+          if (props?.suffix && (props.suffix.text || props.suffix.html)) {
+            component.suffix = {
+              text: props.suffix.text || props.suffix.html,
+              classes: props.suffix.classes || undefined
+            };
+          }
+          // Allow appending additional describedBy ids
+          const describedExtra = props?.describedBy || props?.describedby || '';
+          if (describedExtra) component.extraDescribedBy = String(describedExtra);
+          // Form group classes passthrough
+          if (props?.formGroup && props.formGroup.classes) component.formGroupClass = props.formGroup.classes;
         }
   if (tplType === 'date-input') {
           if (props?.namePrefix) component.namePrefix = props.namePrefix;
@@ -1287,7 +1442,19 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
             component.dateFields = props.items.map(f => ({ name: f?.name, classes: f?.classes })).filter(f => f.name);
           }
         }
-  if (options) component.options = options;
+  if (options) {
+    // Preserve per-item id if provided in template props.items[].id
+    const srcItems = Array.isArray(props?.items) ? props.items : [];
+    component.options = options.map((o, idx) => {
+      const src = srcItems[idx] || {};
+      return src && src.id ? { ...o, id: String(src.id) } : o;
+    });
+  }
+  // Radios/checkboxes: allow explicit name/idPrefix overrides if provided
+  if ((tplType === 'radio' || tplType === 'radios' || tplType === 'checkbox' || tplType === 'checkboxes') && props) {
+    if (props.name) component.name = String(props.name);
+    if (props.idPrefix || props.id_prefix) component.idPrefix = String(props.idPrefix || props.id_prefix);
+  }
   // Infer normalize (preserve any earlier explicit)
   const inferred = inferNormalize(tplType, props, options || []);
   component.normalize = component.normalize && component.normalize !== 'none' ? component.normalize : inferred;
@@ -1394,25 +1561,70 @@ app.get('/api/component-templates', async (req, res) => {
       ${where}
       ORDER BY label, template_key, version
     `);
+    // When only active templates are requested, return only the highest version per template_key to avoid duplicates
+    let filtered = rows;
+    if (onlyActive) {
+      const byKey = new Map();
+      for (const r of rows) {
+        const k = r.template_key;
+        const prev = byKey.get(k);
+        if (!prev || Number(r.version) > Number(prev.version)) byKey.set(k, r);
+      }
+      filtered = Array.from(byKey.values());
+    }
     // parse JSON safely locally (don't rely on other helpers for forward compatibility)
     const parseJson = v => {
       if (v == null) return null;
       if (typeof v === 'object') return v; // already parsed
       try { return JSON.parse(v); } catch { return null; }
     };
-    const out = rows.map(r => ({
-      id: r.id,
-      key: r.template_key,
-      version: r.version,
-      type: r.type,
-      label: r.label,
-      description: r.description ?? null,
-      props: parseJson(r.default_props) ?? {},
-      editable_fields: parseJson(r.prop_schema) ?? [],
-      has_options: !!r.has_options,
-      option_schema: parseJson(r.option_schema) ?? null,
-      status: r.status
-    }));
+    // Sanitize defaults for input-like components to avoid default error state
+    const stripClasses = (cls, toRemove) => (String(cls || '')
+      .split(/\s+/)
+      .filter(c => c && !toRemove.includes(c))
+      .join(' '));
+    const out = filtered.map(r => {
+      const propsRaw = parseJson(r.default_props) ?? {};
+      const t = String(r.type || '').toLowerCase();
+      if (['input', 'text', 'email', 'number', 'password', 'phone', 'password-input'].includes(t)) {
+        try {
+          if (propsRaw && typeof propsRaw === 'object') {
+            // Remove error classes from formGroup/classes
+            if (propsRaw.formGroup && typeof propsRaw.formGroup === 'object') {
+              propsRaw.formGroup.classes = stripClasses(propsRaw.formGroup.classes, ['govuk-form-group--error']);
+            }
+            propsRaw.classes = stripClasses(propsRaw.classes, ['govuk-input--error']);
+            // Drop errorMessage by default
+            if (propsRaw.errorMessage) delete propsRaw.errorMessage;
+            // Alternative defaults requested by authoring UX
+            // 1) Label classes -> 'govuk-label--m' if not provided
+            if (!propsRaw.label || typeof propsRaw.label !== 'object') {
+              propsRaw.label = { text: (propsRaw.label && propsRaw.label.text) || 'Label', classes: 'govuk-label--m' };
+            } else if (!propsRaw.label.classes || String(propsRaw.label.classes).trim() === '') {
+              propsRaw.label.classes = 'govuk-label--m';
+            }
+            // 2) Hint default text when missing or empty
+            const hintText = propsRaw?.hint?.text;
+            if (!propsRaw.hint || typeof propsRaw.hint !== 'object' || !String(hintText || '').trim()) {
+              propsRaw.hint = { ...(propsRaw.hint || {}), text: 'This is the optional hint text' };
+            }
+          }
+        } catch (_) {}
+      }
+      return {
+        id: r.id,
+        key: r.template_key,
+        version: r.version,
+        type: r.type,
+        label: r.label,
+        description: r.description ?? null,
+        props: propsRaw,
+        editable_fields: parseJson(r.prop_schema) ?? [],
+        has_options: !!r.has_options,
+        option_schema: parseJson(r.option_schema) ?? null,
+        status: r.status
+      };
+    });
     res.status(200).json(out);
   } catch (err) {
     console.error('GET /api/component-templates failed:', err);
