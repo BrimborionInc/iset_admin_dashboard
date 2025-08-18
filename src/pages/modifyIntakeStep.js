@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 // Ensure GOV.UK styles are available in-editor
 import "../css/govuk-frontend.min.css";
-import { DndProvider, useDrag, useDrop } from "react-dnd";
+// Initialize GOV.UK behaviours for dynamic previews
+import { initAll as govukInitAll } from 'govuk-frontend';
+import { DndProvider, useDrag, useDrop, useDragDropManager } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { Grid, Box, Header, Button, Container, SpaceBetween, Alert } from "@cloudscape-design/components";
 import { useParams, useHistory } from "react-router-dom";
@@ -29,6 +31,18 @@ const ComponentItem = ({ component, onAdd }) => (
   </div>
 );
 
+// Only create a DnDProvider if one isn't already present to avoid multiple HTML5Backend instances
+const MaybeDndProvider = ({ children }) => {
+  let hasProvider = true;
+  try {
+    // Will throw if not within a DnD context
+    useDragDropManager();
+  } catch (_) {
+    hasProvider = false;
+  }
+  return hasProvider ? <>{children}</> : <DndProvider backend={HTML5Backend}>{children}</DndProvider>;
+};
+
 const PreviewArea = ({ components, setComponents, handleSelectComponent, selectedComponent }) => {
   const moveComponent = (dragIndex, hoverIndex) => {
     setComponents(prevComponents => {
@@ -43,9 +57,9 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
   };
   return (
     <div className="stage">
-    {components.map((comp, index) => (
+  {components.map((comp, index) => (
         <DraggablePreviewItem
-          key={comp.type + index}
+      key={comp?.props?.id || comp?.props?.name || comp?.templateId || `${comp.type}-${index}`}
           index={index}
           comp={comp}
           moveComponent={moveComponent}
@@ -141,11 +155,15 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
       version: comp?.version ?? 1,
       props: comp?.props || {}
     });
+    // Re-init GOV.UK behaviours when new HTML is injected
+    useEffect(() => {
+      try { if (typeof govukInitAll === 'function') govukInitAll(); } catch (_) {}
+    }, [html]);
     if (!templateId && !templateKey) {
       return <div className="govuk-hint" style={{ color: '#b00' }}>Missing template reference</div>;
     }
     if (error) return <div className="govuk-hint" style={{ color: '#b00' }}>Render error: {error}</div>;
-    if (loading && !html) return <div className="govuk-hint">Rendering…</div>;
+  if (loading && !html) return <div className="govuk-hint">Rendering…</div>;
     return <div className="govuk-embedded" dangerouslySetInnerHTML={{ __html: html }} />;
   };
 
@@ -160,7 +178,15 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
       }}
     >
       <div className="handle" style={{ padding: 5, fontWeight: 'bold', userSelect: 'none' }}>⠿</div>
-      <div onClick={handleClick} style={{ flex: 1 }}>
+      <div
+        onClick={handleClick}
+        style={{
+          flex: 1,
+          // Keep rendered content clear of the drag handle (left) and delete icon (right)
+          paddingLeft: 28,
+          paddingRight: 36,
+        }}
+      >
         <RenderComponentCard comp={comp} />
       </div>
       <Button className="delete" onClick={handleDelete} iconName="close" variant="icon" />
@@ -223,8 +249,16 @@ const ModifyComponent = () => {
           setInitialName(data.name || 'Untitled BlockStep');
           setInitialStatus(data.status || 'active');
           const comps = Array.isArray(data.components) ? data.components : [];
-          setComponents(comps);
-          setInitialComponents(comps);
+          // Dedupe by name/id to avoid accidental duplicates from prior saves
+          const seen = new Set();
+          const deduped = comps.filter(c => {
+            const key = `${c?.props?.name || ''}::${c?.props?.id || ''}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          setComponents(deduped);
+          setInitialComponents(deduped);
         } catch (e) {
           console.error('Failed to load step', e);
         } finally {
@@ -427,7 +461,7 @@ const ModifyComponent = () => {
   /* existing state & effects unchanged */
 
   return (
-    <DndProvider backend={HTML5Backend}>
+    <MaybeDndProvider>
       <style>{`
         .stage { padding: 8px; background: #fafafa; min-height: 160px; border: 1px dashed #d5dbdb; }
         .stage-card { background:#fff; border:1px solid #d5dbdb; border-radius:8px; padding:12px; margin-bottom:12px; position:relative; }
@@ -474,25 +508,122 @@ const ModifyComponent = () => {
               <ComponentItem
                 key={index}
                 component={comp}
-        onAdd={component => {
-                  const defaultProps = {
-                    ...(component.props || {}),
-                    items: (component.props && component.props.items) ? [...component.props.items] : []
-                  };
-                  const newComponent = {
-                    type: component.type,
-                    label: component.label,
-          props: defaultProps,
-          // for backend saves
-          templateId: component.id,
-          // for preview/template lookup
-          template_key: component.template_key, // specify backend template to render
-                    // carry schema through so Properties panel can render controls
-                    editable_fields: component.editable_fields || [],
-                    has_options: component.has_options || false,
-                    option_schema: component.option_schema || null
-                  };
-                  setComponents(prev => [...prev, newComponent]);
+  onAdd={component => {
+                  // Deep clone to avoid shared nested references between added components
+                  const defaultProps = JSON.parse(JSON.stringify(component.props || {}));
+                  if (Array.isArray(component.props?.items)) {
+                    defaultProps.items = [...component.props.items];
+                  }
+
+                  // Sanitize defaults to avoid showing error state by default
+                  const typeKey = String(component.type || component.template_key || '').toLowerCase();
+                  const stripClasses = (cls, toRemove) => (String(cls || '')
+                    .split(/\s+/)
+                    .filter(c => c && !toRemove.includes(c))
+                    .join(' '));
+                  if (typeKey === 'input' || typeKey === 'text' || typeKey === 'email' || typeKey === 'number' || typeKey === 'password' || typeKey === 'phone' || typeKey === 'password-input') {
+                    // Remove GOV.UK error classes from formGroup and control
+                    if (defaultProps.formGroup && typeof defaultProps.formGroup === 'object') {
+                      defaultProps.formGroup.classes = stripClasses(defaultProps.formGroup.classes, ['govuk-form-group--error']);
+                    }
+                    defaultProps.classes = stripClasses(defaultProps.classes, ['govuk-input--error']);
+                    // If errorMessage exists, clear it to avoid macro rendering error state
+                    if (defaultProps.errorMessage) {
+                      try { delete defaultProps.errorMessage; } catch (_) { defaultProps.errorMessage = { text: '' }; }
+                    }
+                    // Apply requested alternative defaults
+                    // 1) Label classes -> 'govuk-label--m' when not provided
+                    if (!defaultProps.label || typeof defaultProps.label !== 'object') {
+                      defaultProps.label = { text: (defaultProps.label && defaultProps.label.text) || 'Label', classes: 'govuk-label--m' };
+                    } else if (!defaultProps.label.classes || String(defaultProps.label.classes).trim() === '') {
+                      defaultProps.label.classes = 'govuk-label--m';
+                    }
+                    // 2) Hint default text when absent or empty
+                    const hintText = defaultProps?.hint?.text;
+                    if (!defaultProps.hint || typeof defaultProps.hint !== 'object' || !String(hintText || '').trim()) {
+                      defaultProps.hint = { ...(defaultProps.hint || {}), text: 'This is the optional hint text' };
+                    }
+                  } else if (typeKey === 'radio' || typeKey === 'radios' || typeKey === 'checkbox' || typeKey === 'checkboxes') {
+                    // Choice components: clean error state and set helpful defaults
+                    if (defaultProps.formGroup && typeof defaultProps.formGroup === 'object') {
+                      defaultProps.formGroup.classes = stripClasses(defaultProps.formGroup.classes, ['govuk-form-group--error']);
+                    }
+                    if (defaultProps.errorMessage) {
+                      try { delete defaultProps.errorMessage; } catch (_) { defaultProps.errorMessage = { text: '' }; }
+                    }
+                    // Ensure fieldset legend with medium size by default
+                    if (!defaultProps.fieldset || typeof defaultProps.fieldset !== 'object') {
+                      defaultProps.fieldset = { legend: { text: 'Choose one option', classes: 'govuk-fieldset__legend--m' } };
+                    } else {
+                      const legend = defaultProps.fieldset.legend || {};
+                      if (!legend.text) legend.text = 'Choose one option';
+                      if (!legend.classes || String(legend.classes).trim() === '') legend.classes = 'govuk-fieldset__legend--m';
+                      defaultProps.fieldset.legend = legend;
+                    }
+                    // Hint default text
+                    const hintText = defaultProps?.hint?.text;
+                    if (!defaultProps.hint || typeof defaultProps.hint !== 'object' || !String(hintText || '').trim()) {
+                      defaultProps.hint = { ...(defaultProps.hint || {}), text: 'This is the optional hint text' };
+                    }
+                    // Ensure options array with sensible defaults if empty
+                    if (!Array.isArray(defaultProps.items) || defaultProps.items.length === 0) {
+                      defaultProps.items = [
+                        { text: 'Yes', value: 'yes' },
+                        { text: 'No', value: 'no' }
+                      ];
+                    } else {
+                      // Normalize existing items to have text/value strings
+                      defaultProps.items = defaultProps.items.map((it, idx) => ({
+                        text: (it && (it.text || it.html)) ? (it.text || it.html) : `Option ${idx + 1}`,
+                        value: typeof it?.value !== 'undefined' ? String(it.value) : ((it && (it.text || it.html)) ? (it.text || it.html) : `opt${idx + 1}`),
+                        hint: it && it.hint ? it.hint : undefined,
+                      }));
+                    }
+                  }
+                  // Insert with unique name/id to prevent collisions like "input-1"
+                  setComponents(prev => {
+                    const used = new Set();
+                    prev.forEach(c => {
+                      const nm = c?.props?.name; if (nm) used.add(String(nm));
+                      const idv = c?.props?.id; if (idv) used.add(String(idv));
+                    });
+                    // Derive a clean, lowercase base from existing name/id/type
+                    const toSlug = (s) => String(s || '')
+                      .toLowerCase()
+                      .replace(/[^a-z0-9]+/g, '-')
+                      .replace(/(^-|-$)/g, '') || 'field';
+                    const basePrefix = toSlug(defaultProps.name || defaultProps.id || component.type || component.template_key || 'field');
+                    const makeUnique = (base) => {
+                      let candidate = base;
+                      if (used.has(candidate)) {
+                        const m = candidate.match(/^(.*?)-(\d+)$/);
+                        let stem = m ? m[1] : candidate;
+                        let i = m ? parseInt(m[2], 10) : 1;
+                        do { i += 1; candidate = `${stem}-${i}`; } while (used.has(candidate));
+                      }
+                      return candidate;
+                    };
+                    const nameCandidate = makeUnique(basePrefix);
+                    const idBase = toSlug(defaultProps.id || basePrefix);
+                    const idCandidate = makeUnique(idBase);
+
+                    const propsWithIds = { ...defaultProps, name: nameCandidate, id: idCandidate };
+
+                    const newComponent = {
+                      type: component.type,
+                      label: component.label,
+                      props: propsWithIds,
+                      // for backend saves
+                      templateId: component.id,
+                      // for preview/template lookup
+                      template_key: component.template_key, // specify backend template to render
+                      // carry schema through so Properties panel can render controls
+                      editable_fields: component.editable_fields || [],
+                      has_options: component.has_options || false,
+                      option_schema: component.option_schema || null
+                    };
+                    return [...prev, newComponent];
+                  });
                 }}
               />
             ))}
@@ -524,7 +655,7 @@ const ModifyComponent = () => {
           </Box>
         </Grid>
       </Container>
-    </DndProvider>
+  </MaybeDndProvider>
   );
 };
 export { setComponentConfigValue };
