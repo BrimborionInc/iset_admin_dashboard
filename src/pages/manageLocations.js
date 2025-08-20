@@ -17,6 +17,7 @@ import {
 import Board from '@cloudscape-design/board-components/board';
 import BoardItem from '@cloudscape-design/board-components/board-item';
 import { useHistory } from 'react-router-dom';
+import { apiFetch } from '../auth/apiClient';
 
 const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
   const history = useHistory();
@@ -38,11 +39,9 @@ const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
   const [flashMessages, setFlashMessages] = useState([]); // Define flashMessages state
 
   const fetchPtmas = () => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ptmas?type=PTMA`)
+    apiFetch(`/api/ptmas?type=PTMA`)
       .then(response => response.json())
-      .then(data => {
-        setPtmas(data);
-      })
+      .then(data => setPtmas(data))
       .catch(error => console.error('Error fetching PTMAs:', error));
   };
 
@@ -61,7 +60,7 @@ const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
   };
 
   const handleDeleteConfirm = () => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ptmas/${locationToDelete.id}`, {
+    apiFetch(`/api/ptmas/${locationToDelete.id}`, {
       method: 'DELETE',
     })
       .then(response => {

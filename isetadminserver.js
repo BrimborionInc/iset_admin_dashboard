@@ -26,7 +26,8 @@ console.log("CORS Allowed Origin:", process.env.ALLOWED_ORIGIN);
 
 // Set a default value for ALLOWED_ORIGIN in development if not set in .env
 if (process.env.NODE_ENV !== 'production' && !process.env.ALLOWED_ORIGIN) {
-  process.env.ALLOWED_ORIGIN = 'http://localhost:3000';  // Default for dev
+  // Allow both portal (3000) and admin UI (3001) in dev
+  process.env.ALLOWED_ORIGIN = 'http://localhost:3000,http://localhost:3001';
 }
 
 const express = require('express');
@@ -35,6 +36,7 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const fs = require('fs');
 const cheerio = require('cheerio');
+const axios = require('axios');
 
 const app = express();
 const port = process.env.PORT || 5001; // Use port from .env
@@ -55,6 +57,62 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
+// --- Authentication (Cognito) - feature flagged ---
+try {
+  const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+  if (authProvider === 'cognito') {
+    const { authnMiddleware } = require('./src/middleware/authn');
+    app.use('/api', authnMiddleware());
+  }
+} catch (e) {
+  console.warn('Auth middleware init failed:', e?.message);
+}
+
+// Simple auth probe for smoke testing
+app.get('/api/auth/me', (req, res) => {
+  const enabled = String(process.env.AUTH_PROVIDER || 'none').toLowerCase() === 'cognito';
+  if (!enabled) return res.status(200).json({ provider: 'none', auth: null });
+  if (!req.auth) return res.status(401).json({ error: 'Unauthenticated' });
+  res.json({ provider: 'cognito', auth: req.auth });
+});
+
+// --- AI Chat proxy (server-side, avoids exposing API keys in browser) -----
+// POST /api/ai/chat
+// Body: { messages: [{ role: 'system'|'user'|'assistant', content: string }], model?: string }
+// Returns: OpenRouter API response (choices[0].message.content used by UI)
+app.post('/api/ai/chat', async (req, res) => {
+  try {
+    const key = process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_KEY;
+    if (!key) {
+      return res.status(501).json({ error: 'disabled', message: 'AI assistant is disabled. No server API key configured.' });
+    }
+    const { messages, model } = req.body || {};
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'messages_required' });
+    }
+    // Sanitize payload and cap size
+    const safeMessages = messages
+      .slice(0, 12)
+      .map(m => ({
+        role: ['system','user','assistant'].includes(String(m.role).toLowerCase()) ? String(m.role).toLowerCase() : 'user',
+        content: String(m.content ?? '').slice(0, 8000)
+      }));
+    const mdl = typeof model === 'string' && model.trim() ? model : 'mistralai/mistral-7b-instruct';
+    const headers = {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.ALLOWED_ORIGIN || 'http://localhost:3001',
+      'X-Title': 'Admin Dashboard Assistant',
+    };
+    const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', { model: mdl, messages: safeMessages }, { headers });
+    res.status(200).json(resp.data);
+  } catch (e) {
+    const status = e?.response?.status || 500;
+    const details = e?.response?.data || { message: e.message };
+    res.status(status).json({ error: 'proxy_failed', details });
+  }
+});
+
 const dbConfig = {
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -63,6 +121,17 @@ const dbConfig = {
 };
 
 const pool = mysql.createPool(dbConfig);
+
+// Admin routes (delegated user management) - feature flagged
+try {
+  const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+  if (authProvider === 'cognito') {
+    const adminUsers = require('./src/routes/admin/users');
+    app.use('/api/admin', adminUsers);
+  }
+} catch (e) {
+  console.warn('Admin routes init failed:', e?.message);
+}
 
 // --- DEV-ONLY DB Inspector (read-only) ------------------------------------
 // Enable with ENABLE_DEV_DB_INSPECTOR=true and optional DEV_DB_KEY as a simple shared secret.
@@ -1351,6 +1420,18 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
         // Extract label/hint based on GOV.UK macro conventions
         const labelText = props?.fieldset?.legend?.text ?? props?.label?.text ?? props?.titleText ?? '';
         const hintText = props?.hint?.text ?? props?.text ?? '';
+        // Helper: flatten bilingual values (supports { en, fr } or plain strings)
+        const asLang = (v, lang) => {
+          if (v && typeof v === 'object') {
+            const val = v[lang] ?? v.en ?? v.fr;
+            return typeof val === 'string' ? val : (val == null ? '' : String(val));
+          }
+          return v == null ? '' : String(v);
+        };
+        const labelEn = asLang(labelText, 'en');
+        const labelFr = asLang(labelText, 'fr') || labelEn;
+        const hintEn = asLang(hintText, 'en');
+        const hintFr = asLang(hintText, 'fr') || hintEn;
 
   // Extract options for choice components (handle aliases)
   let options = null;
@@ -1401,8 +1482,8 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
   const component = {
           id,
           type: normalisedType,
-          label: { en: labelText || id, fr: labelText || id },
-          hint: hintText ? { en: hintText, fr: hintText } : undefined,
+          label: { en: labelEn || id, fr: labelFr || labelEn || id },
+          hint: (hintEn || hintFr) ? { en: hintEn, fr: hintFr } : undefined,
           class: props?.classes || undefined,
           required: !!props?.required,
           // storageKey: prefer chosenKey (aligned with routing if applicable)
@@ -1586,7 +1667,7 @@ app.get('/api/component-templates', async (req, res) => {
     const out = filtered.map(r => {
       const propsRaw = parseJson(r.default_props) ?? {};
       const t = String(r.type || '').toLowerCase();
-      if (['input', 'text', 'email', 'number', 'password', 'phone', 'password-input'].includes(t)) {
+  if (['input', 'text', 'email', 'number', 'password', 'phone', 'password-input'].includes(t)) {
         try {
           if (propsRaw && typeof propsRaw === 'object') {
             // Remove error classes from formGroup/classes
@@ -1594,8 +1675,7 @@ app.get('/api/component-templates', async (req, res) => {
               propsRaw.formGroup.classes = stripClasses(propsRaw.formGroup.classes, ['govuk-form-group--error']);
             }
             propsRaw.classes = stripClasses(propsRaw.classes, ['govuk-input--error']);
-            // Drop errorMessage by default
-            if (propsRaw.errorMessage) delete propsRaw.errorMessage;
+    // Keep any errorMessage defined by author; UI may choose to show or ignore
             // Alternative defaults requested by authoring UX
             // 1) Label classes -> 'govuk-label--m' if not provided
             if (!propsRaw.label || typeof propsRaw.label !== 'object') {
@@ -2069,7 +2149,7 @@ app.post('/api/cases', async (req, res) => {
 app.get('/api/case-assignment/unassigned-applications', async (req, res) => {
   try {
     // Run a query to find all submitted applications that don't yet have a case
-    const [rows] = await pool.query(`
+    let sql = `
       SELECT 
         a.id AS application_id,
         a.created_at AS submitted_at,
@@ -2079,9 +2159,19 @@ app.get('/api/case-assignment/unassigned-applications', async (req, res) => {
       FROM iset_application a
       JOIN user u ON a.user_id = u.id
       LEFT JOIN iset_case c ON a.id = c.application_id
-      WHERE c.id IS NULL
-      ORDER BY a.created_at DESC;
-    `);
+      WHERE c.id IS NULL\n`;
+    const params = [];
+    try {
+      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+      if (authProvider === 'cognito') {
+        const { scopeApplications } = require('./src/lib/dbScope');
+        const { sql: scopeSql, params: scopeParams } = scopeApplications(req.auth || {}, 'a');
+        sql += ` AND ${scopeSql}\n`;
+        params.push(...scopeParams);
+      }
+    } catch (_) {}
+    sql += '      ORDER BY a.created_at DESC';
+    const [rows] = await pool.query(sql, params);
 
     // Send results to the frontend
     res.status(200).json(rows);
@@ -2112,10 +2202,15 @@ app.get('/api/case-assignment/unassigned-applications', async (req, res) => {
  * - tracking_id
  */
 app.get('/api/tasks', async (req, res) => {
-  const userId = 18; // replace with req.user.id when auth is active
+  let userId = 18; // replace with req.user.id when auth is active
   try {
-    const [rows] = await pool.query(
-      `SELECT
+    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+    if (authProvider === 'cognito') {
+      userId = Number(req.auth?.userId) || -1;
+    }
+  } catch (_) {}
+  try {
+    let sql = `SELECT
          t.id,
          t.case_id,
          t.title,
@@ -2131,14 +2226,23 @@ app.get('/api/tasks', async (req, res) => {
        FROM iset_case_task t
        JOIN iset_case c ON t.case_id = c.id
        JOIN iset_application a ON c.application_id = a.id
-       WHERE t.assigned_to_user_id = ? 
-         AND t.status IN ('open', 'in_progress')
-       ORDER BY 
+       WHERE t.assigned_to_user_id = ?\n`;
+    const params = [userId];
+    try {
+      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+      if (authProvider === 'cognito') {
+        const { scopeCases } = require('./src/lib/dbScope');
+        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
+        sql += ` AND ${scopeSql}\n`;
+        params.push(...scopeParams);
+      }
+    } catch (_) {}
+    sql += ` AND t.status IN ('open', 'in_progress')\n`;
+    sql += ` ORDER BY 
          t.priority = 'high' DESC,
          t.due_date < CURDATE() DESC,
-         t.due_date ASC`,
-      [userId]
-    );
+         t.due_date ASC`;
+    const [rows] = await pool.query(sql, params);
     res.json(rows);
   } catch (err) {
     console.error('Error fetching tasks:', err);
@@ -2233,7 +2337,7 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
 app.get('/api/cases', async (req, res) => {
   try {
     const { stage } = req.query;
-    let sql = `
+  let sql = `
       SELECT 
         c.id,
         c.application_id,
@@ -2266,6 +2370,17 @@ app.get('/api/cases', async (req, res) => {
       sql += 'WHERE c.stage = ?\n';
       params.push(stage);
     }
+    // RBAC scoping (feature-flagged)
+    try {
+      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+      if (authProvider === 'cognito') {
+        const { scopeCases } = require('./src/lib/dbScope');
+        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
+        sql += (stage ? ' AND ' : 'WHERE ') + scopeSql + '\n';
+        params.push(...scopeParams);
+      }
+    } catch (_) {}
+
     sql += 'GROUP BY c.id\nORDER BY c.last_activity_at DESC';
 
     const [rows] = await pool.query(sql, params);
@@ -2282,7 +2397,7 @@ app.get('/api/cases/:id', async (req, res) => {
   const caseId = req.params.id;
   try {
     // Fetch case and joined application fields
-    const [rows] = await pool.query(`
+  let baseSql = `
       SELECT 
         c.id,
         c.application_id,
@@ -2332,8 +2447,20 @@ app.get('/api/cases/:id', async (req, res) => {
       JOIN iset_application a ON c.application_id = a.id
       JOIN user applicant ON a.user_id = applicant.id
       WHERE c.id = ?
-      LIMIT 1
-    `, [caseId]);
+    `;
+
+    const params = [caseId];
+    try {
+      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+      if (authProvider === 'cognito') {
+        const { scopeCases } = require('./src/lib/dbScope');
+        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
+        baseSql += ` AND ${scopeSql}`;
+        params.push(...scopeParams);
+      }
+    } catch (_) {}
+
+    const [rows] = await pool.query(baseSql + ' LIMIT 1', params);
 
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Case not found' });
@@ -2396,9 +2523,21 @@ app.get('/api/case-events', async (req, res) => {
     whereClauses.push('e.is_read = 0');
   }
 
-  const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+  let whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
 
   try {
+    // RBAC scoping if enabled: ensure events are for cases within scope
+    const scopedParams = [...params];
+    try {
+      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+      if (authProvider === 'cognito') {
+        const { scopeCases } = require('./src/lib/dbScope');
+        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
+        whereSql += (whereSql ? ' AND ' : 'WHERE ') + scopeSql;
+        scopedParams.push(...scopeParams);
+      }
+    } catch (_) {}
+
     const [rows] = await pool.query(`
       SELECT 
         e.id, e.case_id, e.event_type, e.event_data, e.is_read, e.created_at,
@@ -2413,7 +2552,7 @@ app.get('/api/case-events', async (req, res) => {
       ${whereSql}
       ORDER BY e.created_at DESC, e.id DESC
       LIMIT ? OFFSET ?
-    `, [...params, limit, offset]);
+    `, [...scopedParams, limit, offset]);
     // Parse event_data JSON if needed
     rows.forEach(row => {
       if (typeof row.event_data === 'string') {
@@ -2624,6 +2763,58 @@ app.get('/api/counters', async (req, res) => {
     // Log any errors and return a 500 status
     console.error('Error fetching counters:', error);
     res.status(500).send({ message: 'Failed to fetch counters' });
+  }
+});
+
+
+// --- Basic Users and Roles for Admin UI pages (lightweight) ---------------
+// List basic users from the user table for demo/admin views
+app.get('/api/users', async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, name, email
+         FROM user
+        ORDER BY id DESC
+        LIMIT 500`
+    );
+    // Shape to match UI expectations (includes a role field even if null)
+    const out = rows.map(r => ({ id: r.id, name: r.name, email: r.email, role: r.role || null }));
+    res.status(200).json(out);
+  } catch (err) {
+    console.error('Error fetching users:', err);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// Static role catalogue for the Roles table in Manage Users
+app.get('/api/roles', (_req, res) => {
+  // Keep in sync with navigation/feature flags as needed
+  const roles = [
+    { id: 'SysAdmin', name: 'System Administrator', description: 'Full administrative access to the Admin Portal.' },
+    { id: 'ProgramAdmin', name: 'Program Administrator', description: 'Manage programs, templates, and reporting.' },
+    { id: 'RegionalCoordinator', name: 'Regional Coordinator', description: 'Coordinate case assignments and oversee regional workflows.' },
+    { id: 'PTMAStaff', name: 'PTMA Staff', description: 'PTMA-level view and updates for assigned cases.' },
+  ];
+  res.status(200).json(roles);
+});
+
+// Minimal notifications summary for Manage Notifications landing
+app.get('/api/notifications', async (_req, res) => {
+  try {
+    // Provide a simple summary based on existing notification_template rows if present
+    const [rows] = await pool.query(
+      `SELECT type, language, status, COUNT(*) AS count
+         FROM notification_template
+        GROUP BY type, language, status
+        ORDER BY type, language, status`
+    ).catch(() => [ [] ]); // if table missing, fall back to empty array
+
+    const summary = Array.isArray(rows) ? rows : [];
+    res.status(200).json({ templatesSummary: summary });
+  } catch (err) {
+    // If anything fails, return an empty structure so UI keeps working
+    console.warn('Notifications summary unavailable:', err?.message || err);
+    res.status(200).json({ templatesSummary: [] });
   }
 });
 
@@ -3523,19 +3714,35 @@ app.get('/api/applications/:id', async (req, res) => {
   const applicationId = req.params.id;
   try {
     // Get application data
-    const [[application]] = await pool.query(
-      'SELECT * FROM iset_application WHERE id = ?',
-      [applicationId]
-    );
+    let appSql = 'SELECT * FROM iset_application a WHERE a.id = ?';
+    const appParams = [applicationId];
+    try {
+      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+      if (authProvider === 'cognito') {
+        const { scopeApplications } = require('./src/lib/dbScope');
+        const { sql: scopeSql, params: scopeParams } = scopeApplications(req.auth || {}, 'a');
+        appSql += ` AND ${scopeSql}`;
+        appParams.push(...scopeParams);
+      }
+    } catch (_) {}
+    const [[application]] = await pool.query(appSql, appParams);
     if (!application) {
       return res.status(404).json({ error: 'Application not found' });
     }
 
     // Get case info (if exists)
-    const [[caseRow]] = await pool.query(
-      `SELECT id, assigned_to_user_id, status, priority, stage, program_type, case_summary, opened_at, closed_at, last_activity_at, ptma_id FROM iset_case WHERE application_id = ?`,
-      [applicationId]
-    );
+    let caseSql = `SELECT id, assigned_to_user_id, status, priority, stage, program_type, case_summary, opened_at, closed_at, last_activity_at, ptma_id FROM iset_case c WHERE application_id = ?`;
+    const caseParams = [applicationId];
+    try {
+      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+      if (authProvider === 'cognito') {
+        const { scopeCases } = require('./src/lib/dbScope');
+        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
+        caseSql += ` AND ${scopeSql}`;
+        caseParams.push(...scopeParams);
+      }
+    } catch (_) {}
+    const [[caseRow]] = await pool.query(caseSql, caseParams);
 
     let evaluator = null;
     let ptma = null;
@@ -3572,10 +3779,18 @@ app.get('/api/applications/:id/ptma', async (req, res) => {
   const applicationId = req.params.id;
   try {
     // Get assigned evaluator for this application (via iset_case)
-    const [[caseRow]] = await pool.query(
-      'SELECT assigned_to_user_id FROM iset_case WHERE application_id = ?',
-      [applicationId]
-    );
+    let s = 'SELECT assigned_to_user_id FROM iset_case c WHERE application_id = ?';
+    const sParams = [applicationId];
+    try {
+      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+      if (authProvider === 'cognito') {
+        const { scopeCases } = require('./src/lib/dbScope');
+        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
+        s += ` AND ${scopeSql}`;
+        sParams.push(...scopeParams);
+      }
+    } catch (_) {}
+    const [[caseRow]] = await pool.query(s, sParams);
     if (!caseRow) {
       return res.status(200).json({ ptmas: [] });
     }
@@ -3603,18 +3818,23 @@ app.put('/api/applications/:id/ptma-case-summary', async (req, res) => {
   }
   try {
     // Update the case_summary in iset_case for the given application_id
-    const [result] = await pool.query(
-      'UPDATE iset_case SET case_summary = ? WHERE application_id = ?',
-      [case_summary, applicationId]
-    );
+    let upd = 'UPDATE iset_case c SET case_summary = ? WHERE application_id = ?';
+    const updParams = [case_summary, applicationId];
+    try {
+      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+      if (authProvider === 'cognito') {
+        const { scopeCases } = require('./src/lib/dbScope');
+        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
+        upd += ` AND ${scopeSql}`;
+        updParams.push(...scopeParams);
+      }
+    } catch (_) {}
+    const [result] = await pool.query(upd, updParams);
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Case not found for this application' });
     }
     // Return the updated case_summary (and optionally the full case row)
-    const [[updatedCase]] = await pool.query(
-      'SELECT case_summary FROM iset_case WHERE application_id = ?',
-      [applicationId]
-    );
+  const [[updatedCase]] = await pool.query('SELECT case_summary FROM iset_case WHERE application_id = ?', [applicationId]);
     res.status(200).json({ case_summary: updatedCase.case_summary });
   } catch (error) {
     console.error('Error updating case summary:', error);
@@ -3635,7 +3855,7 @@ app.get('/api/cases/:case_id/events', async (req, res) => {
   const caseId = req.params.case_id;
   const { limit = 50, offset = 0 } = req.query;
   try {
-    const [rows] = await pool.query(`
+    let sql = `
       SELECT 
         e.id AS event_id,
         e.case_id,
@@ -3649,10 +3869,20 @@ app.get('/api/cases/:case_id/events', async (req, res) => {
       FROM iset_case_event e
       JOIN user u ON e.user_id = u.id
       JOIN iset_event_type et ON e.event_type = et.event_type
-      WHERE e.case_id = ?
-      ORDER BY e.created_at DESC
-      LIMIT ? OFFSET ?
-    `, [caseId, Number(limit), Number(offset)]);
+      JOIN iset_case c ON e.case_id = c.id
+      WHERE e.case_id = ?\n`;
+    const qParams = [caseId];
+    try {
+      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+      if (authProvider === 'cognito') {
+        const { scopeCases } = require('./src/lib/dbScope');
+        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
+        sql += ` AND ${scopeSql}\n`;
+        qParams.push(...scopeParams);
+      }
+    } catch (_) {}
+    sql += '      ORDER BY e.created_at DESC\n      LIMIT ? OFFSET ?';
+    const [rows] = await pool.query(sql, [...qParams, Number(limit), Number(offset)]);
     res.status(200).json(rows);
   } catch (error) {
     console.error('Error fetching case events:', error);

@@ -4,6 +4,7 @@ import Board from '@cloudscape-design/board-components/board';
 import ManageTemplates from '../widgets/manageTemplates';
 import ConfigureNotifications from '../widgets/configureNotifications'; // Import the new widget
 import NotificationSettingsWidget from '../widgets/notificationSettingsWidget';
+import { apiFetch } from '../auth/apiClient';
 
 const ManageNotifications = ({ toggleHelpPanel, updateBreadcrumbs, setSplitPanelOpen, splitPanelOpen, setSplitPanelSize, splitPanelSize, setAvailableItems }) => {
   const [notifications, setNotifications] = useState([]);
@@ -33,7 +34,7 @@ const ManageNotifications = ({ toggleHelpPanel, updateBreadcrumbs, setSplitPanel
   useEffect(() => {
     const fetchNotifications = async () => {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/notifications`);
+  const response = await apiFetch(`/api/notifications`);
         const data = await response.json();
         setNotifications(data);
       } catch (error) {

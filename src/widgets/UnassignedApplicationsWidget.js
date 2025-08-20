@@ -16,6 +16,7 @@ import {
 import { BoardItem } from '@cloudscape-design/board-components';
 import Modal from '@cloudscape-design/components/modal';
 import Select from '@cloudscape-design/components/select';
+import { apiFetch } from '../auth/apiClient';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
@@ -83,7 +84,7 @@ const UnassignedApplicationsWidget = ({ actions, onCaseAssigned, refreshKey }) =
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/case-assignment/unassigned-applications`);
+  const response = await apiFetch(`/api/case-assignment/unassigned-applications`);
         if (!response.ok) throw new Error('Failed to fetch');
         const data = await response.json();
         // Sort by submitted_at descending
@@ -103,7 +104,7 @@ const UnassignedApplicationsWidget = ({ actions, onCaseAssigned, refreshKey }) =
     if (modalVisible) {
       setOfficersLoading(true);
       setOfficersError(null);
-      fetch(`${process.env.REACT_APP_API_BASE_URL}/api/intake-officers`)
+  apiFetch(`/api/intake-officers`)
         .then(res => {
           if (!res.ok) throw new Error('Failed to fetch intake officers');
           return res.json();
@@ -125,7 +126,7 @@ const UnassignedApplicationsWidget = ({ actions, onCaseAssigned, refreshKey }) =
     setAssigning(true);
     setAssignError(null);
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases`, {
+  const res = await apiFetch(`/api/cases`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

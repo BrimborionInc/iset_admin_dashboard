@@ -16,6 +16,7 @@ import ChatBubble from "@cloudscape-design/chat-components/chat-bubble";
 import PromptInput from "@cloudscape-design/components/prompt-input";
 import SupportPromptGroup from "@cloudscape-design/chat-components/support-prompt-group";
 import SideNavigation from './layouts/SideNavigation.js';
+import { apiFetch } from './auth/apiClient';
 import AppRoutes from './routes/AppRoutes.js'; // Ensure this matches the export in AppRoutes.js
 import { helpMessages } from './utils/helpMessages.js';
 import CustomSplitPanel from './layouts/CustomSplitPanel.js';
@@ -100,32 +101,25 @@ const AppContent = ({ currentRole }) => {
       setLoading(true);
 
       try {
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": "Bearer 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",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:3000",
-            "X-Title": "Admin Dashboard Assistant"
-          },
+        const response = await apiFetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: "mistralai/mistral-7b-instruct",
+            model: 'mistralai/mistral-7b-instruct',
             messages: [
-              {
-                role: "system",
-                content: `
-                  You are a helpful assistant for the Admin Dashboard.
-                  Provide assistance with navigation, feature usage, and troubleshooting common issues.
-                  Limit responses to topics relevant to this context:
-                  ${aiContext}
-                `
-              },
-              { role: "user", content: promptValue }
+              { role: 'system', content: `You are a helpful assistant for the Admin Dashboard. Limit responses to this context: ${aiContext}` },
+              { role: 'user', content: promptValue }
             ]
           })
         });
 
         const data = await response.json();
+        if (!response.ok) {
+          const msg = data?.message || data?.details?.message || 'AI assistant is disabled or unavailable.';
+          setChatMessages((prev) => [...prev, { type: 'incoming', text: msg, timestamp: new Date().toLocaleTimeString() }]);
+          setLoading(false);
+          return;
+        }
         const aiReply = data.choices?.[0]?.message?.content;
 
         setChatMessages((prev) => [

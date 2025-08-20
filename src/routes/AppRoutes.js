@@ -1,5 +1,7 @@
 import ManageWorkflows from '../pages/manageWorkflows.js';
 import React from 'react';
+import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '../auth/cognito';
+import roleMatrix from '../config/roleMatrix.json';
 import { Route, Switch, useLocation } from 'react-router-dom';
 import ModifyWorkflow from '../pages/modifyWorkflow.js';
 import {
@@ -52,6 +54,7 @@ import ManageMessagesHelp from '../helpPanelContents/manageMessagesHelp.js'; // 
 import ModifyComponent from '../pages/modifyIntakeStep.js'; // Import the new component
 import ModifyComponentHelp from '../helpPanelContents/modifyComponentHelp.js'; // Import the help panel content
 import ManageSecurityOptions from '../pages/manageSecurityOptions.js'; // Import the renamed component
+import AccessControlDashboard from '../pages/accessControlDashboard.js';
 import ManageIntakeSteps from '../pages/manageIntakeSteps.js'; // Import the renamed component
 import ManageIntakeStepsHelpPanel from '../helpPanelContents/manageIntakeStepsHelpPanel'; // Correct the import path
 import TestTable from '../pages/TestTable.jsx'; // Import the TestTable component
@@ -63,6 +66,7 @@ import ApplicationCaseDashboard from '../pages/applicationCaseDashboard.js'; // 
 import ArmsReportingDashboard from '../pages/armsReporting.js'; // Import the new component
 import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Import the NWAC Hub Management dashboard
 import AssessmentReviewDashboard from '../pages/assessmentReview.js'; // Import the new Assessment Review dashboard
+import AuthCallback from '../pages/AuthCallback.js';
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -110,21 +114,55 @@ const AppRoutes = ({
     </ContentLayout>
   );
 
+  function Guard({ children, roles, path }) {
+    const iamOn = isIamOn();
+    if (!iamOn) return children;
+    if (!hasValidSession()) {
+      return renderContent(() => () => (<div style={{ padding: 24 }}>Please sign in to access this page.</div>), [{ text: 'Home', href: '/' }], 'Authentication required');
+    }
+    const claims = getIdTokenClaims();
+    const role = getRoleFromClaims(claims);
+    const allowed = (() => {
+      if (Array.isArray(roles) && roles.length) return roles;
+      if (path && roleMatrix?.routes) {
+        // Try exact match, then match by removing params (e.g., :id)
+        const direct = roleMatrix.routes[path];
+        if (direct) return direct;
+      }
+      return null;
+    })();
+    if (allowed) {
+      if (!role || !allowed.includes(role)) {
+        return renderContent(() => () => (<div style={{ padding: 24 }}>You do not have permission to view this page.</div>), [{ text: 'Home', href: '/' }], 'Access denied');
+      }
+    } else if (roleMatrix?.default === 'deny') {
+      return renderContent(() => () => (<div style={{ padding: 24 }}>You do not have permission to view this page.</div>), [{ text: 'Home', href: '/' }], 'Access denied');
+    }
+    return children;
+  }
+
   return (
     <Switch>
+      <Route path="/auth/callback">
+        <AuthCallback />
+      </Route>
       <Route path="/manage-workflows">
-        {renderContent(ManageWorkflows, [
+        <Guard roles={['System Administrator']} path="/manage-workflows">
+          {renderContent(ManageWorkflows, [
           { text: 'Home', href: '/' },
           { text: 'Intake Editor', href: '/manage-components' },
           { text: 'Manage Workflows', href: '/manage-workflows' }
-        ], 'Manage Workflows', 'manageWorkflows')}
+          ], 'Manage Workflows', 'manageWorkflows')}
+        </Guard>
       </Route>
         <Route path="/modify-workflow">
-          {renderContent(ModifyWorkflow, [
+          <Guard roles={['System Administrator']} path="/modify-workflow">
+            {renderContent(ModifyWorkflow, [
             { text: 'Home', href: '/' },
             { text: 'Manage Workflows', href: '/manage-workflows' },
             { text: 'Modify Workflow', href: '/modify-workflow' }
-          ], 'Modify Workflow', 'modifyWorkflow')}
+            ], 'Modify Workflow', 'modifyWorkflow')}
+          </Guard>
         </Route>
       <Route path="/experiment">
         {renderContent(Experiment, [{ text: 'Home', href: '/' }, { text: 'Experiment', href: '/experiment' }], 'Experiment Page', 'experiment')}
@@ -136,7 +174,9 @@ const AppRoutes = ({
         {renderContent(ManageMessages, [{ text: 'Home', href: '/' }, { text: 'Secure Client Messaging', href: '/manage-messages' }], 'Secure Client Messaging', ManageMessagesHelp.aiContext)}
       </Route>
       <Route path="/ptma-management">
-        {renderContent(LocationsManagementDashboard, [{ text: 'Home', href: '/' }, { text: 'Manage PTMAs', href: '/ptma-management' }], 'Manage PTMAs', <ManageLocationsHelp />)}
+        <Guard path="/ptma-management">
+          {renderContent(LocationsManagementDashboard, [{ text: 'Home', href: '/' }, { text: 'Manage PTMAs', href: '/ptma-management' }], 'Manage PTMAs', <ManageLocationsHelp />)}
+        </Guard>
       </Route>
       <Route path="/locations-management-dashboard">
         {renderContent(LocationsManagementDashboard, [{ text: 'Home', href: '/' }, { text: 'Manage Locations', href: '/locations-management-dashboard' }], 'Manage Locations', ManageLocationsHelp.aiContext)}
@@ -145,7 +185,9 @@ const AppRoutes = ({
         {renderContent(ModifyLocation, [{ text: 'Home', href: '/' }, { text: 'Manage Locations', href: '/ptma-management' }, { text: 'Modify Location', href: '/modify-ptma/:id' }], 'Manage Location', 'modifyPtma')}
       </Route>
       <Route path="/user-management-dashboard">
-        {renderContent(UserManagementDashboard, [{ text: 'Home', href: '/' }, { text: 'User Management', href: '/user-management-dashboard' }], 'User Management', 'userManagement')}
+        <Guard path="/user-management-dashboard">
+          {renderContent(UserManagementDashboard, [{ text: 'Home', href: '/' }, { text: 'User Management', href: '/user-management-dashboard' }], 'User Management', 'userManagement')}
+        </Guard>
       </Route>
       <Route path="/new-location">
         {renderContent(NewLocationForm, [{ text: 'Home', href: '/' }, { text: 'Manage PTMAs', href: '/ptma-management' }, { text: 'New PTMA', href: '/new-location' }], 'New PTMA', 'newPtma')}
@@ -208,6 +250,7 @@ const AppRoutes = ({
         {renderContent(ModifyAppointment, [{ text: 'Home', href: '/' }, { text: 'Manage Appointments', href: '/manage-appointments-new' }, { text: 'Modify Appointment', href: '/modify-appointment/:id' }], 'Modify Appointment', 'modifyAppointment')}
       </Route>
       <Route path="/reporting-and-monitoring-dashboard">
+        <Guard path="/reporting-and-monitoring-dashboard">
         {renderContent(
           ReportingAndMonitoringDashboard,
           [{ text: 'Home', href: '/' }, { text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' }],
@@ -224,6 +267,7 @@ const AppRoutes = ({
             </Button>
           </SpaceBetween>
         )}
+        </Guard>
       </Route>
       <Route path="/manage-fees">
         {renderContent(ManageFees, [{ text: 'Home', href: '/' }, { text: 'Manage Fees', href: '/manage-fees' }], 'Manage Fees', 'manageFees')}
@@ -232,7 +276,9 @@ const AppRoutes = ({
         {renderContent(VisualSettings, [{ text: 'Home', href: '/' }, { text: 'Visual Settings', href: '/visual-settings' }], 'Visual Settings', 'visualSettings')}
       </Route>
       <Route path="/manage-notifications">
-        {renderContent(ManageNotifications, [{ text: 'Home', href: '/' }, { text: 'Manage Notifications', href: '/manage-notifications' }], 'Manage Notifications', <ManageNotificationsHelp />)}
+        <Guard path="/manage-notifications">
+          {renderContent(ManageNotifications, [{ text: 'Home', href: '/' }, { text: 'Manage Notifications', href: '/manage-notifications' }], 'Manage Notifications', <ManageNotificationsHelp />)}
+        </Guard>
       </Route>
       <Route path="/manage-ticketing-dashboard">
         {renderContent(ManageTicketingDashboard, [{ text: 'Home', href: '/' }, { text: 'Manage Ticketing', href: '/manage-ticketing-dashboard' }], 'Manage Ticketing', 'manageTicketing')}
@@ -258,8 +304,19 @@ const AppRoutes = ({
       <Route path="/manage-security-options">
         {renderContent(ManageSecurityOptions, [{ text: 'Home', href: '/' }, { text: 'Security Settings', href: '/manage-security-options' }], 'Security Settings', 'manageSecurityOptions')}
       </Route>
+      <Route path="/access-control">
+        <Guard path="/manage-security-options">
+          {renderContent(AccessControlDashboard, [
+            { text: 'Home', href: '/' },
+            { text: 'Security Settings', href: '/manage-security-options' },
+            { text: 'Access Control', href: '/access-control' }
+          ], 'Access Control', 'accessControl')}
+        </Guard>
+      </Route>
       <Route path="/manage-components">
-  {renderContent(ManageIntakeSteps, [{ text: 'Home', href: '/' }, { text: 'Manage Intake Steps', href: '/manage-components' }], 'Manage Intake Steps', <ManageIntakeStepsHelpPanel />)}
+        <Guard path="/manage-components">
+          {renderContent(ManageIntakeSteps, [{ text: 'Home', href: '/' }, { text: 'Manage Intake Steps', href: '/manage-components' }], 'Manage Intake Steps', <ManageIntakeStepsHelpPanel />)}
+        </Guard>
       </Route>
       <Route path="/test-table">
         {renderContent(TestTable, [{ text: 'Home', href: '/' }, { text: 'Test Table', href: '/test-table' }], 'Test Table', 'testTable')}
@@ -268,13 +325,19 @@ const AppRoutes = ({
         {renderContent(QMSOperatorDemo, [{ text: 'Home', href: '/' }, { text: 'QMS Operator Demo', href: '/qms-operator-demo' }], 'QMS Operator Demo', 'qmsOperatorDemo')}
       </Route>
       <Route path="/manage-applications">
-        {renderContent(ManageApplications, [{ text: 'Home', href: '/' }, { text: 'Case Management', href: '/manage-applications' }], 'Case Management', 'manageApplications')}
+        <Guard path="/manage-applications">
+          {renderContent(ManageApplications, [{ text: 'Home', href: '/' }, { text: 'Case Management', href: '/manage-applications' }], 'Case Management', 'manageApplications')}
+        </Guard>
       </Route>
       <Route path="/case-management">
-        {renderContent(ManageApplications, [{ text: 'Home', href: '/' }, { text: 'Case Management', href: '/case-management' }], 'Case Management', 'caseManagement')}
+        <Guard path="/case-management">
+          {renderContent(ManageApplications, [{ text: 'Home', href: '/' }, { text: 'Case Management', href: '/case-management' }], 'Case Management', 'caseManagement')}
+        </Guard>
       </Route>
       <Route path="/manage-organisations">
-        {renderContent(ManageOrganisations, [{ text: 'Home', href: '/' }, { text: 'Manage ISET Holders', href: '/manage-organisations' }], 'Manage ISET Holders', 'manageOrganisations')}
+        <Guard path="/manage-organisations">
+          {renderContent(ManageOrganisations, [{ text: 'Home', href: '/' }, { text: 'Manage ISET Holders', href: '/manage-organisations' }], 'Manage ISET Holders', 'manageOrganisations')}
+        </Guard>
       </Route>
       <Route path="/case-assignment-dashboard">
         {renderContent(CaseAssignmentDashboard, [
@@ -283,16 +346,21 @@ const AppRoutes = ({
         ], 'Case Assignment', 'caseAssignment')}
       </Route>
       <Route path="/application-case/:id">
-        {renderContent(ApplicationCaseDashboard, [{ text: 'Home', href: '/' }, { text: 'Case Management', href: '/case-management' }, { text: 'Application' }], 'ISET Application Management', 'applicationCaseDashboard')}
+        <Guard path="/application-case/:id">
+          {renderContent(ApplicationCaseDashboard, [{ text: 'Home', href: '/' }, { text: 'Case Management', href: '/case-management' }, { text: 'Application' }], 'ISET Application Management', 'applicationCaseDashboard')}
+        </Guard>
       </Route>
       <Route path="/arms-reporting">
-        {renderContent(ArmsReportingDashboard, [
+        <Guard path="/arms-reporting">
+          {renderContent(ArmsReportingDashboard, [
           { text: 'Home', href: '/' },
           { text: 'ARMS Reporting', href: '/arms-reporting' }
         ], 'ARMS Reporting', 'armsReporting')}
+        </Guard>
       </Route>
       <Route path="/nwac-hub-management">
-        {renderContent(
+        <Guard path="/nwac-hub-management">
+          {renderContent(
           NWACHubManagementDashboard,
           [
             { text: 'Home', href: '/' },
@@ -301,12 +369,15 @@ const AppRoutes = ({
           'NWAC Hub Management',
           'nwacHubManagement'
         )}
+        </Guard>
       </Route>
       <Route path="/assessment-review">
-        {renderContent(AssessmentReviewDashboard, [
+        <Guard path="/assessment-review">
+          {renderContent(AssessmentReviewDashboard, [
           { text: 'Home', href: '/' },
           { text: 'Assessment Review', href: '/assessment-review' }
         ], 'Assessment Review', 'assessmentReview')}
+        </Guard>
       </Route>
       <Route path="/">
         {renderContent(AdminDashboard, [{ text: 'Home', href: '/' }, { text: 'Admin Console', href: '#' }], 'Secure Solution Suite Admin Console', AdminDashboardHelp.aiContext)}
