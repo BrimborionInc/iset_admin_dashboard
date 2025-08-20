@@ -10,14 +10,23 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep }) => {
   const history = useHistory();
 
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps`)
-      .then(response => response.json())
+    const apiBase = process.env.REACT_APP_API_BASE_URL || '';
+    fetch(`${apiBase}/api/steps`)
+      .then(async response => {
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.error || err.message || `HTTP ${response.status}`);
+        }
+        return response.json();
+      })
       .then(data => {
-        setSteps(data);
+        const list = Array.isArray(data) ? data : (Array.isArray(data?.rows) ? data.rows : []);
+        setSteps(list);
         setLoading(false);
       })
       .catch(error => {
         console.error('Error fetching steps:', error);
+        setSteps([]);
         setLoading(false);
       });
   }, []);
@@ -29,7 +38,8 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep }) => {
   const handleDelete = async (step) => {
     if (window.confirm(`Delete intake step "${step.name}"? This cannot be undone.`)) {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps/${step.id}`, {
+  const apiBase = process.env.REACT_APP_API_BASE_URL || '';
+  const response = await fetch(`${apiBase}/api/steps/${step.id}`, {
           method: 'DELETE',
         });
 

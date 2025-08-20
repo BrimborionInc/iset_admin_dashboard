@@ -13,6 +13,7 @@ import {
 } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useHistory } from 'react-router-dom';
+import { apiFetch } from '../auth/apiClient';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
@@ -80,8 +81,8 @@ const AssignedCasesWidget = ({ actions, refreshKey, simulatedUser }) => {
       setLoading(true);
       setError(null);
       try {
-        let url = `${process.env.REACT_APP_API_BASE_URL}/api/cases`;
-        const response = await fetch(url);
+  let url = `/api/cases`;
+  const response = await apiFetch(url);
         if (!response.ok) throw new Error('Failed to fetch');
         let data = await response.json();
         // Filter by evaluator if simulatedUser is set

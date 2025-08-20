@@ -8,6 +8,7 @@ import { HTML5Backend } from "react-dnd-html5-backend";
 import { Grid, Box, Header, Button, Container, SpaceBetween, Alert } from "@cloudscape-design/components";
 import { useParams, useHistory } from "react-router-dom";
 import PropertiesPanel from './PropertiesPanel.js';
+import TranslationsWidget from '../widgets/TranslationsWidget';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5001';
 
@@ -43,7 +44,22 @@ const MaybeDndProvider = ({ children }) => {
   return hasProvider ? <>{children}</> : <DndProvider backend={HTML5Backend}>{children}</DndProvider>;
 };
 
-const PreviewArea = ({ components, setComponents, handleSelectComponent, selectedComponent }) => {
+const PreviewArea = ({ components, setComponents, handleSelectComponent, selectedComponent, previewLang = 'en' }) => {
+  // Flatten bilingual { en, fr } to strings for display safety
+  const flattenTranslations = (val, lang = 'en') => {
+    const isLangObj = (v) => v && typeof v === 'object' && (
+      Object.prototype.hasOwnProperty.call(v, 'en') || Object.prototype.hasOwnProperty.call(v, 'fr')
+    );
+    if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') return String(val);
+    if (Array.isArray(val)) return val.map(v => flattenTranslations(v, lang));
+    if (isLangObj(val)) return String(val[lang] ?? val.en ?? val.fr ?? '');
+    if (val && typeof val === 'object') {
+      const out = Array.isArray(val) ? [] : {};
+      for (const [k, v] of Object.entries(val)) out[k] = flattenTranslations(v, lang);
+      return out;
+    }
+    return val;
+  };
   const moveComponent = (dragIndex, hoverIndex) => {
     setComponents(prevComponents => {
       if (dragIndex < 0 || hoverIndex < 0 || dragIndex >= prevComponents.length || hoverIndex >= prevComponents.length) {
@@ -59,13 +75,14 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
     <div className="stage">
   {components.map((comp, index) => (
         <DraggablePreviewItem
-      key={comp?.props?.id || comp?.props?.name || comp?.templateId || `${comp.type}-${index}`}
+    key={(comp?.templateId || comp?.template_id || comp?.id || comp?.props?.id || comp?.props?.name || `${comp.type}-${index}`) + `-${index}`}
           index={index}
-          comp={comp}
+      comp={comp}
           moveComponent={moveComponent}
           setComponents={setComponents}
           handleSelectComponent={handleSelectComponent}
-      selectedComponent={selectedComponent}
+    selectedComponent={selectedComponent}
+    previewLang={previewLang}
         />
       ))}
       {components.length === 0 && (
@@ -77,7 +94,7 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
   );
 };
 
-const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handleSelectComponent, selectedComponent }) => {
+const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handleSelectComponent, selectedComponent, previewLang = 'en' }) => {
   const [{ isDragging }, drag] = useDrag(() => ({
     type: "REORDER_COMPONENT",
     item: { index },
@@ -145,15 +162,45 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
     return { html, loading, error };
   }
 
-  const RenderComponentCard = ({ comp }) => {
+  const RenderComponentCard = ({ comp, previewLang = 'en' }) => {
+    // Flatten any bilingual values like { en, fr } down to a single string for preview rendering
+    const flattenTranslations = (val, lang = 'en') => {
+      const isLangObj = (v) => v && typeof v === 'object' && (
+        Object.prototype.hasOwnProperty.call(v, 'en') || Object.prototype.hasOwnProperty.call(v, 'fr')
+      );
+      const pickLang = (v) => {
+        // Prefer requested language, then English, then French, then text/html fields, else empty string
+        if (typeof v === 'string' || typeof v === 'number') return String(v);
+        if (isLangObj(v)) {
+          const cand = v[lang] ?? v.en ?? v.fr;
+          return typeof cand === 'string' || typeof cand === 'number' ? String(cand) : '';
+        }
+        if (v && typeof v === 'object') {
+          // if it is a GOV.UK macro object like { text: '...', html: '...' }, keep as object
+          // but recurse into its values
+          const out = Array.isArray(v) ? [] : {};
+          if (Array.isArray(v)) {
+            for (const item of v) out.push(flattenTranslations(item, lang));
+            return out;
+          }
+          for (const [k, val2] of Object.entries(v)) out[k] = flattenTranslations(val2, lang);
+          return out;
+        }
+        return v;
+      };
+      return pickLang(val);
+    };
+
     // Prefer templateId from DB, fall back to key/type.
     const templateId  = comp?.templateId ?? comp?.template_id ?? comp?.id ?? null;
     const templateKey = comp?.template_key ?? comp?.type ?? null;
+    // Prepare props for preview (strings only)
+  const previewProps = useMemo(() => flattenTranslations(comp?.props || {}, previewLang), [comp?.props, previewLang]);
     const { html, loading, error } = useNunjucksHTML({
       templateId,
       templateKey,
       version: comp?.version ?? 1,
-      props: comp?.props || {}
+      props: previewProps
     });
     // Re-init GOV.UK behaviours when new HTML is injected
     useEffect(() => {
@@ -187,7 +234,7 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
           paddingRight: 36,
         }}
       >
-        <RenderComponentCard comp={comp} />
+  <RenderComponentCard comp={comp} previewLang={previewLang} />
       </div>
       <Button className="delete" onClick={handleDelete} iconName="close" variant="icon" />
     </div>
@@ -458,6 +505,9 @@ const ModifyComponent = () => {
 
   const handleCancel = () => history.push('/manage-components');
 
+  // Language toggle for Working Area preview
+  const [previewLang, setPreviewLang] = useState('en');
+
   /* existing state & effects unchanged */
 
   return (
@@ -630,28 +680,54 @@ const ModifyComponent = () => {
           </Box>
 
       <Box padding="m">
-            <Header variant="h3">Working Area</Header>
+            <Header
+              variant="h3"
+              actions={
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Button
+                    variant={previewLang === 'en' ? 'primary' : 'normal'}
+                    onClick={() => setPreviewLang('en')}
+                    disabled={previewLang === 'en'}
+                  >EN</Button>
+                  <Button
+                    variant={previewLang === 'fr' ? 'primary' : 'normal'}
+                    onClick={() => setPreviewLang('fr')}
+                    disabled={previewLang === 'fr'}
+                  >FR</Button>
+                </SpaceBetween>
+              }
+            >
+              Working Area
+            </Header>
             {!loading && (
               <PreviewArea
                 components={components}
                 setComponents={setComponents}
                 handleSelectComponent={handleSelectComponent}
         selectedComponent={selectedComponent}
+        previewLang={previewLang}
               />
             )}
           </Box>
 
           <Box padding="m">
-            <PropertiesPanel
-              selectedComponent={selectedComponent}
-              updateComponentProperty={updateComponentProperty}
-              pageProperties={{ name, status }}
-              setPageProperties={({ name, status }) => {
-                setName(name);
-                setStatus(status);
-                setInitialComponents([]);
-              }}
-            />
+            <SpaceBetween size="l">
+              <TranslationsWidget
+                components={components}
+                setComponents={setComponents}
+                asBoardItem={false}
+              />
+              <PropertiesPanel
+                selectedComponent={selectedComponent}
+                updateComponentProperty={updateComponentProperty}
+                pageProperties={{ name, status }}
+                setPageProperties={({ name, status }) => {
+                  setName(name);
+                  setStatus(status);
+                  setInitialComponents([]);
+                }}
+              />
+            </SpaceBetween>
           </Box>
         </Grid>
       </Container>

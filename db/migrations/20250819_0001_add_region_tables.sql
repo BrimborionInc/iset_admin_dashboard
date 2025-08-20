@@ -1,0 +1,7 @@
+-- Create region table (if not exists)
+CREATE TABLE IF NOT EXISTS region (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(16) NOT NULL UNIQUE,
+  name VARCHAR(128) NOT NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -14,6 +14,7 @@ import {
 import Board from '@cloudscape-design/board-components/board';
 import BoardItem from '@cloudscape-design/board-components/board-item';
 import { useHistory } from 'react-router-dom';
+import { apiFetch } from '../auth/apiClient';
 
 const NWACHubManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
   const history = useHistory();
@@ -33,11 +34,9 @@ const NWACHubManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => 
 
   // Placeholder fetch for NWAC Hubs
   const fetchHubs = () => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ptmas?type=Hub`)
+    apiFetch(`/api/ptmas?type=Hub`)
       .then(response => response.json())
-      .then(data => {
-        setHubs(data);
-      })
+      .then(data => setHubs(data))
       .catch(error => console.error('Error fetching Hubs:', error));
   };
 

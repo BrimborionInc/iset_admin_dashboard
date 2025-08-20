@@ -1,0 +1,4 @@
+-- Backfill region_id values (example placeholder)
+-- TODO: Replace with actual mapping logic from PTMA/province tables
+-- UPDATE applications a JOIN ptma p ON a.ptma_id = p.id SET a.region_id = p.region_id WHERE a.region_id IS NULL;
+-- UPDATE iset_case c JOIN applications a ON c.application_id = a.id SET c.region_id = a.region_id WHERE c.region_id IS NULL;

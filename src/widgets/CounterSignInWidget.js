@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Header, Button, Select, SpaceBetween, Alert, Box, Link, ButtonDropdown } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import CounterSignInHelp from '../helpPanelContents/CounterSignInHelp';
+import { apiFetch } from '../auth/apiClient';
 
 const CounterSignInWidget = ({ toggleHelpPanel, actions, setActiveUserId }) => {
   const [users, setUsers] = useState([]);
@@ -15,8 +16,8 @@ const CounterSignInWidget = ({ toggleHelpPanel, actions, setActiveUserId }) => {
     // Fetch users and counters on component mount
     const fetchData = async () => {
       try {
-        const usersRes = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/users`);
-        const countersRes = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/counters`);
+        const usersRes = await apiFetch(`/api/users`);
+        const countersRes = await apiFetch(`/api/counters`);
         const usersData = await usersRes.json();
         const countersData = await countersRes.json();
         setUsers(usersData.map(user => ({ label: user.name, value: user.id })));
@@ -36,7 +37,7 @@ const CounterSignInWidget = ({ toggleHelpPanel, actions, setActiveUserId }) => {
     }
 
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/counter-session`, {
+      const response = await apiFetch(`/api/counter-session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

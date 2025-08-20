@@ -15,6 +15,7 @@ import {
 import Board from '@cloudscape-design/board-components/board';
 import BoardItem from '@cloudscape-design/board-components/board-item';
 import { helpMessages } from '../utils/helpMessages'; // Import help messages
+import { apiFetch } from '../auth/apiClient';
 
 const UserManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
   const [users, setUsers] = useState([]);
@@ -37,32 +38,22 @@ const UserManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
   ]);
 
   useEffect(() => {
-    // Fetch users data
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/users`)
-      .then(response => response.json())
-      .then(data => setUsers(data))
-      .catch(error => {
-        console.error('Error fetching users:', error);
-        setError('Error fetching users');
-      });
-
-    // Fetch roles data
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/roles`)
-      .then(response => response.json())
-      .then(data => setRoles(data))
-      .catch(error => {
-        console.error('Error fetching roles:', error);
-        setError('Error fetching roles');
-      });
-
-    // Fetch evaluators data
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/intake-officers`)
-      .then(response => response.json())
-      .then(data => setEvaluators(data))
-      .catch(error => {
-        console.error('Error fetching evaluators:', error);
-        setError('Error fetching evaluators');
-      });
+    // Fetch users, roles, and evaluators using apiFetch
+    (async () => {
+      try {
+        const [usersRes, rolesRes, evalsRes] = await Promise.all([
+          apiFetch(`/api/users`),
+          apiFetch(`/api/roles`),
+          apiFetch(`/api/intake-officers`),
+        ]);
+        setUsers(await usersRes.json());
+        setRoles(await rolesRes.json());
+        setEvaluators(await evalsRes.json());
+      } catch (error) {
+        console.error('Error fetching user dashboard data:', error);
+        setError('Error fetching users/roles/evaluators');
+      }
+    })();
   }, []);
 
   const userColumns = [

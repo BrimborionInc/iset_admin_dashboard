@@ -107,6 +107,19 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   const rawMode = selectedComponent?.props?.mode ?? 'static';
   const currentMode = optionSourceMode; // Use the tracked mode instead of rawMode
 
+  // Helper: safely display bilingual objects or primitives
+  const asLangString = (val, lang = 'en') => {
+    if (val == null) return '';
+    if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') return String(val);
+    if (typeof val === 'object') {
+      if (Object.prototype.hasOwnProperty.call(val, 'en') || Object.prototype.hasOwnProperty.call(val, 'fr')) {
+        return String(val[lang] ?? val.en ?? val.fr ?? '');
+      }
+      try { return JSON.stringify(val); } catch { return String(val); }
+    }
+    return String(val);
+  };
+
   // Build a lightweight JSON Schema for Ajv from editable_fields
   const componentJsonSchema = useMemo(() => {
     const fields = (selectedComponent?.editable_fields || []).filter(f => f.type !== 'optionList');
@@ -585,15 +598,22 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                       ...schema.map(key => ({
                         id: key,
                         header: key,
-                        cell: item => item[key],
+                        cell: item => asLangString(item[key], 'en'),
                         editConfig: {
                           editingCell: (item, { currentValue, setValue }) => (
                             <Input
-                              value={currentValue || item[key]}
+                              value={currentValue ?? asLangString(item[key], 'en')}
                               onChange={({ detail }) => {
-                                setValue(detail.value);
+                                const newVal = detail.value;
+                                setValue(newVal);
                                 const updated = [...options];
-                                updated[options.indexOf(item)][key] = detail.value;
+                                const idx = options.indexOf(item);
+                                const prev = updated[idx]?.[key];
+                                if (key === 'text' && prev && typeof prev === 'object' && (Object.prototype.hasOwnProperty.call(prev,'en') || Object.prototype.hasOwnProperty.call(prev,'fr'))) {
+                                  updated[idx][key] = { en: newVal, fr: prev.fr ?? '' };
+                                } else {
+                                  updated[idx][key] = newVal;
+                                }
                                 updateComponentProperty(field.path, updated, true);
                               }}
                             />

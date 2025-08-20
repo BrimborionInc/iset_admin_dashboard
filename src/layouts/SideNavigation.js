@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { SideNavigation as CloudscapeSideNavigation, Badge } from '@cloudscape-design/components';
+import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '../auth/cognito';
+import roleMatrix from '../config/roleMatrix.json';
 
 const commonFooterItems = [
   { type: 'divider' },
@@ -10,7 +12,27 @@ const commonFooterItems = [
 
 const SideNavigation = ({ currentRole }) => {
   const history = useHistory();
-  const navItems = [
+  const [tick, setTick] = useState(0);
+  const [expandedSections, setExpandedSections] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('sideNavExpanded');
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch { return new Set(); }
+  });
+  useEffect(() => {
+    const onChange = () => setTick(t => t + 1);
+    window.addEventListener('auth:session-changed', onChange);
+    window.addEventListener('storage', onChange);
+    return () => {
+      window.removeEventListener('auth:session-changed', onChange);
+      window.removeEventListener('storage', onChange);
+    };
+  }, []);
+  useEffect(() => {
+    try { sessionStorage.setItem('sideNavExpanded', JSON.stringify(Array.from(expandedSections))); } catch {}
+  }, [expandedSections]);
+  const allNavItems = [
     {
       type: 'section',
       text: 'ISET Administration',
@@ -18,9 +40,6 @@ const SideNavigation = ({ currentRole }) => {
         { type: 'link', text: 'Application Assignment', href: '/case-assignment-dashboard' },
                 { type: 'link', text: 'NWAC Hub Management', href: '/nwac-hub-management' }, // Placeholder link
         { type: 'link', text: 'PTMA Management', href: '/ptma-management' },
-
-        // Only show Notification Settings for System Administrator
-        ...(currentRole?.value === 'System Administrator' ? [{ type: 'link', text: 'Notification Settings', href: '/manage-notifications' }] : []),
         { type: 'link', text: 'ARMS Reporting', href: '/arms-reporting' },
         { type: 'link', text: 'Assessment Review', href: '/assessment-review' },
       ],
@@ -70,8 +89,7 @@ const SideNavigation = ({ currentRole }) => {
         { type: 'link', text: 'Release Management', href: '/release-management-dashboard' },
         { type: 'link', text: 'Options', href: '/options-dashboard' },
         { type: 'link', text: 'Visual Settings', href: '/visual-settings' },
-        // Only show Notification Settings for System Administrator
-        ...(currentRole?.value === 'System Administrator' ? [{ type: 'link', text: 'Notification Settings', href: '/notification-settings-dashboard' }] : []),
+  { type: 'link', text: 'Notification Settings', href: '/notification-settings-dashboard' },
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
         { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
         { type: 'link', text: 'Test Config Dashboard', href: '/test-config-dashboard' },
@@ -87,6 +105,7 @@ const SideNavigation = ({ currentRole }) => {
         { type: 'link', text: 'Visual Settings', href: '/security-visual-settings-dashboard' },
         { type: 'link', text: 'Audit and Logs', href: '/audit-logs-dashboard' },
         { type: 'link', text: 'Security Settings', href: '/manage-security-options' },
+  { type: 'link', text: 'Access Control', href: '/access-control' },
       ],
     },
     {
@@ -100,13 +119,25 @@ const SideNavigation = ({ currentRole }) => {
     },
   ];
 
-  function filterNavItemsForRole(role) {
+  function isAllowed(href, roleValue) {
+    if (!href) return true;
+    const allowed = roleMatrix?.routes?.[href];
+    if (allowed) return allowed.includes(roleValue);
+    if (roleMatrix?.default === 'deny') return false;
+    return true;
+  }
+
+  function filterNavItemsForRole(role, signedOut) {
+    if (signedOut) {
+      const support = allNavItems.find(s => s.type === 'section' && s.text === 'Support');
+      return [support, ...commonFooterItems].filter(Boolean);
+    }
     const roleValue = role?.value || role;
-    if (roleValue === 'System Administrator') return [...navItems, ...commonFooterItems];
+    if (roleValue === 'System Administrator') return [...allNavItems, ...commonFooterItems];
     if (roleValue === 'Program Administrator') {
-      const filteredSections = navItems.map(section => {
+  let filteredSections = allNavItems.map(section => {
         if (section.type === 'section' && section.text === 'ISET Administration') {
-          const newItems = section.items.filter(item => item.text !== 'ARMS Integration');
+          const newItems = section.items.filter(item => item.text !== 'ARMS Integration' && item.text !== 'Notification Settings');
           // Do not push another Assessment Review link here
           return { ...section, items: newItems };
         }
@@ -130,10 +161,14 @@ const SideNavigation = ({ currentRole }) => {
         }
         return section;
       });
+      filteredSections = filteredSections.map(section => ({
+        ...section,
+        items: section.items?.filter(item => isAllowed(item.href, roleValue))
+      }));
       return [...filteredSections, ...commonFooterItems];
     }
     if (roleValue === 'Regional Coordinator') {
-      const filteredSections = navItems.map(section => {
+      let filteredSections = allNavItems.map(section => {
         if (section.type === 'section' && section.text === 'ISET Administration') {
           return {
             ...section,
@@ -163,10 +198,14 @@ const SideNavigation = ({ currentRole }) => {
         }
         return section;
       });
+      filteredSections = filteredSections.map(section => ({
+        ...section,
+        items: section.items?.filter(item => isAllowed(item.href, roleValue))
+      }));
       return [...filteredSections, ...commonFooterItems];
     }
     if (roleValue === 'PTMA Staff') {
-      const filteredSections = navItems
+      const filteredSections = allNavItems
         .map(section => {
           if (section.type === 'section' && section.text === 'ISET Assessment') {
             return {
@@ -185,14 +224,46 @@ const SideNavigation = ({ currentRole }) => {
           }
           return null;
         })
-        .filter(Boolean);
+        .filter(Boolean)
+        .map(section => ({
+          ...section,
+          items: section.items?.filter(item => isAllowed(item.href, roleValue))
+        }));
       return [...filteredSections, ...commonFooterItems];
     }
     // Default: show all items for unknown role
-    return [...navItems, ...commonFooterItems];
+    // Additionally enforce deny-by-default against roleMatrix for non-SA roles
+    const filteredSections = allNavItems.map(section => {
+      if (!section.items) return section;
+      return {
+        ...section,
+        items: section.items.filter(item => isAllowed(item.href, roleValue))
+      };
+    });
+    return [...filteredSections, ...commonFooterItems];
   }
 
-  const filteredNavItems = filterNavItemsForRole(currentRole);
+  const iamOn = isIamOn();
+  const simSignedOut = (() => { try { return sessionStorage.getItem('simulateSignedOut') === 'true'; } catch { return false; } })();
+  const signedIn = hasValidSession();
+  const tokenRole = getRoleFromClaims(getIdTokenClaims());
+  const effectiveRole = (iamOn && signedIn && tokenRole) ? { value: tokenRole } : currentRole;
+  const filteredNavItems = filterNavItemsForRole(effectiveRole, (iamOn && !signedIn) || (!iamOn && simSignedOut));
+
+  const itemsWithExpandState = useMemo(() => {
+    const apply = (items) => items.map(item => {
+      if (item?.type === 'section') {
+        const key = item.text || item.href || JSON.stringify(item);
+        return {
+          ...item,
+          defaultExpanded: expandedSections.has(key),
+          items: item.items ? apply(item.items) : item.items,
+        };
+      }
+      return item;
+    });
+    return apply(filteredNavItems);
+  }, [filteredNavItems, expandedSections]);
 
   return (
     <CloudscapeSideNavigation
@@ -200,7 +271,19 @@ const SideNavigation = ({ currentRole }) => {
         href: '/',
         text: 'ISET Admin',
       }}
-      items={filteredNavItems}
+      items={itemsWithExpandState}
+      onChange={(e) => {
+        const detail = e?.detail;
+        const item = detail?.item;
+        if (item?.type === 'section') {
+          const key = item.text || item.href || JSON.stringify(item);
+          setExpandedSections(prev => {
+            const next = new Set(prev);
+            if (detail?.expanded) next.add(key); else next.delete(key);
+            return next;
+          });
+        }
+      }}
       onFollow={(e) => {
         // Intercept to use SPA navigation and avoid full reloads
         if (e.detail && e.detail.href && !e.detail.external) {

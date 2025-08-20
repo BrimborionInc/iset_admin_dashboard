@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.645.0",
     "@cloudscape-design/board-components": "^3.0.89",
     "@cloudscape-design/chat-components": "^1.0.28",
     "@cloudscape-design/code-view": "^3.0.44",
@@ -29,6 +30,7 @@
     "govuk-frontend": "^5.9.0",
     "https-browserify": "^1.0.0",
     "iset-intake": "file:../ISET-intake",
+    "jose": "^5.9.3",
     "lodash.template": "^4.5.0",
     "mysql": "^2.18.1",
     "mysql2": "^3.12.0",

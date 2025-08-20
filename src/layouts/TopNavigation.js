@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { TopNavigation } from '@cloudscape-design/components';
+import { buildLoginUrl, buildLogoutUrl, clearSession, hasValidSession, loadSession } from '../auth/cognito';
 
 function getEmailForRole(role) {
   switch (role?.value || role) {
@@ -16,8 +17,49 @@ function getEmailForRole(role) {
   }
 }
 
+function isBypassEnabled() {
+  try { return sessionStorage.getItem('iamBypass') === 'off'; } catch { return false; }
+}
+function isSimSignedOut() {
+  try { return sessionStorage.getItem('simulateSignedOut') === 'true'; } catch { return false; }
+}
+
 const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) => {
-  console.log('TopNavigation received onLanguageChange:', onLanguageChange);
+  const [signedIn, setSignedIn] = useState(() => hasValidSession());
+  const [bypass, setBypass] = useState(() => isBypassEnabled());
+  const [email, setEmail] = useState(() => {
+    const s = loadSession();
+    return s?.idToken && !isBypassEnabled()
+      ? (JSON.parse(atob(s.idToken.split('.')[1]))?.email || getEmailForRole(currentRole))
+      : getEmailForRole(currentRole);
+  });
+
+  useEffect(() => {
+    const recompute = () => {
+      const s = loadSession();
+      const bypassNow = isBypassEnabled();
+      setBypass(bypassNow);
+      const simOut = isSimSignedOut();
+      setSignedIn(bypassNow ? (!simOut && hasValidSession()) : hasValidSession());
+      const newEmail = s?.idToken && !bypassNow
+        ? (JSON.parse(atob(s.idToken.split('.')[1]))?.email || getEmailForRole(currentRole))
+        : getEmailForRole(currentRole);
+      setEmail(newEmail);
+    };
+    // Listen for our custom session change event and storage sync (multi-tab)
+    const onSessionChanged = () => recompute();
+    const onStorage = (e) => {
+  if (e.key === 'authSession' || e.key === 'iamBypass' || e.key === 'currentRole' || e.key === 'simulateSignedOut') recompute();
+    };
+    window.addEventListener('auth:session-changed', onSessionChanged);
+    window.addEventListener('storage', onStorage);
+  // Recompute on mount and whenever currentRole changes
+  recompute();
+    return () => {
+      window.removeEventListener('auth:session-changed', onSessionChanged);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [currentRole]);
   return (
     <div>
       <TopNavigation
@@ -61,15 +103,39 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) =>
             ariaLabel: 'Settings',
             onClick: () => console.log('Settings clicked'),
           },
-          {
-            type: 'menu-dropdown',
-            text: getEmailForRole(currentRole),
-            ariaLabel: 'Account Options',
-            items: [
-              { id: 'profile', text: 'My Profile' },
-              { id: 'signout', text: 'Sign Out' },
-            ],
-          },
+          bypass
+            ? {
+                type: 'menu-dropdown',
+                text: email,
+                ariaLabel: 'Dev bypass account',
+                items: [
+                  { id: 'dev-bypass', text: 'Developer bypass mode' },
+                ],
+                onItemClick: () => {},
+              }
+            : signedIn
+            ? {
+                type: 'menu-dropdown',
+                text: email,
+                ariaLabel: 'Account Options',
+                items: [
+                  { id: 'profile', text: 'My Profile' },
+                  { id: 'signout', text: 'Sign Out' },
+                ],
+                onItemClick: (e) => {
+                  if (e.detail.id === 'signout') {
+                    clearSession();
+                    window.location.href = buildLogoutUrl();
+                  }
+                },
+              }
+            : {
+                type: 'button',
+                text: 'Sign in',
+                onClick: () => {
+                  window.location.href = buildLoginUrl();
+                },
+              },
         ]}
       />
     </div>
