@@ -96,6 +96,9 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
         // best-effort: try label.text then hint.text if present
         if (getAtPath(p, 'label.text') !== undefined) push(getAtPath(p, 'label.text'));
         if (getAtPath(p, 'hint.text') !== undefined) push(getAtPath(p, 'hint.text'));
+  // also support static content components with top-level text/html
+  if (getAtPath(p, 'text') !== undefined) push(getAtPath(p, 'text'));
+  if (getAtPath(p, 'html') !== undefined) push(getAtPath(p, 'html'));
       }
     });
     const pct = (lang) => total ? Math.round((filled[lang] / total) * 100) : 100;
@@ -145,7 +148,7 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
     components.forEach((comp, ci) => {
       const type = String(comp?.type || comp?.template_key || '').toLowerCase();
       const p = comp?.props || {};
-      if (isInputLike(type) || type === 'select') {
+      if (isInputLike(type)) {
         addTasksFor(ci, p, 'label.text');
         addTasksFor(ci, p, 'hint.text');
       } else if (isChoice(type)) {
@@ -159,6 +162,9 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       } else {
         if (getAtPath(p, 'label.text') !== undefined) addTasksFor(ci, p, 'label.text');
         if (getAtPath(p, 'hint.text') !== undefined) addTasksFor(ci, p, 'hint.text');
+  // include static content fields
+  if (getAtPath(p, 'text') !== undefined) addTasksFor(ci, p, 'text');
+  if (getAtPath(p, 'html') !== undefined) addTasksFor(ci, p, 'html');
       }
     });
     return tasks;
@@ -286,6 +292,9 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
         } else {
           if (getAtPath(props, 'label.text') !== undefined) rows.push({ label: 'Label', path: 'label.text' });
           if (getAtPath(props, 'hint.text') !== undefined) rows.push({ label: 'Hint', path: 'hint.text' });
+          // static content fields (e.g., inset-text, text-block)
+          if (getAtPath(props, 'text') !== undefined) rows.push({ label: 'Text', path: 'text' });
+          if (getAtPath(props, 'html') !== undefined) rows.push({ label: 'HTML', path: 'html' });
         }
 
         const items = Array.isArray(props.items) ? props.items : [];
@@ -345,7 +354,7 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
     </SpaceBetween>
   );
 
-  const headerActions = (
+  const toolbar = (
     <SpaceBetween direction="horizontal" size="xs">
       <Badge color={coverage.pct.fr === 100 ? 'green' : 'normal'}>FR {coverage.pct.fr}%</Badge>
       <Badge color={coverage.pct.en === 100 ? 'green' : 'normal'}>EN {coverage.pct.en}%</Badge>
@@ -356,12 +365,7 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
   );
 
   const headerEl = (
-    <Header
-      variant="h2"
-      actions={headerActions}
-    >
-      Translations
-    </Header>
+    <Header variant="h3" actions={toolbar}>Translations</Header>
   );
 
   if (asBoardItem) {

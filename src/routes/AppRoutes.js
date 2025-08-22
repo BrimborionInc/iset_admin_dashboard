@@ -299,7 +299,16 @@ const AppRoutes = ({
       </Route>
 
       <Route path="/modify-component/:id">
-        {renderContent(ModifyComponent, [{ text: 'Home', href: '/' }, { text: 'Manage Components', href: '/manage-components' }, { text: 'Modify Component', href: '/modify-component/:id' }], 'Modify Component', <ModifyComponentHelp />)}
+        {renderContent(
+          ModifyComponent,
+          [
+            { text: 'Home', href: '/' },
+            { text: 'Manage Intake Steps', href: '/manage-components' },
+            { text: 'Modify Intake Step', href: '/modify-component/:id' }
+          ],
+          'Modify Intake Step',
+          <ModifyComponentHelp />
+        )}
       </Route>
       <Route path="/manage-security-options">
         {renderContent(ManageSecurityOptions, [{ text: 'Home', href: '/' }, { text: 'Security Settings', href: '/manage-security-options' }], 'Security Settings', 'manageSecurityOptions')}

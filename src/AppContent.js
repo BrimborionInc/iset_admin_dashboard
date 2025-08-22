@@ -168,75 +168,75 @@ const AppContent = ({ currentRole }) => {
         tools={
           <HelpPanel
             header={
-              <SpaceBetween size="l">
-                <h2 style={{ marginLeft: "8px" }}>{helpPanelTitle}</h2>
-                <Box>
-                  <SpaceBetween size="l">
-                    <Button
-                      onClick={() => setChatVisible(!chatVisible)}
-                      variant="primary"
-                    >
-                      {chatVisible ? "Close Chat" : "Start Chat"}
-                    </Button>
-                    {chatVisible && (
-                      <div style={{ marginTop: '10px' }}>
-                        <div
-                          ref={chatContainerRef}
-                          style={{ maxHeight: "200px", overflowY: "auto", marginBottom: "10px" }}
-                        >
-                          {chatMessages.map((message, index) => (
-                            <ChatBubble
-                              key={index}
-                              ariaLabel={`${message.type === "outgoing" ? "You" : "AI"} at ${message.timestamp}`}
-                              type={message.type}
-                              avatar={
-                                message.type === "outgoing" ? (
-                                  <Avatar
-                                    ariaLabel="You"
-                                    tooltipText="You"
-                                    initials="You"
-                                  />
-                                ) : (
-                                  <Avatar
-                                    color="gen-ai"
-                                    iconName="gen-ai"
-                                    ariaLabel="Generative AI assistant"
-                                    tooltipText="Generative AI assistant"
-                                  />
-                                )
-                              }
-                            >
-                              {message.text}
-                            </ChatBubble>
-                          ))}
-                          {loading && <p>Generating a response...</p>}
-                        </div>
-                        <div>
-                          <input
-                            type="text"
-                            value={promptValue}
-                            onChange={(e) => setPromptValue(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault();
-                                handleSendMessage();
-                              }
-                            }}
-                            placeholder="Ask your question here..."
-                            style={{ width: "80%", padding: "10px", marginRight: "10px", marginBottom: "10px" }} // Added marginBottom for spacing
-                          />
-                          <Button onClick={handleSendMessage} variant="primary">
-                            Send
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </SpaceBetween>
-                </Box>
-              </SpaceBetween>
+              <Header
+                variant="h2"
+                actions={
+                  <Button
+                    onClick={() => setChatVisible(!chatVisible)}
+                    variant="primary"
+                  >
+                    {chatVisible ? "Close Chat" : "Start Chat"}
+                  </Button>
+                }
+              >
+                {helpPanelTitle}
+              </Header>
             }
           >
             {currentHelpContent}
+            {chatVisible && (
+              <Box margin={{ top: 's' }}>
+                <div
+                  ref={chatContainerRef}
+                  style={{ maxHeight: "200px", overflowY: "auto", marginBottom: "10px" }}
+                >
+                  {chatMessages.map((message, index) => (
+                    <ChatBubble
+                      key={index}
+                      ariaLabel={`${message.type === "outgoing" ? "You" : "AI"} at ${message.timestamp}`}
+                      type={message.type}
+                      avatar={
+                        message.type === "outgoing" ? (
+                          <Avatar
+                            ariaLabel="You"
+                            tooltipText="You"
+                            initials="You"
+                          />
+                        ) : (
+                          <Avatar
+                            color="gen-ai"
+                            iconName="gen-ai"
+                            ariaLabel="Generative AI assistant"
+                            tooltipText="Generative AI assistant"
+                          />
+                        )
+                      }
+                    >
+                      {message.text}
+                    </ChatBubble>
+                  ))}
+                  {loading && <p>Generating a response...</p>}
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    value={promptValue}
+                    onChange={(e) => setPromptValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
+                    placeholder="Ask your question here..."
+                    style={{ width: "80%", padding: "10px", marginRight: "10px", marginBottom: "10px" }}
+                  />
+                  <Button onClick={handleSendMessage} variant="primary">
+                    Send
+                  </Button>
+                </div>
+              </Box>
+            )}
             <div>
               <h3>
                 Learn more <Icon name="external" size="inherit" />
