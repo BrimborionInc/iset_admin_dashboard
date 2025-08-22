@@ -276,6 +276,7 @@ const SUPPORTED_COMPONENT_TYPES = new Set([
   'date',
   'date-input',
   'label',
+  'paragraph',
   'inset-text',
   'warning-text',
   'details',
@@ -437,6 +438,87 @@ app.post('/api/render/component', async (req, res) => {
   }
 });
 
+// Dev-only: seed a simple content-only Text component template into the template catalog
+// Enable by setting ENABLE_DEV_SEED_TEMPLATES=true
+app.post('/api/dev/seed-text-template', async (req, res) => {
+  try {
+    const enabled = String(process.env.ENABLE_DEV_SEED_TEMPLATES || 'false').toLowerCase() === 'true';
+    if (!enabled) return res.status(403).json({ error: 'Seeding disabled. Set ENABLE_DEV_SEED_TEMPLATES=true to enable.' });
+
+    // Determine next version for this template_key
+    const templateKey = 'text-block'; // avoid collision with input type "text"
+    const [[verRow]] = await pool.query(
+      `SELECT COALESCE(MAX(version), 0) AS v
+         FROM iset_intake.component_template
+        WHERE template_key = ?`,
+      [templateKey]
+    );
+    const nextVersion = Number(verRow?.v || 0) + 1;
+
+    const defaultProps = {
+      text: 'Example text',
+      classes: 'govuk-body'
+    };
+
+    // Minimal editor schema for the Step Editor Properties panel
+    const propSchema = [
+      { label: 'Text', path: 'text', type: 'textarea', required: true },
+      {
+        label: 'Classes',
+        path: 'classes',
+        type: 'select',
+        options: [
+          'govuk-body', 'govuk-body-s', 'govuk-hint', 'govuk-inset-text',
+          'govuk-heading-s', 'govuk-heading-m', 'govuk-heading-l', 'govuk-heading-xl',
+          'govuk-label--s', 'govuk-label--m', 'govuk-label--l', 'govuk-label--xl'
+        ]
+      }
+    ];
+
+    // Nunjucks template: choose element based on classes
+  const exportNunjucks = `
+{% set cls = props.classes or 'govuk-body' %}
+{% set text = props.text or '' %}
+{% if cls and (cls.indexOf('govuk-inset-text') != -1) %}
+<div class="govuk-inset-text">{{ text }}</div>
+{% elif cls and (cls.indexOf('govuk-heading-xl') != -1) %}
+<h1 class="govuk-heading-xl">{{ text }}</h1>
+{% elif cls and (cls.indexOf('govuk-heading-l') != -1) %}
+<h2 class="govuk-heading-l">{{ text }}</h2>
+{% elif cls and (cls.indexOf('govuk-heading-m') != -1) %}
+<h3 class="govuk-heading-m">{{ text }}</h3>
+{% elif cls and (cls.indexOf('govuk-heading-s') != -1) %}
+<h4 class="govuk-heading-s">{{ text }}</h4>
+{% else %}
+<p class="{{ cls }}">{{ text }}</p>
+{% endif %}`;
+
+    await pool.query(
+      `INSERT INTO iset_intake.component_template
+         (template_key, version, type, label, description, default_props, prop_schema, has_options, option_schema, status, export_njk_template)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        templateKey,
+        nextVersion,
+        'paragraph', // distinct from input 'text'
+        'Text',
+        'Static text block (headings or body).',
+        JSON.stringify(defaultProps),
+        JSON.stringify(propSchema),
+        0,
+        null,
+        'active',
+        exportNunjucks
+      ]
+    );
+
+    res.status(201).json({ ok: true, template_key: templateKey, version: nextVersion });
+  } catch (err) {
+    console.error('Seed text template failed:', err);
+    res.status(500).json({ error: 'Failed to seed text template' });
+  }
+});
+
 // GET /api/audit/parity-sample?templateKey=radio
 // Renders the latest active template and performs basic GOV.UK structure checks.
 app.get('/api/audit/parity-sample', async (req, res) => {
@@ -570,7 +652,7 @@ function parityChecks($, type, props) {
     if ($('details.govuk-details').length === 0) issues.push('No govuk details');
   } else if (t === 'accordion') {
     if ($('.govuk-accordion').length === 0) issues.push('No govuk accordion');
-  } else if (t === 'label' || t === 'inset-text' || t === 'warning-text' || t === 'panel' || t === 'summary-list') {
+  } else if (t === 'label' || t === 'paragraph' || t === 'inset-text' || t === 'warning-text' || t === 'panel' || t === 'summary-list') {
     // Content components: best-effort checks
     // No strict checks beyond presence
   }
@@ -620,6 +702,8 @@ app.get('/api/audit/parity-all', async (req, res) => {
         if (!props.fieldset) props.fieldset = { legend: { text: 'Date of birth' } };
       } else if (t === 'file-upload') {
         if (!props.label) props.label = { text: 'Upload a file' };
+      } else if (t === 'paragraph') {
+        if (!props.text) props.text = 'Paragraph text';
       }
       let issues = [];
       let renderError = null;
@@ -1417,9 +1501,9 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
           throw err;
         }
 
-        // Extract label/hint based on GOV.UK macro conventions
-        const labelText = props?.fieldset?.legend?.text ?? props?.label?.text ?? props?.titleText ?? '';
-        const hintText = props?.hint?.text ?? props?.text ?? '';
+  // Extract label/hint based on GOV.UK macro conventions
+  const labelText = props?.fieldset?.legend?.text ?? props?.label?.text ?? props?.titleText ?? '';
+  const hintText = props?.hint?.text ?? props?.text ?? '';
         // Helper: flatten bilingual values (supports { en, fr } or plain strings)
         const asLang = (v, lang) => {
           if (v && typeof v === 'object') {
@@ -1471,6 +1555,42 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
           chosenKey = labelSlug;
         }
         const id = toIdSlug(chosenKey || labelSlug, tplType || 'field', i, usedIds);
+
+        // Special-case: content-only components
+        // 1) Text block (paragraph)
+        if (tplType === 'paragraph' || c.template_key === 'text-block') {
+          // Treat as a simple paragraph with provided text and optional classes
+          const paraText = props?.text ?? labelText ?? '';
+          const paraHint = '';
+          out.components.push({
+            id: toIdSlug('paragraph', 'paragraph', i, usedIds),
+            type: 'paragraph',
+            text: { en: asLang(paraText, 'en'), fr: asLang(paraText, 'fr') },
+            class: props?.classes || undefined,
+            // paragraphs are not required and have no storage
+          });
+          continue;
+        }
+        // 2) Inset text
+        if (tplType === 'inset-text') {
+          const txt = props?.text ?? hintText ?? labelText ?? '';
+          out.components.push({
+            id: toIdSlug('inset-text', 'inset-text', i, usedIds),
+            type: 'inset-text',
+            text: { en: asLang(txt, 'en'), fr: asLang(txt, 'fr') },
+          });
+          continue;
+        }
+        // 3) Warning text
+        if (tplType === 'warning-text') {
+          const txt = props?.text ?? hintText ?? labelText ?? '';
+          out.components.push({
+            id: toIdSlug('warning-text', 'warning-text', i, usedIds),
+            type: 'warning-text',
+            text: { en: asLang(txt, 'en'), fr: asLang(txt, 'fr') },
+          });
+          continue;
+        }
 
         // Map to portal component shape
         // Normalise type for the portal renderer
@@ -1667,7 +1787,7 @@ app.get('/api/component-templates', async (req, res) => {
     const out = filtered.map(r => {
       const propsRaw = parseJson(r.default_props) ?? {};
       const t = String(r.type || '').toLowerCase();
-  if (['input', 'text', 'email', 'number', 'password', 'phone', 'password-input'].includes(t)) {
+    if (['input', 'text', 'email', 'number', 'password', 'phone', 'password-input'].includes(t)) {
         try {
           if (propsRaw && typeof propsRaw === 'object') {
             // Remove error classes from formGroup/classes
@@ -1690,7 +1810,14 @@ app.get('/api/component-templates', async (req, res) => {
             }
           }
         } catch (_) {}
-      }
+        } else if (t === 'paragraph') {
+          try {
+            if (propsRaw && typeof propsRaw === 'object') {
+              if (!propsRaw.text) propsRaw.text = 'Paragraph text';
+              if (!propsRaw.classes) propsRaw.classes = 'govuk-body';
+            }
+          } catch (_) {}
+        }
       return {
         id: r.id,
         key: r.template_key,

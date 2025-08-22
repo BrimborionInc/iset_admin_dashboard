@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 // Ensure GOV.UK styles are available in-editor
 import "../css/govuk-frontend.min.css";
 // Initialize GOV.UK behaviours for dynamic previews
 import { initAll as govukInitAll } from 'govuk-frontend';
 import { DndProvider, useDrag, useDrop, useDragDropManager } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
-import { Grid, Box, Header, Button, Container, SpaceBetween, Alert } from "@cloudscape-design/components";
+import { Grid, Box, Header, Button, Container, SpaceBetween, Alert, ExpandableSection } from "@cloudscape-design/components";
 import { useParams, useHistory } from "react-router-dom";
 import PropertiesPanel from './PropertiesPanel.js';
 import TranslationsWidget from '../widgets/TranslationsWidget';
@@ -95,11 +95,15 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
 };
 
 const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handleSelectComponent, selectedComponent, previewLang = 'en' }) => {
+  const handleRef = useRef(null);
+  const pendingFocusTargetRef = useRef(null); // stores original mousedown target when selecting
   const [{ isDragging }, drag] = useDrag(() => ({
     type: "REORDER_COMPONENT",
     item: { index },
     collect: monitor => ({ isDragging: !!monitor.isDragging() })
   }));
+  // Apply drag behaviour only to the handle, not the whole card, so text selection isn't hijacked
+  useEffect(() => { if (handleRef.current) drag(handleRef.current); }, [drag]);
 
   const [, drop] = useDrop({
     accept: "REORDER_COMPONENT",
@@ -162,7 +166,7 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
     return { html, loading, error };
   }
 
-  const RenderComponentCard = ({ comp, previewLang = 'en' }) => {
+  const RenderComponentCard = React.memo(({ comp, previewLang = 'en', pendingFocusTargetRef, isSelected }) => {
     // Flatten any bilingual values like { en, fr } down to a single string for preview rendering
     const flattenTranslations = (val, lang = 'en') => {
       const isLangObj = (v) => v && typeof v === 'object' && (
@@ -202,29 +206,194 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
       version: comp?.version ?? 1,
       props: previewProps
     });
+    const containerRef = useRef(null);
+
     // Re-init GOV.UK behaviours when new HTML is injected
-    useEffect(() => {
-      try { if (typeof govukInitAll === 'function') govukInitAll(); } catch (_) {}
+    // Initialise GOV.UK only once (global) to avoid repeated DOM mutations that can steal focus
+  useEffect(() => {
+      if (!html) return;
+      if (!window.__govukOnce) {
+        try {
+          if (document?.body && !document.body.classList.contains('govuk-frontend-supported')) {
+            document.body.classList.add('govuk-frontend-supported');
+          }
+          if (typeof govukInitAll === 'function') govukInitAll();
+          window.__govukOnce = true;
+    } catch (e) { /* silent */ }
+      }
     }, [html]);
-    if (!templateId && !templateKey) {
-      return <div className="govuk-hint" style={{ color: '#b00' }}>Missing template reference</div>;
-    }
-    if (error) return <div className="govuk-hint" style={{ color: '#b00' }}>Render error: {error}</div>;
-  if (loading && !html) return <div className="govuk-hint">Rendering…</div>;
-    return <div className="govuk-embedded" dangerouslySetInnerHTML={{ __html: html }} />;
-  };
+
+    // Inline editing effect (runs every render; guarded inside)
+    // Use layout effect so we can attach editing before paint to reduce focus races
+  useLayoutEffect(() => {
+      if (!html) return; // nothing to edit yet
+      if (!containerRef.current) return;
+      const root = containerRef.current;
+      const isSelectedCurrent = selectedComponent?.index === index;
+      // If not selected, ensure we remove editing affordances (once) then exit
+      if (!isSelectedCurrent) {
+        Array.from(root.querySelectorAll('[data-inline-edit]')).forEach(el => {
+          el.removeAttribute('data-inline-edit');
+          el.removeAttribute('contenteditable');
+          el.onblur = null;
+          el.onkeydown = null;
+          el.style.outline = '';
+          el.style.outlineOffset = '';
+          el.classList.remove('inline-edit-target');
+        });
+        return;
+      }
+      // Skip if already initialised and no pending focus request
+      if (root.querySelector('[data-inline-edit]') && !pendingFocusTargetRef?.current) {
+        return; // preserve focus, nothing to change
+      }
+
+      const type = String(comp.type || comp.template_key || '').toLowerCase();
+
+      const attach = (el, path, transformOut) => {
+        if (!el) return;
+        // Skip if already initialised for this path
+        if (el.getAttribute('data-inline-edit') === path) return;
+        el.setAttribute('contenteditable', 'true');
+        el.setAttribute('data-inline-edit', path);
+        el.classList.add('inline-edit-target');
+        el.style.outline = '2px dashed #0972d3';
+        el.style.outlineOffset = '2px';
+        el.setAttribute('tabindex', '0');
+        // Prevent label default focusing underlying control while editing
+        if (el.tagName === 'LABEL') {
+          el.addEventListener('mousedown', (e) => {
+            if (selectedComponent?.index === index) {
+              e.preventDefault();
+            }
+          });
+        }
+        const readValue = () => {
+          let txt = el.innerText || el.textContent || '';
+          if (transformOut) txt = transformOut(txt);
+          return txt.trim();
+        };
+        const commit = () => {
+          const value = readValue();
+          setComponents(prev => prev.map((c, i) => {
+            if (i !== index) return c;
+            const next = { ...c, props: { ...(c.props || {}) } };
+            const parts = path.split('.');
+            let cur = next.props;
+            for (let pi = 0; pi < parts.length - 1; pi++) {
+              const key = parts[pi];
+              if (!cur[key] || typeof cur[key] !== 'object') cur[key] = {};
+              cur = cur[key];
+            }
+            const leaf = parts[parts.length - 1];
+            const existing = cur[leaf];
+            if (existing && typeof existing === 'object' && (existing.en || existing.fr)) {
+              cur[leaf] = { ...existing, [previewLang]: value };
+            } else {
+              cur[leaf] = value;
+            }
+            return next;
+          }));
+        };
+        el.onblur = commit;
+        el.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el.blur(); } };
+      };
+
+      try {
+        if (!root) return;
+        if (['paragraph','inset-text','warning-text'].includes(type)) {
+          const selector = type === 'inset-text' ? '.govuk-inset-text' : (type === 'warning-text' ? '.govuk-warning-text__text' : 'p, h1, h2, h3, h4');
+          const el = root.querySelector(selector);
+          attach(el, 'text');
+        } else {
+          const legend = root.querySelector('.govuk-fieldset__legend');
+          if (legend) attach(legend, 'fieldset.legend.text');
+          const label = root.querySelector('label.govuk-label:not(.govuk-radios__label):not(.govuk-checkboxes__label)');
+          if (label) attach(label, 'label.text');
+          const hint = root.querySelector('.govuk-hint:not(.govuk-radios__hint):not(.govuk-checkboxes__hint)');
+          if (hint) attach(hint, 'hint.text');
+          if (['radio','radios','checkbox','checkboxes'].includes(type)) {
+            // Attach editors to each option label's text (items[i].text) without allowing structure changes
+            const optionLabels = root.querySelectorAll('.govuk-radios__item label.govuk-radios__label, .govuk-checkboxes__item label.govuk-checkboxes__label');
+            optionLabels.forEach((lab, i) => {
+              attach(lab, `items.${i}.text`);
+              // Prevent toggling the underlying input while editing text
+              lab.addEventListener('mousedown', e => { if (lab.getAttribute('data-inline-edit')) e.preventDefault(); });
+            });
+          }
+        }
+  } catch (err) { /* silent */ }
+
+      // After attaching editors, if there is a pending focus target (user clicked directly on text when selecting), focus it now.
+  if (pendingFocusTargetRef?.current && containerRef.current?.contains(pendingFocusTargetRef.current)) {
+        // Find the nearest editable ancestor
+        let focusEl = pendingFocusTargetRef.current;
+        while (focusEl && focusEl !== containerRef.current && !focusEl.getAttribute?.('data-inline-edit')) {
+          focusEl = focusEl.parentNode;
+        }
+        if (focusEl && focusEl.getAttribute && focusEl.getAttribute('data-inline-edit')) {
+          try {
+            // Delay focus to next frame to avoid race with selection re-render
+            requestAnimationFrame(() => {
+              try {
+                focusEl.focus();
+                const range = document.createRange();
+                range.selectNodeContents(focusEl);
+                range.collapse(false);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+              } catch (e2) { /* silent */ }
+            });
+          } catch (e) { /* silent */ }
+        }
+      }
+      if (pendingFocusTargetRef) pendingFocusTargetRef.current = null;
+    }, [html, selectedComponent?.index, index, comp, previewLang, setComponents]);
+
+    let inner;
+    if (!templateId && !templateKey) inner = <div className="govuk-hint" style={{ color: '#b00' }}>Missing template reference</div>;
+    else if (error) inner = <div className="govuk-hint" style={{ color: '#b00' }}>Render error: {error}</div>;
+    else if (loading && !html) inner = <div className="govuk-hint">Rendering…</div>;
+    else inner = <div dangerouslySetInnerHTML={{ __html: html }} />;
+
+    // Stop clicks inside editable text from bubbling to card (avoid unintended selection logic)
+    useEffect(() => {
+      const root = containerRef.current;
+      if (!root) return;
+      const handler = (e) => {
+        const el = e.target.closest('[data-inline-edit]');
+        if (el) {
+          e.stopPropagation();
+        }
+      };
+      root.addEventListener('click', handler, true);
+      return () => root.removeEventListener('click', handler, true);
+    }, [html]);
+
+    return <div ref={containerRef} className="govuk-embedded">{inner}</div>;
+  }, (prev, next) => {
+    // Custom props equality to avoid needless re-renders
+    return prev.comp === next.comp && prev.previewLang === next.previewLang && prev.isSelected === next.isSelected;
+  });
 
   return (
     <div
-      ref={node => drag(drop(node))}
+      ref={node => drop(node)}
       className={`stage-card${selectedComponent?.index === index ? ' selected' : ''}`}
-      style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'grab', opacity: isDragging ? 0.9 : 1 }}
+      style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', opacity: isDragging ? 0.9 : 1 }}
+      onMouseDown={e => {
+        // Remember target so we can focus after selection if it becomes editable
+        if (selectedComponent?.index !== index) {
+          pendingFocusTargetRef.current = e.target;
+        }
+      }}
       onClick={e => {
         if (selectedComponent?.index !== index) handleSelectComponent(index);
         e.stopPropagation();
       }}
     >
-      <div className="handle" style={{ padding: 5, fontWeight: 'bold', userSelect: 'none' }}>⠿</div>
+      <div ref={handleRef} className="handle" style={{ padding: 5, fontWeight: 'bold', userSelect: 'none' }}>⠿</div>
       <div
         onClick={handleClick}
         style={{
@@ -234,7 +403,7 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
           paddingRight: 36,
         }}
       >
-  <RenderComponentCard comp={comp} previewLang={previewLang} />
+  <RenderComponentCard comp={comp} previewLang={previewLang} pendingFocusTargetRef={pendingFocusTargetRef} isSelected={selectedComponent?.index === index} />
       </div>
       <Button className="delete" onClick={handleDelete} iconName="close" variant="icon" />
     </div>
@@ -242,7 +411,9 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
 };
 
 const ModifyComponent = () => {
-  const [components, setComponents] = useState([]);
+  const [components, _setComponents] = useState([]);
+  const [historyStack, setHistoryStack] = useState([]); // snapshots
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const [initialComponents, setInitialComponents] = useState([]);
   const [selectedComponent, setSelectedComponent] = useState(null);
   const [availableComponents, setAvailableComponents] = useState([]);
@@ -263,6 +434,45 @@ const ModifyComponent = () => {
     const b = { name: initialName, status: initialStatus, components: initialComponents };
     return JSON.stringify(a) !== JSON.stringify(b);
   }, [name, status, components, initialName, initialStatus, initialComponents]);
+
+  const pushHistory = (snapshot) => {
+    const serialized = JSON.stringify(snapshot);
+    let base = historyIndex >= 0 ? historyStack.slice(0, historyIndex + 1) : [];
+    if (base.length) {
+      const last = JSON.stringify(base[base.length - 1]);
+      if (last === serialized) return;
+    }
+    const clone = JSON.parse(serialized);
+    base = [...base, clone];
+    if (base.length > 50) base.splice(0, base.length - 50);
+    setHistoryStack(base);
+    setHistoryIndex(base.length - 1);
+  };
+  function setComponents(nextOrFn, { skipHistory } = {}) {
+    _setComponents(prev => {
+      const next = typeof nextOrFn === 'function' ? nextOrFn(prev) : nextOrFn;
+      if (!skipHistory && JSON.stringify(prev) !== JSON.stringify(next)) pushHistory(next);
+      return next;
+    });
+  }
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex >= 0 && historyIndex < historyStack.length - 1;
+  const handleUndo = () => {
+    if (!canUndo) return;
+    const newIdx = historyIndex - 1;
+    setHistoryIndex(newIdx);
+    const snap = historyStack[newIdx];
+    _setComponents(JSON.parse(JSON.stringify(snap)));
+    setSelectedComponent(sc => (sc && sc.index < snap.length) ? { ...snap[sc.index], index: sc.index } : null);
+  };
+  const handleRedo = () => {
+    if (!canRedo) return;
+    const newIdx = historyIndex + 1;
+    setHistoryIndex(newIdx);
+    const snap = historyStack[newIdx];
+    _setComponents(JSON.parse(JSON.stringify(snap)));
+    setSelectedComponent(sc => (sc && sc.index < snap.length) ? { ...snap[sc.index], index: sc.index } : null);
+  };
 
   useEffect(() => {
     if (id === 'new') {
@@ -304,7 +514,7 @@ const ModifyComponent = () => {
             seen.add(key);
             return true;
           });
-          setComponents(deduped);
+          setComponents(deduped, { skipHistory: true });
           setInitialComponents(deduped);
         } catch (e) {
           console.error('Failed to load step', e);
@@ -315,6 +525,12 @@ const ModifyComponent = () => {
       fetchStep();
     }
   }, [id]);
+
+  // Seed initial history once loading completed
+  useEffect(() => {
+    if (!loading && historyIndex === -1) pushHistory(components);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   useEffect(() => {
     const fetchAvailableComponents = async () => {
@@ -518,7 +734,8 @@ const ModifyComponent = () => {
         .stage-card.selected { box-shadow: 0 0 0 2px #0972d3 inset; }
         .stage-card .handle { cursor:grab; position:absolute; left:8px; top:8px; opacity:0.6; }
         .stage-card .delete { cursor:pointer; position:absolute; right:8px; top:8px; opacity:0.7; }
-  .stage .govuk-embedded { background:#fff; }
+        .stage-card .inline-edit-target { cursor:text; }
+        .stage .govuk-embedded { background:#fff; }
         /* GOV.UK background normalised inside editor */
         .stage .govuk-form-group { margin-bottom: 20px; }
         .stage .govuk-label, .stage .govuk-fieldset__legend { margin-bottom: 5px; }
@@ -531,6 +748,8 @@ const ModifyComponent = () => {
             actions={
               <SpaceBetween direction="horizontal" size="xs">
                 <Button onClick={handleCancel}>Cancel</Button>
+                <Button onClick={handleUndo} disabled={!canUndo}>Undo</Button>
+                <Button onClick={handleRedo} disabled={!canRedo}>Redo</Button>
                 {id !== 'new' && <Button onClick={handleSaveAsNew} variant="normal">Save as New</Button>}
                 {id !== 'new' && <Button onClick={handleDelete} variant="normal">Delete</Button>}
                 <Button onClick={handleSaveTemplate} disabled={!hasChanges} variant="primary">Save Changes</Button>
@@ -601,6 +820,10 @@ const ModifyComponent = () => {
                     if (defaultProps.errorMessage) {
                       try { delete defaultProps.errorMessage; } catch (_) { defaultProps.errorMessage = { text: '' }; }
                     }
+                    // Remove layout modifiers so newly added radios default to standard stacked layout.
+                    if (typeKey === 'radio' || typeKey === 'radios') {
+                      defaultProps.classes = stripClasses(defaultProps.classes, ['govuk-radios--inline','govuk-radios--small']);
+                    }
                     // Ensure fieldset legend with medium size by default
                     if (!defaultProps.fieldset || typeof defaultProps.fieldset !== 'object') {
                       defaultProps.fieldset = { legend: { text: 'Choose one option', classes: 'govuk-fieldset__legend--m' } };
@@ -615,11 +838,22 @@ const ModifyComponent = () => {
                     if (!defaultProps.hint || typeof defaultProps.hint !== 'object' || !String(hintText || '').trim()) {
                       defaultProps.hint = { ...(defaultProps.hint || {}), text: 'This is the optional hint text' };
                     }
-                    // Ensure options array with sensible defaults if empty
-                    if (!Array.isArray(defaultProps.items) || defaultProps.items.length === 0) {
+                    // Ensure options array with sensible defaults.
+                    const looksLikePlaceholder = (arr) => {
+                      if (!Array.isArray(arr)) return true;
+                      if (arr.length === 0) return true;
+                      // If all items have text matching Option <n> (case-insensitive) treat as placeholder
+                      const optRegex = /^\s*option\b/i;
+                      const sample = arr.slice(0, 5);
+                      return sample.every((it, idx) => {
+                        const t = (it && (it.text || it.html) || '').trim();
+                        return !t || optRegex.test(t) || /^yes$/i.test(t) || /^no$/i.test(t);
+                      });
+                    };
+                    if (looksLikePlaceholder(defaultProps.items)) {
                       defaultProps.items = [
-                        { text: 'Yes', value: 'yes' },
-                        { text: 'No', value: 'no' }
+                        { text: 'Yes', value: 'true' },
+                        { text: 'No', value: 'false' }
                       ];
                     } else {
                       // Normalize existing items to have text/value strings
@@ -712,11 +946,6 @@ const ModifyComponent = () => {
 
           <Box padding="m">
             <SpaceBetween size="l">
-              <TranslationsWidget
-                components={components}
-                setComponents={setComponents}
-                asBoardItem={false}
-              />
               <PropertiesPanel
                 selectedComponent={selectedComponent}
                 updateComponentProperty={updateComponentProperty}
@@ -727,6 +956,13 @@ const ModifyComponent = () => {
                   setInitialComponents([]);
                 }}
               />
+              <ExpandableSection headerText="Translations" defaultExpanded={false}>
+                <TranslationsWidget
+                  components={components}
+                  setComponents={setComponents}
+                  asBoardItem={false}
+                />
+              </ExpandableSection>
             </SpaceBetween>
           </Box>
         </Grid>

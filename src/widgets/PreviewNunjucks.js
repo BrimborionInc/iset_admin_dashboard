@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Header } from '@cloudscape-design/components';
+import { Box, Header, Link } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import CodeView from '@cloudscape-design/code-view/code-view';
 import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
+import PreviewNunjucksWidgetHelp from '../helpPanelContents/previewNunjucksWidgetHelp';
 
-const PreviewStepJson = ({ selectedBlockStep }) => {
+const PreviewStepJson = ({ selectedBlockStep, toggleHelpPanel }) => {
   const [json, setJson] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -29,7 +30,21 @@ const PreviewStepJson = ({ selectedBlockStep }) => {
 
   return (
     <BoardItem
-      header={<Header variant="h2">Step JSON</Header>}
+      header={
+        <Header
+          variant="h2"
+          info={
+            <Link
+              variant="info"
+              onFollow={() => toggleHelpPanel && toggleHelpPanel(<PreviewNunjucksWidgetHelp />, 'Step JSON', PreviewNunjucksWidgetHelp.aiContext)}
+            >
+              Info
+            </Link>
+          }
+        >
+          Step JSON
+        </Header>
+      }
       i18nStrings={{
         dragHandleAriaLabel: 'Drag handle',
         dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
