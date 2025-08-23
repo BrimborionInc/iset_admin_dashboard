@@ -29,6 +29,7 @@ infra/terraform/*.tfstate
 infra/terraform/*.tfstate.backup
 infra/terraform/*.zip
 infra/terraform/terraform.tfstate*
+infra/terraform/*.tfvars
 
 # Local environment & secrets (stop tracking if previously added)
 .env
