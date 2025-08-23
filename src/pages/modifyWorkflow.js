@@ -212,6 +212,16 @@ export default function ModifyWorkflowEditorWidget() {
     return { name: wfName || 'Untitled Workflow', status: wfStatus || 'draft', steps: stepIds, start_step_id: startDbId, routes };
   }, [steps, wfName, wfStatus, startUiId]);
 
+  const publishWorkflow = useCallback(async () => {
+    if (!wfId) return;
+    try {
+      setSaving(true); setSaveMsg('');
+      await axios.post(`${API_BASE}/api/workflows/${wfId}/publish`);
+      setSaveMsg('Published.');
+    } catch (e) { setSaveMsg('Publish failed'); }
+    finally { setSaving(false); setTimeout(() => setSaveMsg(''), 3000); }
+  }, [wfId]);
+
   const saveWorkflow = useCallback(async () => {
     setSaveMsg('');
     setSaving(true);
@@ -276,6 +286,7 @@ export default function ModifyWorkflowEditorWidget() {
               if (Object.prototype.hasOwnProperty.call(delta, 'startUiId')) setStartUiId(delta.startUiId);
             }}
             onSave={saveWorkflow}
+            onPublish={publishWorkflow}
             saving={saving}
             saveMsg={saveMsg}
             onClear={() => setSaveMsg('')}
@@ -305,6 +316,7 @@ export default function ModifyWorkflowEditorWidget() {
             apiBase={API_BASE}
             steps={steps}
             selectedId={selectedId}
+            workflowId={wfId}
             onChange={(updated) => setSteps(prev => prev.map(s => (s.id === updated.id ? updated : s)))}
             onDelete={(id) => { setSteps(prev => removeStepAndRewire(prev, id)); setSelectedId(curr => (curr === id ? null : curr)); }}
           />

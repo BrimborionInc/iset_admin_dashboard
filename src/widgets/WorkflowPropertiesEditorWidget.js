@@ -1,8 +1,8 @@
 import React from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Header, Grid, FormField, Input, Select, Button, Alert } from '@cloudscape-design/components';
+import { Header, Grid, FormField, Input, Select, Button, Alert, SpaceBetween } from '@cloudscape-design/components';
 
-const WorkflowPropertiesEditorWidget = ({ name, status, startUiId, startOptions = [], onChange, onSave, saving, saveMsg, onClear }) => {
+const WorkflowPropertiesEditorWidget = ({ name, status, startUiId, startOptions = [], onChange, onSave, onPublish, saving, saveMsg, onClear }) => {
   const itemI18n = {
     dragHandleAriaLabel: 'Drag handle',
     dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
@@ -12,7 +12,7 @@ const WorkflowPropertiesEditorWidget = ({ name, status, startUiId, startOptions 
 
   return (
     <BoardItem
-      header={<Header variant="h2" actions={<Button loading={saving} variant="primary" onClick={onSave}>Save</Button>}>Workflow</Header>}
+  header={<Header variant="h2" actions={<SpaceBetween size="xs" direction="horizontal">{onPublish && <Button onClick={onPublish} disabled={saving}>Publish</Button>}<Button loading={saving} variant="primary" onClick={onSave}>Save</Button></SpaceBetween>}>Workflow</Header>}
       i18nStrings={itemI18n}
     >
       {saveMsg ? (
