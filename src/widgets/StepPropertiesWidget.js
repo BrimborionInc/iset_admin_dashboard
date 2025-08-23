@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useHistory } from 'react-router-dom';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { Box, Header, Container, SpaceBetween, FormField, Input, Select, Button } from '@cloudscape-design/components';
 
 const selectObj = (value, opts) => opts.find(o => o.value === value) || null;
 const stepOptionsFrom = (steps, excludeId) => steps.filter(s => s.id !== excludeId).map(s => ({ label: s.name, value: s.id }));
 
-const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, onDelete }) => {
+const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, onDelete, workflowId }) => {
+  const history = useHistory();
   const step = steps.find(s => s.id === selectedId) || null;
   const stepOpts = useMemo(() => (step ? stepOptionsFrom(steps, step.id) : []), [steps, step?.id]);
   const routing = step?.routing || { mode: 'linear' };
@@ -178,7 +180,18 @@ const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, 
             </SpaceBetween>
           )}
         </Container>
-        <Button onClick={() => onDelete(step.id)}>Delete step</Button>
+        <SpaceBetween size="xs" direction="horizontal">
+          <Button
+            onClick={() => {
+              if (step.stepId) {
+                const qp = workflowId ? `?fromWorkflow=${workflowId}` : '';
+                history.push(`/modify-component/${step.stepId}${qp}`);
+              }
+            }}
+            disabled={!step.stepId}
+          >Modify step</Button>
+          <Button onClick={() => onDelete(step.id)}>Remove step</Button>
+        </SpaceBetween>
       </SpaceBetween>
     </BoardItem>
   );

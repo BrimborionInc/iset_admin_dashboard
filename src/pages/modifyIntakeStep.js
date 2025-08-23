@@ -5,8 +5,8 @@ import "../css/govuk-frontend.min.css";
 import { initAll as govukInitAll } from 'govuk-frontend';
 import { DndProvider, useDrag, useDrop, useDragDropManager } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
-import { Grid, Box, Header, Button, Container, SpaceBetween, Alert, ExpandableSection } from "@cloudscape-design/components";
-import { useParams, useHistory } from "react-router-dom";
+import { Grid, Box, Header, Button, Container, SpaceBetween, Alert, ExpandableSection, SegmentedControl } from "@cloudscape-design/components";
+import { useParams, useHistory, useLocation } from "react-router-dom";
 import PropertiesPanel from './PropertiesPanel.js';
 import TranslationsWidget from '../widgets/TranslationsWidget';
 
@@ -250,8 +250,9 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
 
       const type = String(comp.type || comp.template_key || '').toLowerCase();
 
-      const attach = (el, path, transformOut) => {
+      const attach = (el, path, options = {}) => {
         if (!el) return;
+        const { htmlMode = false, allowEnter = false, transformOut } = options;
         // Skip if already initialised for this path
         if (el.getAttribute('data-inline-edit') === path) return;
         el.setAttribute('contenteditable', 'true');
@@ -260,20 +261,51 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
         el.style.outline = '2px dashed #0972d3';
         el.style.outlineOffset = '2px';
         el.setAttribute('tabindex', '0');
-        // Prevent label default focusing underlying control while editing
+        const debugInline = !!window.__ISET_DEBUG_INLINE_EDIT;
         if (el.tagName === 'LABEL') {
-          el.addEventListener('mousedown', (e) => {
-            if (selectedComponent?.index === index) {
-              e.preventDefault();
-            }
+          const origFor = el.getAttribute('for');
+          if (origFor) {
+            el.dataset.inlineEditFor = origFor;
+            el.removeAttribute('for');
+            if (debugInline) console.log('[InlineEdit] removed label for', origFor); // eslint-disable-line no-console
+          }
+          // No pointer suppression so caret can appear; removing 'for' is sufficient to stop focus jump.
+        }
+        // Ensure text is selectable even if parent containers set user-select:none
+        el.style.userSelect = 'text';
+        // Click-to-focus caret placement (works even if selection logic already ran)
+        el.addEventListener('click', () => {
+          if (selectedComponent?.index === index) {
+            if (document.activeElement !== el) el.focus();
+            try {
+              const sel = window.getSelection();
+              if (sel) {
+                const r = document.createRange();
+                r.selectNodeContents(el);
+                r.collapse(false);
+                sel.removeAllRanges();
+                sel.addRange(r);
+              }
+            } catch (_) { /* ignore */ }
+          }
+        });
+        if (debugInline) {
+          el.addEventListener('keydown', (e) => {
+            console.log('[InlineEdit] keydown', e.key); // eslint-disable-line no-console
           });
         }
         const readValue = () => {
-          let txt = el.innerText || el.textContent || '';
-          if (transformOut) txt = transformOut(txt);
-          return txt.trim();
+          let txt = htmlMode ? el.innerHTML : (el.innerText || el.textContent || '');
+          if (transformOut) txt = transformOut(txt, { el, htmlMode });
+          return htmlMode ? txt.trim() : txt.trim();
         };
         const commit = () => {
+          // Restore label 'for' attribute after editing ends
+          if (el.tagName === 'LABEL' && el.dataset.inlineEditFor) {
+            el.setAttribute('for', el.dataset.inlineEditFor);
+            if (debugInline) console.log('[InlineEdit] restored label for', el.dataset.inlineEditFor); // eslint-disable-line no-console
+            delete el.dataset.inlineEditFor;
+          }
           const value = readValue();
           setComponents(prev => prev.map((c, i) => {
             if (i !== index) return c;
@@ -296,7 +328,7 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
           }));
         };
         el.onblur = commit;
-        el.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el.blur(); } };
+  el.onkeydown = (e) => { if (!allowEnter && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el.blur(); } };
       };
 
       try {
@@ -308,8 +340,75 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
         } else {
           const legend = root.querySelector('.govuk-fieldset__legend');
           if (legend) attach(legend, 'fieldset.legend.text');
+          // Panel (confirmation panel) support: titleText + html body
+          const panelTitle = root.querySelector('.govuk-panel__title');
+          if (panelTitle) attach(panelTitle, 'titleText');
+          const panelBody = root.querySelector('.govuk-panel__body');
+          if (panelBody) attach(panelBody, 'html', { htmlMode: true, allowEnter: true });
           const label = root.querySelector('label.govuk-label:not(.govuk-radios__label):not(.govuk-checkboxes__label)');
-          if (label) attach(label, 'label.text');
+          if (label) {
+            // Debug instrumentation: observe if this label node gets replaced (character-count suspected)
+            if (window.__ISET_DEBUG_INLINE_EDIT && !label.dataset.inlineEditObserved) {
+              try {
+                const obsTarget = label.parentElement || root;
+                const mo = new MutationObserver(muts => {
+                  muts.forEach(m => {
+                    if ([...m.removedNodes].includes(label)) {
+                      console.log('[InlineEdit][Observer] Label node removed from DOM'); // eslint-disable-line no-console
+                    }
+                    if ([...m.addedNodes].some(n => n.nodeType === 1 && n.matches && n.matches('label.govuk-label'))) {
+                      console.log('[InlineEdit][Observer] New label node added', m); // eslint-disable-line no-console
+                    }
+                  });
+                });
+                mo.observe(obsTarget, { childList: true, subtree: true });
+                label.dataset.inlineEditObserved = '1';
+              } catch (_) { /* ignore */ }
+            }
+            // Dynamically determine correct path for this component's label text.
+            // Common patterns:
+            //  - props.label.text (GOV.UK inputs, character-count, etc.)
+            //  - props.label (string) (some simpler templates)
+            //  - props.text (standalone label component template)
+            let labelPath = 'label.text';
+            try {
+              const p = comp?.props || {};
+              if (type === 'label') {
+                if (typeof p.text === 'string') labelPath = 'text';
+                else if (typeof p.label === 'string') labelPath = 'label';
+              } else {
+                if (p.label && typeof p.label === 'string') labelPath = 'label';
+                else if (!(p.label && typeof p.label === 'object' && Object.prototype.hasOwnProperty.call(p.label, 'text')) && typeof p.text === 'string' && !p.fieldset) {
+                  // Fallback: if no label.text structure but top-level text exists and no fieldset legend, edit that.
+                  labelPath = 'text';
+                }
+              }
+            } catch (_) { /* ignore */ }
+            // Additional heuristic: character-count macro sometimes uses label.text but editing failed; log and try alternatives.
+            const debug = !!window.__ISET_DEBUG_INLINE_EDIT;
+            if (debug) {
+              // eslint-disable-next-line no-console
+              console.log('[InlineEdit] attach attempt', { componentType: type, chosenPath: labelPath, hasLabelObj: !!comp?.props?.label, labelIsString: typeof comp?.props?.label === 'string', labelHTML: label.innerHTML });
+            }
+            attach(label, labelPath);
+            // Fallbacks: if after first attach the attribute isn't set (edge template), try alternate common paths.
+            if (!label.getAttribute('data-inline-edit')) {
+              const fallbackPaths = [];
+              if (labelPath !== 'label') fallbackPaths.push('label');
+              if (labelPath !== 'text') fallbackPaths.push('text');
+              if (labelPath !== 'label.text') fallbackPaths.push('label.text');
+              for (const fp of fallbackPaths) {
+                attach(label, fp);
+                if (label.getAttribute('data-inline-edit')) {
+                  if (debug) console.log('[InlineEdit] fallback path used', fp); // eslint-disable-line no-console
+                  break;
+                }
+              }
+            } else if (debug) {
+              // eslint-disable-next-line no-console
+              console.log('[InlineEdit] attached ok', label.getAttribute('data-inline-edit'));
+            }
+          }
           const hint = root.querySelector('.govuk-hint:not(.govuk-radios__hint):not(.govuk-checkboxes__hint)');
           if (hint) attach(hint, 'hint.text');
           if (['radio','radios','checkbox','checkboxes'].includes(type)) {
@@ -343,8 +442,24 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
                 const sel = window.getSelection();
                 sel.removeAllRanges();
                 sel.addRange(range);
+                if (window.__ISET_DEBUG_INLINE_EDIT) console.log('[InlineEdit] primary focus applied'); // eslint-disable-line no-console
               } catch (e2) { /* silent */ }
             });
+            // Secondary delayed retry (covers cases where GOV.UK JS moves focus, e.g., character-count auto JS)
+            setTimeout(() => {
+              if (document.activeElement !== focusEl) {
+                try {
+                  focusEl.focus();
+                  const r2 = document.createRange();
+                  r2.selectNodeContents(focusEl);
+                  r2.collapse(false);
+                  const sel2 = window.getSelection();
+                  sel2.removeAllRanges();
+                  sel2.addRange(r2);
+                  if (window.__ISET_DEBUG_INLINE_EDIT) console.log('[InlineEdit] secondary focus retry'); // eslint-disable-line no-console
+                } catch (_) {}
+              }
+            }, 80);
           } catch (e) { /* silent */ }
         }
       }
@@ -383,9 +498,13 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
       className={`stage-card${selectedComponent?.index === index ? ' selected' : ''}`}
       style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', opacity: isDragging ? 0.9 : 1 }}
       onMouseDown={e => {
-        // Remember target so we can focus after selection if it becomes editable
         if (selectedComponent?.index !== index) {
           pendingFocusTargetRef.current = e.target;
+        }
+        const lbl = e.target.closest && e.target.closest('label.govuk-label');
+        if (lbl && !lbl.hasAttribute('data-inline-edit')) {
+          // Only prevent default before we turn it editable; after attach we want native selection for caret
+          e.preventDefault();
         }
       }}
       onClick={e => {
@@ -416,12 +535,25 @@ const ModifyComponent = () => {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [initialComponents, setInitialComponents] = useState([]);
   const [selectedComponent, setSelectedComponent] = useState(null);
+  // Debug instrumentation: expose currently selected component for console inspection
+  useEffect(() => {
+    if (window.__ISET_DEBUG_INLINE_EDIT) {
+      if (selectedComponent) {
+        try { window.__ISET_SELECTED = JSON.parse(JSON.stringify(selectedComponent)); } catch (_) { window.__ISET_SELECTED = selectedComponent; }
+      } else {
+        delete window.__ISET_SELECTED;
+      }
+    }
+  }, [selectedComponent]);
   const [availableComponents, setAvailableComponents] = useState([]);
   const [loading, setLoading] = useState(true);
   // DB-only model (no file paths)
   // template lookups (filled after library fetch)
   const tplById = useMemo(() => new Map(availableComponents.map(t => [t.id, t])), [availableComponents]);
   const { id } = useParams();
+  const location = useLocation();
+  const sp = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const fromWorkflow = sp.get('fromWorkflow');
   const history = useHistory();
   const [alert, setAlert] = useState(null);
   const [name, setName] = useState('');
@@ -538,21 +670,32 @@ const ModifyComponent = () => {
         const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/component-templates`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        const parsed = data
-          .filter(t => t.status === 'active')
-          .map(t => ({
-            id: t.id,
-            type: t.type,
-            label: t.label,
-            description: t.description ?? '',
-            props: JSON.parse(JSON.stringify(t.props || {})),
-            editable_fields: t.editable_fields || [],
-            has_options: !!t.has_options,
-            option_schema: t.option_schema || null,
-            template_key: t.key,
-            version: t.version
-          }));
-        setAvailableComponents(parsed);
+        // 1) Keep only active templates
+        const active = data.filter(t => t.status === 'active');
+        // 2) Normalise shape & ensure template_key carried through (older code used t.key which isn't present)
+        const normalised = active.map(t => ({
+          id: t.id,
+          type: t.type,
+          label: t.label,
+          description: t.description ?? '',
+          props: JSON.parse(JSON.stringify(t.props || {})),
+            // Deep clone props so edits don't mutate the cached "availableComponents" list
+          editable_fields: t.editable_fields || [],
+          has_options: !!t.has_options,
+          option_schema: t.option_schema || null,
+          template_key: t.template_key || t.type, // prefer explicit template_key
+          version: t.version || 1
+        }));
+        // 3) Keep only the highest version per template_key (or type fallback) so library shows latest version only.
+        const byKey = new Map();
+        for (const tpl of normalised) {
+          const key = tpl.template_key || tpl.type;
+          const existing = byKey.get(key);
+          if (!existing || (tpl.version || 0) > (existing.version || 0)) byKey.set(key, tpl);
+        }
+        const latest = Array.from(byKey.values())
+          .sort((a, b) => a.label.localeCompare(b.label));
+        setAvailableComponents(latest);
       } catch (err) {
         console.error('Failed to load component templates:', err);
         setAvailableComponents([]);
@@ -587,33 +730,32 @@ const ModifyComponent = () => {
   }, [components.length, availableComponents, tplById]);
 
   const handleSelectComponent = index => {
-    setSelectedComponent(
-      index !== null
-        ? {
-            ...components[index],
-            index,
-            props: {
-              ...components[index].props,
-              items: components[index].props?.items ?? [],
-              mode: components[index].props?.props?.mode || 'static',
-              endpoint: components[index].props?.props?.endpoint || null
-            },
-            // surface schema to properties panel (merge from template if missing)
-            editable_fields: (() => {
-              const existing = components[index].editable_fields;
-              if (existing && existing.length) return existing;
-              const tpl =
-                tplById.get(
-                  components[index].templateId ?? components[index].template_id ?? components[index].id
-                ) ||
-                availableComponents.find(
-                  t => t.template_key === components[index].template_key || t.type === components[index].type
-                );
-              return tpl?.editable_fields || [];
-            })()
-          }
-        : null
-    );
+    const nextSel = index !== null ? {
+      ...components[index],
+      index,
+      props: {
+        ...components[index].props,
+        items: components[index].props?.items ?? [],
+        mode: components[index].props?.props?.mode || 'static',
+        endpoint: components[index].props?.props?.endpoint || null
+      },
+      editable_fields: (() => {
+        const existing = components[index].editable_fields;
+        if (existing && existing.length) return existing;
+        const tpl =
+          tplById.get(
+            components[index].templateId ?? components[index].template_id ?? components[index].id
+          ) ||
+          availableComponents.find(
+            t => t.template_key === components[index].template_key || t.type === components[index].type
+          );
+        return tpl?.editable_fields || [];
+      })()
+    } : null;
+    if (window.__ISET_DEBUG_INLINE_EDIT) {
+      try { window.__ISET_SELECTED = nextSel ? JSON.parse(JSON.stringify(nextSel)) : null; } catch (_) { window.__ISET_SELECTED = nextSel; }
+    }
+    setSelectedComponent(nextSel);
   };
 
   function setNestedProp(obj, path, value) {
@@ -747,6 +889,7 @@ const ModifyComponent = () => {
             description="Modify the intake step components"
             actions={
               <SpaceBetween direction="horizontal" size="xs">
+                {fromWorkflow && <Button onClick={() => history.push(`/modify-workflow?id=${fromWorkflow}`)}>Back to Workflow</Button>}
                 <Button onClick={handleCancel}>Cancel</Button>
                 <Button onClick={handleUndo} disabled={!canUndo}>Undo</Button>
                 <Button onClick={handleRedo} disabled={!canRedo}>Redo</Button>
@@ -917,18 +1060,15 @@ const ModifyComponent = () => {
             <Header
               variant="h3"
               actions={
-                <SpaceBetween direction="horizontal" size="xs">
-                  <Button
-                    variant={previewLang === 'en' ? 'primary' : 'normal'}
-                    onClick={() => setPreviewLang('en')}
-                    disabled={previewLang === 'en'}
-                  >EN</Button>
-                  <Button
-                    variant={previewLang === 'fr' ? 'primary' : 'normal'}
-                    onClick={() => setPreviewLang('fr')}
-                    disabled={previewLang === 'fr'}
-                  >FR</Button>
-                </SpaceBetween>
+                <SegmentedControl
+                  label="Language"
+                  selectedId={previewLang}
+                  onChange={({ detail }) => setPreviewLang(detail.selectedId)}
+                  options={[
+                    { text: 'EN', id: 'en' },
+                    { text: 'FR', id: 'fr' }
+                  ]}
+                />
               }
             >
               Working Area

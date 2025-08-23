@@ -122,6 +122,294 @@ const dbConfig = {
 
 const pool = mysql.createPool(dbConfig);
 
+// ---------------- Component Templates Endpoints (Library) -----------------
+// Provides CRUD-lite access to component template definitions stored in DB.
+// Assumed table: component_templates (fallback: component_template) with columns:
+// id (PK), name, type, template_key, version, props (JSON), editable_fields (JSON), has_options (TINYINT), option_schema (JSON)
+// If your actual schema differs, adjust the column names below accordingly.
+
+async function selectComponentTemplates() {
+  // Try plural then singular
+  const [rowsPlural] = await pool.query('SELECT * FROM component_templates').catch(() => [null]);
+  if (rowsPlural) return rowsPlural;
+  const [rowsSingular] = await pool.query('SELECT * FROM component_template');
+  return rowsSingular;
+}
+
+function normalizeTemplateRow(row) {
+  const parse = (v, def = null) => {
+    if (v == null) return def;
+    if (typeof v === 'object') return v;
+    try { return JSON.parse(v); } catch { return def; }
+  };
+  const props = parse(row.default_props, {}); // actual column name in schema
+  const editable = parse(row.prop_schema, []); // actual column name in schema
+  const optionSchema = parse(row.option_schema, null);
+  return {
+    id: row.id,
+    // Keep both label and name for backward compatibility
+    label: row.label || row.name || row.template_key || row.type || '',
+    name: row.name || row.label || row.template_key || row.type || '',
+    description: row.description || '',
+    status: row.status || 'active',
+    type: row.type || row.template_key || row.name,
+    template_key: row.template_key || row.type || row.name,
+    version: row.version || 1,
+    props,
+    editable_fields: editable,
+    has_options: !!(row.has_options || row.hasOptions),
+    option_schema: optionSchema,
+  };
+}
+
+// Removed earlier simple list handler; consolidated logic lives later in file (includes augmentation & version filtering)
+
+app.put('/api/component-templates/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, type, template_key, version, props, editable_fields, has_options, option_schema } = req.body || {};
+  const updates = [];
+  const params = [];
+  function push(col, val, json = false) {
+    if (typeof val === 'undefined') return;
+    updates.push(`${col} = ?`);
+    params.push(json ? JSON.stringify(val) : val);
+  }
+  push('name', name);
+  push('type', type);
+  push('template_key', template_key);
+  push('version', version);
+  push('props', props, true);
+  push('editable_fields', editable_fields, true);
+  push('has_options', typeof has_options === 'boolean' ? (has_options ? 1 : 0) : undefined);
+  push('option_schema', option_schema, true);
+  if (!updates.length) return res.status(400).json({ error: 'no_updates' });
+  try {
+    // Attempt plural then singular
+    params.push(id);
+    const sqlPlural = `UPDATE component_templates SET ${updates.join(', ')} WHERE id = ?`;
+    let [result] = await pool.query(sqlPlural, params).catch(() => [null]);
+    if (!result || result.affectedRows === 0) {
+      const sqlSingular = `UPDATE component_template SET ${updates.join(', ')} WHERE id = ?`;
+      [result] = await pool.query(sqlSingular, params);
+      if (!result || result.affectedRows === 0) return res.status(404).json({ error: 'not_found' });
+    }
+    res.status(200).json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'component_template_update_failed', details: e.message });
+  }
+});
+
+// Targeted fix endpoint to normalize "Confirmation Panel" -> "Panel" and ensure proper fields.
+app.post('/api/component-templates/fix/panel-normalize', async (_req, res) => {
+  try {
+    const rows = await selectComponentTemplates();
+    const candidates = rows.filter(r => {
+      const nm = String(r.name || '').toLowerCase();
+      const tp = String(r.type || '').toLowerCase();
+      const tk = String(r.template_key || '').toLowerCase();
+      return nm.includes('confirmation panel') || tp === 'confirmation-panel' || tk === 'confirmation-panel';
+    });
+    if (!candidates.length) return res.status(200).json({ updated: 0, message: 'No matching panel templates found.' });
+    let updated = 0;
+    for (const row of candidates) {
+      const baseProps = (() => {
+        try { return typeof row.props === 'string' ? JSON.parse(row.props) : (row.props || {}); } catch { return {}; }
+      })();
+      if (!baseProps.titleText) baseProps.titleText = 'Application complete';
+      if (!baseProps.html) baseProps.html = 'Your reference number<br><strong>ABC123</strong>';
+      const editable = ['titleText','html'];
+      const params = [ 'Panel', 'panel', 'panel', 1, JSON.stringify(baseProps), JSON.stringify(editable), 0, null, row.id ];
+      // Try plural then singular
+      const sqlPlural = 'UPDATE component_templates SET name=?, type=?, template_key=?, version=?, props=?, editable_fields=?, has_options=?, option_schema=? WHERE id=?';
+      let [result] = await pool.query(sqlPlural, params).catch(() => [null]);
+      if (!result || result.affectedRows === 0) {
+        const sqlSingular = 'UPDATE component_template SET name=?, type=?, template_key=?, version=?, props=?, editable_fields=?, has_options=?, option_schema=? WHERE id=?';
+        [result] = await pool.query(sqlSingular, params);
+      }
+      if (result && result.affectedRows > 0) updated += result.affectedRows;
+    }
+    res.status(200).json({ updated });
+  } catch (e) {
+    res.status(500).json({ error: 'panel_normalize_failed', details: e.message });
+  }
+});
+
+// One-off migration endpoint to persist label.classes insertion and legacy required removal.
+// Safe to run multiple times (idempotent) – it will only update rows needing changes.
+app.post('/api/component-templates/migrate/label-required-cleanup', async (_req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT id, template_key, type, default_props, prop_schema FROM iset_intake.component_template`);
+    const labelClassOptions = [ 'govuk-label', 'govuk-label--s', 'govuk-label--m', 'govuk-label--l', 'govuk-label--xl' ];
+    const inputLike = new Set(['input','textarea','character-count','select','file-upload','password-input']);
+    let updated = 0;
+    const changedTemplates = [];
+    for (const r of rows) {
+      let changed = false;
+      let schema = [];
+      try { schema = r.prop_schema ? JSON.parse(r.prop_schema) : []; } catch { schema = []; }
+      if (!Array.isArray(schema)) schema = [];
+      const beforeLen = schema.length;
+      schema = schema.filter(f => f && f.key !== 'required' && f.path !== 'required');
+      if (schema.length !== beforeLen) changed = true;
+      const hasLabelText = schema.some(f => f && (f.path === 'label.text' || f.key === 'label.text'));
+      const hasLabelClasses = schema.some(f => f && (f.path === 'label.classes' || f.key === 'label.classes'));
+      if (hasLabelText && !hasLabelClasses) {
+        const insertIdx = schema.findIndex(f => f && (f.path === 'label.text' || f.key === 'label.text'));
+        const fieldDef = { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions };
+        if (insertIdx >= 0) schema.splice(insertIdx + 1, 0, fieldDef); else schema.push(fieldDef);
+        changed = true;
+      }
+      let defaults = {};
+      try { defaults = r.default_props ? JSON.parse(r.default_props) : {}; } catch { defaults = {}; }
+      if (inputLike.has(String(r.type).toLowerCase())) {
+        if (!defaults.label || typeof defaults.label !== 'object') {
+          defaults.label = { text: (defaults.label && defaults.label.text) || 'Label', classes: 'govuk-label--m' };
+          changed = true;
+        } else if (!defaults.label.classes) {
+          defaults.label.classes = 'govuk-label--m';
+          changed = true;
+        }
+      }
+      if (changed) {
+        await pool.query(`UPDATE iset_intake.component_template SET prop_schema = ?, default_props = ? WHERE id = ?`, [JSON.stringify(schema), JSON.stringify(defaults), r.id]);
+        updated++;
+        changedTemplates.push({ id: r.id, key: r.template_key, type: r.type });
+      }
+    }
+    res.status(200).json({ message: 'Label/required cleanup complete', updated, changedTemplates });
+  } catch (err) {
+    console.error('label-required-cleanup failed', err);
+    res.status(500).json({ error: 'label_required_cleanup_failed' });
+  }
+});
+
+// POST /api/component-templates/migrate/backfill-props
+// Persists any runtime-backfilled props & editable_fields for input-like templates missing schema (idempotent)
+app.post('/api/component-templates/migrate/backfill-props', async (_req, res) => {
+  try {
+    const targets = ['character-count','input','textarea','select','file-upload','password-input'];
+    const [rows] = await pool.query(`SELECT id, type, default_props, prop_schema FROM iset_intake.component_template`);
+    const labelClassOptions = [ 'govuk-label', 'govuk-label--s', 'govuk-label--m', 'govuk-label--l', 'govuk-label--xl' ];
+    let updated = 0;
+    const changed = [];
+    for (const r of rows) {
+      const t = String(r.type || '').toLowerCase();
+      if (!targets.includes(t)) continue;
+      let props = {}; try { props = r.default_props ? JSON.parse(r.default_props) : {}; } catch { props = {}; }
+      let schema = []; try { schema = r.prop_schema ? JSON.parse(r.prop_schema) : []; } catch { schema = []; }
+      if (!Array.isArray(schema)) schema = [];
+      const originalSchemaLen = schema.length;
+      const originalPropsJSON = JSON.stringify(props);
+      // Normalise label
+      if (!props.label || typeof props.label !== 'object') props.label = { text: 'Label', classes: 'govuk-label--m' };
+      else if (!props.label.classes) props.label.classes = 'govuk-label--m';
+      const ensure = (k, v) => { if (!(k in props)) props[k] = v; };
+      if (t === 'character-count') {
+        ensure('name','message'); ensure('id',''); ensure('rows','5'); ensure('maxlength','200'); ensure('threshold','75');
+        if (!props.hint || typeof props.hint !== 'object') props.hint = { text: 'Do not include personal information.' };
+        if (!props.formGroup) props.formGroup = { classes: '' };
+        if (!props.errorMessage) props.errorMessage = { text: '' };
+      } else if (t === 'input') {
+        ensure('name','input-1'); ensure('id','input-1'); ensure('type','text');
+        if (!props.hint || typeof props.hint !== 'object' || !props.hint.text) props.hint = { text: 'This is the optional hint text' };
+        if (!props.errorMessage) props.errorMessage = { text: '' };
+        if (!props.formGroup) props.formGroup = { classes: '' };
+      } else if (t === 'textarea') {
+        ensure('name','more-detail'); ensure('id','more-detail'); ensure('rows','5');
+        if (!props.hint || typeof props.hint !== 'object' || !props.hint.text) props.hint = { text: 'Don\'t include personal or financial information.' };
+        if (!props.errorMessage) props.errorMessage = { text: '' };
+        if (!props.formGroup) props.formGroup = { classes: '' };
+      } else if (t === 'select') {
+        ensure('name','example-select');
+        if (!Array.isArray(props.items) || !props.items.length) props.items = [ { text: 'Option 1', value: '1' }, { text: 'Option 2', value: '2' }, { text: 'Option 3', value: '3' } ];
+        if (!props.hint || typeof props.hint !== 'object' || !props.hint.text) props.hint = { text: 'Pick from the options' };
+      } else if (t === 'file-upload') {
+        ensure('name','uploadedFile');
+        if (!props.hint || typeof props.hint !== 'object' || !props.hint.text) props.hint = { text: 'Files must be under 10MB.' };
+        if (!props.errorMessage) props.errorMessage = { text: '' };
+      } else if (t === 'password-input') {
+        ensure('name','password');
+        if (!props.hint || typeof props.hint !== 'object' || !props.hint.text) props.hint = { text: 'This is the optional hint text' };
+        if (!props.errorMessage) props.errorMessage = { text: '' };
+      }
+      // Rebuild schema only if empty
+      if (!schema.length) {
+        if (t === 'character-count') schema = [
+          { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+          { key: 'id', path: 'id', type: 'text', label: 'ID' },
+          { key: 'labelText', path: 'label.text', type: 'text', label: 'Label Text' },
+          { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions },
+          { key: 'hintText', path: 'hint.text', type: 'text', label: 'Hint Text' },
+          { key: 'maxlength', path: 'maxlength', type: 'text', label: 'Max Length' },
+          { key: 'threshold', path: 'threshold', type: 'text', label: 'Threshold (%)' },
+          { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' }
+        ];
+        else if (t === 'input') schema = [
+          { key: 'name', path: 'name', type: 'text', label: 'Field name' },
+          { key: 'id', path: 'id', type: 'text', label: 'ID' },
+          { key: 'type', path: 'type', type: 'enum', label: 'Input type', options: ['text','email','number','password','tel','url','search'] },
+          { key: 'label.text', path: 'label.text', type: 'text', label: 'Label' },
+          { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions },
+          { key: 'hint.text', path: 'hint.text', type: 'text', label: 'Hint' },
+          { key: 'errorMessage.text', path: 'errorMessage.text', type: 'text', label: 'Error message' },
+          { key: 'classes', path: 'classes', type: 'text', label: 'Input classes' }
+        ];
+        else if (t === 'textarea') schema = [
+          { key: 'labelText', path: 'label.text', type: 'text', label: 'Label Text' },
+          { key: 'labelClasses', path: 'label.classes', type: 'select', label: 'Label Classes', options: labelClassOptions.slice(0,4) },
+          { key: 'hintText', path: 'hint.text', type: 'text', label: 'Hint Text' },
+          { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+          { key: 'id', path: 'id', type: 'text', label: 'ID' },
+          { key: 'rows', path: 'rows', type: 'text', label: 'Rows (number as text)' },
+          { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' }
+        ];
+        else if (t === 'select') schema = [
+          { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+          { key: 'id', path: 'id', type: 'text', label: 'ID' },
+          { key: 'labelText', path: 'label.text', type: 'text', label: 'Label Text' },
+          { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions },
+          { key: 'hintText', path: 'hint.text', type: 'text', label: 'Hint Text' },
+          { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' }
+        ];
+        else if (t === 'file-upload') schema = [
+          { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+          { key: 'id', path: 'id', type: 'text', label: 'ID' },
+          { key: 'labelText', path: 'label.text', type: 'text', label: 'Label Text' },
+          { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions },
+          { key: 'hintText', path: 'hint.text', type: 'text', label: 'Hint Text' },
+          { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' }
+        ];
+        else if (t === 'password-input') schema = [
+          { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+          { key: 'id', path: 'id', type: 'text', label: 'ID' },
+          { key: 'labelText', path: 'label.text', type: 'text', label: 'Label Text' },
+          { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions },
+          { key: 'hintText', path: 'hint.text', type: 'text', label: 'Hint Text' },
+          { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' }
+        ];
+      }
+      // Remove legacy required if present
+      const filteredSchema = schema.filter(f => f.key !== 'required' && f.path !== 'required');
+      if (filteredSchema.length !== schema.length) schema = filteredSchema;
+      if (schema.length && !schema.some(f => f.path === 'label.classes') && schema.some(f => f.path === 'label.text')) {
+        const idx = schema.findIndex(f => f.path === 'label.text');
+        const def = { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions };
+        if (idx >= 0) schema.splice(idx + 1, 0, def); else schema.push(def);
+      }
+      const newPropsJSON = JSON.stringify(props);
+      const newSchemaJSON = JSON.stringify(schema);
+      if (newPropsJSON !== originalPropsJSON || schema.length !== originalSchemaLen) {
+        await pool.query(`UPDATE iset_intake.component_template SET default_props = ?, prop_schema = ? WHERE id = ?`, [newPropsJSON, newSchemaJSON, r.id]);
+        updated++; changed.push({ id: r.id, type: t });
+      }
+    }
+    res.status(200).json({ message: 'Backfill complete', updated, changed });
+  } catch (err) {
+    console.error('backfill-props failed', err);
+    res.status(500).json({ error: 'backfill_props_failed' });
+  }
+});
+
 // Admin routes (delegated user management) - feature flagged
 try {
   const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
@@ -564,6 +852,84 @@ app.get('/api/audit/parity-sample', async (req, res) => {
   } catch (err) {
     console.error('GET /api/audit/parity-sample failed:', err);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/component-templates/panel/version
+// Creates a new version of the panel template (id provided or discovered by template_key='panel')
+// Adds support for html body (html vs text) while retaining titleText.
+app.post('/api/component-templates/panel/version', async (req, res) => {
+  try {
+    // Find current latest active panel template
+    const [[row]] = await pool.query(`SELECT * FROM iset_intake.component_template WHERE template_key='panel' AND status='active' ORDER BY version DESC LIMIT 1`);
+    if (!row) return res.status(404).json({ error: 'panel_template_not_found' });
+    const currentVersion = Number(row.version || 0);
+    const nextVersion = currentVersion + 1;
+    const defaultProps = (() => { try { return JSON.parse(row.default_props); } catch { return {}; } })();
+    // Promote existing text to html if html not present
+    if (!defaultProps.html && defaultProps.text) {
+      // Preserve line breaks
+      defaultProps.html = String(defaultProps.text).replace(/\n/g, '<br>');
+    }
+    if (!defaultProps.titleText) defaultProps.titleText = 'Application complete';
+    // Remove now redundant plain text if both html & text exist (keep html authoritative)
+    if (defaultProps.html) delete defaultProps.text;
+    if (typeof defaultProps.headingLevel === 'undefined') defaultProps.headingLevel = 1;
+    if (typeof defaultProps.classes === 'undefined') defaultProps.classes = '';
+
+    const newPropSchema = [
+      { key: 'titleText', path: 'titleText', type: 'text', label: 'Title Text' },
+      { key: 'html', path: 'html', type: 'textarea', label: 'HTML Content' },
+      { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' },
+      { key: 'headingLevel', path: 'headingLevel', type: 'number', label: 'Heading Level' }
+    ];
+
+    const newNunjucks = `{% from "govuk/components/panel/macro.njk" import govukPanel %}\n\n{{ govukPanel({\n  titleText: props.titleText,\n  html: props.html,\n  headingLevel: props.headingLevel,\n  classes: props.classes\n}) }}`;
+
+    await pool.query(
+      `INSERT INTO iset_intake.component_template
+        (template_key, version, type, label, description, default_props, prop_schema, has_options, option_schema, status, export_njk_template)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        row.template_key,
+        nextVersion,
+        row.type || 'panel',
+        'Panel',
+        'Confirmation / summary panel with title and HTML body.',
+        JSON.stringify(defaultProps),
+        JSON.stringify(newPropSchema),
+        row.has_options || 0,
+        row.option_schema || null,
+        'active',
+        newNunjucks
+      ]
+    );
+
+    res.status(201).json({ ok: true, template_key: row.template_key, version: nextVersion });
+  } catch (e) {
+    console.error('panel version create failed', e);
+    res.status(500).json({ error: 'panel_version_failed', details: e.message });
+  }
+});
+
+// POST /api/component-templates/prune-old
+// Marks older active versions (status='active') of each template_key as 'inactive', keeping only the highest version active.
+app.post('/api/component-templates/prune-old', async (_req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT template_key, MAX(version) AS maxv FROM iset_intake.component_template WHERE status='active' GROUP BY template_key`);
+    let totalUpdated = 0;
+    for (const r of rows) {
+      const { template_key, maxv } = r;
+      const [result] = await pool.query(
+        `UPDATE iset_intake.component_template SET status='inactive' WHERE template_key=? AND status='active' AND version < ?`,
+        [template_key, maxv]
+      );
+      totalUpdated += result.affectedRows || 0;
+    }
+    res.status(200).json({ ok: true, deactivated: totalUpdated });
+  } catch (e) {
+    console.error('prune-old failed', e);
+    res.status(500).json({ error: 'prune_failed', details: e.message });
   }
 });
 
@@ -1605,10 +1971,38 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
           label: { en: labelEn || id, fr: labelFr || labelEn || id },
           hint: (hintEn || hintFr) ? { en: hintEn, fr: hintFr } : undefined,
           class: props?.classes || undefined,
-          required: !!props?.required,
+          // Required: prefer new validation.required flag, fall back to legacy props.required
+          required: !!(props?.validation && typeof props.validation === 'object' ? props.validation.required : props?.required),
           // storageKey: prefer chosenKey (aligned with routing if applicable)
           storageKey: chosenKey || id,
         };
+        // Export label classes if present (portal renderer will optionally apply)
+        if (props?.label && typeof props.label === 'object' && props.label.classes && String(props.label.classes).trim()) {
+          component.labelClass = String(props.label.classes).trim();
+        }
+        // Export legend classes for radios/checkboxes/select (fieldset legend)
+        if (props?.fieldset?.legend && props.fieldset.legend.classes && String(props.fieldset.legend.classes).trim()) {
+          component.legendClass = String(props.fieldset.legend.classes).trim();
+        }
+        // Character-count specific props
+        if (tplType === 'character-count') {
+          const ml = props?.maxlength ?? props?.maxLength;
+          const th = props?.threshold;
+            // rows may be stored as string
+          if (ml !== undefined && ml !== null && ml !== '') {
+            const n = Number(ml);
+            if (!isNaN(n) && n > 0) component.maxLength = n;
+          }
+          if (th !== undefined && th !== null && th !== '') {
+            const n = Number(th);
+            if (!isNaN(n) && n >= 0) component.threshold = n; // percentage
+          }
+          const rowsVal = props?.rows;
+          if (rowsVal !== undefined && rowsVal !== null && rowsVal !== '') {
+            const n = Number(rowsVal);
+            if (!isNaN(n) && n > 0) component.rows = n;
+          }
+        }
 
         // Carry a few useful extras when present (non-breaking for the portal renderer)
         if (tplType === 'input') {
@@ -1659,6 +2053,32 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
   // Infer normalize (preserve any earlier explicit)
   const inferred = inferNormalize(tplType, props, options || []);
   component.normalize = component.normalize && component.normalize !== 'none' ? component.normalize : inferred;
+
+        // If a structured validation config exists, export a trimmed version (forward-compatible; portal may ignore for now)
+        if (props?.validation && typeof props.validation === 'object') {
+          const v = props.validation;
+          const safeRules = Array.isArray(v.rules)
+            ? v.rules.filter(r => r && typeof r === 'object').map(r => ({
+                id: r.id,
+                trigger: r.trigger,
+                predicate: r.predicate,
+                message: r.message,
+                severity: r.severity,
+                block: !!r.block
+              }))
+            : undefined;
+          const validationOut = {
+            required: typeof v.required === 'boolean' ? v.required : undefined,
+            errorMessage: (v.errorMessage && typeof v.errorMessage === 'object') ? v.errorMessage : undefined,
+            rules: safeRules && safeRules.length ? safeRules : undefined
+          };
+          // Remove all-undefined object to avoid noise
+          if (validationOut.required || validationOut.errorMessage || (validationOut.rules && validationOut.rules.length)) {
+            component.validation = validationOut;
+          }
+          // Ensure top-level required reflects validation.required if set
+          if (typeof v.required === 'boolean' && v.required && !component.required) component.required = true;
+        }
 
         out.components.push(component);
       }
@@ -1818,6 +2238,135 @@ app.get('/api/component-templates', async (req, res) => {
             }
           } catch (_) {}
         }
+      let editable = parseJson(r.prop_schema) ?? [];
+      // 1. Broad removal of legacy 'required' editable field (validation panel now authoritative)
+      editable = editable.filter(f => (f.key !== 'required' && f.path !== 'required'));
+      // 2. Ensure label.classes select for any component that has label.text editing but lacks label.classes
+      const hasLabelText = editable.some(f => f.path === 'label.text' || f.key === 'label.text');
+      const hasLabelClasses = editable.some(f => f.path === 'label.classes' || f.key === 'label.classes');
+      const labelClassOptions = [ 'govuk-label', 'govuk-label--s', 'govuk-label--m', 'govuk-label--l', 'govuk-label--xl' ];
+      if (hasLabelText && !hasLabelClasses) {
+        const insertIdx = editable.findIndex(f => f.path === 'label.text' || f.key === 'label.text');
+        const fieldDef = {
+          key: 'label.classes',
+          path: 'label.classes',
+          type: 'select',
+          label: 'Label classes',
+          options: labelClassOptions
+        };
+        if (insertIdx >= 0) editable.splice(insertIdx + 1, 0, fieldDef); else editable.push(fieldDef);
+      }
+      // 3. Component-type specific normalisation for character-count / textarea / input to ensure default label classes
+      if (['character-count','textarea','input','select','file-upload','password-input'].includes(t)) {
+        if (!propsRaw.label || typeof propsRaw.label !== 'object') {
+          propsRaw.label = { text: (propsRaw.label && propsRaw.label.text) || (propsRaw.label && typeof propsRaw.label === 'string' ? propsRaw.label : 'Label'), classes: 'govuk-label--m' };
+        } else if (!propsRaw.label.classes) {
+          propsRaw.label.classes = 'govuk-label--m';
+        }
+      }
+      // 4. Backfill lost default props for certain templates (post-migration safety net)
+      if (t === 'character-count') {
+        if (!('name' in propsRaw)) propsRaw.name = 'message';
+        if (!('id' in propsRaw)) propsRaw.id = '';
+        if (!('rows' in propsRaw)) propsRaw.rows = '5';
+        if (!('maxlength' in propsRaw)) propsRaw.maxlength = '200';
+        if (!('threshold' in propsRaw)) propsRaw.threshold = '75';
+        if (!propsRaw.hint || typeof propsRaw.hint !== 'object') propsRaw.hint = { text: 'Do not include personal information.' };
+        if (!propsRaw.formGroup) propsRaw.formGroup = { classes: '' };
+        if (!propsRaw.errorMessage) propsRaw.errorMessage = { text: '' };
+      } else if (t === 'input') {
+        if (!('name' in propsRaw)) propsRaw.name = 'input-1';
+        if (!('id' in propsRaw)) propsRaw.id = 'input-1';
+        if (!('type' in propsRaw)) propsRaw.type = 'text';
+        if (!propsRaw.hint || typeof propsRaw.hint !== 'object' || !propsRaw.hint.text) propsRaw.hint = { text: 'This is the optional hint text' };
+        if (!propsRaw.errorMessage) propsRaw.errorMessage = { text: '' };
+        if (!propsRaw.formGroup) propsRaw.formGroup = { classes: '' };
+      } else if (t === 'textarea') {
+        if (!('name' in propsRaw)) propsRaw.name = 'more-detail';
+        if (!('id' in propsRaw)) propsRaw.id = 'more-detail';
+        if (!('rows' in propsRaw)) propsRaw.rows = '5';
+        if (!propsRaw.hint || typeof propsRaw.hint !== 'object' || !propsRaw.hint.text) propsRaw.hint = { text: 'Don\'t include personal or financial information.' };
+        if (!propsRaw.errorMessage) propsRaw.errorMessage = { text: '' };
+        if (!propsRaw.formGroup) propsRaw.formGroup = { classes: '' };
+      } else if (t === 'select') {
+        if (!('name' in propsRaw)) propsRaw.name = 'example-select';
+        if (!Array.isArray(propsRaw.items) || !propsRaw.items.length) {
+          propsRaw.items = [ { text: 'Option 1', value: '1' }, { text: 'Option 2', value: '2' }, { text: 'Option 3', value: '3' } ];
+        }
+        if (!propsRaw.hint || typeof propsRaw.hint !== 'object' || !propsRaw.hint.text) propsRaw.hint = { text: 'Pick from the options' };
+      } else if (t === 'file-upload') {
+        if (!('name' in propsRaw)) propsRaw.name = 'uploadedFile';
+        if (!propsRaw.hint || typeof propsRaw.hint !== 'object' || !propsRaw.hint.text) propsRaw.hint = { text: 'Files must be under 10MB.' };
+        if (!propsRaw.errorMessage) propsRaw.errorMessage = { text: '' };
+      } else if (t === 'password-input') {
+        if (!('name' in propsRaw)) propsRaw.name = 'password';
+        if (!propsRaw.hint || typeof propsRaw.hint !== 'object' || !propsRaw.hint.text) propsRaw.hint = { text: 'This is the optional hint text' };
+        if (!propsRaw.errorMessage) propsRaw.errorMessage = { text: '' };
+      }
+      // 5. Reconstruct editable_fields if empty (DB may have lost schema). Build minimal viable schema.
+      if ((!editable || !editable.length) && ['character-count','input','textarea','select','file-upload','password-input'].includes(t)) {
+        const labelClassOptions = [ 'govuk-label', 'govuk-label--s', 'govuk-label--m', 'govuk-label--l', 'govuk-label--xl' ];
+        if (t === 'character-count') {
+          editable = [
+            { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+            { key: 'id', path: 'id', type: 'text', label: 'ID' },
+            { key: 'labelText', path: 'label.text', type: 'text', label: 'Label Text' },
+            { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions },
+            { key: 'hintText', path: 'hint.text', type: 'text', label: 'Hint Text' },
+            { key: 'maxlength', path: 'maxlength', type: 'text', label: 'Max Length' },
+            { key: 'threshold', path: 'threshold', type: 'text', label: 'Threshold (%)' },
+            { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' }
+          ];
+        } else if (t === 'input') {
+          editable = [
+            { key: 'name', path: 'name', type: 'text', label: 'Field name' },
+            { key: 'id', path: 'id', type: 'text', label: 'ID' },
+            { key: 'type', path: 'type', type: 'enum', label: 'Input type', options: ['text','email','number','password','tel','url','search'] },
+            { key: 'label.text', path: 'label.text', type: 'text', label: 'Label' },
+            { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions },
+            { key: 'hint.text', path: 'hint.text', type: 'text', label: 'Hint' },
+            { key: 'errorMessage.text', path: 'errorMessage.text', type: 'text', label: 'Error message' },
+            { key: 'classes', path: 'classes', type: 'text', label: 'Input classes' }
+          ];
+        } else if (t === 'textarea') {
+          editable = [
+            { key: 'labelText', path: 'label.text', type: 'text', label: 'Label Text' },
+            { key: 'labelClasses', path: 'label.classes', type: 'select', label: 'Label Classes', options: labelClassOptions.slice(0,4) },
+            { key: 'hintText', path: 'hint.text', type: 'text', label: 'Hint Text' },
+            { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+            { key: 'id', path: 'id', type: 'text', label: 'ID' },
+            { key: 'rows', path: 'rows', type: 'text', label: 'Rows (number as text)' },
+            { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' }
+          ];
+        } else if (t === 'select') {
+          editable = [
+            { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+            { key: 'id', path: 'id', type: 'text', label: 'ID' },
+            { key: 'labelText', path: 'label.text', type: 'text', label: 'Label Text' },
+            { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions },
+            { key: 'hintText', path: 'hint.text', type: 'text', label: 'Hint Text' },
+            { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' }
+          ];
+        } else if (t === 'file-upload') {
+          editable = [
+            { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+            { key: 'id', path: 'id', type: 'text', label: 'ID' },
+            { key: 'labelText', path: 'label.text', type: 'text', label: 'Label Text' },
+            { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions },
+            { key: 'hintText', path: 'hint.text', type: 'text', label: 'Hint Text' },
+            { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' }
+          ];
+        } else if (t === 'password-input') {
+          editable = [
+            { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+            { key: 'id', path: 'id', type: 'text', label: 'ID' },
+            { key: 'labelText', path: 'label.text', type: 'text', label: 'Label Text' },
+            { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: labelClassOptions },
+            { key: 'hintText', path: 'hint.text', type: 'text', label: 'Hint Text' },
+            { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' }
+          ];
+        }
+      }
       return {
         id: r.id,
         key: r.template_key,
@@ -1826,7 +2375,7 @@ app.get('/api/component-templates', async (req, res) => {
         label: r.label,
         description: r.description ?? null,
         props: propsRaw,
-        editable_fields: parseJson(r.prop_schema) ?? [],
+        editable_fields: editable,
         has_options: !!r.has_options,
         option_schema: parseJson(r.option_schema) ?? null,
         status: r.status
