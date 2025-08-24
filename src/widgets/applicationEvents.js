@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { Header, ButtonDropdown, Table, StatusIndicator, Box, Spinner, TextFilter, SpaceBetween } from '@cloudscape-design/components';
 
@@ -17,13 +18,13 @@ const ApplicationEvents = ({ actions, application_id, caseData, user_id: propUse
     if (!userId) return;
     setLoading(true);
     setError(null);
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/case-events?user_id=${userId}`)
+    apiFetch(`/api/case-events?user_id=${userId}`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch events');
         return res.json();
       })
       .then(data => setEvents(data))
-      .catch(err => setError('Failed to load events'))
+      .catch(() => setError('Failed to load events'))
       .finally(() => setLoading(false));
   }, [userId]);
 

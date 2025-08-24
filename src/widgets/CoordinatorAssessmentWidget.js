@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 
@@ -261,7 +262,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     };
     try {
       // Save assessment
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases/${caseData.id}`, {
+      const res = await apiFetch(`/api/cases/${caseData.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -271,7 +272,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
 
       // 3. Update stage to 'assessment_submitted' if not already
       if (caseData.stage !== 'assessment_submitted') {
-        const stageRes = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases/${caseData.id}/stage`, {
+        const stageRes = await apiFetch(`/api/cases/${caseData.id}/stage`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ stage: 'assessment_submitted' })
@@ -343,7 +344,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         case_summary: assessment.overview || null
       };
       console.log('Saving assessment. Payload:', payload);
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases/${caseData.id}`, {
+      const res = await apiFetch(`/api/cases/${caseData.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -440,7 +441,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     };
     try {
       // 1. Update case with NWAC review and status
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases/${caseData.id}`, {
+      const res = await apiFetch(`/api/cases/${caseData.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -448,7 +449,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       const result = await res.json();
       if (!res.ok || !result.success) throw new Error(result.error || 'Failed to save NWAC review.');
       // 2. Update stage to 'review_complete'
-      const stageRes = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases/${caseData.id}/stage`, {
+      const stageRes = await apiFetch(`/api/cases/${caseData.id}/stage`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stage: 'review_complete' })
@@ -457,7 +458,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       // 3. Log NWAC review submitted event
       const userId = caseData?.user_id || caseData?.applicant_user_id || null;
       if (userId) {
-        await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/case-events`, {
+        await apiFetch(`/api/case-events`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -472,7 +473,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           })
         });
         // 4. Log event for approval/rejection
-        await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/case-events`, {
+        await apiFetch(`/api/case-events`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

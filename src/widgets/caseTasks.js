@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import {
   Box,
   Header,
@@ -26,7 +27,7 @@ const CaseTasks = ({ actions }) => {
   const loadTasks = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/tasks`);
+  const res = await apiFetch(`/api/tasks`);
       const data = await res.json();
       setTasks(data);
     } catch (err) {
@@ -43,7 +44,7 @@ const CaseTasks = ({ actions }) => {
   // Mark task complete
   const completeTask = async (taskId) => {
     try {
-      await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/tasks/${taskId}/complete`, { method: 'PUT' });
+  await apiFetch(`/api/tasks/${taskId}/complete`, { method: 'PUT' });
       loadTasks();
     } catch (err) {
       console.error('Error completing task:', err);

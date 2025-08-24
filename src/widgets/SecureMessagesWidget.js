@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import { Box, Header, ButtonDropdown, Link, Table, Spinner, TextFilter, RadioGroup, Tabs, Modal, Input, Textarea, SpaceBetween, Button } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import SecureMessagesHelpPanelContent from '../helpPanelContents/secureMessagesHelpPanelContent';
@@ -33,7 +34,7 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
     if (!applicantUserId) return;
     setLoading(true);
     setError(null);
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages`)
+  apiFetch(`/api/admin/messages`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch messages');
         return res.json();
@@ -48,7 +49,7 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
 
   // Fetch evaluators for sender name lookup
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/intake-officers`)
+  apiFetch(`/api/intake-officers`)
       .then(res => res.json())
       .then(data => setEvaluators(data))
       .catch(() => setEvaluators([]));
@@ -132,7 +133,7 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
     // Mark as read if it's an unread inbox message
     if (activeTabId === 'inbox' && message.status === 'unread') {
       try {
-        await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages/${message.id}/status`, {
+  await apiFetch(`/api/admin/messages/${message.id}/status`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'read' })
@@ -169,7 +170,7 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
     setComposeSending(true);
     setComposeError(null);
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages`, {
+  const response = await apiFetch(`/api/admin/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -185,7 +186,7 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
         throw new Error(errorData.error || 'Failed to send message');
       }
       // Refresh messages after sending
-      await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages`)
+  await apiFetch(`/api/admin/messages`)
         .then(res => res.json())
         .then(data => {
           setMessages(data.filter(m => m.sender_id === applicantUserId || m.recipient_id === applicantUserId));
@@ -207,7 +208,7 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
     if (!applicantUserId) return;
     setLoading(true);
     setError(null);
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages`)
+  apiFetch(`/api/admin/messages`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch messages');
         return res.json();
@@ -330,7 +331,7 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
     if (modalOpen && selectedMessage && selectedMessage.id && caseData?.id) {
       setAttachmentsLoading(true);
       setAttachmentsError(null);
-      fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages/${selectedMessage.id}/attachments?case_id=${caseData.id}`)
+  apiFetch(`/api/admin/messages/${selectedMessage.id}/attachments?case_id=${caseData.id}`)
         .then(res => {
           if (!res.ok) throw new Error('Failed to fetch attachments');
           return res.json();
@@ -355,7 +356,7 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
     }
     try {
       // Set status to 'archived' before soft delete
-      await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages/${selectedMessage.id}/status`, {
+  await apiFetch(`/api/admin/messages/${selectedMessage.id}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'archived' })
@@ -363,14 +364,14 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
       setMessages(msgs => msgs.map(m => m.id === selectedMessage.id ? { ...m, status: 'archived' } : m));
     } catch (e) {}
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages/${selectedMessage.id}/delete`, {
+  const response = await apiFetch(`/api/admin/messages/${selectedMessage.id}/delete`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
         throw new Error('Failed to delete message');
       }
-      await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages`)
+  await apiFetch(`/api/admin/messages`)
         .then(res => res.json())
         .then(data => {
           setMessages(data.filter(m => m.sender_id === applicantUserId || m.recipient_id === applicantUserId));
@@ -386,14 +387,14 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
   const handleHardDelete = async () => {
     if (!selectedMessage) return;
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages/${selectedMessage.id}/hard-delete`, {
+  const response = await apiFetch(`/api/admin/messages/${selectedMessage.id}/hard-delete`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
         throw new Error('Failed to hard delete message');
       }
-      await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages`)
+  await apiFetch(`/api/admin/messages`)
         .then(res => res.json())
         .then(data => {
           setMessages(data.filter(m => m.sender_id === applicantUserId || m.recipient_id === applicantUserId));
@@ -422,14 +423,14 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
       // Call hard delete endpoint for each
       await Promise.all(
         deletedIds.map(id =>
-          fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages/${id}/hard-delete`, {
+          apiFetch(`/api/admin/messages/${id}/hard-delete`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
           })
         )
       );
       // Refresh messages
-      await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages`)
+  await apiFetch(`/api/admin/messages`)
         .then(res => res.json())
         .then(data => {
           setMessages(data.filter(m => m.sender_id === applicantUserId || m.recipient_id === applicantUserId));

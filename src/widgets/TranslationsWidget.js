@@ -62,7 +62,9 @@ function isDateLike(type) {
 }
 
 const TranslationsWidget = ({ actions, components = [], setComponents, asBoardItem = true }) => {
-  const apiBase = process.env.REACT_APP_API_BASE_URL || '';
+  // All authenticated API calls should use apiFetch wrapper
+  // (lazy import to avoid circulars if any heavy deps load this widget early)
+  const { apiFetch } = require('../auth/apiClient');
   const [translating, setTranslating] = React.useState(false);
   const [message, setMessage] = React.useState(null); // { type: 'success'|'error'|'info', text }
   // Compute coverage per language (simple: counts non-empty fields over total fields)
@@ -234,7 +236,7 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
           items
         })
       };
-      const res = await fetch(`${apiBase}/api/ai/chat`, {
+  const res = await apiFetch(`/api/ai/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [system, user] })

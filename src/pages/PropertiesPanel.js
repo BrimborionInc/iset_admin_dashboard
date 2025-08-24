@@ -5,7 +5,7 @@ import { Box, Container, Header, Table, Input, Button, Select, SpaceBetween, For
 import get from 'lodash/get';
 import Ajv from 'ajv';
 
-const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pageProperties, setPageProperties }) => {
+const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pageProperties, setPageProperties, currentLang = 'en', latestTemplateVersionByKey, onUpgradeTemplate }) => {
   const [availableDataSources, setAvailableDataSources] = useState([]);
   const [selectedEndpoint, setSelectedEndpoint] = useState(null);
   const [optionSourceMode, setOptionSourceMode] = useState('static');
@@ -122,6 +122,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
       let type = 'string';
       if (f.type === 'checkbox' || f.type === 'boolean') type = 'boolean';
       if (f.type === 'attributes') type = 'array';
+      if (['number','integer'].includes(f.type)) type = 'number';
       // If options provided (select/enum) remain string unless actual value indicates boolean
       if (f.type === 'select' && Array.isArray(f.options)) type = 'string';
       // Heuristic: if current prop value is strictly boolean, treat as boolean regardless of declared field type
@@ -130,6 +131,10 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
         if (typeof currentVal === 'boolean') type = 'boolean';
       } catch { /* ignore */ }
       properties[key] = { type };
+      // Allow blank string for optional numeric fields to avoid immediate error badge
+      if (type === 'number' && !f.required) {
+        properties[key] = { anyOf: [ { type: 'number' }, { type: 'string', enum: [''] } ] };
+      }
       if (type === 'string' && f.type === 'select' && Array.isArray(f.options)) {
         const enumVals = f.options.map(o => (o.value ?? o));
         // Allow empty / unset as a valid non-required state so we don't show an error badge immediately
@@ -148,13 +153,21 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
     return { type: 'object', properties, required };
   }, [selectedComponent?.editable_fields, selectedComponent?.props]);
 
+  const flattenI18n = (val) => {
+    if (!val) return val;
+    if (typeof val === 'object' && (Object.prototype.hasOwnProperty.call(val,'en') || Object.prototype.hasOwnProperty.call(val,'fr'))) {
+      return val[currentLang] ?? val.en ?? val.fr ?? '';
+    }
+    return val;
+  };
+
   const validateProps = (props) => {
     try {
       const validate = ajv.compile(componentJsonSchema);
       const flat = {};
       (selectedComponent?.editable_fields || []).forEach(f => {
         if (!f.path) return;
-        flat[f.path] = get(props, f.path);
+        flat[f.path] = flattenI18n(get(props, f.path));
       });
       const ok = validate(flat);
       const errs = {};
@@ -187,7 +200,14 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
     if (p === 'describedby') return 'Space-separated IDs appended to aria-describedby. Advanced accessibility wiring.';
     if (p.startsWith('prefix.')) return 'Non-editable text before the input (e.g., $).';
     if (p.startsWith('suffix.')) return 'Non-editable text after the input (e.g., kg).';
-    if (p === 'attributes') return 'Custom attributes (e.g., data-*). Use cautiously and document usage.';
+  if (p === 'attributes') return 'Custom attributes (e.g., data-*). Use cautiously and document usage.';
+  if (p === 'name') return 'Submission key used as the field identifier in submissions.';
+  if (p === 'id') return 'HTML id attribute (used for label association); usually match Submission Key.';
+  if (p === 'rows') return 'Visible height (number of text rows).';
+  if (p === 'maxlength') return 'Maximum character count enforced by the component.';
+  if (p === 'threshold') return 'Percentage (0-100) when the counter starts showing (e.g., 75).';
+  if (p === 'maxwords') return 'Optional maximum word count (leave blank to ignore).';
+  if (p === 'value') return 'Default pre-filled value (leave blank for none).';
     return null;
   };
 
@@ -289,6 +309,15 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
     );
   };
 
+  // Translation helpers
+  const isI18nObject = (v) => v && typeof v === 'object' && (
+    Object.prototype.hasOwnProperty.call(v, 'en') || Object.prototype.hasOwnProperty.call(v, 'fr')
+  );
+  const translatablePaths = new Set([
+    'label.text', 'hint.text', 'errorMessage.text', 'fieldset.legend.text'
+  ]);
+  const isTranslatablePath = (p) => translatablePaths.has(String(p || ''));
+
   return (
     <SpaceBetween size="l">
       <ExpandableSection headerText="Page Properties" defaultExpanded>
@@ -330,6 +359,24 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
       {selectedComponent && (
         <>
           <ExpandableSection headerText="Component Properties" defaultExpanded>
+            {selectedComponent && latestTemplateVersionByKey && (
+              (() => {
+                const key = selectedComponent.template_key || selectedComponent.type;
+                const latest = latestTemplateVersionByKey.get ? latestTemplateVersionByKey.get(key) : latestTemplateVersionByKey[key];
+                const cur = selectedComponent.version || 0;
+                const needsUpgrade = latest && latest > cur;
+                return (
+                  <Box margin={{ bottom: 's' }}>
+                    <SpaceBetween size="xs" direction="horizontal">
+                      <Badge color={needsUpgrade ? 'red' : 'green'}>{`Version ${cur}${needsUpgrade ? ` (latest is ${latest})` : ''}`}</Badge>
+                      {needsUpgrade && (
+                        <Button size="small" onClick={() => onUpgradeTemplate && onUpgradeTemplate()}>Upgrade to v{latest}</Button>
+                      )}
+                    </SpaceBetween>
+                  </Box>
+                );
+              })()
+            )}
             <Table
               variant="embedded"
               columnDefinitions={[
@@ -354,7 +401,12 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                   cell: item => {
                     const v = item.value;
                     const err = validationErrors[item.path];
-                    const display = typeof v === 'boolean' ? (v ? 'True' : 'False') : (typeof v === 'object' ? JSON.stringify(v) : v);
+                    let display;
+                    if (typeof v === 'boolean') display = v ? 'True' : 'False';
+                    else if (isI18nObject(v)) {
+                      display = v[currentLang] ?? v.en ?? v.fr ?? '';
+                    } else if (typeof v === 'object') display = JSON.stringify(v);
+                    else display = v;
                     return (
                       <SpaceBetween direction="horizontal" size="xs">
                         <span>{display}</span>
@@ -364,14 +416,28 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                   },
                   editConfig: {
                     editingCell: (item, { currentValue, setValue }) => {
+                      const original = get(selectedComponent?.props, item.path);
+                      const isI18n = isI18nObject(original) || isTranslatablePath(item.path);
                       const handleChange = (value) => {
-                        setValue(value);
-                        updateComponentProperty(item.path, value, true);
-                        const next = JSON.parse(JSON.stringify(selectedComponent?.props || {}));
-                        const parts = item.path.split('.');
-                        let tgt = next; for (let i=0;i<parts.length-1;i++){ if(!tgt[parts[i]]) tgt[parts[i]]={}; tgt=tgt[parts[i]]; }
-                        tgt[parts[parts.length-1]] = value;
-                        validateProps(next);
+                        if (isI18n) {
+                          const base = isI18nObject(original) ? { ...original } : { [currentLang]: (typeof original === 'string' ? original : '') };
+                          base[currentLang] = value;
+                          setValue(value);
+                          updateComponentProperty(item.path, base, true);
+                          const next = JSON.parse(JSON.stringify(selectedComponent?.props || {}));
+                          const parts = item.path.split('.');
+                          let tgt = next; for (let i=0;i<parts.length-1;i++){ if(!tgt[parts[i]]) tgt[parts[i]]={}; tgt=tgt[parts[i]]; }
+                          tgt[parts[parts.length-1]] = base;
+                          validateProps(next);
+                        } else {
+                          setValue(value);
+                          updateComponentProperty(item.path, value, true);
+                          const next = JSON.parse(JSON.stringify(selectedComponent?.props || {}));
+                          const parts = item.path.split('.');
+                          let tgt = next; for (let i=0;i<parts.length-1;i++){ if(!tgt[parts[i]]) tgt[parts[i]]={}; tgt=tgt[parts[i]]; }
+                          tgt[parts[parts.length-1]] = value;
+                          validateProps(next);
+                        }
                       };
 
                       const path = item.path || '';
@@ -384,6 +450,11 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                       if (isPath(path, 'fieldset.legend.classes')) {
                         return (
                           <CuratedSelectWithCustom value={val || ''} onChange={handleChange} options={FIELDSET_LEGEND_CLASS_SUGGESTIONS} placeholder="Legend class" />
+                        );
+                      }
+                      if (isPath(path, 'classes')) {
+                        return (
+                          <CuratedSelectWithCustom value={val || ''} onChange={handleChange} options={GENERIC_CLASS_SUGGESTIONS} placeholder="CSS classes" />
                         );
                       }
                       if (endsWithPath(path, '.classes')) {
@@ -412,10 +483,14 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                         );
                       }
                       switch (item.type) {
-                        case 'textarea':
-                          return <Textarea value={currentValue || item.value} onChange={({ detail }) => handleChange(detail.value)} rows={4} />;
-                        case 'text':
-                          return <Input value={currentValue || item.value} onChange={({ detail }) => handleChange(detail.value)} />;
+                        case 'textarea': {
+                          const val = isI18n ? (original?.[currentLang] ?? original?.en ?? original?.fr ?? '') : (currentValue || item.value);
+                          return <Textarea value={val} onChange={({ detail }) => handleChange(detail.value)} rows={4} />;
+                        }
+                        case 'text': {
+                          const val = isI18n ? (original?.[currentLang] ?? original?.en ?? original?.fr ?? '') : (currentValue || item.value);
+                          return <Input value={val} onChange={({ detail }) => handleChange(detail.value)} />;
+                        }
                         case 'checkbox':
                         case 'boolean': {
                           const selectedBool = currentValue ?? item.value;
@@ -431,6 +506,13 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                         case 'select':
                         case 'enum':
                           return <Select expandToViewport selectedOption={{ label: currentValue || item.value, value: currentValue || item.value }} onChange={({ detail }) => handleChange(detail.selectedOption.value)} options={item.options || []} />;
+                        case 'number': {
+                          const val = isI18n ? (original?.[currentLang] ?? original?.en ?? original?.fr ?? '') : (currentValue ?? item.value);
+                          return <Input type="number" value={val} onChange={({ detail }) => {
+                            const parsed = detail.value === '' ? '' : Number(detail.value);
+                            handleChange(parsed);
+                          }} />;
+                        }
                         case 'attributes': {
                           const rows = Array.isArray(currentValue || item.value) ? (currentValue || item.value) : [];
                           return (
@@ -462,13 +544,41 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                   }
                 }
               ]}
-                items={selectedComponent.editable_fields?.filter(field => field.type !== 'optionList').map(field => ({
-                  label: field.label,
-                  value: get(selectedComponent.props, field.path),
-                  type: field.type === 'string' ? 'text' : (field.type === 'enum' ? 'select' : field.type),
-                  options: (field.options || []).map(o => typeof o === 'string' ? { label: o, value: o } : o),
-                  path: field.path,
-                }))}
+                items={(() => {
+                  const priority = [
+                    'id',
+                    'name',
+                    'label.text', 'label.classes',
+                    'fieldset.legend.text','fieldset.legend.classes',
+                    'hint.text',
+                    'value',
+                    'rows','maxlength','threshold','maxwords',
+                    'type','autocomplete','inputmode','pattern','spellcheck',
+                    'classes','formGroup.classes',
+                    'prefix.text','suffix.text'
+                  ];
+                  const indexOfPath = (p) => {
+                    const i = priority.indexOf(p);
+                    return i === -1 ? 999 + p.length : i; // stable fallback
+                  };
+                  return (selectedComponent.editable_fields || [])
+                    .filter(field => field.type !== 'optionList')
+                    .filter(field => {
+                      const isCharCount = (selectedComponent.template_key || selectedComponent.type) === 'character-count';
+                      if (isCharCount && (field.path === 'errorMessage.text' || field.key === 'errorMessage.text')) return false;
+                      return true;
+                    })
+                    .map(field => ({
+                      label: field.label,
+                      value: get(selectedComponent.props, field.path),
+                      type: field.type === 'string' ? 'text' : (field.type === 'enum' ? 'select' : field.type),
+                      options: (field.options || []).map(o => typeof o === 'string' ? { label: o, value: o } : o),
+                      path: field.path,
+                      _order: indexOfPath(field.path)
+                    }))
+                    .sort((a,b) => a._order === b._order ? a.label.localeCompare(b.label) : a._order - b._order)
+                    .map(({ _order, ...rest }) => rest);
+                })()}
                 submitEdit={() => { }}
                 ariaLabels={{ tableLabel: 'Component Properties Table' }}
               />

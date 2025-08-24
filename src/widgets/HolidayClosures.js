@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import {
   Table,
   SpaceBetween,
@@ -17,7 +18,7 @@ const HolidayClosures = ({ locationId }) => {
   const [isChanged, setIsChanged] = useState(false);
 
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/operating-hours/${locationId}`)
+  apiFetch(`/api/operating-hours/${locationId}`)
       .then(response => {
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
@@ -32,7 +33,7 @@ const HolidayClosures = ({ locationId }) => {
       .catch(error => {
         console.error('Error fetching holiday closures:', error);
         // Log the full response for debugging
-        fetch(`${process.env.REACT_APP_API_BASE_URL}/api/operating-hours/${locationId}`)
+  apiFetch(`/api/operating-hours/${locationId}`)
           .then(response => response.text())
           .then(text => console.log('Full response:', text));
       });
@@ -44,11 +45,9 @@ const HolidayClosures = ({ locationId }) => {
       date: closure.date.split('T')[0], // Format date to YYYY-MM-DD
     }));
 
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/holiday-closures/${locationId}`, {
+    apiFetch(`/api/holiday-closures/${locationId}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(formattedHolidayClosures),
     })
       .then(response => {

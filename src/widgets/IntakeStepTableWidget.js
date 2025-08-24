@@ -3,6 +3,7 @@ import { Box, Header, Button, SpaceBetween, Table, TextFilter, ButtonDropdown, L
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useHistory } from 'react-router-dom';
 import IntakeStepLibraryWidgetHelp from '../helpPanelContents/intakeStepLibraryWidgetHelp';
+import { apiFetch } from '../auth/apiClient'; // use authenticated fetch wrapper
 
 const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel }) => {
   const [steps, setSteps] = useState([]);
@@ -14,25 +15,29 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
   const history = useHistory();
 
   useEffect(() => {
-    const apiBase = process.env.REACT_APP_API_BASE_URL || '';
-    fetch(`${apiBase}/api/steps`)
-      .then(async response => {
-        if (!response.ok) {
-          const err = await response.json().catch(() => ({}));
-          throw new Error(err.error || err.message || `HTTP ${response.status}`);
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await apiFetch('/api/steps');
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.error || err.message || `HTTP ${resp.status}`);
         }
-        return response.json();
-      })
-      .then(data => {
+        const data = await resp.json();
+        if (cancelled) return;
         const list = Array.isArray(data) ? data : (Array.isArray(data?.rows) ? data.rows : []);
         setSteps(list);
-        setLoading(false);
-      })
-      .catch(error => {
-        console.error('Error fetching steps:', error);
-        setSteps([]);
-        setLoading(false);
-      });
+      } catch (e) {
+        if (!cancelled) {
+          console.error('Error fetching steps:', e);
+          setBanner({ type: 'error', message: e.message || 'Failed to load steps' });
+          setSteps([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const handleModify = (step) => {
@@ -48,14 +53,13 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
     const step = pendingDelete;
     if (!step) return;
     try {
-      const apiBase = process.env.REACT_APP_API_BASE_URL || '';
-      const response = await fetch(`${apiBase}/api/steps/${step.id}`, { method: 'DELETE' });
-      if (response.ok) {
+      const resp = await apiFetch(`/api/steps/${step.id}`, { method: 'DELETE' });
+      if (resp.ok) {
         setSteps(prev => prev.filter(item => item.id !== step.id));
         setBanner({ type: 'info', message: 'Step deleted.' });
       } else {
-        const error = await response.json().catch(() => ({}));
-        setBanner({ type: 'error', message: `Failed to delete step: ${error.error || error.message || response.status}` });
+        const err = await resp.json().catch(() => ({}));
+        setBanner({ type: 'error', message: `Failed to delete step: ${err.error || err.message || resp.status}` });
       }
     } catch (error) {
       console.error('Error deleting step:', error);

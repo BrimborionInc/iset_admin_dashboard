@@ -34,22 +34,24 @@ export async function apiFetch(path, options = {}) {
 
   const bypass = getBypassHeaders();
   if (bypass) {
+    // Dev simulation headers (may be ignored if server dev bypass not enabled)
     Object.entries(bypass).forEach(([k, v]) => headers.set(k, v));
+    // Also attach a real bearer token if available so requests still succeed when server requires Cognito
+    const existingAuth = headers.get('Authorization');
+    let sess = existingAuth ? null : loadSession();
+    if (sess && sess.idToken) {
+      headers.set('Authorization', 'Bearer ' + sess.idToken);
+    }
   } else {
     let sess = loadSession();
     if (!sess || !sess.idToken) {
-      // Not signed in
       if (sessionStorage.getItem('iamBypass') === 'off' && sessionStorage.getItem('simulateSignedOut') === 'true') {
-        // In simulation mode, avoid navigation; return a faux 401 so callers can render the signed-out UX
         return new Response(JSON.stringify({ error: 'simulated-unauthenticated' }), { status: 401, headers: { 'content-type': 'application/json' } });
       }
       window.location.assign(buildLoginUrl());
       return new Response(null, { status: 0, statusText: 'redirecting-to-login' });
     }
-    // Attempt refresh if near expiry
-    try {
-      sess = await ensureFreshSession() || sess;
-    } catch (e) {
+    try { sess = await ensureFreshSession() || sess; } catch (e) {
       window.location.assign(buildLoginUrl());
       return new Response(null, { status: 0, statusText: 'redirecting-to-login' });
     }

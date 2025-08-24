@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import { Header, Box, ButtonDropdown, Table, StatusIndicator, Button, SpaceBetween } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 
@@ -9,7 +10,7 @@ const IsetEvaluatorsWidget = ({ ptmaId, actions = {} }) => {
   useEffect(() => {
     if (!ptmaId) return;
     setLoading(true);
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ptmas/${ptmaId}/evaluators`)
+    apiFetch(`/api/ptmas/${ptmaId}/evaluators`)
       .then(response => response.json())
       .then(data => {
         setEvaluators(data);

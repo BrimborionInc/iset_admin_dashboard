@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import {
   Box,
   Header,
@@ -21,7 +22,7 @@ const CaseUpdates = ({ actions }) => {
   useEffect(() => {
     const fetchEvents = async () => {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/case-events?limit=20`);
+        const response = await apiFetch(`/api/case-events?limit=20`);
         const data = await response.json();
         setEvents(data);
       } catch (error) {

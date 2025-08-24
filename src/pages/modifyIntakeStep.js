@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from "react";
 // Ensure GOV.UK styles are available in-editor
 import "../css/govuk-frontend.min.css";
 // Initialize GOV.UK behaviours for dynamic previews
@@ -9,8 +9,9 @@ import { Grid, Box, Header, Button, Container, SpaceBetween, Alert, ExpandableSe
 import { useParams, useHistory, useLocation } from "react-router-dom";
 import PropertiesPanel from './PropertiesPanel.js';
 import TranslationsWidget from '../widgets/TranslationsWidget';
+import { apiFetch } from '../auth/apiClient';
 
-const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:5001';
+// API_BASE constant removed; all network calls now go through apiFetch which handles base URL & auth.
 
 const setComponentConfigValue = (path, value, selectedComponent) => {
   if (!selectedComponent || !selectedComponent.props) return;
@@ -23,10 +24,42 @@ const setComponentConfigValue = (path, value, selectedComponent) => {
   current[keys[keys.length - 1]] = value;
 };
 
-const ComponentItem = ({ component, onAdd }) => (
+// Utility: identify translatable (i18n) value objects
+const isI18nObject = v => v && typeof v === 'object' && (
+  Object.prototype.hasOwnProperty.call(v, 'en') || Object.prototype.hasOwnProperty.call(v, 'fr')
+);
+
+// Given a default props object and current language, wrap plain string values at known translation paths into { lang: value }
+function seedI18nDefaults(props, lang = 'en') {
+  if (!props || typeof props !== 'object') return props;
+  const clone = JSON.parse(JSON.stringify(props));
+  const translationPaths = [
+    'label.text','hint.text','errorMessage.text','value',
+    'charCountSingular','charCountPlural','wordCountSingular','wordCountPlural'
+  ];
+  const setPath = (obj, path, val) => {
+    const parts = path.split('.');
+    const last = parts.pop();
+    const target = parts.reduce((acc,k)=>{ if(!acc[k]||typeof acc[k]!== 'object') acc[k]={}; return acc[k]; }, obj);
+    target[last] = val;
+  };
+  const getPath = (obj, path) => path.split('.').reduce((acc,k)=> (acc && acc[k] !== undefined ? acc[k] : undefined), obj);
+  translationPaths.forEach(p => {
+    const val = getPath(clone, p);
+    if (typeof val === 'string' && val.trim()) {
+      setPath(clone, p, { [lang]: val });
+    } else if (typeof val === 'string' && !val.trim()) {
+      // leave empty string as blank translation for current lang only
+      setPath(clone, p, { [lang]: '' });
+    }
+  });
+  return clone;
+}
+
+const ComponentItem = ({ component, onAdd, currentLang }) => (
   <div
     style={{ padding: "8px", border: "1px solid #ccc", cursor: "pointer" }}
-    onClick={() => onAdd(component)}
+    onClick={() => onAdd(component, currentLang)}
   >
     {component.label}
   </div>
@@ -142,7 +175,7 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
         const ac = new AbortController(); abortRef.current = ac;
         setLoading(true); setError('');
         try {
-          const res = await fetch(`${API_BASE}/api/render/component`, {
+          const res = await apiFetch(`/api/render/component`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ templateKey, templateId, version, props }),
@@ -606,6 +639,109 @@ const ModifyComponent = () => {
     setSelectedComponent(sc => (sc && sc.index < snap.length) ? { ...snap[sc.index], index: sc.index } : null);
   };
 
+  // Add component with i18n seeding (moved inside component scope to satisfy linter)
+  const pendingSelectIndexRef = useRef(null);
+  const addComponent = (template, lang = 'en') => {
+    if (!template) return;
+    const seeded = seedI18nDefaults(template.props || {}, lang);
+    // Character-count specific post-processing: strip large bottom margin & assign incremental name/id
+    if ((template.template_key || template.type) === 'character-count') {
+      if (seeded && seeded.classes === 'govuk-!-margin-bottom-6') seeded.classes = '';
+      // Determine next index (1-based)
+      const existingCount = components.filter(c => (c.template_key || c.type) === 'character-count').length;
+      const nextIndex = existingCount + 1;
+      const baseName = `Character-Count-${nextIndex}`;
+      if (!seeded.name || /^message$/i.test(seeded.name)) seeded.name = baseName;
+      if (!seeded.id || !String(seeded.id).trim()) seeded.id = seeded.name;
+      if (seeded.maxwords == null) seeded.maxwords = '';
+      if (typeof seeded.value === 'undefined' || seeded.value === '') seeded.value = { [lang]: '' };
+      if (seeded.errorMessage && typeof seeded.errorMessage.text === 'string' && !seeded.errorMessage.text.trim()) {
+        // Allow validation widget to control it; convert to i18n object for consistency
+        seeded.errorMessage.text = { [lang]: '' };
+      }
+      // Enforce default label class & bilingual label text if not already meaningful
+      if (!seeded.label || typeof seeded.label !== 'object') seeded.label = { text: { en: '', fr: '' }, classes: 'govuk-label--m' };
+      if (!seeded.label.classes || !String(seeded.label.classes).trim()) seeded.label.classes = 'govuk-label--m';
+      const currentLabelText = seeded.label.text;
+      const isPlainString = typeof currentLabelText === 'string';
+      const genericPlaceholders = ['message','label',''];
+      const objectHasGeneric = (!isPlainString && typeof currentLabelText === 'object' && (
+        (currentLabelText.en && genericPlaceholders.includes(String(currentLabelText.en).trim().toLowerCase())) ||
+        (currentLabelText.fr && genericPlaceholders.includes(String(currentLabelText.fr).trim().toLowerCase()))
+      ));
+      const needsDefault = (
+        (isPlainString && genericPlaceholders.includes(currentLabelText.trim().toLowerCase())) ||
+        (isPlainString && !currentLabelText.trim()) ||
+        objectHasGeneric ||
+        (typeof currentLabelText === 'object' && !(
+          (currentLabelText.en && currentLabelText.en.trim()) || (currentLabelText.fr && currentLabelText.fr.trim())
+        ))
+      );
+      if (needsDefault) {
+        seeded.label.text = { en: 'Input with character-count', fr: 'Champ avec compteur de caractères' };
+      } else if (isPlainString) {
+        // Convert existing plain string to bilingual object preserving value for EN, supply FR default
+        seeded.label.text = { en: currentLabelText, fr: 'Champ avec compteur de caractères' };
+      } else if (typeof currentLabelText === 'object') {
+        if (!currentLabelText.en) currentLabelText.en = 'Input with character-count';
+        if (!currentLabelText.fr) currentLabelText.fr = 'Champ avec compteur de caractères';
+      }
+    } else if ((template.template_key || template.type) === 'textarea') {
+      // Textarea improvements: bilingual defaults, consistent label class, value i18n wrapper
+      if (!seeded.label || typeof seeded.label !== 'object') seeded.label = { text: { en: '', fr: '' }, classes: 'govuk-label--m' };
+      if (!seeded.label.classes || !String(seeded.label.classes).trim()) seeded.label.classes = 'govuk-label--m';
+      const lt = seeded.label.text;
+      const plain = typeof lt === 'string';
+      if (plain && !lt.trim()) {
+        seeded.label.text = { en: 'Multi-line input', fr: 'Champ multi-lignes' };
+      } else if (plain) {
+        seeded.label.text = { en: lt, fr: 'Champ multi-lignes' };
+      } else if (typeof lt === 'object') {
+        if (!lt.en) lt.en = 'Multi-line input';
+        if (!lt.fr) lt.fr = 'Champ multi-lignes';
+      }
+      // Hint i18n
+      if (seeded.hint) {
+        const ht = seeded.hint.text;
+        if (typeof ht === 'string') {
+          seeded.hint.text = { [lang]: ht };
+        } else if (typeof ht === 'object') {
+          if (!ht.en) ht.en = "Don't include personal or financial information.";
+          if (!ht.fr) ht.fr = "N'incluez pas d'informations personnelles ou financières.";
+        } else {
+          seeded.hint.text = { en: "Don't include personal or financial information.", fr: "N'incluez pas d'informations personnelles ou financières." };
+        }
+      }
+      // Value to i18n object
+      if (typeof seeded.value === 'string') {
+        seeded.value = { [lang]: seeded.value };
+      } else if (typeof seeded.value === 'undefined') {
+        seeded.value = { en: '', fr: '' };
+      }
+      // errorMessage to i18n container
+      if (seeded.errorMessage && typeof seeded.errorMessage.text === 'string') {
+        seeded.errorMessage.text = { [lang]: seeded.errorMessage.text };
+      }
+    }
+    setComponents(prev => {
+      const instance = {
+        id: undefined,
+        templateId: template.id,
+        template_key: template.template_key,
+        type: template.type,
+        version: template.version,
+        label: template.label,
+        props: seeded,
+        editable_fields: template.editable_fields || [],
+        has_options: !!template.has_options,
+        option_schema: template.option_schema || null
+      };
+      const next = [...prev, instance];
+      pendingSelectIndexRef.current = next.length - 1;
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (id === 'new') {
       setComponents([]);
@@ -617,9 +753,9 @@ const ModifyComponent = () => {
       setLoading(false);
     } else if (id) {
       // DB-backed step load
-      const fetchStep = async () => {
+    const fetchStep = async () => {
         try {
-          const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps/${id}`);
+      const res = await apiFetch(`/api/steps/${id}`);
           if (res.status === 404) {
             // Step not found: initialize a draft instead of failing
             setAlert({ type: 'warning', message: `Step ${id} not found. Starting a new draft.` });
@@ -667,31 +803,41 @@ const ModifyComponent = () => {
   useEffect(() => {
     const fetchAvailableComponents = async () => {
       try {
-        const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/component-templates`);
+        const res = await apiFetch(`/api/component-templates`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        // 1) Keep only active templates
-        const active = data.filter(t => t.status === 'active');
-        // 2) Normalise shape & ensure template_key carried through (older code used t.key which isn't present)
-        const normalised = active.map(t => ({
-          id: t.id,
-          type: t.type,
-          label: t.label,
-          description: t.description ?? '',
-          props: JSON.parse(JSON.stringify(t.props || {})),
-            // Deep clone props so edits don't mutate the cached "availableComponents" list
-          editable_fields: t.editable_fields || [],
-          has_options: !!t.has_options,
-          option_schema: t.option_schema || null,
-          template_key: t.template_key || t.type, // prefer explicit template_key
-          version: t.version || 1
-        }));
-        // 3) Keep only the highest version per template_key (or type fallback) so library shows latest version only.
+        const raw = await res.json();
+        // Accept both old (array) and new ({ count, templates }) shapes
+        const list = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw.templates)
+            ? raw.templates
+            : Array.isArray(raw.data)
+              ? raw.data
+              : [];
+        // 1) Keep only active templates (default to active if status missing)
+        const active = list.filter(t => (t.status || 'active') === 'active');
+        // 2) Normalise shape; prefer default_props then props
+        const normalised = active.map(t => {
+          const baseProps = t.default_props || t.props || {};
+          return {
+            id: t.id,
+            type: t.type || t.template_key || t.name,
+            label: t.label || t.name || t.template_key || t.type || 'Component',
+            description: t.description ?? '',
+            props: JSON.parse(JSON.stringify(baseProps)), // deep clone
+            editable_fields: t.editable_fields || t.prop_schema || [],
+            has_options: !!t.has_options,
+            option_schema: t.option_schema || null,
+            template_key: t.template_key || t.type || t.name,
+            version: t.version || 1
+          };
+        });
+        // 3) Keep only the highest version per template_key
         const byKey = new Map();
         for (const tpl of normalised) {
           const key = tpl.template_key || tpl.type;
-          const existing = byKey.get(key);
-          if (!existing || (tpl.version || 0) > (existing.version || 0)) byKey.set(key, tpl);
+            const existing = byKey.get(key);
+            if (!existing || (tpl.version || 0) > (existing.version || 0)) byKey.set(key, tpl);
         }
         const latest = Array.from(byKey.values())
           .sort((a, b) => a.label.localeCompare(b.label));
@@ -730,6 +876,8 @@ const ModifyComponent = () => {
   }, [components.length, availableComponents, tplById]);
 
   const handleSelectComponent = index => {
+  if (index == null) { setSelectedComponent(null); return; }
+  if (!components[index]) return; // guard against race
     const nextSel = index !== null ? {
       ...components[index],
       index,
@@ -757,6 +905,16 @@ const ModifyComponent = () => {
     }
     setSelectedComponent(nextSel);
   };
+  // After components mutate, if we have a pending selection index, select it once the component exists
+  useEffect(() => {
+    if (pendingSelectIndexRef.current != null) {
+      const idx = pendingSelectIndexRef.current;
+      if (components[idx]) {
+        handleSelectComponent(idx);
+        pendingSelectIndexRef.current = null;
+      }
+    }
+  }, [components]);
 
   function setNestedProp(obj, path, value) {
     if (!path) return;
@@ -796,7 +954,7 @@ const ModifyComponent = () => {
     try {
       const payload = { name, status, components: toApiComponents(components) };
       if (id === 'new') {
-        const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps`, {
+        const res = await apiFetch(`/api/steps`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -806,7 +964,7 @@ const ModifyComponent = () => {
         setAlert({ type: 'success', message: 'Created new Step.' });
         history.push(`/modify-component/${out.id}`);
       } else {
-        const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps/${id}`, {
+        const res = await apiFetch(`/api/steps/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -827,7 +985,7 @@ const ModifyComponent = () => {
   const handleSaveAsNew = async () => {
     try {
       const payload = { name: `${name} (copy)`, status, components: toApiComponents(components) };
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps`, {
+      const res = await apiFetch(`/api/steps`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -846,7 +1004,7 @@ const ModifyComponent = () => {
     if (id === 'new') return;
     if (!window.confirm('Delete this step? This cannot be undone.')) return;
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/steps/${id}`, { method: 'DELETE' });
       const out = await res.json().catch(() => ({}));
       if (res.status === 409) {
         setAlert({ type: 'warning', message: out?.error || 'Step is referenced by a workflow.' });
@@ -865,6 +1023,49 @@ const ModifyComponent = () => {
 
   // Language toggle for Working Area preview
   const [previewLang, setPreviewLang] = useState('en');
+
+  // Map of latest active template versions by key for upgrade detection
+  const latestTemplateVersionByKey = useMemo(() => {
+    const m = new Map();
+    availableComponents.forEach(t => {
+      const k = t.template_key || t.type;
+      if (!m.has(k) || (t.version || 0) > (m.get(k) || 0)) m.set(k, t.version || 0);
+    });
+    return m;
+  }, [availableComponents]);
+
+  // Upgrade selected component to latest template version, merging props conservatively
+  const upgradeSelectedComponent = useCallback(() => {
+    if (!selectedComponent) return;
+    const key = selectedComponent.template_key || selectedComponent.type;
+    const latestTpl = availableComponents.find(t => (t.template_key || t.type) === key);
+    if (!latestTpl || (latestTpl.version || 0) <= (selectedComponent.version || 0)) return;
+    const oldProps = selectedComponent.props || {};
+    const newDefaults = seedI18nDefaults(latestTpl.props || {}, previewLang);
+    const merge = (oldVal, newVal) => {
+      if (oldVal === undefined) return newVal;
+      if (typeof newVal !== 'object' || newVal === null) return oldVal !== undefined ? oldVal : newVal;
+      if (Array.isArray(newVal)) return Array.isArray(oldVal) ? oldVal : newVal;
+      const out = { ...newVal };
+      Object.keys(oldVal || {}).forEach(k => {
+        if (k in newVal) out[k] = merge(oldVal[k], newVal[k]);
+      });
+      return out;
+    };
+    const mergedProps = merge(oldProps, newDefaults);
+    setComponents(prev => prev.map((c, i) => i === selectedComponent.index ? {
+      ...c,
+      version: latestTpl.version,
+      props: mergedProps,
+      editable_fields: latestTpl.editable_fields || c.editable_fields
+    } : c));
+    setSelectedComponent(sc => sc ? {
+      ...sc,
+      version: latestTpl.version,
+      props: mergedProps,
+      editable_fields: latestTpl.editable_fields || sc.editable_fields
+    } : sc);
+  }, [selectedComponent, availableComponents, setComponents, previewLang]);
 
   /* existing state & effects unchanged */
 
@@ -916,142 +1117,12 @@ const ModifyComponent = () => {
         <Grid gridDefinition={[{ colspan: 2 }, { colspan: 6 }, { colspan: 4 }]}>
           <Box padding="m">
             <Header variant="h3">Library</Header>
-            {availableComponents.map((comp, index) => (
+            {availableComponents.map((comp) => (
               <ComponentItem
-                key={index}
+                key={comp.id}
                 component={comp}
-  onAdd={component => {
-                  // Deep clone to avoid shared nested references between added components
-                  const defaultProps = JSON.parse(JSON.stringify(component.props || {}));
-                  if (Array.isArray(component.props?.items)) {
-                    defaultProps.items = [...component.props.items];
-                  }
-
-                  // Sanitize defaults to avoid showing error state by default
-                  const typeKey = String(component.type || component.template_key || '').toLowerCase();
-                  const stripClasses = (cls, toRemove) => (String(cls || '')
-                    .split(/\s+/)
-                    .filter(c => c && !toRemove.includes(c))
-                    .join(' '));
-                  if (typeKey === 'input' || typeKey === 'text' || typeKey === 'email' || typeKey === 'number' || typeKey === 'password' || typeKey === 'phone' || typeKey === 'password-input') {
-                    // Remove GOV.UK error classes from formGroup and control
-                    if (defaultProps.formGroup && typeof defaultProps.formGroup === 'object') {
-                      defaultProps.formGroup.classes = stripClasses(defaultProps.formGroup.classes, ['govuk-form-group--error']);
-                    }
-                    defaultProps.classes = stripClasses(defaultProps.classes, ['govuk-input--error']);
-                    // If errorMessage exists, clear it to avoid macro rendering error state
-                    if (defaultProps.errorMessage) {
-                      try { delete defaultProps.errorMessage; } catch (_) { defaultProps.errorMessage = { text: '' }; }
-                    }
-                    // Apply requested alternative defaults
-                    // 1) Label classes -> 'govuk-label--m' when not provided
-                    if (!defaultProps.label || typeof defaultProps.label !== 'object') {
-                      defaultProps.label = { text: (defaultProps.label && defaultProps.label.text) || 'Label', classes: 'govuk-label--m' };
-                    } else if (!defaultProps.label.classes || String(defaultProps.label.classes).trim() === '') {
-                      defaultProps.label.classes = 'govuk-label--m';
-                    }
-                    // 2) Hint default text when absent or empty
-                    const hintText = defaultProps?.hint?.text;
-                    if (!defaultProps.hint || typeof defaultProps.hint !== 'object' || !String(hintText || '').trim()) {
-                      defaultProps.hint = { ...(defaultProps.hint || {}), text: 'This is the optional hint text' };
-                    }
-                  } else if (typeKey === 'radio' || typeKey === 'radios' || typeKey === 'checkbox' || typeKey === 'checkboxes') {
-                    // Choice components: clean error state and set helpful defaults
-                    if (defaultProps.formGroup && typeof defaultProps.formGroup === 'object') {
-                      defaultProps.formGroup.classes = stripClasses(defaultProps.formGroup.classes, ['govuk-form-group--error']);
-                    }
-                    if (defaultProps.errorMessage) {
-                      try { delete defaultProps.errorMessage; } catch (_) { defaultProps.errorMessage = { text: '' }; }
-                    }
-                    // Remove layout modifiers so newly added radios default to standard stacked layout.
-                    if (typeKey === 'radio' || typeKey === 'radios') {
-                      defaultProps.classes = stripClasses(defaultProps.classes, ['govuk-radios--inline','govuk-radios--small']);
-                    }
-                    // Ensure fieldset legend with medium size by default
-                    if (!defaultProps.fieldset || typeof defaultProps.fieldset !== 'object') {
-                      defaultProps.fieldset = { legend: { text: 'Choose one option', classes: 'govuk-fieldset__legend--m' } };
-                    } else {
-                      const legend = defaultProps.fieldset.legend || {};
-                      if (!legend.text) legend.text = 'Choose one option';
-                      if (!legend.classes || String(legend.classes).trim() === '') legend.classes = 'govuk-fieldset__legend--m';
-                      defaultProps.fieldset.legend = legend;
-                    }
-                    // Hint default text
-                    const hintText = defaultProps?.hint?.text;
-                    if (!defaultProps.hint || typeof defaultProps.hint !== 'object' || !String(hintText || '').trim()) {
-                      defaultProps.hint = { ...(defaultProps.hint || {}), text: 'This is the optional hint text' };
-                    }
-                    // Ensure options array with sensible defaults.
-                    const looksLikePlaceholder = (arr) => {
-                      if (!Array.isArray(arr)) return true;
-                      if (arr.length === 0) return true;
-                      // If all items have text matching Option <n> (case-insensitive) treat as placeholder
-                      const optRegex = /^\s*option\b/i;
-                      const sample = arr.slice(0, 5);
-                      return sample.every((it, idx) => {
-                        const t = (it && (it.text || it.html) || '').trim();
-                        return !t || optRegex.test(t) || /^yes$/i.test(t) || /^no$/i.test(t);
-                      });
-                    };
-                    if (looksLikePlaceholder(defaultProps.items)) {
-                      defaultProps.items = [
-                        { text: 'Yes', value: 'true' },
-                        { text: 'No', value: 'false' }
-                      ];
-                    } else {
-                      // Normalize existing items to have text/value strings
-                      defaultProps.items = defaultProps.items.map((it, idx) => ({
-                        text: (it && (it.text || it.html)) ? (it.text || it.html) : `Option ${idx + 1}`,
-                        value: typeof it?.value !== 'undefined' ? String(it.value) : ((it && (it.text || it.html)) ? (it.text || it.html) : `opt${idx + 1}`),
-                        hint: it && it.hint ? it.hint : undefined,
-                      }));
-                    }
-                  }
-                  // Insert with unique name/id to prevent collisions like "input-1"
-                  setComponents(prev => {
-                    const used = new Set();
-                    prev.forEach(c => {
-                      const nm = c?.props?.name; if (nm) used.add(String(nm));
-                      const idv = c?.props?.id; if (idv) used.add(String(idv));
-                    });
-                    // Derive a clean, lowercase base from existing name/id/type
-                    const toSlug = (s) => String(s || '')
-                      .toLowerCase()
-                      .replace(/[^a-z0-9]+/g, '-')
-                      .replace(/(^-|-$)/g, '') || 'field';
-                    const basePrefix = toSlug(defaultProps.name || defaultProps.id || component.type || component.template_key || 'field');
-                    const makeUnique = (base) => {
-                      let candidate = base;
-                      if (used.has(candidate)) {
-                        const m = candidate.match(/^(.*?)-(\d+)$/);
-                        let stem = m ? m[1] : candidate;
-                        let i = m ? parseInt(m[2], 10) : 1;
-                        do { i += 1; candidate = `${stem}-${i}`; } while (used.has(candidate));
-                      }
-                      return candidate;
-                    };
-                    const nameCandidate = makeUnique(basePrefix);
-                    const idBase = toSlug(defaultProps.id || basePrefix);
-                    const idCandidate = makeUnique(idBase);
-
-                    const propsWithIds = { ...defaultProps, name: nameCandidate, id: idCandidate };
-
-                    const newComponent = {
-                      type: component.type,
-                      label: component.label,
-                      props: propsWithIds,
-                      // for backend saves
-                      templateId: component.id,
-                      // for preview/template lookup
-                      template_key: component.template_key, // specify backend template to render
-                      // carry schema through so Properties panel can render controls
-                      editable_fields: component.editable_fields || [],
-                      has_options: component.has_options || false,
-                      option_schema: component.option_schema || null
-                    };
-                    return [...prev, newComponent];
-                  });
-                }}
+                currentLang={previewLang}
+                onAdd={(c) => addComponent(c, previewLang)}
               />
             ))}
           </Box>
@@ -1095,6 +1166,9 @@ const ModifyComponent = () => {
                   setStatus(status);
                   setInitialComponents([]);
                 }}
+                currentLang={previewLang}
+                latestTemplateVersionByKey={latestTemplateVersionByKey}
+                onUpgradeTemplate={upgradeSelectedComponent}
               />
               <ExpandableSection headerText="Translations" defaultExpanded={false}>
                 <TranslationsWidget

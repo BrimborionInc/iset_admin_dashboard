@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Box, Header, ButtonDropdown, SpaceBetween, Link } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import PreviewIntakeStepWidgetHelp from '../helpPanelContents/previewIntakeStepWidgetHelp';
+import { apiFetch } from '../auth/apiClient';
 
 const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
   const [html, setHtml] = useState('');
@@ -62,9 +63,8 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
       if (!selectedBlockStep?.id) return;
       setLoading(true);
       try {
-        // 1) fetch full step (includes components)
-  const apiBase = process.env.REACT_APP_API_BASE_URL || '';
-  const stepRes = await fetch(`${apiBase}/api/steps/${selectedBlockStep.id}`);
+        // 1) fetch full step (includes components) via authenticated apiFetch
+        const stepRes = await apiFetch(`/api/steps/${selectedBlockStep.id}`);
         if (!stepRes.ok) throw new Error(`Load step HTTP ${stepRes.status}`);
         const step = await stepRes.json();
         // Flatten bilingual fields to the selected language for preview rendering
@@ -73,7 +73,7 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
           props: flattenByLang(c?.props || {}, lang)
         })) : [];
         // 2) render to HTML via server-side Nunjucks
-  const prevRes = await fetch(`${apiBase}/api/preview/step`, {
+  const prevRes = await apiFetch('/api/preview/step', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ components })
