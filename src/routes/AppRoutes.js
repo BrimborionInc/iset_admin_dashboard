@@ -1,6 +1,6 @@
 import ManageWorkflows from '../pages/manageWorkflows.js';
 import React from 'react';
-import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '../auth/cognito';
+import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../auth/cognito';
 import roleMatrix from '../config/roleMatrix.json';
 import { Route, Switch, useLocation } from 'react-router-dom';
 import ModifyWorkflow from '../pages/modifyWorkflow.js';
@@ -118,7 +118,13 @@ const AppRoutes = ({
     const iamOn = isIamOn();
     if (!iamOn) return children;
     if (!hasValidSession()) {
-      return renderContent(() => () => (<div style={{ padding: 24 }}>Please sign in to access this page.</div>), [{ text: 'Home', href: '/' }], 'Authentication required');
+      const AuthRequired = () => (
+        <div style={{ padding: 24 }}>
+          <p style={{ marginBottom: 12 }}>Please sign in to access this page.</p>
+          <Button variant="primary" onClick={() => window.location.assign(buildLoginUrl())}>Sign in</Button>
+        </div>
+      );
+      return renderContent(AuthRequired, [{ text: 'Home', href: '/' }], 'Authentication required');
     }
     const claims = getIdTokenClaims();
     const role = getRoleFromClaims(claims);
@@ -133,10 +139,12 @@ const AppRoutes = ({
     })();
     if (allowed) {
       if (!role || !allowed.includes(role)) {
-        return renderContent(() => () => (<div style={{ padding: 24 }}>You do not have permission to view this page.</div>), [{ text: 'Home', href: '/' }], 'Access denied');
+        const AccessDenied = () => (<div style={{ padding: 24 }}>You do not have permission to view this page.</div>);
+        return renderContent(AccessDenied, [{ text: 'Home', href: '/' }], 'Access denied');
       }
     } else if (roleMatrix?.default === 'deny') {
-      return renderContent(() => () => (<div style={{ padding: 24 }}>You do not have permission to view this page.</div>), [{ text: 'Home', href: '/' }], 'Access denied');
+      const AccessDenied = () => (<div style={{ padding: 24 }}>You do not have permission to view this page.</div>);
+      return renderContent(AccessDenied, [{ text: 'Home', href: '/' }], 'Access denied');
     }
     return children;
   }

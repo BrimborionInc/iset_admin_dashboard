@@ -1,5 +1,5 @@
 // API client that attaches Cognito ID token when IAM is on, or sends dev-bypass headers when off.
-import { buildLoginUrl, loadSession, ensureFreshSession } from './cognito';
+import { buildLoginUrl, loadSession, ensureFreshSession, clearSession } from './cognito';
 
 const API_BASE = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001';
 
@@ -59,11 +59,13 @@ export async function apiFetch(path, options = {}) {
   const resp = await fetch(url, { ...options, headers });
   if (resp.status === 401 || resp.status === 403) {
     if (!bypass) {
-      if (sessionStorage.getItem('iamBypass') === 'off' && sessionStorage.getItem('simulateSignedOut') === 'true') {
-        // Still simulate signed-out without leaving the page
-        return resp;
-      }
-      window.location.assign(buildLoginUrl());
+      const simulate = sessionStorage.getItem('iamBypass') === 'off' && sessionStorage.getItem('simulateSignedOut') === 'true';
+      const pending = sessionStorage.getItem('authPending') === '1';
+      const onCallback = typeof window !== 'undefined' && window.location.pathname.startsWith('/auth/callback');
+      if (simulate || pending || onCallback) return resp;
+      clearSession();
+      try { window.dispatchEvent(new CustomEvent('auth:needs-login')); } catch {}
+      return resp;
     }
   }
   return resp;

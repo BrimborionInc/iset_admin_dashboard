@@ -9,13 +9,38 @@ export function getHostedBase() {
   return `https://${domainPrefix}.auth.${region}.amazoncognito.com`;
 }
 
+function getRedirectUri() {
+  if (typeof window !== 'undefined') {
+    // Allow dynamic override to current origin (helps when port changes between envs)
+    if (process.env.REACT_APP_USE_DYNAMIC_REDIRECT === 'true') {
+      return window.location.origin + '/auth/callback';
+    }
+    if (redirectUri) {
+      try {
+        const configured = new URL(redirectUri);
+  if (configured.origin !== window.location.origin) {
+          if (process.env.REACT_APP_ALLOW_REDIRECT_ORIGIN_MISMATCH !== 'true') {
+            // We still return the configured one (may be intentional across domains), just warn.
+          }
+        }
+      } catch (e) {
+      }
+    }
+  }
+  if (redirectUri) return redirectUri;
+  if (typeof window !== 'undefined') return window.location.origin + '/auth/callback';
+  return '/auth/callback';
+}
+
 export function buildLoginUrl() {
   const base = getHostedBase();
   const p = new URL(base + '/login');
   p.searchParams.set('client_id', clientId);
   p.searchParams.set('response_type', 'code');
   p.searchParams.set('scope', 'openid email profile');
-  p.searchParams.set('redirect_uri', redirectUri);
+  const ru = getRedirectUri();
+  p.searchParams.set('redirect_uri', ru);
+  try { sessionStorage.setItem('authLastRedirectUri', ru); } catch {}
   try {
     // Carry current location through the OAuth flow to return the user where they started
     const current = typeof window !== 'undefined' ? window.location.href : '/';
@@ -38,7 +63,10 @@ export async function exchangeCodeForTokens(code) {
   body.set('grant_type', 'authorization_code');
   body.set('client_id', clientId);
   body.set('code', code);
-  body.set('redirect_uri', redirectUri);
+  let usedRedirect = null;
+  try { usedRedirect = sessionStorage.getItem('authLastRedirectUri'); } catch {}
+  if (!usedRedirect) usedRedirect = getRedirectUri();
+  body.set('redirect_uri', usedRedirect);
   const resp = await fetch(tokenUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -95,10 +123,9 @@ export function clearSession() {
 
 export function hasValidSession() {
   const s = loadSession();
-  if (!s) return false;
   const now = Math.floor(Date.now() / 1000);
+  if (!s) return false;
   if (typeof s.expiresAt === 'number' && s.expiresAt > now) return true;
-  // Consider session usable if we have a refresh token (client may refresh on demand)
   return !!s.refreshToken;
 }
 
@@ -133,8 +160,26 @@ export function getIdTokenClaims() {
 
 export function getRoleFromClaims(claims) {
   if (!claims) return undefined;
-  const role = claims.role || (Array.isArray(claims['cognito:groups']) ? claims['cognito:groups'][0] : undefined);
-  return role ? String(role) : undefined;
+  const raw = claims.role || (Array.isArray(claims['cognito:groups']) ? claims['cognito:groups'][0] : undefined);
+  if (!raw) return undefined;
+  const norm = normalizeRole(raw);
+  return norm;
+}
+
+// Map backend / Cognito group codes to UI display names used in roleMatrix & nav filtering
+function normalizeRole(r) {
+  const map = {
+    SysAdmin: 'System Administrator',
+    'System Administrator': 'System Administrator',
+    ProgramAdmin: 'Program Administrator',
+    'Program Administrator': 'Program Administrator',
+    RegionalCoordinator: 'Regional Coordinator',
+    'Regional Coordinator': 'Regional Coordinator',
+    Adjudicator: 'Adjudicator',
+    'PTMA Staff': 'PTMA Staff',
+    PTMA: 'PTMA Staff'
+  };
+  return map[r] || r; // fall back to raw if unknown
 }
 
 export function isIamOn() {

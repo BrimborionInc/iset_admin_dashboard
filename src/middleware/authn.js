@@ -31,10 +31,7 @@ function getAudience() {
 async function verifyToken(token) {
   const issuer = getIssuer();
   const audience = getAudience();
-  const { payload } = await jwtVerify(token, getJWKS(), {
-    issuer,
-    audience,
-  });
+  const { payload } = await jwtVerify(token, getJWKS(), { issuer, audience });
   return payload;
 }
 
@@ -118,7 +115,7 @@ function authnMiddleware() {
       req.auth = extractAuthFromClaims(claims);
       return next();
     } catch (e) {
-      return res.status(401).json({ error: 'Invalid or expired token' });
+  return res.status(401).json({ error: 'Invalid or expired token' });
     }
   };
 }

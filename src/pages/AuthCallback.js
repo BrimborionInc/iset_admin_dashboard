@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
-import { exchangeCodeForTokens, saveSession } from '../auth/cognito';
+import { exchangeCodeForTokens, saveSession, buildLoginUrl } from '../auth/cognito';
 
 export default function AuthCallback() {
   const history = useHistory();
@@ -15,10 +15,15 @@ export default function AuthCallback() {
       setError('Missing authorization code');
       return;
     }
-    (async () => {
+  // Mark auth pending to suppress premature 401 redirects
+  try { sessionStorage.setItem('authPending', '1'); } catch {}
+  (async () => {
       try {
         const tokens = await exchangeCodeForTokens(code);
         saveSession(tokens);
+    try { sessionStorage.removeItem('authPending'); } catch {}
+        // Optional auth probe before redirect (helps diagnose 401 loop)
+  // (optional) could probe API here if desired
         // If a valid state (same-origin absolute URL) is provided, navigate back there; otherwise home
         let target = '/';
         if (state) {
@@ -30,6 +35,7 @@ export default function AuthCallback() {
         }
         history.replace(target);
       } catch (e) {
+    try { sessionStorage.removeItem('authPending'); } catch {}
         setError(e.message || 'Sign-in failed');
       }
     })();
@@ -38,7 +44,14 @@ export default function AuthCallback() {
   return (
     <div style={{ padding: 24 }}>
       <h3>Signing you in…</h3>
-      {error && <div style={{ color: 'red' }}>Error: {error}</div>}
+      {error && (
+        <div style={{ color: 'red', marginTop: 12 }}>
+          Error: {error}
+          <div style={{ marginTop: 12 }}>
+            <button onClick={() => window.location.assign(buildLoginUrl())}>Try again</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
