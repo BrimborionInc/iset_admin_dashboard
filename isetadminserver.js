@@ -68,6 +68,14 @@ try {
   console.warn('Auth middleware init failed:', e?.message);
 }
 
+// Mount admin users router (Cognito administrative user lifecycle)
+try {
+  const adminUsersRouter = require('./src/routes/admin/users');
+  app.use('/api/admin', adminUsersRouter);
+} catch (e) {
+  console.warn('Admin users router mount failed:', e?.message);
+}
+
 // Simple auth probe for smoke testing
 app.get('/api/auth/me', (req, res) => {
   const enabled = String(process.env.AUTH_PROVIDER || 'none').toLowerCase() === 'cognito';
@@ -75,6 +83,7 @@ app.get('/api/auth/me', (req, res) => {
   if (!req.auth) return res.status(401).json({ error: 'Unauthenticated' });
   res.json({ provider: 'cognito', auth: req.auth });
 });
+
 
 // --- AI Chat proxy (server-side, avoids exposing API keys in browser) -----
 // POST /api/ai/chat
