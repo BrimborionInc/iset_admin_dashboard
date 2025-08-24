@@ -58,9 +58,19 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // --- Authentication (Cognito) - feature flagged ---
+// New: allow local development bypass via DEV_DISABLE_AUTH=true (non-production only)
 try {
   const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-  if (authProvider === 'cognito') {
+  const devDisableAuth = process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
+  if (authProvider === 'cognito' && devDisableAuth) {
+    console.warn('\n============================================================');
+    console.warn('[AUTH] DEV AUTH BYPASS ACTIVE (DEV_DISABLE_AUTH=true)');
+    console.warn('[AUTH] All /api requests are unauthenticated locally.');
+    console.warn('[AUTH] DO NOT USE THIS IN PROD. Remove DEV_DISABLE_AUTH to re-enable.');
+    console.warn('============================================================\n');
+    // Mark responses so calls are visibly unauthenticated in network inspector
+    app.use((req, res, next) => { res.setHeader('X-Auth-Bypassed', 'true'); next(); });
+  } else if (authProvider === 'cognito') {
     const { authnMiddleware } = require('./src/middleware/authn');
     app.use('/api', authnMiddleware());
   }
@@ -85,15 +95,25 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 
-// --- AI Chat proxy (server-side, avoids exposing API keys in browser) -----
-// POST /api/ai/chat
-// Body: { messages: [{ role: 'system'|'user'|'assistant', content: string }], model?: string }
-// Returns: OpenRouter API response (choices[0].message.content used by UI)
+// --- AI Chat proxy & status (server-side, avoids exposing API keys in browser) -----
+// GET  /api/ai/status -> { enabled: boolean, provider: string|null }
+// POST /api/ai/chat   -> OpenRouter streaming/standard chat completion
+const AI_KEY = process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_KEY || '';
+if (!AI_KEY) {
+  console.warn('[AI] No OPENROUTER_API_KEY / OPENROUTER_KEY set. /api/ai/chat will return 501 (disabled).');
+} else {
+  console.log('[AI] OpenRouter key detected. AI translation/chat enabled.');
+}
+app.get('/api/ai/status', (_req, res) => {
+  const enabled = !!AI_KEY;
+  res.json({ enabled, provider: enabled ? 'openrouter' : null });
+});
+// Body: { messages: [{ role, content }], model? }
 app.post('/api/ai/chat', async (req, res) => {
   try {
-    const key = process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_KEY;
+    const key = AI_KEY;
     if (!key) {
-      return res.status(501).json({ error: 'disabled', message: 'AI assistant is disabled. No server API key configured.' });
+      return res.status(501).json({ error: 'ai_disabled', message: 'AI assistant disabled (missing API key).' });
     }
     const { messages, model } = req.body || {};
     if (!Array.isArray(messages) || messages.length === 0) {
@@ -113,7 +133,7 @@ app.post('/api/ai/chat', async (req, res) => {
       'HTTP-Referer': process.env.ALLOWED_ORIGIN || 'http://localhost:3001',
       'X-Title': 'Admin Dashboard Assistant',
     };
-    const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', { model: mdl, messages: safeMessages }, { headers });
+  const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', { model: mdl, messages: safeMessages }, { headers });
     res.status(200).json(resp.data);
   } catch (e) {
     const status = e?.response?.status || 500;
@@ -133,9 +153,12 @@ const pool = mysql.createPool(dbConfig);
 
 // ---------------- Component Templates Endpoints (Library) -----------------
 // Provides CRUD-lite access to component template definitions stored in DB.
-// Assumed table: component_templates (fallback: component_template) with columns:
-// id (PK), name, type, template_key, version, props (JSON), editable_fields (JSON), has_options (TINYINT), option_schema (JSON)
-// If your actual schema differs, adjust the column names below accordingly.
+// Actual schema (DESCRIBE iset_intake.component_template):
+// id (PK), template_key (varchar), version (int), type (varchar), label (varchar), description (text),
+// default_props (json, NOT NULL), prop_schema (json, nullable), export_njk_template (text), status (varchar),
+// created_at (datetime), updated_at (datetime), has_options (tinyint), option_schema (json)
+// NOTE: Earlier code used conceptual names: name -> label, props -> default_props, editable_fields -> prop_schema.
+// For backward compatibility we still emit name + editable_fields, but writes now target the correct columns.
 
 async function selectComponentTemplates() {
   // Try plural then singular
@@ -151,31 +174,76 @@ function normalizeTemplateRow(row) {
     if (typeof v === 'object') return v;
     try { return JSON.parse(v); } catch { return def; }
   };
-  const props = parse(row.default_props, {}); // actual column name in schema
-  const editable = parse(row.prop_schema, []); // actual column name in schema
+  const defaultProps = parse(row.default_props, {});
+  const propSchema = parse(row.prop_schema, []);
   const optionSchema = parse(row.option_schema, null);
+  const label = row.label || row.name || row.template_key || row.type || '';
   return {
     id: row.id,
-    // Keep both label and name for backward compatibility
-    label: row.label || row.name || row.template_key || row.type || '',
-    name: row.name || row.label || row.template_key || row.type || '',
+    label,
+    // name retained for backward compatibility with any frontend code still expecting it
+    name: label,
     description: row.description || '',
     status: row.status || 'active',
-    type: row.type || row.template_key || row.name,
-    template_key: row.template_key || row.type || row.name,
+    type: row.type || row.template_key || label,
+    template_key: row.template_key || row.type || label,
     version: row.version || 1,
-    props,
-    editable_fields: editable,
+    // Expose both legacy and canonical keys
+    default_props: defaultProps,
+    prop_schema: propSchema,
+    props: defaultProps,
+    editable_fields: propSchema,
     has_options: !!(row.has_options || row.hasOptions),
     option_schema: optionSchema,
   };
 }
 
+// Lightweight read endpoint for component templates (dev + admin usage)
+// GET /api/component-templates?templateKey=character-count&includeTemplate=1
+// Returns normalized rows; if templateKey provided, filters to latest active version of that key.
+app.get('/api/component-templates', async (req, res) => {
+  try {
+    const { templateKey, includeTemplate } = req.query || {};
+    let rows = await selectComponentTemplates();
+    if (templateKey) {
+      // Filter to rows matching template_key and take highest version if version column exists
+      const matches = rows.filter(r => String(r.template_key || r.templateKey || r.type || '').toLowerCase() === String(templateKey).toLowerCase());
+      if (matches.length) {
+        const sorted = matches.sort((a,b) => (Number(b.version||0) - Number(a.version||0)));
+        rows = [sorted[0]];
+      } else {
+        rows = [];
+      }
+    }
+    const out = rows.map(r => {
+      const norm = normalizeTemplateRow(r);
+      if (includeTemplate) {
+        norm.export_njk_template = r.export_njk_template || r.export_njk || null;
+      }
+      return norm;
+    });
+    res.status(200).json({ count: out.length, templates: out });
+  } catch (e) {
+    console.error('GET /api/component-templates failed:', e);
+    res.status(500).json({ error: 'component_templates_fetch_failed' });
+  }
+});
+
 // Removed earlier simple list handler; consolidated logic lives later in file (includes augmentation & version filtering)
 
 app.put('/api/component-templates/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, type, template_key, version, props, editable_fields, has_options, option_schema } = req.body || {};
+  const body = req.body || {};
+  // Accept both legacy and canonical field names from client
+  const label = body.label ?? body.name; // prefer label
+  const type = body.type;
+  const template_key = body.template_key;
+  const version = body.version;
+  const default_props = body.default_props ?? body.props; // unify
+  const prop_schema = body.prop_schema ?? body.editable_fields; // unify
+  const has_options = body.has_options;
+  const option_schema = body.option_schema;
+
   const updates = [];
   const params = [];
   function push(col, val, json = false) {
@@ -183,17 +251,17 @@ app.put('/api/component-templates/:id', async (req, res) => {
     updates.push(`${col} = ?`);
     params.push(json ? JSON.stringify(val) : val);
   }
-  push('name', name);
+  push('label', label);
   push('type', type);
   push('template_key', template_key);
   push('version', version);
-  push('props', props, true);
-  push('editable_fields', editable_fields, true);
+  push('default_props', default_props, true);
+  push('prop_schema', prop_schema, true);
   push('has_options', typeof has_options === 'boolean' ? (has_options ? 1 : 0) : undefined);
   push('option_schema', option_schema, true);
+
   if (!updates.length) return res.status(400).json({ error: 'no_updates' });
   try {
-    // Attempt plural then singular
     params.push(id);
     const sqlPlural = `UPDATE component_templates SET ${updates.join(', ')} WHERE id = ?`;
     let [result] = await pool.query(sqlPlural, params).catch(() => [null]);
@@ -202,7 +270,7 @@ app.put('/api/component-templates/:id', async (req, res) => {
       [result] = await pool.query(sqlSingular, params);
       if (!result || result.affectedRows === 0) return res.status(404).json({ error: 'not_found' });
     }
-    res.status(200).json({ ok: true });
+    res.status(200).json({ ok: true, updated_fields: updates.map(u => u.split(' ')[0]) });
   } catch (e) {
     res.status(500).json({ error: 'component_template_update_failed', details: e.message });
   }
@@ -918,6 +986,131 @@ app.post('/api/component-templates/panel/version', async (req, res) => {
   } catch (e) {
     console.error('panel version create failed', e);
     res.status(500).json({ error: 'panel_version_failed', details: e.message });
+  }
+});
+
+// POST /api/component-templates/character-count/version2
+// Creates a new version (v2) of the character-count template with expanded schema & i18n-aware text fields.
+app.post('/api/component-templates/character-count/version2', async (_req, res) => {
+  try {
+    const [[row]] = await pool.query(`SELECT * FROM iset_intake.component_template WHERE template_key='character-count' AND status='active' ORDER BY version DESC LIMIT 1`);
+    const currentVersion = row ? Number(row.version || 0) : 0;
+    const nextVersion = currentVersion + 1;
+    // Build new default props (preserve existing where possible)
+    const base = (() => { try { return row ? JSON.parse(row.default_props || '{}') : {}; } catch { return {}; } })();
+    const defaultProps = {
+      name: base.name || 'message',
+      id: base.id || '',
+      label: base.label && typeof base.label === 'object' ? base.label : { text: base.label?.text || 'Message' },
+      hint: base.hint && typeof base.hint === 'object' ? base.hint : { text: base.hint?.text || 'Do not include personal information.' },
+      errorMessage: base.errorMessage && typeof base.errorMessage === 'object' ? base.errorMessage : { text: '' },
+      formGroup: base.formGroup || { classes: '' },
+      classes: base.classes || 'govuk-!-margin-bottom-6',
+      rows: base.rows || 5,
+      maxlength: base.maxlength || 200,
+      threshold: base.threshold || 75,
+      maxwords: base.maxwords || null,
+      autocomplete: base.autocomplete || '',
+      spellcheck: typeof base.spellcheck === 'boolean' ? base.spellcheck : true,
+      value: base.value || ''
+    };
+    // Editable field schema (v2)
+    const propSchema = [
+      { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+      { key: 'id', path: 'id', type: 'text', label: 'ID' },
+      { key: 'label.text', path: 'label.text', type: 'text', label: 'Label Text' },
+      { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: ['govuk-label--s','govuk-label--m','govuk-label--l','govuk-label--xl','govuk-visually-hidden'] },
+      { key: 'hint.text', path: 'hint.text', type: 'text', label: 'Hint Text' },
+      { key: 'errorMessage.text', path: 'errorMessage.text', type: 'text', label: 'Error Message' },
+      { key: 'rows', path: 'rows', type: 'number', label: 'Rows' },
+      { key: 'maxlength', path: 'maxlength', type: 'number', label: 'Max Length (chars)' },
+      { key: 'threshold', path: 'threshold', type: 'number', label: 'Threshold (%)' },
+      { key: 'maxwords', path: 'maxwords', type: 'number', label: 'Max Words (optional)' },
+      { key: 'autocomplete', path: 'autocomplete', type: 'text', label: 'Autocomplete' },
+      { key: 'spellcheck', path: 'spellcheck', type: 'boolean', label: 'Spellcheck' },
+      { key: 'value', path: 'value', type: 'textarea', label: 'Default Value' },
+      { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' }
+    ];
+    // Updated Nunjucks (gracefully handle maxwords)
+    const exportNunjucks = `{% from "govuk/components/character-count/macro.njk" import govukCharacterCount %}\n\n{{ govukCharacterCount({\n  name: props.name,\n  id: props.id or props.name,\n  rows: props.rows,\n  maxlength: props.maxlength,\n  maxwords: props.maxwords,\n  threshold: props.threshold,\n  label: props.label,\n  hint: props.hint,\n  errorMessage: props.errorMessage,\n  formGroup: props.formGroup,\n  classes: props.classes,\n  autocomplete: props.autocomplete,\n  spellcheck: props.spellcheck,\n  value: props.value\n}) }}`;
+    await pool.query(
+      `INSERT INTO iset_intake.component_template (template_key, version, type, label, description, default_props, prop_schema, has_options, option_schema, status, export_njk_template)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        'character-count',
+        nextVersion,
+        'character-count',
+        'Character Count',
+        'Textarea with live character/word count (v2)',
+        JSON.stringify(defaultProps),
+        JSON.stringify(propSchema),
+        0,
+        null,
+        'active',
+        exportNunjucks
+      ]
+    );
+    res.status(201).json({ ok: true, template_key: 'character-count', version: nextVersion });
+  } catch (e) {
+    console.error('character-count v2 create failed', e);
+    res.status(500).json({ error: 'character_count_v2_failed', details: e.message });
+  }
+});
+
+// POST /api/component-templates/textarea/version2
+// Creates a new version (v2) of the textarea template with bilingual-ready defaults and expanded schema.
+app.post('/api/component-templates/textarea/version2', async (_req, res) => {
+  try {
+    const [[row]] = await pool.query(`SELECT * FROM iset_intake.component_template WHERE template_key='textarea' AND status='active' ORDER BY version DESC LIMIT 1`);
+    const currentVersion = row ? Number(row.version || 0) : 0;
+    const nextVersion = currentVersion + 1;
+    const base = (() => { try { return row ? JSON.parse(row.default_props || '{}') : {}; } catch { return {}; } })();
+    const defaultProps = {
+      name: base.name || 'more-detail',
+      id: base.id || (base.name || 'more-detail'),
+      label: base.label && typeof base.label === 'object' ? base.label : { text: base.label?.text || base.label || 'Textarea input', classes: (base.label && base.label.classes) || 'govuk-label--m' },
+      hint: base.hint && typeof base.hint === 'object' ? base.hint : { text: base.hint?.text || "Don't include personal or financial information." },
+      errorMessage: base.errorMessage && typeof base.errorMessage === 'object' ? base.errorMessage : { text: '' },
+      classes: base.classes || '',
+      rows: base.rows || 5,
+      autocomplete: base.autocomplete || '',
+      spellcheck: typeof base.spellcheck === 'boolean' ? base.spellcheck : true,
+      value: base.value || ''
+    };
+    const propSchema = [
+      { key: 'name', path: 'name', type: 'text', label: 'Submission Key' },
+      { key: 'id', path: 'id', type: 'text', label: 'ID' },
+      { key: 'label.text', path: 'label.text', type: 'text', label: 'Label Text' },
+      { key: 'label.classes', path: 'label.classes', type: 'select', label: 'Label classes', options: ['govuk-label--s','govuk-label--m','govuk-label--l','govuk-label--xl','govuk-visually-hidden'] },
+      { key: 'hint.text', path: 'hint.text', type: 'text', label: 'Hint Text' },
+      { key: 'rows', path: 'rows', type: 'number', label: 'Rows' },
+      { key: 'classes', path: 'classes', type: 'text', label: 'CSS Classes' },
+      { key: 'autocomplete', path: 'autocomplete', type: 'text', label: 'Autocomplete' },
+      { key: 'spellcheck', path: 'spellcheck', type: 'boolean', label: 'Spellcheck' },
+      { key: 'value', path: 'value', type: 'textarea', label: 'Default Value' }
+    ];
+    const nunjucks = `{% from "govuk/components/textarea/macro.njk" import govukTextarea %}\n\n{{ govukTextarea({\n  name: props.name,\n  id: props.id or props.name,\n  label: props.label,\n  hint: props.hint,\n  errorMessage: props.errorMessage,\n  classes: props.classes,\n  rows: props.rows,\n  autocomplete: props.autocomplete,\n  spellcheck: props.spellcheck,\n  value: props.value\n}) }}`;
+    await pool.query(
+      `INSERT INTO iset_intake.component_template (template_key, version, type, label, description, default_props, prop_schema, has_options, option_schema, status, export_njk_template)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        'textarea',
+        nextVersion,
+        'textarea',
+        'Textarea',
+        'Multi-line text input (v2)',
+        JSON.stringify(defaultProps),
+        JSON.stringify(propSchema),
+        0,
+        null,
+        'active',
+        nunjucks
+      ]
+    );
+    res.status(201).json({ ok: true, template_key: 'textarea', version: nextVersion });
+  } catch (e) {
+    console.error('textarea v2 create failed', e);
+    res.status(500).json({ error: 'textarea_v2_failed', details: e.message });
   }
 });
 

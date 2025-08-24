@@ -4,6 +4,7 @@ import { BoardItem } from '@cloudscape-design/board-components';
 import CodeView from '@cloudscape-design/code-view/code-view';
 import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
 import PreviewNunjucksWidgetHelp from '../helpPanelContents/previewNunjucksWidgetHelp';
+import { apiFetch } from '../auth/apiClient';
 
 const PreviewStepJson = ({ selectedBlockStep, toggleHelpPanel }) => {
   const [json, setJson] = useState('');
@@ -15,7 +16,7 @@ const PreviewStepJson = ({ selectedBlockStep, toggleHelpPanel }) => {
       if (!selectedBlockStep?.id) { setJson(''); return; }
       setLoading(true);
       try {
-        const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/steps/${selectedBlockStep.id}`);
+  const res = await apiFetch(`/api/steps/${selectedBlockStep.id}`);
         const data = await res.json();
         if (!cancelled) setJson(JSON.stringify(data, null, 2));
       } catch (e) {

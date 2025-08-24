@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import { ContentLayout, Header, Alert, Box } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import CaseManagementDemoControlsWidget from '../widgets/CaseManagementDemoControlsWidget';
@@ -12,7 +13,7 @@ const ManageApplications = ({ toggleHelpPanel }) => {
 
   // Fetch evaluators on mount
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/intake-officers`)
+    apiFetch(`/api/intake-officers`)
       .then((res) => res.json())
       .then((data) => {
         setEvaluators(data);
@@ -20,7 +21,7 @@ const ManageApplications = ({ toggleHelpPanel }) => {
           setSimulatedUser(data[0]); // Default to first evaluator
         }
       });
-  }, []);
+  }, [simulatedUser]);
 
   const [items, setItems] = useState([
     {

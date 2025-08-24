@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import { Box, Header, ButtonDropdown, FormField, Input, Textarea, Button, SpaceBetween, Multiselect, Alert } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 
@@ -27,7 +28,7 @@ const ComposeMessageWidget = ({ actions, onSend, recipient }) => {
     if (!isFormComplete) return;
 
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/admin/messages`, {
+      const response = await apiFetch(`/api/admin/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

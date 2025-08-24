@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import { Form, FormField, Input, Select, Grid, SpaceBetween, Header, Button, Flashbar, Box, ButtonDropdown } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useParams } from 'react-router-dom';
@@ -27,7 +28,7 @@ const GeneralInformation = () => {
   const [isChanged, setIsChanged] = useState(false);
 
   useEffect(() => {
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/locations/${locationId}`)
+  apiFetch(`/api/locations/${locationId}`)
       .then(response => response.json())
       .then(data => {
         setLocation(data);
@@ -36,22 +37,22 @@ const GeneralInformation = () => {
       })
       .catch(error => console.error('Error fetching location:', error));
 
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/countries`)
+  apiFetch(`/api/countries`)
       .then(response => response.json())
       .then(data => setCountries(data.map(country => ({ label: country.name, value: country.id }))))
       .catch(error => console.error('Error fetching countries:', error));
 
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/location-types`)
+  apiFetch(`/api/location-types`)
       .then(response => response.json())
       .then(data => setLocationTypes(data.map(type => ({ label: type.type_name, value: type.id }))))
       .catch(error => console.error('Error fetching location types:', error));
 
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/locations`)
+  apiFetch(`/api/locations`)
       .then(response => response.json())
       .then(data => setHubVacOptions(data.map(location => ({ label: location.location, value: location.id }))))
       .catch(error => console.error('Error fetching hub VACs:', error));
 
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/ircc-offices`)
+  apiFetch(`/api/ircc-offices`)
       .then(response => response.json())
       .then(data => setIrccOfficeOptions(data.map(office => ({ label: office.name, value: office.id })))) // Fetch IRCC offices
       .catch(error => console.error('Error fetching IRCC offices:', error));
@@ -84,7 +85,7 @@ const GeneralInformation = () => {
     console.log('Saving general information:', updatedLocation); // Add logging
     console.log('Country:', updatedLocation.country_id, 'Location Type:', updatedLocation.location_type_id); // Add logging
 
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/locations/${locationId}/general-information`, {
+  apiFetch(`/api/locations/${locationId}/general-information`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',

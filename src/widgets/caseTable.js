@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import {
   Box,
   Header,
@@ -34,7 +35,7 @@ const CaseTable = ({ actions }) => {
   useEffect(() => {
     const fetchCases = async () => {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases`);
+  const response = await apiFetch(`/api/cases`);
         const data = await response.json();
         setCases(data);
         setFilteredCases(data);

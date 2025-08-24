@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { Header, Table, Box, Button, ButtonDropdown } from '@cloudscape-design/components';
 
@@ -10,7 +11,7 @@ const SupportingDocumentsWidget = ({ actions, caseData }) => {
   useEffect(() => {
     if (!applicantUserId) return;
     setLoading(true);
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/applicants/${applicantUserId}/documents`)
+    apiFetch(`/api/applicants/${applicantUserId}/documents`)
       .then(res => res.json())
       .then(data => {
         setDocuments(data);
