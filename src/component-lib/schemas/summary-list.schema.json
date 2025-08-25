@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Summary List Component Default Props Schema",
+  "type": "object",
+  "required": ["rows"],
+  "additionalProperties": true,
+  "properties": {
+    "classes": { "type": "string" },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["key", "value"],
+        "properties": {
+          "key": {
+            "type": "object",
+            "anyOf": [
+              { "required": ["text"] },
+              { "required": ["html"] }
+            ],
+            "properties": {
+              "text": {
+                "anyOf": [
+                  { "type": "string" },
+                  { "type": "object", "properties": { "en": { "type": "string" }, "fr": { "type": "string" } }, "additionalProperties": false }
+                ]
+              },
+              "html": { "type": "string" }
+            },
+            "additionalProperties": true
+          },
+          "value": {
+            "type": "object",
+            "anyOf": [
+              { "required": ["text"] },
+              { "required": ["html"] }
+            ],
+            "properties": {
+              "text": {
+                "anyOf": [
+                  { "type": "string" },
+                  { "type": "object", "properties": { "en": { "type": "string" }, "fr": { "type": "string" } }, "additionalProperties": false }
+                ]
+              },
+              "html": { "type": "string" },
+              "format": { "type": "string", "enum": ["text", "date", "currency", "yesno"] },
+              "fromField": { "type": "string" }
+            },
+            "additionalProperties": true
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["href"],
+              "properties": {
+                "href": { "type": "string" },
+                "text": { "type": "string" },
+                "html": { "type": "string" },
+                "visuallyHiddenText": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

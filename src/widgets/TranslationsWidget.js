@@ -56,6 +56,14 @@ function isInputLike(type) {
   return ['input','text','email','number','password','phone','password-input','textarea','character-count'].includes(t);
 }
 
+function isFileUpload(type) {
+  return String(type || '').toLowerCase() === 'file-upload';
+}
+
+function isSummaryList(type) {
+  return String(type || '').toLowerCase() === 'summary-list';
+}
+
 function isDateLike(type) {
   const t = String(type || '').toLowerCase();
   return t === 'date' || t === 'date-input';
@@ -82,6 +90,14 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       if (isInputLike(type)) {
         push(getAtPath(p, 'label.text'));
         push(getAtPath(p, 'hint.text'));
+        push(getAtPath(p, 'prefix.text'));
+        push(getAtPath(p, 'suffix.text'));
+      } else if (isSummaryList(type)) {
+        const rows = Array.isArray(p?.rows) ? p.rows : [];
+        rows.forEach(r => { push(r?.key?.text); push(r?.value?.text); });
+      } else if (isFileUpload(type)) {
+        push(getAtPath(p, 'label.text'));
+        push(getAtPath(p, 'hint.text'));
       } else if (isChoice(type)) {
         if (type === 'select') {
           push(getAtPath(p, 'label.text'));
@@ -90,7 +106,7 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
         }
         push(getAtPath(p, 'hint.text'));
         const items = Array.isArray(p?.items) ? p.items : [];
-        items.forEach(it => push(it?.text));
+        items.forEach(it => { push(it?.text); if (type !== 'select') push(it?.hint); });
       } else if (isDateLike(type)) {
         push(getAtPath(p, 'fieldset.legend.text'));
         push(getAtPath(p, 'hint.text'));
@@ -117,21 +133,24 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       setAtPath(props, path, lng);
       return { ...c, props };
     }));
+    actions?.markDirty && actions.markDirty();
   };
 
-  const handleItemChange = (compIndex, itemIndex, lang, value) => {
+  const handleItemChange = (compIndex, itemIndex, lang, value, field = 'text') => {
     setComponents(prev => prev.map((c, idx) => {
       if (idx !== compIndex) return c;
       const props = { ...(c.props || {}) };
       const items = Array.isArray(props.items) ? [...props.items] : [];
       const it = { ...(items[itemIndex] || {}) };
-      const lng = ensureLangObject(it.text);
+      const baseVal = field === 'hint' ? it.hint : it.text;
+      const lng = ensureLangObject(baseVal);
       lng[lang] = value;
-      it.text = lng;
+      if (field === 'hint') it.hint = lng; else it.text = lng;
       items[itemIndex] = it;
       props.items = items;
       return { ...c, props };
     }));
+    actions?.markDirty && actions.markDirty();
   };
 
   // Collect translation tasks for missing EN or FR fields
@@ -153,11 +172,22 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       if (isInputLike(type)) {
         addTasksFor(ci, p, 'label.text');
         addTasksFor(ci, p, 'hint.text');
+        addTasksFor(ci, p, 'prefix.text');
+        addTasksFor(ci, p, 'suffix.text');
+      } else if (isSummaryList(type)) {
+        const rows = Array.isArray(p?.rows) ? p.rows : [];
+        rows.forEach((r, ri) => {
+          addTasksFor(ci, p, `rows.${ri}.key.text`);
+          addTasksFor(ci, p, `rows.${ri}.value.text`);
+        });
+      } else if (isFileUpload(type)) {
+        addTasksFor(ci, p, 'label.text');
+        addTasksFor(ci, p, 'hint.text');
       } else if (isChoice(type)) {
         if (type === 'select') addTasksFor(ci, p, 'label.text'); else addTasksFor(ci, p, 'fieldset.legend.text');
         addTasksFor(ci, p, 'hint.text');
-  const items = Array.isArray(p?.items) ? p.items : [];
-  items.forEach((it, ii) => addTasksFor(ci, p, `items.${ii}.text`));
+        const items = Array.isArray(p?.items) ? p.items : [];
+        items.forEach((it, ii) => { addTasksFor(ci, p, `items.${ii}.text`); if (type !== 'select') addTasksFor(ci, p, `items.${ii}.hint`); });
       } else if (isDateLike(type)) {
         addTasksFor(ci, p, 'fieldset.legend.text');
         addTasksFor(ci, p, 'hint.text');
@@ -214,6 +244,7 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       comp.props = p;
       return comp;
     }));
+    actions?.markDirty && actions.markDirty();
   };
 
   const handleTranslateMissing = async () => {
@@ -278,7 +309,17 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
         const type = String(comp?.type || comp?.template_key || '').toLowerCase();
         const props = comp?.props || {};
         const rows = [];
-        if (isInputLike(type) || type === 'select') {
+        if (isInputLike(type)) {
+          rows.push({ label: 'Label', path: 'label.text' });
+          rows.push({ label: 'Hint', path: 'hint.text' });
+          rows.push({ label: 'Prefix', path: 'prefix.text' });
+          rows.push({ label: 'Suffix', path: 'suffix.text' });
+        } else if (isSummaryList(type)) {
+          // No top-level label/hint; handled per-row below
+        } else if (isFileUpload(type)) {
+          rows.push({ label: 'Label', path: 'label.text' });
+          rows.push({ label: 'Hint', path: 'hint.text' });
+        } else if (type === 'select') {
           rows.push({ label: 'Label', path: 'label.text' });
           rows.push({ label: 'Hint', path: 'hint.text' });
         } else if (isChoice(type)) {
@@ -299,7 +340,8 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
           if (getAtPath(props, 'html') !== undefined) rows.push({ label: 'HTML', path: 'html' });
         }
 
-        const items = Array.isArray(props.items) ? props.items : [];
+  const items = Array.isArray(props.items) ? props.items : [];
+  const summaryRows = isSummaryList(type) ? (Array.isArray(props.rows) ? props.rows : []) : [];
 
         return (
           <Box key={ci} padding={{ top: 'xs', bottom: 's' }} border={{ side: 'bottom', color: 'divider' }}>
@@ -329,20 +371,91 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
                 <Header variant="h4">Options</Header>
                 {items.map((it, ii) => {
                   const val = ensureLangObject(it?.text);
+                  const hintVal = ensureLangObject(it?.hint);
                   return (
-                    <Grid key={ii} gridDefinition={[{ colspan: 3 }, { colspan: 4 }, { colspan: 4 }]}>
-                      <Box variant="div" padding={{ vertical: 'xs' }} style={{ alignSelf: 'center' }}>
-                        Value: <code>{String(it?.value ?? '')}</code>
-                      </Box>
-                      {LANGS.map(lang => (
-                        <FormField key={lang} label={lang.toUpperCase()}>
-                          <Input
-                            value={String(val[lang] ?? '')}
-                            onChange={({ detail }) => handleItemChange(ci, ii, lang, detail.value)}
-                          />
-                        </FormField>
-                      ))}
-                    </Grid>
+                    <React.Fragment key={ii}>
+                      <Grid gridDefinition={[{ colspan: 3 }, { colspan: 4 }, { colspan: 4 }]}>
+                        <Box variant="div" padding={{ vertical: 'xs' }} style={{ alignSelf: 'center' }}>
+                          Value: <code>{String(it?.value ?? '')}</code>
+                        </Box>
+                        {LANGS.map(lang => (
+                          <FormField key={lang} label={lang.toUpperCase()}>
+                            <Input
+                              value={String(val[lang] ?? '')}
+                              onChange={({ detail }) => handleItemChange(ci, ii, lang, detail.value, 'text')}
+                            />
+                          </FormField>
+                        ))}
+                      </Grid>
+                      {type !== 'select' && (
+                        <Grid gridDefinition={[{ colspan: 3 }, { colspan: 4 }, { colspan: 4 }]}>
+                          <Box variant="div" padding={{ vertical: 'xs' }} style={{ alignSelf: 'center' }}>
+                            <em style={{ color: '#555' }}>Hint</em>
+                          </Box>
+                          {LANGS.map(lang => (
+                            <FormField key={lang} label={lang.toUpperCase()}>
+                              <Input
+                                value={String(hintVal[lang] ?? '')}
+                                placeholder="(optional)"
+                                onChange={({ detail }) => handleItemChange(ci, ii, lang, detail.value, 'hint')}
+                              />
+                            </FormField>
+                          ))}
+                        </Grid>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </Box>
+            )}
+            {isSummaryList(type) && summaryRows.length > 0 && (
+              <Box padding={{ top: 's' }}>
+                <Header variant="h4">Rows</Header>
+                {summaryRows.map((r, ri) => {
+                  const keyVal = ensureLangObject(r?.key?.text);
+                  const valueVal = ensureLangObject(r?.value?.text);
+                  const handleRowChange = (lang, field) => ({ detail }) => {
+                    setComponents(prev => prev.map((c2, idx2) => {
+                      if (idx2 !== ci) return c2;
+                      const p2 = { ...(c2.props || {}) };
+                      const rows2 = Array.isArray(p2.rows) ? [...p2.rows] : [];
+                      const row = { ...(rows2[ri] || {}) };
+                      if (field === 'key') {
+                        const cur = ensureLangObject(row.key && row.key.text);
+                        row.key = { ...(row.key || {}), text: { ...cur, [lang]: detail.value } };
+                      } else if (field === 'value') {
+                        const cur = ensureLangObject(row.value && row.value.text);
+                        row.value = { ...(row.value || {}), text: { ...cur, [lang]: detail.value } };
+                      }
+                      rows2[ri] = row;
+                      p2.rows = rows2;
+                      return { ...c2, props: p2 };
+                    }));
+                    actions?.markDirty && actions.markDirty();
+                  };
+                  return (
+                    <React.Fragment key={ri}>
+                      <Grid gridDefinition={[{ colspan: 3 }, { colspan: 4 }, { colspan: 4 }]}>
+                        <Box variant="div" padding={{ vertical: 'xs' }} style={{ alignSelf: 'center' }}>
+                          <strong>Row {ri + 1} Key</strong>
+                        </Box>
+                        {LANGS.map(lang => (
+                          <FormField key={lang} label={lang.toUpperCase()}>
+                            <Input value={String(keyVal[lang] || '')} onChange={handleRowChange(lang, 'key')} />
+                          </FormField>
+                        ))}
+                      </Grid>
+                      <Grid gridDefinition={[{ colspan: 3 }, { colspan: 4 }, { colspan: 4 }]}>
+                        <Box variant="div" padding={{ vertical: 'xs' }} style={{ alignSelf: 'center' }}>
+                          <em style={{ color: '#555' }}>Value</em>
+                        </Box>
+                        {LANGS.map(lang => (
+                          <FormField key={lang} label={lang.toUpperCase()}>
+                            <Input value={String(valueVal[lang] || '')} onChange={handleRowChange(lang, 'value')} />
+                          </FormField>
+                        ))}
+                      </Grid>
+                    </React.Fragment>
                   );
                 })}
               </Box>

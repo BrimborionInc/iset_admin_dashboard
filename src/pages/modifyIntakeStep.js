@@ -593,6 +593,7 @@ const ModifyComponent = () => {
   const [status, setStatus] = useState('');
   const [initialName, setInitialName] = useState('');
   const [initialStatus, setInitialStatus] = useState('');
+  const [manualDirty, setManualDirty] = useState(false);
   // compute hasChanges (deep) to gate buttons
   const hasChanges = useMemo(() => {
     const a = { name, status, components };
@@ -644,6 +645,23 @@ const ModifyComponent = () => {
   const addComponent = (template, lang = 'en') => {
     if (!template) return;
     const seeded = seedI18nDefaults(template.props || {}, lang);
+    // Summary-list: start with placeholder dummy content (until workflow selected in properties panel)
+    if ((template.template_key || template.type) === 'summary-list') {
+      if (!Array.isArray(seeded.rows) || !seeded.rows.length) {
+        seeded.rows = [
+          {
+            key: { text: { en: 'Question 1', fr: 'Question 1' } },
+            value: { text: { en: 'Value', fr: 'Valeur' } }
+          },
+          {
+            key: { text: { en: 'Question 2', fr: 'Question 2' } },
+            value: { text: { en: 'Value', fr: 'Valeur' } }
+          }
+        ];
+      }
+      // dynamic config placeholders (set by PropertiesPanel when workflow picked)
+      seeded.workflowId = null;
+    }
     // Character-count specific post-processing: strip large bottom margin & assign incremental name/id
     if ((template.template_key || template.type) === 'character-count') {
       if (seeded && seeded.classes === 'govuk-!-margin-bottom-6') seeded.classes = '';
@@ -976,6 +994,7 @@ const ModifyComponent = () => {
       setInitialComponents(components);
       setInitialName(name);
       setInitialStatus(status);
+      setManualDirty(false);
     } catch (e) {
       console.error('Save step failed', e);
       setAlert({ type: 'error', message: 'Failed to save step.' });
@@ -1096,7 +1115,7 @@ const ModifyComponent = () => {
                 <Button onClick={handleRedo} disabled={!canRedo}>Redo</Button>
                 {id !== 'new' && <Button onClick={handleSaveAsNew} variant="normal">Save as New</Button>}
                 {id !== 'new' && <Button onClick={handleDelete} variant="normal">Delete</Button>}
-                <Button onClick={handleSaveTemplate} disabled={!hasChanges} variant="primary">Save Changes</Button>
+                <Button onClick={handleSaveTemplate} disabled={!hasChanges && !manualDirty} variant="primary">Save Changes</Button>
               </SpaceBetween>
             }
           >
@@ -1172,6 +1191,7 @@ const ModifyComponent = () => {
               />
               <ExpandableSection headerText="Translations" defaultExpanded={false}>
                 <TranslationsWidget
+                  actions={{ markDirty: () => setManualDirty(true) }}
                   components={components}
                   setComponents={setComponents}
                   asBoardItem={false}

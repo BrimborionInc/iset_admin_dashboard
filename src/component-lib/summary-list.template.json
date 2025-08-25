@@ -1,0 +1,28 @@
+{
+  "template_key": "summary-list",
+  "type": "summary-list",
+  "label": "Summary List",
+  "description": "Display key/value rows summarizing information (bilingual-ready rows).",
+  "status": "active",
+  "default_props": {
+    "classes": "",
+    "rows": [
+      {
+        "key": { "text": { "en": "Full name", "fr": "Nom complet" } },
+        "value": { "text": { "en": "Jane Smith", "fr": "Jane Smith" } },
+        "actions": []
+      },
+      {
+        "key": { "text": { "en": "Email", "fr": "Courriel" } },
+        "value": { "text": { "en": "jane@example.com", "fr": "jane@example.com" } },
+        "actions": []
+      }
+    ]
+  },
+  "prop_schema": [
+    { "key": "classes", "path": "classes", "type": "text", "label": "CSS Classes" }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "{% set cls = 'govuk-summary-list' %}{% if props.classes %}{% set cls = cls + ' ' + props.classes %}{% endif %}<dl class=\"{{ cls }}\">{% for r in props.rows %}{% if r %}<div class=\"govuk-summary-list__row\"><dt class=\"govuk-summary-list__key\">{{ (r.key and r.key.text) or (r.key and r.key.html) or '' }}</dt><dd class=\"govuk-summary-list__value\">{% if r.value and r.value.html %}{{ r.value.html | safe }}{% else %}{{ (r.value and r.value.text) or '' }}{% endif %}</dd>{% if r.actions and r.actions | length %}<dd class=\"govuk-summary-list__actions\">{% for a in r.actions %}{% if a and a.href and (a.text or a.html) %}<a class=\"govuk-link\" href=\"{{ a.href }}\">{% if a.html %}{{ a.html | safe }}{% else %}{{ a.text }}{% endif %}{% if a.visuallyHiddenText %}<span class=\"govuk-visually-hidden\"> {{ a.visuallyHiddenText }}{% endif %}</a>{% if not loop.last %}<span class=\"govuk-summary-list__actions-list-item-separator\"> | </span>{% endif %}{% endif %}{% endfor %}</dd>{% endif %}</div>{% endif %}{% endfor %}</dl>"
+}

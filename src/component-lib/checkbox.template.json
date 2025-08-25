@@ -1,0 +1,52 @@
+{
+  "template_key": "checkbox",
+  "type": "checkbox",
+  "label": "Checkboxes",
+  "description": "A group of checkboxes allowing users to select zero, one, or multiple options.",
+  "status": "active",
+  "default_props": {
+    "name": "example-checkboxes",
+    "fieldset": { "legend": { "text": "Select all that apply", "isPageHeading": false, "classes": "govuk-fieldset__legend--l" } },
+    "hint": { "text": { "en": "Select all that apply.", "fr": "Sélectionnez toutes les options applicables." } },
+    "classes": "govuk-checkboxes",
+    "formGroup": { "classes": "" },
+    "disabled": false,
+    "items": [
+      { "text": "Option A", "value": "a" },
+      { "text": "Option B", "value": "b" },
+      { "text": "Option C", "value": "c" }
+    ]
+  },
+  "prop_schema": [
+    { "key": "legendText", "path": "fieldset.legend.text", "type": "text", "label": "Legend Text" },
+    { "key": "hintText", "path": "hint.text", "type": "text", "label": "Hint Text" },
+    { "key": "legendClasses", "path": "fieldset.legend.classes", "type": "select", "label": "Legend Classes", "options": [
+      { "label": "Small (s)", "value": "govuk-fieldset__legend--s" },
+      { "label": "Medium (m)", "value": "govuk-fieldset__legend--m" },
+      { "label": "Large (l) (default)", "value": "govuk-fieldset__legend--l" },
+      { "label": "Extra Large (xl)", "value": "govuk-fieldset__legend--xl" },
+      { "label": "None (no size modifier)", "value": "" }
+    ] },
+    { "key": "isPageHeading", "path": "fieldset.legend.isPageHeading", "type": "select", "label": "Is Page Heading?", "options": [
+      { "label": "True", "value": true },
+      { "label": "False", "value": false }
+    ] },
+    { "key": "name", "path": "name", "type": "text", "label": "Data Key" },
+    { "key": "classes", "path": "classes", "type": "select", "label": "Container Classes", "options": [
+      { "label": "Default", "value": "govuk-checkboxes" },
+      { "label": "Small", "value": "govuk-checkboxes govuk-checkboxes--small" }
+    ] },
+    { "key": "formGroup.classes", "path": "formGroup.classes", "type": "select", "label": "Form Group Classes", "options": [
+      { "label": "Default (none)", "value": "" },
+      { "label": "Error State", "value": "govuk-form-group--error" }
+    ] },
+    { "key": "disabled", "path": "disabled", "type": "select", "label": "Disabled?", "options": [
+      { "label": "True", "value": true },
+      { "label": "False", "value": false }
+    ] },
+    { "key": "options", "path": "items", "type": "optionList", "label": "Options" }
+  ],
+  "has_options": true,
+  "option_schema": ["text", "value", "hint"],
+  "export_njk_template": "{% from \"govuk/components/checkboxes/macro.njk\" import govukCheckboxes %}\n{% set cls = props.classes or 'govuk-checkboxes' %}\n{% if 'govuk-checkboxes' not in cls %}{% set cls = 'govuk-checkboxes ' + cls %}{% endif %}\n{{ govukCheckboxes({\n  name: props.name,\n  fieldset: {\n    legend: {\n      text: props.fieldset.legend.text,\n      isPageHeading: props.fieldset.legend.isPageHeading,\n      classes: props.fieldset.legend.classes\n    }\n  },\n  hint: props.hint,\n  classes: cls,\n  formGroup: { classes: props.formGroup.classes },\n  disabled: props.disabled,\n  items: props.items\n}) }}"
+}

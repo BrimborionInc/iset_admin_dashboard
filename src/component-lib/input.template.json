@@ -1,0 +1,73 @@
+{
+  "template_key": "input",
+  "type": "input",
+  "label": "Text Input",
+  "description": "Single-line text input supporting common HTML input types.",
+  "status": "active",
+  "default_props": {
+    "name": "example-input",
+    "id": "",
+    "label": { "text": "Your input", "classes": "govuk-label--m" },
+    "hint": { "text": "Enter the requested value." },
+    "errorMessage": { "text": "" },
+    "classes": "govuk-input",
+    "formGroup": { "classes": "" },
+    "type": "text",
+    "autocomplete": "",
+    "inputmode": "",
+    "pattern": "",
+    "spellcheck": true,
+    "value": "",
+    "prefix": { "text": "" },
+    "suffix": { "text": "" }
+  },
+  "prop_schema": [
+  { "key": "name", "path": "name", "type": "text", "label": "Data Key" },
+    { "key": "label.text", "path": "label.text", "type": "text", "label": "Label Text" },
+    { "key": "label.classes", "path": "label.classes", "type": "select", "label": "Label Classes", "options": [
+      { "label": "Default (none)", "value": "" },
+      { "label": "Small (s)", "value": "govuk-label--s" },
+      { "label": "Medium (m)", "value": "govuk-label--m" },
+      { "label": "Large (l)", "value": "govuk-label--l" },
+      { "label": "Extra Large (xl)", "value": "govuk-label--xl" },
+      { "label": "Visually Hidden", "value": "govuk-visually-hidden" }
+    ] },
+  { "key": "hint.text", "path": "hint.text", "type": "text", "label": "Hint Text" },
+    { "key": "type", "path": "type", "type": "select", "label": "Input Type", "options": [
+      { "label": "text", "value": "text" },
+      { "label": "email", "value": "email" },
+      { "label": "tel", "value": "tel" },
+      { "label": "number", "value": "number" },
+      { "label": "password", "value": "password" },
+      { "label": "url", "value": "url" },
+      { "label": "search", "value": "search" },
+      { "label": "date", "value": "date" },
+      { "label": "month", "value": "month" },
+      { "label": "time", "value": "time" },
+      { "label": "week", "value": "week" }
+    ] },
+    { "key": "autocomplete", "path": "autocomplete", "type": "text", "label": "Autocomplete" },
+    { "key": "inputmode", "path": "inputmode", "type": "text", "label": "Input Mode" },
+    { "key": "pattern", "path": "pattern", "type": "text", "label": "Pattern (regex)" },
+    { "key": "spellcheck", "path": "spellcheck", "type": "select", "label": "Spellcheck?", "options": [
+      { "label": "True", "value": true },
+      { "label": "False", "value": false }
+    ] },
+  { "key": "value", "path": "value", "type": "textarea", "label": "Default Value" },
+  { "key": "prefix.text", "path": "prefix.text", "type": "text", "label": "Prefix Text" },
+  { "key": "suffix.text", "path": "suffix.text", "type": "text", "label": "Suffix Text" },
+    { "key": "classes", "path": "classes", "type": "select", "label": "CSS Classes", "options": [
+      { "label": "Default (govuk-input)", "value": "govuk-input" },
+      { "label": "Width 20", "value": "govuk-input govuk-input--width-20" },
+      { "label": "Width 10", "value": "govuk-input govuk-input--width-10" },
+      { "label": "Width 5", "value": "govuk-input govuk-input--width-5" }
+    ] },
+    { "key": "formGroup.classes", "path": "formGroup.classes", "type": "select", "label": "Form Group Classes", "options": [
+      { "label": "Default (none)", "value": "" },
+      { "label": "Error State", "value": "govuk-form-group--error" }
+    ] }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "{% from \"govuk/components/input/macro.njk\" import govukInput %}\n{% set cls = props.classes or 'govuk-input' %}\n{% if 'govuk-input' not in cls %}{% set cls = 'govuk-input ' + cls %}{% endif %}\n{% set prefixObj = null %}\n{% if props.prefix and props.prefix.text and (props.prefix.text | trim) %}{% set prefixObj = props.prefix %}{% endif %}\n{% set suffixObj = null %}\n{% if props.suffix and props.suffix.text and (props.suffix.text | trim) %}{% set suffixObj = props.suffix %}{% endif %}\n{{ govukInput({\n  name: props.name,\n  id: props.id or props.name,\n  type: props.type,\n  label: props.label,\n  hint: props.hint,\n  errorMessage: props.errorMessage,\n  classes: cls,\n  formGroup: props.formGroup,\n  autocomplete: props.autocomplete,\n  inputmode: props.inputmode,\n  pattern: props.pattern,\n  spellcheck: props.spellcheck,\n  value: props.value,\n  prefix: prefixObj,\n  suffix: suffixObj\n}) }}"
+}

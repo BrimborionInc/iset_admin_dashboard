@@ -1,0 +1,51 @@
+{
+  "template_key": "file-upload",
+  "type": "file-upload",
+  "label": "File Upload",
+  "description": "Upload one or more supporting documents (bilingual-ready label & hint).",
+  "status": "active",
+  "default_props": {
+    "name": "uploaded-file",
+    "id": "",
+    "label": { "text": { "en": "Upload a file", "fr": "Téléversez un fichier" }, "classes": "govuk-label--m" },
+    "hint": { "text": { "en": "Files must be under 10MB.", "fr": "Les fichiers doivent être inférieurs à 10 Mo." } },
+    "errorMessage": { "text": "" },
+    "multiple": false,
+    "accept": "",
+    "documentType": "",
+    "classes": "",
+    "formGroup": { "classes": "" },
+    "disabled": false
+  },
+  "prop_schema": [
+    { "key": "name", "path": "name", "type": "text", "label": "Data Key" },
+    { "key": "label.text", "path": "label.text", "type": "text", "label": "Label Text" },
+    { "key": "label.classes", "path": "label.classes", "type": "select", "label": "Label Classes", "options": [
+      { "label": "Medium (m)", "value": "govuk-label--m" },
+      { "label": "Small (s)", "value": "govuk-label--s" },
+      { "label": "Large (l)", "value": "govuk-label--l" },
+      { "label": "Extra Large (xl)", "value": "govuk-label--xl" },
+      { "label": "Visually Hidden", "value": "govuk-visually-hidden" },
+      { "label": "None", "value": "" }
+    ] },
+    { "key": "hint.text", "path": "hint.text", "type": "text", "label": "Hint Text" },
+    { "key": "multiple", "path": "multiple", "type": "select", "label": "Allow Multiple?", "options": [
+      { "label": "No", "value": false },
+      { "label": "Yes", "value": true }
+    ] },
+    { "key": "accept", "path": "accept", "type": "text", "label": "Accept (MIME list)" },
+    { "key": "documentType", "path": "documentType", "type": "text", "label": "Document Type (metadata)" },
+    { "key": "classes", "path": "classes", "type": "text", "label": "CSS Classes" },
+    { "key": "formGroup.classes", "path": "formGroup.classes", "type": "select", "label": "Form Group Classes", "options": [
+      { "label": "Default (none)", "value": "" },
+      { "label": "Error State", "value": "govuk-form-group--error" }
+    ] },
+    { "key": "disabled", "path": "disabled", "type": "select", "label": "Disabled?", "options": [
+      { "label": "False", "value": false },
+      { "label": "True", "value": true }
+    ] }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "{% from \"govuk/components/file-upload/macro.njk\" import govukFileUpload %}\n{% set theId = props.id or props.name %}\n{% set attrs = {} %}\n{% if props.accept %}{% set attrs = attrs | combine({ 'accept': props.accept }) %}{% endif %}\n{% if props.documentType %}{% set attrs = attrs | combine({ 'data-document-type': props.documentType }) %}{% endif %}\n{{ govukFileUpload({\n  id: theId,\n  name: props.name,\n  label: props.label,\n  hint: props.hint,\n  errorMessage: props.errorMessage,\n  formGroup: props.formGroup,\n  classes: props.classes,\n  multiple: props.multiple,\n  disabled: props.disabled,\n  attributes: attrs\n}) }}"
+}
