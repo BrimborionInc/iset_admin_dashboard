@@ -151,6 +151,208 @@ const dbConfig = {
 
 const pool = mysql.createPool(dbConfig);
 
+// ---------------- Component Template Validation (initial: radio) -----------------
+// We load JSON Schemas from src/component-lib/schemas. For now we focus on radio.
+const Ajv = require('ajv');
+const ajv = new Ajv({ allErrors: true, strict: false });
+const schemaCache = {};
+function loadSchemaIfNeeded(key) {
+  if (schemaCache[key]) return schemaCache[key];
+  try {
+    const schemaPath = path.join(__dirname, 'src', 'component-lib', 'schemas', `${key}.schema.json`);
+    if (fs.existsSync(schemaPath)) {
+      const raw = fs.readFileSync(schemaPath, 'utf8');
+      const json = JSON.parse(raw);
+      schemaCache[key] = ajv.compile(json);
+      return schemaCache[key];
+    }
+  } catch (e) {
+    console.warn(`[schema] Failed loading schema for ${key}:`, e.message);
+  }
+  schemaCache[key] = null; // cache miss to avoid repeated fs hits
+  return null;
+}
+
+function validateTemplatePayload(templateKey, payloadProps) {
+  const validate = loadSchemaIfNeeded(templateKey);
+  if (!validate) return { ok: true }; // no schema -> allow (future components)
+  const valid = validate(payloadProps);
+  if (valid) return { ok: true };
+  return {
+    ok: false,
+    errors: (validate.errors || []).map(e => ({
+      instancePath: e.instancePath,
+      message: e.message,
+      keyword: e.keyword,
+      params: e.params
+    }))
+  };
+}
+
+// Sync radio template from filesystem source of truth if drift (latest-only approach)
+// This does NOT create historical versions; it updates latest in-place given pre-release status.
+async function syncRadioTemplateFromFile() {
+  try {
+    const filePath = path.join(__dirname, 'src', 'component-lib', 'radio.template.json');
+    if (!fs.existsSync(filePath)) return;
+    const fileJson = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    // Always target latest (highest version then highest id) so admin UI (which selects latest) stays in sync
+    const [rows] = await pool.query('SELECT * FROM component_templates WHERE template_key = ? ORDER BY version DESC, id DESC LIMIT 1', ['radio']).catch(() => [null]);
+    let row = rows && rows.length ? rows[0] : null;
+    if (!row) {
+      // Fallback: singular table name
+      const [rowsAlt] = await pool.query('SELECT * FROM component_template WHERE template_key = ? ORDER BY version DESC, id DESC LIMIT 1', ['radio']).catch(() => [null]);
+      row = rowsAlt && rowsAlt.length ? rowsAlt[0] : null;
+    }
+    if (!row) {
+      // Auto-insert initial row if missing so template becomes available
+      try {
+        const insertSqlPlural = 'INSERT INTO component_templates (template_key, type, version, label, description, status, default_props, prop_schema, has_options, option_schema, export_njk_template) VALUES (?,?,?,?,?,?,?,?,?,?,?)';
+        const params = [fileJson.template_key || 'radio', fileJson.type || fileJson.template_key || 'radio', 1, fileJson.label, fileJson.description || '', fileJson.status || 'active', JSON.stringify(fileJson.default_props), JSON.stringify(fileJson.prop_schema), fileJson.has_options ? 1 : 0, JSON.stringify(fileJson.option_schema || null), fileJson.export_njk_template || null];
+        let [ins] = await pool.query(insertSqlPlural, params).catch(() => [null]);
+        if (!ins || !ins.insertId) {
+          const insertSqlSingular = 'INSERT INTO component_template (template_key, type, version, label, description, status, default_props, prop_schema, has_options, option_schema, export_njk_template) VALUES (?,?,?,?,?,?,?,?,?,?,?)';
+          await pool.query(insertSqlSingular, params);
+        }
+        console.log('[sync] radio template inserted (initial) from file');
+      } catch (e2) {
+        console.warn('[sync] failed inserting radio template:', e2.message);
+      }
+      return;
+    }
+    const dbProps = typeof row.default_props === 'string' ? (() => { try { return JSON.parse(row.default_props); } catch { return {}; } })() : (row.default_props || row.props || {});
+    const dbSchema = typeof row.prop_schema === 'string' ? (() => { try { return JSON.parse(row.prop_schema); } catch { return []; } })() : (row.prop_schema || row.editable_fields || []);
+    const exportTpl = row.export_njk_template || row.export_njk || null;
+    const drift = JSON.stringify(dbProps) !== JSON.stringify(fileJson.default_props)
+      || JSON.stringify(dbSchema) !== JSON.stringify(fileJson.prop_schema)
+      || String(exportTpl || '') !== String(fileJson.export_njk_template || '')
+      || (row.label !== fileJson.label)
+      || (String(row.description||'') !== String(fileJson.description||''));
+    if (drift) {
+      const sqlPlural = 'UPDATE component_templates SET label=?, description=?, status=?, default_props=?, prop_schema=?, has_options=?, option_schema=?, export_njk_template=? WHERE id=?';
+      const params = [fileJson.label, fileJson.description || '', fileJson.status || 'active', JSON.stringify(fileJson.default_props), JSON.stringify(fileJson.prop_schema), fileJson.has_options ? 1 : 0, JSON.stringify(fileJson.option_schema || null), fileJson.export_njk_template || null, row.id];
+      let [result] = await pool.query(sqlPlural, params).catch(() => [null]);
+      if (!result || result.affectedRows === 0) {
+        const sqlSingular = 'UPDATE component_template SET label=?, description=?, status=?, default_props=?, prop_schema=?, has_options=?, option_schema=?, export_njk_template=? WHERE id=?';
+        await pool.query(sqlSingular, params);
+      }
+      console.log('[sync] radio template (latest version) updated from file source of truth');
+    }
+  } catch (e) {
+    console.warn('[sync] radio template sync failed:', e.message);
+  }
+}
+
+// Fire and forget sync on startup (non-blocking)
+syncRadioTemplateFromFile();
+
+// Generic helper to sync a template by key (initial reuse for input)
+async function syncTemplateFromFile(templateKey) {
+  try {
+    const filePath = path.join(__dirname, 'src', 'component-lib', `${templateKey}.template.json`);
+    if (!fs.existsSync(filePath)) return;
+    const fileJson = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const [rowsPlural] = await pool.query('SELECT * FROM component_templates WHERE template_key = ? ORDER BY version DESC, id DESC LIMIT 1', [templateKey]).catch(() => [null]);
+    let row = rowsPlural && rowsPlural.length ? rowsPlural[0] : null;
+    if (!row) {
+      const [rowsSingular] = await pool.query('SELECT * FROM component_template WHERE template_key = ? ORDER BY version DESC, id DESC LIMIT 1', [templateKey]).catch(() => [null]);
+      row = rowsSingular && rowsSingular.length ? rowsSingular[0] : null;
+    }
+    if (!row) {
+      // Auto insert new template if missing
+      try {
+        const insertSqlPlural = 'INSERT INTO component_templates (template_key, type, version, label, description, status, default_props, prop_schema, has_options, option_schema, export_njk_template) VALUES (?,?,?,?,?,?,?,?,?,?,?)';
+        const params = [fileJson.template_key || templateKey, fileJson.type || fileJson.template_key || templateKey, 1, fileJson.label, fileJson.description || '', fileJson.status || 'active', JSON.stringify(fileJson.default_props), JSON.stringify(fileJson.prop_schema), fileJson.has_options ? 1 : 0, JSON.stringify(fileJson.option_schema || null), fileJson.export_njk_template || null];
+        let [ins] = await pool.query(insertSqlPlural, params).catch(() => [null]);
+        if (!ins || !ins.insertId) {
+          const insertSqlSingular = 'INSERT INTO component_template (template_key, type, version, label, description, status, default_props, prop_schema, has_options, option_schema, export_njk_template) VALUES (?,?,?,?,?,?,?,?,?,?,?)';
+          await pool.query(insertSqlSingular, params);
+        }
+        console.log(`[sync] ${templateKey} template inserted (initial) from file`);
+      } catch (e2) {
+        console.warn(`[sync] failed inserting ${templateKey} template:`, e2.message);
+      }
+      return;
+    }
+    const dbProps = typeof row.default_props === 'string' ? (() => { try { return JSON.parse(row.default_props); } catch { return {}; } })() : (row.default_props || {});
+    const dbSchema = typeof row.prop_schema === 'string' ? (() => { try { return JSON.parse(row.prop_schema); } catch { return []; } })() : (row.prop_schema || []);
+    const exportTpl = row.export_njk_template || row.export_njk || null;
+    const drift = JSON.stringify(dbProps) !== JSON.stringify(fileJson.default_props)
+      || JSON.stringify(dbSchema) !== JSON.stringify(fileJson.prop_schema)
+      || String(exportTpl || '') !== String(fileJson.export_njk_template || '')
+      || (row.label !== fileJson.label)
+      || (String(row.description||'') !== String(fileJson.description||''));
+    if (drift) {
+      const sqlPlural = 'UPDATE component_templates SET label=?, description=?, status=?, default_props=?, prop_schema=?, has_options=?, option_schema=?, export_njk_template=? WHERE id=?';
+      const params = [fileJson.label, fileJson.description || '', fileJson.status || 'active', JSON.stringify(fileJson.default_props), JSON.stringify(fileJson.prop_schema), fileJson.has_options ? 1 : 0, JSON.stringify(fileJson.option_schema || null), fileJson.export_njk_template || null, row.id];
+      let [result] = await pool.query(sqlPlural, params).catch(() => [null]);
+      if (!result || result.affectedRows === 0) {
+        const sqlSingular = 'UPDATE component_template SET label=?, description=?, status=?, default_props=?, prop_schema=?, has_options=?, option_schema=?, export_njk_template=? WHERE id=?';
+        await pool.query(sqlSingular, params);
+      }
+      console.log(`[sync] ${templateKey} template updated from file source of truth`);
+    }
+  } catch (e) {
+    console.warn(`[sync] ${templateKey} template sync failed:`, e.message);
+  }
+}
+
+// Input template sync (reuse generic helper)
+async function syncInputTemplateFromFile() { return syncTemplateFromFile('input'); }
+syncInputTemplateFromFile();
+
+// Checkbox template sync (reuse generic helper)
+async function syncCheckboxTemplateFromFile() { return syncTemplateFromFile('checkbox'); }
+syncCheckboxTemplateFromFile();
+
+// Date-input template sync (reuse generic helper)
+async function syncDateInputTemplateFromFile() { return syncTemplateFromFile('date-input'); }
+syncDateInputTemplateFromFile();
+
+// File-upload template sync (reuse generic helper)
+async function syncFileUploadTemplateFromFile() { return syncTemplateFromFile('file-upload'); }
+syncFileUploadTemplateFromFile();
+
+// Summary-list template sync (reuse generic helper)
+async function syncSummaryListTemplateFromFile() { return syncTemplateFromFile('summary-list'); }
+syncSummaryListTemplateFromFile();
+
+// Dev helper endpoint to force re-sync of radio template from filesystem (no versioning bump)
+app.post('/api/dev/sync/radio-template', async (_req, res) => {
+  await syncRadioTemplateFromFile();
+  res.json({ ok: true, message: 'Radio template sync attempted' });
+});
+
+// Dev helper to sync input template
+app.post('/api/dev/sync/input-template', async (_req, res) => {
+  await syncInputTemplateFromFile();
+  res.json({ ok: true, message: 'Input template sync attempted' });
+});
+
+// Dev helper to sync checkbox template
+app.post('/api/dev/sync/checkbox-template', async (_req, res) => {
+  await syncCheckboxTemplateFromFile();
+  res.json({ ok: true, message: 'Checkbox template sync attempted' });
+});
+
+// Dev helper to sync date-input template
+app.post('/api/dev/sync/date-input-template', async (_req, res) => {
+  await syncDateInputTemplateFromFile();
+  res.json({ ok: true, message: 'Date-input template sync attempted' });
+});
+
+// Dev helper to sync file-upload template
+app.post('/api/dev/sync/file-upload-template', async (_req, res) => {
+  await syncFileUploadTemplateFromFile();
+  res.json({ ok: true, message: 'File-upload template sync attempted' });
+});
+
+// Dev helper to sync summary-list template
+app.post('/api/dev/sync/summary-list-template', async (_req, res) => {
+  await syncSummaryListTemplateFromFile();
+  res.json({ ok: true, message: 'Summary-list template sync attempted' });
+});
+
 // ---------------- Component Templates Endpoints (Library) -----------------
 // Provides CRUD-lite access to component template definitions stored in DB.
 // Actual schema (DESCRIBE iset_intake.component_template):
@@ -215,13 +417,29 @@ app.get('/api/component-templates', async (req, res) => {
         rows = [];
       }
     }
-    const out = rows.map(r => {
+    let out = rows.map(r => {
       const norm = normalizeTemplateRow(r);
+      // Alias legacy plural key to singular for UI consistency
+      if (String(norm.template_key).toLowerCase() === 'checkboxes') {
+        norm.template_key = 'checkbox';
+        norm.type = 'checkbox';
+      }
       if (includeTemplate) {
         norm.export_njk_template = r.export_njk_template || r.export_njk || null;
       }
       return norm;
     });
+    // Deduplicate by template_key keeping latest version (and preferring rows with richer option_schema length)
+    const byKey = new Map();
+    for (const tpl of out) {
+      const k = String(tpl.template_key).toLowerCase();
+      const existing = byKey.get(k);
+      if (!existing) { byKey.set(k, tpl); continue; }
+      const exScore = (existing.version||0) * 10 + (Array.isArray(existing.option_schema)? existing.option_schema.length:0);
+      const newScore = (tpl.version||0) * 10 + (Array.isArray(tpl.option_schema)? tpl.option_schema.length:0);
+      if (newScore >= exScore) byKey.set(k, tpl);
+    }
+    out = Array.from(byKey.values());
     res.status(200).json({ count: out.length, templates: out });
   } catch (e) {
     console.error('GET /api/component-templates failed:', e);
@@ -243,6 +461,17 @@ app.put('/api/component-templates/:id', async (req, res) => {
   const prop_schema = body.prop_schema ?? body.editable_fields; // unify
   const has_options = body.has_options;
   const option_schema = body.option_schema;
+
+  // Schema validation (radio only for now) – use template_key or type to identify
+  const tk = (template_key || type || '').toLowerCase();
+  if (tk === 'radio' && default_props) {
+    const result = validateTemplatePayload('radio', default_props);
+    if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
+  }
+  if (tk === 'input' && default_props) {
+    const result = validateTemplatePayload('input', default_props);
+    if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
+  }
 
   const updates = [];
   const params = [];
@@ -695,6 +924,24 @@ async function renderComponentHtml(comp) {
   const tpl = rows?.[0]?.export_njk_template;
   if (!tpl) return `<!-- missing template for ${templateKey || type} -->`;
   try {
+    // Normalise radio option hint strings -> { text: "..." } objects so GOV.UK macro renders them.
+  const tKey = (templateKey || type || '').toLowerCase();
+  // Normalise hint strings for choice components (radios, checkboxes, select) so GOV.UK macros render them
+  if ((tKey === 'radio' || tKey === 'radios' || tKey === 'select' || tKey === 'checkbox' || tKey === 'checkboxes') && comp?.props && Array.isArray(comp.props.items)) {
+      comp = { ...comp, props: { ...comp.props, items: comp.props.items.map(it => {
+        if (it && typeof it.hint === 'string' && it.hint.trim() !== '') {
+          return { ...it, hint: { text: it.hint } };
+        }
+        return it;
+      }) } };
+    }
+    // Backward compatibility: earlier editor bug nested updated date-input items under props.props.items
+    if ((tKey === 'date' || tKey === 'date-input') && comp?.props) {
+      const nested = comp.props?.props?.items;
+      if (Array.isArray(nested) && (!Array.isArray(comp.props.items) || nested.some(n => n?.autocomplete) )) {
+        comp = { ...comp, props: { ...comp.props, items: nested } };
+      }
+    }
     return env.renderString(tpl, { props: comp.props || {} });
   } catch (e) {
     console.error('NJK render error:', e);
@@ -791,7 +1038,27 @@ app.post('/api/render/component', async (req, res) => {
 
     let html;
     try {
-      html = env.renderString(tpl, { props });
+      let normProps = props;
+      try {
+        const keyLower = (templateKey || rows?.[0]?.template_key || '').toLowerCase();
+        // Normalise hint strings for choice components (radios, checkboxes, select)
+        if ((keyLower === 'radio' || keyLower === 'radios' || keyLower === 'select' || keyLower === 'checkbox' || keyLower === 'checkboxes') && normProps && Array.isArray(normProps.items)) {
+          normProps = { ...normProps, items: normProps.items.map(it => {
+            if (it && typeof it.hint === 'string' && it.hint.trim() !== '') {
+              return { ...it, hint: { text: it.hint } };
+            }
+            return it;
+          }) };
+        }
+        // Backward compatibility for date-input nested props bug
+        if ((keyLower === 'date' || keyLower === 'date-input') && normProps) {
+          const nested = normProps?.props?.items;
+          if (Array.isArray(nested) && (!Array.isArray(normProps.items) || nested.some(n => n?.autocomplete))) {
+            normProps = { ...normProps, items: nested };
+          }
+        }
+      } catch { /* ignore normalisation errors */ }
+      html = env.renderString(tpl, { props: normProps });
     } catch (e) {
       console.error('Nunjucks render error:', e);
       return res.status(500).json({ error: 'Render failed', details: String(e).slice(0, 200) });
@@ -2160,6 +2427,41 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
           continue;
         }
 
+        // Summary-list (dynamic summary) special-case: freeze included rows with labels & format
+        if (tplType === 'summary-list') {
+          const included = Array.isArray(props?.included) ? props.included : [];
+          const rows = [];
+          // Build a quick index of prior component labels by storageKey
+          const priorIndex = new Map();
+          for (const pc of out.components) {
+            if (pc && pc.storageKey) {
+              priorIndex.set(pc.storageKey, pc);
+            }
+          }
+          for (const r of included) {
+            if (!r || !r.key) continue;
+            const source = priorIndex.get(r.key);
+            const baseLabel = source?.label || { en: r.key, fr: r.key };
+            const finalLabel = (r.labelOverride && typeof r.labelOverride === 'object') ? {
+              en: r.labelOverride.en || baseLabel.en || r.key,
+              fr: r.labelOverride.fr || r.labelOverride.en || baseLabel.fr || baseLabel.en || r.key
+            } : baseLabel;
+            rows.push({
+              key: r.key,
+              label: finalLabel,
+              format: r.format || 'text'
+            });
+          }
+          out.components.push({
+            id: toIdSlug('summary-list', 'summary-list', i, usedIds),
+            type: 'summary-list',
+            rows,
+            hideEmpty: props.hideEmpty !== false,
+            emptyFallback: (props.emptyFallback && typeof props.emptyFallback === 'object') ? props.emptyFallback : { en: 'Not provided', fr: 'Non fourni' }
+          });
+          continue;
+        }
+
         // Map to portal component shape
         // Normalise type for the portal renderer
         const normalisedType = (
@@ -2704,6 +3006,55 @@ app.post('/api/steps', async (req, res) => {
   if (!name || !Array.isArray(components)) {
     return res.status(400).json({ error: 'name and components[] are required' });
   }
+  // Server-side validation: Data Key uniqueness + pattern; date-input structural integrity
+  try {
+    const seen = new Map(); // lowercased name -> original
+    for (let i = 0; i < components.length; i++) {
+      const c = components[i];
+      if (!c || typeof c !== 'object') continue;
+      const props = c.props || {};
+      const dataKey = props.name;
+      if (dataKey != null) {
+        if (typeof dataKey !== 'string' || !/^[-a-z0-9_]+$/.test(dataKey)) {
+          return res.status(400).json({ error: `Invalid Data Key at component index ${i}: must match ^[-a-z0-9_]+$` });
+        }
+        const k = dataKey.toLowerCase();
+        if (seen.has(k)) {
+          return res.status(400).json({ error: `Duplicate Data Key '${dataKey}' at component index ${i} (also used earlier)` });
+        }
+        seen.set(k, dataKey);
+      }
+      // date-input structural validation (lightweight)
+      const typeKey = String(c.template_key || c.type || '').toLowerCase();
+      if (typeKey === 'date-input' || typeKey === 'date') {
+        if (!Array.isArray(props.items)) {
+          return res.status(400).json({ error: `date-input at index ${i} missing items[] array` });
+        }
+        const names = props.items.map(it => it && it.name).filter(Boolean);
+        const requiredParts = ['day','month','year'];
+        const missing = requiredParts.filter(r => !names.includes(r));
+        if (missing.length) {
+          return res.status(400).json({ error: `date-input at index ${i} missing required parts: ${missing.join(', ')}` });
+        }
+      }
+      if (typeKey === 'file-upload' || typeKey === 'fileupload') {
+        if (props.accept && typeof props.accept === 'string') {
+          if (props.accept.length > 200) return res.status(400).json({ error: `file-upload at index ${i} accept too long (max 200 chars)` });
+          const parts = props.accept.split(',').map(s => s.trim()).filter(Boolean);
+          if (parts.length > 0) {
+            const invalid = parts.filter(p => !/^\.[A-Za-z0-9]+$/.test(p) && !/^[A-Za-z0-9-]+\/[A-Za-z0-9+.-]+$/.test(p));
+            if (invalid.length) return res.status(400).json({ error: `file-upload at index ${i} invalid accept tokens: ${invalid.slice(0,5).join(', ')}` });
+          }
+        }
+        if (props.documentType && typeof props.documentType === 'string') {
+          if (!/^[-a-zA-Z0-9_]+$/.test(props.documentType)) return res.status(400).json({ error: `file-upload at index ${i} invalid documentType (use alphanumeric, dash, underscore)` });
+          if (props.documentType.length > 40) return res.status(400).json({ error: `file-upload at index ${i} documentType too long (max 40)` });
+        }
+      }
+    }
+  } catch (e) {
+    return res.status(400).json({ error: 'Validation failed', details: String(e).slice(0,200) });
+  }
   try {
     const stepId = await withTx(async (conn) => {
       const [r] = await conn.query(
@@ -2741,6 +3092,52 @@ app.put('/api/steps/:id', async (req, res) => {
   const { id } = req.params;
   const { name, status, components, ui_meta } = req.body || {};
   try {
+    if (Array.isArray(components)) {
+      // Same validation logic as in POST route
+      const seen = new Map();
+      for (let i = 0; i < components.length; i++) {
+        const c = components[i];
+        if (!c || typeof c !== 'object') continue;
+        const props = c.props || {};
+        const dataKey = props.name;
+        if (dataKey != null) {
+          if (typeof dataKey !== 'string' || !/^[-a-z0-9_]+$/.test(dataKey)) {
+            return res.status(400).json({ error: `Invalid Data Key at component index ${i}: must match ^[-a-z0-9_]+$` });
+          }
+          const k = dataKey.toLowerCase();
+          if (seen.has(k)) {
+            return res.status(400).json({ error: `Duplicate Data Key '${dataKey}' at component index ${i} (also used earlier)` });
+          }
+          seen.set(k, dataKey);
+        }
+        const typeKey = String(c.template_key || c.type || '').toLowerCase();
+        if (typeKey === 'date-input' || typeKey === 'date') {
+          if (!Array.isArray(props.items)) {
+            return res.status(400).json({ error: `date-input at index ${i} missing items[] array` });
+          }
+          const names = props.items.map(it => it && it.name).filter(Boolean);
+          const requiredParts = ['day','month','year'];
+          const missing = requiredParts.filter(r => !names.includes(r));
+          if (missing.length) {
+            return res.status(400).json({ error: `date-input at index ${i} missing required parts: ${missing.join(', ')}` });
+          }
+        }
+        if (typeKey === 'file-upload' || typeKey === 'fileupload') {
+          if (props.accept && typeof props.accept === 'string') {
+            if (props.accept.length > 200) return res.status(400).json({ error: `file-upload at index ${i} accept too long (max 200 chars)` });
+            const parts = props.accept.split(',').map(s => s.trim()).filter(Boolean);
+            if (parts.length > 0) {
+              const invalid = parts.filter(p => !/^\.[A-Za-z0-9]+$/.test(p) && !/^[A-Za-z0-9-]+\/[A-Za-z0-9+.-]+$/.test(p));
+              if (invalid.length) return res.status(400).json({ error: `file-upload at index ${i} invalid accept tokens: ${invalid.slice(0,5).join(', ')}` });
+            }
+          }
+          if (props.documentType && typeof props.documentType === 'string') {
+            if (!/^[-a-zA-Z0-9_]+$/.test(props.documentType)) return res.status(400).json({ error: `file-upload at index ${i} invalid documentType (use alphanumeric, dash, underscore)` });
+            if (props.documentType.length > 40) return res.status(400).json({ error: `file-upload at index ${i} documentType too long (max 40)` });
+          }
+        }
+      }
+    }
     await withTx(async (conn) => {
       // ensure step exists
       const [[exists]] = await conn.query(

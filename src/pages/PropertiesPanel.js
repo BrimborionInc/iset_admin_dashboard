@@ -177,6 +177,22 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
           errs[k] = e.message || 'Invalid value';
         }
       }
+      // Data Key pattern + uniqueness (client-side advisory)
+      const dataKey = flat['name'];
+      if (typeof dataKey === 'string') {
+        if (dataKey.trim() === '') {
+          errs['name'] = errs['name'] || 'Data Key required';
+        } else if (!/^[-a-z0-9_]+$/.test(dataKey)) {
+          errs['name'] = 'Use lowercase letters, digits, hyphen or underscore.';
+        } else {
+          try {
+            const siblings = (pageProperties?.components || []).filter(c => c !== selectedComponent);
+            if (siblings.some(c => (c.props?.name || '') === dataKey)) {
+              errs['name'] = 'Data Key must be unique on page';
+            }
+          } catch { /* ignore */ }
+        }
+      }
       setValidationErrors(errs);
     } catch (e) {
       setValidationErrors({});
@@ -194,22 +210,72 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
     if (p === 'autocomplete') return 'HTML autocomplete hint for browsers (e.g., email, given-name). Leave blank unless clear.';
     if (p === 'inputmode' || p === 'inputmode'.toLowerCase()) return 'Virtual keyboard hint for mobile (e.g., numeric, email, tel).';
     if (p === 'type' || p === 'props.type') return 'HTML input type (text, email, number, etc.). Affects validation and keyboards.';
-    if (p === 'pattern') return 'Client-side regex the value must match. Use sparingly; consider server validation too.';
+  if (p === 'pattern') return 'Regular expression (JavaScript) tested against the entire value. Tips: ^ anchors start, $ anchors end. Escape backslashes \\ in patterns. Keep client regex simple (format only) and use server validation for complex/business rules. Examples: ^[0-9]{5}$ (US ZIP), ^[A-Za-z]\\d[A-Za-z] ?\\d[A-Za-z]\\d$ (CA postal), ^\\d+$ (digits only). Leave blank for no client pattern.';
     if (p === 'spellcheck') return 'Enable for free text (true); disable for codes, emails, or numbers (false).';
     if (p === 'disabled') return 'Prevents user interaction. Usually false for live forms.';
     if (p === 'describedby') return 'Space-separated IDs appended to aria-describedby. Advanced accessibility wiring.';
     if (p.startsWith('prefix.')) return 'Non-editable text before the input (e.g., $).';
     if (p.startsWith('suffix.')) return 'Non-editable text after the input (e.g., kg).';
   if (p === 'attributes') return 'Custom attributes (e.g., data-*). Use cautiously and document usage.';
-  if (p === 'name') return 'Submission key used as the field identifier in submissions.';
+  if (p === 'name') return 'Data Key: identifier used in submission JSON and exports. Lowercase, unique per page.';
   if (p === 'id') return 'HTML id attribute (used for label association); usually match Submission Key.';
   if (p === 'rows') return 'Visible height (number of text rows).';
   if (p === 'maxlength') return 'Maximum character count enforced by the component.';
   if (p === 'threshold') return 'Percentage (0-100) when the counter starts showing (e.g., 75).';
   if (p === 'maxwords') return 'Optional maximum word count (leave blank to ignore).';
   if (p === 'value') return 'Default pre-filled value (leave blank for none).';
+  if (p === 'accept') return 'Comma-separated file types. Use extensions like .pdf,.jpg or MIME types like image/png, application/pdf. Leave blank to allow any.';
+  if (p === 'multiple') return 'Allow selecting and uploading multiple files. If enabled, submission stores an array of file objects.';
+  if (p === 'documenttype') return 'Optional document category tag (alphanumeric, dash, underscore). Sent to upload endpoint as metadata.';
     return null;
   };
+
+  // Side-effect: when editing date-input autocomplete preset, project to items[].autocomplete
+  useEffect(() => {
+    try {
+      const t = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
+      if (t === 'date-input') {
+        const preset = selectedComponent?.props?.autocompletePreset || '';
+        const items = Array.isArray(selectedComponent?.props?.items) ? selectedComponent.props.items : [];
+        // Only mutate if preset implies values and items missing autocomplete fields
+        if (preset === 'dob') {
+          const desired = { day: 'bday-day', month: 'bday-month', year: 'bday-year' };
+          let needsUpdate = false;
+            const nextItems = items.map(it => {
+              if (!it || !it.name) return it;
+              const want = desired[it.name];
+              if (want && it.autocomplete !== want) {
+                needsUpdate = true;
+                return { ...it, autocomplete: want };
+              }
+              return it;
+            });
+          if (needsUpdate) {
+            // NOTE: path should be relative to props; previously used 'props.items' which created props.props.items
+            updateComponentProperty('items', nextItems, true);
+          }
+        } else if (preset === 'off') {
+          // Force explicit autocomplete="off" on each part
+          let needsUpdate = false;
+          const nextItems = items.map(it => {
+            if (!it || !it.name) return it;
+            if (it.autocomplete !== 'off') { needsUpdate = true; return { ...it, autocomplete: 'off' }; }
+            return it;
+          });
+          if (needsUpdate) updateComponentProperty('items', nextItems, true);
+        } else if (preset === '' && Array.isArray(items) && items.some(it => it && it.autocomplete)) {
+          // If user clears preset, remove previously applied autocomplete hints (only if they match the preset pattern)
+          const pattern = /^bday-(day|month|year)$/;
+          let changed = false;
+          const nextItems = items.map(it => {
+            if (it && pattern.test(it.autocomplete || '')) { changed = true; const { autocomplete, ...rest } = it; return rest; }
+            return it;
+          });
+          if (changed) updateComponentProperty('items', nextItems, true);
+        }
+      }
+    } catch { /* ignore */ }
+  }, [selectedComponent?.props?.autocompletePreset, selectedComponent?.props?.items, selectedComponent?.template_key, selectedComponent?.type]);
 
   useEffect(() => {
     if (!selectedComponent) { setValidationErrors({}); return; }
@@ -318,6 +384,119 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   ]);
   const isTranslatablePath = (p) => translatablePaths.has(String(p || ''));
 
+  // --- Summary List (dynamic workflow summarisation) ----------------------
+  const isSummaryList = selectedComponent && (selectedComponent.template_key === 'summary-list' || selectedComponent.type === 'summary-list');
+  const [workflows, setWorkflows] = useState([]);
+  const [workflowLoading, setWorkflowLoading] = useState(false);
+  const [fieldsLoading, setFieldsLoading] = useState(false);
+  const [availableFields, setAvailableFields] = useState([]); // { key, labelEn, labelFr, stepName }
+
+  useEffect(() => {
+    if (!isSummaryList) return;
+    setWorkflowLoading(true);
+    axios.get(`${process.env.REACT_APP_API_BASE_URL}/api/workflows`).then(res => {
+      setWorkflows(res.data || []);
+    }).catch(()=> setWorkflows([])).finally(()=> setWorkflowLoading(false));
+  }, [isSummaryList]);
+
+  // Helper to extract field-like components from a workflow detail object
+  const extractFieldsFromWorkflow = (wfDetail) => {
+    if (!wfDetail || !Array.isArray(wfDetail.steps)) return [];
+    // Need each step's components; fetch individually if API exists (/api/steps/:id)
+    return []; // placeholder until we fetch steps below
+  };
+
+  const loadWorkflowFields = async (workflowId) => {
+    if (!workflowId) { setAvailableFields([]); return; }
+    setFieldsLoading(true);
+    try {
+      // fetch workflow details (list of step IDs)
+      const wfRes = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/api/workflows/${workflowId}`);
+      const wf = wfRes.data;
+      const steps = Array.isArray(wf.steps) ? wf.steps : [];
+      const out = [];
+      // For each step, fetch step detail with components
+      for (const s of steps) {
+        try {
+          const stepRes = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/api/steps/${s.id}`);
+          const step = stepRes.data;
+          const comps = Array.isArray(step.components) ? step.components : [];
+          for (const c of comps) {
+            const props = c.props || {};
+            const key = props.name || props.fieldName || props.field_name || props.id;
+            if (!key) continue;
+            // Skip summary-list itself or non-answer containers
+            const t = (c.template_key || c.templateKey || c.type || '').toLowerCase();
+            if (!t) continue;
+            if (t === 'summary-list') continue;
+            // Basic allowed types heuristic
+            const allowed = ['input','textarea','radio','radios','checkbox','checkboxes','select','date-input','file-upload'];
+            if (!allowed.includes(t)) continue;
+            let labelObj = props?.fieldset?.legend?.text || props?.label?.text || props?.titleText || props?.text || '';
+            // If still empty, attempt to infer via template defaults stored on component? (not available here without extra API call) leave blank.
+            const labEn = typeof labelObj === 'object' ? (labelObj.en || labelObj.fr || '') : (labelObj || '');
+            const labFr = typeof labelObj === 'object' ? (labelObj.fr || labelObj.en || '') : (labelObj || '');
+            out.push({ key, labelEn: labEn, labelFr: labFr, stepName: step.name || `Step ${s.id}` });
+          }
+        } catch { /* ignore step fetch error */ }
+      }
+      setAvailableFields(out);
+    } catch {
+      setAvailableFields([]);
+    } finally {
+      setFieldsLoading(false);
+    }
+  };
+
+  // When workflowId changes on summary-list component, (re)load fields
+  useEffect(() => {
+    if (!isSummaryList) return;
+    const workflowId = selectedComponent?.props?.workflowId || null;
+    loadWorkflowFields(workflowId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSummaryList, selectedComponent?.props?.workflowId]);
+
+  const summaryListConfig = useMemo(() => {
+    if (!isSummaryList) return null;
+    const included = Array.isArray(selectedComponent?.props?.included) ? selectedComponent.props.included : [];
+    const hideEmpty = selectedComponent?.props?.hideEmpty !== false; // default true
+    const emptyFallback = selectedComponent?.props?.emptyFallback || { en: 'Not provided', fr: 'Non fourni' };
+    return { included, hideEmpty, emptyFallback };
+  }, [isSummaryList, selectedComponent]);
+
+  const updateSummaryListConfig = (patch) => {
+    if (!isSummaryList) return;
+    const prev = summaryListConfig || { included: [], hideEmpty: true, emptyFallback: { en: 'Not provided', fr: 'Non fourni' } };
+    const next = { ...prev, ...patch };
+    updateComponentProperty('included', next.included, true);
+    updateComponentProperty('hideEmpty', next.hideEmpty, true);
+    updateComponentProperty('emptyFallback', next.emptyFallback, true);
+  };
+
+  const handleWorkflowSelect = (wfId) => {
+    updateComponentProperty('workflowId', wfId, true);
+    // Reset included rows when workflow changes
+    updateComponentProperty('included', [], true);
+  };
+
+  const toggleIncludeField = (fieldKey) => {
+    const cur = summaryListConfig?.included || [];
+    const idx = cur.findIndex(r => r.key === fieldKey);
+    let next;
+    if (idx >= 0) next = cur.filter(r => r.key !== fieldKey);
+    else {
+      const field = availableFields.find(f => f.key === fieldKey);
+      next = [...cur, { key: fieldKey, labelOverride: null, format: 'text', stepName: field?.stepName }];
+    }
+    updateSummaryListConfig({ included: next });
+  };
+
+  const updateIncludedRow = (fieldKey, patch) => {
+    const cur = summaryListConfig?.included || [];
+    const next = cur.map(r => r.key === fieldKey ? { ...r, ...patch } : r);
+    updateSummaryListConfig({ included: next });
+  };
+
   return (
     <SpaceBetween size="l">
       <ExpandableSection headerText="Page Properties" defaultExpanded>
@@ -356,6 +535,74 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
         />
       </ExpandableSection>
 
+      {selectedComponent && (
+        isSummaryList && (
+          <ExpandableSection headerText="Summary List" defaultExpanded>
+            <Container header={<Header variant="h3">Summary Source</Header>}>
+              <SpaceBetween size="m">
+                <FormField label="Workflow to summarise" description="Select a saved workflow; fields from its steps become available.">
+                  <Select
+                    statusType={workflowLoading ? 'loading' : 'finished'}
+                    placeholder={workflowLoading ? 'Loading workflows…' : 'Select workflow'}
+                    selectedOption={(selectedComponent?.props?.workflowId && workflows.find(w => w.id === selectedComponent.props.workflowId)) ? { label: workflows.find(w => w.id === selectedComponent.props.workflowId)?.name, value: selectedComponent.props.workflowId } : null}
+                    onChange={({ detail }) => handleWorkflowSelect(detail.selectedOption.value)}
+                    options={workflows.map(w => ({ label: w.name, value: w.id }))}
+                    expandToViewport
+                  />
+                </FormField>
+                {selectedComponent?.props?.workflowId && (
+                  <>
+                    <FormField label="Fields" description="Toggle which fields appear. Order follows workflow for now.">
+                      <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid #d5dbdb', padding: 8, borderRadius: 4 }}>
+                        {fieldsLoading && <div className="govuk-hint">Loading fields…</div>}
+                        {!fieldsLoading && availableFields.length === 0 && <div className="govuk-hint">No fields found in workflow.</div>}
+                        {!fieldsLoading && availableFields.map(f => {
+                          const included = (summaryListConfig?.included || []).some(r => r.key === f.key);
+                          return (
+                            <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                              <Checkbox checked={included} onChange={() => toggleIncludeField(f.key)} />
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 13, fontWeight: 500 }}>{f.labelEn || f.key} <span style={{ color: '#666', fontWeight: 400 }}>({f.key})</span></div>
+                                <div style={{ fontSize: 11, color: '#666' }}>{f.stepName}</div>
+                              </div>
+                              {included && (
+                                <Select
+                                  selectedOption={(summaryListConfig?.included || []).find(r => r.key === f.key)?.format ? { label: (summaryListConfig.included.find(r => r.key === f.key)?.format || 'text'), value: (summaryListConfig.included.find(r => r.key === f.key)?.format || 'text') } : { label: 'text', value: 'text' }}
+                                  onChange={({ detail }) => updateIncludedRow(f.key, { format: detail.selectedOption.value })}
+                                  options={[{ label: 'text', value: 'text' }, { label: 'date', value: 'date' }, { label: 'yesno', value: 'yesno' }, { label: 'currency', value: 'currency' }]}
+                                  selectedAriaLabel="Format"
+                                  placeholder="Format"
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </FormField>
+                    <FormField label="Hide empty answers">
+                      <Toggle checked={summaryListConfig?.hideEmpty !== false} onChange={({ detail }) => updateSummaryListConfig({ hideEmpty: detail.checked })}>Hide empty</Toggle>
+                    </FormField>
+                    {summaryListConfig?.hideEmpty === false && (
+                      <FormField label="Empty fallback (EN)">
+                        <Input value={summaryListConfig?.emptyFallback?.en || ''} onChange={({ detail }) => updateSummaryListConfig({ emptyFallback: { ...(summaryListConfig?.emptyFallback || {}), en: detail.value } })} />
+                      </FormField>
+                    )}
+                    {summaryListConfig?.hideEmpty === false && (
+                      <FormField label="Texte de remplacement (FR)">
+                        <Input value={summaryListConfig?.emptyFallback?.fr || ''} onChange={({ detail }) => updateSummaryListConfig({ emptyFallback: { ...(summaryListConfig?.emptyFallback || {}), fr: detail.value } })} />
+                      </FormField>
+                    )}
+                    {(summaryListConfig?.included || []).length === 0 && <Badge color="red">Select at least one field</Badge>}
+                  </>
+                )}
+                {!selectedComponent?.props?.workflowId && (
+                  <Box variant="div" color="text-body-secondary">Select a workflow to populate this summary list. Placeholder rows show until then.</Box>
+                )}
+              </SpaceBetween>
+            </Container>
+          </ExpandableSection>
+        )
+      )}
       {selectedComponent && (
         <>
           <ExpandableSection headerText="Component Properties" defaultExpanded>
@@ -453,8 +700,19 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                         );
                       }
                       if (isPath(path, 'classes')) {
+                        // Prefer template-defined options for this component if provided
+                        let optionValues = [];
+                        if (Array.isArray(item.options) && item.options.length) {
+                          optionValues = item.options.map(o => (o.value ?? o.label ?? ''));
+                        } else {
+                          optionValues = GENERIC_CLASS_SUGGESTIONS;
+                        }
+                        // Ensure current value (e.g., govuk-radios) is present so it is not treated as custom
+                        if (typeof val === 'string' && val && !optionValues.includes(val)) {
+                          optionValues = [val, ...optionValues];
+                        }
                         return (
-                          <CuratedSelectWithCustom value={val || ''} onChange={handleChange} options={GENERIC_CLASS_SUGGESTIONS} placeholder="CSS classes" />
+                          <CuratedSelectWithCustom value={val || ''} onChange={handleChange} options={optionValues} placeholder="CSS classes" />
                         );
                       }
                       if (endsWithPath(path, '.classes')) {
@@ -504,8 +762,36 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                           );
                         }
                         case 'select':
-                        case 'enum':
-                          return <Select expandToViewport selectedOption={{ label: currentValue || item.value, value: currentValue || item.value }} onChange={({ detail }) => handleChange(detail.selectedOption.value)} options={item.options || []} />;
+                        case 'enum': {
+                          // Normalise boolean option values to strings for Cloudscape Select (which matches by reference/value string)
+                          const rawOptions = Array.isArray(item.options) ? item.options : [];
+                          const optList = rawOptions.map(o => {
+                            if (typeof o.value === 'boolean') {
+                              return { ...o, value: o.value ? 'true' : 'false', __bool: true };
+                            }
+                            return o;
+                          });
+                          const rawVal = (currentValue !== undefined ? currentValue : item.value);
+                          const normVal = typeof rawVal === 'boolean' ? (rawVal ? 'true' : 'false') : (rawVal ?? '');
+                          const selectedOption = optList.find(o => o.value === normVal) || (normVal !== '' ? { label: String(normVal), value: normVal } : null);
+                          return (
+                            <Select
+                              expandToViewport
+                              selectedOption={selectedOption}
+                              onChange={({ detail }) => {
+                                const sel = detail.selectedOption;
+                                if (sel && sel.__bool) {
+                                  handleChange(sel.value === 'true');
+                                } else if (typeof rawVal === 'boolean' && (sel?.value === 'true' || sel?.value === 'false')) {
+                                  handleChange(sel.value === 'true');
+                                } else {
+                                  handleChange(sel ? sel.value : '');
+                                }
+                              }}
+                              options={optList}
+                            />
+                          );
+                        }
                         case 'number': {
                           const val = isI18n ? (original?.[currentLang] ?? original?.en ?? original?.fr ?? '') : (currentValue ?? item.value);
                           return <Input type="number" value={val} onChange={({ detail }) => {
@@ -653,31 +939,58 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                           <Table
                             variant="embedded"
                             columnDefinitions={[
-                              ...schema.map(key => ({
-                                id: key,
-                                header: key,
-                                cell: item => asLangString(item[key], 'en'),
-                                editConfig: {
-                                  editingCell: (item, { currentValue, setValue }) => (
-                                    <Input
-                                      value={currentValue ?? asLangString(item[key], 'en')}
-                                      onChange={({ detail }) => {
-                                        const newVal = detail.value;
+                              ...schema.map(key => {
+                                const isHint = key === 'hint';
+                                return {
+                                  id: key,
+                                  header: key,
+                                  minWidth: isHint ? 260 : 120,
+                                  maxWidth: isHint ? 480 : undefined,
+                                  cell: item => {
+                                    const val = asLangString(item[key], 'en');
+                                    if (isHint) {
+                                      // Show full hint but allow wrapping
+                                      return <span style={{ whiteSpace: 'normal', display: 'block' }}>{val}</span>;
+                                    }
+                                    return val;
+                                  },
+                                  editConfig: {
+                                    editingCell: (item, { currentValue, setValue }) => {
+                                      const baseVal = currentValue ?? asLangString(item[key], 'en');
+                                      const handleCommit = (newVal) => {
                                         setValue(newVal);
                                         const updated = [...options];
                                         const idx = options.indexOf(item);
                                         const prev = updated[idx]?.[key];
                                         if (key === 'text' && prev && typeof prev === 'object' && (Object.prototype.hasOwnProperty.call(prev,'en') || Object.prototype.hasOwnProperty.call(prev,'fr'))) {
-                                           updated[idx][key] = { en: newVal, fr: prev.fr ?? '' };
-                                         } else {
-                                           updated[idx][key] = newVal;
-                                         }
-                                         updateComponentProperty(field.path, updated, true);
-                                       }}
-                                     />
-                                   ),
-                                 },
-                               })),
+                                          updated[idx][key] = { en: newVal, fr: prev.fr ?? '' };
+                                        } else {
+                                          updated[idx][key] = newVal;
+                                        }
+                                        updateComponentProperty(field.path, updated, true);
+                                      };
+                                      if (isHint) {
+                                        return (
+                                          <Textarea
+                                            rows={2}
+                                            value={baseVal}
+                                            onChange={({ detail }) => handleCommit(detail.value)}
+                                            placeholder="Hint (optional)"
+                                            style={{ width: '100%' }}
+                                          />
+                                        );
+                                      }
+                                      return (
+                                        <Input
+                                          value={baseVal}
+                                          onChange={({ detail }) => handleCommit(detail.value)}
+                                          style={{ width: '100%' }}
+                                        />
+                                      );
+                                    }
+                                  }
+                                };
+                              }),
                                { id: 'actions', header: 'Actions', cell: item => (<Button iconName="close" variant="icon" onClick={() => handleRemoveOption(options.indexOf(item), field)} />) },
                             ]}
                             items={options}

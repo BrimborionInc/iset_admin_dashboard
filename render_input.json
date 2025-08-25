@@ -1,0 +1,20 @@
+{
+   templateKey: input,
+  props: {
+    name: example-input,
+    id: ,
+ type: text,
+ label: { text: Your input, classes: govuk-label--m },
+ hint: { text: Enter the requested value. },
+ value: ,
+    classes: govuk-input,
+    formGroup: { classes:  },
+ autocomplete: ,
+    inputmode: ,
+ pattern: ,
+    spellcheck: true,
+    errorMessage: { text:  },
+ prefix: { text:  },
+    suffix: { text:  }
+ }
+}
