@@ -1,0 +1,286 @@
+{
+  "steps": [
+    {
+      "stepId": "aaa-radio-group",
+      "type": "schema",
+      "title": {
+        "en": "aaa_Radio Group",
+        "fr": "aaa_Radio Group"
+      },
+      "description": {
+        "en": "",
+        "fr": ""
+      },
+      "components": [
+        {
+          "id": "choose-an-option",
+          "type": "radio",
+          "label": {
+            "en": "Choose an option",
+            "fr": "Choisissez une option"
+          },
+          "hint": {
+            "en": "You can only choose one",
+            "fr": "Vous pouvez choisir un unique"
+          },
+          "class": "govuk-radios",
+          "required": false,
+          "storageKey": "choose-an-option",
+          "legendClass": "govuk-fieldset__legend--s",
+          "options": [
+            {
+              "label": {
+                "en": "Yes",
+                "fr": "Oui"
+              },
+              "value": "1"
+            },
+            {
+              "label": {
+                "en": "No",
+                "fr": "Non"
+              },
+              "value": "2"
+            }
+          ],
+          "name": "example-radio",
+          "normalize": "number"
+        }
+      ],
+      "nextStepId": "eligibility"
+    },
+    {
+      "stepId": "eligibility",
+      "type": "schema",
+      "title": {
+        "en": "Eligibility",
+        "fr": "Eligibility"
+      },
+      "description": {
+        "en": "",
+        "fr": ""
+      },
+      "components": [
+        {
+          "id": "paragraph-2",
+          "type": "paragraph",
+          "text": {
+            "en": "Eligibility",
+            "fr": "Éligibilité"
+          },
+          "class": "govuk-heading-l"
+        },
+        {
+          "id": "paragraph-3",
+          "type": "paragraph",
+          "text": {
+            "en": "Please answer the following questions to determine your eligibility for the ISET program.",
+            "fr": "Exemple de texte"
+          },
+          "class": "govuk-body"
+        },
+        {
+          "id": "are-you-a-member-of-a-first-nations-inuit-or-me-tis-group",
+          "type": "radio",
+          "label": {
+            "en": "Are you a member of a First Nations, Inuit, or Métis group?",
+            "fr": "Are you a member of a First Nations, Inuit, or Métis group?"
+          },
+          "hint": {
+            "en": "This program is for Indigenous Peoples: First Nations, Inuit, or Métis.",
+            "fr": "This program is for Indigenous Peoples: First Nations, Inuit, or Métis."
+          },
+          "class": "govuk-radios--inline",
+          "required": true,
+          "storageKey": "are-you-a-member-of-a-first-nations-inuit-or-me-tis-group",
+          "legendClass": "govuk-fieldset__legend--m",
+          "options": [
+            {
+              "label": "Yes",
+              "value": "1"
+            },
+            {
+              "label": "No",
+              "value": "2"
+            }
+          ],
+          "name": "example-radio",
+          "normalize": "number",
+          "validation": {
+            "required": true,
+            "errorMessage": {
+              "en": "Select an option for are you a member of a first nations, inuit, or métis group?",
+              "fr": "Sélectionnez une option pour are you a member of a first nations, inuit, or métis group?"
+            },
+            "rules": [
+              {
+                "id": "rule-1755876812944",
+                "trigger": [
+                  "change"
+                ],
+                "message": {
+                  "en": "Custom validation message",
+                  "fr": "Message de validation personnalisé"
+                },
+                "severity": "error",
+                "block": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "example-radio-2",
+          "type": "radio",
+          "label": {
+            "en": "Do you identify as a woman, trans woman, Two-Spirit, or gender-diverse individual who identifies as a woman?",
+            "fr": "Do you identify as a woman, trans woman, Two-Spirit, or gender-diverse individual who identifies as a woman?"
+          },
+          "hint": {
+            "en": "ISET is open to Indigenous: women, trans women, Two-Spirit, and gender-diverse people who identify as women.",
+            "fr": "ISET is open to Indigenous: women, trans women, Two-Spirit, and gender-diverse people who identify as women."
+          },
+          "class": "govuk-radios--inline",
+          "required": false,
+          "storageKey": "example-radio-2",
+          "legendClass": "govuk-fieldset__legend--m",
+          "options": [
+            {
+              "label": "Yes",
+              "value": "true"
+            },
+            {
+              "label": "No",
+              "value": "false"
+            }
+          ],
+          "name": "example-radio-2",
+          "normalize": "yn-01"
+        },
+        {
+          "id": "example-radio-3",
+          "type": "radio",
+          "label": {
+            "en": "Are you a Canadian citizen?",
+            "fr": "Are you a Canadian citizen?"
+          },
+          "hint": {
+            "en": "You must be a Canadian citizen to qualify for ISET funding.",
+            "fr": "You must be a Canadian citizen to qualify for ISET funding."
+          },
+          "class": "govuk-radios--inline",
+          "required": false,
+          "storageKey": "example-radio-3",
+          "legendClass": "govuk-fieldset__legend--m",
+          "options": [
+            {
+              "label": "Yes",
+              "value": "true"
+            },
+            {
+              "label": "No",
+              "value": "false"
+            }
+          ],
+          "name": "example-radio-3",
+          "normalize": "yn-01"
+        }
+      ],
+      "nextStepId": "aaa-checkbox"
+    },
+    {
+      "stepId": "aaa-checkbox",
+      "type": "schema",
+      "title": {
+        "en": "aaa_checkbox",
+        "fr": "aaa_checkbox"
+      },
+      "description": {
+        "en": "",
+        "fr": ""
+      },
+      "components": [
+        {
+          "id": "example-checkboxes",
+          "type": "checkboxes",
+          "label": {
+            "en": "Select all that apply",
+            "fr": "Sélectionnez tout ce qui s'applique"
+          },
+          "hint": {
+            "en": "Select all that apply.",
+            "fr": "Sélectionnez toutes les options applicables."
+          },
+          "class": "govuk-checkboxes",
+          "required": false,
+          "storageKey": "example-checkboxes",
+          "legendClass": "govuk-fieldset__legend--l",
+          "options": [
+            {
+              "label": {
+                "en": "Option A",
+                "fr": "Option A"
+              },
+              "value": "a"
+            },
+            {
+              "label": {
+                "en": "Option B",
+                "fr": "Option B"
+              },
+              "value": "b"
+            },
+            {
+              "label": {
+                "en": "Option C",
+                "fr": "Option C"
+              },
+              "value": "c"
+            }
+          ],
+          "name": "example-checkboxes",
+          "normalize": "none"
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "schemaVersion": "1.1",
+    "generatedAt": "2025-08-26T14:24:26.747Z",
+    "workflow": {
+      "id": 15,
+      "name": "Testing Tuesday",
+      "status": "draft"
+    },
+    "counts": {
+      "steps": 3,
+      "components": 7
+    },
+    "templates": [
+      {
+        "id": 1,
+        "template_key": "radio",
+        "version": 1,
+        "type": "radio",
+        "count": 4
+      },
+      {
+        "id": 29,
+        "template_key": "text-block",
+        "version": 3,
+        "type": "paragraph",
+        "count": 2
+      },
+      {
+        "id": 33,
+        "template_key": "checkbox",
+        "version": 1,
+        "type": "checkbox",
+        "count": 1
+      }
+    ]
+  },
+  "validation": {
+    "ok": true,
+    "errors": []
+  }
+}

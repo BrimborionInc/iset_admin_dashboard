@@ -56,6 +56,13 @@ function isInputLike(type) {
   return ['input','text','email','number','password','phone','password-input','textarea','character-count'].includes(t);
 }
 
+// Only a subset of input-like components support prefix/suffix adornments.
+// Excludes textarea and character-count per product decision (no affix UI, avoid noisy translation keys).
+function canHaveAffixes(type) {
+  const t = String(type || '').toLowerCase();
+  return ['input','text','email','number','password','phone','password-input'].includes(t);
+}
+
 function isFileUpload(type) {
   return String(type || '').toLowerCase() === 'file-upload';
 }
@@ -90,8 +97,10 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       if (isInputLike(type)) {
         push(getAtPath(p, 'label.text'));
         push(getAtPath(p, 'hint.text'));
-        push(getAtPath(p, 'prefix.text'));
-        push(getAtPath(p, 'suffix.text'));
+        if (canHaveAffixes(type)) {
+          push(getAtPath(p, 'prefix.text'));
+          push(getAtPath(p, 'suffix.text'));
+        }
       } else if (isSummaryList(type)) {
         const rows = Array.isArray(p?.rows) ? p.rows : [];
         rows.forEach(r => { push(r?.key?.text); push(r?.value?.text); });
@@ -112,6 +121,8 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
         push(getAtPath(p, 'hint.text'));
       } else {
         // best-effort: try label.text then hint.text if present
+  if (getAtPath(p, 'titleText') !== undefined) push(getAtPath(p, 'titleText'));
+  if (getAtPath(p, 'summaryText') !== undefined) push(getAtPath(p, 'summaryText'));
         if (getAtPath(p, 'label.text') !== undefined) push(getAtPath(p, 'label.text'));
         if (getAtPath(p, 'hint.text') !== undefined) push(getAtPath(p, 'hint.text'));
   // also support static content components with top-level text/html
@@ -172,8 +183,10 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       if (isInputLike(type)) {
         addTasksFor(ci, p, 'label.text');
         addTasksFor(ci, p, 'hint.text');
-        addTasksFor(ci, p, 'prefix.text');
-        addTasksFor(ci, p, 'suffix.text');
+        if (canHaveAffixes(type)) {
+          addTasksFor(ci, p, 'prefix.text');
+          addTasksFor(ci, p, 'suffix.text');
+        }
       } else if (isSummaryList(type)) {
         const rows = Array.isArray(p?.rows) ? p.rows : [];
         rows.forEach((r, ri) => {
@@ -194,6 +207,8 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       } else {
         if (getAtPath(p, 'label.text') !== undefined) addTasksFor(ci, p, 'label.text');
         if (getAtPath(p, 'hint.text') !== undefined) addTasksFor(ci, p, 'hint.text');
+  if (getAtPath(p, 'titleText') !== undefined) addTasksFor(ci, p, 'titleText');
+  if (getAtPath(p, 'summaryText') !== undefined) addTasksFor(ci, p, 'summaryText');
   // include static content fields
   if (getAtPath(p, 'text') !== undefined) addTasksFor(ci, p, 'text');
   if (getAtPath(p, 'html') !== undefined) addTasksFor(ci, p, 'html');
@@ -312,8 +327,10 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
         if (isInputLike(type)) {
           rows.push({ label: 'Label', path: 'label.text' });
           rows.push({ label: 'Hint', path: 'hint.text' });
-          rows.push({ label: 'Prefix', path: 'prefix.text' });
-          rows.push({ label: 'Suffix', path: 'suffix.text' });
+          if (canHaveAffixes(type)) {
+            rows.push({ label: 'Prefix', path: 'prefix.text' });
+            rows.push({ label: 'Suffix', path: 'suffix.text' });
+          }
         } else if (isSummaryList(type)) {
           // No top-level label/hint; handled per-row below
         } else if (isFileUpload(type)) {
@@ -335,6 +352,8 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
         } else {
           if (getAtPath(props, 'label.text') !== undefined) rows.push({ label: 'Label', path: 'label.text' });
           if (getAtPath(props, 'hint.text') !== undefined) rows.push({ label: 'Hint', path: 'hint.text' });
+          if (getAtPath(props, 'titleText') !== undefined) rows.push({ label: 'Title', path: 'titleText' });
+          if (getAtPath(props, 'summaryText') !== undefined) rows.push({ label: 'Summary', path: 'summaryText' });
           // static content fields (e.g., inset-text, text-block)
           if (getAtPath(props, 'text') !== undefined) rows.push({ label: 'Text', path: 'text' });
           if (getAtPath(props, 'html') !== undefined) rows.push({ label: 'HTML', path: 'html' });

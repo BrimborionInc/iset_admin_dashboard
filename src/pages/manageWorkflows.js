@@ -4,10 +4,12 @@ import Board from '@cloudscape-design/board-components/board';
 import WorkflowListWidget from '../widgets/WorkflowListWidget';
 import WorkflowPreviewWidget from '../widgets/WorkflowPreviewWidget';
 import WorkflowPropertiesWidget from '../widgets/WorkflowPropertiesWidget';
+import WorkflowRuntimeSchemaWidget from '../widgets/WorkflowRuntimeSchemaWidget';
 
 const initialItems = [
   { id: 'workflowList', rowSpan: 6, columnSpan: 2, data: { title: 'Workflow Library' } },
   { id: 'workflowPreview', rowSpan: 6, columnSpan: 2, data: { title: 'Workflow Preview' } },
+  { id: 'workflowRuntime', rowSpan: 4, columnSpan: 4, data: { title: 'Runtime Schema' } },
   { id: 'workflowProps', rowSpan: 2, columnSpan: 4, data: { title: 'Workflow Properties' } },
 ];
 
@@ -29,6 +31,9 @@ const ManageWorkflows = () => {
           onWorkflowUpdated={setSelectedWorkflow}
         />
       );
+    }
+    if (item.id === 'workflowRuntime') {
+      return <WorkflowRuntimeSchemaWidget selectedWorkflow={selectedWorkflow} />;
     }
     return null;
   };

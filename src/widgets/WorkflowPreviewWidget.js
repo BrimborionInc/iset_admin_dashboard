@@ -1,9 +1,29 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Header, ButtonDropdown, Link } from '@cloudscape-design/components';
+import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, SegmentedControl, Modal } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import ReactFlow from 'reactflow';
 import 'reactflow/dist/style.css';
 import ELK from 'elkjs/lib/elk.bundled.js';
+import axios from 'axios';
+import jsonLogic from 'json-logic-js';
+// Reuse the actual public portal component registry for faithful rendering
+// The portal package is linked via file:../ISET-intake in package.json, so we can import its renderer registry directly.
+import PortalRegistry from '../portalRendererRegistry';
+
+// Helper to safely extract a display string from multilingual or raw values
+const textOf = (v) => {
+  if (v == null) return '';
+  if (typeof v === 'string' || typeof v === 'number') return String(v);
+  if (typeof v === 'object') return v.en || v.fr || Object.values(v).find(x => typeof x === 'string') || '';
+  return '';
+};
+
+// Adaptor for summary-list component so admin preview uses portal SummaryList with current collected answers
+const SummaryListAdapter = ({ comp, answers }) => {
+  const Comp = PortalRegistry['summary-list'];
+  if (!Comp) return null;
+  return <Comp comp={comp} values={answers} />;
+};
 
 // Smaller nodes and tighter default fallback spacing
 const NODE_W = 160;
@@ -163,6 +183,30 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
   const [{ nodes, edges }, setGraph] = useState({ nodes: [], edges: [] });
   const rfRef = React.useRef(null);
   const containerRef = React.useRef(null);
+  const [mode, setMode] = useState('graph'); // graph | interactive | json
+  const [runtime, setRuntime] = useState(null); // { steps, meta }
+  const [runner, setRunner] = useState({ stepIndex: 0, answers: {}, errors: {}, history: [] });
+  const [showAnswers, setShowAnswers] = useState(false);
+  const apiBase = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
+
+  // Load runtime schema only when workflow changes (retain answers & position when switching modes)
+  useEffect(() => {
+    if (!selectedWorkflow) { setRuntime(null); setRunner({ stepIndex: 0, answers: {}, errors: {}, history: [] }); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await axios.get(`${apiBase}/api/workflows/${selectedWorkflow.id}/preview`);
+        if (!cancelled) {
+          setRuntime(data);
+          // Reset runner fresh for new workflow only
+          setRunner({ stepIndex: 0, answers: {}, errors: {}, history: [] });
+        }
+      } catch (e) {
+        if (!cancelled) setRuntime({ error: 'Failed to load runtime schema' });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedWorkflow?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +235,70 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
     return () => ro.disconnect();
   }, []);
 
+  // Interactive helpers
+  const steps = runtime?.steps || [];
+  const currentStep = steps[runner.stepIndex] || null;
+  const answers = runner.answers;
+
+  const setAnswer = (comp, value) => {
+    setRunner(r => ({ ...r, answers: { ...r.answers, [comp.storageKey || comp.id]: value } }));
+  };
+  const validateStep = () => {
+    if (!currentStep) return {};
+    const errs = {};
+    (currentStep.components || []).forEach(c => {
+      const key = c.storageKey || c.id;
+      if (c.required) {
+        const v = answers[key];
+        if (v == null || v === '' || (Array.isArray(v) && !v.length)) errs[key] = 'Required';
+      }
+    });
+    setRunner(r => ({ ...r, errors: errs }));
+    return errs;
+  };
+  const next = () => {
+    const errs = validateStep();
+    if (Object.keys(errs).length) return;
+    if (!currentStep) return;
+    // Branching logic
+    let nextId = null;
+    if (Array.isArray(currentStep.branching)) {
+      for (const b of currentStep.branching) {
+        try { if (jsonLogic.apply(b.condition, answers)) { nextId = b.nextStepId; break; } } catch { /* ignore */ }
+      }
+    }
+    if (!nextId && currentStep.defaultNextStepId) nextId = currentStep.defaultNextStepId;
+    if (!nextId && currentStep.nextStepId) nextId = currentStep.nextStepId;
+    if (nextId) {
+      const idx = steps.findIndex(s => s.stepId === nextId);
+      if (idx >= 0) {
+        setRunner(r => ({
+          ...r,
+          // append current step to history (path stack); if user had gone back and chose a different branch, we prune any forward history implicitly since we base on current r.history
+          history: [...r.history, r.stepIndex],
+          stepIndex: idx,
+          errors: {}
+        }));
+        setShowAnswers(false);
+        return;
+      }
+    }
+  // End reached – show answers modal
+  setShowAnswers(true);
+  // Automatically switch to JSON output view so author sees final answer object
+  setMode('json');
+  setRunner(r => ({ ...r }));
+  };
+  const back = () => {
+    setRunner(r => {
+      if (!r.history.length) return r; // nothing to go back to
+      const newHistory = [...r.history];
+      const prevIdx = newHistory.pop();
+      return { ...r, stepIndex: prevIdx, history: newHistory, errors: {} };
+    });
+    setShowAnswers(false);
+  };
+
   return (
     <BoardItem
       header={
@@ -203,6 +311,19 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
             >
               Info
             </Link>
+          }
+          actions={
+            <SpaceBetween direction="horizontal" size="xs">
+              <SegmentedControl
+                selectedId={mode}
+                onChange={e => setMode(e.detail.selectedId)}
+                options={[
+                  { id: 'graph', text: 'Graph' },
+                  { id: 'interactive', text: 'Interactive' },
+                  { id: 'json', text: 'Output JSON' }
+                ]}
+              />
+            </SpaceBetween>
           }
         >
           Workflow Preview
@@ -227,20 +348,101 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
         {!selectedWorkflow && (
           <div style={{ color: '#888' }}>Select a workflow to preview</div>
         )}
-        {selectedWorkflow && (
+        {selectedWorkflow && mode === 'graph' && (
           <div ref={containerRef} style={{ height: 420, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff' }}>
             <ReactFlow
-        onInit={onRFInit}
+              onInit={onRFInit}
               nodes={nodes}
               edges={edges}
               nodesDraggable={false}
               nodesConnectable={false}
               elementsSelectable={false}
-        panOnDrag
-        zoomOnScroll
-        fitView
+              panOnDrag
+              zoomOnScroll
+              fitView
               proOptions={{ hideAttribution: true }}
             />
+          </div>
+        )}
+  {selectedWorkflow && mode === 'interactive' && (
+          <div style={{ border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', padding: 16, maxHeight: 420, overflow: 'auto' }}>
+            {!runtime && <div style={{ color: '#888' }}>Loading runtime schema...</div>}
+            {runtime?.error && <div style={{ color: '#d4351c' }}>{runtime.error}</div>}
+            {runtime && !runtime.error && currentStep && (
+              <div>
+                <div style={{ marginBottom: 12, fontWeight: 600, fontSize: 16 }}>{currentStep.title?.en || currentStep.stepId}</div>
+                <div className="govuk-width-container" style={{ paddingLeft: 0, paddingRight: 0 }}>
+                  {(currentStep.components || []).map(c => {
+                    const type = c.type;
+                    const key = c.storageKey || c.id;
+                    if (type === 'summary-list') {
+                      return <SummaryListAdapter key={c.id} comp={c} answers={answers} />;
+                    }
+                    const Comp = PortalRegistry[type];
+                    if (!Comp) return <div key={c.id} style={{ fontSize: 12, color: '#666' }}>[Unsupported: {type}]</div>;
+                    const val = answers[key];
+                    return <Comp key={c.id} comp={c} value={val} onChange={v => setAnswer(c, v)} error={runner.errors[key]} values={answers} />;
+                  })}
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <Button disabled={!runner.history.length} onClick={back}>Back</Button>
+                  <Button variant="primary" onClick={next}>{runner.stepIndex < steps.length - 1 ? 'Next' : 'Finish'}</Button>
+                </div>
+                {runner.stepIndex === steps.length - 1 && <div style={{ marginTop: 12, fontSize: 12, color: '#555' }}>Finish simulates end of workflow; data not persisted.</div>}
+              </div>
+            )}
+            {showAnswers && (
+              <Modal
+                visible={showAnswers}
+                onDismiss={() => setShowAnswers(false)}
+                size="large"
+                header="Collected Answers"
+                footer={<SpaceBetween direction="horizontal" size="xs"><Button variant="primary" onClick={() => setShowAnswers(false)}>Close</Button></SpaceBetween>}
+              >
+                <div style={{ maxHeight: 400, overflow: 'auto', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre' }}>
+                  {JSON.stringify(answers, null, 2)}
+                </div>
+              </Modal>
+            )}
+          </div>
+        )}
+        {selectedWorkflow && mode === 'json' && (
+          <div style={{ border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', display: 'flex', flexDirection: 'column', height: 420 }}>
+            {runtime?.error && <div style={{ color: '#d4351c' }}>{runtime.error}</div>}
+            {!runtime && !runtime?.error && <div style={{ color: '#888', padding: 12 }}>Loading runtime schema…</div>}
+            {runtime && !runtime.error && (() => {
+              // Build full skeleton of all storage keys from schema, overlay live answers
+              const out = {};
+              (runtime.steps || []).forEach(s => {
+                (s.components || []).forEach(c => {
+                  if (!c.storageKey) return; // skip non-storing components
+                  if (Object.prototype.hasOwnProperty.call(out, c.storageKey)) return; // first wins
+                  // default value heuristic
+                  let defVal = null;
+                  if (c.type === 'checkboxes') defVal = [];
+                  out[c.storageKey] = defVal;
+                });
+              });
+              // Overlay current answers
+              Object.keys(answers || {}).forEach(k => { out[k] = answers[k]; });
+              const jsonStr = JSON.stringify(out, null, 2);
+              return (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid #f0f2f4', background: '#f8f9fa', borderTopLeftRadius: 6, borderTopRightRadius: 6 }}>
+                    <div style={{ fontWeight: 600 }}>Output JSON <span style={{ fontWeight: 400, color: '#555', fontSize: 12 }}>(null =&gt; unanswered)</span></div>
+                    <Button
+                      variant="icon"
+                      iconName="copy"
+                      ariaLabel="Copy JSON"
+                      onClick={() => { try { navigator.clipboard.writeText(jsonStr); } catch {} }}
+                    />
+                  </div>
+                  <div style={{ flex: 1, overflow: 'auto', padding: 12 }}>
+                    <pre style={{ margin: 0 }}>{jsonStr}</pre>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         )}
       </Box>
