@@ -2,6 +2,9 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import '@cloudscape-design/global-styles/index.css';
+// Include GOV.UK Frontend styles to ensure portal renderer components display faithfully inside admin preview.
+// Prefer local copy (built via govuk-frontend assets pipeline) to avoid external network dependency.
+import './css/govuk-frontend.min.css';
 
 // Dev-only: warn on raw fetch /api calls lacking Authorization (helps catch missed apiFetch migrations)
 if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {

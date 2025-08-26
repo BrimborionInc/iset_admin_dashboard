@@ -1,0 +1,28 @@
+{
+  "template_key": "details",
+  "type": "details",
+  "label": "Details",
+  "description": "Expandable disclosure for secondary information.",
+  "status": "active",
+  "default_props": {
+    "id": "",
+    "open": false,
+    "summaryText": "More details",
+    "text": "This is hidden by default.",
+    "html": "",
+    "classes": ""
+  },
+  "prop_schema": [
+    { "key": "summaryText", "path": "summaryText", "type": "text", "label": "Summary Text" },
+    { "key": "text", "path": "text", "type": "textarea", "label": "Details Text" },
+    { "key": "html", "path": "html", "type": "textarea", "label": "Details HTML" },
+    { "key": "open", "path": "open", "type": "select", "label": "Open by default?", "options": [
+      { "label": "False", "value": false },
+      { "label": "True", "value": true }
+    ] },
+    { "key": "classes", "path": "classes", "type": "text", "label": "CSS Classes" }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "{% from \"govuk/components/details/macro.njk\" import govukDetails %}\n{{ govukDetails({\n  summaryText: props.summaryText,\n  text: props.text,\n  html: props.html,\n  open: props.open,\n  id: props.id,\n  classes: props.classes\n}) }}"
+}

@@ -37,6 +37,19 @@ const mysql = require('mysql2/promise');
 const fs = require('fs');
 const cheerio = require('cheerio');
 const axios = require('axios');
+// Workflow normalization (shared preview/publish schema builder)
+let buildWorkflowSchema; // lazy require inside try-catch to avoid crash if file missing
+try {
+  ({ buildWorkflowSchema } = require('./src/workflows/normalizeWorkflow'));
+} catch (e) {
+  console.warn('[init] normalizeWorkflow module load failed:', e.message);
+}
+let validateWorkflow;
+try { ({ validateWorkflow } = require('./src/workflows/validateComponents')); } catch (e) { console.warn('validator load failed:', e.message); }
+// NOTE: SUPPORTED_COMPONENT_TYPES is already defined later in this file for publish support.
+// We only attempt to import if not present (in older restored versions). If shadowed, ignore.
+let importedSupportedTypes;
+try { ({ SUPPORTED_COMPONENT_TYPES: importedSupportedTypes } = require('./src/workflows/constants')); } catch (e) { /* optional */ }
 
 const app = express();
 const port = process.env.PORT || 5001; // Use port from .env
@@ -317,6 +330,30 @@ syncFileUploadTemplateFromFile();
 async function syncSummaryListTemplateFromFile() { return syncTemplateFromFile('summary-list'); }
 syncSummaryListTemplateFromFile();
 
+// Textarea template sync (reuse generic helper)
+async function syncTextareaTemplateFromFile() { return syncTemplateFromFile('textarea'); }
+syncTextareaTemplateFromFile();
+
+// Character-count template sync (reuse generic helper)
+async function syncCharacterCountTemplateFromFile() { return syncTemplateFromFile('character-count'); }
+syncCharacterCountTemplateFromFile();
+
+// Inset-text template sync (reuse generic helper)
+async function syncInsetTextTemplateFromFile() { return syncTemplateFromFile('inset-text'); }
+syncInsetTextTemplateFromFile();
+
+// Panel template sync (reuse generic helper)
+async function syncPanelTemplateFromFile() { return syncTemplateFromFile('panel'); }
+syncPanelTemplateFromFile();
+
+// Details template sync (reuse generic helper)
+async function syncDetailsTemplateFromFile() { return syncTemplateFromFile('details'); }
+syncDetailsTemplateFromFile();
+
+// Text-block template sync (reuse generic helper)
+async function syncTextBlockTemplateFromFile() { return syncTemplateFromFile('text-block'); }
+syncTextBlockTemplateFromFile();
+
 // Dev helper endpoint to force re-sync of radio template from filesystem (no versioning bump)
 app.post('/api/dev/sync/radio-template', async (_req, res) => {
   await syncRadioTemplateFromFile();
@@ -351,6 +388,42 @@ app.post('/api/dev/sync/file-upload-template', async (_req, res) => {
 app.post('/api/dev/sync/summary-list-template', async (_req, res) => {
   await syncSummaryListTemplateFromFile();
   res.json({ ok: true, message: 'Summary-list template sync attempted' });
+});
+
+// Dev helper to sync textarea template
+app.post('/api/dev/sync/textarea-template', async (_req, res) => {
+  await syncTextareaTemplateFromFile();
+  res.json({ ok: true, message: 'Textarea template sync attempted' });
+});
+
+// Dev helper to sync character-count template
+app.post('/api/dev/sync/character-count-template', async (_req, res) => {
+  await syncCharacterCountTemplateFromFile();
+  res.json({ ok: true, message: 'Character-count template sync attempted' });
+});
+
+// Dev helper to sync inset-text template
+app.post('/api/dev/sync/inset-text-template', async (_req, res) => {
+  await syncInsetTextTemplateFromFile();
+  res.json({ ok: true, message: 'Inset-text template sync attempted' });
+});
+
+// Dev helper to sync panel template
+app.post('/api/dev/sync/panel-template', async (_req, res) => {
+  await syncPanelTemplateFromFile();
+  res.json({ ok: true, message: 'Panel template sync attempted' });
+});
+
+// Dev helper to sync details template
+app.post('/api/dev/sync/details-template', async (_req, res) => {
+  await syncDetailsTemplateFromFile();
+  res.json({ ok: true, message: 'Details template sync attempted' });
+});
+
+// Dev helper to sync text-block template
+app.post('/api/dev/sync/text-block-template', async (_req, res) => {
+  await syncTextBlockTemplateFromFile();
+  res.json({ ok: true, message: 'Text-block template sync attempted' });
 });
 
 // ---------------- Component Templates Endpoints (Library) -----------------
@@ -472,6 +545,34 @@ app.put('/api/component-templates/:id', async (req, res) => {
     const result = validateTemplatePayload('input', default_props);
     if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
   }
+  if (tk === 'textarea' && default_props) {
+    const result = validateTemplatePayload('textarea', default_props);
+    if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
+  }
+  if (tk === 'character-count' && default_props) {
+    const result = validateTemplatePayload('character-count', default_props);
+    if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
+  }
+  if ((tk === 'checkbox' || tk === 'checkboxes') && default_props) {
+    const result = validateTemplatePayload('checkbox', default_props);
+    if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
+  }
+  if (tk === 'inset-text' && default_props) {
+    const result = validateTemplatePayload('inset-text', default_props);
+    if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
+  }
+  if (tk === 'panel' && default_props) {
+    const result = validateTemplatePayload('panel', default_props);
+    if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
+  }
+  if (tk === 'details' && default_props) {
+    const result = validateTemplatePayload('details', default_props);
+    if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
+  }
+  if (tk === 'text-block' && default_props) {
+    const result = validateTemplatePayload('text-block', default_props);
+    if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
+  }
 
   const updates = [];
   const params = [];
@@ -537,6 +638,40 @@ app.post('/api/component-templates/fix/panel-normalize', async (_req, res) => {
     res.status(200).json({ updated });
   } catch (e) {
     res.status(500).json({ error: 'panel_normalize_failed', details: e.message });
+  }
+});
+
+// Migration: prune prefix/suffix props from character-count templates (should not be translatable)
+app.post('/api/component-templates/fix/character-count-prune-prefix-suffix', async (_req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT id, default_props, prop_schema FROM iset_intake.component_template WHERE template_key='character-count'`);
+    let updated = 0;
+    const changed = [];
+    for (const r of rows) {
+      let props = {}; try { props = r.default_props ? JSON.parse(r.default_props) : {}; } catch { props = {}; }
+      let schema = []; try { schema = r.prop_schema ? JSON.parse(r.prop_schema) : []; } catch { schema = []; }
+      const beforeJSON = JSON.stringify(props);
+      // Remove stray prefix/suffix keys (text objects or scalars)
+      if (props && typeof props === 'object') {
+        if (props.prefix) delete props.prefix;
+        if (props.suffix) delete props.suffix;
+      }
+      // Remove any schema entries referencing prefix or suffix
+      if (Array.isArray(schema) && schema.length) {
+        const filtered = schema.filter(f => !(f && typeof f === 'object' && /(^|\.)prefix(\.|$)/i.test(String(f.path||f.key||''))));
+        const filtered2 = filtered.filter(f => !(f && typeof f === 'object' && /(^|\.)suffix(\.|$)/i.test(String(f.path||f.key||''))));
+        schema = filtered2;
+      }
+      const afterJSON = JSON.stringify(props);
+      if (afterJSON !== beforeJSON) {
+        await pool.query(`UPDATE iset_intake.component_template SET default_props=?, prop_schema=? WHERE id=?`, [afterJSON, JSON.stringify(schema), r.id]);
+        updated++; changed.push(r.id);
+      }
+    }
+    res.status(200).json({ ok: true, updated, changed });
+  } catch (e) {
+    console.error('character-count prune prefix/suffix failed', e);
+    res.status(500).json({ error: 'character_count_prune_failed', details: e.message });
   }
 });
 
@@ -2108,6 +2243,47 @@ app.delete('/api/workflows/:id', async (req, res) => {
   }
 });
 
+// --- Runtime Preview (normalized schema) --------------------------------------
+// GET /api/workflows/:id/preview -> { steps, meta }
+app.get('/api/workflows/:id/preview', async (req, res) => {
+  if (!buildWorkflowSchema) return res.status(500).json({ error: 'preview_unavailable', message: 'Normalization module not loaded' });
+  const { id } = req.params;
+  const audit = String(req.query.auditTemplates || 'false').toLowerCase() === 'true';
+  try {
+    const out = await buildWorkflowSchema({ pool, workflowId: id, auditTemplates: audit });
+    // Optional contract validation (dev aid): ?validate=true
+    let validation = null;
+    if (validateWorkflow && String(req.query.validate||'false').toLowerCase()==='true') {
+      validation = validateWorkflow({ steps: out.steps, meta: out.meta });
+    }
+    res.status(200).json({ steps: out.steps, meta: out.meta, validation });
+  } catch (e) {
+    if (e.code === 404) return res.status(404).json({ error: 'Workflow not found' });
+    if (e.code === 400) return res.status(400).json({ error: 'invalid_workflow', details: e.details, message: e.message });
+    console.error('GET /api/workflows/:id/preview failed:', e);
+    res.status(500).json({ error: 'Failed to build preview schema' });
+  }
+});
+
+// Dev: validate workflow contract without fetching steps manually
+app.get('/api/workflows/:id/validate', async (req,res) => {
+  if (!buildWorkflowSchema || !validateWorkflow) return res.status(500).json({ error:'validator_unavailable' });
+  try {
+    const out = await buildWorkflowSchema({ pool, workflowId: req.params.id });
+    const validation = validateWorkflow({ steps: out.steps, meta: out.meta });
+    res.json(validation);
+  } catch (e) {
+    const status = e.code === 404 ? 404 : 500;
+    res.status(status).json({ error: e.message });
+  }
+});
+
+// Meta: list supported component types (helps admin UI understand renderer coverage)
+app.get('/api/meta/supported-component-types', (_req, res) => {
+  if (!SUPPORTED_COMPONENT_TYPES) return res.status(500).json({ error: 'not_available' });
+  res.json({ types: Array.from(SUPPORTED_COMPONENT_TYPES) });
+});
+
 // --- Publish workflow to Public Portal (v1: immediate push) -----------------
 // This builds a self-contained JSON array of steps (bilingual titles/descriptions only for now),
 // supporting linear and single-field option-based routing, and writes it to the portal project.
@@ -2368,7 +2544,11 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
         // 3) props.name
         // 4) props.id (if not a placeholder like input-1)
         // 5) slugified label
-        const labelSlug = slugify(labelText || `${tplType || 'field'}-${i+1}`);
+  // Build slug from resolved English label to avoid '[object Object]' artifacts
+  let labelSlugBase = labelEn && typeof labelEn === 'string' && labelEn.trim() ? labelEn : '';
+  if (!labelSlugBase) labelSlugBase = (typeof labelText === 'string' ? labelText : '') || `${tplType || 'field'}-${i+1}`;
+  let labelSlug = slugify(labelSlugBase) || `${tplType || 'field'}-${i+1}`;
+  if (labelSlug === 'object-object') labelSlug = `${tplType || 'field'}-${i+1}`;
         const routeField = route && route.mode === 'by_option' ? (route.field_key || '').trim() : '';
         const fieldNameProp = (props?.fieldName || props?.field_name || props?.fieldname || '').toString().trim();
         const nameProp = (props?.name || '').toString().trim();

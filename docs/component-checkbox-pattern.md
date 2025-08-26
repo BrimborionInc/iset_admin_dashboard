@@ -1,5 +1,7 @@
 # Checkboxes Component Pattern
 
+Status: Modernized (filesystem template + AJV schema + validation + dev sync)
+
 ## Purpose
 Let users select zero, one, or multiple options from a small to moderate list where independent selection matters (not mutually exclusive like radios).
 
@@ -13,11 +15,12 @@ Let users select zero, one, or multiple options from a small to moderate list wh
 - Disabled: Disables the whole set (rare; prefer conditional rendering instead).
 
 ## Translations
-Bilingual: legend.text, hint.text, each item text, each item hint. Translation widget excludes unrelated fields.
+Bilingual fields: `fieldset.legend.text`, `hint.text`, each `items[].text`, each optional `items[].hint`.
+Prefix/suffix are not applicable.
 
 ## Rendering
-Macro: `govukCheckboxes`.
-Normalization: Ensures `govuk-checkboxes` present in classes (base class re-added if missing); item hint strings coerced to `{ text: "..." }` objects; bilingual expansion handled elsewhere.
+Macro: `govukCheckboxes` (see `export_njk_template` in `checkbox.template.json`).
+Normalization: Server ensures `govuk-checkboxes` present in classes; item hint primitive strings converted to object form; bilingual expansion handled elsewhere.
 
 ## Accessibility
 - Use a clear legend summarizing all items.
@@ -25,10 +28,19 @@ Normalization: Ensures `govuk-checkboxes` present in classes (base class re-adde
 - Avoid too many checkboxes (>12) — consider a multi-select autocomplete.
 - Provide mutually exclusive option (e.g. "None of the above") only if logic requires; ensure exclusive behavior (future enhancement).
 
-## Validation Guidance
-- Option values must be unique.
-- Server: produce an array of selected values; enforce min/max selection rules if any.
-- Do not rely solely on disabled state; remove items not applicable.
+## Validation Guidance (AJV Schema: `checkbox.schema.json`)
+Required top-level: `name`, `fieldset.legend.text|isPageHeading|classes`, `items` (>=1). Hint text required to encourage authors to give clarifying context (policy aligned with radios).
+Per item: `text`, `value` required; optional `hint`, `checked`, `disabled`.
+Recommended additional logical constraints (not yet enforced in schema):
+- Unique item `value`s
+- Avoid empty strings for bilingual `text.en` / `text.fr` when known
+- Hint length ≤ 300 chars (schema enforces)
+
+## Dev Sync & Source of Truth
+Filesystem template: `src/component-lib/checkbox.template.json`
+Schema: `src/component-lib/schemas/checkbox.schema.json`
+Dev resync endpoint: `POST /api/dev/sync/checkbox-template`
+PUT validation: `/api/component-templates/:id` triggers AJV when `template_key` is `checkbox` / `checkboxes`.
 
 ## Example JSON
 ```
@@ -47,7 +59,10 @@ Normalization: Ensures `govuk-checkboxes` present in classes (base class re-adde
 ```
 
 ## Future Enhancements
-- Exclusive (none) option auto-uncheck logic.
-- Min/max selection client validation.
-- Grouped checkbox sets collapse/expand.
- - Optional `idPrefix` support (currently omitted; GOV.UK macro accepts it to customise generated IDs when needed, but default `name`-based IDs are sufficient for our usage).
+- Exclusive (none) option auto-uncheck logic
+- Min/max selection client validation
+- Grouped checkbox sets collapse/expand
+- Optional `idPrefix` support (macro supports it; currently omitted as `name`-based IDs suffice)
+
+---
+Last updated: 2025-08-26

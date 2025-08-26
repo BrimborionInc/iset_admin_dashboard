@@ -227,6 +227,14 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   if (p === 'accept') return 'Comma-separated file types. Use extensions like .pdf,.jpg or MIME types like image/png, application/pdf. Leave blank to allow any.';
   if (p === 'multiple') return 'Allow selecting and uploading multiple files. If enabled, submission stores an array of file objects.';
   if (p === 'documenttype') return 'Optional document category tag (alphanumeric, dash, underscore). Sent to upload endpoint as metadata.';
+  if (p === 'text') return 'Plain text content (displayed inside the inset area / static content component). Keep concise: 1–3 short sentences. Avoid headings or interactive elements.';
+  if (p === 'html') return 'Optional HTML override. If provided, it is rendered instead of Text. Keep markup minimal (links, <strong>, <em>). Do not include headings or form controls.';
+  if (p === 'titletext') return 'Panel heading text (prominent). Should be a short confirmation or status (e.g., Application complete). Bilingual object allowed.';
+  if (p === 'headinglevel') return 'HTML heading level for the panel title (1-4). Choose the level that fits the page outline. Do not skip levels.';
+  if (p === 'summarytext') return 'Clickable summary that toggles visibility of the hidden details content. Keep concise.';
+  if (p === 'open') return 'Whether the details are expanded by default. Usually false so users can choose to reveal.';
+  if (p === 'text') return 'Bilingual text content (object with en/fr). Editing here affects current language view; provide both before publishing.';
+  if (p === 'html') return 'Optional HTML override for this text block. If set, HTML is rendered instead of Text.';
     return null;
   };
 
@@ -380,7 +388,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
     Object.prototype.hasOwnProperty.call(v, 'en') || Object.prototype.hasOwnProperty.call(v, 'fr')
   );
   const translatablePaths = new Set([
-    'label.text', 'hint.text', 'errorMessage.text', 'fieldset.legend.text'
+  'label.text', 'hint.text', 'errorMessage.text', 'fieldset.legend.text', 'titleText', 'summaryText', 'text'
   ]);
   const isTranslatablePath = (p) => translatablePaths.has(String(p || ''));
 
@@ -605,6 +613,18 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
       )}
       {selectedComponent && (
         <>
+          {(() => { /* Determine if validation widget should appear for this component */
+            const t = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
+            const validationAllowed = new Set(['textarea','select','radio','radios','password-input','input','file-upload','date-input','checkbox','checkboxes','character-count']);
+            return validationAllowed.has(t);
+          })() && (
+            <ExpandableSection headerText="Validation" defaultExpanded>
+              <ValidationEditor
+                selectedComponent={selectedComponent}
+                updateComponentProperty={updateComponentProperty}
+              />
+            </ExpandableSection>
+          )}
           <ExpandableSection headerText="Component Properties" defaultExpanded>
             {selectedComponent && latestTemplateVersionByKey && (
               (() => {
@@ -852,6 +872,10 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                     .filter(field => {
                       const isCharCount = (selectedComponent.template_key || selectedComponent.type) === 'character-count';
                       if (isCharCount && (field.path === 'errorMessage.text' || field.key === 'errorMessage.text')) return false;
+                      // Prefix / suffix only apply to text input components; suppress for others
+                      const tKey = String(selectedComponent.template_key || selectedComponent.type || '').toLowerCase();
+                      const isInputLike = tKey === 'input' || tKey === 'text' || tKey === 'email' || tKey === 'number' || tKey === 'password' || tKey === 'phone';
+                      if (!isInputLike && (field.path?.startsWith('prefix.') || field.path?.startsWith('suffix.'))) return false;
                       return true;
                     })
                     .map(field => ({
@@ -1005,14 +1029,6 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
               );
             })}
         </>
-      )}
-      {selectedComponent && (
-        <ExpandableSection headerText="Validation" defaultExpanded>
-          <ValidationEditor
-            selectedComponent={selectedComponent}
-            updateComponentProperty={updateComponentProperty}
-          />
-        </ExpandableSection>
       )}
     </SpaceBetween>
   );

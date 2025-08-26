@@ -1,0 +1,21 @@
+{
+  "template_key": "inset-text",
+  "type": "inset-text",
+  "label": "Inset Text",
+  "description": "Displays a block of subdued content, often used for important notes or contextual background information.",
+  "status": "active",
+  "default_props": {
+    "id": "",
+    "text": "This section contains important background information.",
+    "html": "",
+    "classes": ""
+  },
+  "prop_schema": [
+    { "key": "text", "path": "text", "type": "textarea", "label": "Inset Text" },
+    { "key": "html", "path": "html", "type": "textarea", "label": "HTML Content" },
+    { "key": "classes", "path": "classes", "type": "text", "label": "CSS Classes" }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "{% from \"govuk/components/inset-text/macro.njk\" import govukInsetText %}\n{{ govukInsetText({\n  text: props.text,\n  html: props.html,\n  id: props.id,\n  classes: props.classes\n}) }}"
+}

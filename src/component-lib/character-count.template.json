@@ -1,0 +1,48 @@
+{
+  "template_key": "character-count",
+  "type": "character-count",
+  "label": "Character Count",
+  "description": "Textarea with live character or word count and threshold-based messaging.",
+  "status": "active",
+  "default_props": {
+    "name": "example-character-count",
+    "label": { "text": "Describe your request", "classes": "govuk-label--m" },
+    "hint": { "text": "Do not include personal information." },
+    "errorMessage": { "text": "" },
+    "classes": "",
+    "formGroup": { "classes": "" },
+    "rows": 5,
+    "maxlength": 200,
+    "threshold": 75,
+    "maxwords": null,
+    "autocomplete": "",
+    "spellcheck": true,
+    "value": ""
+  },
+  "prop_schema": [
+    { "key": "name", "path": "name", "type": "text", "label": "Data Key" },
+    { "key": "label.text", "path": "label.text", "type": "text", "label": "Label Text" },
+    { "key": "label.classes", "path": "label.classes", "type": "select", "label": "Label Classes", "options": [
+      { "label": "Default (m)", "value": "govuk-label--m" },
+      { "label": "Small (s)", "value": "govuk-label--s" },
+      { "label": "Large (l)", "value": "govuk-label--l" },
+      { "label": "Extra Large (xl)", "value": "govuk-label--xl" },
+      { "label": "Visually Hidden", "value": "govuk-visually-hidden" }
+    ] },
+    { "key": "hint.text", "path": "hint.text", "type": "text", "label": "Hint Text" },
+    { "key": "rows", "path": "rows", "type": "number", "label": "Rows" },
+    { "key": "maxlength", "path": "maxlength", "type": "number", "label": "Max Length (chars)" },
+    { "key": "threshold", "path": "threshold", "type": "number", "label": "Threshold (%)" },
+    { "key": "maxwords", "path": "maxwords", "type": "number", "label": "Max Words (optional)" },
+    { "key": "autocomplete", "path": "autocomplete", "type": "text", "label": "Autocomplete" },
+    { "key": "spellcheck", "path": "spellcheck", "type": "select", "label": "Spellcheck?", "options": [
+      { "label": "True", "value": true },
+      { "label": "False", "value": false }
+    ] },
+    { "key": "value", "path": "value", "type": "textarea", "label": "Default Value" },
+    { "key": "classes", "path": "classes", "type": "text", "label": "CSS Classes" }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "{% from \"govuk/components/character-count/macro.njk\" import govukCharacterCount %}\n{{ govukCharacterCount({\n  name: props.name,\n  id: props.id or props.name,\n  label: props.label,\n  hint: props.hint,\n  errorMessage: props.errorMessage,\n  formGroup: props.formGroup,\n  classes: props.classes,\n  rows: props.rows,\n  maxlength: props.maxlength,\n  maxwords: props.maxwords,\n  threshold: props.threshold,\n  autocomplete: props.autocomplete,\n  spellcheck: props.spellcheck,\n  value: props.value\n}) }}"
+}

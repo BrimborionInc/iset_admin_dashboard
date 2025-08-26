@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Textarea Component Props Schema",
+  "type": "object",
+  "required": ["name", "label", "hint", "classes", "rows"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "id": { "type": "string" },
+    "label": {
+      "type": "object",
+      "required": ["text"],
+      "properties": {
+        "text": { "anyOf": [ { "type": "string" }, { "type": "object" } ] },
+        "classes": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "hint": {
+      "type": "object",
+      "properties": { "text": { "anyOf": [ { "type": "string" }, { "type": "object" } ] } },
+      "additionalProperties": true
+    },
+    "errorMessage": {
+      "type": "object",
+      "properties": { "text": { "anyOf": [ { "type": "string" }, { "type": "object" } ] } },
+      "additionalProperties": true
+    },
+    "classes": { "type": "string" },
+    "rows": { "type": ["number", "string"], "minimum": 1 },
+    "autocomplete": { "type": "string" },
+    "spellcheck": { "type": "boolean" },
+    "formGroup": {
+      "type": "object",
+      "properties": { "classes": { "type": "string" } },
+      "additionalProperties": true
+    },
+    "value": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}

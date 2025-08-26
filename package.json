@@ -31,6 +31,7 @@
     "https-browserify": "^1.0.0",
     "iset-intake": "file:../ISET-intake",
     "jose": "^5.9.3",
+    "json-logic-js": "^2.0.5",
     "lodash.template": "^4.5.0",
     "mysql": "^2.18.1",
     "mysql2": "^3.12.0",
@@ -57,8 +58,10 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "server": "node isetadminserver.js",
-  "lint": "eslint --ext .js,.jsx src",
+    "lint": "eslint --ext .js,.jsx src",
     "audit:parity": "node scripts/parity-audit.js",
+    "fixtures:workflows": "node scripts/generate-workflow-fixtures.js",
+    "sync:portal-renderers": "node scripts/sync-portal-renderers.js",
     "deploy": "powershell -ExecutionPolicy Bypass -File deploy.ps1"
   },
   "eslintConfig": {
@@ -80,6 +83,7 @@
     ]
   },
   "devDependencies": {
+    "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
     "string-replace-loader": "^3.1.0"
   }
 }
