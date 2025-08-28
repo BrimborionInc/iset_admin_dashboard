@@ -129,6 +129,10 @@ export default function ModifyWorkflowEditorWidget() {
 
   // Validation state
   const validation = useMemo(() => validateWorkflow(steps), [steps]);
+  const dirtyRef = useRef(false);
+  const [isDirty, setIsDirty] = useState(false);
+  // Track unsaved changes (simplistic diff marker)
+  useEffect(() => { dirtyRef.current = true; setIsDirty(true); }, [steps, wfName, wfStatus, startUiId]);
   // Keyboard affordance: Esc clears selection
   useEffect(() => {
     const onKeyDown = (e) => { if (e.key === 'Escape') setSelectedId(null); };
@@ -239,6 +243,7 @@ export default function ModifyWorkflowEditorWidget() {
         u.searchParams.set('id', data.id);
         window.history.replaceState({}, '', u.toString());
       }
+      dirtyRef.current = false; setIsDirty(false);
     } catch (e) {
       setSaveMsg('Save failed');
     } finally {
@@ -290,6 +295,7 @@ export default function ModifyWorkflowEditorWidget() {
             saving={saving}
             saveMsg={saveMsg}
             onClear={() => setSaveMsg('')}
+            dirty={isDirty}
           />
         );
       case 'library':
@@ -308,6 +314,8 @@ export default function ModifyWorkflowEditorWidget() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             onDelete={() => setShowDeleteModal(true)}
+            errorsByStep={validation.byStep}
+            startId={startUiId}
           />
         );
       case 'stepProps':

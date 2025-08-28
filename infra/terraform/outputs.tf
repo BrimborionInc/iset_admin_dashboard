@@ -13,6 +13,11 @@ output "user_pool_client_id" {
   description = "Cognito App Client ID"
 }
 
+output "portal_user_pool_client_id" {
+  value       = aws_cognito_user_pool_client.portal.id
+  description = "Cognito Portal (public) App Client ID"
+}
+
 output "issuer" {
   value       = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.admin.id}"
   description = "OIDC issuer URL for JWT validation"

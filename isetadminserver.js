@@ -17,8 +17,7 @@ const generateGUID = () => {
 // Use dynamic path based on the environment
 const dotenvPath = process.env.NODE_ENV === 'production'
   ? '/home/ec2-user/admin-dashboard/.env'  // Path for production
-  : path.resolve(__dirname, '.env');  // Use local .env for development
-
+  : path.resolve(__dirname, '.env'); // Development/local path
 require('dotenv').config({ path: dotenvPath });
 
 console.log("Loaded .env from:", dotenvPath);  // Debugging log
@@ -75,6 +74,7 @@ app.use(cors(corsOptions));
 try {
   const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
   const devDisableAuth = process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
+  const devAuthBypass = (process.env.DEV_AUTH_BYPASS === 'true' || process.env.DEV_AUTH_BYPASS === '1') && process.env.NODE_ENV !== 'production';
   if (authProvider === 'cognito' && devDisableAuth) {
     console.warn('\n============================================================');
     console.warn('[AUTH] DEV AUTH BYPASS ACTIVE (DEV_DISABLE_AUTH=true)');
@@ -86,6 +86,9 @@ try {
   } else if (authProvider === 'cognito') {
     const { authnMiddleware } = require('./src/middleware/authn');
     app.use('/api', authnMiddleware());
+    if (devAuthBypass) {
+      console.warn('[AUTH] Cognito auth enabled but DEV_AUTH_BYPASS=true: X-Dev-Bypass header with matching token will short-circuit auth in middleware');
+    }
   }
 } catch (e) {
   console.warn('Auth middleware init failed:', e?.message);
@@ -107,6 +110,36 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ provider: 'cognito', auth: req.auth });
 });
 
+// Phase 5: linkage coverage proxy (pulls from intake portal backend)
+// Returns { total, linked, coveragePct, legacyWithPassword, recentActive7d }
+app.get('/api/admin/linkage-stats', async (req, res) => {
+  try {
+    const target = process.env.LINKAGE_STATS_URL || process.env.INTAKE_BASE_URL || 'http://localhost:5000';
+    const url = target.replace(/\/$/, '') + '/api/admin/linkage-stats';
+    const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+    const headers = { 'Content-Type': 'application/json' };
+    // Forward bearer if present (so the portal can auth if required)
+    if (req.headers.authorization) headers.Authorization = req.headers.authorization;
+    // Forward dev bypass headers so intake server can honor local auth bypass
+    ['x-dev-bypass','x-dev-role','x-dev-userid','x-dev-regionid'].forEach(h => {
+      const v = req.headers[h];
+      if (v) headers[h] = v;
+    });
+    const resp = await fetch(url, { headers, timeout: 5000 });
+    const text = await resp.text();
+    if (!resp.ok) {
+      return res.status(502).json({ error: 'upstream_error', status: resp.status, body: text.slice(0,200) });
+    }
+    let json;
+    try { json = JSON.parse(text); } catch {
+      return res.status(502).json({ error: 'invalid_upstream_json', body: text.slice(0,120) });
+    }
+    res.json(json);
+  } catch (e) {
+    res.status(500).json({ error: 'linkage_stats_proxy_failed', message: e.message });
+  }
+});
+
 
 // --- AI Chat proxy & status (server-side, avoids exposing API keys in browser) -----
 // GET  /api/ai/status -> { enabled: boolean, provider: string|null }
@@ -117,9 +150,73 @@ if (!AI_KEY) {
 } else {
   console.log('[AI] OpenRouter key detected. AI translation/chat enabled.');
 }
+// Simple in-memory cache for model catalog
+let __aiModelsCache = { fetchedAt: 0, ttl: 0, data: [] };
+async function fetchOpenRouterModels(force = false) {
+  const now = Date.now();
+  const ttlMs = (parseInt(process.env.OPENROUTER_MODELS_TTL || '3600', 10) || 3600) * 1000;
+  if (!force && __aiModelsCache.data.length && (now - __aiModelsCache.fetchedAt) < __aiModelsCache.ttl) {
+    return { fromCache: true, models: __aiModelsCache.data };
+  }
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (AI_KEY) headers.Authorization = `Bearer ${AI_KEY}`;
+    const resp = await axios.get('https://openrouter.ai/api/v1/models', { headers, timeout: 10000 });
+    const raw = resp.data?.data || resp.data?.models || [];
+    // Normalize subset of useful fields
+    const models = raw.map(m => ({
+      id: m.id || m.name || m.slug,
+      name: m.name || m.id,
+      context: m.context_length || m.context_length_tokens || m.context || null,
+      pricing: m.pricing || m.cost || null,
+      description: m.description || '',
+      architecture: m.architecture || m.family || null,
+      provider: m.provider || (m.id ? m.id.split('/')[0] : null)
+    })).filter(m => m.id);
+    __aiModelsCache = { fetchedAt: now, ttl: ttlMs, data: models };
+    return { fromCache: false, models };
+  } catch (e) {
+    console.warn('[AI] fetch models failed:', e.message);
+    return { fromCache: false, models: [] };
+  }
+}
+// Policy allowlist: env OPENROUTER_ALLOWED_MODELS (comma) or prefixes OPENROUTER_ALLOWED_PREFIXES
+function isModelAllowed(modelId) {
+  if (!modelId) return false;
+  const allowModels = (process.env.OPENROUTER_ALLOWED_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (allowModels.length && allowModels.includes(modelId)) return true;
+  const allowPrefixes = (process.env.OPENROUTER_ALLOWED_PREFIXES || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (allowPrefixes.length && allowPrefixes.some(p => modelId.startsWith(p))) return true;
+  // Fallback to legacy prefix list if none configured
+  if (!allowModels.length && !allowPrefixes.length) {
+    const legacy = ['openai/','mistralai/','anthropic/','google/','meta/'];
+    return legacy.some(p => modelId.startsWith(p));
+  }
+  return false;
+}
+// GET /api/ai/models -> dynamic model catalog (role not strictly required but we may restrict later)
+app.get('/api/ai/models', async (req, res) => {
+  try {
+    const { models, fromCache } = await fetchOpenRouterModels(Boolean(req.query.force));
+    // Apply allowlist filter
+    const filtered = models.filter(m => isModelAllowed(m.id));
+    res.json({ count: filtered.length, fromCache, ttlSeconds: (parseInt(process.env.OPENROUTER_MODELS_TTL || '3600',10)||3600), models: filtered });
+  } catch (e) {
+    res.status(500).json({ error: 'models_fetch_failed', message: e.message });
+  }
+});
 app.get('/api/ai/status', (_req, res) => {
   const enabled = !!AI_KEY;
-  res.json({ enabled, provider: enabled ? 'openrouter' : null });
+  const configuredModel = (process.env.OPENROUTER_MODEL || '').trim();
+  const params = {
+    temperature: parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'),
+    top_p: parseFloat(process.env.OPENROUTER_TOP_P || '1'),
+    max_tokens: parseInt(process.env.OPENROUTER_MAX_TOKENS || '0', 10) || null,
+    presence_penalty: parseFloat(process.env.OPENROUTER_PRESENCE_PENALTY || '0'),
+    frequency_penalty: parseFloat(process.env.OPENROUTER_FREQUENCY_PENALTY || '0')
+  };
+  const fallbacks = (process.env.OPENROUTER_FALLBACK_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
+  res.json({ enabled, provider: enabled ? 'openrouter' : null, model: (global.__AI_MODEL_OVERRIDE || configuredModel || 'mistralai/mistral-7b-instruct'), params, fallbacks });
 });
 // Body: { messages: [{ role, content }], model? }
 app.post('/api/ai/chat', async (req, res) => {
@@ -139,20 +236,533 @@ app.post('/api/ai/chat', async (req, res) => {
         role: ['system','user','assistant'].includes(String(m.role).toLowerCase()) ? String(m.role).toLowerCase() : 'user',
         content: String(m.content ?? '').slice(0, 8000)
       }));
-    const mdl = typeof model === 'string' && model.trim() ? model : 'mistralai/mistral-7b-instruct';
+    const FALLBACK_MODEL = 'mistralai/mistral-7b-instruct';
+  const defaultModel = (global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '').trim() || FALLBACK_MODEL;
+    const requestedModel = (typeof model === 'string' && model.trim()) ? model.trim() : null;
+    const mdl = requestedModel || defaultModel;
     const headers = {
       Authorization: `Bearer ${key}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': process.env.ALLOWED_ORIGIN || 'http://localhost:3001',
       'X-Title': 'Admin Dashboard Assistant',
     };
-  const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', { model: mdl, messages: safeMessages }, { headers });
-    res.status(200).json(resp.data);
+    // Generation params (defaults from env; allow per-request override if provided)
+    const params = {
+      temperature: Math.min(2, Math.max(0, typeof req.body.temperature === 'number' ? req.body.temperature : parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'))),
+      top_p: Math.min(1, Math.max(0, typeof req.body.top_p === 'number' ? req.body.top_p : parseFloat(process.env.OPENROUTER_TOP_P || '1'))),
+      presence_penalty: Math.min(2, Math.max(-2, typeof req.body.presence_penalty === 'number' ? req.body.presence_penalty : parseFloat(process.env.OPENROUTER_PRESENCE_PENALTY || '0'))),
+      frequency_penalty: Math.min(2, Math.max(-2, typeof req.body.frequency_penalty === 'number' ? req.body.frequency_penalty : parseFloat(process.env.OPENROUTER_FREQUENCY_PENALTY || '0'))),
+    };
+    const maxTokensEnv = parseInt(process.env.OPENROUTER_MAX_TOKENS || '0', 10);
+    const max_tokens = typeof req.body.max_tokens === 'number' ? req.body.max_tokens : (maxTokensEnv > 0 ? maxTokensEnv : undefined);
+    if (max_tokens && (!Number.isInteger(max_tokens) || max_tokens < 1)) return res.status(400).json({ error: 'invalid_max_tokens' });
+    const fallbacksChain = (process.env.OPENROUTER_FALLBACK_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
+    const attempted = [];
+    async function tryModel(modelId) {
+      attempted.push(modelId);
+      const payload = { model: modelId, messages: safeMessages, ...params };
+      if (max_tokens) payload.max_tokens = max_tokens;
+      return axios.post('https://openrouter.ai/api/v1/chat/completions', payload, { headers });
+    }
+    let resp;
+    let primaryError = null;
+    try {
+      resp = await tryModel(mdl);
+    } catch (err) {
+      primaryError = err;
+      const status = err?.response?.status;
+      // Iterate fallbacks if configured error and chain exists
+      if ([400,401,402,403,404,422].includes(Number(status)) && fallbacksChain.length) {
+        for (const fb of fallbacksChain) {
+          if (fb === mdl) continue; // skip if same
+            try {
+              resp = await tryModel(fb);
+              return res.status(200).json({ ...resp.data, _fallbackChain: attempted });
+            } catch (e2) {
+              continue;
+            }
+        }
+      }
+      const details = err?.response?.data || { message: err.message };
+      return res.status(status || 500).json({ error: 'proxy_failed', details, attempted, _fallbackChain: attempted });
+    }
+    res.status(200).json({ ...resp.data, _attempted: attempted });
   } catch (e) {
     const status = e?.response?.status || 500;
     const details = e?.response?.data || { message: e.message };
     res.status(status).json({ error: 'proxy_failed', details });
   }
+});
+
+// PATCH /api/config/runtime/ai-model  { model: "model-name" }
+// Non-persistent (in-memory) override for active session; requires System Administrator role when auth enabled
+app.patch('/api/config/runtime/ai-model', (req, res) => {
+  try {
+    const body = req.body || {};
+    const nextModel = (body.model || '').trim();
+    if (!nextModel) return res.status(400).json({ error: 'model_required' });
+    // Basic allowlist (can be expanded)
+    const allowedPrefixes = ['openai/', 'mistralai/', 'anthropic/', 'google/', 'meta/'];
+    if (!allowedPrefixes.some(p => nextModel.startsWith(p))) {
+      return res.status(400).json({ error: 'unsupported_model', message: 'Model prefix not allowed in this environment.' });
+    }
+    // Authorization: if auth provider enabled, require SysAdmin
+    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+    const devAuthBypassed = authProvider === 'cognito' && process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
+    let effectiveRole = req.auth?.role;
+    if ((!effectiveRole || devAuthBypassed) && !req.auth) {
+      // Attempt to derive role from dev bypass header (since auth middleware not attached in bypass mode)
+      const hdrRole = req.get('x-dev-role') || req.get('X-Dev-Role');
+      if (hdrRole) effectiveRole = hdrRole;
+    }
+    if (authProvider === 'cognito' && !devAuthBypassed) {
+      if (effectiveRole !== 'System Administrator') return res.status(403).json({ error: 'forbidden' });
+    } else {
+      // Non-cognito or bypass mode: still enforce role if header provided; allow if System Administrator else forbid
+      if (effectiveRole && effectiveRole !== 'System Administrator') {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+    const prev = global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '';
+    // Persist to .env file (atomic-ish replace). We retain previous lines & replace/append OPENROUTER_MODEL.
+    let persisted = false;
+    try {
+      const envFile = dotenvPath; // resolved earlier depending on NODE_ENV
+      let content = '';
+      try { content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : ''; } catch { /* ignore read error */ }
+      const lines = content.split(/\r?\n/);
+      let found = false;
+      for (let i = 0; i < lines.length; i++) {
+        if (/^\s*OPENROUTER_MODEL\s*=/.test(lines[i])) { lines[i] = `OPENROUTER_MODEL=${nextModel}`; found = true; break; }
+      }
+      if (!found) {
+        if (lines.length && lines[lines.length - 1].trim() !== '') lines.push('');
+        lines.push(`OPENROUTER_MODEL=${nextModel}`);
+      }
+      const newContent = lines.join('\n');
+      // Write via temp file then rename for a bit more safety
+      const tmpPath = envFile + '.tmp';
+      fs.writeFileSync(tmpPath, newContent, 'utf8');
+      fs.renameSync(tmpPath, envFile);
+      persisted = true;
+      // Reflect immediately in process env & clear volatile override
+      process.env.OPENROUTER_MODEL = nextModel;
+      delete global.__AI_MODEL_OVERRIDE;
+    } catch (fileErr) {
+      // Fall back to in-memory override if file write fails
+      global.__AI_MODEL_OVERRIDE = nextModel;
+      console.warn('[ai-model] Failed to persist to .env, using in-memory override only:', fileErr.message);
+    }
+    // Lightweight audit log (stdout). Could be extended to DB later.
+    console.log('[audit] ai-model-change', JSON.stringify({ when: new Date().toISOString(), prev, next: nextModel, by: req.auth?.sub || 'dev-bypass', role: effectiveRole || null, persisted }));
+    res.json({ ok: true, model: nextModel, persisted });
+  } catch (e) {
+    res.status(500).json({ error: 'ai_model_update_failed', message: e.message });
+  }
+});
+
+// GET current AI generation params & fallbacks
+app.get('/api/config/runtime/ai-params', (req, res) => {
+  try {
+    const params = {
+      temperature: parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'),
+      top_p: parseFloat(process.env.OPENROUTER_TOP_P || '1'),
+      max_tokens: parseInt(process.env.OPENROUTER_MAX_TOKENS || '0', 10) || null,
+      presence_penalty: parseFloat(process.env.OPENROUTER_PRESENCE_PENALTY || '0'),
+      frequency_penalty: parseFloat(process.env.OPENROUTER_FREQUENCY_PENALTY || '0')
+    };
+    const fallbacks = (process.env.OPENROUTER_FALLBACK_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
+    res.json({ params, fallbacks });
+  } catch (e) {
+    res.status(500).json({ error: 'ai_params_fetch_failed', message: e.message });
+  }
+});
+
+function persistEnvUpdates(updates) {
+  const envFile = dotenvPath;
+  let content = '';
+  try { content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : ''; } catch { /* ignore */ }
+  const lines = content.split(/\r?\n/);
+  const map = new Map();
+  for (const l of lines) {
+    const m = l.match(/^\s*([^#=]+?)\s?=\s?(.*)$/);
+    if (m) map.set(m[1].trim(), m[2]);
+  }
+  Object.entries(updates).forEach(([k,v]) => { if (v === null || typeof v === 'undefined') return; map.set(k, String(v)); });
+  const newLines = [];
+  const seen = new Set();
+  for (const l of lines) {
+    const m = l.match(/^\s*([^#=]+?)\s?=/);
+    if (m) {
+      const key = m[1].trim();
+      if (updates[key] !== undefined && !seen.has(key)) {
+        newLines.push(`${key}=${map.get(key)}`);
+        seen.add(key);
+        continue;
+      }
+    }
+    newLines.push(l);
+  }
+  for (const [k,v] of Object.entries(updates)) {
+    if (!seen.has(k)) newLines.push(`${k}=${v}`);
+  }
+  const finalContent = newLines.join('\n');
+  const tmp = envFile + '.tmp';
+  fs.writeFileSync(tmp, finalContent, 'utf8');
+  fs.renameSync(tmp, envFile);
+  // Reflect into process.env
+  Object.entries(updates).forEach(([k,v]) => { process.env[k] = String(v); });
+}
+
+// PATCH AI generation params
+app.patch('/api/config/runtime/ai-params', (req, res) => {
+  try {
+    const body = req.body || {};
+    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+    const devAuthBypassed = authProvider === 'cognito' && process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
+    let role = req.auth?.role;
+    if ((!role || devAuthBypassed) && !req.auth) {
+      const hdrRole = req.get('x-dev-role') || req.get('X-Dev-Role');
+      if (hdrRole) role = hdrRole;
+    }
+    if (role !== 'System Administrator') return res.status(403).json({ error: 'forbidden' });
+    const toNumberOrNull = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
+    const temperature = toNumberOrNull(body.temperature);
+    const top_p = toNumberOrNull(body.top_p);
+    const max_tokens = toNumberOrNull(body.max_tokens);
+    const presence_penalty = toNumberOrNull(body.presence_penalty);
+    const frequency_penalty = toNumberOrNull(body.frequency_penalty);
+    function inRange(val, min, max) { return typeof val === 'number' && !Number.isNaN(val) && val >= min && val <= max; }
+    if (temperature !== null && !inRange(temperature, 0, 2)) return res.status(400).json({ error: 'invalid_temperature' });
+    if (top_p !== null && !inRange(top_p, 0, 1)) return res.status(400).json({ error: 'invalid_top_p' });
+    if (presence_penalty !== null && !inRange(presence_penalty, -2, 2)) return res.status(400).json({ error: 'invalid_presence_penalty' });
+    if (frequency_penalty !== null && !inRange(frequency_penalty, -2, 2)) return res.status(400).json({ error: 'invalid_frequency_penalty' });
+    if (max_tokens !== null && (!Number.isInteger(max_tokens) || max_tokens < 1)) return res.status(400).json({ error: 'invalid_max_tokens' });
+    const updates = {};
+    if (temperature !== null) updates.OPENROUTER_TEMPERATURE = temperature;
+    if (top_p !== null) updates.OPENROUTER_TOP_P = top_p;
+    if (max_tokens !== null) updates.OPENROUTER_MAX_TOKENS = max_tokens;
+    if (presence_penalty !== null) updates.OPENROUTER_PRESENCE_PENALTY = presence_penalty;
+    if (frequency_penalty !== null) updates.OPENROUTER_FREQUENCY_PENALTY = frequency_penalty;
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'no_updates' });
+    try { persistEnvUpdates(updates); } catch (e) { return res.status(500).json({ error: 'persist_failed', message: e.message }); }
+    console.log('[audit] ai-params-change', JSON.stringify({ when: new Date().toISOString(), updates, by: req.auth?.sub || 'dev-bypass', role }));
+    res.json({ ok: true, updates });
+  } catch (e) { res.status(500).json({ error: 'ai_params_update_failed', message: e.message }); }
+});
+
+// PATCH AI fallback chain (comma-separated list)
+app.patch('/api/config/runtime/ai-fallbacks', (req, res) => {
+  try {
+    const body = req.body || {};
+    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+    const devAuthBypassed = authProvider === 'cognito' && process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
+    let role = req.auth?.role;
+    if ((!role || devAuthBypassed) && !req.auth) {
+      const hdrRole = req.get('x-dev-role') || req.get('X-Dev-Role'); if (hdrRole) role = hdrRole;
+    }
+    if (role !== 'System Administrator') return res.status(403).json({ error: 'forbidden' });
+    const listRaw = body.fallbackModels || body.fallbacks || [];
+    const list = Array.isArray(listRaw) ? listRaw : String(listRaw).split(',');
+    const cleaned = list.map(s => String(s).trim()).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
+    for (const mdl of cleaned) { if (!isModelAllowed(mdl)) return res.status(400).json({ error: 'unsupported_model_in_fallbacks', model: mdl }); }
+    try { persistEnvUpdates({ OPENROUTER_FALLBACK_MODELS: cleaned.join(',') }); } catch (e) { return res.status(500).json({ error: 'persist_failed', message: e.message }); }
+    console.log('[audit] ai-fallbacks-change', JSON.stringify({ when: new Date().toISOString(), fallbackModels: cleaned, by: req.auth?.sub || 'dev-bypass', role }));
+    res.json({ ok: true, fallbackModels: cleaned });
+  } catch (e) { res.status(500).json({ error: 'ai_fallbacks_update_failed', message: e.message }); }
+});
+
+// --- Runtime Configuration Introspection (non-secret) -----------------------
+// GET /api/config/runtime -> selected non-sensitive runtime configuration values
+// NOTE: Only exposes values safe for admin viewing; secrets go through /api/config/security
+// ---------------- Multi-scope Auth Runtime (Phase 4) ----------------
+// Persistent (filesystem JSON) multi-scope auth configuration
+// Public-only fields: maxPasswordResetsPerDay, anomalyProtection
+const authConfigPath = process.env.AUTH_CONFIG_FILE || path.resolve(__dirname, 'db', 'auth-config.json');
+
+function deepMerge(to, from) {
+  if (!from || typeof from !== 'object') return to;
+  Object.keys(from).forEach(k => {
+    const fv = from[k];
+    if (fv && typeof fv === 'object' && !Array.isArray(fv)) {
+      if (!to[k] || typeof to[k] !== 'object') to[k] = {};
+      deepMerge(to[k], fv);
+    } else {
+      to[k] = fv;
+    }
+  });
+  return to;
+}
+
+function defaultAuthConfig() {
+  return {
+    admin: {
+      tokenTtl: { access: 3600, id: 3600, refresh: 86400, frontendIdle: 900, absolute: 28800 },
+      policy: {
+        mfaMode: 'optional',
+        pkceRequired: true,
+        passwordPolicy: { minLength: 12, requireUpper: true, requireLower: true, requireNumber: true, requireSymbol: false },
+        lockout: { threshold: 5, durationSeconds: 900 },
+        federation: { providers: [], lastSync: null }
+      }
+    },
+    public: {
+      tokenTtl: { access: 3600, id: 3600, refresh: 86400, frontendIdle: 900, absolute: 28800 },
+      policy: {
+        mfaMode: 'off',
+        pkceRequired: true,
+        passwordPolicy: { minLength: 12, requireUpper: true, requireLower: true, requireNumber: true, requireSymbol: false },
+        lockout: { threshold: 5, durationSeconds: 900 },
+        federation: { providers: [], lastSync: null },
+        maxPasswordResetsPerDay: 5,
+        anomalyProtection: 'standard'
+      }
+    }
+  };
+}
+
+function loadAuthConfigFromFile() {
+  try {
+    if (fs.existsSync(authConfigPath)) {
+      const raw = fs.readFileSync(authConfigPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      return deepMerge(defaultAuthConfig(), parsed);
+    }
+  } catch (e) {
+    console.warn('[auth-config] Failed reading persisted auth config, using defaults:', e.message);
+  }
+  return defaultAuthConfig();
+}
+
+function persistAuthConfig(cfg) {
+  try {
+    const dir = path.dirname(authConfigPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const tmp = authConfigPath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8');
+    fs.renameSync(tmp, authConfigPath);
+  } catch (e) {
+    console.warn('[auth-config] Persist failed:', e.message);
+  }
+}
+
+const __authConfig = global.__authConfig || (global.__authConfig = loadAuthConfigFromFile());
+
+function sysAdminOnly(req) {
+  const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+  const devAuthBypassed = authProvider === 'cognito' && process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
+  let role = req.auth?.role;
+  if ((!role || devAuthBypassed) && !req.auth) {
+    const hdrRole = req.get('x-dev-role') || req.get('X-Dev-Role');
+    if (hdrRole) role = hdrRole;
+  }
+  return role === 'System Administrator';
+}
+
+app.get('/api/config/runtime', (req, res) => {
+  try {
+    const enabled = !!AI_KEY;
+    const aiModel = (process.env.OPENROUTER_MODEL || '').trim() || 'mistralai/mistral-7b-instruct';
+    const aiParams = {
+      temperature: parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'),
+      top_p: parseFloat(process.env.OPENROUTER_TOP_P || '1'),
+      max_tokens: parseInt(process.env.OPENROUTER_MAX_TOKENS || '0',10) || null,
+      presence_penalty: parseFloat(process.env.OPENROUTER_PRESENCE_PENALTY || '0'),
+      frequency_penalty: parseFloat(process.env.OPENROUTER_FREQUENCY_PENALTY || '0')
+    };
+    const fallbackModels = (process.env.OPENROUTER_FALLBACK_MODELS || '').split(',').map(s=>s.trim()).filter(Boolean);
+    const authProvider = String(process.env.AUTH_PROVIDER || 'none');
+    const devBypass = process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
+    const allowedOrigins = (process.env.ALLOWED_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+    const nodeEnv = process.env.NODE_ENV || 'development';
+    const authAdmin = __authConfig.admin;
+    const authPublic = __authConfig.public;
+    res.json({
+      ai: { enabled, model: aiModel, params: aiParams, fallbackModels },
+      auth: { // legacy combined surface (admin-focused)
+        tokenTtl: authAdmin.tokenTtl,
+        mfa: { mode: authAdmin.policy.mfaMode },
+        passwordPolicy: authAdmin.policy.passwordPolicy,
+        lockout: authAdmin.policy.lockout,
+        pkceRequired: authAdmin.policy.pkceRequired,
+        devBypass,
+        provider: authProvider
+      },
+      authAdmin: {
+        provider: 'cognito',
+        issuer: process.env.COGNITO_ISSUER || '',
+        tokenTtl: authAdmin.tokenTtl,
+        mfa: { mode: authAdmin.policy.mfaMode },
+        passwordPolicy: authAdmin.policy.passwordPolicy,
+        lockout: authAdmin.policy.lockout,
+        pkceRequired: authAdmin.policy.pkceRequired,
+        federation: authAdmin.policy.federation
+      },
+      authPublic: {
+        provider: 'cognito',
+        issuer: process.env.COGNITO_ISSUER || '',
+        tokenTtl: authPublic.tokenTtl,
+        mfa: { mode: authPublic.policy.mfaMode },
+        passwordPolicy: authPublic.policy.passwordPolicy,
+        lockout: authPublic.policy.lockout,
+        pkceRequired: authPublic.policy.pkceRequired,
+        federation: authPublic.policy.federation,
+        maxPasswordResetsPerDay: authPublic.policy.maxPasswordResetsPerDay,
+        anomalyProtection: authPublic.policy.anomalyProtection
+      },
+      cors: { allowedOrigins },
+      env: { nodeEnv }
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'config_runtime_failed', message: e.message });
+  }
+});
+
+// PATCH auth session TTLs (supports scope=admin|public, fallback both if none)
+app.patch('/api/config/runtime/auth-session', (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const scope = (req.query.scope || '').toLowerCase();
+    if (scope && !['admin','public'].includes(scope)) return res.status(400).json({ error: 'invalid_scope' });
+    const ttl = (req.body || {}).tokenTtl || {};
+    const apply = target => {
+      ['access','id','refresh','frontendIdle','absolute'].forEach(k => { if (ttl[k] !== undefined) target.tokenTtl[k] = ttl[k]; });
+    };
+  if (scope) apply(__authConfig[scope]); else { apply(__authConfig.admin); apply(__authConfig.public); }
+  persistAuthConfig(__authConfig);
+  res.json({ tokenTtl: scope ? __authConfig[scope].tokenTtl : { ...__authConfig.admin.tokenTtl } });
+  } catch (e) { res.status(500).json({ error: 'auth_session_update_failed', message: e.message }); }
+});
+
+// PATCH auth policy (scope)
+app.patch('/api/config/runtime/auth-policy', (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const scope = (req.query.scope || '').toLowerCase();
+    if (scope && !['admin','public'].includes(scope)) return res.status(400).json({ error: 'invalid_scope' });
+    const body = req.body || {};
+    const apply = target => {
+      if (body.mfa && typeof body.mfa.mode === 'string') target.policy.mfaMode = body.mfa.mode;
+      if (body.pkceRequired !== undefined) target.policy.pkceRequired = !!body.pkceRequired;
+      if (body.passwordPolicy) target.policy.passwordPolicy = { ...target.policy.passwordPolicy, ...body.passwordPolicy };
+      if (body.lockout) target.policy.lockout = { ...target.policy.lockout, ...body.lockout };
+    };
+    if (scope) apply(__authConfig[scope]); else { apply(__authConfig.admin); apply(__authConfig.public); }
+    // Public-only fields
+    if (body.maxPasswordResetsPerDay !== undefined && (!scope || scope === 'public')) {
+      const target = scope ? __authConfig[scope] : __authConfig.public; // if both, only apply to public
+      target.policy.maxPasswordResetsPerDay = Number(body.maxPasswordResetsPerDay) || 0;
+    }
+    if (body.anomalyProtection && (!scope || scope === 'public')) {
+      const target = scope ? __authConfig[scope] : __authConfig.public;
+      target.policy.anomalyProtection = String(body.anomalyProtection);
+    }
+    persistAuthConfig(__authConfig);
+    const src = scope ? __authConfig[scope] : __authConfig.admin;
+    const pub = __authConfig.public;
+    const base = {
+      mfa: { mode: src.policy.mfaMode },
+      passwordPolicy: src.policy.passwordPolicy,
+      lockout: src.policy.lockout,
+      pkceRequired: src.policy.pkceRequired
+    };
+    if (scope === 'public') {
+      base.maxPasswordResetsPerDay = pub.policy.maxPasswordResetsPerDay;
+      base.anomalyProtection = pub.policy.anomalyProtection;
+    }
+    res.json(base);
+  } catch (e) { res.status(500).json({ error: 'auth_policy_update_failed', message: e.message }); }
+});
+
+// Federation sync (dummy timestamp update for now)
+app.post('/api/config/runtime/auth-federation-sync', (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const scope = (req.query.scope || '').toLowerCase();
+    if (scope && !['admin','public'].includes(scope)) return res.status(400).json({ error: 'invalid_scope' });
+    const now = new Date().toISOString();
+    const apply = target => { target.policy.federation.lastSync = now; };
+  if (scope) apply(__authConfig[scope]); else { apply(__authConfig.admin); apply(__authConfig.public); }
+  persistAuthConfig(__authConfig);
+  res.json({ lastSync: now });
+  } catch (e) { res.status(500).json({ error: 'auth_federation_sync_failed', message: e.message }); }
+});
+
+// GET /api/config/security -> secret presence + masked forms (never full secret values)
+app.get('/api/config/security', (req, res) => {
+  try {
+    // Derive effective role (mirror logic used in ai-model PATCH for consistency)
+    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+    const devAuthBypassed = authProvider === 'cognito' && process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
+    let effectiveRole = req.auth?.role || null;
+    if ((!effectiveRole || devAuthBypassed) && !req.auth) {
+      const hdrRole = req.get('x-dev-role') || req.get('X-Dev-Role');
+      if (hdrRole) effectiveRole = hdrRole;
+    }
+    const MASK_LEVEL = (() => {
+      if (effectiveRole === 'System Administrator') return 'admin'; // standard masked view
+      if (effectiveRole === 'Program Administrator') return 'restricted'; // heavily masked
+      return 'none'; // no visibility
+    })();
+    const baseMask = (val) => {
+      if (!val) return { present: false, masked: null };
+      const str = String(val);
+      if (str.length <= 8) return { present: true, masked: str[0] + '***' + str.slice(-1) };
+      return { present: true, masked: str.slice(0, 4) + '***' + str.slice(-4) };
+    };
+    const restrictedRemask = (masked) => {
+      if (!masked) return null;
+      // Replace all but last 2 visible chars with * to further restrict
+      return masked.replace(/.(?=..$)/g, '*');
+    };
+    const secretDefs = [
+      { key: 'OPENROUTER_API_KEY', val: process.env.OPENROUTER_API_KEY },
+      { key: 'OPENROUTER_KEY', val: process.env.OPENROUTER_KEY },
+      { key: 'DB_PASS', val: process.env.DB_PASS },
+      { key: 'DEV_DB_KEY', val: process.env.DEV_DB_KEY },
+    ];
+    let secrets = [];
+    if (MASK_LEVEL !== 'none') {
+      secrets = secretDefs.map(s => {
+        const masked = baseMask(s.val);
+        if (MASK_LEVEL === 'restricted' && masked.present) {
+          return { key: s.key, present: true, masked: restrictedRemask(masked.masked) };
+        }
+        return { key: s.key, present: masked.present, masked: masked.masked };
+      });
+    }
+    res.json({ role: effectiveRole, visibility: MASK_LEVEL, secrets });
+  } catch (e) {
+    res.status(500).json({ error: 'config_security_failed', message: e.message });
+  }
+});
+
+// ---------------- Session Audit (Phase 8) -----------------
+// Endpoints assume audit table (created by intake service) exists in same DB.
+// Protected: System Administrator only.
+app.get('/api/audit/session/stats', async (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const [[agg]] = await pool.query(`SELECT COUNT(*) total, MIN(issued_at) oldest, MAX(last_seen_at) newest FROM user_session_audit`).catch(()=>[[{ total:0, oldest:null, newest:null }]]);
+    const [[last24]] = await pool.query(`SELECT COUNT(DISTINCT user_id) active_users_24h, COUNT(*) rows_24h FROM user_session_audit WHERE last_seen_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)`).catch(()=>[[{ active_users_24h:0, rows_24h:0 }]]);
+    res.json({ total: agg.total, oldest: agg.oldest, newest: agg.newest, activeUsers24h: last24.active_users_24h, rows24h: last24.rows_24h });
+  } catch (e) { res.status(500).json({ error: 'session_audit_stats_failed', message: e.message }); }
+});
+app.get('/api/audit/session/recent', async (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit||'50',10)));
+    const [rows] = await pool.query(`SELECT user_id, session_key, issued_at, last_seen_at, ip_hash, user_agent_hash FROM user_session_audit ORDER BY last_seen_at DESC LIMIT ?`, [limit]);
+    res.json({ count: rows.length, sessions: rows });
+  } catch (e) { res.status(500).json({ error: 'session_audit_recent_failed', message: e.message }); }
+});
+app.post('/api/audit/session/prune', async (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days||req.body?.days||'60',10)));
+    const [result] = await pool.query(`DELETE FROM user_session_audit WHERE last_seen_at < DATE_SUB(NOW(), INTERVAL ? DAY)`, [days]);
+    res.json({ pruned: result.affectedRows || 0, olderThanDays: days });
+  } catch (e) { res.status(500).json({ error: 'session_audit_prune_failed', message: e.message }); }
 });
 
 const dbConfig = {
@@ -1037,7 +1647,8 @@ try {
 }
 
 // Helper: render a single component template to HTML using export_njk_template from DB
-async function renderComponentHtml(comp) {
+async function renderComponentHtml(comp, depth = 0) {
+  if (depth > 4) return '<!-- max depth reached -->';
   const templateKey = comp.template_key || comp.templateKey || comp.templateKey || null;
   const type = comp.type || null;
   let rows;
@@ -1060,15 +1671,52 @@ async function renderComponentHtml(comp) {
   if (!tpl) return `<!-- missing template for ${templateKey || type} -->`;
   try {
     // Normalise radio option hint strings -> { text: "..." } objects so GOV.UK macro renders them.
-  const tKey = (templateKey || type || '').toLowerCase();
-  // Normalise hint strings for choice components (radios, checkboxes, select) so GOV.UK macros render them
-  if ((tKey === 'radio' || tKey === 'radios' || tKey === 'select' || tKey === 'checkbox' || tKey === 'checkboxes') && comp?.props && Array.isArray(comp.props.items)) {
-      comp = { ...comp, props: { ...comp.props, items: comp.props.items.map(it => {
-        if (it && typeof it.hint === 'string' && it.hint.trim() !== '') {
-          return { ...it, hint: { text: it.hint } };
+    const tKey = (templateKey || type || '').toLowerCase();
+    // Normalise hint strings for choice components (radios, checkboxes, select)
+    if ((tKey === 'radio' || tKey === 'radios' || tKey === 'select' || tKey === 'checkbox' || tKey === 'checkboxes') && comp?.props && Array.isArray(comp.props.items)) {
+      // Process conditional follow-up questions (single depth currently) for radios + checkboxes
+      if ((tKey === 'radio' || tKey === 'radios' || tKey === 'checkbox' || tKey === 'checkboxes')) {
+        const newItems = [];
+        for (const it of comp.props.items) {
+          if (it && it.conditional && Array.isArray(it.conditional.questions) && it.conditional.questions.length) {
+            // Render each follow-up component to HTML
+            const htmlParts = [];
+            for (const q of it.conditional.questions) {
+              try {
+                // Defensive clone; ensure nested component has template_key if only type present
+                const childComp = { ...q };
+                if (!childComp.template_key && childComp.type) childComp.template_key = childComp.type;
+                const rendered = await renderComponentHtml(childComp, depth + 1);
+                htmlParts.push(rendered);
+              } catch (e) {
+                htmlParts.push(`<!-- follow-up render error: ${e.message} -->`);
+              }
+            }
+            const combined = htmlParts.join('\n');
+            const { questions, ...restCond } = it.conditional;
+            newItems.push({
+              ...it,
+              ...(typeof it.hint === 'string' && it.hint.trim() !== '' ? { hint: { text: it.hint } } : {}),
+              conditional: { ...restCond, html: combined }
+            });
+            continue;
+          }
+          // No conditional questions
+          if (it && typeof it.hint === 'string' && it.hint.trim() !== '') {
+            newItems.push({ ...it, hint: { text: it.hint } });
+          } else {
+            newItems.push(it);
+          }
         }
-        return it;
-      }) } };
+        comp = { ...comp, props: { ...comp.props, items: newItems } };
+      } else {
+        comp = { ...comp, props: { ...comp.props, items: comp.props.items.map(it => {
+          if (it && typeof it.hint === 'string' && it.hint.trim() !== '') {
+            return { ...it, hint: { text: it.hint } };
+          }
+          return it;
+        }) } };
+      }
     }
     // Backward compatibility: earlier editor bug nested updated date-input items under props.props.items
     if ((tKey === 'date' || tKey === 'date-input') && comp?.props) {
@@ -1077,6 +1725,27 @@ async function renderComponentHtml(comp) {
         comp = { ...comp, props: { ...comp.props, items: nested } };
       }
     }
+    // Prune empty errorMessage objects so GOV.UK macros don't apply error styling by presence alone
+    try {
+      if (comp?.props && comp.props.errorMessage) {
+        const em = comp.props.errorMessage;
+        let empty = false;
+        if (typeof em.text === 'string') {
+          empty = em.text.trim() === '';
+        } else if (em && typeof em.text === 'object' && em.text !== null) {
+          const vals = Object.values(em.text).map(v => (typeof v === 'string') ? v.trim() : '');
+            empty = vals.length > 0 && vals.every(v => v === '');
+        } else if (!em.text) {
+          // No text field at all
+          empty = true;
+        }
+        if (empty) {
+          // Remove field entirely so macro treats as no error
+          const { errorMessage, ...rest } = comp.props;
+          comp = { ...comp, props: rest };
+        }
+      }
+    } catch { /* ignore pruning errors */ }
     return env.renderString(tpl, { props: comp.props || {} });
   } catch (e) {
     console.error('NJK render error:', e);
@@ -1095,16 +1764,16 @@ if (!app.locals.__govukStaticMounted) {
 function wrapGovukDoc(innerHtml) {
   // Inline GOV.UK assets to avoid separate network fetches inside iframe which may 404 or be blocked.
   let css = '';
-  let js = '';
+  let jsModule = '';
   try {
     css = fs.readFileSync(path.join(__dirname, 'node_modules', 'govuk-frontend', 'dist', 'govuk', 'govuk-frontend.min.css'), 'utf8');
   } catch (e) {
     css = '/* failed to inline govuk css: ' + e.message + ' */';
   }
   try {
-    js = fs.readFileSync(path.join(__dirname, 'node_modules', 'govuk-frontend', 'dist', 'govuk', 'govuk-frontend.min.js'), 'utf8');
+    jsModule = fs.readFileSync(path.join(__dirname, 'node_modules', 'govuk-frontend', 'dist', 'govuk', 'govuk-frontend.min.js'), 'utf8');
   } catch (e) {
-    js = '/* failed to inline govuk js: ' + e.message + ' */';
+    jsModule = '/* failed to inline govuk js: ' + e.message + ' */';
   }
   return `<!doctype html>
   <html lang="en" class="govuk-template">
@@ -1115,9 +1784,47 @@ function wrapGovukDoc(innerHtml) {
       <style>${css}\nbody { margin:16px; }</style>
     </head>
     <body class="govuk-template__body">
-      <script>document.body.className = document.body.className ? document.body.className + ' js-enabled' : 'js-enabled';</script>
-      <div class="govuk-width-container">${innerHtml}</div>
-      <script>${js}; window.GOVUKFrontend && window.GOVUKFrontend.initAll();</script>
+      <script>
+        // Ensure GOV.UK Frontend support class is present so component JS will initialise
+        // and CSS rules like .govuk-frontend-supported .govuk-radios__conditional--hidden apply.
+        (function(){
+          var cls = document.body.className || '';
+            if(!/\bgovuk-frontend-supported\b/.test(cls)) cls += (cls?' ':'') + 'govuk-frontend-supported';
+            if(!/\bjs-enabled\b/.test(cls)) cls += (cls?' ':'') + 'js-enabled';
+            document.body.className = cls;
+        })();
+      </script>
+  <div class="govuk-width-container">${innerHtml}</div>
+  <script type="module">${jsModule}
+  try { window.GOVUKFrontend && window.GOVUKFrontend.initAll(); } catch(e) { console.warn('GOV.UK initAll failed (module)'); }
+  </script>
+      <script>
+// Minimal fallback for conditional radios & checkboxes (no debug logging)
+(function(){
+  function apply(){
+    const support = document.body.classList.contains('govuk-frontend-supported');
+    // Reset all conditional containers (radios + checkboxes)
+    document.querySelectorAll('.govuk-radios__conditional').forEach(el => { el.classList.add('govuk-radios__conditional--hidden'); if(!support) el.style.display='none'; else if(el.style.display==='none') el.style.removeProperty('display'); });
+    document.querySelectorAll('.govuk-checkboxes__conditional').forEach(el => { el.classList.add('govuk-checkboxes__conditional--hidden'); if(!support) el.style.display='none'; else if(el.style.display==='none') el.style.removeProperty('display'); });
+    function toggle(input, group){
+      const condId = input.getAttribute('aria-controls') || input.getAttribute('data-aria-controls');
+      if(!condId) return;
+      const condEl = document.getElementById(condId);
+      if(!condEl) return;
+      const type = group === 'checkbox' ? 'checkboxes' : 'radios';
+      const hiddenClass = type === 'checkboxes' ? 'govuk-checkboxes__conditional--hidden' : 'govuk-radios__conditional--hidden';
+      const show = input.checked;
+      condEl.classList.toggle(hiddenClass, !show);
+      input.setAttribute('aria-expanded', show ? 'true':'false');
+      if(show) condEl.style.removeProperty('display'); else if(!support) condEl.style.display='none'; else condEl.style.removeProperty('display');
+    }
+    document.querySelectorAll('input[type=radio]').forEach(inp => { if(inp.classList.contains('govuk-radios__input') || inp.hasAttribute('aria-controls') || inp.hasAttribute('data-aria-controls')) toggle(inp,'radio'); });
+    document.querySelectorAll('input[type=checkbox]').forEach(inp => { if(inp.classList.contains('govuk-checkboxes__input') || inp.hasAttribute('aria-controls') || inp.hasAttribute('data-aria-controls')) toggle(inp,'checkbox'); });
+  }
+  document.addEventListener('change', e => { if (e.target && e.target.matches && (e.target.matches('input[type=radio]') || e.target.matches('input[type=checkbox]'))) apply(); });
+  if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(apply,0); else document.addEventListener('DOMContentLoaded', apply);
+})();
+      </script>
     </body>
   </html>`;
 }
@@ -1126,12 +1833,101 @@ function wrapGovukDoc(innerHtml) {
 app.post('/api/preview/step', async (req, res) => {
   try {
     const comps = Array.isArray(req.body?.components) ? req.body.components : [];
+    // Build id lookup for linkage resolution
+    const compById = new Map();
+    for (const c of comps) {
+      if (!c || typeof c !== 'object') continue;
+      if (c.id) compById.set(c.id, c);
+      const nameKey = c.props && c.props.name;
+      if (nameKey && !compById.has(nameKey)) compById.set(nameKey, c);
+    }
+    const referencedChildIds = new Set();
+    // Produce processed components with synthetic embedded conditional.questions for radios & checkboxes based on conditionalChildId
+    const processed = comps.map(orig => {
+      if (!orig || typeof orig !== 'object') return orig;
+      let clone = { ...orig, props: typeof orig.props === 'object' && orig.props !== null ? { ...orig.props } : {} };
+      if (!clone.template_key && clone.templateKey) clone.template_key = clone.templateKey;
+      const tKey = String(clone.template_key || clone.type || '').toLowerCase();
+      if ((tKey === 'radio' || tKey === 'radios' || tKey === 'checkbox' || tKey === 'checkboxes') && Array.isArray(clone.props.items)) {
+        const newItems = clone.props.items.map(it => {
+          if (!it || typeof it !== 'object') return it;
+          if (it.conditionalChildId) {
+            const child = compById.get(it.conditionalChildId);
+            if (child && child !== clone) {
+              const refKey = child.id || (child.props && child.props.name);
+              if (refKey) referencedChildIds.add(refKey);
+              // For checkboxes, GOV.UK expects .govuk-checkboxes__conditional container; radios already handled similarly.
+              // Reuse same structure; macro library differentiates by classes; markup generation handled downstream.
+              return { ...it, conditional: { questions: [ { ...child } ] } };
+            }
+          }
+          return it;
+        });
+        clone = { ...clone, props: { ...clone.props, items: newItems } };
+      }
+      return clone;
+    });
+    // Render skipping referenced conditional children at top-level
     let html = '';
-    for (const raw of comps) {
-      const comp = { ...raw, props: typeof raw.props === 'object' && raw.props !== null ? raw.props : {} };
-      // Normalise possible key naming
+    for (const raw of processed) {
+      const key = raw && (raw.id || (raw.props && raw.props.name));
+      if (key && referencedChildIds.has(key)) continue;
+      const comp = { ...raw, props: typeof raw?.props === 'object' && raw.props !== null ? raw.props : {} };
       if (!comp.template_key && comp.templateKey) comp.template_key = comp.templateKey;
-      html += await renderComponentHtml(comp) + '\n';
+      html += await renderComponentHtml(comp, 0) + '\n';
+    }
+    // Server-side pass to ensure conditionals are hidden unless their input is checked.
+    try {
+      const $ = cheerio.load(html);
+      // Radios
+      $('div.govuk-radios').each((_, group) => {
+        const $group = $(group);
+        $group.find('input.govuk-radios__input').each((__, inp) => {
+          const $inp = $(inp);
+          if(!$inp.attr('aria-controls') && $inp.attr('data-aria-controls')) {
+            $inp.attr('aria-controls', $inp.attr('data-aria-controls'));
+          }
+          const condId = $inp.attr('aria-controls');
+          if (!condId) return;
+          const $cond = $('#' + condId);
+          if (!$cond.length) return;
+          const checked = $inp.is(':checked');
+          $inp.attr('aria-expanded', checked ? 'true' : 'false');
+          if (!checked) {
+            if (!$cond.hasClass('govuk-radios__conditional--hidden')) $cond.addClass('govuk-radios__conditional--hidden');
+          } else {
+            $cond.removeClass('govuk-radios__conditional--hidden');
+            const cleaned = ($cond.attr('style')||'').replace(/display:\s*none;?/,'');
+            if (cleaned) $cond.attr('style', cleaned); else $cond.removeAttr('style');
+          }
+        });
+      });
+      // Checkboxes
+      $('div.govuk-checkboxes').each((_, group) => {
+        const $group = $(group);
+        $group.find('input.govuk-checkboxes__input').each((__, inp) => {
+          const $inp = $(inp);
+          if(!$inp.attr('aria-controls') && $inp.attr('data-aria-controls')) {
+            $inp.attr('aria-controls', $inp.attr('data-aria-controls'));
+          }
+          const condId = $inp.attr('aria-controls');
+          if (!condId) return;
+          const $cond = $('#' + condId);
+          if (!$cond.length) return;
+          const checked = $inp.is(':checked');
+          $inp.attr('aria-expanded', checked ? 'true' : 'false');
+          if (!checked) {
+            if (!$cond.hasClass('govuk-checkboxes__conditional--hidden')) $cond.addClass('govuk-checkboxes__conditional--hidden');
+          } else {
+            $cond.removeClass('govuk-checkboxes__conditional--hidden');
+            const cleaned = ($cond.attr('style')||'').replace(/display:\s*none;?/,'');
+            if (cleaned) $cond.attr('style', cleaned); else $cond.removeAttr('style');
+          }
+        });
+      });
+      html = $.html();
+    } catch (e) {
+      console.warn('conditional preprocess failed:', e.message);
     }
     res.status(200).type('text/html').send(wrapGovukDoc(html));
   } catch (err) {
@@ -1190,6 +1986,20 @@ app.post('/api/render/component', async (req, res) => {
           const nested = normProps?.props?.items;
           if (Array.isArray(nested) && (!Array.isArray(normProps.items) || nested.some(n => n?.autocomplete))) {
             normProps = { ...normProps, items: nested };
+          }
+        }
+        // Prune empty errorMessage to avoid false error styling in working area
+        if (normProps && normProps.errorMessage) {
+          const em = normProps.errorMessage;
+          let empty = false;
+          if (typeof em.text === 'string') empty = em.text.trim() === '';
+          else if (em && typeof em.text === 'object' && em.text !== null) {
+            const vals = Object.values(em.text).map(v => typeof v === 'string' ? v.trim() : '');
+            empty = vals.length > 0 && vals.every(v => v === '');
+          } else if (!em.text) empty = true;
+          if (empty) {
+            const { errorMessage, ...rest } = normProps;
+            normProps = rest;
           }
         }
       } catch { /* ignore normalisation errors */ }

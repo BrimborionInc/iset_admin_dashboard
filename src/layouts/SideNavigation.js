@@ -88,10 +88,11 @@ const SideNavigation = ({ currentRole }) => {
         { type: 'link', text: 'User Management', href: '/user-management-dashboard' },
         { type: 'link', text: 'Release Management', href: '/release-management-dashboard' },
         { type: 'link', text: 'Options', href: '/options-dashboard' },
-        { type: 'link', text: 'Visual Settings', href: '/visual-settings' },
   { type: 'link', text: 'Notification Settings', href: '/notification-settings-dashboard' },
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
-        { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
+        ...(currentRole?.value === 'System Administrator' ? [
+          { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' }
+        ] : []),
         { type: 'link', text: 'Test Config Dashboard', href: '/test-config-dashboard' },
   // Removed duplicate href '/manage-components' (already present under Other Dashboards)
       ],
@@ -102,7 +103,6 @@ const SideNavigation = ({ currentRole }) => {
       defaultExpanded: false,
       items: [
         { type: 'link', text: 'Options', href: '/security-options-dashboard' },
-        { type: 'link', text: 'Visual Settings', href: '/security-visual-settings-dashboard' },
         { type: 'link', text: 'Audit and Logs', href: '/audit-logs-dashboard' },
         { type: 'link', text: 'Security Settings', href: '/manage-security-options' },
   { type: 'link', text: 'Access Control', href: '/access-control' },

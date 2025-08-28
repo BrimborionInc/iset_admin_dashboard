@@ -55,7 +55,15 @@ async function elkLayout(steps, edges) {
   };
 }
 
-const WorkflowCanvasWidget = ({ steps = [], selectedId, onSelect, onDelete, onLayout }) => {
+const WorkflowCanvasWidget = ({
+  steps = [],
+  selectedId,
+  onSelect,
+  onDelete,
+  onLayout,
+  errorsByStep = {}, // { stepId: { errors: [...] } }
+  startId = null,
+}) => {
   const rfWrapRef = useRef(null);
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
@@ -130,7 +138,26 @@ const WorkflowCanvasWidget = ({ steps = [], selectedId, onSelect, onDelete, onLa
       const laidOutEdges = edgesModel;
       const { nodes: laidOutNodes, edges: finalEdges } = await elkLayout(steps, laidOutEdges);
       if (!cancelled) {
-        const withSel = laidOutNodes.map(n => ({ ...n, selected: n.id === selectedId }));
+        const withSel = laidOutNodes.map(n => {
+          const errInfo = errorsByStep[n.id];
+          const hasErrors = !!(errInfo && Array.isArray(errInfo.errors) && errInfo.errors.length);
+            return {
+              ...n,
+              selected: n.id === selectedId,
+              className: hasErrors ? 'node-error' : undefined,
+              data: {
+                ...n.data,
+                errors: hasErrors ? errInfo.errors : null,
+                isStart: startId === n.id
+              },
+              style: {
+                ...n.style,
+                // Highlight start step with thicker border (error style wins via class)
+                border: startId === n.id ? '2px solid #0972d3' : n.style.border,
+                background: startId === n.id ? '#f0f7fc' : n.style.background
+              }
+            };
+        });
         setNodes(withSel);
         setEdges(finalEdges);
         scheduleFit(withSel);
@@ -138,7 +165,7 @@ const WorkflowCanvasWidget = ({ steps = [], selectedId, onSelect, onDelete, onLa
       }
     })();
     return () => { cancelled = true; };
-  }, [steps, edgesModel, selectedId, scheduleFit, onLayout]);
+  }, [steps, edgesModel, selectedId, scheduleFit, onLayout, errorsByStep, startId]);
 
   useEffect(() => { setNodes(ns => ns.map(n => ({ ...n, selected: n.id === selectedId }))); }, [selectedId]);
 

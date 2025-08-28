@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Box, Header } from '@cloudscape-design/components';
+import { Box, Header, Input } from '@cloudscape-design/components';
 
 const IntakeStepLibraryWidget = ({ items = [], status = 'idle', apiBase = '', onAdd }) => {
   const itemI18n = {
@@ -10,10 +10,18 @@ const IntakeStepLibraryWidget = ({ items = [], status = 'idle', apiBase = '', on
     resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.',
   };
 
+  const [filter, setFilter] = useState('');
+  const filtered = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    if (!f) return items;
+    return items.filter(it => it.name.toLowerCase().includes(f));
+  }, [items, filter]);
+
   return (
     <BoardItem header={<Header variant="h2">Intake Step Library</Header>} i18nStrings={itemI18n}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {items.map(item => (
+        <Input placeholder="Filter steps" value={filter} onChange={({detail}) => setFilter(detail.value)} />
+        {filtered.map(item => (
           <div
             key={item.id}
             onClick={() => onAdd && onAdd(item)}
@@ -22,6 +30,7 @@ const IntakeStepLibraryWidget = ({ items = [], status = 'idle', apiBase = '', on
             {item.name}
           </div>
         ))}
+        {filtered.length === 0 && status !== 'loading' && <Box variant="div" color="text-body-secondary">No steps match.</Box>}
         {status === 'loading' && <Box variant="div" color="text-status-info">Loading…</Box>}
         {status === 'error' && (
           <Box variant="div" color="text-status-danger">Failed to load library from {apiBase || '(no base)'}</Box>

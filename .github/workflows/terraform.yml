@@ -1,0 +1,113 @@
+name: Terraform Infra
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/terraform.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/terraform.yml'
+  workflow_dispatch:
+    inputs:
+      workspace:
+        description: 'Terraform workspace to apply (default: prod)'
+        required: false
+        default: 'prod'
+
+env:
+  TF_IN_AUTOMATION: true
+  TF_INPUT: 0
+  TF_CLI_ARGS: "-no-color"
+  WORKING_DIR: infra
+  DEFAULT_WORKSPACE: prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set workspace name
+        id: ws
+        run: |
+          # derive workspace from branch (sanitize)
+          BR="${GITHUB_HEAD_REF}"
+          WS=$(echo "$BR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-' | cut -c1-40)
+          if [ -z "$WS" ]; then WS="preview"; fi
+          echo "workspace=${WS}" >> "$GITHUB_OUTPUT"
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/terraform-oidc-role
+          aws-region: ca-central-1
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+      - name: Package Lambdas
+        run: ./scripts/package-post-confirmation.sh
+      - name: Terraform Init
+        run: terraform init -upgrade
+      - name: Select/Create Workspace
+        run: terraform workspace select "${{ steps.ws.outputs.workspace }}" || terraform workspace new "${{ steps.ws.outputs.workspace }}"
+      - name: Terraform Fmt
+        run: terraform fmt -check -diff
+      - name: Terraform Validate
+        run: terraform validate
+      - name: Terraform Plan
+        run: terraform plan -out=plan.tfplan
+      - name: Show Plan
+        run: terraform show -no-color plan.tfplan > plan.txt
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-${{ steps.ws.outputs.workspace }}
+          path: infra/plan.txt
+
+  apply:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determine workspace
+        id: ws
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.workspace }}" ]; then
+            echo "workspace=${{ github.event.inputs.workspace }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "workspace=${{ env.DEFAULT_WORKSPACE }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/terraform-oidc-role
+          aws-region: ca-central-1
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+      - name: Package Lambdas
+        run: ./scripts/package-post-confirmation.sh
+      - name: Terraform Init
+        run: terraform init -upgrade
+      - name: Select/Create Workspace
+        run: terraform workspace select "${{ steps.ws.outputs.workspace }}" || terraform workspace new "${{ steps.ws.outputs.workspace }}"
+      - name: Terraform Plan (fresh)
+        run: terraform plan -out=plan.tfplan
+      - name: Apply
+        run: terraform apply -auto-approve plan.tfplan
