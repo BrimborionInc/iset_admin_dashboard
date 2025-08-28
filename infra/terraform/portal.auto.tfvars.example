@@ -1,0 +1,34 @@
+# Example variable values for public portal Cognito app client
+# Copy to portal.auto.tfvars (omit .example) and adjust hostnames per environment.
+
+aws_region = "ca-central-1"
+app_name   = "iset"
+environment = "dev"
+
+cognito_domain_prefix = "iset-dev-shared"  # must be globally unique; change per env
+
+# Admin console callbacks (existing usage); keep if needed
+oidc_callback_urls = [
+  "http://localhost:3001/auth/callback",
+]
+oidc_logout_urls = [
+  "http://localhost:3001/logout"
+]
+
+# Public portal callbacks (EN + FR variants pointing to same SPA route)
+portal_callback_urls = [
+  "http://localhost:3000/auth/callback",
+  "http://localhost:3000/fr/auth/callback"
+]
+portal_logout_urls = [
+  "http://localhost:3000/",
+  "http://localhost:3000/fr/"
+]
+
+# Email settings (dev defaults to Cognito-managed emails)
+use_cognito_managed_emails = true
+ses_sender       = "no-reply@example.org"
+ses_identity_arn = "arn:aws:ses:ca-central-1:123456789012:identity/example.org"
+create_ses_identity = false
+
+log_retention_days = 30

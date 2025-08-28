@@ -41,7 +41,18 @@
           "text": { "type": "string", "minLength": 1 },
           "value": { "type": ["string", "number"] },
           "hint": { "type": ["string", "null"], "maxLength": 300 },
-          "conditional": { "type": ["object", "null"] },
+          "conditional": {
+            "type": ["object", "null"],
+            "properties": {
+              "questions": {
+                "type": "array",
+                "items": { "type": "object" },
+                "default": []
+              }
+            },
+            "additionalProperties": true
+          },
+          "conditionalChildId": { "type": ["string", "null"], "description": "Links this option to an existing component id to render conditionally." },
           "attributes": { "type": ["object", "null"] }
         },
         "additionalProperties": true

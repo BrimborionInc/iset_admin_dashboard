@@ -1,230 +1,138 @@
-import React, { useState, useEffect } from 'react';
-import { ContentLayout, Header } from '@cloudscape-design/components';
-import Board from '@cloudscape-design/board-components/board';
-import EncryptionSettings from '../widgets/EncryptionSettings';
-import KeyManagementSettings from '../widgets/KeyManagementSettings'; // Import the new widget
-import IdentityAccessManagementSettings from '../widgets/IdentityAccessManagementSettings'; // Import the new widget
-import SecureApiAccessSettings from '../widgets/SecureApiAccessSettings'; // Import the new widget
-import NetworkSecuritySettings from '../widgets/NetworkSecuritySettings'; // Import the new widget
-import ApplicationSecuritySettings from '../widgets/ApplicationSecuritySettings'; // Import the new widget
-import LoggingMonitoringSettings from '../widgets/LoggingMonitoringSettings'; // Import the new widget
-import DataHandlingRetentionSettings from '../widgets/DataHandlingRetentionSettings'; // Import the new widget
-import IncidentResponseComplianceSettings from '../widgets/IncidentResponseComplianceSettings'; // Import the new widget
+import React, { useEffect, useState, useCallback } from 'react';
+import { Box, SpaceBetween, Button, StatusIndicator, Header } from '@cloudscape-design/components';
+import { Board, BoardItem } from '@cloudscape-design/board-components';
+import { apiFetch } from '../auth/apiClient';
 
-const ManageSecurityOptions = ({ header, headerInfo, toggleHelpPanel, updateBreadcrumbs }) => {
-  const [items, setItems] = useState([
-    {
-      id: 'encryption-settings',
-      rowSpan: 4,
-      columnSpan: 2,
-      data: { title: 'Encryption Settings' },
-    },
-    {
-      id: 'key-management-settings',
-      rowSpan: 4,
-      columnSpan: 2,
-      data: { title: 'Key Management Settings' },
-    },
-    {
-      id: 'identity-access-management-settings',
-      rowSpan: 4,
-      columnSpan: 2,
-      data: { title: 'Identity and Access Management (IAM)' },
-    },
-    {
-      id: 'secure-api-access-settings',
-      rowSpan: 4,
-      columnSpan: 2,
-      data: { title: 'Secure API Access' },
-    },
-    {
-      id: 'network-security-settings',
-      rowSpan: 4,
-      columnSpan: 2,
-      data: { title: 'Network Security' },
-    },
-    {
-      id: 'application-security-settings',
-      rowSpan: 4,
-      columnSpan: 2,
-      data: { title: 'Application Security Settings' },
-    },
-    {
-      id: 'logging-monitoring-settings',
-      rowSpan: 4,
-      columnSpan: 2,
-      data: { title: 'Logging and Monitoring' },
-    },
-    {
-      id: 'data-handling-retention-settings',
-      rowSpan: 4,
-      columnSpan: 2,
-      data: { title: 'Data Handling and Retention' },
-    },
-    {
-      id: 'incident-response-compliance-settings',
-      rowSpan: 4,
-      columnSpan: 2,
-      data: { title: 'Incident Response and Compliance' },
-    },
-    // Add more widgets here as needed
-  ]);
+async function fetchJSON(path) {
+  const res = await apiFetch(path);
+  const text = await res.text();
+  if (!res.ok) {
+    try { const j = JSON.parse(text); throw new Error(j.error || j.message || `Failed ${res.status}`); } catch {
+      const snippet = text.slice(0,120).replace(/\s+/g,' ').trim();
+      throw new Error(`Failed ${res.status}: ${snippet || 'no body'}`);
+    }
+  }
+  try { return JSON.parse(text); } catch {
+    const looksHtml = /<!doctype html/i.test(text);
+    throw new Error(looksHtml ? 'Received HTML instead of JSON (check API base/port or proxy config)' : 'Invalid JSON response');
+  }
+}
 
-  useEffect(() => {
-    updateBreadcrumbs([
-      { text: 'Home', href: '/' },
-      { text: 'Security Settings', href: '#' }
-    ]);
-  }, [updateBreadcrumbs]);
+export default function ManageSecurityOptions({ updateBreadcrumbs }) {
+  const [security, setSecurity] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+  const sec = await fetchJSON('/api/config/security');
+      setSecurity(sec);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { updateBreadcrumbs && updateBreadcrumbs([{ text: 'Home', href: '/' }, { text: 'Security Dashboard', href: '#' }]); }, [updateBreadcrumbs]);
+
+  const defaultItems = React.useMemo(() => ([
+    { id: 'secrets', columnSpan: 2, rowSpan: 4, data: { type: 'secrets' } },
+    { id: 'rotation', columnSpan: 2, rowSpan: 4, data: { type: 'rotation' } },
+    { id: 'status', columnSpan: 2, rowSpan: 4, data: { type: 'status' } }
+  ]), []);
+  const [items, setItems] = useState(defaultItems);
+  const resetLayout = () => setItems(defaultItems);
+
+  function renderWidget(type) {
+    switch (type) {
+      case 'secrets':
+        return security && (
+          <SpaceBetween size="xs">
+            {security.secrets.map(s => (
+              <Box key={s.key}>{s.key}: {s.present ? s.masked : <i>missing</i>}</Box>
+            ))}
+            <Box fontSize="body-s" color="text-status-info">Values are masked. Rotation actions will appear here.</Box>
+          </SpaceBetween>
+        );
+      case 'rotation':
+        return (
+          <SpaceBetween size="s">
+            <Box>Integrate automated rotation workflows per secret (e.g., OpenRouter API key, DB password).</Box>
+            <Button disabled>Rotate Selected (coming soon)</Button>
+          </SpaceBetween>
+        );
+      case 'status':
+        return (
+          <SpaceBetween size="xs">
+            <Box>Secrets Loaded: {security ? security.secrets.filter(s => s.present).length : 0}</Box>
+            <Box>Total Secrets Tracked: {security ? security.secrets.length : 0}</Box>
+            {security && <StatusIndicator type={security.secrets.every(s => s.present) ? 'success' : 'warning'}>{security.secrets.every(s => s.present) ? 'All Present' : 'Missing'}</StatusIndicator>}
+          </SpaceBetween>
+        );
+      default:
+        return <Box>Unknown widget</Box>;
+    }
+  }
+
+  const boardI18n = {
+    empty: 'No widgets',
+    loading: 'Loading',
+    columnAriaLabel: i => `Column ${i + 1}`,
+    itemPositionAnnouncement: e => `Moved to col ${e.currentColumn + 1} row ${e.currentRow + 1}`,
+    liveAnnouncementDndStarted: e => `Picked item ${e.position + 1}`,
+    liveAnnouncementDndItemReordered: e => `Item moved to ${e.currentPosition + 1}`,
+    liveAnnouncementDndItemResized: e => `Resized to ${e.size.width} by ${e.size.height}`,
+    liveAnnouncementDndCommitted: e => `Layout saved. Final position ${e.finalPosition != null ? e.finalPosition + 1 : 'unchanged'}`,
+    liveAnnouncementDndDiscarded: () => 'Move canceled',
+    liveAnnouncementItemRemoved: e => `Removed item ${e.position + 1}`,
+  };
+  const boardItemI18n = {
+    dragHandleAriaLabel: 'Drag handle',
+    dragHandleAriaDescription: 'Press Space or Enter to start dragging the widget',
+    dragHandleAriaDescriptionInactive: 'Drag not active',
+    resizeHandleAriaLabel: 'Resize handle',
+    resizeHandleAriaDescription: 'Press Space or Enter to start resizing the widget',
+    resizeHandleAriaDescriptionInactive: 'Resize not active',
+    removeItemAriaLabel: 'Remove widget',
+    editItemAriaLabel: 'Edit widget',
+    dragInactiveItemAriaLabel: 'Draggable widget',
+    dragActiveItemAriaLabel: 'Dragging widget',
+    resizeInactiveItemAriaLabel: 'Resizable widget',
+    resizeActiveItemAriaLabel: 'Resizing widget'
+  };
 
   return (
-    <ContentLayout
-      header={
-        <Header variant="h1" info={headerInfo}>
-          {header}
-        </Header>
-      }
-    >
-      <Board
-        renderItem={(item) => {
-          if (item.id === 'encryption-settings') {
-            return <EncryptionSettings initialSettings={{
-              dataAtRestEncryption: false,
-              dataInTransitEncryption: { label: 'TLS 1.2', value: 'tls1.2' },
-              perfectForwardSecrecy: false,
-              fipsCompliant: false,
-              certificatePinning: false,
-              kmsKeyUsageLogging: false,
-              multiRegionKeyReplication: false,
-              envelopeEncryption: false,
-              hsmUsage: false,
-            }} toggleHelpPanel={toggleHelpPanel} />;
-          }
-          if (item.id === 'key-management-settings') {
-            return <KeyManagementSettings initialSettings={{
-              keyRotationInterval: { label: '6 months', value: '6m' },
-              automaticKeyExpiry: false,
-              keyAccessRestriction: false,
-              auditLogging: false,
-              revocationPolicy: { label: 'Manual', value: 'manual' },
-            }} toggleHelpPanel={toggleHelpPanel} />;
-          }
-          if (item.id === 'identity-access-management-settings') {
-            return <IdentityAccessManagementSettings initialSettings={{
-              mfaEnforcement: false,
-              sessionTimeoutPolicy: { label: '15 mins', value: '15m' },
-              ssoIntegration: false,
-              adaptiveAuthentication: false,
-              loginRateLimiting: false,
-            }} toggleHelpPanel={toggleHelpPanel} />;
-          }
-          if (item.id === 'secure-api-access-settings') {
-            return <SecureApiAccessSettings initialSettings={{
-              apiKeyExpiryPolicy: { label: '30 days', value: '30d' },
-              oauthEnforcement: false,
-              apiRateLimiting: false,
-              apiLogging: false,
-              restrictedDataFields: false,
-              corsPolicy: { label: 'Strict', value: 'strict' },
-              jwtTokenExpiry: { label: '15 mins', value: '15m' },
-              signedJwtTokens: false,
-            }} toggleHelpPanel={toggleHelpPanel} />;
-          }
-          if (item.id === 'network-security-settings') {
-            return <NetworkSecuritySettings initialSettings={{
-              denyAllInboundTraffic: false,
-              sgNaclPolicyEnforcement: false,
-              ddosProtection: false,
-              wafRulesCustomization: false,
-              intrusionDetection: false,
-              automatedResponse: false,
-              vpnEnforcement: false,
-              encryptedS3Storage: false,
-            }} toggleHelpPanel={toggleHelpPanel} />;
-          }
-          if (item.id === 'application-security-settings') {
-            return <ApplicationSecuritySettings initialSettings={{
-              cspHeaders: false,
-              secureCookies: false,
-              csrfProtection: false,
-              sqlInjectionPrevention: false,
-              xssProtection: false,
-              clickjackingProtection: false,
-              userActivityLogging: false,
-              autoLogout: { label: '15 mins', value: '15m' },
-            }} toggleHelpPanel={toggleHelpPanel} />;
-          }
-          if (item.id === 'logging-monitoring-settings') {
-            return <LoggingMonitoringSettings initialSettings={{
-              centralizedLogging: false,
-              anomalyDetection: false,
-              incidentAlerting: false,
-              logRetentionPolicy: { label: '3 months', value: '3m' },
-              logAccessRestrictions: false,
-              userActivityAuditLogs: false,
-              automatedLogArchival: false,
-              siemIntegration: false,
-            }} toggleHelpPanel={toggleHelpPanel} />;
-          }
-          if (item.id === 'data-handling-retention-settings') {
-            return <DataHandlingRetentionSettings initialSettings={{
-              dataRetentionPolicy: { label: '3 years', value: '3y' },
-              dataMinimization: false,
-              automatedDataDeletion: false,
-              cryptographicErasure: false,
-              anonymization: false,
-              legalHoldExemptions: false,
-              backupEncryption: false,
-              dataIntegrityVerification: false,
-            }} toggleHelpPanel={toggleHelpPanel} />;
-          }
-          if (item.id === 'incident-response-compliance-settings') {
-            return <IncidentResponseComplianceSettings initialSettings={{
-              automatedIncidentDetection: false,
-              keyRevocationPolicy: { label: 'Automatic', value: 'automatic' },
-              patchManagementPolicy: { label: 'Immediate', value: 'immediate' },
-              quarterlyAudits: false,
-              penetrationTestingFrequency: { label: 'Monthly', value: 'monthly' },
-              cccsCompliance: false,
-              isoNistCompliance: false,
-              accessControlReviews: { label: 'Monthly', value: 'monthly' },
-            }} toggleHelpPanel={toggleHelpPanel} />;
-          }
-          return null;
-        }}
-        items={items}
-        onItemsChange={(event) => setItems(event.detail.items)}
-        i18nStrings={{
-          liveAnnouncementDndStarted: (operationType) =>
-            operationType === 'resize' ? 'Resizing' : 'Dragging',
-          liveAnnouncementDndItemReordered: (operation) => {
-            const columns = `column ${operation.placement.x + 1}`;
-            const rows = `row ${operation.placement.y + 1}`;
-            return `Item moved to ${operation.direction === 'horizontal' ? columns : rows}.`;
-          },
-          liveAnnouncementDndItemResized: (operation) => {
-            const columnsConstraint = operation.isMinimalColumnsReached ? ' (minimal)' : '';
-            const rowsConstraint = operation.isMinimalRowsReached ? ' (minimal)' : '';
-            const sizeAnnouncement = operation.direction === 'horizontal'
-              ? `columns ${operation.placement.width}${columnsConstraint}`
-              : `rows ${operation.placement.height}${rowsConstraint}`;
-            return `Item resized to ${sizeAnnouncement}.`;
-          },
-          liveAnnouncementDndItemInserted: (operation) => {
-            const columns = `column ${operation.placement.x + 1}`;
-            const rows = `row ${operation.placement.y + 1}`;
-            return `Item inserted to ${columns}, ${rows}.`;
-          },
-          liveAnnouncementDndCommitted: (operationType) => `${operationType} committed`,
-          liveAnnouncementDndDiscarded: (operationType) => `${operationType} discarded`,
-          liveAnnouncementItemRemoved: (op) => `Removed item ${op.item.data.title}.`,
-          navigationAriaLabel: 'Board navigation',
-          navigationAriaDescription: 'Click on non-empty item to move focus over',
-          navigationItemAriaLabel: (item) => (item ? item.data.title : 'Empty'),
-        }}
-      />
-    </ContentLayout>
+    <>
+      {error && <Box color="text-status-error">{error}</Box>}
+      <SpaceBetween size="s">
+        <Board
+          items={items}
+          renderItem={(item, actions) => (
+            <BoardItem
+              header={
+                <Header variant="h2">
+                  {item.id === 'secrets' ? 'Secrets Inventory' : item.id === 'rotation' ? 'Key Rotation (Planned)' : 'Security Posture'}
+                </Header>
+              }
+              i18nStrings={boardItemI18n}
+              {...actions}
+            >
+              {renderWidget(item.data.type)}
+            </BoardItem>
+          )}
+          onItemsChange={e => setItems(e.detail.items)}
+          i18nStrings={boardI18n}
+          empty={<Box>No security data.</Box>}
+          ariaLabel="Security widgets board"
+        />
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button onClick={resetLayout} variant="link">Reset Layout</Button>
+          <Button onClick={load}>Refresh Data</Button>
+        </SpaceBetween>
+      </SpaceBetween>
+    </>
   );
-};
-
-export default ManageSecurityOptions;
+}

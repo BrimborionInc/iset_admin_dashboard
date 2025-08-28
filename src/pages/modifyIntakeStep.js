@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from "react";
+  import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from "react";
 // Ensure GOV.UK styles are available in-editor
 import "../css/govuk-frontend.min.css";
 // Initialize GOV.UK behaviours for dynamic previews
@@ -104,6 +104,33 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
       return updated;
     });
   };
+  // Derive set of referenced conditional child keys (id or props.name)
+  const conditionalRefMap = useMemo(() => {
+    const map = new Map();
+    const extract = (val) => {
+      if (!val) return '';
+      if (typeof val === 'string') return val;
+      if (typeof val === 'object') {
+        if (val.en || val.fr) return val.en || val.fr || '';
+        for (const v of Object.values(val)) { if (typeof v === 'string' && v.trim()) return v; }
+      }
+      return '';
+    };
+    (components || []).forEach(parent => {
+      if (!parent || !parent.props) return;
+      const t = String(parent.template_key || parent.type || '').toLowerCase();
+      if (!['radio','radios','checkbox','checkboxes'].includes(t)) return;
+      const parentLabel = extract(parent.props?.fieldset?.legend?.text || parent.props?.label?.text || parent.props?.titleText || parent.props?.text) || (parent.props?.name || parent.id || '');
+      const items = Array.isArray(parent.props.items) ? parent.props.items : [];
+      items.forEach(it => {
+        if (it && it.conditionalChildId) {
+          const optLabel = extract(it.text || it.html || it.value) || (it.value || '');
+          if (!map.has(it.conditionalChildId)) map.set(it.conditionalChildId, { parentLabel, optionLabel: optLabel });
+        }
+      });
+    });
+    return map;
+  }, [components]);
   return (
     <div className="stage">
   {components.map((comp, index) => (
@@ -116,6 +143,14 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
           handleSelectComponent={handleSelectComponent}
     selectedComponent={selectedComponent}
     previewLang={previewLang}
+  // Try both the persisted id and the original props.name (pre-persistence key) for mapping
+  conditionalRef={(() => { 
+    const idKey = comp?.id; 
+    const nameKey = comp?.props?.name; 
+    if (idKey && conditionalRefMap.get(idKey)) return conditionalRefMap.get(idKey);
+    if (nameKey && conditionalRefMap.get(nameKey)) return conditionalRefMap.get(nameKey);
+    return null; 
+  })()}
         />
       ))}
       {components.length === 0 && (
@@ -127,7 +162,7 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
   );
 };
 
-const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handleSelectComponent, selectedComponent, previewLang = 'en' }) => {
+const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handleSelectComponent, selectedComponent, previewLang = 'en', conditionalRef = null }) => {
   const handleRef = useRef(null);
   const pendingFocusTargetRef = useRef(null); // stores original mousedown target when selecting
   const [{ isDragging }, drag] = useDrag(() => ({
@@ -526,7 +561,7 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
   });
 
   return (
-    <div
+  <div
       ref={node => drop(node)}
       className={`stage-card${selectedComponent?.index === index ? ' selected' : ''}`}
       style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', opacity: isDragging ? 0.9 : 1 }}
@@ -546,6 +581,38 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
       }}
     >
       <div ref={handleRef} className="handle" style={{ padding: 5, fontWeight: 'bold', userSelect: 'none' }}>⠿</div>
+      {conditionalRef && (
+        <div
+          className="conditional-badge"
+          data-has-detail="1"
+          style={{
+            position: 'absolute',
+            top: 4,
+            right: 36,
+            background: '#5925dc',
+            color: '#fff',
+            fontSize: 10,
+            fontWeight: 600,
+            padding: '2px 6px',
+            borderRadius: 12,
+            letterSpacing: '0.5px',
+            textTransform: 'uppercase',
+            cursor: 'default'
+          }}
+          aria-label={`Conditional follow-up: ${conditionalRef.parentLabel || 'Parent'} > ${conditionalRef.optionLabel || 'Option'}`}
+        >
+          COND
+          <span className="conditional-badge__tooltip" role="tooltip">
+            <strong style={{display:'block', fontWeight:600}}>Conditional Follow-up</strong>
+            <span style={{fontSize:11, display:'block'}}>
+              <span style={{color:'#bbb'}}>Parent:</span> {conditionalRef.parentLabel || 'Parent'}
+            </span>
+            <span style={{fontSize:11, display:'block'}}>
+              <span style={{color:'#bbb'}}>Option:</span> {conditionalRef.optionLabel || 'Option'}
+            </span>
+          </span>
+        </div>
+      )}
       <div
         onClick={handleClick}
         style={{
@@ -614,9 +681,48 @@ const ModifyComponent = () => {
     setHistoryStack(base);
     setHistoryIndex(base.length - 1);
   };
+  // Remove dangling conditionalChildId links on radio options whose target component was deleted
+  function cleanupOrphanConditionalLinks(list) {
+    if (!Array.isArray(list) || !list.length) return list;
+    // Collect BOTH ids and props.name values for robust existence detection across save cycles
+    const existingKeys = new Set();
+    list.forEach(c => {
+      if (!c) return;
+      const idKey = c.id || c.templateId || c.template_id || c.props?.id;
+      const nameKey = c.props?.name;
+      if (idKey) existingKeys.add(String(idKey));
+      if (nameKey) existingKeys.add(String(nameKey));
+    });
+    let changed = false;
+    const cleaned = list.map(c => {
+      if (!c) return c;
+      const typ = String(c.template_key || c.type || '').toLowerCase();
+      if (!['radio','radios','checkbox','checkboxes'].includes(typ)) return c;
+      const items = Array.isArray(c.props?.items) ? c.props.items : [];
+      let itemsChanged = false;
+      const newItems = items.map(it => {
+        if (it && it.conditionalChildId) {
+          // If neither id nor name exists in the set, treat as orphan
+          if (!existingKeys.has(String(it.conditionalChildId))) {
+            const { conditionalChildId, ...rest } = it; // eslint-disable-line no-unused-vars
+            itemsChanged = true;
+            return rest;
+          }
+        }
+        return it;
+      });
+      if (itemsChanged) {
+        changed = true;
+        return { ...c, props: { ...(c.props || {}), items: newItems } };
+      }
+      return c;
+    });
+    return changed ? cleaned : list;
+  }
   function setComponents(nextOrFn, { skipHistory } = {}) {
     _setComponents(prev => {
-      const next = typeof nextOrFn === 'function' ? nextOrFn(prev) : nextOrFn;
+      const rawNext = typeof nextOrFn === 'function' ? nextOrFn(prev) : nextOrFn;
+      const next = cleanupOrphanConditionalLinks(rawNext);
       if (!skipHistory && JSON.stringify(prev) !== JSON.stringify(next)) pushHistory(next);
       return next;
     });
@@ -645,6 +751,31 @@ const ModifyComponent = () => {
   const addComponent = (template, lang = 'en') => {
     if (!template) return;
     const seeded = seedI18nDefaults(template.props || {}, lang);
+    // --- Ensure unique name/id across page (avoid collisions that can make unrelated components look conditionally linked) ---
+    const existingKeys = new Set();
+    components.forEach(c => {
+      if (!c) return;
+      const keys = [c.id, c.templateId, c.template_id, c.props?.id, c.props?.name].filter(Boolean);
+      keys.forEach(k => existingKeys.add(String(k)));
+    });
+    const baseTypeSlug = String(template.template_key || template.type || 'comp').replace(/[^a-zA-Z0-9_-]/g,'-');
+    const preferredFromLabel = (() => {
+      const raw = seeded?.label?.text || seeded?.fieldset?.legend?.text || '';
+      if (typeof raw === 'string') return raw;
+      if (raw && typeof raw === 'object') return raw.en || raw.fr || '';
+      return '';
+    })().trim().slice(0,40).replace(/\s+/g,'-').replace(/[^a-zA-Z0-9_-]/g,'');
+    let candidate = seeded?.name || seeded?.id || preferredFromLabel || baseTypeSlug || 'component';
+    if (!candidate.trim()) candidate = baseTypeSlug || 'component';
+    // Normalize
+    candidate = candidate.replace(/[^a-zA-Z0-9_-]/g,'-');
+    if (/^message$/i.test(candidate)) candidate = baseTypeSlug;
+    // Append numeric suffix until unique
+    let unique = candidate; let idx = 1;
+    while (existingKeys.has(unique)) { unique = `${candidate}-${++idx}`; }
+    if (!seeded.name || existingKeys.has(seeded.name)) seeded.name = unique;
+    if (!seeded.id || existingKeys.has(seeded.id)) seeded.id = seeded.name;
+    // ----------------------------------------------------------------------
     // Summary-list: start with placeholder dummy content (until workflow selected in properties panel)
     if ((template.template_key || template.type) === 'summary-list') {
       if (!Array.isArray(seeded.rows) || !seeded.rows.length) {
@@ -1101,6 +1232,10 @@ const ModifyComponent = () => {
         /* GOV.UK background normalised inside editor */
         .stage .govuk-form-group { margin-bottom: 20px; }
         .stage .govuk-label, .stage .govuk-fieldset__legend { margin-bottom: 5px; }
+  .stage-card .conditional-badge { box-shadow: 0 0 0 1px #fff, 0 1px 3px rgba(0,0,0,0.25); position:relative; }
+  .stage-card .conditional-badge__tooltip { display:none; position:absolute; top:110%; right:0; background:#1d1d29; color:#fff; padding:6px 8px; border-radius:6px; width:220px; z-index:10; box-shadow:0 2px 6px rgba(0,0,0,0.35); text-transform:none; letter-spacing:normal; }
+  .stage-card .conditional-badge__tooltip:before { content:""; position:absolute; top:-5px; right:12px; width:8px; height:8px; background:#1d1d29; transform:rotate(45deg); }
+  .stage-card .conditional-badge[data-has-detail]:hover .conditional-badge__tooltip { display:block; }
       `}</style>
       <Container
         header={
@@ -1184,6 +1319,11 @@ const ModifyComponent = () => {
                   setName(name);
                   setStatus(status);
                   setInitialComponents([]);
+                }}
+                allComponents={components}
+                availableTemplates={availableComponents}
+                addExternalComponent={(comp) => {
+                  setComponents(prev => [...prev, comp]);
                 }}
                 currentLang={previewLang}
                 latestTemplateVersionByKey={latestTemplateVersionByKey}

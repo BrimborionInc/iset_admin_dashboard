@@ -29,6 +29,19 @@ variable "oidc_logout_urls" {
   description = "Allowed OAuth logout URLs"
 }
 
+# Portal (public applicant) Hosted UI callback & logout URLs (distinct from console/admin)
+variable "portal_callback_urls" {
+  type        = list(string)
+  description = "Allowed OAuth callback URLs for public portal app client"
+  default     = []
+}
+
+variable "portal_logout_urls" {
+  type        = list(string)
+  description = "Allowed OAuth logout URLs for public portal app client"
+  default     = []
+}
+
 variable "ses_sender" {
   type        = string
   description = "Verified SES sender email (unused when use_cognito_managed_emails = true)"
@@ -57,4 +70,10 @@ variable "log_retention_days" {
   type        = number
   description = "CloudWatch logs retention for Lambda"
   default     = 30
+}
+
+variable "provisioning_webhook_url" {
+  type        = string
+  description = "Optional HTTPS endpoint the PostConfirmation lambda will POST {sub,email,locale} to for applicant provisioning"
+  default     = ""
 }

@@ -99,6 +99,13 @@ Solution: In `renderComponentHtml()` and `/api/render/component`, if component k
 - Automated parity audit for each component on sync.
 - CLI or script to batch re-sync all template files.
 
+## Conditional Follow-ups (In Progress)
+Alpha scaffold added allowing each `items[]` entry to optionally include a `conditional.questions` array of embedded component definitions. Current release:
+- Schema updated to tolerate `conditional.questions` (array) but UI only shows a placeholder panel.
+- Single depth only; nested follow-ups within a follow-up will be ignored/blocked.
+- Rendering/export logic unchanged until implementation phase; existing radios unaffected.
+Planned next steps: authoring UI for attaching components, runtime reveal script, validation gating (required only when parent option selected), bilingual text handling for embedded components, and documentation examples.
+
 ## Quick Checklist (Radio Done)
 - [x] File source of truth
 - [x] Schema validation (AJV)

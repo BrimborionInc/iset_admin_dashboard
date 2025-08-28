@@ -28,7 +28,6 @@ const AdminDashboard = () => {
         { header: 'Suite Configuration', href: '/configuration-settings', description: 'Access and modify system configuration settings and preferences.' },
         { header: 'Release Management', href: '/release-management-dashboard', description: 'Plan, track, and manage software releases and updates.' },
         { header: 'Preferences', href: '/options-dashboard', description: 'Configure system options and settings to suit your needs.' },
-        { header: 'Visual Settings', href: '/visual-settings', description: 'Customize the visual appearance and themes of the dashboard.' },
         { header: 'Security Options', href: '/security-options-dashboard', description: 'Configure security settings and manage access controls.' },
         { header: 'Audit and Logs', href: '/audit-logs-dashboard', description: 'View and analyze audit logs for system activities and changes.' },
         { header: 'Tutorials', href: '/tutorials-dashboard', description: 'Access tutorials and guides to help you navigate the system.' },

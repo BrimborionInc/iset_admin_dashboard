@@ -5,13 +5,14 @@ import { Box, Container, Header, Table, Input, Button, Select, SpaceBetween, For
 import get from 'lodash/get';
 import Ajv from 'ajv';
 
-const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pageProperties, setPageProperties, currentLang = 'en', latestTemplateVersionByKey, onUpgradeTemplate }) => {
+const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pageProperties, setPageProperties, currentLang = 'en', latestTemplateVersionByKey, onUpgradeTemplate, allComponents, addExternalComponent, availableTemplates = [] }) => {
   const [availableDataSources, setAvailableDataSources] = useState([]);
   const [selectedEndpoint, setSelectedEndpoint] = useState(null);
   const [optionSourceMode, setOptionSourceMode] = useState('static');
   const suppressOptionModeEffectRef = useRef(false);
   const suppressNextModeEffect = useRef(false);
   const [validationErrors, setValidationErrors] = useState({});
+
 
   const ajv = useMemo(() => new Ajv({ allErrors: true, strict: false }), []);
 
@@ -1020,6 +1021,23 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                             items={options}
                             header={<Header variant="h3" actions={<Button iconName="add-plus" variant="icon" onClick={() => handleAddOption(field)}>Add Option</Button>} />}
                           />
+                          {(() => {
+                            const tKey = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
+                            if (!['radio','radios','checkbox','checkboxes'].includes(tKey)) return null;
+                            return (
+                              <ChoiceConditionalScaffold
+                                options={options}
+                                fieldPath={field.path}
+                                updateComponentProperty={updateComponentProperty}
+                                asLangString={asLangString}
+                                pageComponents={allComponents || []}
+                                setPageProperties={setPageProperties}
+                                selectedComponent={selectedComponent}
+                                addExternalComponent={addExternalComponent}
+                                availableTemplates={availableTemplates}
+                              />
+                            );
+                          })()}
                         </>
                       )}
                     </SpaceBetween>
@@ -1035,6 +1053,197 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
 };
 
 export default PropertiesPanel;
+
+// --- Radio Conditional Linking Scaffold (Option C) ---
+const ChoiceConditionalScaffold = ({ options, fieldPath, updateComponentProperty, asLangString, pageComponents, setPageProperties, selectedComponent, addExternalComponent, availableTemplates = [] }) => {
+  const [selectedOptionIdx, setSelectedOptionIdx] = React.useState(-1);
+  const [mode, setMode] = React.useState('choose'); // choose | attach-existing | create-new
+  const [newType, setNewType] = React.useState('input');
+  const [newLabel, setNewLabel] = React.useState('');
+  const optionList = Array.isArray(options) ? options : [];
+  // Allowable linked child component types (broad but exclude radios to prevent nesting groups for now)
+  const followTypes = ['input','text','textarea','select','checkbox','date-input','date','file-upload','details','panel','text-block','character-count','email','number','phone','password','paragraph','inset-text','warning-text'];
+
+  const updateOptionArray = (mutator) => {
+    const next = optionList.map(o => ({ ...o }));
+    mutator(next);
+    updateComponentProperty(fieldPath, next, true);
+  };
+
+  const selectedOpt = selectedOptionIdx >=0 ? optionList[selectedOptionIdx] : null;
+  const linkedChildId = selectedOpt?.conditionalChildId || null;
+  const linkedChild = linkedChildId ? pageComponents.find(c => {
+    if (!c) return false;
+    const keys = [c.id, c.props?.name, c.templateId, c.template_id].filter(Boolean);
+    return keys.includes(linkedChildId);
+  }) : null;
+
+  const extractLabel = (comp) => {
+    if (!comp) return '';
+    const raw = comp.props?.label?.text || comp.props?.fieldset?.legend?.text || comp.props?.titleText || comp.props?.text;
+    if (typeof raw === 'string') return raw;
+    if (raw && typeof raw === 'object') {
+      // i18n or macro object
+      const en = raw.en || raw.EN || raw.En;
+      const fr = raw.fr || raw.FR || raw.Fr;
+      if (typeof en === 'string' && en.trim()) return en;
+      if (typeof fr === 'string' && fr.trim()) return fr;
+      // Any string value inside object
+      for (const v of Object.values(raw)) {
+        if (typeof v === 'string' && v.trim()) return v;
+      }
+    }
+    return comp.id || comp.props?.name || '';
+  };
+
+  const referencedIds = new Set();
+  optionList.forEach(o => { if (o && o.conditionalChildId) referencedIds.add(o.conditionalChildId); });
+
+  const allComponents = Array.isArray(pageComponents) ? pageComponents : [];
+  const candidateExisting = allComponents.filter(c => {
+    if (!c) return false;
+    const keys = [c.id, c.props?.name].filter(Boolean);
+    if (!keys.length) return false;
+    const parentKeys = [selectedComponent?.id, selectedComponent?.props?.name].filter(Boolean);
+    if (keys.some(k => parentKeys.includes(k))) return false;
+    const t = String(c.type || c.template_key || '').toLowerCase();
+    if (t === 'radio' || t === 'radios') return false;
+    // If any of the component's keys already referenced by some other option (and not the currently selected link), exclude
+    if (keys.some(k => referencedIds.has(k)) && !keys.includes(linkedChildId)) return false;
+    if (!followTypes.includes(t)) return false;
+    return true;
+  });
+
+  const linkExisting = (childId) => {
+    if (selectedOptionIdx < 0) return;
+    updateOptionArray(next => { next[selectedOptionIdx] = { ...next[selectedOptionIdx], conditionalChildId: childId }; });
+    setMode('choose');
+  };
+
+  const unlink = () => {
+    if (selectedOptionIdx < 0) return;
+    updateOptionArray(next => { const it = { ...next[selectedOptionIdx] }; delete it.conditionalChildId; next[selectedOptionIdx] = it; });
+  };
+
+  const createAndLink = () => {
+    if (selectedOptionIdx < 0) return;
+    const parentKey = selectedComponent?.id || selectedComponent?.props?.name || 'radio';
+    const baseId = `${parentKey}_${optionList[selectedOptionIdx]?.value || 'opt'+selectedOptionIdx}_follow`.replace(/[^a-zA-Z0-9_-]/g,'_');
+    let newId = baseId; let i=1;
+    while (pageComponents.some(c => (c.id || c.props?.name) === newId)) { newId = baseId + '_' + (++i); }
+    const tpl = availableTemplates.find(t => (t.template_key === newType) || (t.type === newType));
+    const baseProps = JSON.parse(JSON.stringify(tpl?.props || {}));
+    baseProps.name = newId;
+    if (!baseProps.id) baseProps.id = newId;
+    // Normalise label / legend text overrides
+    const labelText = newLabel || baseProps?.label?.text || 'Follow-up';
+    if (!baseProps.label) baseProps.label = { text: labelText };
+    else if (typeof baseProps.label === 'object') {
+      if (typeof baseProps.label.text === 'object') {
+        baseProps.label.text.en = labelText;
+      } else baseProps.label.text = labelText;
+    }
+    if (!baseProps.fieldset) baseProps.fieldset = { legend: { text: labelText, isPageHeading: false, classes: '' } };
+    if (!baseProps.fieldset.legend) baseProps.fieldset.legend = { text: labelText, isPageHeading: false, classes: '' };
+    else if (!baseProps.fieldset.legend.text) baseProps.fieldset.legend.text = labelText;
+    const newComp = {
+      id: undefined,
+      templateId: tpl?.id,
+      template_key: tpl?.template_key || newType,
+      type: tpl?.type || newType,
+      version: tpl?.version || 1,
+      label: tpl?.label || labelText,
+      props: baseProps,
+      editable_fields: tpl?.editable_fields || [],
+      has_options: !!tpl?.has_options,
+      option_schema: tpl?.option_schema || null
+    };
+    if (typeof addExternalComponent === 'function') addExternalComponent(newComp);
+    updateOptionArray(next => { next[selectedOptionIdx] = { ...next[selectedOptionIdx], conditionalChildId: newComp.props.name }; });
+    setNewLabel('');
+    setMode('choose');
+  };
+
+  const parentType = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
+  const heading = parentType.includes('checkbox') ? 'Conditional Follow-up (linked - checkbox)' : 'Conditional Follow-up (linked)';
+  return (
+    <Box margin={{ top: 's' }}>
+      <Header variant="h4">{heading}</Header>
+      <Box fontSize="body-s" color="text-body-secondary" margin={{ bottom: 's' }}>
+        Link an existing component or create a new one that only appears when its option is selected. Linked child is removed from top-level preview automatically.
+      </Box>
+      <SpaceBetween size="s">
+        <FormField label="Target option">
+          <Select
+            expandToViewport
+            selectedOption={selectedOptionIdx >=0 ? { label: `${asLangString(optionList[selectedOptionIdx]?.text,'en') || '(untitled)'} (${optionList[selectedOptionIdx]?.value})`, value: String(selectedOptionIdx) } : null}
+            onChange={({ detail }) => { setSelectedOptionIdx(Number(detail.selectedOption.value)); setMode('choose'); }}
+            placeholder="Choose option"
+            options={optionList.map((o,i)=> ({ label: `${asLangString(o.text,'en') || '(untitled)'} (${o.value||i})`, value: String(i) }))}
+          />
+        </FormField>
+        {selectedOptionIdx === -1 && <Box fontSize="body-s" color="text-body-secondary">Select an option to manage its follow-up.</Box>}
+        {selectedOptionIdx >=0 && (
+          <Container variant="stacked" header={<Header variant="h5">Follow-up for option {asLangString(optionList[selectedOptionIdx]?.text,'en') || '(untitled)'} </Header>}>
+            <SpaceBetween size="s">
+              {!linkedChild && <Box fontSize="body-s" color="text-body-secondary">No follow-up linked.</Box>}
+              {linkedChild && (
+                <Box>
+                  <strong>{extractLabel(linkedChild)}</strong>
+                  <div style={{ fontSize:11, color:'#555' }}>{linkedChild.type}</div>
+                  <SpaceBetween direction="horizontal" size="xs" style={{ marginTop:4 }}>
+                    <Button onClick={unlink} iconName="close">Unlink</Button>
+                  </SpaceBetween>
+                </Box>
+              )}
+              {mode === 'choose' && (
+                <SpaceBetween size="xs">
+                  <Button onClick={()=>setMode('attach-existing')} disabled={candidateExisting.length===0}>Attach existing</Button>
+                  <Button onClick={()=>setMode('create-new')} iconName="add-plus">Create new</Button>
+                </SpaceBetween>
+              )}
+              {mode === 'attach-existing' && (
+                <SpaceBetween size="s">
+                  <FormField label="Existing components">
+                    <Select
+                      expandToViewport
+                      placeholder={candidateExisting.length? 'Select component' : 'None available'}
+                      onChange={({ detail }) => linkExisting(detail.selectedOption.value)}
+                      options={candidateExisting.map(c => {
+                        const key = c.id || c.props?.name;
+                        return { label: `${extractLabel(c)} (${c.type})`, value: key };
+                      })}
+                    />
+                  </FormField>
+                  <Button onClick={()=>setMode('choose')}>Cancel</Button>
+                </SpaceBetween>
+              )}
+              {mode === 'create-new' && (
+                <SpaceBetween size="s">
+                  <FormField label="Component type">
+                    <Select
+                      expandToViewport
+                      selectedOption={{ label: newType, value: newType }}
+                      onChange={({ detail }) => setNewType(detail.selectedOption.value)}
+                      options={followTypes.map(t => ({ label: t, value: t }))}
+                    />
+                  </FormField>
+                  <FormField label="Label (legend/text)">
+                    <Input value={newLabel} onChange={({ detail }) => setNewLabel(detail.value)} placeholder="e.g. Email address" />
+                  </FormField>
+                  <SpaceBetween direction="horizontal" size="xs">
+                    <Button variant="primary" disabled={!newType} onClick={createAndLink}>Create & Link</Button>
+                    <Button onClick={()=> { setMode('choose'); setNewLabel(''); }}>Cancel</Button>
+                  </SpaceBetween>
+                </SpaceBetween>
+              )}
+            </SpaceBetween>
+          </Container>
+        )}
+      </SpaceBetween>
+    </Box>
+  );
+};
 
 // --- Validation Editor (inline) ---
 const ValidationEditor = ({ selectedComponent, updateComponentProperty }) => {

@@ -32,6 +32,13 @@ data "archive_file" "pre_token_zip" {
   output_path = "./.terraform/${local.name_pref}-pre-token-gen.zip"
 }
 
+# Package the Post-Confirmation Lambda (stub)
+data "archive_file" "post_confirmation_zip" {
+  type        = "zip"
+  source_dir  = "../lambda/post-confirmation"
+  output_path = "./.terraform/${local.name_pref}-post-confirmation.zip"
+}
+
 resource "aws_iam_role" "lambda_role" {
   name               = "${local.name_pref}-pre-token-gen-role"
   assume_role_policy = jsonencode({
@@ -57,6 +64,22 @@ resource "aws_lambda_function" "pre_token_gen" {
   filename      = data.archive_file.pre_token_zip.output_path
   source_code_hash = data.archive_file.pre_token_zip.output_base64sha256
   timeout       = 10
+}
+
+# Post Confirmation Lambda (stub for applicant provisioning)
+resource "aws_lambda_function" "post_confirmation" {
+  function_name = "${local.name_pref}-post-confirmation"
+  role          = aws_iam_role.lambda_role.arn
+  handler       = "index.handler"
+  runtime       = "nodejs20.x"
+  filename      = data.archive_file.post_confirmation_zip.output_path
+  source_code_hash = data.archive_file.post_confirmation_zip.output_base64sha256
+  timeout       = 10
+  environment {
+    variables = {
+      PROVISIONING_WEBHOOK_URL = var.provisioning_webhook_url
+    }
+  }
 }
 
 resource "aws_cognito_user_pool" "admin" {
@@ -88,6 +111,7 @@ resource "aws_cognito_user_pool" "admin" {
 
   lambda_config {
     pre_token_generation = aws_lambda_function.pre_token_gen.arn
+    post_confirmation    = aws_lambda_function.post_confirmation.arn
   }
 }
 
@@ -95,6 +119,14 @@ resource "aws_lambda_permission" "allow_cognito_invoke" {
   statement_id  = "AllowExecutionFromCognito"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.pre_token_gen.function_name
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.admin.arn
+}
+
+resource "aws_lambda_permission" "allow_cognito_invoke_post_confirmation" {
+  statement_id  = "AllowExecutionFromCognitoPostConfirmation"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.post_confirmation.function_name
   principal     = "cognito-idp.amazonaws.com"
   source_arn    = aws_cognito_user_pool.admin.arn
 }
@@ -148,6 +180,40 @@ resource "aws_cognito_user_group" "adjudicator" {
   user_pool_id = aws_cognito_user_pool.admin.id
 }
 
+# Applicant group for public portal users
+resource "aws_cognito_user_group" "applicant" {
+  name         = "Applicant"
+  user_pool_id = aws_cognito_user_pool.admin.id
+  description  = "Public portal applicant users"
+}
+
+# Public portal app client (PKCE, no secret, short token lifetimes configurable later)
+resource "aws_cognito_user_pool_client" "portal" {
+  name         = "${local.app_name}-portal"
+  user_pool_id = aws_cognito_user_pool.admin.id
+
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["email", "openid", "profile"]
+  supported_identity_providers         = ["COGNITO"]
+
+  callback_urls = var.portal_callback_urls
+  logout_urls   = var.portal_logout_urls
+
+  generate_secret = false
+
+  prevent_user_existence_errors = "ENABLED"
+
+  access_token_validity  = 30
+  id_token_validity      = 30
+  refresh_token_validity = 12
+  token_validity_units {
+    access_token  = "minutes"
+    id_token      = "minutes"
+    refresh_token = "hours"
+  }
+}
+
 # Optional: SES email identity (use domain identity in real setups)
 resource "aws_ses_email_identity" "sender" {
   count = var.create_ses_identity ? 1 : 0
@@ -157,5 +223,10 @@ resource "aws_ses_email_identity" "sender" {
 # CloudWatch log retention for Lambda
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   name              = "/aws/lambda/${aws_lambda_function.pre_token_gen.function_name}"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_cloudwatch_log_group" "lambda_post_confirmation_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.post_confirmation.function_name}"
   retention_in_days = var.log_retention_days
 }

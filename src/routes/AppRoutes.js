@@ -41,7 +41,6 @@ import ModifyAppointment from '../pages/modifyAppointment.js'; // Import the new
 import ReportingAndMonitoringDashboard from '../pages/reportingAndMonitoringDashboard.js'; // Import the new component
 import ManageFees from '../pages/manageFees.js'; // Import the new component
 import ST6 from '../widgets/ST6'; // Import the new widget
-import VisualSettings from '../pages/visualSettings.js'; // Import the new component
 import ManageNotifications from '../pages/manageNotifications.js'; // Import the new component
 import { ManageNotificationsHelp } from '../helpPanelContents/manageNotificationsHelp.js'; // Named export
 import ManageAppointmentsHelp from '../helpPanelContents/manageAppointmentsHelp.js'; // Import the help panel content
@@ -252,7 +251,9 @@ const AppRoutes = ({
         {renderContent(BookAppointmentQ8, [{ text: 'Home', href: '/' }, { text: 'Book Appointment Q8', href: '/book-appointment-q8' }], 'Book Appointment Q8', 'bookAppointmentQ8')}
       </Route>
       <Route path="/configuration-settings">
-        {renderContent(ConfigurationSettings, [{ text: 'Home', href: '/' }, { text: 'Configuration Settings', href: '/configuration-settings' }], 'Configuration Settings', 'configurationSettings')}
+        <Guard roles={['System Administrator']} path="/configuration-settings">
+          {renderContent(ConfigurationSettings, [{ text: 'Home', href: '/' }, { text: 'Configuration Settings', href: '/configuration-settings' }], 'Configuration Settings', 'configurationSettings')}
+        </Guard>
       </Route>
       <Route path="/modify-appointment/:id">
         {renderContent(ModifyAppointment, [{ text: 'Home', href: '/' }, { text: 'Manage Appointments', href: '/manage-appointments-new' }, { text: 'Modify Appointment', href: '/modify-appointment/:id' }], 'Modify Appointment', 'modifyAppointment')}
@@ -279,9 +280,6 @@ const AppRoutes = ({
       </Route>
       <Route path="/manage-fees">
         {renderContent(ManageFees, [{ text: 'Home', href: '/' }, { text: 'Manage Fees', href: '/manage-fees' }], 'Manage Fees', 'manageFees')}
-      </Route>
-      <Route path="/visual-settings">
-        {renderContent(VisualSettings, [{ text: 'Home', href: '/' }, { text: 'Visual Settings', href: '/visual-settings' }], 'Visual Settings', 'visualSettings')}
       </Route>
       <Route path="/manage-notifications">
         <Guard path="/manage-notifications">
