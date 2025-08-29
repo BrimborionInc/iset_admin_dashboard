@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Header, ButtonDropdown, Link, Table, Button, TextFilter, SpaceBetween, Spinner } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
-import axios from 'axios';
+import { apiFetch } from '../auth/apiClient';
 
 const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
 
@@ -49,7 +49,8 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow }) => {
   const load = async () => {
     try {
       setLoading(true);
-      const { data } = await axios.get(`${API_BASE}/api/workflows`);
+      const resp = await apiFetch('/api/workflows');
+      const data = await resp.json().catch(() => []);
       const rows = (data || []).map(r => ({
         id: r.id,
         name: r.name,
@@ -74,11 +75,14 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow }) => {
   }, []);
   const onSelectWorkflowInternal = async (item) => {
     try {
-      const { data } = await axios.get(`${API_BASE}/api/workflows/${item.id}`);
-      onSelectWorkflow && onSelectWorkflow(data);
-    } catch {
-      onSelectWorkflow && onSelectWorkflow(item);
-    }
+      const resp = await apiFetch(`/api/workflows/${item.id}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        onSelectWorkflow && onSelectWorkflow(data);
+        return;
+      }
+    } catch {}
+    onSelectWorkflow && onSelectWorkflow(item);
   };
 
   const onModify = (item) => {
@@ -88,7 +92,8 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow }) => {
   const onDelete = async (item) => {
     if (!window.confirm(`Delete workflow "${item.name}"? This cannot be undone.`)) return;
     try {
-      await axios.delete(`${API_BASE}/api/workflows/${item.id}`);
+      const resp = await apiFetch(`/api/workflows/${item.id}`, { method: 'DELETE' });
+      if (!resp.ok) throw new Error('Failed');
       await load();
     } catch (e) {
       alert('Failed to delete workflow');

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Modal, Button, SpaceBetween } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
-import axios from 'axios';
+// Use shared authenticated fetch helper
+import { apiFetch } from '../auth/apiClient';
 import WorkflowPropertiesEditorWidget from '../widgets/WorkflowPropertiesEditorWidget';
 import IntakeStepLibraryWidget from '../widgets/IntakeStepLibraryWidget';
 import WorkflowCanvasWidget from '../widgets/WorkflowCanvasWidget';
@@ -81,7 +82,9 @@ export default function ModifyWorkflowEditorWidget() {
     let cancelled = false;
     (async () => {
       try {
-        const { data } = await axios.get(`${API_BASE}/api/workflows/${wfId}`);
+  const resp = await apiFetch(`/api/workflows/${wfId}`);
+  if (!resp.ok) throw new Error(`Load workflow HTTP ${resp.status}`);
+  const data = await resp.json();
         if (cancelled) return;
         setWfName(data.name || '');
         setWfStatus(data.status || 'draft');
@@ -146,9 +149,9 @@ export default function ModifyWorkflowEditorWidget() {
     (async () => {
       try {
         setLibStatus('loading');
-        const res = await fetch(`${API_BASE}/api/steps`, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const rows = await res.json();
+  const res = await apiFetch('/api/steps', { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const rows = await res.json();
         if (cancelled) return;
   const items = rows.map(r => ({ id: `step-${r.id}`, stepId: r.id, name: r.name }));
         setLibrary(items);
@@ -220,7 +223,7 @@ export default function ModifyWorkflowEditorWidget() {
     if (!wfId) return;
     try {
       setSaving(true); setSaveMsg('');
-      await axios.post(`${API_BASE}/api/workflows/${wfId}/publish`);
+  await apiFetch(`/api/workflows/${wfId}/publish`, { method: 'POST' });
       setSaveMsg('Published.');
     } catch (e) { setSaveMsg('Publish failed'); }
     finally { setSaving(false); setTimeout(() => setSaveMsg(''), 3000); }
@@ -232,16 +235,21 @@ export default function ModifyWorkflowEditorWidget() {
     try {
       const body = toApiPayload();
       if (wfId) {
-        await axios.put(`${API_BASE}/api/workflows/${wfId}`, body);
+  const resp = await apiFetch(`/api/workflows/${wfId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!resp.ok) throw new Error('Save failed');
         setSaveMsg('Saved.');
       } else {
-        const { data } = await axios.post(`${API_BASE}/api/workflows`, body);
-        if (data?.id) setWfId(data.id);
+        const resp = await apiFetch('/api/workflows', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!resp.ok) throw new Error('Create failed');
+        const created = await resp.json();
+        if (created?.id) setWfId(created.id);
         setSaveMsg('Created.');
         // Update URL to include id
-        const u = new URL(window.location.href);
-        u.searchParams.set('id', data.id);
-        window.history.replaceState({}, '', u.toString());
+        if (created?.id) {
+          const u = new URL(window.location.href);
+          u.searchParams.set('id', created.id);
+          window.history.replaceState({}, '', u.toString());
+        }
       }
       dirtyRef.current = false; setIsDirty(false);
     } catch (e) {
