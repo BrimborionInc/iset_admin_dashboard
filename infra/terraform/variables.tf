@@ -77,3 +77,30 @@ variable "provisioning_webhook_url" {
   description = "Optional HTTPS endpoint the PostConfirmation lambda will POST {sub,email,locale} to for applicant provisioning"
   default     = ""
 }
+
+# -----------------------------
+# Split applicant pool support
+# -----------------------------
+variable "applicant_app_name" {
+  type        = string
+  description = "Applicant (public) application name prefix for separate user pool"
+  default     = "iset-applicant"
+}
+
+variable "applicant_cognito_domain_prefix" {
+  type        = string
+  description = "Hosted UI domain prefix for applicant user pool (leave blank to skip domain)"
+  default     = ""
+}
+
+variable "applicant_callback_urls" {
+  type        = list(string)
+  description = "Allowed OAuth callback URLs for applicant pool app client"
+  default     = []
+}
+
+variable "applicant_logout_urls" {
+  type        = list(string)
+  description = "Allowed OAuth logout URLs for applicant pool app client"
+  default     = []
+}

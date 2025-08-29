@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { apiFetch } from '../auth/apiClient';
 import { useHistory } from 'react-router-dom';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { Box, Header, Container, SpaceBetween, FormField, Input, Select, Button } from '@cloudscape-design/components';
@@ -26,9 +27,9 @@ const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, 
       if (!step?.stepId) return; // no DB backing
       try {
         setLoadingFields(true);
-        const res = await fetch(`${apiBase}/api/steps/${step.stepId}`, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+  const res = await apiFetch(`/api/steps/${step.stepId}`, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
         const choices = [];
         const map = {};
         (data.components || []).forEach(c => {

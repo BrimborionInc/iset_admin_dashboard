@@ -201,6 +201,10 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
       [stepId]
     );
     const usedIds = new Set();
+  // Track original authoring props.id -> component index for conditional embedding
+  const authoringIdIndex = new Map();
+  // Track which component indices become embedded children (to prune later)
+  const consumedChildIndices = new Set();
     for (let i = 0; i < compRows.length; i++) {
       const c = compRows[i];
       const defaults = safeParse(c.default_props, {});
@@ -360,7 +364,15 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
       if (options) {
         const srcItems = Array.isArray(props?.items) ? props.items : [];
         component.options = options.map((o, idx) => {
-          const src = srcItems[idx] || {}; return src && src.id ? { ...o, id: String(src.id) } : o;
+          const src = srcItems[idx] || {};
+          const opt = src && src.id ? { ...o, id: String(src.id) } : { ...o };
+          if (src.conditionalChildId) opt.conditionalChildId = String(src.conditionalChildId);
+          if (src.hint && typeof src.hint === 'object') {
+            // Preserve per-option hint if provided (parallel to label text)
+            const h = src.hint.text || src.hint.html || src.hint;
+            if (h) opt.hint = h;
+          }
+            return opt;
         });
       }
       if (['radio','radios','checkbox','checkboxes'].includes(tplType) && props) {
@@ -386,6 +398,40 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
       }
 
       out.components.push(component);
+      // Record mapping from original props.id (authoring) to index of this component
+      if (props && props.id) {
+        const origId = String(props.id).trim();
+        if (origId) authoringIdIndex.set(origId, out.components.length - 1);
+      }
+    }
+
+    // Second pass: embed conditional children for radios / checkboxes
+    for (let pIdx = 0; pIdx < out.components.length; pIdx++) {
+      const parent = out.components[pIdx];
+      if (!parent || !Array.isArray(parent.options)) continue;
+      // Only process choice components
+      if (!(parent.type === 'radio' || parent.type === 'checkboxes')) continue;
+      for (const opt of parent.options) {
+        if (!opt || !opt.conditionalChildId) continue;
+        const targetId = String(opt.conditionalChildId).trim();
+        if (!targetId) continue;
+        const childIdx = authoringIdIndex.get(targetId);
+        if (childIdx == null) continue; // no matching component
+        if (childIdx === pIdx) continue; // safety: don't embed self
+        const childComp = out.components[childIdx];
+        if (!childComp || consumedChildIndices.has(childIdx)) continue; // already consumed elsewhere
+        // Attach as option.children (array) for renderer compatibility
+        if (!Array.isArray(opt.children)) opt.children = [];
+        opt.children.push(childComp);
+        // Mark child for removal from top-level components list
+        consumedChildIndices.add(childIdx);
+        // Remove the marker field to simplify published schema (renderer only needs nested children)
+        delete opt.conditionalChildId;
+      }
+    }
+    if (consumedChildIndices.size) {
+      // Rebuild components array without consumed children
+      out.components = out.components.filter((_, idx) => !consumedChildIndices.has(idx));
     }
     stepsOut.push(out);
   }

@@ -43,29 +43,46 @@ log_retention_days  = 30
 - `terraform plan -var-file=dev.tfvars`
 - `terraform apply -var-file=dev.tfvars`
 
-### Adding the Public Portal (Applicants)
-The same user pool now supports a second (portal) app client already defined in `main.tf` (`aws_cognito_user_pool_client.portal`).
+### Public Portal (Single-Pool Mode - legacy)
+Originally the same user pool hosted a second (portal) app client (`aws_cognito_user_pool_client.portal`). Instructions retained here for reference if reverting to single pool.
 
-1. Copy `portal.example.tfvars` to e.g. `dev.portal.tfvars` and adjust domains / callback URLs.
-2. Ensure BOTH admin (`oidc_*`) and portal (`portal_*`) URL lists are set.
-3. Run plan/apply with that tfvars file:
-	- `terraform plan -var-file=dev.portal.tfvars`
-	- `terraform apply -var-file=dev.portal.tfvars`
-4. After apply, capture outputs:
-	- `issuer`
-	- `portal_user_pool_client_id`
-	- `hosted_ui_domain`
-5. Set environment for portal backend (`ISET-intake`):
+Steps (legacy model): copy `portal.example.tfvars`, set `portal_*` callback/logout URLs, plan/apply, then map outputs (`portal_user_pool_client_id`, `issuer`, `hosted_ui_domain`) into portal `.env`.
+
+### Split Applicant Pool (Current Model)
+We now provision a completely separate applicant user pool + domain + client:
+- Resources: `aws_cognito_user_pool.applicant`, `aws_cognito_user_pool_client.applicant_portal`, `aws_cognito_user_pool_domain.applicant`
+- Variables: `applicant_app_name`, `applicant_cognito_domain_prefix`, `applicant_callback_urls`, `applicant_logout_urls`
+
+After `terraform apply`, note new outputs:
+- `applicant_user_pool_id`
+- `applicant_user_pool_client_id`
+- `applicant_issuer`
+- `applicant_hosted_ui_domain`
+
+Update public portal backend (`ISET-intake/.env`):
 ```
 PUBLIC_AUTH_MODE=cognito
-COGNITO_ISSUER=<issuer output>
-COGNITO_PORTAL_CLIENT_ID=<portal_user_pool_client_id output>
-COGNITO_REDIRECT_URI=https://portal.dev.example.com/auth/callback   # or http://localhost:3000/auth/callback
+COGNITO_USER_POOL_ID=<applicant_user_pool_id>
+COGNITO_PORTAL_CLIENT_ID=<applicant_user_pool_client_id>
+COGNITO_ISSUER=<applicant_issuer>
+COGNITO_DOMAIN=https://<applicant_hosted_ui_domain>.auth.<region>.amazoncognito.com
+COGNITO_REDIRECT_URI=http://localhost:3000/auth/callback   # or deployed URL
 COGNITO_REGION=<aws_region>
 ```
-6. Rebuild the portal frontend with matching `REACT_APP_` variables.
+Frontend (`REACT_APP_`): same values prefixed with `REACT_APP_` (except `PUBLIC_AUTH_MODE`).
 
-Local Dev (mixed): you can include both localhost and production domains simultaneously in the callback & logout URL arrays.
+Security isolation:
+- Admin dashboard validates tokens against original admin pool issuer.
+- Public portal validates only the applicant pool issuer; no shared groups required.
+
+If cleaning up legacy groups: remove Applicant group in admin pool (already done) — do NOT remove admin role groups.
+
+Rollback strategy:
+1. Keep both pools active temporarily.
+2. Switch portal env vars back to admin pool outputs.
+3. Remove applicant pool resources from Terraform once traffic drained.
+
+Local dev: you can keep both pools; ensure distinct domain prefixes to avoid clashes.
 
 ## Wire outputs to the app
 Set the following env vars in `admin-dashboard` when enabling the Cognito feature flag:

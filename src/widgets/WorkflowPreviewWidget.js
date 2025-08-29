@@ -4,7 +4,7 @@ import { BoardItem } from '@cloudscape-design/board-components';
 import ReactFlow from 'reactflow';
 import 'reactflow/dist/style.css';
 import ELK from 'elkjs/lib/elk.bundled.js';
-import axios from 'axios';
+import { apiFetch } from '../auth/apiClient';
 import jsonLogic from 'json-logic-js';
 // Reuse the actual public portal component registry for faithful rendering
 // The portal package is linked via file:../ISET-intake in package.json, so we can import its renderer registry directly.
@@ -195,11 +195,15 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
     let cancelled = false;
     (async () => {
       try {
-        const { data } = await axios.get(`${apiBase}/api/workflows/${selectedWorkflow.id}/preview`);
+        const resp = await apiFetch(`/api/workflows/${selectedWorkflow.id}/preview`);
         if (!cancelled) {
-          setRuntime(data);
-          // Reset runner fresh for new workflow only
-          setRunner({ stepIndex: 0, answers: {}, errors: {}, history: [] });
+          if (resp.ok) {
+            const data = await resp.json();
+            setRuntime(data);
+            setRunner({ stepIndex: 0, answers: {}, errors: {}, history: [] });
+          } else {
+            setRuntime({ error: 'Failed to load runtime schema' });
+          }
         }
       } catch (e) {
         if (!cancelled) setRuntime({ error: 'Failed to load runtime schema' });

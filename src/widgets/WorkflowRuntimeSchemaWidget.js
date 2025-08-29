@@ -10,7 +10,9 @@ import {
   StatusIndicator,
   Button
 } from '@cloudscape-design/components';
-import axios from 'axios';
+import CodeView from '@cloudscape-design/code-view/code-view';
+import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
+import { apiFetch } from '../auth/apiClient';
 
 const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
 
@@ -28,8 +30,15 @@ export default function WorkflowRuntimeSchemaWidget({ selectedWorkflow, actions 
       if (!selectedWorkflow) { setPreview(null); setError(null); return; }
       setLoading(true); setError(null);
       try {
-        const { data } = await axios.get(`${API_BASE}/api/workflows/${selectedWorkflow.id}/preview`);
-        if (!cancelled) { setPreview(data); }
+        const resp = await apiFetch(`/api/workflows/${selectedWorkflow.id}/preview`);
+        if (!cancelled) {
+          if (resp.ok) {
+            const data = await resp.json();
+            setPreview(data);
+          } else {
+            setError('Failed to load preview');
+          }
+        }
       } catch (e) {
         if (!cancelled) setError('Failed to load preview');
       } finally { if (!cancelled) setLoading(false); }
@@ -99,9 +108,21 @@ export default function WorkflowRuntimeSchemaWidget({ selectedWorkflow, actions 
               ))}
             </div>
             {showJson && (
-              <div style={{ maxHeight: 320, overflow: 'auto', border: '1px solid #d0d5d9', borderRadius: 4 }}>
-                <pre style={{ margin: 0, padding: 8, fontSize: 12 }}>{jsonText}</pre>
-              </div>
+              <CodeView
+                content={jsonText}
+                language="json"
+                lineNumbers
+                wrapLines
+                ariaLabel="Workflow runtime JSON"
+                actions={
+                  <CopyToClipboard
+                    copyButtonAriaLabel="Copy workflow JSON"
+                    copyErrorText="Copy failed"
+                    copySuccessText="Copied"
+                    textToCopy={jsonText}
+                  />
+                }
+              />
             )}
           </SpaceBetween>
         )}

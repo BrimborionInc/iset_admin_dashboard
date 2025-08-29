@@ -11,9 +11,9 @@ import {
   FormField,
   Grid
 } from '@cloudscape-design/components';
-import axios from 'axios';
+import { apiFetch } from '../auth/apiClient';
 
-const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
+const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, ''); // retained for any absolute path needs
 
 // No key/value component needed; using FormField with disabled inputs for read-only fields.
 
@@ -70,7 +70,9 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated }
     try {
       setSaving(true);
       setAlert(null);
-      const { data } = await axios.post(`${API_BASE}/api/workflows/${workflow.id}/publish`);
+      const resp = await apiFetch(`/api/workflows/${workflow.id}/publish`, { method: 'POST' });
+      if (!resp.ok) throw new Error(`Publish failed: ${resp.status}`);
+      const data = await resp.json();
       setAlert({ type: 'success', text: `Published (${data.steps} steps).` });
     } catch (e) {
       setAlert({ type: 'error', text: 'Publish failed.' });
@@ -80,14 +82,8 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated }
   };
 
   const onSave = async () => {
-    if (!workflow) {
-      setAlert({ type: 'warning', text: 'No workflow selected.' });
-      return;
-    }
-    if (!isDirty) {
-      setAlert({ type: 'info', text: 'No changes to save.' });
-      return;
-    }
+    if (!workflow) { setAlert({ type: 'warning', text: 'No workflow selected.' }); return; }
+    if (!isDirty) { setAlert({ type: 'info', text: 'No changes to save.' }); return; }
     try {
       setSaving(true);
       setAlert(null);
@@ -101,11 +97,19 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated }
         start_step_id: start ? start.id : null,
         routes
       };
-      await axios.put(`${API_BASE}/api/workflows/${workflow.id}`, payload);
+      const saveResp = await apiFetch(`/api/workflows/${workflow.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!saveResp.ok) throw new Error(`Save failed: ${saveResp.status}`);
       setAlert({ type: 'success', text: 'Saved.' });
       try {
-        const { data } = await axios.get(`${API_BASE}/api/workflows/${workflow.id}`);
-        onWorkflowUpdated && onWorkflowUpdated(data);
+        const wfResp = await apiFetch(`/api/workflows/${workflow.id}`);
+        if (wfResp.ok) {
+          const data = await wfResp.json();
+            onWorkflowUpdated && onWorkflowUpdated(data);
+        }
       } catch {}
     } catch (e) {
       setAlert({ type: 'error', text: 'Save failed.' });
