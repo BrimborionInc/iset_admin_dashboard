@@ -348,7 +348,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
         />
       }
   >
-  <Box>
+  <Box style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {!selectedWorkflow && (
           <div style={{ color: '#888' }}>Select a workflow to preview</div>
         )}
@@ -369,7 +369,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
           </div>
         )}
   {selectedWorkflow && mode === 'interactive' && (
-          <div style={{ border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', padding: 16, maxHeight: 420, overflow: 'auto' }}>
+          <div style={{ flex: 1, minHeight: 300, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', padding: 16, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
             {!runtime && <div style={{ color: '#888' }}>Loading runtime schema...</div>}
             {runtime?.error && <div style={{ color: '#d4351c' }}>{runtime.error}</div>}
             {runtime && !runtime.error && currentStep && (
@@ -411,7 +411,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
           </div>
         )}
         {selectedWorkflow && mode === 'json' && (
-          <div style={{ border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', display: 'flex', flexDirection: 'column', height: 420 }}>
+          <div style={{ flex: 1, minHeight: 300, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', display: 'flex', flexDirection: 'column' }}>
             {runtime?.error && <div style={{ color: '#d4351c' }}>{runtime.error}</div>}
             {!runtime && !runtime?.error && <div style={{ color: '#888', padding: 12 }}>Loading runtime schema…</div>}
             {runtime && !runtime.error && (() => {

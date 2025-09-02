@@ -44,7 +44,8 @@
     { "key": "disabled", "path": "disabled", "type": "select", "label": "Disabled?", "options": [
       { "label": "False", "value": false },
       { "label": "True", "value": true }
-    ] }
+  ] },
+  { "key": "options", "path": "items", "type": "optionList", "label": "Options" }
   ],
   "has_options": true,
   "option_schema": [

@@ -774,6 +774,30 @@ const dbConfig = {
 
 const pool = mysql.createPool(dbConfig);
 
+// --- Startup DB diagnostic (enable/disable via ENABLE_DB_DIAG env var; defaults to true) ---------
+// Logs which physical MySQL instance we're connected to plus a quick summary of the step table.
+// This helps detect situations where manual SQL sessions and the Node process point at different instances.
+// Safe / read-only. To silence, set ENABLE_DB_DIAG=false in the environment.
+(async () => {
+  if (String(process.env.ENABLE_DB_DIAG || 'true').toLowerCase() === 'true') {
+    try {
+      const [[meta]] = await pool.query('SELECT @@hostname AS host, @@port AS port, DATABASE() AS db');
+      const [[counts]] = await pool.query('SELECT COUNT(*) AS stepCount, COALESCE(MAX(id),0) AS maxStepId FROM iset_intake.step');
+      const [recent] = await pool.query('SELECT id, name, status FROM iset_intake.step ORDER BY id DESC LIMIT 5');
+      console.log('[DB-DIAG]', JSON.stringify({
+        host: meta.host,
+        port: meta.port,
+        database: meta.db,
+        stepCount: counts.stepCount,
+        maxStepId: counts.maxStepId,
+        recentSteps: recent.map(r => ({ id: r.id, name: r.name, status: r.status }))
+      }));
+    } catch (e) {
+      console.warn('[DB-DIAG] failed:', e && e.message ? e.message : e);
+    }
+  }
+})();
+
 // ---------------- Component Template Validation (initial: radio) -----------------
 // We load JSON Schemas from src/component-lib/schemas. For now we focus on radio.
 const Ajv = require('ajv');

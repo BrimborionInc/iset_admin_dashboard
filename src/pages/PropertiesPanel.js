@@ -1,7 +1,7 @@
 // Updated rewrite of PropertiesPanel.js – consistent Container usage and spacing
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import axios from 'axios';
-import { Box, Container, Header, Table, Input, Button, Select, SpaceBetween, FormField, Textarea, Badge, Popover, Checkbox, Toggle, ExpandableSection } from '@cloudscape-design/components';
+import { Box, Container, Header, Table, Input, Button, Select, SpaceBetween, FormField, Textarea, Badge, Popover, Checkbox, Toggle, ExpandableSection, Spinner } from '@cloudscape-design/components';
 import get from 'lodash/get';
 import Ajv from 'ajv';
 
@@ -12,6 +12,10 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   const suppressOptionModeEffectRef = useRef(false);
   const suppressNextModeEffect = useRef(false);
   const [validationErrors, setValidationErrors] = useState({});
+  // AI option generation state
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiStatus, setAiStatus] = useState(null); // { type:'error'|'success'|'info', text }
 
 
   const ajv = useMemo(() => new Ajv({ allErrors: true, strict: false }), []);
@@ -100,6 +104,97 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
 
   const getSchema = () => selectedComponent?.option_schema || ['text', 'value'];
   const currentMode = optionSourceMode;
+
+  // --- AI Option Generation ---
+  const generateOptionsWithAI = async (editableField) => {
+    setAiStatus(null);
+    const prompt = (aiPrompt || '').trim();
+    if (!prompt) { setAiStatus({ type: 'error', text: 'Enter a description first.' }); return; }
+    const schema = getSchema();
+    setAiGenerating(true);
+    try {
+      // Lazy import to avoid circular if any
+      const { apiFetch } = require('../auth/apiClient');
+      const system = {
+        role: 'system',
+        content: 'You are an assistant that generates structured option lists for form controls. Output ONLY compact JSON: { "options": [ { ... } ] }. No explanations.'
+      };
+      const user = {
+        role: 'user',
+        content: JSON.stringify({
+          instruction: 'Generate distinct, user-friendly options based on the description. Provide value (machine-friendly slug) and text (label). Include hint only if clearly requested and schema allows. Limit to max 40 options. For simple binary or yes/no style prompts, generate only necessary options.',
+          description: prompt,
+          requiredKeys: schema,
+          examples: [
+            { description: 'Yes No', options: [ { value: 'yes', text: 'Yes' }, { value: 'no', text: 'No' } ] },
+            { description: 'Canadian Provinces and Territories', options: [ { value: 'ab', text: 'Alberta' }, { value: 'bc', text: 'British Columbia' } ] }
+          ]
+        })
+      };
+      const res = await apiFetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [system, user] })
+      });
+      if (res.status === 501) {
+        setAiStatus({ type: 'error', text: 'AI service disabled on server.' });
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      const raw = data?.choices?.[0]?.message?.content || '';
+      const parsed = (() => {
+        try { return JSON.parse(raw); } catch (_) {}
+        // Attempt extraction of first JSON object substring
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (match) { try { return JSON.parse(match[0]); } catch (_) {} }
+        return null;
+      })();
+      const optArr = Array.isArray(parsed?.options) ? parsed.options : [];
+      if (!optArr.length) {
+        setAiStatus({ type: 'error', text: 'AI returned no options.' });
+        return;
+      }
+      const slug = (s) => String(s || '')
+        .toLowerCase()
+        .replace(/&/g,' and ')
+        .replace(/[^a-z0-9]+/g,'-')
+        .replace(/^-+|-+$/g,'')
+        .slice(0,64) || 'opt';
+      const existingValues = new Set();
+      const cleaned = optArr
+        .filter(o => o && (o.text || o.value))
+        .map((o,i) => {
+          const text = String(o.text || o.value || `Option ${i+1}`).trim();
+          let value = String(o.value || slug(text));
+          value = value || slug(text);
+          if (existingValues.has(value)) {
+            let base = value; let n=2; while (existingValues.has(base+'-'+n)) n++; value = base+'-'+n;
+          }
+          existingValues.add(value);
+          const item = {};
+          if (schema.includes('value')) item.value = value;
+          if (schema.includes('text')) item.text = text;
+          if (schema.includes('hint') && o.hint) item.hint = o.hint;
+          return item;
+        })
+        .slice(0, 40);
+      if (!cleaned.length) { setAiStatus({ type: 'error', text: 'No valid options after cleaning.' }); return; }
+      // Replace existing options list
+      updateComponentProperty(editableField.path, cleaned, true);
+      // Force static mode if not already
+      if (selectedComponent?.props?.mode !== 'static') {
+        updateComponentProperty('props.mode', 'static', true);
+        updateComponentProperty('props.endpoint', null, true);
+        updateComponentProperty('props.attributes', null, true);
+        setOptionSourceMode('static');
+      }
+      setAiStatus({ type: 'success', text: `Generated ${cleaned.length} option(s).` });
+    } catch (e) {
+      setAiStatus({ type: 'error', text: `Generation failed: ${e.message || String(e)}` });
+    } finally {
+      setAiGenerating(false);
+    }
+  };
 
   const asLangString = (val, lang = 'en') => {
     if (val == null) return '';
@@ -329,7 +424,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   ], []);
 
   const GENERIC_CLASS_SUGGESTIONS = useMemo(() => [
-    '', 'govuk-visually-hidden',
+    '', 'govuk-visually-hidden', 'govuk-hint',
     'govuk-!-margin-bottom-2', 'govuk-!-margin-bottom-3', 'govuk-!-margin-bottom-4',
     'govuk-!-font-weight-bold',
     'govuk-radios--inline', 'govuk-radios--small',
@@ -340,30 +435,67 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   const endsWithPath = (p, suffix) => typeof p === 'string' && p.toLowerCase().endsWith(suffix.toLowerCase());
 
   const CuratedSelectWithCustom = ({ value, onChange, options, placeholder = 'Select...', width = 280 }) => {
-    const optionList = options.map(v => ({ label: v === '' ? '(empty)' : v, value: v }));
-    const isCustom = value != null && !options.includes(value);
-    const [showCustom, setShowCustom] = React.useState(isCustom);
-    // Keep internal showCustom state in sync if parent value changes to a curated option
+    // Maintain a local extended list so committed custom values become first-class curated options for future edits
+    const [extended, setExtended] = React.useState(() => [...options]);
+    // Keep extended in sync when parent options change (but preserve previously added custom if still selected)
     useEffect(() => {
-      if (!isCustom && showCustom) setShowCustom(false);
-      if (isCustom && !showCustom) setShowCustom(true);
+      setExtended(prev => {
+        const baseSet = new Set(options);
+        // retain any prior custom currently selected
+        if (value && !options.includes(value) && prev.includes(value)) baseSet.add(value);
+        return Array.from(baseSet);
+      });
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isCustom, value]);
+    }, [options.join('|')]);
+
+    const isCustom = value != null && !extended.includes(value);
+    const [showCustom, setShowCustom] = React.useState(isCustom);
+    const [draft, setDraft] = React.useState(isCustom ? (value || '') : '');
+    const inputRef = React.useRef(null);
+
+    // Sync when external value changes
+    useEffect(() => {
+      const nowCustom = value != null && !extended.includes(value);
+      if (nowCustom && !showCustom) { setShowCustom(true); setDraft(value || ''); }
+      if (!nowCustom && showCustom && extended.includes(value || '')) { setShowCustom(false); }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [value, extended.join('|')]);
+
+    const optionList = extended.map(v => ({ label: v === '' ? '(empty)' : v, value: v }));
+
     const selected = (showCustom || isCustom)
       ? { label: 'Custom…', value: '__custom__' }
       : { label: (value ?? '') === '' ? '(empty)' : (value ?? ''), value: value ?? '' };
+
+    const promoteValue = (val) => {
+      if (val && !extended.includes(val)) {
+        setExtended(prev => [...prev, val]);
+      }
+    };
+
+    const commitDraft = () => {
+      const trimmed = draft.trim();
+      if (!trimmed) { onChange(''); return; }
+      promoteValue(trimmed);
+      onChange(trimmed);
+      // After committing, treat as curated selection
+      setShowCustom(false);
+    };
+
     const handleSelectChange = (v) => {
       if (v === '__custom__') {
         setShowCustom(true);
         if (!isCustom) {
-          // Seed with empty string so user can type
-          onChange('');
+          setDraft('');
+          // Do not call onChange yet; wait for commit
         }
+        setTimeout(() => { inputRef.current && inputRef.current.focus(); }, 0);
         return;
       }
       setShowCustom(false);
       onChange(v);
     };
+
     return (
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: width }}>
         <Select
@@ -375,9 +507,15 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
         />
         {(showCustom || isCustom) && (
           <Input
-            value={value ?? ''}
+            ref={inputRef}
+            value={draft}
             placeholder="Enter custom value"
-            onChange={({ detail }) => onChange(detail.value)}
+            onChange={({ detail }) => setDraft(detail.value)}
+            onBlur={commitDraft}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); commitDraft(); }
+              if (e.key === 'Escape') { e.preventDefault(); setShowCustom(false); }
+            }}
           />
         )}
       </div>
@@ -720,20 +858,30 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                           <CuratedSelectWithCustom value={val || ''} onChange={handleChange} options={FIELDSET_LEGEND_CLASS_SUGGESTIONS} placeholder="Legend class" />
                         );
                       }
-                      if (isPath(path, 'classes')) {
-                        // Prefer template-defined options for this component if provided
+                      if (isPath(path, 'classes', 'class')) {
+                        // Determine component type for tailored suggestions
+                        const compType = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
+                        // Prefer template-defined options first
                         let optionValues = [];
                         if (Array.isArray(item.options) && item.options.length) {
                           optionValues = item.options.map(o => (o.value ?? o.label ?? ''));
                         } else {
                           optionValues = GENERIC_CLASS_SUGGESTIONS;
                         }
-                        // Ensure current value (e.g., govuk-radios) is present so it is not treated as custom
+                        // Augment for text/paragraph style components
+                        const texty = ['paragraph','text-block','textblock','inset-text','warning-text'];
+                        if (texty.includes(compType)) {
+                          const extra = ['govuk-body','govuk-body-l','govuk-hint'];
+                          for (const e of extra) if (!optionValues.includes(e)) optionValues.push(e);
+                        }
+                        // Guarantee govuk-hint is present per requirement
+                        if (!optionValues.includes('govuk-hint')) optionValues.push('govuk-hint');
+                        // Ensure current value present so not forced into custom prematurely
                         if (typeof val === 'string' && val && !optionValues.includes(val)) {
                           optionValues = [val, ...optionValues];
                         }
                         return (
-                          <CuratedSelectWithCustom value={val || ''} onChange={handleChange} options={optionValues} placeholder="CSS classes" />
+                          <CuratedSelectWithCustom value={val || ''} onChange={handleChange} options={optionValues} placeholder="CSS class" />
                         );
                       }
                       if (endsWithPath(path, '.classes')) {
@@ -948,6 +1096,27 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
 
                       {currentMode === 'static' && (
                         <>
+                          <Container variant="stacked" header={<Header variant="h4">AI Generate Options</Header>}>
+                            <SpaceBetween size="s">
+                              <FormField label="Describe the option list"
+                                constraintText="E.g. 'Yes No', 'Canadian Provinces and Territories', '1 to 5 satisfaction scale'">
+                                <Input
+                                  placeholder="Enter description..."
+                                  value={aiPrompt}
+                                  onChange={({ detail }) => setAiPrompt(detail.value)}
+                                  disabled={aiGenerating}
+                                />
+                              </FormField>
+                              <SpaceBetween direction="horizontal" size="xs">
+                                <Button variant="primary" iconName="refresh" loading={aiGenerating} disabled={aiGenerating || !aiPrompt.trim()} onClick={() => generateOptionsWithAI(field)}>Generate</Button>
+                              </SpaceBetween>
+                              {aiStatus && (
+                                <Box fontSize="body-s" color={aiStatus.type === 'error' ? 'text-status-error' : (aiStatus.type === 'success' ? 'text-status-success' : 'inherit')}>
+                                  {aiStatus.text}
+                                </Box>
+                              )}
+                            </SpaceBetween>
+                          </Container>
                           {(() => {
                             const vals = options.map(o => String(o?.value ?? '')).filter(v => v !== '');
                             const dups = new Set(vals.filter((v, i) => vals.indexOf(v) !== i));
@@ -1303,11 +1472,40 @@ const ValidationEditor = ({ selectedComponent, updateComponentProperty }) => {
   const aiGenerate = () => {
     // Simple heuristic generation based on type & labels
     const type = String(selectedComponent?.type || '').toLowerCase();
-    const name = selectedComponent?.props?.label?.text || selectedComponent?.props?.fieldset?.legend?.text || selectedComponent?.props?.name || 'This field';
-    const baseEn = type.includes('radio') ? `Select an option for ${name.toLowerCase()}` : type.includes('checkbox') ? `Select at least one option for ${name.toLowerCase()}` : `Enter ${name.toLowerCase()}`;
-    const baseFr = type.includes('radio') ? `Sélectionnez une option pour ${name.toLowerCase()}` : type.includes('checkbox') ? `Sélectionnez au moins une option pour ${name.toLowerCase()}` : `Entrez ${name.toLowerCase()}`;
-    const next = { ...validation, errorMessage: { en: baseEn, fr: baseFr } };
-    commit(next);
+    const rawLabel = (
+      selectedComponent?.props?.label?.text ||
+      selectedComponent?.props?.fieldset?.legend?.text ||
+      selectedComponent?.props?.titleText ||
+      selectedComponent?.props?.text ||
+      selectedComponent?.props?.name ||
+      'This field'
+    );
+    // Normalise possible i18n/object/string label value to a plain string
+    const normalise = (val) => {
+      if (val == null) return 'this field';
+      if (typeof val === 'string') return val.trim() || 'this field';
+      if (typeof val === 'object') {
+        if (typeof val.en === 'string' && val.en.trim()) return val.en.trim();
+        if (typeof val.fr === 'string' && val.fr.trim()) return val.fr.trim();
+        for (const v of Object.values(val)) {
+          if (typeof v === 'string' && v.trim()) return v.trim();
+        }
+      }
+      try { return String(val).trim() || 'this field'; } catch { return 'this field'; }
+    };
+    const nameStr = normalise(rawLabel);
+    const lower = nameStr.toLowerCase();
+    const baseEn = type.includes('radio')
+      ? `Select an option for ${lower}`
+      : type.includes('checkbox')
+        ? `Select at least one option for ${lower}`
+        : `Enter ${lower}`;
+    const baseFr = type.includes('radio')
+      ? `Sélectionnez une option pour ${lower}`
+      : type.includes('checkbox')
+        ? `Sélectionnez au moins une option pour ${lower}`
+        : `Entrez ${lower}`;
+    commit({ ...validation, errorMessage: { en: baseEn, fr: baseFr } });
   };
 
   return (

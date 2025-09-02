@@ -981,6 +981,14 @@ const ModifyComponent = () => {
             version: t.version || 1
           };
         });
+        // Fallback injection: ensure any option-bearing template has an optionList field so Options editor appears even if DB template missing it
+        normalised.forEach(t => {
+          if (t.has_options && Array.isArray(t.editable_fields)) {
+            if (!t.editable_fields.some(f => f && f.type === 'optionList')) {
+              t.editable_fields = [...t.editable_fields, { key: 'options', path: 'items', type: 'optionList', label: 'Options' }];
+            }
+          }
+        });
         // 3) Keep only the highest version per template_key
         const byKey = new Map();
         for (const tpl of normalised) {
@@ -1004,21 +1012,27 @@ const ModifyComponent = () => {
     if (!components.length || !availableComponents.length) return;
     setComponents(prev =>
       prev.map(c => {
-        // if already enriched, keep as-is
-        if (c.editable_fields && c.editable_fields.length) return c;
         const tpl =
           tplById.get(c.templateId ?? c.template_id ?? c.id) ||
           availableComponents.find(t => t.template_key === c.template_key || t.type === c.type);
         if (!tpl) return c;
+        const existing = Array.isArray(c.editable_fields) ? c.editable_fields : [];
+        const tplFields = Array.isArray(tpl.editable_fields) ? tpl.editable_fields : [];
+        const mergedMap = new Map();
+        [...existing, ...tplFields].forEach(f => { if (f && f.path) mergedMap.set(f.path, f); });
+        const merged = Array.from(mergedMap.values());
+        if ((c.has_options || tpl.has_options) && !merged.some(f => f.type === 'optionList')) {
+          merged.push({ key: 'options', path: 'items', type: 'optionList', label: 'Options' });
+        }
         return {
           ...c,
           type: c.type ?? tpl.type,
           label: c.label ?? tpl.label,
           template_key: c.template_key ?? tpl.template_key,
           version: c.version ?? tpl.version,
-          editable_fields: tpl.editable_fields || [],
-          has_options: !!tpl.has_options,
-          option_schema: tpl.option_schema || null
+          editable_fields: merged,
+          has_options: c.has_options ?? !!tpl.has_options,
+          option_schema: c.option_schema || tpl.option_schema || null
         };
       })
     );
@@ -1037,8 +1051,6 @@ const ModifyComponent = () => {
         endpoint: components[index].props?.props?.endpoint || null
       },
       editable_fields: (() => {
-        const existing = components[index].editable_fields;
-        if (existing && existing.length) return existing;
         const tpl =
           tplById.get(
             components[index].templateId ?? components[index].template_id ?? components[index].id
@@ -1046,7 +1058,15 @@ const ModifyComponent = () => {
           availableComponents.find(
             t => t.template_key === components[index].template_key || t.type === components[index].type
           );
-        return tpl?.editable_fields || [];
+        const existing = Array.isArray(components[index].editable_fields) ? components[index].editable_fields : [];
+        const tplFields = Array.isArray(tpl?.editable_fields) ? tpl.editable_fields : [];
+        const mergedMap = new Map();
+        [...existing, ...tplFields].forEach(f => { if (f && f.path) mergedMap.set(f.path, f); });
+        const merged = Array.from(mergedMap.values());
+        if ((components[index].has_options || tpl?.has_options) && !merged.some(f => f.type === 'optionList')) {
+          merged.push({ key: 'options', path: 'items', type: 'optionList', label: 'Options' });
+        }
+        return merged;
       })()
     } : null;
     if (window.__ISET_DEBUG_INLINE_EDIT) {
