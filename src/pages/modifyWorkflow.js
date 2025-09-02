@@ -118,6 +118,11 @@ export default function ModifyWorkflowEditorWidget() {
           // fallback: first node
           setStartUiId(uiSteps[0]?.id || null);
         }
+  // Establish baseline now that existing workflow data loaded (no setTimeout needed)
+  baselineRef.current = snapshot();
+  baselineReadyRef.current = true;
+  dirtyRef.current = false;
+  setIsDirty(false);
       } catch (e) {
         // If load fails, leave as-is (new)
       }
@@ -130,16 +135,71 @@ export default function ModifyWorkflowEditorWidget() {
     } catch {}
   }, [steps]);
 
-  // Validation state
+  // Validation + dirty tracking
   const validation = useMemo(() => validateWorkflow(steps), [steps]);
   const dirtyRef = useRef(false);
   const [isDirty, setIsDirty] = useState(false);
-  // Track unsaved changes (simplistic diff marker)
-  useEffect(() => { dirtyRef.current = true; setIsDirty(true); }, [steps, wfName, wfStatus, startUiId]);
+  const baselineRef = useRef(null);
+  const baselineReadyRef = useRef(false);
+
+  const snapshot = useCallback(() => {
+    const normSteps = steps.map(s => ({
+      id: s.id,
+      name: s.name,
+      stepId: s.stepId,
+      routing: (() => {
+        const r = s.routing || { mode: 'linear' };
+        if (r.mode === 'linear') return { mode: 'linear', next: r.next || null };
+        const mapping = r.mapping || {};
+        const sortedKeys = Object.keys(mapping).sort();
+        const sortedMapping = {};
+        for (const k of sortedKeys) sortedMapping[k] = mapping[k] || null;
+        return { mode: 'byOption', fieldKey: r.fieldKey || '', options: Array.isArray(r.options) ? [...r.options] : [], mapping: sortedMapping, defaultNext: r.defaultNext || null };
+      })()
+    }));
+    return { wfName: wfName || '', wfStatus: wfStatus || 'draft', startUiId: startUiId || null, steps: normSteps };
+  }, [steps, wfName, wfStatus, startUiId]);
+
+  // Track whether any user-initiated edit has occurred to avoid premature dirty flag
+  const userEditRef = useRef(false);
+  const markUserEdited = () => { userEditRef.current = true; };
+
+  const recomputeDirty = useCallback(() => {
+    if (!baselineReadyRef.current || !baselineRef.current) return; // no baseline yet
+    if (!userEditRef.current) return; // suppress until a user edit actually occurs
+    try {
+      const curr = snapshot();
+      const changed = JSON.stringify(curr) !== JSON.stringify(baselineRef.current);
+      dirtyRef.current = changed;
+      setIsDirty(changed);
+      if (window?.DEBUG_WORKFLOW_DIRTY) {
+        console.log('[WF Dirty] Recompute', { changed, curr, baseline: baselineRef.current });
+      }
+    } catch {
+      dirtyRef.current = false;
+      setIsDirty(false);
+    }
+  }, [snapshot]);
+
+  // Initialize baseline for new workflow (no id) once.
+  useEffect(() => {
+    if (baselineReadyRef.current) return;
+    if (wfId) return; // existing workflow handled after load
+    baselineRef.current = snapshot();
+    baselineReadyRef.current = true;
+    dirtyRef.current = false;
+    setIsDirty(false);
+  }, [wfId, snapshot]);
+
+  // Recompute only after baseline established and on dependency change
+  useEffect(() => { recomputeDirty(); }, [recomputeDirty, steps, wfName, wfStatus, startUiId]);
   // Keyboard affordance: Esc clears selection
   useEffect(() => {
     const onKeyDown = (e) => { if (e.key === 'Escape') setSelectedId(null); };
     window.addEventListener('keydown', onKeyDown);
+      if (window?.DEBUG_WORKFLOW_DIRTY) {
+        console.log('[WF Dirty] Baseline initialised', baselineRef.current);
+      }
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
@@ -165,6 +225,7 @@ export default function ModifyWorkflowEditorWidget() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addFromLibrary = useCallback((lib) => {
+    markUserEdited();
     setSteps(prev => {
       const newId = nextStepId(prev);
       const newStep = { id: newId, name: lib.name, stepId: lib.stepId, routing: { mode: 'linear' } };
@@ -190,8 +251,8 @@ export default function ModifyWorkflowEditorWidget() {
     });
   }, [selectedId]);
 
-  const updateStep = useCallback((updated) => { setSteps(prev => prev.map(s => (s.id === updated.id ? updated : s))); }, []);
-  const deleteStep = useCallback((id) => { setSteps(prev => removeStepAndRewire(prev, id)); setSelectedId(curr => (curr === id ? null : curr)); }, []);
+  const updateStep = useCallback((updated) => { markUserEdited(); setSteps(prev => prev.map(s => (s.id === updated.id ? updated : s))); }, []);
+  const deleteStep = useCallback((id) => { markUserEdited(); setSteps(prev => removeStepAndRewire(prev, id)); setSelectedId(curr => (curr === id ? null : curr)); }, []);
 
   const deleteSelected = useCallback(() => { if (!selectedId) return; setShowDeleteModal(true); }, [selectedId]);
 
@@ -203,6 +264,9 @@ export default function ModifyWorkflowEditorWidget() {
     const startDbId = startUiId ? uiToDb.get(startUiId) : (steps[0]?.stepId || null);
     const routes = [];
     for (const s of steps) {
+    if (window?.DEBUG_WORKFLOW_DIRTY) {
+      console.log('[WF Dirty] Saved – baseline reset', baselineRef.current);
+    }
       const r = s.routing || {};
       if (r.mode === 'linear') {
         if (r.next) routes.push({ source_step_id: s.stepId, mode: 'linear', default_next_step_id: uiToDb.get(r.next) || null });
@@ -251,14 +315,18 @@ export default function ModifyWorkflowEditorWidget() {
           window.history.replaceState({}, '', u.toString());
         }
       }
-      dirtyRef.current = false; setIsDirty(false);
+  // Reset baseline to new saved snapshot
+  baselineRef.current = snapshot();
+  baselineReadyRef.current = true;
+  dirtyRef.current = false;
+  setIsDirty(false);
     } catch (e) {
       setSaveMsg('Save failed');
     } finally {
       setSaving(false);
       setTimeout(() => setSaveMsg(''), 3000);
     }
-  }, [wfId, toApiPayload]);
+  }, [wfId, toApiPayload, snapshot]);
 
   const startOptions = steps.map(s => ({ label: s.name, value: s.id }));
 
@@ -294,9 +362,9 @@ export default function ModifyWorkflowEditorWidget() {
             startUiId={startUiId}
             startOptions={startOptions}
             onChange={(delta) => {
-              if (Object.prototype.hasOwnProperty.call(delta, 'name')) setWfName(delta.name);
-              if (Object.prototype.hasOwnProperty.call(delta, 'status')) setWfStatus(delta.status);
-              if (Object.prototype.hasOwnProperty.call(delta, 'startUiId')) setStartUiId(delta.startUiId);
+              if (Object.prototype.hasOwnProperty.call(delta, 'name')) { markUserEdited(); setWfName(delta.name); }
+              if (Object.prototype.hasOwnProperty.call(delta, 'status')) { markUserEdited(); setWfStatus(delta.status); }
+              if (Object.prototype.hasOwnProperty.call(delta, 'startUiId')) { markUserEdited(); setStartUiId(delta.startUiId); }
             }}
             onSave={saveWorkflow}
             onPublish={publishWorkflow}
