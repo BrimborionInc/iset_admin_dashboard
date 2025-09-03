@@ -25,7 +25,7 @@ const WorkflowPropertiesEditorWidget = ({ name, status, startUiId, startOptions 
           {saveMsg}
         </Alert>
       ) : null}
-      <Grid gridDefinition={[{ colspan: 4 }, { colspan: 2 }, { colspan: 2 }]}> 
+  <Grid gridDefinition={[{ colspan: 4 }, { colspan: 2 }, { colspan: 2 }]}> 
         <FormField label="Name">
           <Input value={name} onChange={({ detail }) => onChange({ name: detail.value })} />
         </FormField>
@@ -44,6 +44,7 @@ const WorkflowPropertiesEditorWidget = ({ name, status, startUiId, startOptions 
             options={startOptions}
           />
         </FormField>
+  {/* Summary page toggle removed; authors add a summary step manually */}
       </Grid>
     </BoardItem>
   );

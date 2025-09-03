@@ -5,9 +5,9 @@ import "../css/govuk-frontend.min.css";
 import { initAll as govukInitAll } from 'govuk-frontend';
 import { DndProvider, useDrag, useDrop, useDragDropManager } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
-import { Grid, Box, Header, Button, Container, SpaceBetween, Alert, ExpandableSection, SegmentedControl } from "@cloudscape-design/components";
+import { Grid, Box, Header, Button, Container, SpaceBetween, Alert, ExpandableSection, SegmentedControl, FormField, Input, Select, Textarea, Toggle } from "@cloudscape-design/components";
 import { useParams, useHistory, useLocation } from "react-router-dom";
-import PropertiesPanel from './PropertiesPanel.js';
+import PropertiesPanel, { ValidationEditor } from './PropertiesPanel.js';
 import TranslationsWidget from '../widgets/TranslationsWidget';
 import { apiFetch } from '../auth/apiClient';
 
@@ -266,8 +266,43 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
     // Prefer templateId from DB, fall back to key/type.
     const templateId  = comp?.templateId ?? comp?.template_id ?? comp?.id ?? null;
     const templateKey = comp?.template_key ?? comp?.type ?? null;
-    // Prepare props for preview (strings only)
-  const previewProps = useMemo(() => flattenTranslations(comp?.props || {}, previewLang), [comp?.props, previewLang]);
+    // Prepare props for preview (strings only) with special handling for summary-list
+    const previewProps = useMemo(() => {
+      const base = flattenTranslations(comp?.props || {}, previewLang) || {};
+      const t = String(comp?.type || comp?.template_key || '').toLowerCase();
+      if (t === 'summary-list') {
+        const included = Array.isArray(comp?.props?.included) ? comp.props.included : [];
+        if (included.length > 0) {
+          base.rows = included.map(r => {
+            const lbl = (() => {
+              if (!r) return '';
+              // 1. Explicit override (string or bilingual object)
+              if (typeof r.labelOverride === 'string') return r.labelOverride;
+              if (r.labelOverride && typeof r.labelOverride === 'object') return r.labelOverride[previewLang] || r.labelOverride.en || r.labelOverride.fr || r.key;
+              // 2. Stored snapshot labels from field selection
+              if (previewLang === 'fr' && r.labelFr) return r.labelFr;
+              if (previewLang === 'en' && r.labelEn) return r.labelEn;
+              if (r.labelEn || r.labelFr) return r.labelEn || r.labelFr; // fallback any snapshot
+              // 3. Fallback to key
+              return r.key;
+            })();
+            return {
+              key: { text: lbl },
+              value: { text: previewLang === 'fr' ? '(valeur à l\'exécution)' : '(value at runtime)' }
+            };
+          });
+        } else {
+          base.rows = [
+            {
+              key: { text: previewLang === 'fr' ? 'Liste récapitulative (espace réservé)' : 'Summary list (placeholder)' },
+              value: { text: previewLang === 'fr' ? 'Sélectionnez un workflow et des champs dans le panneau Propriétés. Non publié tant que non configuré.' : 'Select a workflow & fields in the Properties panel. Not included in publish until configured.' }
+            }
+          ];
+        }
+        base.__preview = true; // hint for server template if needed
+      }
+      return base;
+    }, [comp?.props, previewLang]);
     const { html, loading, error } = useNunjucksHTML({
       templateId,
       templateKey,
@@ -660,6 +695,7 @@ const ModifyComponent = () => {
   const [status, setStatus] = useState('');
   const [initialName, setInitialName] = useState('');
   const [initialStatus, setInitialStatus] = useState('');
+  // (Removed) Step-level validation (stop conditions) – simplified editor now only manages component-level validation.
   const [manualDirty, setManualDirty] = useState(false);
   // compute hasChanges (deep) to gate buttons
   const hasChanges = useMemo(() => {
@@ -893,12 +929,13 @@ const ModifyComponent = () => {
 
   useEffect(() => {
     if (id === 'new') {
-      setComponents([]);
+  setComponents([]);
       setName('Untitled BlockStep');
       setStatus('active');
       setInitialComponents([]);
       setInitialName('Untitled BlockStep');
       setInitialStatus('active');
+  /* stopConditions removed */
       setLoading(false);
     } else if (id) {
       // DB-backed step load
@@ -923,6 +960,7 @@ const ModifyComponent = () => {
           setInitialName(data.name || 'Untitled BlockStep');
           setInitialStatus(data.status || 'active');
           const comps = Array.isArray(data.components) ? data.components : [];
+          // stopConditions removed from this version; ignore any legacy data.stopConditions
           // Dedupe by name/id to avoid accidental duplicates from prior saves
           const seen = new Set();
           const deduped = comps.filter(c => {
@@ -933,6 +971,7 @@ const ModifyComponent = () => {
           });
           setComponents(deduped, { skipHistory: true });
           setInitialComponents(deduped);
+          /* stopConditions removed */
         } catch (e) {
           console.error('Failed to load step', e);
         } finally {
@@ -1112,16 +1151,31 @@ const ModifyComponent = () => {
   };
 
   // normalise editor components to API payload
-  const toApiComponents = (arr) =>
-    (Array.isArray(arr) ? arr : []).map(c => ({
-      templateId: c.templateId ?? c.template_id ?? c.id, // be forgiving
-      props: c.props || {}
-    }));
+  const toApiComponents = (arr) => {
+    return (Array.isArray(arr) ? arr : []).map(c => {
+      if (!c) return c;
+      const templateKey = c.template_key || c.type;
+      // Shallow clone props to avoid mutating editor state
+      const props = c.props ? { ...c.props } : {};
+      // If summary-list has been configured (workflow selected or included rows chosen), drop placeholder rows
+      if ((templateKey === 'summary-list') && props) {
+        const hasConfig = (Array.isArray(props.included) && props.included.length) || props.workflowId;
+        if (hasConfig && Array.isArray(props.rows)) {
+          delete props.rows; // prevent hybrid state (placeholder + included)
+        }
+      }
+      return {
+        templateId: c.templateId ?? c.template_id ?? c.id, // be forgiving
+        template_key: templateKey, // include for server-side sanitation / future logic
+        props
+      };
+    });
+  };
 
   const handleSaveTemplate = async () => {
     // DB-only save of step JSON
     try {
-      const payload = { name, status, components: toApiComponents(components) };
+  const payload = { name, status, components: toApiComponents(components) };
       if (id === 'new') {
         const res = await apiFetch(`/api/steps`, {
           method: 'POST',
@@ -1145,6 +1199,7 @@ const ModifyComponent = () => {
       setInitialComponents(components);
       setInitialName(name);
       setInitialStatus(status);
+  /* stopConditions removed */
       setManualDirty(false);
     } catch (e) {
       console.error('Save step failed', e);
@@ -1154,7 +1209,7 @@ const ModifyComponent = () => {
 
   const handleSaveAsNew = async () => {
     try {
-      const payload = { name: `${name} (copy)`, status, components: toApiComponents(components) };
+  const payload = { name: `${name} (copy)`, status, components: toApiComponents(components) };
       const res = await apiFetch(`/api/steps`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1357,6 +1412,21 @@ const ModifyComponent = () => {
                   asBoardItem={false}
                 />
               </ExpandableSection>
+              {selectedComponent && (() => {
+                const t = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
+                const allowed = new Set(['textarea','select','radio','radios','password-input','input','file-upload','date-input','checkbox','checkboxes','character-count']);
+                if (!allowed.has(t)) return null;
+                return (
+                  <ExpandableSection headerText="Validation" defaultExpanded={false}>
+                    <ValidationEditor
+                      selectedComponent={selectedComponent}
+                      updateComponentProperty={updateComponentProperty}
+                      allComponents={components}
+                    />
+                  </ExpandableSection>
+                );
+              })()}
+              {/* Step Validation (Stop Conditions) UI removed */}
             </SpaceBetween>
           </Box>
         </Grid>

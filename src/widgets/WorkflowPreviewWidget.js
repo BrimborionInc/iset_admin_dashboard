@@ -19,10 +19,10 @@ const textOf = (v) => {
 };
 
 // Adaptor for summary-list component so admin preview uses portal SummaryList with current collected answers
-const SummaryListAdapter = ({ comp, answers }) => {
+const SummaryListAdapter = ({ comp, answers, lang }) => {
   const Comp = PortalRegistry['summary-list'];
   if (!Comp) return null;
-  return <Comp comp={comp} values={answers} />;
+  return <Comp comp={comp} values={answers} lang={lang} />;
 };
 
 // Smaller nodes and tighter default fallback spacing
@@ -183,9 +183,13 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
   const [{ nodes, edges }, setGraph] = useState({ nodes: [], edges: [] });
   const rfRef = React.useRef(null);
   const containerRef = React.useRef(null);
-  const [mode, setMode] = useState('graph'); // graph | interactive | json
+  const [mode, setMode] = useState('graph'); // graph | interactive | summary | json
+  const [previewLang, setPreviewLang] = useState('en'); // 'en' | 'fr'
   const [runtime, setRuntime] = useState(null); // { steps, meta }
-  const [runner, setRunner] = useState({ stepIndex: 0, answers: {}, errors: {}, history: [] });
+  const [runner, setRunner] = useState({ stepIndex: 0, answers: {}, errors: {}, warnings: {}, history: [] });
+  const [liveAnnouncement, setLiveAnnouncement] = useState('');
+  const errorSummaryRef = React.useRef(null);
+  const focusErrorSummaryNext = React.useRef(false);
   const [showAnswers, setShowAnswers] = useState(false);
   const apiBase = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
 
@@ -241,27 +245,179 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
 
   // Interactive helpers
   const steps = runtime?.steps || [];
+  const hasSummaryList = useMemo(() => {
+    if (!steps.length) return false;
+    return steps.some(s => Array.isArray(s.components) && s.components.some(c => c && c.type === 'summary-list'));
+  }, [steps]);
+
+  // If current mode is summary but no summary list exists anymore, fallback to graph
+  useEffect(() => {
+    if (mode === 'summary' && !hasSummaryList) setMode('graph');
+  }, [mode, hasSummaryList]);
   const currentStep = steps[runner.stepIndex] || null;
   const answers = runner.answers;
 
+  // --- Validation (unified schema parity with public portal) --------------
+  // Helper: flatten top-level components plus single-level option children (conditional reveals)
+  function flattenComponents(stepObj){
+    const list = [];
+    if(!stepObj || !Array.isArray(stepObj.components)) return list;
+    for(const c of stepObj.components){
+      if(!c) continue;
+      list.push(c);
+      if(Array.isArray(c.options)){
+        for(const opt of c.options){
+          if(opt && Array.isArray(opt.children)){
+            for(const ch of opt.children){ if(ch) list.push(ch); }
+          }
+        }
+      }
+    }
+    return list;
+  }
+  const msgFor = (m) => {
+    if (!m) return '';
+    if (typeof m === 'string') return m;
+    if (typeof m === 'object') return m[previewLang] || m.en || m.fr || Object.values(m).find(x => typeof x === 'string') || '';
+    return String(m);
+  };
+  function migrateValidation(raw){
+    if(!raw||typeof raw!=='object') return { required:false, rules:[] };
+    const v = JSON.parse(JSON.stringify(raw));
+    if(!v.requiredMessage && v.errorMessage){
+      if(typeof v.errorMessage==='object') v.requiredMessage = v.errorMessage; else v.requiredMessage = { en: v.errorMessage, fr: v.errorMessage };
+    }
+    if(v.pattern){
+      const exists = Array.isArray(v.rules)&&v.rules.some(r=> (r.type||r.kind)==='pattern');
+      if(!exists){ v.rules = [...(v.rules||[]), { id:'auto-pattern', type:'pattern', trigger:['submit'], pattern:v.pattern }]; }
+      delete v.pattern;
+    }
+    if(v.minLength){
+      const exists = Array.isArray(v.rules)&&v.rules.some(r=> (r.type||r.kind)==='length');
+      if(!exists){ v.rules = [...(v.rules||[]), { id:'auto-length', type:'length', trigger:['submit'], minLength:v.minLength }]; }
+      delete v.minLength;
+    }
+    if(Array.isArray(v.rules)){
+      v.rules = v.rules.map(r=>{ if(!r) return r; const out={...r}; if(!out.type && out.kind) out.type=out.kind; if(out.type==='atLeastOne' && Array.isArray(out.keys) && !out.fields) out.fields=out.keys; if(!Array.isArray(out.trigger)||!out.trigger.length) out.trigger=['submit']; if(!out.severity) out.severity='error'; if(out.block===undefined) out.block= out.severity==='error'; return out; });
+    } else v.rules=[];
+    return v;
+  }
+  function valueIsEmpty(val){
+    if(val==null) return true; if(typeof val==='string') return val.trim()===''; if(Array.isArray(val)) return val.length===0; return false;
+  }
+  function mergedLogicData(stepObj){
+    const data = { ...answers };
+    const comps = flattenComponents(stepObj);
+    comps.forEach(c=>{
+      const sk = c.storageKey || c.id; const id = c.id; if(sk && id){ const val = answers[sk]; if(val!==undefined && data[id]===undefined) data[id]=val; if(answers[id]!==undefined && data[sk]===undefined) data[sk]=answers[id]; }
+    });
+    return data;
+  }
+  function evaluateRule(rule, comp, value, data){
+    const type = rule.type || rule.kind;
+    const failMsg = ()=> msgFor(rule.message) || '';
+    try {
+      switch(type){
+        case 'predicate': {
+          if(!rule.when) return { failed:false }; const res = !!jsonLogic.apply(rule.when, data); return res ? { failed:true, message: failMsg() || 'Invalid' } : { failed:false };
+        }
+        case 'atLeastOne': {
+          const fields = Array.isArray(rule.fields)?rule.fields:[]; const ok = fields.some(f=>{ const v=data[f]; if(v==null) return false; if(Array.isArray(v)) return v.length>0; if(typeof v==='object') return Object.keys(v).length>0; return String(v).trim()!==''; }); return ok?{failed:false}:{failed:true,message:failMsg()||'Provide at least one value.'};
+        }
+        case 'range': {
+          if(valueIsEmpty(value)) return { failed:false }; const num=Number(value); if(!Number.isFinite(num)) return { failed:false }; if(rule.min!=null && num<rule.min) return { failed:true, message: failMsg()||`Value must be ≥ ${rule.min}`}; if(rule.max!=null && num>rule.max) return { failed:true, message: failMsg()||`Value must be ≤ ${rule.max}`}; return { failed:false };
+        }
+        case 'length': {
+          if(typeof value!=='string'||value==='') return { failed:false }; if(rule.minLength!=null && value.length<rule.minLength) return { failed:true, message: failMsg()||`Minimum ${rule.minLength} characters.`}; if(rule.maxLength!=null && value.length>rule.maxLength) return { failed:true, message: failMsg()||`Maximum ${rule.maxLength} characters.`}; return { failed:false };
+        }
+        case 'pattern': { if(typeof value!=='string'||value==='') return { failed:false }; if(!rule.pattern) return { failed:false }; try { const re=new RegExp(rule.pattern, rule.flags||''); if(!re.test(value)) return { failed:true, message: failMsg()||'Invalid format.' }; } catch { return { failed:false }; } return { failed:false }; }
+        case 'compare': { const resolve=o=> (typeof o==='string' && Object.prototype.hasOwnProperty.call(data,o))?data[o]:o; const l=resolve(rule.left); const r=resolve(rule.right); const op=rule.op; let ok=true; switch(op){ case '==': ok = l==r; break; case '!=': ok = l!=r; break; case '>': ok = Number(l)>Number(r); break; case '>=': ok = Number(l)>=Number(r); break; case '<': ok = Number(l)<Number(r); break; case '<=': ok = Number(l)<=Number(r); break; default: ok=true; } if(!ok) return { failed:true, message: failMsg()||'Values do not match.' }; return { failed:false }; }
+        default: return { failed:false };
+      }
+    } catch { return { failed:false }; }
+  }
+  function evaluateChangeRules(comp, nextVal){
+    focusErrorSummaryNext.current = false; // live feedback shouldn't shift focus
+    const k = comp.storageKey || comp.id; if(!k) return;
+    const rawValidation = (() => {
+      const base = (comp.validation && typeof comp.validation === 'object') ? JSON.parse(JSON.stringify(comp.validation)) : {};
+      const fromProps = (comp.props && comp.props.validation && typeof comp.props.validation === 'object') ? comp.props.validation : null;
+      if (fromProps) {
+        // Only fill fields missing in base (so DB-promoted values win)
+        if (base.requiredMessage == null && fromProps.requiredMessage != null) base.requiredMessage = fromProps.requiredMessage;
+        if (base.rules == null && Array.isArray(fromProps.rules)) base.rules = JSON.parse(JSON.stringify(fromProps.rules));
+        else if (Array.isArray(base.rules) && Array.isArray(fromProps.rules)) {
+          // Merge by id (keep existing first)
+            const seen = new Set(base.rules.map(r=>r&&r.id));
+            fromProps.rules.forEach(r=>{ if(r && r.id && !seen.has(r.id)) base.rules.push(r); });
+        }
+        if (base.required == null && fromProps.required != null) base.required = fromProps.required;
+      }
+      return base;
+    })();
+    const migrated = migrateValidation(rawValidation);
+    const rules = migrated.rules || [];
+    const data = { ...mergedLogicData(currentStep), [k]: nextVal };
+    let firstError=null; let warning=null;
+    for(const r of rules){
+      const triggers = Array.isArray(r.trigger)?r.trigger:['submit'];
+      if(!triggers.includes('change')) continue;
+      const { failed, message } = evaluateRule(r, comp, nextVal, data);
+      if(failed){
+        if((r.severity||'error')==='warn') { warning = message; continue; }
+        firstError = message || 'Invalid'; break;
+      }
+    }
+    setRunner(r=>{ const errors={...r.errors}; if(firstError) errors[k]=firstError; else delete errors[k]; const warnings={...(r.warnings||{})}; if(warning) warnings[k]=warning; else delete warnings[k]; if(firstError && r.errors[k]!==firstError){ setLiveAnnouncement(`${comp.label ? (typeof comp.label==='object'? (comp.label.en||Object.values(comp.label)[0]) : comp.label)+': ':''}${firstError}`);} else if(!firstError && r.errors[k]){ setLiveAnnouncement(''); } return { ...r, errors, warnings }; });
+  }
   const setAnswer = (comp, value) => {
-    setRunner(r => ({ ...r, answers: { ...r.answers, [comp.storageKey || comp.id]: value } }));
+    const key = comp.storageKey || comp.id;
+    setRunner(r => ({ ...r, answers: { ...r.answers, [key]: value } }));
+    setTimeout(()=> evaluateChangeRules(comp, value),0);
   };
   const validateStep = () => {
-    if (!currentStep) return {};
-    const errs = {};
-    (currentStep.components || []).forEach(c => {
-      const key = c.storageKey || c.id;
-      if (c.required) {
-        const v = answers[key];
-        if (v == null || v === '' || (Array.isArray(v) && !v.length)) errs[key] = 'Required';
+    if(!currentStep) return {};
+    focusErrorSummaryNext.current = true;
+    const data = mergedLogicData(currentStep);
+  const compList = flattenComponents(currentStep);
+    const errs={}; const warns={};
+    compList.forEach(c=>{
+      const k = c.storageKey || c.id; if(!k) return; const val = answers[k];
+      const rawValidation = (() => {
+        const base = (c.validation && typeof c.validation === 'object') ? JSON.parse(JSON.stringify(c.validation)) : {};
+        const fromProps = (c.props && c.props.validation && typeof c.props.validation === 'object') ? c.props.validation : null;
+        if (fromProps) {
+          if (base.requiredMessage == null && fromProps.requiredMessage != null) base.requiredMessage = fromProps.requiredMessage;
+          if (base.rules == null && Array.isArray(fromProps.rules)) base.rules = JSON.parse(JSON.stringify(fromProps.rules));
+          else if (Array.isArray(base.rules) && Array.isArray(fromProps.rules)) {
+            const seen = new Set(base.rules.map(r=>r&&r.id));
+            fromProps.rules.forEach(r=>{ if(r && r.id && !seen.has(r.id)) base.rules.push(r); });
+          }
+          if (base.required == null && fromProps.required != null) base.required = fromProps.required;
+        }
+        return base;
+      })();
+      const migrated = migrateValidation(rawValidation || {});
+  const isReq = c.required || (c.props && c.props.required) || migrated.required;
+      if(isReq && valueIsEmpty(val)){
+        const reqMsg = migrated.requiredMessage ? msgFor(migrated.requiredMessage) : (migrated.errorMessage ? msgFor(migrated.errorMessage) : 'This field is required');
+        errs[k]=reqMsg; return; // skip further rules
+      }
+      for(const r of migrated.rules){
+        const triggers = Array.isArray(r.trigger)?r.trigger:['submit'];
+        if(!triggers.includes('submit')) continue;
+        const { failed, message } = evaluateRule(r, c, val, data);
+        if(failed){
+          if((r.severity||'error')==='warn'){ if(!warns[k]) warns[k]=message||'Check value'; continue; }
+          errs[k]=message||'Invalid'; if(r.block!==false) break; // stop further rules
+        }
       }
     });
-    setRunner(r => ({ ...r, errors: errs }));
+    setRunner(r => ({ ...r, errors: errs, warnings: warns }));
     return errs;
   };
   const next = () => {
-    const errs = validateStep();
+  const errs = validateStep();
     if (Object.keys(errs).length) return;
     if (!currentStep) return;
     // Branching logic
@@ -278,10 +434,10 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
       if (idx >= 0) {
         setRunner(r => ({
           ...r,
-          // append current step to history (path stack); if user had gone back and chose a different branch, we prune any forward history implicitly since we base on current r.history
           history: [...r.history, r.stepIndex],
           stepIndex: idx,
-          errors: {}
+          errors: {},
+          warnings: {}
         }));
         setShowAnswers(false);
         return;
@@ -298,10 +454,26 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
       if (!r.history.length) return r; // nothing to go back to
       const newHistory = [...r.history];
       const prevIdx = newHistory.pop();
-      return { ...r, stepIndex: prevIdx, history: newHistory, errors: {} };
+      return { ...r, stepIndex: prevIdx, history: newHistory, errors: {}, warnings: {} };
     });
     setShowAnswers(false);
   };
+
+  // Error summary focus management
+  useEffect(()=>{
+    const hasErrors = Object.keys(runner.errors||{}).length>0;
+    if(hasErrors && focusErrorSummaryNext.current && errorSummaryRef.current){
+      try{ errorSummaryRef.current.focus(); }catch{}
+      focusErrorSummaryNext.current=false;
+    }
+  }, [runner.errors]);
+
+  function anchorIdFor(comp){
+    const key = comp.storageKey || comp.id; const type = String(comp.type||'').toLowerCase();
+    if(type==='radio'||type==='checkbox'||type==='checkboxes') return `${key}-0`;
+    if(type==='date'||type==='date-input') return `${key}-day`;
+    return key;
+  }
 
   return (
     <BoardItem
@@ -321,11 +493,15 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
               <SegmentedControl
                 selectedId={mode}
                 onChange={e => setMode(e.detail.selectedId)}
-                options={[
-                  { id: 'graph', text: 'Graph' },
-                  { id: 'interactive', text: 'Interactive' },
-                  { id: 'json', text: 'Output JSON' }
-                ]}
+                options={(() => {
+                  const base = [
+                    { id: 'graph', text: 'Graph' },
+                    { id: 'interactive', text: 'Interactive' }
+                  ];
+                  if (hasSummaryList) base.push({ id: 'summary', text: 'Summary' });
+                  base.push({ id: 'json', text: 'Output JSON' });
+                  return base;
+                })()}
               />
             </SpaceBetween>
           }
@@ -341,10 +517,29 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
       }}
       settings={
         <ButtonDropdown
-          items={[{ id: 'remove', text: 'Remove' }]}
-          ariaLabel="Board item settings"
+          items={[
+            { id: 'lang-en', text: 'English' },
+            { id: 'lang-fr', text: 'Français' },
+            { id: 'remove', text: 'Remove' }
+          ]}
+          ariaLabel="Workflow preview settings"
           variant="icon"
-          onItemClick={() => actions && actions.removeItem && actions.removeItem()}
+          onItemClick={({ detail }) => {
+            if (!detail || !detail.id) return;
+            switch (detail.id) {
+              case 'lang-en':
+                setPreviewLang('en');
+                break;
+              case 'lang-fr':
+                setPreviewLang('fr');
+                break;
+              case 'remove':
+                actions && actions.removeItem && actions.removeItem();
+                break;
+              default:
+                break;
+            }
+          }}
         />
       }
   >
@@ -374,18 +569,43 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
             {runtime?.error && <div style={{ color: '#d4351c' }}>{runtime.error}</div>}
             {runtime && !runtime.error && currentStep && (
               <div>
-                <div style={{ marginBottom: 12, fontWeight: 600, fontSize: 16 }}>{currentStep.title?.en || currentStep.stepId}</div>
+                <div style={{ marginBottom: 12, fontWeight: 600, fontSize: 16 }}>{currentStep.title?.[previewLang] || currentStep.title?.en || currentStep.stepId}</div>
                 <div className="govuk-width-container" style={{ paddingLeft: 0, paddingRight: 0 }}>
+                  {/* Live region for change validations */}
+                  <div aria-live="polite" className="govuk-visually-hidden">{liveAnnouncement}</div>
+                  {Object.keys(runner.errors||{}).length>0 && (
+                    <div ref={errorSummaryRef} tabIndex="-1" className="govuk-error-summary" aria-labelledby="wp-error-summary-title" role="alert" style={{marginBottom:16}}>
+                      <h2 className="govuk-error-summary__title" id="wp-error-summary-title" style={{fontSize:18}}>There is a problem</h2>
+                      <div className="govuk-error-summary__body">
+                        <ul className="govuk-list govuk-error-summary__list">
+                          {Object.entries(runner.errors).map(([k,m])=>{
+                                    const all = flattenComponents(currentStep);
+                                    const comp = all.find(c=> (c.storageKey||c.id)===k);
+                                    const anchor = comp? anchorIdFor(comp): k;
+                                    return <li key={k}><a href={`#${anchor}`}>{m}</a></li>;
+                                  })}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
                   {(currentStep.components || []).map(c => {
                     const type = c.type;
                     const key = c.storageKey || c.id;
                     if (type === 'summary-list') {
-                      return <SummaryListAdapter key={c.id} comp={c} answers={answers} />;
+                      return <SummaryListAdapter key={c.id} comp={c} answers={answers} lang={previewLang} />;
                     }
                     const Comp = PortalRegistry[type];
                     if (!Comp) return <div key={c.id} style={{ fontSize: 12, color: '#666' }}>[Unsupported: {type}]</div>;
                     const val = answers[key];
-                    return <Comp key={c.id} comp={c} value={val} onChange={v => setAnswer(c, v)} error={runner.errors[key]} values={answers} />;
+                    const renderChild = (child) => {
+                      if (!child || !child.type) return null;
+                      const ChildComp = PortalRegistry[child.type];
+                      if (!ChildComp) return <div key={child.id || child.storageKey} style={{ fontSize: 12, color: '#666' }}>[Unsupported: {child.type}]</div>;
+                      const childKey = child.storageKey || child.id;
+                      const childVal = answers[childKey];
+                      return <ChildComp key={child.id || childKey} comp={child} value={childVal} onChange={v => setAnswer(child, v)} error={runner.errors[childKey]} values={answers} lang={previewLang} />;
+                    };
+                    return <Comp key={c.id} comp={c} value={val} onChange={v => setAnswer(c, v)} error={runner.errors[key]} values={answers} lang={previewLang} render={renderChild} />;
                   })}
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -407,6 +627,28 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
                   {JSON.stringify(answers, null, 2)}
                 </div>
               </Modal>
+            )}
+          </div>
+        )}
+        {selectedWorkflow && mode === 'summary' && hasSummaryList && (
+          <div style={{ flex: 1, minHeight: 300, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', padding: 16, overflow: 'auto' }}>
+            {!runtime && <div style={{ color: '#888' }}>Loading summary…</div>}
+            {runtime?.error && <div style={{ color: '#d4351c' }}>{runtime.error}</div>}
+            {runtime && !runtime.error && (
+              <div style={{ maxWidth: 800 }}>
+                {(steps || []).filter(s => Array.isArray(s.components) && s.components.some(c => c.type === 'summary-list')).map(s => (
+                  <div key={s.stepId || s.id} style={{ marginBottom: 32 }}>
+                    <h3 style={{ marginTop: 0 }}>{s.title?.[previewLang] || s.title?.en || 'Summary'}</h3>
+                    {s.components.filter(c => c.type === 'summary-list').map(c => (
+                      <SummaryListAdapter key={c.id} comp={c} answers={answers} lang={previewLang} />
+                    ))}
+                  </div>
+                ))}
+                {!steps.some(s => Array.isArray(s.components) && s.components.some(c => c.type === 'summary-list')) && (
+                  <div style={{ color: '#666', fontSize: 14 }}>No summary-list component found.</div>
+                )}
+                <div style={{ marginTop: 12, fontSize: 12, color: '#555' }}>Values reflect current Interactive answers; open Interactive mode to change them.</div>
+              </div>
             )}
           </div>
         )}
