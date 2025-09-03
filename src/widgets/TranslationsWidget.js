@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Box, Header, SpaceBetween, ButtonDropdown, Grid, Input, FormField, Badge, Container, Button, Alert } from '@cloudscape-design/components';
+import { Box, Header, SpaceBetween, ButtonDropdown, Grid, Input, FormField, Badge, Container, Alert, Spinner } from '@cloudscape-design/components';
+import Avatar from '@cloudscape-design/chat-components/avatar';
 
 // Phase 1: manual bilingual editing for common fields only (EN/FR)
 // - input/text/textarea/password/number/email/phone: label.text, hint.text
@@ -88,6 +89,17 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
     components.forEach(c => {
       const type = String(c?.type || c?.template_key || '').toLowerCase();
       const p = c?.props || {};
+      const hasContent = (val) => {
+        if (val == null) return false;
+        if (typeof val === 'string') return val.trim().length > 0;
+        if (typeof val === 'object') {
+          const vEn = typeof val.en === 'string' ? val.en.trim() : '';
+          const vFr = typeof val.fr === 'string' ? val.fr.trim() : '';
+          const vTxt = typeof val.text === 'string' ? val.text.trim() : '';
+            return !!(vEn || vFr || vTxt);
+        }
+        return false;
+      };
       const push = (v) => {
         const o = ensureLangObject(v);
         total += 1;
@@ -98,8 +110,10 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
         push(getAtPath(p, 'label.text'));
         push(getAtPath(p, 'hint.text'));
         if (canHaveAffixes(type)) {
-          push(getAtPath(p, 'prefix.text'));
-          push(getAtPath(p, 'suffix.text'));
+          const pref = getAtPath(p, 'prefix.text');
+          const suff = getAtPath(p, 'suffix.text');
+          if (hasContent(pref)) push(pref);
+          if (hasContent(suff)) push(suff);
         }
       } else if (isSummaryList(type)) {
         const rows = Array.isArray(p?.rows) ? p.rows : [];
@@ -177,6 +191,17 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       if (en && !fr) tasks.push({ id: `${ci}|${path}`, from: 'en', to: 'fr', text: en });
       if (fr && !en) tasks.push({ id: `${ci}|${path}`, from: 'fr', to: 'en', text: fr });
     };
+    const hasContent = (val) => {
+      if (val == null) return false;
+      if (typeof val === 'string') return val.trim().length > 0;
+      if (typeof val === 'object') {
+        const vEn = typeof val.en === 'string' ? val.en.trim() : '';
+        const vFr = typeof val.fr === 'string' ? val.fr.trim() : '';
+        const vTxt = typeof val.text === 'string' ? val.text.trim() : '';
+        return !!(vEn || vFr || vTxt);
+      }
+      return false;
+    };
     components.forEach((comp, ci) => {
       const type = String(comp?.type || comp?.template_key || '').toLowerCase();
       const p = comp?.props || {};
@@ -184,8 +209,8 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
         addTasksFor(ci, p, 'label.text');
         addTasksFor(ci, p, 'hint.text');
         if (canHaveAffixes(type)) {
-          addTasksFor(ci, p, 'prefix.text');
-          addTasksFor(ci, p, 'suffix.text');
+          if (hasContent(getAtPath(p, 'prefix.text'))) addTasksFor(ci, p, 'prefix.text');
+          if (hasContent(getAtPath(p, 'suffix.text'))) addTasksFor(ci, p, 'suffix.text');
         }
       } else if (isSummaryList(type)) {
         const rows = Array.isArray(p?.rows) ? p.rows : [];
@@ -328,8 +353,10 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
           rows.push({ label: 'Label', path: 'label.text' });
           rows.push({ label: 'Hint', path: 'hint.text' });
           if (canHaveAffixes(type)) {
-            rows.push({ label: 'Prefix', path: 'prefix.text' });
-            rows.push({ label: 'Suffix', path: 'suffix.text' });
+            const hasContent = (val) => {
+              if (val == null) return false; if (typeof val === 'string') return val.trim().length>0; if (typeof val === 'object') { const vEn = typeof val.en==='string'?val.en.trim():''; const vFr = typeof val.fr==='string'?val.fr.trim():''; const vTxt = typeof val.text==='string'?val.text.trim():''; return !!(vEn||vFr||vTxt); } return false; };
+            if (hasContent(getAtPath(props, 'prefix.text'))) rows.push({ label: 'Prefix', path: 'prefix.text' });
+            if (hasContent(getAtPath(props, 'suffix.text'))) rows.push({ label: 'Suffix', path: 'suffix.text' });
           }
         } else if (isSummaryList(type)) {
           // No top-level label/hint; handled per-row below
@@ -364,7 +391,7 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
 
         return (
           <Box key={ci} padding={{ top: 'xs', bottom: 's' }} border={{ side: 'bottom', color: 'divider' }}>
-            <Header variant="h3">{comp?.label || comp?.type || 'Component'} <small style={{ color: '#6b7280' }}>({type})</small></Header>
+            <Header variant="h3">{comp?.props?.name || comp?.name || comp?.storageKey || comp?.label || comp?.type || 'Component'} <small style={{ color: '#6b7280' }}>({type})</small></Header>
 
             {rows.map((r, idx) => {
               const val = ensureLangObject(getAtPath(props, r.path));
@@ -492,9 +519,17 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
     <SpaceBetween direction="horizontal" size="xs">
       <Badge color={coverage.pct.fr === 100 ? 'green' : 'normal'}>FR {coverage.pct.fr}%</Badge>
       <Badge color={coverage.pct.en === 100 ? 'green' : 'normal'}>EN {coverage.pct.en}%</Badge>
-      <Button onClick={handleTranslateMissing} disabled={translating} variant="normal">
-        {translating ? 'Translating…' : 'Translate'}
-      </Button>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={translating ? 'Translating in progress' : 'Generate missing translations with AI'}
+        onClick={() => { if (!translating) handleTranslateMissing(); }}
+        onKeyDown={e => { if (!translating && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleTranslateMissing(); } }}
+        style={{ cursor: translating ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:4 }}
+      >
+        <Avatar ariaLabel="AI translation generator" color="gen-ai" iconName="gen-ai" tooltipText={translating ? 'Translating…' : 'AI: Fill missing EN/FR fields'} />
+        {translating && <Spinner size="normal" />}        
+      </div>
     </SpaceBetween>
   );
 

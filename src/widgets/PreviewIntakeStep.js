@@ -38,25 +38,7 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
   };
 
   useEffect(() => {
-    let cancelled = false;
-    const forceWhiteBg = (doc) => {
-      try {
-        // Additional override: GOV.UK does not provide combined inline+small class behaviour.
-        // We add a rule so that when both modifiers are present, items lay out inline while retaining small control sizing.
-        const styleTag = '<style>html,body{background:#f7f9fc !important;} body{padding:12px;}\n' +
-          '.govuk-radios.govuk-radios--inline.govuk-radios--small .govuk-radios__item{display:inline-block;margin-right:20px;margin-bottom:0;vertical-align:top;}\n' +
-          '.govuk-radios.govuk-radios--inline.govuk-radios--small .govuk-radios__item:last-child{margin-right:0;}\n' +
-          '</style>';
-        if (/<html[\s\S]*?>/i.test(doc)) {
-          if (/<head[\s\S]*?>/i.test(doc)) {
-            return doc.replace(/<\/head>/i, `${styleTag}</head>`);
-          }
-          return doc.replace(/<html([^>]*)>/i, `<html$1><head>${styleTag}</head>`);
-        }
-        // Not a full document; wrap it
-        return `<!doctype html><html><head><meta charset="utf-8">${styleTag}</head><body>${doc}</body></html>`;
-      } catch { return doc; }
-    };
+    let cancelled = false; // fetch + render lifecycle guard
     async function run() {
       setError(null);
       setHtml('');
@@ -68,19 +50,52 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
         if (!stepRes.ok) throw new Error(`Load step HTTP ${stepRes.status}`);
         const step = await stepRes.json();
         // Flatten bilingual fields to the selected language for preview rendering
-        const components = Array.isArray(step.components) ? step.components.map(c => ({
-          ...c,
-          props: flattenByLang(c?.props || {}, lang)
-        })) : [];
+        const components = Array.isArray(step.components) ? step.components.map(c => {
+          const flatProps = flattenByLang(c?.props || {}, lang) || {};
+          const tKey = String(c.templateKey || c.template_key || c.type || '').toLowerCase();
+          if (['radio','radios','checkbox','checkboxes'].includes(tKey)) {
+            const base = (tKey === 'checkbox' || tKey === 'checkboxes') ? 'govuk-checkboxes' : 'govuk-radios';
+            const cls = String(flatProps.classes || '').trim();
+            if (!cls.split(/\s+/).some(cn => cn === base)) {
+              flatProps.classes = (base + (cls ? ' ' + cls : ''));
+            }
+          }
+          // Summary-list preview support: synthesize rows from included if authoring config present
+          if (tKey === 'summary-list') {
+            const included = Array.isArray(flatProps.included) ? flatProps.included : [];
+            const hasRows = Array.isArray(flatProps.rows) && flatProps.rows.length;
+            if (!hasRows) {
+              if (included.length) {
+                flatProps.rows = included.map(r => {
+                  // Determine label: override -> snapshot bilingual -> key
+                  let labelText = '';
+                  if (r) {
+                    if (typeof r.labelOverride === 'string') labelText = r.labelOverride;
+                    else if (r.labelOverride && typeof r.labelOverride === 'object') labelText = r.labelOverride[lang] || r.labelOverride.en || r.labelOverride.fr || '';
+                    if (!labelText) {
+                      if (lang === 'fr' && r.labelFr) labelText = r.labelFr;
+                      else if (lang === 'en' && r.labelEn) labelText = r.labelEn;
+                      else labelText = r.labelEn || r.labelFr || r.key || '';
+                    }
+                  }
+                  return { key: { text: labelText }, value: { text: '' } };
+                });
+              } else {
+                flatProps.rows = [ { key: { text: 'No fields selected' }, value: { text: '' } } ];
+              }
+            }
+          }
+          return { ...c, props: flatProps };
+        }) : [];
         // 2) render to HTML via server-side Nunjucks
   const prevRes = await apiFetch('/api/preview/step', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ components })
         });
-        const doc = await prevRes.text();
-        if (!prevRes.ok) throw new Error(`Preview HTTP ${prevRes.status}`);
-        if (!cancelled) setHtml(forceWhiteBg(doc));
+  const doc = await prevRes.text(); // server returns full GOV.UK-wrapped document
+  if (!prevRes.ok) throw new Error(`Preview HTTP ${prevRes.status}`);
+  if (!cancelled) setHtml(doc);
       } catch (e) {
         if (!cancelled) setError(String(e.message || e));
       } finally {

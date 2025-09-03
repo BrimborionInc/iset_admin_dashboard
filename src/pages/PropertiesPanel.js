@@ -1,7 +1,9 @@
 // Updated rewrite of PropertiesPanel.js – consistent Container usage and spacing
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import axios from 'axios';
-import { Box, Container, Header, Table, Input, Button, Select, SpaceBetween, FormField, Textarea, Badge, Popover, Checkbox, Toggle, ExpandableSection, Spinner } from '@cloudscape-design/components';
+// Switched from raw axios calls to authenticated apiFetch wrapper (adds bearer / dev bypass headers)
+import { apiFetch } from '../auth/apiClient';
+import { Box, Container, Header, Table, Input, Button, Select, SpaceBetween, FormField, Textarea, Badge, Popover, Checkbox, Toggle, ExpandableSection, Spinner, Modal, Alert } from '@cloudscape-design/components';
+import Avatar from '@cloudscape-design/chat-components/avatar';
 import get from 'lodash/get';
 import Ajv from 'ajv';
 
@@ -16,14 +18,26 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiStatus, setAiStatus] = useState(null); // { type:'error'|'success'|'info', text }
+  const [showAiOptionsModal, setShowAiOptionsModal] = useState(false);
+  const [aiPreview, setAiPreview] = useState(null); // { options: [...] } pending approval
 
 
   const ajv = useMemo(() => new Ajv({ allErrors: true, strict: false }), []);
 
   useEffect(() => {
-    axios.get(`${process.env.REACT_APP_API_BASE_URL}/api/option-data-sources`)
-      .then(res => setAvailableDataSources(res.data))
-      .catch(err => console.error('Failed to load data sources', err));
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await apiFetch('/api/option-data-sources');
+        if (!resp.ok) throw new Error('option-data-sources fetch failed: ' + resp.status);
+        const json = await resp.json();
+        if (!cancelled) setAvailableDataSources(json || []);
+      } catch (e) {
+        console.error('Failed to load data sources', e);
+        if (!cancelled) setAvailableDataSources([]);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -64,8 +78,9 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
 
   const handleSnapshotFetch = async (endpoint, editableField) => {
     try {
-      const res = await axios.get(`${process.env.REACT_APP_API_BASE_URL}${endpoint}`);
-      const data = res.data;
+  const resp = await apiFetch(endpoint.startsWith('http') ? endpoint : endpoint);
+  if (!resp.ok) throw new Error('snapshot fetch failed ' + resp.status);
+  const data = await resp.json();
       const schema = selectedComponent?.option_schema || ['text', 'value'];
       const mapped = data.map((item) => {
         const option = {};
@@ -108,6 +123,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   // --- AI Option Generation ---
   const generateOptionsWithAI = async (editableField) => {
     setAiStatus(null);
+    setAiPreview(null);
     const prompt = (aiPrompt || '').trim();
     if (!prompt) { setAiStatus({ type: 'error', text: 'Enter a description first.' }); return; }
     const schema = getSchema();
@@ -179,21 +195,34 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
         })
         .slice(0, 40);
       if (!cleaned.length) { setAiStatus({ type: 'error', text: 'No valid options after cleaning.' }); return; }
-      // Replace existing options list
-      updateComponentProperty(editableField.path, cleaned, true);
-      // Force static mode if not already
-      if (selectedComponent?.props?.mode !== 'static') {
-        updateComponentProperty('props.mode', 'static', true);
-        updateComponentProperty('props.endpoint', null, true);
-        updateComponentProperty('props.attributes', null, true);
-        setOptionSourceMode('static');
-      }
-      setAiStatus({ type: 'success', text: `Generated ${cleaned.length} option(s).` });
+      // Store preview instead of applying immediately
+      setAiPreview({ options: cleaned, fieldPath: editableField.path });
+      setAiStatus({ type: 'success', text: `Preview generated with ${cleaned.length} option(s). Review and approve to apply.` });
     } catch (e) {
       setAiStatus({ type: 'error', text: `Generation failed: ${e.message || String(e)}` });
     } finally {
       setAiGenerating(false);
     }
+  };
+
+  const applyAiPreview = () => {
+    if (!aiPreview || !Array.isArray(aiPreview.options)) return;
+    const { options: cleaned, fieldPath } = aiPreview;
+    updateComponentProperty(fieldPath, cleaned, true);
+    if (selectedComponent?.props?.mode !== 'static') {
+      updateComponentProperty('props.mode', 'static', true);
+      updateComponentProperty('props.endpoint', null, true);
+      updateComponentProperty('props.attributes', null, true);
+      setOptionSourceMode('static');
+    }
+    setAiStatus({ type: 'success', text: `Applied ${cleaned.length} option(s).` });
+    setAiPreview(null);
+    setShowAiOptionsModal(false);
+  };
+
+  const discardAiPreview = () => {
+    setAiPreview(null);
+    setAiStatus(null);
   };
 
   const asLangString = (val, lang = 'en') => {
@@ -540,10 +569,22 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
 
   useEffect(() => {
     if (!isSummaryList) return;
+    let cancelled = false;
     setWorkflowLoading(true);
-    axios.get(`${process.env.REACT_APP_API_BASE_URL}/api/workflows`).then(res => {
-      setWorkflows(res.data || []);
-    }).catch(()=> setWorkflows([])).finally(()=> setWorkflowLoading(false));
+    (async () => {
+      try {
+        const resp = await apiFetch('/api/workflows');
+        if (!resp.ok) throw new Error('workflows list failed ' + resp.status);
+        const data = await resp.json();
+        if (!cancelled) setWorkflows(Array.isArray(data) ? data : []);
+      } catch (e) {
+        console.warn('Workflows fetch (summary-list) failed:', e.message);
+        if (!cancelled) setWorkflows([]);
+      } finally {
+        if (!cancelled) setWorkflowLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [isSummaryList]);
 
   // Helper to extract field-like components from a workflow detail object
@@ -557,38 +598,68 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
     if (!workflowId) { setAvailableFields([]); return; }
     setFieldsLoading(true);
     try {
-      // fetch workflow details (list of step IDs)
-      const wfRes = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/api/workflows/${workflowId}`);
-      const wf = wfRes.data;
+      const wfResp = await apiFetch(`/api/workflows/${workflowId}`);
+      if (!wfResp.ok) throw new Error('workflow detail ' + wfResp.status);
+      const wf = await wfResp.json();
       const steps = Array.isArray(wf.steps) ? wf.steps : [];
+      const routes = Array.isArray(wf.routes) ? wf.routes : [];
+      // Build adjacency for traversal ordering (mirrors normalizer BFS intent)
+      const byId = new Map(steps.map(s => [s.id, s]));
+      const adj = new Map();
+      steps.forEach(s => adj.set(s.id, new Set()));
+      for (const r of routes) {
+        if (!r || !r.source_step_id) continue;
+        if (!adj.has(r.source_step_id)) adj.set(r.source_step_id, new Set());
+        if (r.mode === 'linear' && r.default_next_step_id && byId.has(r.default_next_step_id)) {
+          adj.get(r.source_step_id).add(r.default_next_step_id);
+        } else if (r.mode === 'by_option') {
+          if (Array.isArray(r.options)) {
+            r.options.forEach(o => { if (o && o.next_step_id && byId.has(o.next_step_id)) adj.get(r.source_step_id).add(o.next_step_id); });
+          }
+          if (r.default_next_step_id && byId.has(r.default_next_step_id)) adj.get(r.source_step_id).add(r.default_next_step_id);
+        }
+      }
+      const start = steps.find(s => s.is_start) || steps[0] || null;
+      const orderedIds = [];
+      const seen = new Set();
+      if (start) {
+        const q = [start.id];
+        seen.add(start.id);
+        while (q.length) {
+          const cur = q.shift();
+            orderedIds.push(cur);
+            for (const nxt of (adj.get(cur) || [])) if (!seen.has(nxt)) { seen.add(nxt); q.push(nxt); }
+        }
+      }
+      // Append any disconnected steps (unlikely but safe)
+      for (const s of steps) if (!seen.has(s.id)) orderedIds.push(s.id);
       const out = [];
-      // For each step, fetch step detail with components
-      for (const s of steps) {
+      for (const stepId of orderedIds) {
+        const s = byId.get(stepId);
+        if (!s) continue;
         try {
-          const stepRes = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/api/steps/${s.id}`);
-          const step = stepRes.data;
+          const stepResp = await apiFetch(`/api/steps/${s.id}`);
+          if (!stepResp.ok) continue;
+          const step = await stepResp.json();
           const comps = Array.isArray(step.components) ? step.components : [];
           for (const c of comps) {
             const props = c.props || {};
             const key = props.name || props.fieldName || props.field_name || props.id;
             if (!key) continue;
-            // Skip summary-list itself or non-answer containers
             const t = (c.template_key || c.templateKey || c.type || '').toLowerCase();
-            if (!t) continue;
-            if (t === 'summary-list') continue;
-            // Basic allowed types heuristic
+            if (!t || t === 'summary-list') continue;
             const allowed = ['input','textarea','radio','radios','checkbox','checkboxes','select','date-input','file-upload'];
             if (!allowed.includes(t)) continue;
             let labelObj = props?.fieldset?.legend?.text || props?.label?.text || props?.titleText || props?.text || '';
-            // If still empty, attempt to infer via template defaults stored on component? (not available here without extra API call) leave blank.
             const labEn = typeof labelObj === 'object' ? (labelObj.en || labelObj.fr || '') : (labelObj || '');
             const labFr = typeof labelObj === 'object' ? (labelObj.fr || labelObj.en || '') : (labelObj || '');
             out.push({ key, labelEn: labEn, labelFr: labFr, stepName: step.name || `Step ${s.id}` });
           }
-        } catch { /* ignore step fetch error */ }
+        } catch {/* ignore individual step errors */}
       }
       setAvailableFields(out);
-    } catch {
+    } catch (e) {
+      console.warn('Workflow fields load failed:', e.message);
       setAvailableFields([]);
     } finally {
       setFieldsLoading(false);
@@ -633,7 +704,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
     if (idx >= 0) next = cur.filter(r => r.key !== fieldKey);
     else {
       const field = availableFields.find(f => f.key === fieldKey);
-      next = [...cur, { key: fieldKey, labelOverride: null, format: 'text', stepName: field?.stepName }];
+      next = [...cur, { key: fieldKey, labelOverride: null, stepName: field?.stepName, labelEn: field?.labelEn, labelFr: field?.labelFr }];
     }
     updateSummaryListConfig({ included: next });
   };
@@ -646,7 +717,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
 
   return (
     <SpaceBetween size="l">
-      <ExpandableSection headerText="Page Properties" defaultExpanded>
+  <ExpandableSection headerText="Intake Step Properties" defaultExpanded>
         <Table
           variant="embedded"
           columnDefinitions={[{
@@ -700,6 +771,22 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                 {selectedComponent?.props?.workflowId && (
                   <>
                     <FormField label="Fields" description="Toggle which fields appear. Order follows workflow for now.">
+                      <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginBottom:6 }}>
+                        <Button
+                          disabled={!availableFields.length || (summaryListConfig?.included||[]).length === availableFields.length}
+                          onClick={() => {
+                            const all = availableFields.map(f => {
+                              const existing = (summaryListConfig?.included || []).find(r => r.key === f.key);
+                              return existing || { key: f.key, labelOverride: null, stepName: f.stepName, labelEn: f.labelEn, labelFr: f.labelFr };
+                            });
+                            updateSummaryListConfig({ included: all });
+                          }}
+                        >Select all</Button>
+                        <Button
+                          disabled={!(summaryListConfig?.included||[]).length}
+                          onClick={() => updateSummaryListConfig({ included: [] })}
+                        >Clear all</Button>
+                      </div>
                       <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid #d5dbdb', padding: 8, borderRadius: 4 }}>
                         {fieldsLoading && <div className="govuk-hint">Loading fields…</div>}
                         {!fieldsLoading && availableFields.length === 0 && <div className="govuk-hint">No fields found in workflow.</div>}
@@ -712,15 +799,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                                 <div style={{ fontSize: 13, fontWeight: 500 }}>{f.labelEn || f.key} <span style={{ color: '#666', fontWeight: 400 }}>({f.key})</span></div>
                                 <div style={{ fontSize: 11, color: '#666' }}>{f.stepName}</div>
                               </div>
-                              {included && (
-                                <Select
-                                  selectedOption={(summaryListConfig?.included || []).find(r => r.key === f.key)?.format ? { label: (summaryListConfig.included.find(r => r.key === f.key)?.format || 'text'), value: (summaryListConfig.included.find(r => r.key === f.key)?.format || 'text') } : { label: 'text', value: 'text' }}
-                                  onChange={({ detail }) => updateIncludedRow(f.key, { format: detail.selectedOption.value })}
-                                  options={[{ label: 'text', value: 'text' }, { label: 'date', value: 'date' }, { label: 'yesno', value: 'yesno' }, { label: 'currency', value: 'currency' }]}
-                                  selectedAriaLabel="Format"
-                                  placeholder="Format"
-                                />
-                              )}
+                              {/* Format selector removed: all values rendered as plain strings; date formatting decided at runtime */}
                             </div>
                           );
                         })}
@@ -752,37 +831,8 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
       )}
       {selectedComponent && (
         <>
-          {(() => { /* Determine if validation widget should appear for this component */
-            const t = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
-            const validationAllowed = new Set(['textarea','select','radio','radios','password-input','input','file-upload','date-input','checkbox','checkboxes','character-count']);
-            return validationAllowed.has(t);
-          })() && (
-            <ExpandableSection headerText="Validation" defaultExpanded>
-              <ValidationEditor
-                selectedComponent={selectedComponent}
-                updateComponentProperty={updateComponentProperty}
-              />
-            </ExpandableSection>
-          )}
           <ExpandableSection headerText="Component Properties" defaultExpanded>
-            {selectedComponent && latestTemplateVersionByKey && (
-              (() => {
-                const key = selectedComponent.template_key || selectedComponent.type;
-                const latest = latestTemplateVersionByKey.get ? latestTemplateVersionByKey.get(key) : latestTemplateVersionByKey[key];
-                const cur = selectedComponent.version || 0;
-                const needsUpgrade = latest && latest > cur;
-                return (
-                  <Box margin={{ bottom: 's' }}>
-                    <SpaceBetween size="xs" direction="horizontal">
-                      <Badge color={needsUpgrade ? 'red' : 'green'}>{`Version ${cur}${needsUpgrade ? ` (latest is ${latest})` : ''}`}</Badge>
-                      {needsUpgrade && (
-                        <Button size="small" onClick={() => onUpgradeTemplate && onUpgradeTemplate()}>Upgrade to v{latest}</Button>
-                      )}
-                    </SpaceBetween>
-                  </Box>
-                );
-              })()
-            )}
+            {/* Version badge & upgrade controls removed until versioning UX is implemented */}
             <Table
               variant="embedded"
               columnDefinitions={[
@@ -1096,10 +1146,15 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
 
                       {currentMode === 'static' && (
                         <>
-                          <Container variant="stacked" header={<Header variant="h4">AI Generate Options</Header>}>
-                            <SpaceBetween size="s">
-                              <FormField label="Describe the option list"
-                                constraintText="E.g. 'Yes No', 'Canadian Provinces and Territories', '1 to 5 satisfaction scale'">
+                          <Modal
+                            visible={showAiOptionsModal}
+                            onDismiss={() => setShowAiOptionsModal(false)}
+                            header="AI Generate Options"
+                            size="large"
+                            footer={<SpaceBetween size="xs" direction="horizontal">{aiPreview && <Button onClick={discardAiPreview}>Reset</Button>}<Button onClick={() => { setShowAiOptionsModal(false); }}>Close</Button>{aiPreview && <Button variant="primary" onClick={applyAiPreview}>Apply</Button>}<Button variant="primary" iconName="refresh" loading={aiGenerating} disabled={aiGenerating || !aiPrompt.trim()} onClick={() => generateOptionsWithAI(field)}>{aiPreview? 'Regenerate' : 'Generate'}</Button></SpaceBetween>}
+                          >
+                            <SpaceBetween size="m">
+                              <FormField label="Describe the option list" constraintText="E.g. 'Yes No', 'Canadian Provinces and Territories', '1 to 5 satisfaction scale'">
                                 <Input
                                   placeholder="Enter description..."
                                   value={aiPrompt}
@@ -1107,16 +1162,22 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                                   disabled={aiGenerating}
                                 />
                               </FormField>
-                              <SpaceBetween direction="horizontal" size="xs">
-                                <Button variant="primary" iconName="refresh" loading={aiGenerating} disabled={aiGenerating || !aiPrompt.trim()} onClick={() => generateOptionsWithAI(field)}>Generate</Button>
-                              </SpaceBetween>
                               {aiStatus && (
-                                <Box fontSize="body-s" color={aiStatus.type === 'error' ? 'text-status-error' : (aiStatus.type === 'success' ? 'text-status-success' : 'inherit')}>
-                                  {aiStatus.text}
-                                </Box>
+                                <Alert type={aiStatus.type === 'error' ? 'error' : (aiStatus.type === 'success' ? 'success' : 'info')}>{aiStatus.text}</Alert>
+                              )}
+                              {aiPreview && (
+                                <Container header={<Header variant="h3">Preview Options ({aiPreview.options.length})</Header>}>
+                                  <Table
+                                    variant="embedded"
+                                    columnDefinitions={getSchema().map(k => ({ id: k, header: k.toUpperCase(), cell: item => String(item[k] ?? '') }))}
+                                    items={aiPreview.options}
+                                    ariaLabels={{ tableLabel: 'AI generated options preview' }}
+                                    header={<Header variant="h4">Generated List</Header>}
+                                  />
+                                </Container>
                               )}
                             </SpaceBetween>
-                          </Container>
+                          </Modal>
                           {(() => {
                             const vals = options.map(o => String(o?.value ?? '')).filter(v => v !== '');
                             const dups = new Set(vals.filter((v, i) => vals.indexOf(v) !== i));
@@ -1188,7 +1249,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                                { id: 'actions', header: 'Actions', cell: item => (<Button iconName="close" variant="icon" onClick={() => handleRemoveOption(options.indexOf(item), field)} />) },
                             ]}
                             items={options}
-                            header={<Header variant="h3" actions={<Button iconName="add-plus" variant="icon" onClick={() => handleAddOption(field)}>Add Option</Button>} />}
+                            header={<Header variant="h3" actions={<SpaceBetween size="xs" direction="horizontal"><div role="button" tabIndex={0} aria-label="Generate options with AI" onClick={() => setShowAiOptionsModal(true)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' ') { e.preventDefault(); setShowAiOptionsModal(true);} }} style={{ cursor:'pointer' }}><Avatar ariaLabel="AI option generator" color="gen-ai" iconName="gen-ai" tooltipText="Generate options with AI" /></div><Button iconName="add-plus" variant="icon" ariaLabel="Add option" onClick={() => handleAddOption(field)} /></SpaceBetween>} />}
                           />
                           {(() => {
                             const tKey = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
@@ -1207,20 +1268,23 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                               />
                             );
                           })()}
-                        </>
-                      )}
+                        {/* Validation block relocated below (after options UI) */}
+                      </>
+                    )}
                     </SpaceBetween>
                     </Container>
                   </ExpandableSection>
                 </React.Fragment>
               );
             })}
+          {/* Validation section moved outside PropertiesPanel (below Translations) */}
         </>
       )}
     </SpaceBetween>
   );
 };
 
+export { ValidationEditor };
 export default PropertiesPanel;
 
 // --- Radio Conditional Linking Scaffold (Option C) ---
@@ -1414,187 +1478,305 @@ const ChoiceConditionalScaffold = ({ options, fieldPath, updateComponentProperty
   );
 };
 
-// --- Validation Editor (inline) ---
-const ValidationEditor = ({ selectedComponent, updateComponentProperty }) => {
-  // Support prior mistaken nesting at props.props.validation
+// --- Unified Validation Editor vNext ---
+const ValidationEditor = ({ selectedComponent, updateComponentProperty, allComponents = [] }) => {
   const misNested = selectedComponent?.props?.props?.validation;
   const topLevel = selectedComponent?.props?.validation;
-  const validation = topLevel || misNested || {};
+  const rawValidation = topLevel || misNested || {};
+
+  // AI validation generation state
+  const [showValAiModal, setShowValAiModal] = React.useState(false);
+  const [valAiPrompt, setValAiPrompt] = React.useState('');
+  const [valAiGenerating, setValAiGenerating] = React.useState(false);
+  const [valAiStatus, setValAiStatus] = React.useState(null); // { type, text }
+  const [valAiPreview, setValAiPreview] = React.useState(null); // preview validation object
+
+  // Migration to unified schema
+  const migrate = React.useCallback((v) => {
+    const next = { ...v };
+    // normalize requiredMessage vs errorMessage
+    if (next.errorMessage && !next.requiredMessage && next.required) {
+      next.requiredMessage = next.errorMessage;
+    }
+    // collect rules
+    let rules = Array.isArray(next.rules) ? [...next.rules] : [];
+    rules = rules.map(r => ({
+      id: r.id || `rule-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+      type: r.type || r.kind || 'predicate',
+      trigger: Array.isArray(r.trigger) && r.trigger.length ? r.trigger : ['submit'],
+      severity: r.severity || 'error',
+      block: typeof r.block === 'boolean' ? r.block : (r.severity !== 'warn'),
+      message: r.message || { en: '', fr: '' },
+      when: r.when,
+      keys: r.keys,
+      min: r.min,
+      max: r.max,
+      pattern: r.pattern,
+      minLength: r.minLength,
+      maxLength: r.maxLength,
+      compare: r.compare
+    }));
+    // promote legacy pattern/minLength on component root
+    if (next.pattern && !rules.some(r => r.type === 'pattern' && r.pattern === next.pattern)) {
+      rules.push({ id: `rule-${Date.now()}-pat`, type: 'pattern', trigger:['submit'], severity:'error', block:true, message:{ en:'Invalid format', fr:'Format invalide' }, pattern: next.pattern });
+      delete next.pattern;
+    }
+    if (next.minLength && !rules.some(r => r.type==='length' && r.minLength===next.minLength)) {
+      rules.push({ id: `rule-${Date.now()}-len`, type:'length', trigger:['submit'], severity:'error', block:true, message:{ en:`Minimum length is ${next.minLength}`, fr:`Longueur minimale ${next.minLength}` }, minLength: next.minLength });
+      delete next.minLength;
+    }
+    next.rules = rules;
+    return next;
+  }, []);
+
   React.useEffect(() => {
     if (!topLevel && misNested) {
-      // Lift mis-nested validation to correct location
       updateComponentProperty('validation', misNested, true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [misNested, topLevel, selectedComponent?.props]);
-  const rules = Array.isArray(validation.rules) ? validation.rules : [];
-
-  const commit = (next) => {
-    updateComponentProperty('validation', next, true);
-  };
-
-  const updateField = (path, value) => {
-    const parts = path.split('.');
-    const next = { ...validation, rules: [...rules] };
-    let tgt = next;
-    for (let i=0;i<parts.length-1;i++) {
-      if (!tgt[parts[i]] || typeof tgt[parts[i]] !== 'object') tgt[parts[i]] = {};
-      tgt = tgt[parts[i]];
+    // Apply migration once (idempotent)
+    if (rawValidation && Object.keys(rawValidation).length) {
+      const migrated = migrate(rawValidation);
+      updateComponentProperty('validation', migrated, true);
     }
-    tgt[parts[parts.length-1]] = value;
-    commit(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const validation = migrate(rawValidation);
+  const rules = validation.rules || [];
+
+  const commit = (next) => updateComponentProperty('validation', migrate(next), true);
+
+  const updateRoot = (patch) => commit({ ...validation, ...patch });
+
+  const updateRule = (id, mutator) => {
+    const nextRules = rules.map(r => r.id === id ? mutator({ ...r }) : r);
+    commit({ ...validation, rules: nextRules });
   };
 
-  const addRule = () => {
-    const id = `rule-${Date.now()}`;
+  const addRule = (type='predicate') => {
+    const id = `rule-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
     const base = {
       id,
-      trigger: ['submit'],
-      kind: 'predicate',
-      when: { '==': [ { var: selectedComponent?.props?.name || 'field' }, '' ] },
-      message: { en: 'Custom validation message', fr: 'Message de validation personnalisé' },
-      severity: 'error',
-      block: false
+      type,
+      trigger:['submit'],
+      severity:'error',
+      block:true,
+      message:{ en:'', fr:'' }
     };
-    commit({ ...validation, rules: [...rules, base] });
+    if (type==='predicate') base.when = { '==':[ { var: selectedComponent?.props?.name || 'field' }, '' ] };
+    if (type==='atLeastOne') base.keys = [];
+    if (type==='range') { base.min = 0; base.max = 1; }
+    if (type==='length') { base.minLength = 1; }
+    if (type==='pattern') { base.pattern = '^.+$'; }
+    if (type==='compare') { base.compare = { left: selectedComponent?.props?.name || 'field', op: '==', right: '' }; }
+    commit({ ...validation, rules:[...rules, base] });
   };
 
-  const updateRule = (idx, mutator) => {
-    const nextRules = rules.map((r,i)=> i===idx ? mutator({ ...r }) : r);
-    commit({ ...validation, rules: nextRules });
+  const removeRule = (id) => commit({ ...validation, rules: rules.filter(r => r.id !== id) });
+
+  // Field picker for multi-field rules
+  const fieldOptions = allComponents.map(c => {
+    const key = c?.props?.name || c?.props?.id || c?.id;
+    if (!key) return null; return { label: key, value: key };
+  }).filter(Boolean);
+
+  const generateValidationWithAI = async () => {
+    setValAiStatus(null);
+    setValAiPreview(null);
+    const prompt = (valAiPrompt || '').trim();
+    if (!prompt) { setValAiStatus({ type: 'error', text: 'Enter a description first.' }); return; }
+    setValAiGenerating(true);
+    try {
+      const { apiFetch } = require('../auth/apiClient');
+      const system = { role: 'system', content: 'You generate validation schemas for form components. Output ONLY JSON matching { "validation": { required?: boolean, requiredMessage?: { en:string, fr?:string }, rules?: [ { id?:string, type: "predicate"|"atLeastOne"|"range"|"length"|"pattern"|"compare", trigger?: ["submit"|"change"], severity?: "error"|"warn", block?: boolean, message?: { en:string, fr?:string }, when?: object, min?:number, max?:number, minLength?:number, maxLength?:number, pattern?:string, keys?:string[], compare?: { left:any, op:string, right:any } } ] } } . Use both EN and FR messages if possible (FR may be empty). Keep triggers minimal (submit unless real-time needed). Ensure each rule has stable id (generate if missing).'};
+      const user = { role: 'user', content: JSON.stringify({ component: { name: selectedComponent?.props?.name, type: selectedComponent?.type, existingValidation: rawValidation }, description: prompt }) };
+      const res = await apiFetch('/api/ai/chat', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ messages:[system,user] }) });
+      if (res.status === 501) { setValAiStatus({ type:'error', text:'AI service disabled on server.' }); return; }
+      const data = await res.json().catch(()=>({}));
+      const raw = data?.choices?.[0]?.message?.content || '';
+      const parsed = (()=>{ try { return JSON.parse(raw); } catch(_) { const m = raw.match(/\{[\s\S]*\}/); if (m) { try { return JSON.parse(m[0]); } catch(_2) {} } return null; } })();
+      const vObj = parsed?.validation || parsed || null;
+      if (!vObj || typeof vObj !== 'object') { setValAiStatus({ type:'error', text:'No validation object returned.' }); return; }
+      // Basic normalization (ids, triggers, severity)
+      const norm = { ...vObj };
+      if (!Array.isArray(norm.rules)) norm.rules = [];
+      norm.rules = norm.rules.map(r => ({
+        id: r.id || `rule-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        type: r.type || 'predicate',
+        trigger: Array.isArray(r.trigger) && r.trigger.length ? r.trigger : ['submit'],
+        severity: r.severity === 'warn' ? 'warn' : 'error',
+        block: r.block === undefined ? (r.severity !== 'warn') : !!r.block,
+        message: ( ()=> { if (!r.message) return { en:'', fr:'' }; if (typeof r.message === 'string') return { en:r.message, fr:'' }; if (typeof r.message === 'object') return { en: r.message.en || r.message.EN || r.message.Fr || r.message.fr || r.message.en || '', fr: r.message.fr || r.message.FR || '' }; return { en:'', fr:'' }; })(),
+        when: r.when,
+        keys: r.keys,
+        min: r.min,
+        max: r.max,
+        minLength: r.minLength,
+        maxLength: r.maxLength,
+        pattern: r.pattern,
+        compare: r.compare
+      }));
+      setValAiPreview(norm);
+      setValAiStatus({ type:'success', text:`Preview generated with ${norm.rules.length} rule(s). Review and apply.` });
+    } catch(e) {
+      setValAiStatus({ type:'error', text:`Generation failed: ${e.message || String(e)}` });
+    } finally {
+      setValAiGenerating(false);
+    }
   };
 
-  const removeRule = (idx) => {
-    const nextRules = rules.filter((_,i)=> i!==idx);
-    commit({ ...validation, rules: nextRules });
+  const applyValidationPreview = () => {
+    if (!valAiPreview) return;
+    commit({ ...validation, ...valAiPreview });
+    setValAiPreview(null);
+    setValAiStatus({ type:'success', text:'Validation applied.' });
+    setShowValAiModal(false);
   };
-
-  const aiGenerate = () => {
-    // Simple heuristic generation based on type & labels
-    const type = String(selectedComponent?.type || '').toLowerCase();
-    const rawLabel = (
-      selectedComponent?.props?.label?.text ||
-      selectedComponent?.props?.fieldset?.legend?.text ||
-      selectedComponent?.props?.titleText ||
-      selectedComponent?.props?.text ||
-      selectedComponent?.props?.name ||
-      'This field'
-    );
-    // Normalise possible i18n/object/string label value to a plain string
-    const normalise = (val) => {
-      if (val == null) return 'this field';
-      if (typeof val === 'string') return val.trim() || 'this field';
-      if (typeof val === 'object') {
-        if (typeof val.en === 'string' && val.en.trim()) return val.en.trim();
-        if (typeof val.fr === 'string' && val.fr.trim()) return val.fr.trim();
-        for (const v of Object.values(val)) {
-          if (typeof v === 'string' && v.trim()) return v.trim();
-        }
-      }
-      try { return String(val).trim() || 'this field'; } catch { return 'this field'; }
-    };
-    const nameStr = normalise(rawLabel);
-    const lower = nameStr.toLowerCase();
-    const baseEn = type.includes('radio')
-      ? `Select an option for ${lower}`
-      : type.includes('checkbox')
-        ? `Select at least one option for ${lower}`
-        : `Enter ${lower}`;
-    const baseFr = type.includes('radio')
-      ? `Sélectionnez une option pour ${lower}`
-      : type.includes('checkbox')
-        ? `Sélectionnez au moins une option pour ${lower}`
-        : `Entrez ${lower}`;
-    commit({ ...validation, errorMessage: { en: baseEn, fr: baseFr } });
-  };
+  const discardValidationPreview = () => { setValAiPreview(null); setValAiStatus(null); };
 
   return (
-  <Container header={<Header variant="h3">Validation</Header>}>
-      <SpaceBetween size="m">
-        <FormField label="Required field?">
-          <Toggle
-            checked={!!validation.required}
-            onChange={({ detail }) => updateField('required', detail.checked)}
-          >Required on submit</Toggle>
-        </FormField>
-        <FormField label="Base error message (English)">
-          <Input
-            placeholder="e.g. Select an option"
-            value={validation.errorMessage?.en || ''}
-            onChange={({ detail }) => updateField('errorMessage.en', detail.value)}
-          />
-        </FormField>
-        <FormField label="Message d'erreur de base (Français)">
-          <Input
-            placeholder="p.ex. Sélectionnez une option"
-            value={validation.errorMessage?.fr || ''}
-            onChange={({ detail }) => updateField('errorMessage.fr', detail.value)}
-          />
-        </FormField>
-        <Button variant="normal" onClick={aiGenerate}>AI Generate Messages</Button>
-        <Header variant="h4" actions={<Button onClick={addRule} iconName="add-plus" variant="icon">Add Rule</Button>}>Predicate Rules</Header>
-        {rules.length === 0 && <Box color="text-body-secondary">No predicate rules</Box>}
-        {rules.map((rule, idx) => (
-          <Container key={rule.id || idx} header={<Header variant="h5">Rule {idx+1}</Header>}>
-            <SpaceBetween size="s">
-              <FormField label="Triggers">
-                <SpaceBetween direction="horizontal" size="xs">
-                  {['change','submit'].map(t => (
-                    <Checkbox
-                      key={t}
-                      checked={rule.trigger?.includes(t)}
-                      onChange={({ detail }) => updateRule(idx, r => ({
-                        ...r,
-                        trigger: detail.checked ? Array.from(new Set([...(r.trigger||[]), t])) : (r.trigger||[]).filter(x=>x!==t)
-                      }))}
-                    >{t}</Checkbox>
-                  ))}
-                </SpaceBetween>
-              </FormField>
-              <FormField label="JSON Logic condition (when)">
-                <Textarea
-                  rows={3}
-                  value={JSON.stringify(rule.when, null, 2)}
-                  onChange={({ detail }) => {
-                    try { const parsed = JSON.parse(detail.value); updateRule(idx, r => ({ ...r, when: parsed })); }
-                    catch { /* ignore parse errors until valid */ }
-                  }}
-                />
-              </FormField>
-              <FormField label="Severity">
-                <Select
-                  expandToViewport
-                  selectedOption={{ label: rule.severity || 'error', value: rule.severity || 'error' }}
-                  onChange={({ detail }) => updateRule(idx, r => ({ ...r, severity: detail.selectedOption.value }))}
-                  options={[{ label: 'error', value: 'error' }, { label: 'warn', value: 'warn' }]}
-                />
-              </FormField>
-              <FormField label="Block progression?">
-                <Checkbox
-                  checked={!!rule.block}
-                  onChange={({ detail }) => updateRule(idx, r => ({ ...r, block: detail.checked }))}
-                >Block on fail</Checkbox>
-              </FormField>
-              <FormField label="Message (English)">
-                <Input
-                  value={rule.message?.en || ''}
-                  onChange={({ detail }) => updateRule(idx, r => ({ ...r, message: { ...(r.message||{}), en: detail.value } }))}
-                />
-              </FormField>
-              <FormField label="Message (Français)">
-                <Input
-                  value={rule.message?.fr || ''}
-                  onChange={({ detail }) => updateRule(idx, r => ({ ...r, message: { ...(r.message||{}), fr: detail.value } }))}
-                />
-              </FormField>
-              <SpaceBetween direction="horizontal" size="xs">
-                <Button iconName="remove" onClick={() => removeRule(idx)} variant="normal">Remove</Button>
+    <SpaceBetween size="l">
+        <Container variant="stacked" header={<Header variant="h4" actions={<SpaceBetween size="xs" direction="horizontal"><div role="button" tabIndex={0} aria-label="AI generate validation" onClick={()=>setShowValAiModal(true)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' ') { e.preventDefault(); setShowValAiModal(true);} }} style={{ cursor:'pointer' }}><Avatar ariaLabel="AI validation generator" color="gen-ai" iconName="gen-ai" tooltipText="Generate validation with AI" /></div></SpaceBetween>}>Required</Header>}>
+          <SpaceBetween size="s">
+            <FormField label="Required?">
+              <Toggle checked={!!validation.required} onChange={({detail})=>updateRoot({ required: detail.checked })}>Field required</Toggle>
+            </FormField>
+            {validation.required && (
+              <SpaceBetween size="s" direction="horizontal">
+                <FormField label="Required message (EN)">
+                  <Input value={validation.requiredMessage?.en || validation.errorMessage?.en || ''} onChange={({detail})=>updateRoot({ requiredMessage:{ ...(validation.requiredMessage||validation.errorMessage||{}), en: detail.value } })} />
+                </FormField>
+                <FormField label="Message (FR)">
+                  <Input value={validation.requiredMessage?.fr || validation.errorMessage?.fr || ''} onChange={({detail})=>updateRoot({ requiredMessage:{ ...(validation.requiredMessage||validation.errorMessage||{}), fr: detail.value } })} />
+                </FormField>
               </SpaceBetween>
+            )}
+          </SpaceBetween>
+        </Container>
+  <Container variant="stacked" header={<Header variant="h4" actions={<SpaceBetween direction="horizontal" size="xs">
+          <Select
+            placeholder="Add rule type"
+            selectedOption={null}
+            onChange={({detail})=> addRule(detail.selectedOption.value)}
+            options={[
+              { label:'Predicate', value:'predicate' },
+              { label:'At least one', value:'atLeastOne' },
+              { label:'Range', value:'range' },
+              { label:'Length', value:'length' },
+              { label:'Pattern', value:'pattern' },
+              { label:'Compare', value:'compare' }
+            ]}
+            expandToViewport
+          />
+        </SpaceBetween>}>Rules</Header>}>
+          <SpaceBetween size="m">
+            {rules.length === 0 && <Box color="text-body-secondary">No rules defined.</Box>}
+            {rules.map((r, idx) => (
+              <Container key={r.id} header={<Header variant="h5">{idx+1}. {r.type}</Header>}>
+                <SpaceBetween size="s">
+                  <SpaceBetween direction="horizontal" size="xs">
+                    {['change','submit'].map(tr => (
+                      <Checkbox key={tr} checked={r.trigger.includes(tr)} onChange={({detail})=>updateRule(r.id, rr => ({ ...rr, trigger: detail.checked ? Array.from(new Set([...rr.trigger, tr])) : rr.trigger.filter(t=>t!==tr) }))}>{tr}</Checkbox>
+                    ))}
+                  </SpaceBetween>
+                  <SpaceBetween direction="horizontal" size="s">
+                    <FormField label="Severity">
+                      <Select
+                        selectedOption={{ label:r.severity, value:r.severity }}
+                        onChange={({detail})=>updateRule(r.id, rr => ({ ...rr, severity: detail.selectedOption.value, block: detail.selectedOption.value==='error' ? true : rr.block }))}
+                        options={[{label:'error',value:'error'},{label:'warn',value:'warn'}]}
+                      />
+                    </FormField>
+                    <FormField label="Block?">
+                      <Checkbox checked={!!r.block} onChange={({detail})=>updateRule(r.id, rr => ({ ...rr, block: detail.checked }))}>Block</Checkbox>
+                    </FormField>
+                  </SpaceBetween>
+                  {r.type==='predicate' && (
+                    <FormField label="JSON Logic (when fails)">
+                      <Textarea rows={3} value={JSON.stringify(r.when, null, 2)} onChange={({detail})=>{ try { const parsed = JSON.parse(detail.value); updateRule(r.id, rr=>({...rr, when: parsed})); } catch {} }} />
+                    </FormField>
+                  )}
+                  {r.type==='atLeastOne' && (
+                    <FormField label="Fields (at least one)">
+                      <Select
+                        multiple
+                        selectedOptions={(r.keys||[]).map(k=>({label:k,value:k}))}
+                        onChange={({detail})=>updateRule(r.id, rr=>({...rr, keys: detail.selectedOptions.map(o=>o.value)}))}
+                        options={fieldOptions}
+                        placeholder="Choose fields"
+                        expandToViewport
+                      />
+                    </FormField>
+                  )}
+                  {r.type==='range' && (
+                    <SpaceBetween direction="horizontal" size="s">
+                      <FormField label="Min"><Input type="number" value={r.min ?? ''} onChange={({detail})=>updateRule(r.id, rr=>({...rr, min: detail.value === '' ? undefined : Number(detail.value)}))} /></FormField>
+                      <FormField label="Max"><Input type="number" value={r.max ?? ''} onChange={({detail})=>updateRule(r.id, rr=>({...rr, max: detail.value === '' ? undefined : Number(detail.value)}))} /></FormField>
+                    </SpaceBetween>
+                  )}
+                  {r.type==='length' && (
+                    <SpaceBetween direction="horizontal" size="s">
+                      <FormField label="Min length"><Input type="number" value={r.minLength ?? ''} onChange={({detail})=>updateRule(r.id, rr=>({...rr, minLength: detail.value===''?undefined:Number(detail.value)}))} /></FormField>
+                      <FormField label="Max length"><Input type="number" value={r.maxLength ?? ''} onChange={({detail})=>updateRule(r.id, rr=>({...rr, maxLength: detail.value===''?undefined:Number(detail.value)}))} /></FormField>
+                    </SpaceBetween>
+                  )}
+                  {r.type==='pattern' && (
+                    <FormField label="Pattern (regex)">
+                      <Input value={r.pattern || ''} onChange={({detail})=>updateRule(r.id, rr=>({...rr, pattern: detail.value}))} placeholder="e.g. ^\\d+$" />
+                    </FormField>
+                  )}
+                  {r.type==='compare' && (
+                    <SpaceBetween size="s">
+                      <FormField label="Left field"><Select selectedOption={r.compare?.left?{label:r.compare.left,value:r.compare.left}:null} onChange={({detail})=>updateRule(r.id, rr=>({...rr, compare:{ ...(rr.compare||{}), left: detail.selectedOption.value }}))} options={fieldOptions} placeholder="Select field" /></FormField>
+                      <FormField label="Operator"><Select selectedOption={{label: r.compare?.op || '==', value: r.compare?.op || '=='}} onChange={({detail})=>updateRule(r.id, rr=>({...rr, compare:{ ...(rr.compare||{}), op: detail.selectedOption.value }}))} options={[ '==','!=','<','<=','>','>=' ].map(o=>({label:o,value:o}))} /></FormField>
+                      <FormField label="Right (field or constant)">
+                        <Input value={r.compare?.right ?? ''} onChange={({detail})=>updateRule(r.id, rr=>({...rr, compare:{ ...(rr.compare||{}), right: detail.value }}))} />
+                      </FormField>
+                    </SpaceBetween>
+                  )}
+                  <SpaceBetween direction="horizontal" size="s">
+                    <FormField label="Message (EN)"><Input value={r.message?.en || ''} onChange={({detail})=>updateRule(r.id, rr=>({...rr, message:{ ...(rr.message||{}), en: detail.value }}))} /></FormField>
+                    <FormField label="Message (FR)"><Input value={r.message?.fr || ''} onChange={({detail})=>updateRule(r.id, rr=>({...rr, message:{ ...(rr.message||{}), fr: detail.value }}))} /></FormField>
+                  </SpaceBetween>
+                  <Button iconName="remove" onClick={()=>removeRule(r.id)} variant="normal">Remove Rule</Button>
+                </SpaceBetween>
+              </Container>
+            ))}
+            <Box color="text-body-secondary" fontSize="body-s">Rules evaluate in listed order. First blocking error stops evaluation; warnings never block.</Box>
+          </SpaceBetween>
+    </Container>
+    <Modal
+      visible={showValAiModal}
+      onDismiss={()=>setShowValAiModal(false)}
+      size="large"
+      header="AI Generate Validation"
+      footer={<SpaceBetween size="xs" direction="horizontal">{valAiPreview && <Button onClick={discardValidationPreview}>Reset</Button>}<Button onClick={()=>setShowValAiModal(false)}>Close</Button>{valAiPreview && <Button variant="primary" onClick={applyValidationPreview}>Apply</Button>}<Button variant="primary" iconName="refresh" loading={valAiGenerating} disabled={valAiGenerating || !valAiPrompt.trim()} onClick={generateValidationWithAI}>{valAiPreview ? 'Regenerate' : 'Generate'}</Button></SpaceBetween>}
+    >
+      <SpaceBetween size="m">
+        <FormField label="Describe validation goals" constraintText="E.g. 'Required, must match Canadian postal code pattern, warn if over 50 characters'">
+          <Textarea rows={4} placeholder="Describe desired rules..." value={valAiPrompt} onChange={({detail})=>setValAiPrompt(detail.value)} disabled={valAiGenerating} />
+        </FormField>
+        {valAiStatus && <Alert type={valAiStatus.type==='error'?'error':(valAiStatus.type==='success'?'success':'info')}>{valAiStatus.text}</Alert>}
+        {valAiPreview && (
+          <Container header={<Header variant="h3">Preview Rules ({valAiPreview.rules?.length||0})</Header>}>
+            <SpaceBetween size="s">
+              {(valAiPreview.rules||[]).map((r,i)=> (
+                <Box key={r.id} padding={{vertical:'xs'}} border={{ side:'bottom', color:'divider' }}>
+                  <strong>{i+1}. {r.type}</strong> – <code>{(r.trigger||[]).join(',')}</code> [{r.severity}{r.block?' block':''}]<br />
+                  {r.pattern && <span>Pattern: <code>{r.pattern}</code><br/></span>}
+                  {r.min!=null || r.max!=null ? <span>Range: {r.min!=null? r.min : '-'} to {r.max!=null? r.max : '-'}<br/></span>: null}
+                  {r.minLength!=null || r.maxLength!=null ? <span>Length: {r.minLength!=null? r.minLength:'-'} to {r.maxLength!=null? r.maxLength:'-'}<br/></span>: null}
+                  {r.keys && r.keys.length>0 && <span>Fields: {r.keys.join(', ')}<br/></span>}
+                  {r.compare && <span>Compare: {JSON.stringify(r.compare)}<br/></span>}
+                  {r.when && <span>Logic: <code>{JSON.stringify(r.when)}</code><br/></span>}
+                  Message EN: {r.message?.en || ''}{r.message?.fr ? <> | FR: {r.message.fr}</> : ''}
+                </Box>
+              ))}
             </SpaceBetween>
           </Container>
-        ))}
-        <Box color="text-body-secondary" fontSize="body-s">Rules run in order; first blocking error stops navigation. Conditions use json-logic.</Box>
+        )}
       </SpaceBetween>
-    </Container>
+    </Modal>
+  </SpaceBetween>
   );
 };

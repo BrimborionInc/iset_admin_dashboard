@@ -29,6 +29,7 @@ export default function ModifyWorkflowEditorWidget() {
   const [wfId, setWfId] = useState(null); // numeric id or null
   const [wfName, setWfName] = useState('');
   const [wfStatus, setWfStatus] = useState('draft');
+  // (Summary step auto-toggle removed; authors must add a summary step manually as a normal intake step.)
   const [startUiId, setStartUiId] = useState(null); // UI step id for start
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -87,7 +88,8 @@ export default function ModifyWorkflowEditorWidget() {
   const data = await resp.json();
         if (cancelled) return;
         setWfName(data.name || '');
-        setWfStatus(data.status || 'draft');
+  setWfStatus(data.status || 'draft');
+  // (Removed summary heuristic; existing summary steps load like any other.)
         // Build UI steps from DB steps, assign stable UI ids
         const uiSteps = (data.steps || []).map((s, idx) => ({ id: `S${idx + 1}`, name: s.name, stepId: s.id, routing: { mode: 'linear' } }));
         const byDbToUi = new Map();
@@ -193,6 +195,7 @@ export default function ModifyWorkflowEditorWidget() {
 
   // Recompute only after baseline established and on dependency change
   useEffect(() => { recomputeDirty(); }, [recomputeDirty, steps, wfName, wfStatus, startUiId]);
+  // (Removed auto placeholder summary step effect.)
   // Keyboard affordance: Esc clears selection
   useEffect(() => {
     const onKeyDown = (e) => { if (e.key === 'Escape') setSelectedId(null); };
@@ -258,26 +261,28 @@ export default function ModifyWorkflowEditorWidget() {
 
   // Build API payload from UI model
   const toApiPayload = useCallback(() => {
-    // map ui id -> db stepId
-    const uiToDb = new Map(steps.map(s => [s.id, s.stepId]));
-    const stepIds = steps.map(s => s.stepId);
-    const startDbId = startUiId ? uiToDb.get(startUiId) : (steps[0]?.stepId || null);
+    // Exclude placeholder summary step(s) (no stepId) from persistence
+    const realSteps = steps.filter(s => s.stepId);
+    const uiToDb = new Map(realSteps.map(s => [s.id, s.stepId]));
+    const stepIds = realSteps.map(s => s.stepId);
+    // Start step must also be a real step
+    const startDbId = startUiId && uiToDb.get(startUiId) ? uiToDb.get(startUiId) : (realSteps[0]?.stepId || null);
     const routes = [];
-    for (const s of steps) {
+    for (const s of realSteps) {
     if (window?.DEBUG_WORKFLOW_DIRTY) {
       console.log('[WF Dirty] Saved – baseline reset', baselineRef.current);
     }
       const r = s.routing || {};
       if (r.mode === 'linear') {
-        if (r.next) routes.push({ source_step_id: s.stepId, mode: 'linear', default_next_step_id: uiToDb.get(r.next) || null });
+        if (r.next && uiToDb.get(r.next)) routes.push({ source_step_id: s.stepId, mode: 'linear', default_next_step_id: uiToDb.get(r.next) || null });
       } else if (r.mode === 'byOption') {
         const options = [];
         const mapping = r.mapping || {};
         const values = Array.isArray(r.options) ? r.options : [];
         for (const v of values) {
-          if (mapping[v]) options.push({ option_value: String(v), next_step_id: uiToDb.get(mapping[v]) || null });
+          if (mapping[v] && uiToDb.get(mapping[v])) options.push({ option_value: String(v), next_step_id: uiToDb.get(mapping[v]) || null });
         }
-        routes.push({ source_step_id: s.stepId, mode: 'by_option', field_key: r.fieldKey || null, default_next_step_id: r.defaultNext ? (uiToDb.get(r.defaultNext) || null) : null, options });
+        routes.push({ source_step_id: s.stepId, mode: 'by_option', field_key: r.fieldKey || null, default_next_step_id: (r.defaultNext && uiToDb.get(r.defaultNext)) ? uiToDb.get(r.defaultNext) : null, options });
       }
     }
     return { name: wfName || 'Untitled Workflow', status: wfStatus || 'draft', steps: stepIds, start_step_id: startDbId, routes };
@@ -328,7 +333,8 @@ export default function ModifyWorkflowEditorWidget() {
     }
   }, [wfId, toApiPayload, snapshot]);
 
-  const startOptions = steps.map(s => ({ label: s.name, value: s.id }));
+  // Exclude placeholder summary step from start step options
+  const startOptions = steps.filter(s => s.stepId).map(s => ({ label: s.name, value: s.id }));
 
   const LAYOUT_KEY = 'mw:board-layout-v1';
   // Default layout: top row 4 cols for properties; second row 1/2/1
@@ -357,15 +363,15 @@ export default function ModifyWorkflowEditorWidget() {
       case 'wfProps':
         return (
           <WorkflowPropertiesEditorWidget
-            name={wfName}
-            status={wfStatus}
-            startUiId={startUiId}
-            startOptions={startOptions}
-            onChange={(delta) => {
-              if (Object.prototype.hasOwnProperty.call(delta, 'name')) { markUserEdited(); setWfName(delta.name); }
-              if (Object.prototype.hasOwnProperty.call(delta, 'status')) { markUserEdited(); setWfStatus(delta.status); }
-              if (Object.prototype.hasOwnProperty.call(delta, 'startUiId')) { markUserEdited(); setStartUiId(delta.startUiId); }
-            }}
+              name={wfName}
+              status={wfStatus}
+              startUiId={startUiId}
+              startOptions={startOptions}
+              onChange={(delta) => {
+                if (Object.prototype.hasOwnProperty.call(delta, 'name')) { markUserEdited(); setWfName(delta.name); }
+                if (Object.prototype.hasOwnProperty.call(delta, 'status')) { markUserEdited(); setWfStatus(delta.status); }
+                if (Object.prototype.hasOwnProperty.call(delta, 'startUiId')) { markUserEdited(); setStartUiId(delta.startUiId); }
+              }}
             onSave={saveWorkflow}
             onPublish={publishWorkflow}
             saving={saving}
@@ -412,6 +418,7 @@ export default function ModifyWorkflowEditorWidget() {
 
   return (
     <Box padding="m">
+  {/* Summary auto-toggle removed */}
       <Board
         renderItem={renderItem}
         items={items}
@@ -471,3 +478,6 @@ export default function ModifyWorkflowEditorWidget() {
 }
 
 // (Removed page-level ResizeObserver error suppression; handled globally in src/index.js during development)
+
+// Manage summary step insertion/removal side-effect outside component return for clarity
+// (Placed after export for readability – executed on module load? Not desired) => Move into component scope above if needed.

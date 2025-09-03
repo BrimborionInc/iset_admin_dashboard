@@ -61,12 +61,13 @@ function inferNormalize(tplType, props, options) {
   }
   if (t === 'textarea' || t === 'text') return 'trim';
   if ((t === 'radio' || t === 'select') && Array.isArray(options) && options.length) {
-    const vals = options.map(o => o.value);
-    const allNum = vals.every(v => typeof v === 'number' || (/^-?\d+(?:\.\d+)?$/).test(String(v)));
-    if (allNum) return 'number';
-    const lc = vals.map(v => String(v).toLowerCase());
+    // Relaxed inference: do NOT coerce numeric-looking radio/select values to 'number' automatically.
+    // Reason: numeric normalization caused predicate comparisons ("1" vs 1) to mismatch when authoring expects string values.
+    // Only infer yes/no normalization shortcut.
+    const lc = options.map(o => String(o.value).toLowerCase());
     const allYN = lc.every(v => v === 'yes' || v === 'no' || v === 'true' || v === 'false');
     if (allYN) return 'yn-01';
+    return 'none';
   }
   return 'none';
 }
@@ -156,6 +157,9 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
   const usedTemplateCounts = new Map();
   const usedTemplateMeta = new Map();
   const placeholderNames = new Set(['example-radio', 'first-name', 'last-name', 'input', 'text-input', 'field', 'checkboxes', 'radio']);
+  // Global alias -> storageKey map so summary-list rows referencing original authoring keys (id/name)
+  // still resolve after normalization may have substituted a slug.
+  const aliasToStorageKey = new Map();
 
   for (const stepId of order) {
     const row = stepRows.find(s => s.step_id === stepId);
@@ -310,13 +314,24 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         for (const pc of out.components) if (pc && pc.storageKey) priorIndex.set(pc.storageKey, pc);
         for (const r of included) {
           if (!r || !r.key) continue;
-            const source = priorIndex.get(r.key);
-            const baseLabel = source?.label || { en: r.key, fr: r.key };
-            const finalLabel = (r.labelOverride && typeof r.labelOverride === 'object') ? {
-              en: r.labelOverride.en || baseLabel.en || r.key,
-              fr: r.labelOverride.fr || r.labelOverride.en || baseLabel.fr || baseLabel.en || r.key
-            } : baseLabel;
-            rows.push({ key: r.key, label: finalLabel, format: r.format || 'text' });
+          const resolvedKey = aliasToStorageKey.get(r.key) || r.key;
+          const source = priorIndex.get(resolvedKey) || priorIndex.get(r.key);
+          // Prefer explicit override, then snapshot labelEn/labelFr, then source label, then key
+          let baseLabel = source?.label || null;
+          if (!baseLabel) {
+            if (r.labelEn || r.labelFr) {
+              baseLabel = { en: r.labelEn || r.labelFr || r.key, fr: r.labelFr || r.labelEn || r.key };
+            } else {
+              baseLabel = { en: r.key, fr: r.key };
+            }
+          }
+          const finalLabel = (r.labelOverride && typeof r.labelOverride === 'object') ? {
+            en: r.labelOverride.en || baseLabel.en || r.key,
+            fr: r.labelOverride.fr || r.labelOverride.en || baseLabel.fr || baseLabel.en || r.key
+          } : baseLabel;
+          const rowObj = { key: resolvedKey, label: finalLabel };
+          if (resolvedKey !== r.key) rowObj.originalKey = r.key;
+          rows.push(rowObj);
         }
         out.components.push({
           id: toIdSlug('summary-list', 'summary-list', i, usedIds),
@@ -384,24 +399,83 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
 
       if (props?.validation && typeof props.validation === 'object') {
         const v = props.validation;
+        // Normalise rules per updated validation model (post step-level removal).
+        // - Drop any malformed entries (non-object)
+        // - Drop predicate rules lacking a 'when' clause (legacy editor created these for required)
+        // - Preserve only recognised fields for each rule type
         const safeRules = Array.isArray(v.rules)
-          ? v.rules.filter(r => r && typeof r === 'object').map(r => ({
-            id: r.id, trigger: r.trigger, predicate: r.predicate, message: r.message, severity: r.severity, block: !!r.block
-          })) : undefined;
+          ? v.rules
+              .filter(r => r && typeof r === 'object')
+              .map(r => {
+                const type = r.type || r.kind || undefined;
+                if (type === 'predicate' && !r.when) {
+                  // Legacy required placeholder; skip (required flag handled separately)
+                  return null;
+                }
+                const out = {
+                  id: r.id,
+                  type,
+                  trigger: Array.isArray(r.trigger) ? r.trigger : (r.trigger ? [r.trigger] : undefined),
+                  message: r.message,
+                  severity: r.severity,
+                  block: r.block !== false
+                };
+                if (type === 'pattern' && r.pattern) { out.pattern = r.pattern; if (r.flags) out.flags = r.flags; }
+                if (type === 'length') { if (r.minLength != null) out.minLength = r.minLength; if (r.maxLength != null) out.maxLength = r.maxLength; }
+                if (type === 'range') { if (r.min != null) out.min = r.min; if (r.max != null) out.max = r.max; }
+                if (type === 'predicate' && r.when) out.when = r.when;
+                if (type === 'atLeastOne' && Array.isArray(r.fields)) out.fields = r.fields;
+                if (type === 'compare') { out.left = r.left; out.right = r.right; out.op = r.op; }
+                return out;
+              })
+              .filter(r => r && r.type) // prune nulls / empty
+          : undefined;
         const validationOut = {
           required: typeof v.required === 'boolean' ? v.required : undefined,
+          requiredMessage: (v.requiredMessage && typeof v.requiredMessage === 'object') ? v.requiredMessage : undefined,
           errorMessage: (v.errorMessage && typeof v.errorMessage === 'object') ? v.errorMessage : undefined,
           rules: safeRules && safeRules.length ? safeRules : undefined
         };
-        if (validationOut.required || validationOut.errorMessage || (validationOut.rules && validationOut.rules.length)) component.validation = validationOut;
+        // Promote errorMessage -> requiredMessage if required true and no dedicated requiredMessage provided
+        if (!validationOut.requiredMessage && validationOut.required && validationOut.errorMessage) {
+          validationOut.requiredMessage = validationOut.errorMessage;
+        }
+        // If field not required, drop stray requiredMessage to avoid confusion
+        if (!validationOut.required && validationOut.requiredMessage) delete validationOut.requiredMessage;
+        // Remove empty container if nothing meaningful remains
+        const hasContent = (
+          validationOut.required === true ||
+          (validationOut.requiredMessage && Object.keys(validationOut.requiredMessage).length) ||
+          (validationOut.rules && validationOut.rules.length)
+        );
+        if (hasContent) component.validation = validationOut;
         if (typeof v.required === 'boolean' && v.required && !component.required) component.required = true;
       }
 
       out.components.push(component);
-      // Record mapping from original props.id (authoring) to index of this component
-      if (props && props.id) {
-        const origId = String(props.id).trim();
+      // Register alias mappings (original authoring identifiers) -> final storageKey
+      try {
+        const aliases = new Set();
+        if (idProp) aliases.add(idProp);
+        if (nameProp) aliases.add(nameProp);
+        if (fieldNameProp) aliases.add(fieldNameProp);
+        aliases.add(labelSlug); // label-derived slug used earlier; harmless if same
+        for (const a of aliases) {
+          if (!a) continue;
+          if (!aliasToStorageKey.has(a)) aliasToStorageKey.set(a, component.storageKey);
+        }
+        // Always map storageKey to itself
+        if (component.storageKey && !aliasToStorageKey.has(component.storageKey)) aliasToStorageKey.set(component.storageKey, component.storageKey);
+      } catch { /* ignore alias registration errors */ }
+      // Record mapping from authoring identifiers to component index for later conditional embedding
+      if (props) {
+        const origId = props.id != null ? String(props.id).trim() : '';
         if (origId) authoringIdIndex.set(origId, out.components.length - 1);
+        // Also index by props.name (data key) because conditionalChildId currently stores the data key, not the DOM id
+        const nameKey = props.name != null ? String(props.name).trim() : '';
+        if (nameKey && !authoringIdIndex.has(nameKey)) {
+          authoringIdIndex.set(nameKey, out.components.length - 1);
+        }
       }
     }
 

@@ -51,7 +51,7 @@ import NewAppointmentFormHelp from '../helpPanelContents/newAppointmentFormHelp'
 import ManageMessages from '../pages/manageMessages.js'; // Import the new component
 import ManageMessagesHelp from '../helpPanelContents/manageMessagesHelp.js'; // Import the help panel content
 import ModifyComponent from '../pages/modifyIntakeStep.js'; // Import the new component
-import ModifyComponentHelp from '../helpPanelContents/modifyComponentHelp.js'; // Import the help panel content
+import ModifyIntakeStepHelp from '../helpPanelContents/modifyIntakeStep.js'; // Renamed help panel content
 import ManageSecurityOptions from '../pages/manageSecurityOptions.js'; // Import the renamed component
 import AccessControlDashboard from '../pages/accessControlDashboard.js';
 import ManageIntakeSteps from '../pages/manageIntakeSteps.js'; // Import the renamed component
@@ -313,7 +313,7 @@ const AppRoutes = ({
             { text: 'Modify Intake Step', href: '/modify-component/:id' }
           ],
           'Modify Intake Step',
-          <ModifyComponentHelp />
+          <ModifyIntakeStepHelp />
         )}
       </Route>
       <Route path="/manage-security-options">

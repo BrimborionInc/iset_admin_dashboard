@@ -3495,6 +3495,20 @@ async function resolveTemplateIds(components, conn) {
 // Body: { name: string, status: 'active'|'inactive', components: [{ templateId:number|, template_key?:string, props?:object }], ui_meta?: any }
 app.post('/api/steps', async (req, res) => {
   const { name, status = 'active', components = [], ui_meta = null } = req.body || {};
+  // Defensive sanitation: strip placeholder summary-list rows if dynamic config present
+  if (Array.isArray(components)) {
+    components.forEach(c => {
+      try {
+        if (!c || !c.props) return;
+        const t = String(c.template_key || c.type || '').toLowerCase();
+        if (t === 'summary-list') {
+          const p = c.props;
+            const hasConfig = (Array.isArray(p.included) && p.included.length) || p.workflowId;
+            if (hasConfig && Array.isArray(p.rows)) delete p.rows;
+        }
+      } catch { /* ignore */ }
+    });
+  }
   if (!name || !Array.isArray(components)) {
     return res.status(400).json({ error: 'name and components[] are required' });
   }
@@ -3583,6 +3597,20 @@ app.post('/api/steps', async (req, res) => {
 app.put('/api/steps/:id', async (req, res) => {
   const { id } = req.params;
   const { name, status, components, ui_meta } = req.body || {};
+  // Defensive sanitation (same as POST)
+  if (Array.isArray(components)) {
+    components.forEach(c => {
+      try {
+        if (!c || !c.props) return;
+        const t = String(c.template_key || c.type || '').toLowerCase();
+        if (t === 'summary-list') {
+          const p = c.props;
+          const hasConfig = (Array.isArray(p.included) && p.included.length) || p.workflowId;
+          if (hasConfig && Array.isArray(p.rows)) delete p.rows;
+        }
+      } catch { /* ignore */ }
+    });
+  }
   try {
     if (Array.isArray(components)) {
       // Same validation logic as in POST route
