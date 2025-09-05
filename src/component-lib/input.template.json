@@ -17,7 +17,8 @@
     "inputmode": "",
     "pattern": "",
     "spellcheck": true,
-    "value": "",
+  "value": "",
+  "mask": "",
     "prefix": { "text": "" },
     "suffix": { "text": "" }
   },
@@ -49,6 +50,16 @@
     { "key": "autocomplete", "path": "autocomplete", "type": "text", "label": "Autocomplete" },
     { "key": "inputmode", "path": "inputmode", "type": "text", "label": "Input Mode" },
     { "key": "pattern", "path": "pattern", "type": "text", "label": "Pattern (regex)" },
+    { "key": "mask", "path": "mask", "type": "select", "label": "Input Mask", "options": [
+      { "label": "None", "value": "" },
+      { "label": "Phone (North America)", "value": "phone-na" },
+      { "label": "SIN (Canada)", "value": "sin-ca" },
+      { "label": "Postal Code (Canada)", "value": "postal-code-ca" },
+      { "label": "ZIP Code (US)", "value": "postal-code-us" },
+      { "label": "Date (YYYY-MM-DD)", "value": "date-iso" },
+      { "label": "Time (HH:MM 24h)", "value": "time-hm" },
+      { "label": "Currency (Integer)", "value": "currency" }
+    ] },
     { "key": "spellcheck", "path": "spellcheck", "type": "select", "label": "Spellcheck?", "options": [
       { "label": "True", "value": true },
       { "label": "False", "value": false }
@@ -69,5 +80,5 @@
   ],
   "has_options": false,
   "option_schema": null,
-  "export_njk_template": "{% from \"govuk/components/input/macro.njk\" import govukInput %}\n{% set cls = props.classes or 'govuk-input' %}\n{% if 'govuk-input' not in cls %}{% set cls = 'govuk-input ' + cls %}{% endif %}\n{% set prefixObj = null %}\n{% if props.prefix and props.prefix.text and (props.prefix.text | trim) %}{% set prefixObj = props.prefix %}{% endif %}\n{% set suffixObj = null %}\n{% if props.suffix and props.suffix.text and (props.suffix.text | trim) %}{% set suffixObj = props.suffix %}{% endif %}\n{{ govukInput({\n  name: props.name,\n  id: props.id or props.name,\n  type: props.type,\n  label: props.label,\n  hint: props.hint,\n  errorMessage: props.errorMessage,\n  classes: cls,\n  formGroup: props.formGroup,\n  autocomplete: props.autocomplete,\n  inputmode: props.inputmode,\n  pattern: props.pattern,\n  spellcheck: props.spellcheck,\n  value: props.value,\n  prefix: prefixObj,\n  suffix: suffixObj\n}) }}"
+  "export_njk_template": "{% from \"govuk/components/input/macro.njk\" import govukInput %}\n{% set cls = props.classes or 'govuk-input' %}\n{% if 'govuk-input' not in cls %}{% set cls = 'govuk-input ' + cls %}{% endif %}\n{% set prefixObj = null %}\n{% if props.prefix and props.prefix.text and (props.prefix.text | trim) %}{% set prefixObj = props.prefix %}{% endif %}\n{% set suffixObj = null %}\n{% if props.suffix and props.suffix.text and (props.suffix.text | trim) %}{% set suffixObj = props.suffix %}{% endif %}\n{% set maybeMaskAttr = props.mask and (props.mask | trim) and ({ 'data-mask': props.mask }) %}\n{{ govukInput({\n  name: props.name,\n  id: props.id or props.name,\n  type: props.type,\n  label: props.label,\n  hint: props.hint,\n  errorMessage: props.errorMessage,\n  classes: cls,\n  formGroup: props.formGroup,\n  autocomplete: props.autocomplete,\n  inputmode: props.inputmode,\n  pattern: props.pattern,\n  spellcheck: props.spellcheck,\n  value: props.value,\n  prefix: prefixObj,\n  suffix: suffixObj,\n  attributes: maybeMaskAttr\n}) }}"
 }

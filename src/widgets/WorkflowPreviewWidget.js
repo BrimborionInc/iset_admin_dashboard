@@ -563,8 +563,8 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
             />
           </div>
         )}
-  {selectedWorkflow && mode === 'interactive' && (
-          <div style={{ flex: 1, minHeight: 300, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff', padding: 16, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+        {selectedWorkflow && mode === 'interactive' && (
+          <div style={{ flex: 1, minHeight: 300, border: '1px solid #d8d8d8', borderRadius: 6, background: '#f3f2f1', padding: 16, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
             {!runtime && <div style={{ color: '#888' }}>Loading runtime schema...</div>}
             {runtime?.error && <div style={{ color: '#d4351c' }}>{runtime.error}</div>}
             {runtime && !runtime.error && currentStep && (

@@ -1,49 +1,86 @@
-import React, { useState } from 'react';
-import { ContentLayout } from '@cloudscape-design/components';
+import React, { useState, useEffect } from 'react';
+import { Button, SpaceBetween } from '@cloudscape-design/components';
+import WorkflowLibraryWidgetHelp from '../helpPanelContents/workflowLibraryWidgetHelp';
+import WorkflowPropertiesWidgetHelp from '../helpPanelContents/workflowPropertiesWidgetHelp';
+import WorkflowPreviewWidgetHelp from '../helpPanelContents/workflowPreviewWidgetHelp';
+import WorkflowRuntimeSchemaWidgetHelp from '../helpPanelContents/workflowRuntimeSchemaWidgetHelp';
 import Board from '@cloudscape-design/board-components/board';
 import WorkflowListWidget from '../widgets/WorkflowListWidget';
 import WorkflowPreviewWidget from '../widgets/WorkflowPreviewWidget';
 import WorkflowPropertiesWidget from '../widgets/WorkflowPropertiesWidget';
 import WorkflowRuntimeSchemaWidget from '../widgets/WorkflowRuntimeSchemaWidget';
 
+// Standardized default layout (order + spans) per user spec
 const initialItems = [
-  { id: 'workflowList', rowSpan: 6, columnSpan: 2, data: { title: 'Workflow Library' } },
-  { id: 'workflowPreview', rowSpan: 6, columnSpan: 2, data: { title: 'Workflow Preview' } },
-  { id: 'workflowRuntime', rowSpan: 4, columnSpan: 4, data: { title: 'Runtime Schema' } },
-  { id: 'workflowProps', rowSpan: 2, columnSpan: 4, data: { title: 'Workflow Properties' } },
+  { id: 'workflowList', rowSpan: 3, columnSpan: 2, data: { title: 'Workflow Library' } },
+  { id: 'workflowProps', rowSpan: 3, columnSpan: 2, data: { title: 'Workflow Properties' } },
+  { id: 'workflowPreview', rowSpan: 5, columnSpan: 2, data: { title: 'Workflow Preview' } },
+  { id: 'workflowRuntime', rowSpan: 5, columnSpan: 2, data: { title: 'Runtime Schema' } }
 ];
 
-const ManageWorkflows = () => {
+const STORAGE_KEY = 'manageWorkflows.board.items.v1';
+
+const ManageWorkflows = ({ toggleHelpPanel }) => {
   const [items, setItems] = useState(initialItems);
   const [selectedWorkflow, setSelectedWorkflow] = useState(null);
 
-  const renderItem = item => {
-    if (item.id === 'workflowList') {
-      return <WorkflowListWidget onSelectWorkflow={setSelectedWorkflow} />;
+  // Restore saved layout
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.every(i => i && typeof i.id === 'string')) {
+          setItems(parsed);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const resetLayout = () => {
+    setItems(initialItems);
+    try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+  };
+
+  const openWidgetHelp = (Comp, title) => {
+    if (!toggleHelpPanel) return;
+    toggleHelpPanel(<Comp />, title, Comp.aiContext || '');
+  };
+
+  const renderItem = (item, actions) => {
+    switch (item.id) {
+      case 'workflowList':
+  return <WorkflowListWidget onSelectWorkflow={setSelectedWorkflow} actions={actions} toggleHelpPanel={() => openWidgetHelp(WorkflowLibraryWidgetHelp, 'Workflow Library')} />;
+      case 'workflowPreview':
+  return <WorkflowPreviewWidget selectedWorkflow={selectedWorkflow} actions={actions} toggleHelpPanel={() => openWidgetHelp(WorkflowPreviewWidgetHelp, 'Workflow Preview')} HelpContent={WorkflowPreviewWidgetHelp} />;
+      case 'workflowProps':
+        return (
+          <WorkflowPropertiesWidget
+            workflow={selectedWorkflow}
+            onWorkflowUpdated={setSelectedWorkflow}
+            actions={actions}
+            toggleHelpPanel={() => openWidgetHelp(WorkflowPropertiesWidgetHelp, 'Workflow Properties')}
+          />
+        );
+      case 'workflowRuntime':
+  return <WorkflowRuntimeSchemaWidget selectedWorkflow={selectedWorkflow} actions={actions} toggleHelpPanel={() => openWidgetHelp(WorkflowRuntimeSchemaWidgetHelp, 'Runtime Schema')} />;
+      default:
+        return null;
     }
-    if (item.id === 'workflowPreview') {
-      return <WorkflowPreviewWidget selectedWorkflow={selectedWorkflow} />;
-    }
-    if (item.id === 'workflowProps') {
-      return (
-        <WorkflowPropertiesWidget
-          workflow={selectedWorkflow}
-          onWorkflowUpdated={setSelectedWorkflow}
-        />
-      );
-    }
-    if (item.id === 'workflowRuntime') {
-      return <WorkflowRuntimeSchemaWidget selectedWorkflow={selectedWorkflow} />;
-    }
-    return null;
   };
 
   return (
-    <ContentLayout>
+    <div>
+      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:8 }}>
+        <Button onClick={resetLayout} variant="link">Reset layout</Button>
+      </div>
       <Board
         renderItem={renderItem}
         items={items}
-        onItemsChange={event => setItems(event.detail.items)}
+        onItemsChange={event => {
+          setItems(event.detail.items);
+          try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(event.detail.items)); } catch { /* ignore */ }
+        }}
         i18nStrings={{
           liveAnnouncementDndStarted: (operationType) =>
             operationType === 'resize' ? 'Resizing' : 'Dragging',
@@ -73,7 +110,7 @@ const ManageWorkflows = () => {
           navigationItemAriaLabel: (item) => (item ? item.data.title : 'Empty'),
         }}
       />
-    </ContentLayout>
+    </div>
   );
 };
 

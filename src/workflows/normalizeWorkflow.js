@@ -371,6 +371,19 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         if (props?.suffix && (props.suffix.text || props.suffix.html)) component.suffix = { text: props.suffix.text || props.suffix.html, classes: props.suffix.classes || undefined };
         if (props?.describedBy || props?.describedby) component.extraDescribedBy = String(props.describedBy || props.describedby);
         if (props?.formGroup?.classes) component.formGroupClass = props.formGroup.classes;
+        // Preserve input masking directive if provided (authoring stores as props.mask)
+        if (props?.mask) {
+          const rawMask = String(props.mask).trim();
+          if (rawMask) {
+            // Allow only known masks to reduce risk of arbitrary injection
+            const allowed = new Set(['phone-na','sin-ca','sin','postal-code-ca','postal-code-us','date-iso','time-hm','currency']);
+            const lc = rawMask.toLowerCase();
+            if (allowed.has(lc)) component.mask = lc === 'sin' ? 'sin-ca' : lc; // normalise alias
+            else component.mask = lc; // fallback: still emit for forward compatibility
+          }
+        } else if (props?.inputMask) { // legacy / alternate key
+          component.mask = String(props.inputMask).trim().toLowerCase();
+        }
       }
       if (tplType === 'date-input') {
         if (props?.namePrefix) component.namePrefix = props.namePrefix;

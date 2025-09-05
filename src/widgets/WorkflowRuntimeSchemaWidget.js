@@ -8,15 +8,17 @@ import {
   Spinner,
   Tabs,
   StatusIndicator,
-  Button
+  Button,
+  Link
 } from '@cloudscape-design/components';
+import WorkflowRuntimeSchemaWidgetHelp from '../helpPanelContents/workflowRuntimeSchemaWidgetHelp';
 import CodeView from '@cloudscape-design/code-view/code-view';
 import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
 import { apiFetch } from '../auth/apiClient';
 
 const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
 
-export default function WorkflowRuntimeSchemaWidget({ selectedWorkflow, actions }) {
+export default function WorkflowRuntimeSchemaWidget({ selectedWorkflow, actions, toggleHelpPanel }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [preview, setPreview] = useState(null); // { steps, meta }
@@ -62,9 +64,10 @@ export default function WorkflowRuntimeSchemaWidget({ selectedWorkflow, actions 
         <Header
           variant="h2"
           counter={headerCounter}
+          info={<Link variant="info" onClick={() => toggleHelpPanel && toggleHelpPanel(<WorkflowRuntimeSchemaWidgetHelp />, 'Runtime Schema')}>Info</Link>}
           actions={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button disabled={!preview} onClick={() => setShowJson(s => !s)}>{showJson ? 'Hide JSON' : 'Show JSON'}</Button>
+              <Button disabled={!preview} onClick={() => setShowJson(s => !s)}>{showJson ? 'Show List' : 'Show JSON'}</Button>
             </SpaceBetween>
           }
         >
@@ -79,50 +82,55 @@ export default function WorkflowRuntimeSchemaWidget({ selectedWorkflow, actions 
       }}
       settings={<ButtonDropdown items={[{ id: 'remove', text: 'Remove' }]} ariaLabel="Board item settings" variant="icon" onItemClick={() => actions?.removeItem && actions.removeItem()} />}
     >
-      <Box>
+      <Box display="flex" flexDirection="column" height="100%" style={{ minHeight: 0 }}>
         {!selectedWorkflow && <Box color="text-status-inactive">Select a workflow to view runtime schema</Box>}
         {selectedWorkflow && loading && <Spinner />}
         {selectedWorkflow && error && <StatusIndicator type="error">{error}</StatusIndicator>}
         {selectedWorkflow && !loading && !error && preview && (
-          <SpaceBetween size="m">
+          <SpaceBetween size="m" direction="vertical" style={{ flex: 1, minHeight: 0 }}>
             {meta && (
               <Box variant="awsui-key-label">Schema v{meta.schemaVersion} • Generated {new Date(meta.generatedAt).toLocaleString()}</Box>
             )}
-            <div style={{ maxHeight: showJson ? 240 : 160, overflow: 'auto', border: '1px solid #e0e0e0', padding: 8, borderRadius: 4, background: '#fafafa' }}>
-              {steps.map((s, idx) => (
-                <div key={s.stepId} style={{ marginBottom: 8 }}>
-                  <strong style={{ cursor: 'pointer' }} onClick={() => setExpandedStep(es => es === s.stepId ? null : s.stepId)}>
-                    {idx + 1}. {s.title?.en || s.stepId}
-                  </strong>
-                  <span style={{ marginLeft: 6, color: '#555' }}>({s.components?.length || 0} components{ s.nextStepId ? ` → ${s.nextStepId}` : ''})</span>
-                  {expandedStep === s.stepId && (
-                    <ul style={{ margin: '4px 0 4px 16px', padding: 0 }}>
-                      {(s.components || []).map(c => (
-                        <li key={c.id} style={{ fontSize: 12 }}>
-                          <code>{c.type}</code> <span style={{ color: '#555' }}>{c.label?.en}</span>{c.storageKey ? ` [${c.storageKey}]` : ''}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ))}
-            </div>
+            {!showJson && (
+              <div style={{ flex: '1 1 auto', minHeight: 120, overflow: 'auto', border: '1px solid #e0e0e0', padding: 8, borderRadius: 4, background: '#fafafa' }}>
+                {steps.map((s, idx) => (
+                  <div key={s.stepId} style={{ marginBottom: 8 }}>
+                    <strong style={{ cursor: 'pointer' }} onClick={() => setExpandedStep(es => es === s.stepId ? null : s.stepId)}>
+                      {idx + 1}. {s.title?.en || s.stepId}
+                    </strong>
+                    <span style={{ marginLeft: 6, color: '#555' }}>({s.components?.length || 0} components{ s.nextStepId ? ` → ${s.nextStepId}` : ''})</span>
+                    {expandedStep === s.stepId && (
+                      <ul style={{ margin: '4px 0 4px 16px', padding: 0 }}>
+                        {(s.components || []).map(c => (
+                          <li key={c.id} style={{ fontSize: 12 }}>
+                            <code>{c.type}</code> <span style={{ color: '#555' }}>{c.label?.en}</span>{c.storageKey ? ` [${c.storageKey}]` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             {showJson && (
-              <CodeView
-                content={jsonText}
-                language="json"
-                lineNumbers
-                wrapLines
-                ariaLabel="Workflow runtime JSON"
-                actions={
-                  <CopyToClipboard
-                    copyButtonAriaLabel="Copy workflow JSON"
-                    copyErrorText="Copy failed"
-                    copySuccessText="Copied"
-                    textToCopy={jsonText}
-                  />
-                }
-              />
+              <div style={{ flex: '1 1 auto', minHeight: 160, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <CodeView
+                  content={jsonText}
+                  language="json"
+                  lineNumbers
+                  wrapLines
+                  ariaLabel="Workflow runtime JSON"
+                  style={{ flex: 1, minHeight: 0 }}
+                  actions={
+                    <CopyToClipboard
+                      copyButtonAriaLabel="Copy workflow JSON"
+                      copyErrorText="Copy failed"
+                      copySuccessText="Copied"
+                      textToCopy={jsonText}
+                    />
+                  }
+                />
+              </div>
             )}
           </SpaceBetween>
         )}

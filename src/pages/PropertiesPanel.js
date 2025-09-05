@@ -1692,8 +1692,8 @@ const ValidationEditor = ({ selectedComponent, updateComponentProperty, allCompo
                     </FormField>
                   </SpaceBetween>
                   {r.type==='predicate' && (
-                    <FormField label="JSON Logic (when fails)">
-                      <Textarea rows={3} value={JSON.stringify(r.when, null, 2)} onChange={({detail})=>{ try { const parsed = JSON.parse(detail.value); updateRule(r.id, rr=>({...rr, when: parsed})); } catch {} }} />
+                    <FormField label="JSON Logic (triggering failure)">
+                      <Textarea rows={9} value={JSON.stringify(r.when, null, 2)} onChange={({detail})=>{ try { const parsed = JSON.parse(detail.value); updateRule(r.id, rr=>({...rr, when: parsed})); } catch {} }} />
                     </FormField>
                   )}
                   {r.type==='atLeastOne' && (

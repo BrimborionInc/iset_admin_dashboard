@@ -9,15 +9,18 @@ import {
   Alert,
   Button,
   FormField,
-  Grid
+  ColumnLayout,
+  Badge,
+  Link
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
+import WorkflowPropertiesWidgetHelp from '../helpPanelContents/workflowPropertiesWidgetHelp';
 
 const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, ''); // retained for any absolute path needs
 
 // No key/value component needed; using FormField with disabled inputs for read-only fields.
 
-export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated }) {
+export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated, actions, toggleHelpPanel }) {
   const [nameValue, setNameValue] = useState('');
   const [statusValue, setStatusValue] = useState('draft');
   const [saving, setSaving] = useState(false);
@@ -127,9 +130,10 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated }
         <Header
           variant="h2"
           counter={headerCounter}
+          info={<Link variant="info" onClick={() => toggleHelpPanel && toggleHelpPanel(<WorkflowPropertiesWidgetHelp />, 'Workflow Properties')}>Info</Link>}
           actions={
             <SpaceBetween direction="horizontal" size="xs">
-              {/* Removed ID badge */}
+              {isDirty && <Badge color="blue">Unsaved</Badge>}
               <Button onClick={onPublish} disabled={!workflow} iconAlign="right">
                 Publish
               </Button>
@@ -153,7 +157,7 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated }
         resizeHandleAriaDescription:
           'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.'
       }}
-      settings={<ButtonDropdown items={[{ id: 'remove', text: 'Remove' }]} ariaLabel="Board item settings" variant="icon" />}
+  settings={<ButtonDropdown items={[{ id: 'remove', text: 'Remove' }]} ariaLabel="Board item settings" variant="icon" onItemClick={() => actions && actions.removeItem && actions.removeItem()} />}
     >
       <SpaceBetween size="l">
         {alert && (
@@ -170,27 +174,59 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated }
         {!workflow && <div style={{ color: '#888' }}>Select a workflow to see details</div>}
 
         {workflow && (
-          <Grid gridDefinition={[{ colspan: 3 }, { colspan: 3 }, { colspan: 2 }, { colspan: 2 }, { colspan: 2 }]}>
-            <FormField label="Name">
-              <Input value={nameValue} onChange={({ detail }) => setNameValue(detail.value)} />
+          <ColumnLayout columns={5} variant="text-grid">
+            <FormField
+              label="Name"
+              description="Display name shown to administrators"
+              constraintText="1–120 characters"
+            >
+              <Input
+                value={nameValue}
+                onChange={({ detail }) => setNameValue(detail.value)}
+                maxLength={120}
+                placeholder="Enter workflow name"
+              />
             </FormField>
-            <FormField label="Status">
+            <FormField
+              label="Status"
+              description="Lifecycle state (draft = editable)"
+              constraintText="draft | active | inactive"
+            >
               <Select
                 selectedOption={selectedStatus}
                 onChange={({ detail }) => setStatusValue(detail.selectedOption?.value || 'draft')}
                 options={statusOptions}
+                placeholder="Select status"
               />
             </FormField>
-            <FormField label="Steps">
+            <FormField
+              label="Steps"
+              description="Total steps in this workflow"
+              constraintText="Read-only"
+            >
               <Input value={String(stepsCount)} disabled />
             </FormField>
-            <FormField label="Created">
-              <Input value={workflow.created_at ? new Date(workflow.created_at).toLocaleString() : '—'} disabled />
+            <FormField
+              label="Created"
+              description="Creation timestamp"
+              constraintText="Local time"
+            >
+              <Input
+                value={workflow.created_at ? new Date(workflow.created_at).toLocaleString() : '—'}
+                disabled
+              />
             </FormField>
-            <FormField label="Updated">
-              <Input value={workflow.updated_at ? new Date(workflow.updated_at).toLocaleString() : '—'} disabled />
+            <FormField
+              label="Updated"
+              description="Last modification"
+              constraintText="Local time"
+            >
+              <Input
+                value={workflow.updated_at ? new Date(workflow.updated_at).toLocaleString() : '—'}
+                disabled
+              />
             </FormField>
-          </Grid>
+          </ColumnLayout>
         )}
       </SpaceBetween>
     </BoardItem>
