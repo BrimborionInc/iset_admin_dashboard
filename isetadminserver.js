@@ -69,6 +69,44 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
+// --- Public Linkage Coverage Proxy (moved before auth middleware) ---------
+// Returns aggregate, non-sensitive linkage stats from the intake service WITHOUT requiring admin auth.
+// Placed here (before Cognito auth mounting) so /api/admin/linkage-stats is publicly reachable.
+// Caching: 10s in-memory to reduce upstream load during dashboard refreshes.
+let __linkageStatsCache = { ts: 0, ttlMs: 10_000, data: null };
+app.get('/api/admin/linkage-stats', async (req, res) => {
+  try {
+    const baseRaw = process.env.LINKAGE_STATS_URL || process.env.INTAKE_BASE_URL || 'http://localhost:5000';
+    const base = /^https?:\/\//i.test(baseRaw) ? baseRaw : `http://${baseRaw}`;
+    const url = base.replace(/\/$/, '') + '/api/admin/linkage-stats';
+
+    if (__linkageStatsCache.data && (Date.now() - __linkageStatsCache.ts) < __linkageStatsCache.ttlMs) {
+      return res.json({ ...(__linkageStatsCache.data || {}), _cache: true, _source: 'cache', _public: true });
+    }
+
+    const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+
+    let resp, text;
+    try {
+      resp = await fetch(url, { headers: { 'Content-Type': 'application/json' }, timeout: 5000 });
+      text = await resp.text();
+    } catch (netErr) {
+      return res.status(502).json({ error: 'linkage_stats_failed', category: 'network', message: netErr.message, upstreamBase: base });
+    }
+    if (!resp.ok) {
+      return res.status(resp.status === 404 ? 404 : 502).json({ error: 'linkage_stats_failed', category: 'upstream', status: resp.status, body: text.slice(0,500), upstreamBase: base });
+    }
+    let json;
+    try { json = JSON.parse(text); } catch {
+      return res.status(502).json({ error: 'linkage_stats_failed', category: 'parse', upstreamBase: base, body: text.slice(0,500) });
+    }
+    __linkageStatsCache = { ts: Date.now(), ttlMs: __linkageStatsCache.ttlMs, data: json };
+    res.json({ ...json, _cache: false, _source: 'upstream', _public: true });
+  } catch (e) {
+    res.status(500).json({ error: 'linkage_stats_proxy_failed', message: e.message });
+  }
+});
+
 // --- Authentication (Cognito) - feature flagged ---
 // New: allow local development bypass via DEV_DISABLE_AUTH=true (non-production only)
 try {
@@ -110,35 +148,7 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ provider: 'cognito', auth: req.auth });
 });
 
-// Phase 5: linkage coverage proxy (pulls from intake portal backend)
-// Returns { total, linked, coveragePct, legacyWithPassword, recentActive7d }
-app.get('/api/admin/linkage-stats', async (req, res) => {
-  try {
-    const target = process.env.LINKAGE_STATS_URL || process.env.INTAKE_BASE_URL || 'http://localhost:5000';
-    const url = target.replace(/\/$/, '') + '/api/admin/linkage-stats';
-    const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-    const headers = { 'Content-Type': 'application/json' };
-    // Forward bearer if present (so the portal can auth if required)
-    if (req.headers.authorization) headers.Authorization = req.headers.authorization;
-    // Forward dev bypass headers so intake server can honor local auth bypass
-    ['x-dev-bypass','x-dev-role','x-dev-userid','x-dev-regionid'].forEach(h => {
-      const v = req.headers[h];
-      if (v) headers[h] = v;
-    });
-    const resp = await fetch(url, { headers, timeout: 5000 });
-    const text = await resp.text();
-    if (!resp.ok) {
-      return res.status(502).json({ error: 'upstream_error', status: resp.status, body: text.slice(0,200) });
-    }
-    let json;
-    try { json = JSON.parse(text); } catch {
-      return res.status(502).json({ error: 'invalid_upstream_json', body: text.slice(0,120) });
-    }
-    res.json(json);
-  } catch (e) {
-    res.status(500).json({ error: 'linkage_stats_proxy_failed', message: e.message });
-  }
-});
+// (Removed duplicate linkage-stats route; public version defined earlier before auth.)
 
 
 // --- AI Chat proxy & status (server-side, avoids exposing API keys in browser) -----
@@ -556,7 +566,16 @@ function sysAdminOnly(req) {
     const hdrRole = req.get('x-dev-role') || req.get('X-Dev-Role');
     if (hdrRole) role = hdrRole;
   }
-  return role === 'System Administrator';
+  // Normalize legacy / short group codes (e.g., "SysAdmin") to canonical display roles
+  const normalizeRole = (r) => {
+    if (!r) return r;
+    const map = {
+      SysAdmin: 'System Administrator',
+      'System Administrator': 'System Administrator'
+    };
+    return map[r] || r;
+  };
+  return normalizeRole(role) === 'System Administrator';
 }
 
 app.get('/api/config/runtime', (req, res) => {
@@ -988,6 +1007,10 @@ syncDetailsTemplateFromFile();
 async function syncTextBlockTemplateFromFile() { return syncTemplateFromFile('text-block'); }
 syncTextBlockTemplateFromFile();
 
+// Select template sync (reuse generic helper)
+async function syncSelectTemplateFromFile() { return syncTemplateFromFile('select'); }
+syncSelectTemplateFromFile();
+
 // Dev helper endpoint to force re-sync of radio template from filesystem (no versioning bump)
 app.post('/api/dev/sync/radio-template', async (_req, res) => {
   await syncRadioTemplateFromFile();
@@ -1058,6 +1081,12 @@ app.post('/api/dev/sync/details-template', async (_req, res) => {
 app.post('/api/dev/sync/text-block-template', async (_req, res) => {
   await syncTextBlockTemplateFromFile();
   res.json({ ok: true, message: 'Text-block template sync attempted' });
+});
+
+// Dev helper to sync select template
+app.post('/api/dev/sync/select-template', async (_req, res) => {
+  await syncSelectTemplateFromFile();
+  res.json({ ok: true, message: 'Select template sync attempted' });
 });
 
 // ---------------- Component Templates Endpoints (Library) -----------------

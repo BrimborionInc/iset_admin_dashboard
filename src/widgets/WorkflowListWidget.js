@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Header, ButtonDropdown, Link, Table, Button, TextFilter, SpaceBetween, Spinner } from '@cloudscape-design/components';
+import { Box, Header, ButtonDropdown, Link, Table, Button, TextFilter, SpaceBetween, Spinner, Modal, Input, Alert } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { apiFetch } from '../auth/apiClient';
 
@@ -41,10 +41,15 @@ const getColumnDefinitions = (onSelectWorkflow, onModify, onDelete) => [
 
 const formatDate = (dt) => dt ? new Date(dt).toISOString().slice(0, 10) : '';
 
-const WorkflowListWidget = ({ actions, onSelectWorkflow }) => {
+const WorkflowListWidget = ({ actions, onSelectWorkflow, toggleHelpPanel }) => {
   const [filteringText, setFilteringText] = useState('');
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
+  const [deleteTarget, setDeleteTarget] = useState(null); // workflow row object
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+  const [alert, setAlert] = useState(null); // { type, text }
 
   const load = async () => {
     try {
@@ -89,15 +94,35 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow }) => {
     window.location.href = `/modify-workflow?id=${encodeURIComponent(item.id)}`;
   };
 
-  const onDelete = async (item) => {
-    if (!window.confirm(`Delete workflow "${item.name}"? This cannot be undone.`)) return;
+  const openDelete = (item) => {
+    setDeleteTarget(item);
+    setDeleteConfirm('');
+    setDeleteError(null);
+  };
+
+  const performDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
     try {
-      const resp = await apiFetch(`/api/workflows/${item.id}`, { method: 'DELETE' });
-      if (!resp.ok) throw new Error('Failed');
+      const resp = await apiFetch(`/api/workflows/${deleteTarget.id}`, { method: 'DELETE' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      setAlert({ type: 'success', text: `Deleted workflow \"${deleteTarget.name}\".` });
+      setDeleteTarget(null);
+      setDeleteConfirm('');
       await load();
     } catch (e) {
-      alert('Failed to delete workflow');
+      setDeleteError('Delete failed. Please retry or contact support.');
+    } finally {
+      setDeleting(false);
     }
+  };
+
+  const cancelDelete = () => {
+    if (deleting) return; // block close while in-flight
+    setDeleteTarget(null);
+    setDeleteConfirm('');
+    setDeleteError(null);
   };
 
   const filtered = useMemo(() => {
@@ -109,10 +134,13 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow }) => {
     <BoardItem
       header={
         <Header
+          info={<Link variant="info" onClick={() => toggleHelpPanel && toggleHelpPanel()}>Info</Link>}
           actions={
-            <Button iconAlign="right" onClick={() => (window.location.href = '/modify-workflow')}>
-              Create New
-            </Button>
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button iconAlign="right" onClick={() => (window.location.href = '/modify-workflow')}>
+                Create New
+              </Button>
+            </SpaceBetween>
           }
         >
           Workflow Library
@@ -140,7 +168,7 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow }) => {
           renderAriaLive={({ firstIndex, lastIndex, totalItemsCount }) =>
             `Displaying items ${firstIndex} to ${lastIndex} of ${totalItemsCount}`
           }
-      columnDefinitions={getColumnDefinitions(onSelectWorkflowInternal, onModify, onDelete)}
+  columnDefinitions={getColumnDefinitions(onSelectWorkflowInternal, onModify, openDelete)}
       items={filtered}
       loading={loading}
           loadingText="Loading resources"
@@ -161,7 +189,58 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow }) => {
             />
           }
         />
+        {alert && (
+          <Box margin={{ top: 's' }}>
+            <Alert dismissible onDismiss={() => setAlert(null)} type={alert.type}>{alert.text}</Alert>
+          </Box>
+        )}
       </Box>
+
+      {deleteTarget && (
+        <Modal
+          visible={true}
+          onDismiss={cancelDelete}
+          header={`Delete Workflow: ${deleteTarget.name}`}
+          closeAriaLabel="Close delete workflow dialog"
+          size="medium"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={cancelDelete} disabled={deleting}>Cancel</Button>
+              <Button
+                variant="primary"
+                disabled={deleteConfirm.trim() !== 'delete' || deleting}
+                loading={deleting}
+                onClick={performDelete}
+              >
+                Delete
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            <Box>
+              This will permanently remove the workflow <strong>{deleteTarget.name}</strong>{' '}
+              (ID: {deleteTarget.id}). This action cannot be undone.
+            </Box>
+            <Box fontSize="body-s" color="text-status-inactive">
+              If this workflow is currently active in any environment, deletion may affect historical
+              audit or review processes. Consider setting status to <em>inactive</em> instead if you
+              only want to retire it.
+            </Box>
+            <Box>
+              Type <code>delete</code> to confirm:
+              <Input
+                autoFocus
+                placeholder="delete"
+                value={deleteConfirm}
+                onChange={e => setDeleteConfirm(e.detail.value)}
+                disabled={deleting}
+              />
+            </Box>
+            {deleteError && <Alert type="error">{deleteError}</Alert>}
+          </SpaceBetween>
+        </Modal>
+      )}
     </BoardItem>
   );
 };

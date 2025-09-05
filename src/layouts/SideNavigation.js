@@ -32,6 +32,13 @@ const SideNavigation = ({ currentRole }) => {
   useEffect(() => {
     try { sessionStorage.setItem('sideNavExpanded', JSON.stringify(Array.from(expandedSections))); } catch {}
   }, [expandedSections]);
+  // Compute role context early so it can be used inside nav item construction
+  const iamOn = isIamOn();
+  const simSignedOut = (() => { try { return sessionStorage.getItem('simulateSignedOut') === 'true'; } catch { return false; } })();
+  const signedIn = hasValidSession();
+  const tokenRole = getRoleFromClaims(getIdTokenClaims());
+  const effectiveRole = (iamOn && signedIn && tokenRole) ? { value: tokenRole } : currentRole;
+
   const allNavItems = [
     {
       type: 'section',
@@ -59,15 +66,20 @@ const SideNavigation = ({ currentRole }) => {
         { type: 'link', text: 'Reminders and Notifications', href: '/manage-notifications' },
         { type: 'link', text: 'Secure Messaging', href: '/manage-messages' },
         { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },
-        // Only System Administrators can see authoring/flow management links
-        ...(currentRole?.value === 'System Administrator'
-          ? [
-              { type: 'link', text: 'Manage Intake Steps', href: '/manage-components' },
-              { type: 'link', text: 'Manage Workflows', href: '/manage-workflows' },
-            ]
-          : []),
+        // Authoring links moved to dedicated 'Intake Form Editor' section
       ],
     },
+    // Dedicated section for intake form editing / workflow authoring (System Administrator only)
+    ...(((effectiveRole?.value || effectiveRole) === 'System Administrator' || (effectiveRole?.value || effectiveRole) === 'SysAdmin') ? [
+      {
+        type: 'section',
+        text: 'Intake Form Editor',
+        items: [
+          { type: 'link', text: 'Manage Intake Steps', href: '/manage-components' },
+          { type: 'link', text: 'Manage Workflows', href: '/manage-workflows' },
+        ]
+      }
+    ] : []),
     {
       type: 'section',
       text: 'Analytics Dashboard',
@@ -90,7 +102,7 @@ const SideNavigation = ({ currentRole }) => {
         { type: 'link', text: 'Options', href: '/options-dashboard' },
   { type: 'link', text: 'Notification Settings', href: '/notification-settings-dashboard' },
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
-        ...(currentRole?.value === 'System Administrator' ? [
+        ...(((effectiveRole?.value || effectiveRole) === 'System Administrator' || (effectiveRole?.value || effectiveRole) === 'SysAdmin') ? [
           { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' }
         ] : []),
         { type: 'link', text: 'Test Config Dashboard', href: '/test-config-dashboard' },
@@ -243,11 +255,6 @@ const SideNavigation = ({ currentRole }) => {
     return [...filteredSections, ...commonFooterItems];
   }
 
-  const iamOn = isIamOn();
-  const simSignedOut = (() => { try { return sessionStorage.getItem('simulateSignedOut') === 'true'; } catch { return false; } })();
-  const signedIn = hasValidSession();
-  const tokenRole = getRoleFromClaims(getIdTokenClaims());
-  const effectiveRole = (iamOn && signedIn && tokenRole) ? { value: tokenRole } : currentRole;
   const filteredNavItems = filterNavItemsForRole(effectiveRole, (iamOn && !signedIn) || (!iamOn && simSignedOut));
 
   const itemsWithExpandState = useMemo(() => {

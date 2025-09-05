@@ -36,6 +36,7 @@
     "inputmode": { "type": "string" },
     "pattern": { "type": "string" },
     "spellcheck": { "type": "boolean" },
+  "mask": { "type": "string", "enum": ["", "phone-na", "sin-ca", "postal-code-ca", "postal-code-us", "date-iso", "time-hm", "currency"] },
     "value": { "type": ["string", "number", "null"] }
   },
   "additionalProperties": true

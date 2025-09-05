@@ -65,9 +65,12 @@ export async function apiFetch(path, options = {}) {
       const pending = sessionStorage.getItem('authPending') === '1';
       const onCallback = typeof window !== 'undefined' && window.location.pathname.startsWith('/auth/callback');
       if (simulate || pending || onCallback) return resp;
-      clearSession();
-      try { window.dispatchEvent(new CustomEvent('auth:needs-login')); } catch {}
-      return resp;
+      if (resp.status === 401) {
+        // Only clear session for true authentication failures
+        clearSession();
+        try { window.dispatchEvent(new CustomEvent('auth:needs-login')); } catch {}
+      }
+      return resp; // 403 is authorization issue; keep session so UI can show access denied
     }
   }
   return resp;

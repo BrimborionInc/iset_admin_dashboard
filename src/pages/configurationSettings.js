@@ -148,7 +148,19 @@ export default function ConfigurationSettings() {
         if (r?.ai?.model) {
           setAiModel({ label: r.ai.model, value: r.ai.model });
         }
-        if (r?.ai?.params) setParams(p => ({ ...p, ...r.ai.params }));
+        if (r?.ai?.params) {
+          // Sanitize null/undefined values to avoid rendering "null" in number inputs
+          const cleaned = {};
+          const defaults = { temperature: 0.7, top_p: 1, presence_penalty: 0, frequency_penalty: 0 };
+          Object.entries(r.ai.params).forEach(([k, v]) => {
+            if (v === null || v === undefined) {
+              if (k === 'max_tokens') cleaned[k] = ''; else cleaned[k] = defaults[k] != null ? defaults[k] : '';
+            } else {
+              cleaned[k] = v;
+            }
+          });
+          setParams(p => ({ ...p, ...cleaned }));
+        }
         if (Array.isArray(r?.ai?.fallbackModels)) {
           setFallbacks(r.ai.fallbackModels.map(m => ({ label: m, value: m })));
         }
@@ -216,20 +228,25 @@ export default function ConfigurationSettings() {
     }
 
   function numberInput(key, min, max, step = 'any') {
-      return (
-        <Input
-          type="number"
-          value={String(params[key])}
-          step={step}
-          onChange={e => { const v = e.detail.value; setParams(p => ({ ...p, [key]: v === '' ? '' : Number(v) })); }}
-          disabled={!canEditAI}
-          inputMode="decimal"
-          ariaLabel={key}
-          placeholder="auto"
-          constraintText={`Range ${min} to ${max}`}
-        />
-      );
-    }
+    const raw = params[key];
+    const value = raw === null || raw === undefined ? '' : raw === '' ? '' : String(raw);
+    return (
+      <Input
+        type="number"
+        value={value}
+        step={step}
+        onChange={e => {
+          const v = e.detail.value;
+          setParams(p => ({ ...p, [key]: v === '' ? '' : Number(v) }));
+        }}
+        disabled={!canEditAI}
+        inputMode="decimal"
+        ariaLabel={key}
+        placeholder="auto"
+        constraintText={`Range ${min} to ${max}`}
+      />
+    );
+  }
 
   // Auth rendering (separate to keep switch simple)
   function renderAuth() {
@@ -461,7 +478,7 @@ export default function ConfigurationSettings() {
           {policyEdits.federation.providers.length > 0 && (
             <SpaceBetween size="xxs">
               <Box fontSize="heading-xs" variant="h4">Federation Providers</Box>
-              <SpaceBetween size="xxs">{policyEdits.federation.providers.map(pv => <Box key={pv} fontSize="body-s">{pv}</Box>)}</SpaceBetween>
+              <SpaceBetween size="xxs">{policyEdits.federation.providers.map((pv, idx) => <Box key={`prov-${idx}-${pv}` } fontSize="body-s">{pv}</Box>)}</SpaceBetween>
               <Box fontSize="body-s" color="text-status-inactive">Last Sync: {policyEdits.federation.lastSync || 'n/a'}</Box>
               {canEditAuth && (
                 <Button size="small" onClick={() => syncFederation(scope)} loading={syncingFederation}>Sync Federation</Button>
@@ -514,14 +531,14 @@ export default function ConfigurationSettings() {
               {callbackUris.length > 0 && (
                 <FormField label="Callback URIs" description="Registered OAuth2 redirect endpoints (read-only)">
                   <SpaceBetween size="xxs">
-                    {callbackUris.map(u => <Box key={u} fontSize="body-s" style={{wordBreak:'break-all'}}>{u}</Box>)}
+                    {callbackUris.map((u, idx) => <Box key={`cb-${idx}`} fontSize="body-s" style={{wordBreak:'break-all'}}>{u}</Box>)}
                   </SpaceBetween>
                 </FormField>
               )}
               {logoutUris.length > 0 && (
                 <FormField label="Post Logout URIs" description="Where the IdP may redirect after sign-out">
                   <SpaceBetween size="xxs">
-                    {logoutUris.map(u => <Box key={u} fontSize="body-s" style={{wordBreak:'break-all'}}>{u}</Box>)}
+                    {logoutUris.map((u, idx) => <Box key={`lo-${idx}`} fontSize="body-s" style={{wordBreak:'break-all'}}>{u}</Box>)}
                   </SpaceBetween>
                 </FormField>
               )}
@@ -794,7 +811,15 @@ export default function ConfigurationSettings() {
               {renderBoardContent(item.data.type)}
             </BoardItem>
           )}
-          onItemsChange={e => setBoardItems(e.detail.items)}
+          onItemsChange={e => {
+            // Deduplicate by id to avoid duplicate key warnings from accidental duplicates
+            const seen = new Set();
+            const deduped = [];
+            for (const it of e.detail.items) {
+              if (!seen.has(it.id)) { seen.add(it.id); deduped.push(it); }
+            }
+            setBoardItems(deduped);
+          }}
           i18nStrings={boardI18n}
           empty={<Box>No widgets</Box>}
           ariaLabel="Configuration widgets board"

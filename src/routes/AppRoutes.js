@@ -1,4 +1,5 @@
 import ManageWorkflows from '../pages/manageWorkflows.js';
+import ManageWorkflowsHelpPanel from '../helpPanelContents/manageWorkflowsHelpPanel';
 import React from 'react';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../auth/cognito';
 import roleMatrix from '../config/roleMatrix.json';
@@ -156,10 +157,10 @@ const AppRoutes = ({
       <Route path="/manage-workflows">
         <Guard roles={['System Administrator']} path="/manage-workflows">
           {renderContent(ManageWorkflows, [
-          { text: 'Home', href: '/' },
-          { text: 'Intake Editor', href: '/manage-components' },
-          { text: 'Manage Workflows', href: '/manage-workflows' }
-          ], 'Manage Workflows', 'manageWorkflows')}
+            { text: 'Home', href: '/' },
+            { text: 'Intake Editor', href: '/manage-components' },
+            { text: 'Manage Workflows', href: '/manage-workflows' }
+          ], 'Manage Workflows', <ManageWorkflowsHelpPanel />)}
         </Guard>
       </Route>
         <Route path="/modify-workflow">

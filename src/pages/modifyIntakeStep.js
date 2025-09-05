@@ -5,9 +5,10 @@ import "../css/govuk-frontend.min.css";
 import { initAll as govukInitAll } from 'govuk-frontend';
 import { DndProvider, useDrag, useDrop, useDragDropManager } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
-import { Grid, Box, Header, Button, Container, SpaceBetween, Alert, ExpandableSection, SegmentedControl, FormField, Input, Select, Textarea, Toggle } from "@cloudscape-design/components";
+import { Grid, Box, Header, Button, Container, SpaceBetween, Alert, ExpandableSection, SegmentedControl, FormField, Input, Select, Textarea, Toggle, Badge, Table, Modal } from "@cloudscape-design/components";
 import { useParams, useHistory, useLocation } from "react-router-dom";
 import PropertiesPanel, { ValidationEditor } from './PropertiesPanel.js';
+import { validateStep, summarizeIssues } from '../validation/stepValidator';
 import TranslationsWidget from '../widgets/TranslationsWidget';
 import { apiFetch } from '../auth/apiClient';
 
@@ -1248,6 +1249,18 @@ const ModifyComponent = () => {
 
   // Language toggle for Working Area preview
   const [previewLang, setPreviewLang] = useState('en');
+  // Step-level validation state (deterministic advisory)
+  const [validationIssues, setValidationIssues] = useState([]);
+  const [showValidationPanel, setShowValidationPanel] = useState(false);
+  // Modal for detailed issue view
+  const [activeIssue, setActiveIssue] = useState(null);
+
+  const runValidation = useCallback(() => {
+    const stepObj = { name, status, components };
+    const issues = validateStep(stepObj);
+    setValidationIssues(issues);
+    setShowValidationPanel(true);
+  }, [name, status, components]);
 
   // Map of latest active template versions by key for upgrade detection
   const latestTemplateVersionByKey = useMemo(() => {
@@ -1325,6 +1338,7 @@ const ModifyComponent = () => {
                 <Button onClick={handleRedo} disabled={!canRedo}>Redo</Button>
                 {id !== 'new' && <Button onClick={handleSaveAsNew} variant="normal">Save as New</Button>}
                 {id !== 'new' && <Button onClick={handleDelete} variant="normal">Delete</Button>}
+                <Button onClick={runValidation} variant="normal">Validate</Button>
                 <Button onClick={handleSaveTemplate} disabled={!hasChanges && !manualDirty} variant="primary">Save Changes</Button>
               </SpaceBetween>
             }
@@ -1356,7 +1370,69 @@ const ModifyComponent = () => {
             ))}
           </Box>
 
-      <Box padding="m">
+          <Box padding="m">
+            {showValidationPanel && (
+              <ExpandableSection headerText={`Validation Results (${validationIssues.length})`} defaultExpanded>
+                <SpaceBetween size="s">
+                  {validationIssues.length === 0 && <Box color="text-body-secondary">No issues found.</Box>}
+                  {validationIssues.length > 0 && (() => {
+                    const summary = summarizeIssues(validationIssues);
+                    return (
+                      <SpaceBetween size="s">
+                        <SpaceBetween direction="horizontal" size="xs">
+                          <Badge color={summary.error ? 'red' : 'grey'}>{summary.error} errors</Badge>
+                          <Badge color={summary.warning ? 'yellow' : 'grey'}>{summary.warning} warnings</Badge>
+                          <Badge color={summary.info ? 'blue' : 'grey'}>{summary.info} info</Badge>
+                          <Button variant="inline-link" onClick={() => setShowValidationPanel(false)}>Hide</Button>
+                          <Button variant="inline-link" onClick={runValidation}>Re-run</Button>
+                        </SpaceBetween>
+                        <Table
+                          variant="embedded"
+                          columnDefinitions={[
+                            { id: 'sev', header: 'Severity', cell: i => i.severity },
+                            { id: 'cat', header: 'Category', cell: i => i.category },
+                            { id: 'msg', header: 'Message (click row for full)', cell: i => {
+                                const m = i.message || '';
+                                return m.length > 110 ? m.slice(0, 110) + '…' : m;
+                              } },
+                            { id: 'comp', header: 'Component', cell: i => (i.componentName || (i.componentIndex!=null? `#${i.componentIndex+1}` : '')) }
+                          ]}
+                          items={validationIssues}
+                          stickyHeader
+                          resizableColumns
+                          onRowClick={({ detail }) => setActiveIssue(detail.item)}
+                          ariaLabels={{ tableLabel: 'Validation issues table' }}
+                        />
+                        {activeIssue && (
+                          <Modal
+                            visible={!!activeIssue}
+                            onDismiss={() => setActiveIssue(null)}
+                            header={`Validation Issue: ${activeIssue.severity?.toUpperCase()}`}
+                            size="medium"
+                            closeAriaLabel="Close issue details"
+                          >
+                            <SpaceBetween size="s">
+                              <Box><strong>Severity:</strong> {activeIssue.severity}</Box>
+                              <Box><strong>Category:</strong> {activeIssue.category}</Box>
+                              {activeIssue.componentName || activeIssue.componentIndex!=null ? (
+                                <Box><strong>Component:</strong> {activeIssue.componentName || `#${(activeIssue.componentIndex||0)+1}`}</Box>
+                              ) : null}
+                              <Box><strong>Message:</strong><br />{activeIssue.message}</Box>
+                              {activeIssue.suggestion && (
+                                <Box><strong>Suggestion:</strong><br />{activeIssue.suggestion}</Box>
+                              )}
+                              <Box textAlign="right">
+                                <Button variant="primary" onClick={() => setActiveIssue(null)}>Close</Button>
+                              </Box>
+                            </SpaceBetween>
+                          </Modal>
+                        )}
+                      </SpaceBetween>
+                    );
+                  })()}
+                </SpaceBetween>
+              </ExpandableSection>
+            )}
             <Header
               variant="h3"
               actions={
@@ -1427,6 +1503,11 @@ const ModifyComponent = () => {
                 );
               })()}
               {/* Step Validation (Stop Conditions) UI removed */}
+              {!showValidationPanel && validationIssues.length > 0 && (
+                <Alert type={validationIssues.some(i=>i.severity==='error')? 'warning':'info'}>
+                  Previous validation run found {validationIssues.length} issue(s). <Button variant="inline-link" onClick={()=>setShowValidationPanel(true)}>Show details</Button>
+                </Alert>
+              )}
             </SpaceBetween>
           </Box>
         </Grid>

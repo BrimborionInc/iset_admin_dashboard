@@ -6,7 +6,7 @@
   "status": "active",
   "default_props": {
     "name": "example-select",
-    "id": "",
+    "id": "",              
     "label": { "text": "Choose an option", "classes": "govuk-label--m" },
     "hint": { "text": "Select the applicable option." },
     "errorMessage": { "text": "" },
@@ -15,7 +15,7 @@
       { "value": "opt1", "text": "Option 1" },
       { "value": "opt2", "text": "Option 2" }
     ],
-    "classes": "",
+    "classes": "govuk-select",
     "formGroup": { "classes": "" },
     "disabled": false
   },
@@ -32,10 +32,10 @@
     ] },
     { "key": "hint.text", "path": "hint.text", "type": "text", "label": "Hint Text" },
     { "key": "classes", "path": "classes", "type": "select", "label": "CSS Classes", "options": [
-      { "label": "Default (none)", "value": "" },
-      { "label": "Full width (govuk-!-width-full)", "value": "govuk-!-width-full" },
-      { "label": "One half (govuk-!-width-one-half)", "value": "govuk-!-width-one-half" },
-      { "label": "One third (govuk-!-width-one-third)", "value": "govuk-!-width-one-third" }
+      { "label": "Default (govuk-select)", "value": "govuk-select" },
+      { "label": "Full width (govuk-!-width-full)", "value": "govuk-select govuk-!-width-full" },
+      { "label": "One half (govuk-!-width-one-half)", "value": "govuk-select govuk-!-width-one-half" },
+      { "label": "One third (govuk-!-width-one-third)", "value": "govuk-select govuk-!-width-one-third" }
     ] },
     { "key": "formGroup.classes", "path": "formGroup.classes", "type": "select", "label": "Form Group Classes", "options": [
       { "label": "Default (none)", "value": "" },
@@ -44,13 +44,10 @@
     { "key": "disabled", "path": "disabled", "type": "select", "label": "Disabled?", "options": [
       { "label": "False", "value": false },
       { "label": "True", "value": true }
-  ] },
-  { "key": "options", "path": "items", "type": "optionList", "label": "Options" }
+    ] },
+    { "key": "options", "path": "items", "type": "optionList", "label": "Options" }
   ],
   "has_options": true,
-  "option_schema": [
-    { "key": "value", "path": "value", "type": "text", "label": "Value" },
-    { "key": "text", "path": "text", "type": "text", "label": "Text" }
-  ],
-  "export_njk_template": "{% from \"govuk/components/select/macro.njk\" import govukSelect %}\n{% set idVal = props.id or props.name %}\n{% set items = (props.items or []) %}\n{# Normalise item text/hint to bilingual objects if necessary handled server-side #}\n{{ govukSelect({\n  id: idVal,\n  name: props.name,\n  label: props.label,\n  hint: props.hint,\n  errorMessage: props.errorMessage,\n  items: items,\n  classes: props.classes,\n  formGroup: props.formGroup,\n  disabled: props.disabled\n}) }}"
+  "option_schema": ["text", "value"],
+  "export_njk_template": "{% from \"govuk/components/select/macro.njk\" import govukSelect %}\n{% set idVal = props.id or props.name %}\n{% set items = (props.items or []) %}\n{{ govukSelect({\n  id: idVal,\n  name: props.name,\n  label: props.label,\n  hint: props.hint,\n  errorMessage: props.errorMessage,\n  items: items,\n  classes: props.classes,\n  formGroup: props.formGroup,\n  disabled: props.disabled\n}) }}"
 }
