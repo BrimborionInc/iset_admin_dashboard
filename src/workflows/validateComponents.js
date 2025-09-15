@@ -39,6 +39,16 @@ function validateComponent(c, ctx, errs) {
       c.rows.forEach((r,i) => { if (!r.key) push(errs, stepId, c.id, 'row_missing_key', `Row ${i} missing key`); });
     }
   }
+  if (c.type === 'file-upload') {
+    const maxSizeMb = Number(c.maxSizeMb || c.max_size_mb || 10) || 10;
+    if (maxSizeMb <= 0) push(errs, stepId, c.id, 'max_size_nonpositive', 'maxSizeMb must be > 0');
+    if (maxSizeMb > 50) push(errs, stepId, c.id, 'max_size_too_high', 'maxSizeMb exceeds hard limit (50MB)');
+    if (c.accept) {
+      const acceptArr = Array.isArray(c.accept)?c.accept:String(c.accept).split(/[\s,]+/).filter(Boolean);
+      if (acceptArr.some(a => a.length > 100)) push(errs, stepId, c.id, 'accept_token_too_long', 'One accept token too long');
+      if (acceptArr.length > 25) push(errs, stepId, c.id, 'too_many_accept_types', 'Too many accept types (max 25)');
+    }
+  }
   // Basic bilingual field checks
   ['label','hint'].forEach(f => { if (c[f] && !isLangObj(c[f])) push(errs, stepId, c.id, 'bad_lang_obj', `${f} should be bilingual object`); });
 }

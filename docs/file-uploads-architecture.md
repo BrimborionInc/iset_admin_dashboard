@@ -4,12 +4,12 @@ Status: Draft (shared across Admin + Public)
 Owners: Admin Intake Editor + Case Management
 Scope: Admin intake authoring, preview/testing, and future case dashboards
 
-Refer to the primary spec in ISET-intake/docs/file-uploads-architecture.md. This copy highlights admin-specific needs.
+Refer to the primary spec in ISET-intake/docs/file-uploads-architecture.md. This copy highlights admin-specific needs. Terminal step mandate (pilot): all applicant uploads live only in a single `supporting-documents` step immediately before summary; omission = no uploads.
 
 Reminder: Active TODO list
 - Shared uploads TODO lives at `ISET-intake/docs/uploads-TODO.md`.
 
-## Admin-specific considerations
+## Admin-specific considerations (Pilot + Forward)
 - Document Type Catalog authoring
   - Create/edit types, allowed extensions/MIME, size limits, count limits
   - Conditional rules (required_when), visibility (public/admin/both)
@@ -20,9 +20,9 @@ Reminder: Active TODO list
   - Allow multiple files, min/max files per component (min/max are static in V1)
    - Accepted types override; per-file max size override (bounded by global hard cap)
    - Per-component guidance text; optional storage key prefix/namespace
-- Sandbox preview
-  - Generate sample pre-signed URLs against non-prod storage for test uploads
-  - Show scan lifecycle states and error simulations
+- Sandbox preview (Phase B+)
+  - Generate sample pre-signed URLs against non-prod storage for test uploads (dev flag)
+  - Simulate scan lifecycle states and error scenarios prior to real scanning integration
 - Governance
   - Retention policy templates; legal hold markers (future)
   - Role-based permissions for catalog changes, overrides, and quarantined item handling
@@ -61,6 +61,7 @@ Reminder: Active TODO list
 ## Decision log (admin)
  - 2025-09-06: On‑prem storage: MinIO (S3‑compatible) selected for Phase 1; environment-level toggle planned for AWS later.
  - 2025-09-06: Rules are configured at the component level; conditional visibility and conditional required are supported. No program-level rules.
+ - 2025-09-12: Pilot restricts uploads to terminal `supporting-documents` step only; mid-flow placement deferred.
 
 ---
 
@@ -71,14 +72,17 @@ TL;DR status
 - No admin authoring UI for uploads yet; rules model finalized (component-level only; `visibleWhen`/`requiredWhen`, static `min/max` in V1).
 
 Where to pick up (admin side)
-1) Add File Upload component controls in the intake editor:
-   - Visibility: `visibleWhen`
-   - Required: toggle + `requiredWhen`
-   - Multiplicity: allowMultiple, minFiles, maxFiles (static)
-   - Accept and maxSizeMb (bounded by global hard cap)
-   - Help text and optional storage key prefix
-2) Provide an environment defaults screen (read-only in first pass) showing effective policy (allowed types, hard caps, scan scope).
-3) Optional: preview pane that requests a presign ticket against non-prod to test uploads (ties to the live presign endpoint).
+Phase ordering (aligned with global phased plan):
+Phase A (Portal Pilot): No admin authoring required; schema patched manually.
+Phase B (Authoring Enablement):
+  1) Add File Upload component controls in the intake editor (fields: label, componentId, accept, maxSizeMb, allowMultiple, minFiles, maxFiles, visibleWhen, requiredWhen, helpText, storagePrefix, groupId).
+  2) Step-level metadata editing (title, introMarkdown, completionHelpText, emptyStateText); enforce single terminal step.
+  3) Group management UI (add/reorder/delete) with referential validation.
+  4) Environment defaults screen (initially read-only) exposing allowed types, hard cap, scan scope.
+  5) Preview mode (dev flag) with stub or restricted presign to test UI.
+Phase C (Scanning): Display scan status transitions; quarantine handling (read-only or action buttons if scope permits).
+Phase D (Hardening): Audit visualization, rate limit metrics, stale cleanup summary.
+Phase E (Policy UI): Editable environment defaults; detect overrides at component level.
 
 Key code pointers (backend integration reference)
 - API contracts to call from preview/test:
@@ -97,6 +101,8 @@ Quality snapshot
 - Server endpoints live behind feature flags; dev-bypass supported locally.
 - Frontend admin work is greenfield; no breaking changes expected.
 
-Next 1–2 admin tasks
-1) Implement the editor UI for File Upload component settings and persist them in the schema.
-2) Add a read-only “Document Settings” screen to surface environment defaults and effective hard caps.
+Next admin tasks (Phase B readiness)
+1) Draft JSON schema for FileUpload component and step metadata.
+2) Implement editor UI and persistence for component settings + groups.
+3) Read-only Document Settings screen.
+4) Dev preview mode wiring.

@@ -385,6 +385,18 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
           component.mask = String(props.inputMask).trim().toLowerCase();
         }
       }
+      if (tplType === 'file-upload') {
+        if (typeof props?.multiple !== 'undefined') component.multiple = !!props.multiple;
+        if (props?.accept) component.accept = String(props.accept);
+        if (props?.maxSizeMb != null) {
+          const n = Number(props.maxSizeMb);
+          if (!isNaN(n) && n > 0) component.maxSizeMb = n;
+        }
+        if (props?.documentType) component.documentType = String(props.documentType);
+        if (typeof props?.showMimeList !== 'undefined') component.showMimeList = !!props.showMimeList;
+        if (typeof props?.showMaxSize !== 'undefined') component.showMaxSize = !!props.showMaxSize;
+        if (typeof props?.disabled !== 'undefined') component.disabled = !!props.disabled;
+      }
       if (tplType === 'date-input') {
         if (props?.namePrefix) component.namePrefix = props.namePrefix;
         if (Array.isArray(props?.items)) component.dateFields = props.items.map(f => ({ name: f?.name, classes: f?.classes })).filter(f => f.name);
