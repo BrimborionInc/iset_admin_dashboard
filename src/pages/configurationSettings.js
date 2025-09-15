@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Button, SpaceBetween, Box, Select, FormField, StatusIndicator, Toggle, ColumnLayout, Input, Multiselect, Header, Badge, Checkbox, Modal, Tabs, Alert } from '@cloudscape-design/components';
+import { Button, SpaceBetween, Box, Select, FormField, StatusIndicator, Toggle, ColumnLayout, Input, Multiselect, Header, Badge, Checkbox, Modal, Tabs, Alert, Link } from '@cloudscape-design/components';
 import { Board, BoardItem } from '@cloudscape-design/board-components';
 import { getIdTokenClaims, getRoleFromClaims, isIamOn, hasValidSession } from '../auth/cognito';
 import { apiFetch } from '../auth/apiClient';
@@ -28,7 +28,7 @@ const STATIC_MODEL_PLACEHOLDERS = [
   { label: 'GPT-4.1 Mini', value: 'openai/gpt-4.1-mini' },
 ];
 
-export default function ConfigurationSettings() {
+export default function ConfigurationSettings({ toggleHelpPanel }) {
   const [runtime, setRuntime] = useState(null);
   const [security, setSecurity] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -97,8 +97,7 @@ export default function ConfigurationSettings() {
   const defaultBoardItems = React.useMemo(() => ([
     { id: 'ai', columnSpan: 2, rowSpan: 4, data: { type: 'ai' } },
     { id: 'auth', columnSpan: 2, rowSpan: 4, data: { type: 'auth' } },
-  { id: 'linkage', columnSpan: 2, rowSpan: 3, data: { type: 'linkage' } },
-  { id: 'sessionAudit', columnSpan: 2, rowSpan: 3, data: { type: 'sessionAudit' } },
+    { id: 'sessionAudit', columnSpan: 2, rowSpan: 3, data: { type: 'sessionAudit' } },
     { id: 'cors', columnSpan: 2, rowSpan: 4, data: { type: 'cors' } },
     { id: 'env', columnSpan: 2, rowSpan: 2, data: { type: 'env' } },
     { id: 'secrets', columnSpan: 2, rowSpan: 3, data: { type: 'secrets' } },
@@ -107,7 +106,7 @@ export default function ConfigurationSettings() {
   const [boardItems, setBoardItems] = useState(defaultBoardItems);
   const resetLayout = () => setBoardItems(defaultBoardItems);
   // Phase 5 linkage stats
-  const [linkage, setLinkage] = useState(null);
+  // Removed linkage widget state
   // Session audit stats
   const [auditStats, setAuditStats] = useState(null);
   const [auditRecent, setAuditRecent] = useState([]);
@@ -124,17 +123,7 @@ export default function ConfigurationSettings() {
     finally { setAuditLoading(false); }
   }, []);
   useEffect(() => { fetchAudit(); }, [fetchAudit]);
-  const [linkageError, setLinkageError] = useState(null);
-  const [linkageLoading, setLinkageLoading] = useState(false);
-  const fetchLinkage = useCallback(async () => {
-    setLinkageLoading(true); setLinkageError(null);
-    try {
-      const data = await fetchJSON('/api/admin/linkage-stats');
-      setLinkage(data);
-    } catch (e) { setLinkageError(e.message); }
-    finally { setLinkageLoading(false); }
-  }, []);
-  useEffect(() => { fetchLinkage(); }, [fetchLinkage]);
+  // Removed linkage fetch logic
 
     // Missing helpers from prior corruption: load + AI save handlers
     const load = useCallback(async () => {
@@ -559,6 +548,17 @@ export default function ConfigurationSettings() {
     );
   }
 
+  // Help components mapping
+  const helpComponents = {
+    ai: require('../helpPanelContents/aiConfigWidgetHelp.js').default,
+    auth: require('../helpPanelContents/authWidgetHelp.js').default,
+    sessionAudit: require('../helpPanelContents/sessionAuditWidgetHelp.js').default,
+    cors: require('../helpPanelContents/corsOriginsWidgetHelp.js').default,
+    env: require('../helpPanelContents/environmentWidgetHelp.js').default,
+    secrets: require('../helpPanelContents/secretsWidgetHelp.js').default,
+    appearance: require('../helpPanelContents/appearanceWidgetHelp.js').default
+  };
+
   function renderBoardContent(type) {
     switch (type) {
       case 'ai':
@@ -600,41 +600,6 @@ export default function ConfigurationSettings() {
         );
       case 'auth':
         return renderAuth();
-      case 'linkage':
-        return (
-          <SpaceBetween size="s">
-            {linkageError && <Alert type="error" header="Linkage stats error">{linkageError}</Alert>}
-            <SpaceBetween size="xxs">
-              <Box fontSize="heading-xs" variant="h4">Applicant Identity Linkage</Box>
-              {linkageLoading && <StatusIndicator type="loading">Loading</StatusIndicator>}
-              {linkage && (
-                <ColumnLayout columns={5} variant="text-grid">
-                  <FormField label="Total Users"><Box>{linkage.total}</Box></FormField>
-                  <FormField label="Linked (Cognito)"><Box>{linkage.linked}</Box></FormField>
-                  <FormField label="Coverage %"><StatusIndicator type={linkage.coveragePct >= 99 ? 'success' : linkage.coveragePct >= 95 ? 'info' : 'pending'}>{linkage.coveragePct}%</StatusIndicator></FormField>
-                  <FormField label="Legacy With Password"><StatusIndicator type={linkage.legacyWithPassword === 0 ? 'success' : linkage.legacyWithPassword < 10 ? 'info' : 'warning'}>{linkage.legacyWithPassword}</StatusIndicator></FormField>
-                  <FormField label="Active (7d)"><Box>{linkage.recentActive7d}</Box></FormField>
-                </ColumnLayout>
-              )}
-              {linkage && (
-                <SpaceBetween size="xxs">
-                  {linkage.coveragePct < 99 && (
-                    <Alert type="info" header="Linkage Coverage Below Target">Password column removal gated until 99%+ linked.</Alert>
-                  )}
-                  {linkage.legacyWithPassword > 0 && (
-                    <Alert type="warning" header="Legacy Password Hashes Present">Run backfill and confirm audit script passes before dropping column.</Alert>
-                  )}
-                  {linkage.coveragePct >= 99 && linkage.legacyWithPassword === 0 && (
-                    <Alert type="success" header="Ready for Password Column Drop">Meets readiness checklist (coverage ≥99%, zero legacy hashes).</Alert>
-                  )}
-                </SpaceBetween>
-              )}
-              <SpaceBetween direction="horizontal" size="xs">
-                <Button iconName="refresh" onClick={fetchLinkage} loading={linkageLoading}>Refresh</Button>
-              </SpaceBetween>
-            </SpaceBetween>
-          </SpaceBetween>
-        );
       case 'sessionAudit':
         return (
           <SpaceBetween size="s">
@@ -735,6 +700,20 @@ export default function ConfigurationSettings() {
               header={
                 <Header
                   variant="h2"
+                  info={<Link variant="info" onClick={() => {
+                    const Comp = helpComponents[item.data.type];
+                    if (toggleHelpPanel && Comp) {
+                      toggleHelpPanel(<Comp />, (
+                        item.id === 'ai' ? 'AI / LLM Configuration' :
+                        item.id === 'auth' ? 'Authentication' :
+                        item.id === 'linkage' ? 'Cognito Linkage Readiness' :
+                        item.id === 'cors' ? 'CORS / Origins' :
+                        item.id === 'env' ? 'Environment' :
+                        item.id === 'appearance' ? 'Appearance & Theme' :
+                        item.id === 'sessionAudit' ? 'Session Audit' : 'Info'
+                      ), (Comp.aiContext || ''));
+                    }
+                  }}>Info</Link>}
                   actions={(() => {
                     if (item.id === 'ai') {
                       return (

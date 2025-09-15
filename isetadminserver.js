@@ -107,6 +107,52 @@ app.get('/api/admin/linkage-stats', async (req, res) => {
   }
 });
 
+// --- Upload Config Proxy (for standalone dashboard hitting admin port) ---
+// Forwards to intake service which hosts canonical implementation.
+// GET  /api/admin/upload-config  -> proxy to {INTAKE_BASE_URL}/api/admin/upload-config
+// PATCH /api/admin/upload-config -> proxy body and return result
+app.all(['/api/admin/upload-config'], async (req, res) => {
+  try {
+    const baseRaw = process.env.INTAKE_BASE_URL || 'http://localhost:5000';
+    const base = /^https?:\/\//i.test(baseRaw) ? baseRaw : `http://${baseRaw}`;
+    const targetUrl = base.replace(/\/$/, '') + '/api/admin/upload-config';
+    const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+    const method = req.method.toUpperCase();
+    if (!['GET','PATCH'].includes(method)) {
+      return res.status(405).json({ error: 'method_not_allowed' });
+    }
+    const headers = { 'Content-Type': 'application/json' };
+    // Forward dev bypass + role headers for local auth simulation
+    const fwdHeaders = ['x-dev-bypass','x-dev-role','x-dev-userid'];
+    for (const h of fwdHeaders) {
+      const v = req.headers[h];
+      if (v) headers[h] = v;
+    }
+    // Forward bearer token if present
+    if (req.headers['authorization']) headers['authorization'] = req.headers['authorization'];
+    // Forward cookies if present (for access/id tokens)
+    if (req.headers['cookie']) headers['cookie'] = req.headers['cookie'];
+    let body;
+    if (method === 'PATCH') {
+      body = JSON.stringify(req.body || {});
+    }
+    let upstream;
+    try {
+      upstream = await fetch(targetUrl, { method, headers, body, timeout: 8000 });
+    } catch (netErr) {
+      return res.status(502).json({ error: 'upstream_unreachable', message: netErr.message, upstream: targetUrl });
+    }
+    const text = await upstream.text();
+    let json;
+    try { json = JSON.parse(text); } catch {
+      return res.status(502).json({ error: 'upstream_invalid_json', snippet: text.slice(0,200) });
+    }
+    res.status(upstream.status).json(json);
+  } catch (e) {
+    res.status(500).json({ error: 'upload_config_proxy_failed', message: e.message });
+  }
+});
+
 // --- Authentication (Cognito) - feature flagged ---
 // New: allow local development bypass via DEV_DISABLE_AUTH=true (non-production only)
 try {

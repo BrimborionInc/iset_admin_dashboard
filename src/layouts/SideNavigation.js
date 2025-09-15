@@ -103,7 +103,8 @@ const SideNavigation = ({ currentRole }) => {
   { type: 'link', text: 'Notification Settings', href: '/notification-settings-dashboard' },
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
         ...(((effectiveRole?.value || effectiveRole) === 'System Administrator' || (effectiveRole?.value || effectiveRole) === 'SysAdmin') ? [
-          { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' }
+          { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
+          { type: 'link', text: 'File Upload Config', href: '/admin/upload-config' }
         ] : []),
         { type: 'link', text: 'Test Config Dashboard', href: '/test-config-dashboard' },
   // Removed duplicate href '/manage-components' (already present under Other Dashboards)

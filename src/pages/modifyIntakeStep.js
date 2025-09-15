@@ -783,11 +783,109 @@ const ModifyComponent = () => {
     setSelectedComponent(sc => (sc && sc.index < snap.length) ? { ...snap[sc.index], index: sc.index } : null);
   };
 
+  // --- Conditional Visibility (file-upload) workflow selector state ---
+  const [condWfLoading, setCondWfLoading] = useState(false);
+  const [condWorkflows, setCondWorkflows] = useState([]);
+  const condWorkflowsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!selectedComponent) return;
+    const t = String(selectedComponent.template_key || selectedComponent.type || '').toLowerCase();
+    if (t !== 'file-upload') return;
+    if (condWorkflowsLoadedRef.current) return;
+    setCondWfLoading(true);
+    (async () => {
+      try {
+        const resp = await apiFetch('/api/workflows');
+        if (resp && resp.ok) {
+          const data = await resp.json().catch(()=>[]);
+          if (Array.isArray(data)) setCondWorkflows(data);
+        }
+      } catch (e) {
+        console.error('Load workflows (conditional visibility) failed', e);
+      } finally {
+        setCondWfLoading(false);
+        condWorkflowsLoadedRef.current = true;
+      }
+    })();
+  }, [selectedComponent]);
+
+  const handleSelectCondWorkflow = async (wfId) => {
+    if (!selectedComponent) return;
+    try {
+      // Patch component props with chosen workflowId for conditions context
+      let updatedComp = null;
+      setComponents(prev => prev.map((c,i) => {
+        if (i !== selectedComponent.index) return c;
+        const nextProps = { ...(c.props||{}), conditionsWorkflowId: wfId };
+        updatedComp = { ...c, props: nextProps };
+        return updatedComp;
+      }));
+      if (updatedComp) {
+        setSelectedComponent({ ...updatedComp, index: selectedComponent.index });
+      }
+      if (!wfId) return;
+      const wfDetails = await apiFetch(`/api/workflows/${wfId}`);
+      let wfData = null;
+      if (wfDetails && typeof wfDetails.json === 'function') {
+        if (wfDetails.ok) {
+          wfData = await wfDetails.json().catch(()=>null);
+        }
+      } else {
+        // Backward compatibility if apiFetch was changed to return JSON directly
+        wfData = wfDetails;
+      }
+      if (wfData && Array.isArray(wfData.steps)) {
+        const snapshot = wfData.steps.map((s, si) => {
+          const comps = Array.isArray(s.components) ? s.components : [];
+          const compEntries = comps.map(cc => {
+            const ref = cc?.props?.name || cc?.props?.id || cc?.id || cc?.templateId || null;
+            if (!ref) return null;
+            let label = '';
+            const rawLabel = cc?.label;
+            if (rawLabel && typeof rawLabel === 'object') {
+              if (rawLabel.text) {
+                if (typeof rawLabel.text === 'string') label = rawLabel.text;
+                else if (typeof rawLabel.text === 'object') label = rawLabel.text.en || rawLabel.text.fr || '';
+              } else {
+                label = rawLabel.en || rawLabel.fr || '';
+              }
+            } else if (typeof rawLabel === 'string') {
+              label = rawLabel;
+            }
+            if (!label) label = ref;
+            const type = String(cc?.template_key || cc?.type || '').toLowerCase();
+            return { ref, label, type };
+          }).filter(Boolean);
+          return { stepId: s.id || s.step_id || `step-${si+1}`, stepName: s.name || `Step ${si+1}`, components: compEntries };
+        }).filter(s => s.components && s.components.length);
+        // Persist snapshot into component props (__workflowFields) so existing option merge logic uses it
+        let finalComp = null;
+        setComponents(prev => prev.map((c,i) => {
+          if (i !== selectedComponent.index) return c;
+          const nextProps = { ...(c.props||{}), __workflowFields: snapshot, conditionsWorkflowId: wfId };
+            finalComp = { ...c, props: nextProps };
+          return finalComp;
+        }));
+        if (finalComp) {
+          setSelectedComponent({ ...finalComp, index: selectedComponent.index });
+        }
+      }
+    } catch (e) {
+      console.error('Load workflow details (conditional visibility) failed', e);
+    }
+  };
+
   // Add component with i18n seeding (moved inside component scope to satisfy linter)
   const pendingSelectIndexRef = useRef(null);
   const addComponent = (template, lang = 'en') => {
     if (!template) return;
     const seeded = seedI18nDefaults(template.props || {}, lang);
+    // File-upload: ensure accept list defaults explicitly so property panel is populated
+    if ((template.template_key || template.type) === 'file-upload') {
+      if (!seeded.accept || !String(seeded.accept).trim()) {
+        seeded.accept = '.pdf,.jpg,.jpeg,.png,.gif,.heic';
+      }
+    }
     // --- Ensure unique name/id across page (avoid collisions that can make unrelated components look conditionally linked) ---
     const existingKeys = new Set();
     components.forEach(c => {
@@ -982,6 +1080,26 @@ const ModifyComponent = () => {
       fetchStep();
     }
   }, [id]);
+
+  // Backfill missing accept on existing file-upload components (post-load)
+  useEffect(() => {
+    if (!components.length) return;
+    let changed = false;
+    const next = components.map(c => {
+      if ((c.template_key || c.type) === 'file-upload') {
+        const currentAccept = c.props?.accept || c.accept;
+        if (!currentAccept || !String(currentAccept).trim()) {
+          const clone = { ...c };
+          clone.props = { ...(clone.props||{}), accept: '.pdf,.jpg,.jpeg,.png,.gif,.heic' };
+          changed = true;
+          return clone;
+        }
+      }
+      return c;
+    });
+    if (changed) setComponents(next);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [components]);
 
   // Seed initial history once loading completed
   useEffect(() => {
@@ -1255,6 +1373,13 @@ const ModifyComponent = () => {
   // Modal for detailed issue view
   const [activeIssue, setActiveIssue] = useState(null);
 
+  // Auto-suppress generic validation panel for file-upload components (panel not relevant)
+  useEffect(() => {
+    if (selectedComponent && (selectedComponent.type === 'file-upload' || selectedComponent.template_key === 'file-upload')) {
+      if (showValidationPanel) setShowValidationPanel(false);
+    }
+  }, [selectedComponent, showValidationPanel]);
+
   const runValidation = useCallback(() => {
     const stepObj = { name, status, components };
     const issues = validateStep(stepObj);
@@ -1371,7 +1496,7 @@ const ModifyComponent = () => {
           </Box>
 
           <Box padding="m">
-            {showValidationPanel && (
+            {showValidationPanel && !(selectedComponent && (selectedComponent.type === 'file-upload' || selectedComponent.template_key === 'file-upload')) && (
               <ExpandableSection headerText={`Validation Results (${validationIssues.length})`} defaultExpanded>
                 <SpaceBetween size="s">
                   {validationIssues.length === 0 && <Box color="text-body-secondary">No issues found.</Box>}
@@ -1490,8 +1615,8 @@ const ModifyComponent = () => {
               </ExpandableSection>
               {selectedComponent && (() => {
                 const t = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
-                const allowed = new Set(['textarea','select','radio','radios','password-input','input','file-upload','date-input','checkbox','checkboxes','character-count']);
-                if (!allowed.has(t)) return null;
+                const allowed = new Set(['textarea','select','radio','radios','password-input','input','date-input','checkbox','checkboxes','character-count']);
+                if (!allowed.has(t)) return null; // file-upload intentionally excluded (no per-component validation panel)
                 return (
                   <ExpandableSection headerText="Validation" defaultExpanded={false}>
                     <ValidationEditor
@@ -1502,8 +1627,144 @@ const ModifyComponent = () => {
                   </ExpandableSection>
                 );
               })()}
+              {selectedComponent && (() => {
+                // Scaffold: Conditional visibility editor (beta) for file-upload components
+                const t = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
+                if (t !== 'file-upload') return null;
+                const idx = selectedComponent.index;
+                // Gather prior components as potential refs
+                // Local step prior components
+                const priorLocal = components.slice(0, idx).filter(Boolean).map((c,i) => {
+                  const ref = c.props?.name || c.props?.id || c.id || c.templateId || `comp-${i+1}`;
+                  return { label: ref, value: ref, group: 'This Step' };
+                });
+                // Prototype: if workflow fields snapshot already attached to this component (e.g., via future PropertiesPanel selection)
+                // expect structure props.__workflowFields = [{ stepId, components:[{ ref, label }] }]
+                const wfFields = [];
+                try {
+                  const snap = selectedComponent.props?.__workflowFields;
+                  if (Array.isArray(snap)) {
+                    const includeTypes = new Set(['input','text','email','phone','password','number','textarea','select','radio','checkbox','checkboxes','date','date-input','character-count','file-upload']);
+                    snap.forEach(s => {
+                      const sid = s.stepId || 'step';
+                      (s.components||[]).forEach(f => {
+                        if (!f) return;
+                        const ref = f.ref || f.name || f.id;
+                        if (!ref) return;
+                        const ttype = String(f.type || '').toLowerCase();
+                        if (ttype && !includeTypes.has(ttype)) return; // skip non-input display components
+                        const lab = f.label || ref;
+                        wfFields.push({ label: `${lab} (${sid})`, value: ref, group: sid });
+                      });
+                    });
+                  }
+                } catch (_) {}
+                const prior = [...priorLocal, ...wfFields];
+                const conditions = selectedComponent.props?.conditions || { all: [] };
+                // Local ephemeral control state is not kept; rely on immediate writes to component props via setComponents.
+                const addRule = (rule) => {
+                  setComponents(prev => prev.map((c,i) => {
+                    if (i !== idx) return c;
+                    const nextConds = c.props?.conditions && typeof c.props.conditions === 'object' ? { ...c.props.conditions } : { all: [] };
+                    if (!Array.isArray(nextConds.all)) nextConds.all = [];
+                    nextConds.all = [...nextConds.all, rule];
+                    return { ...c, props: { ...(c.props||{}), conditions: nextConds } };
+                  }));
+                  // Refresh selectedComponent reference
+                  setSelectedComponent(sc => sc && sc.index === idx ? { ...components[idx], index: idx, props: { ...components[idx].props, conditions: { ...(conditions || { all: [] }), all: [...(conditions.all||[]), rule] } } } : sc);
+                };
+                const removeRule = (rIdx) => {
+                  setComponents(prev => prev.map((c,i) => {
+                    if (i !== idx) return c;
+                    const nextConds = c.props?.conditions && typeof c.props.conditions === 'object' ? { ...c.props.conditions } : { all: [] };
+                    if (Array.isArray(nextConds.all)) nextConds.all = nextConds.all.filter((_,ri) => ri !== rIdx);
+                    return { ...c, props: { ...(c.props||{}), conditions: nextConds } };
+                  }));
+                  setSelectedComponent(sc => sc && sc.index === idx ? { ...components[idx], index: idx } : sc);
+                };
+                // Temporary state for new rule inputs kept in refs to avoid re-renders
+                const newRuleRef = { ref: '', op: 'equals', value: '' };
+                const condWfId = selectedComponent.props?.conditionsWorkflowId || null;
+                return (
+                  <ExpandableSection headerText="Conditional Visibility (Beta)" defaultExpanded={false}>
+                    <SpaceBetween size="s">
+                      <Box variant="p" fontSize="body-s" color="text-body-secondary">
+                        Show this file upload only when all listed conditions evaluate true. Stored under props.conditions.all[].
+                      </Box>
+                      <FormField label="Workflow context" description="Optionally pull fields from another workflow's steps.">
+                        <Select
+                          statusType={condWfLoading ? 'loading' : 'finished'}
+                          placeholder={condWfLoading ? 'Loading workflows…' : 'Select workflow (optional)'}
+                          selectedOption={condWfId && condWorkflows.find(w => w.id === condWfId) ? { label: condWorkflows.find(w => w.id === condWfId).name, value: condWfId } : null}
+                          onChange={({ detail }) => handleSelectCondWorkflow(detail.selectedOption?.value || null)}
+                          options={condWorkflows.map(w => ({ label: w.name, value: w.id }))}
+                          expandToViewport
+                        />
+                      </FormField>
+                      {!condWfId && (
+                        <Box color="text-body-secondary">Select a workflow to configure visibility conditions.</Box>
+                      )}
+                      {condWfId && !selectedComponent.props?.__workflowFields && (
+                        <Box variant="span" color="text-status-info">Loading workflow fields…</Box>
+                      )}
+                      {condWfId && selectedComponent.props?.__workflowFields && (
+                        <>
+                          <Table
+                            variant="embedded"
+                            columnDefinitions={[
+                              { id: 'ref', header: 'Ref', cell: r => r.ref },
+                              { id: 'op', header: 'Op', cell: r => r.op },
+                              { id: 'val', header: 'Value', cell: r => (r.value===undefined||r.value===null||r.value==='') ? '—' : String(r.value) },
+                              { id: 'act', header: '', cell: (_r, ri) => (
+                                <Button variant="icon" iconName="close" ariaLabel="Remove" onClick={() => removeRule(ri)} />
+                              ) }
+                            ]}
+                            items={(conditions.all||[]).map(r => ({ ...r }))}
+                            empty={<Box color="text-body-secondary">No conditions defined.</Box>}
+                            ariaLabels={{ tableLabel: 'Conditional visibility rules' }}
+                          />
+                          <SpaceBetween size="xs">
+                            <FormField label="When field" stretch>
+                              <Select
+                                selectedOption={newRuleRef.ref ? { label: newRuleRef.ref, value: newRuleRef.ref } : null}
+                                onChange={({ detail }) => { newRuleRef.ref = detail.selectedOption?.value || ''; }}
+                                options={prior}
+                                placeholder="Select a field"
+                              />
+                            </FormField>
+                            <FormField label="Operator">
+                              <Select
+                                selectedOption={{ label: newRuleRef.op, value: newRuleRef.op }}
+                                onChange={({ detail }) => { newRuleRef.op = detail.selectedOption?.value || 'equals'; }}
+                                options={[ 'equals','notEquals','exists','notExists','>','<' ].map(o => ({ label: o, value: o }))}
+                              />
+                            </FormField>
+                            <FormField label="Value" description="Ignored for exists/notExists">
+                              <Input
+                                value={newRuleRef.value}
+                                onChange={({ detail }) => { newRuleRef.value = detail.value; }}
+                                placeholder="e.g. married"
+                                disabled={['exists','notExists'].includes(newRuleRef.op)}
+                              />
+                            </FormField>
+                            <Button
+                              onClick={() => {
+                                if (!newRuleRef.ref) return;
+                                const rule = { ref: newRuleRef.ref, op: newRuleRef.op };
+                                if (!['exists','notExists'].includes(newRuleRef.op)) rule.value = newRuleRef.value;
+                                addRule(rule);
+                              }}
+                              variant="primary"
+                            >Add condition</Button>
+                          </SpaceBetween>
+                        </>
+                      )}
+                    </SpaceBetween>
+                  </ExpandableSection>
+                );
+              })()}
               {/* Step Validation (Stop Conditions) UI removed */}
-              {!showValidationPanel && validationIssues.length > 0 && (
+              {!showValidationPanel && validationIssues.length > 0 && !(selectedComponent && (selectedComponent.type === 'file-upload' || selectedComponent.template_key === 'file-upload')) && (
                 <Alert type={validationIssues.some(i=>i.severity==='error')? 'warning':'info'}>
                   Previous validation run found {validationIssues.length} issue(s). <Button variant="inline-link" onClick={()=>setShowValidationPanel(true)}>Show details</Button>
                 </Alert>

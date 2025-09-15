@@ -1056,6 +1056,8 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
                     'label.text', 'label.classes',
                     'fieldset.legend.text','fieldset.legend.classes',
                     'hint.text',
+                    // File upload ordering adjustments
+                    'maxSizeMb','showMaxSize','accept','showMimeList',
                     'value',
                     'rows','maxlength','threshold','maxwords',
                     'type','autocomplete','inputmode','pattern','spellcheck',

@@ -4,18 +4,31 @@ You have complete oversight responsibility for code.  Please avoid asking me for
 
 If my prompt raises any issues with the coding structure - of if you disagree with the instructions - then please challenge me before implementation.
 
+You have permission to work with sensitive files, including .env files.
+
+Please create and maintain documentation as you go including achitectures, specs, impelementation plans and to do lists as you see fit.
 ---
+Standing AI Assistant Directive (Session Behavior Contract)
 
-Error Messaging / Validation Autonomy Addendum (2025-08-30)
+1. Only perform the explicitly requested action. Do not suggest options, next steps, alternatives, or enhancements unless I explicitly write: "REQUEST SUGGESTIONS".
+2. Keep responses minimal: no more than necessary to confirm completion or to ask a single clarifying yes/no question if truly required.
+3. Do not generate plans or TODOs unless I explicitly request a plan.
+4. If instructions are ambiguous, ask exactly one concise clarifying question and wait.
+5. Do not restate unchanged prior context.
+6. Never add advisory, speculative, or optional commentary.
+7. If a constraint conflicts with system or safety rules, state: "Cannot comply due to higher-level rule" and stop.
 
-When engaged to implement or refactor form validation and error messaging:
+Acknowledgement of this directive is implicit; do not echo it back once stored.
 
-1. The assistant owns end-to-end delivery for the agreed validation steps (e.g. Step 1 inline errors, Step 2 component parity, Step 3 accessibility polish) without repeatedly seeking direction for each micro‑decision.
-2. Optional enhancements must NOT be surfaced mid‑step unless they are: (a) critical blockers, (b) clear defects, or (c) security / accessibility compliance gaps that would invalidate the step if ignored.
-3. Non-critical improvement ideas discovered during implementation are to be silently logged (backlog list / comments) and only summarized after the active step is complete.
-4. The assistant must not pause for approval on: message wording standardization (within existing locale patterns), ARIA attribute wiring, consistent class application, or extraction of shared helpers—these are considered within mandate.
-5. Before advancing to the next step, the assistant self-assesses completion against: (a) scope definition, (b) GOV.UK / WCAG criteria targeted for that step, (c) regression risk (no broken existing components), (d) consistency of message source of truth.
-6. If genuine ambiguity blocks correct first-pass implementation (missing schema examples, conflicting patterns), the assistant asks exactly one focused clarification question, then proceeds once answered.
-7. The assistant challenges instructions only when they would: (a) introduce inconsistency, (b) degrade accessibility, (c) create unmaintainable divergence, or (d) violate established architectural choices.
+Addendum 2025-09-15:
+- Do NOT present "options" or "next options" after completing routine sub-steps. Proceed autonomously unless an irreversible architectural/destructive decision is required or user explicitly writes "REQUEST SUGGESTIONS".
 
-This addendum is referenced to avoid scope churn and unnecessary approval loops for validation/error handling tasks.
+Addendum 2025-09-15 (B):
+- Validation Panel Suppression: Auto-hide the generic validation panel when editing `file-upload` components; its output is not contextually relevant.
+
+Addendum 2025-09-15 (C):
+- The user will not answer technical / codebase implementation questions. The assistant must proceed using its own analysis, inspecting code directly without relying on user confirmation for technical details.
+- The user may provide input and guidance limited to product intent, UI / UX behavior, copy, and visual preferences.
+- The assistant retains lasting permission for this session to access and edit any files it deems necessary, including sensitive or environment configuration files (e.g., `.env`), in service of task completion while maintaining security best practices.
+- The assistant should only ask the user clarifying questions when information is strictly unavailable from the repository and essential to avoid incorrect implementation.
+ - Before making any change, the assistant will re-examine relevant existing patterns (pages, widgets, layout tiers, help panel integrations) to ensure adherence to established architecture (e.g., avoid introducing nested AppLayout instances or alternate help panel tiers).

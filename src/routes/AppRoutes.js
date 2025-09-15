@@ -67,6 +67,7 @@ import ArmsReportingDashboard from '../pages/armsReporting.js'; // Import the ne
 import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Import the NWAC Hub Management dashboard
 import AssessmentReviewDashboard from '../pages/assessmentReview.js'; // Import the new Assessment Review dashboard
 import AuthCallback from '../pages/AuthCallback.js';
+import UploadConfigDashboard from '../pages/uploadConfigDashboard.js';
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -254,6 +255,15 @@ const AppRoutes = ({
       <Route path="/configuration-settings">
         <Guard roles={['System Administrator']} path="/configuration-settings">
           {renderContent(ConfigurationSettings, [{ text: 'Home', href: '/' }, { text: 'Configuration Settings', href: '/configuration-settings' }], 'Configuration Settings', 'configurationSettings')}
+        </Guard>
+      </Route>
+      <Route path="/admin/upload-config">
+        <Guard roles={['System Administrator']} path="/admin/upload-config">
+          {renderContent(UploadConfigDashboard, [
+            { text: 'Home', href: '/' },
+            { text: 'Configuration', href: '/configuration-settings' },
+            { text: 'File Upload Config', href: '/admin/upload-config' }
+          ], 'File Upload Configuration', 'fileUploadConfig')}
         </Guard>
       </Route>
       <Route path="/modify-appointment/:id">
