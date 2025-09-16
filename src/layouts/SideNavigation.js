@@ -6,7 +6,6 @@ import roleMatrix from '../config/roleMatrix.json';
 
 const commonFooterItems = [
   { type: 'divider' },
-  { type: 'link', text: 'Notifications', href: '/notifications', info: <Badge color="red">23</Badge> },
   { type: 'link', text: 'Documentation', href: 'https://example.com', external: true },
 ];
 
@@ -99,14 +98,12 @@ const SideNavigation = ({ currentRole }) => {
       items: [
         { type: 'link', text: 'User Management', href: '/user-management-dashboard' },
         { type: 'link', text: 'Release Management', href: '/release-management-dashboard' },
-        { type: 'link', text: 'Options', href: '/options-dashboard' },
-  { type: 'link', text: 'Notification Settings', href: '/notification-settings-dashboard' },
+        { type: 'link', text: 'Notification Settings', href: '/notification-settings-dashboard' },
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
         ...(((effectiveRole?.value || effectiveRole) === 'System Administrator' || (effectiveRole?.value || effectiveRole) === 'SysAdmin') ? [
           { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
           { type: 'link', text: 'File Upload Config', href: '/admin/upload-config' }
         ] : []),
-        { type: 'link', text: 'Test Config Dashboard', href: '/test-config-dashboard' },
   // Removed duplicate href '/manage-components' (already present under Other Dashboards)
       ],
     },
@@ -115,7 +112,6 @@ const SideNavigation = ({ currentRole }) => {
       text: 'Security',
       defaultExpanded: false,
       items: [
-        { type: 'link', text: 'Options', href: '/security-options-dashboard' },
         { type: 'link', text: 'Audit and Logs', href: '/audit-logs-dashboard' },
         { type: 'link', text: 'Security Settings', href: '/manage-security-options' },
   { type: 'link', text: 'Access Control', href: '/access-control' },
@@ -142,8 +138,8 @@ const SideNavigation = ({ currentRole }) => {
 
   function filterNavItemsForRole(role, signedOut) {
     if (signedOut) {
-      const support = allNavItems.find(s => s.type === 'section' && s.text === 'Support');
-      return [support, ...commonFooterItems].filter(Boolean);
+      // Signed out: no navigation sections, minimal footer (documentation link only)
+      return [...commonFooterItems];
     }
     const roleValue = role?.value || role;
     if (roleValue === 'System Administrator') return [...allNavItems, ...commonFooterItems];

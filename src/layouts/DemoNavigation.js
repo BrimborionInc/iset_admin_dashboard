@@ -21,9 +21,29 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
 
   // Persist IAM toggle and apply dev-bypass token defaults
   useEffect(() => {
+    const previous = sessionStorage.getItem('iamBypass');
     sessionStorage.setItem('iamBypass', iamOn ? 'on' : 'off');
     if (!sessionStorage.getItem('devBypassToken')) {
       sessionStorage.setItem('devBypassToken', 'local-dev-secret');
+    }
+    const wasOff = previous === 'off';
+    // If we are turning IAM ON (moving from bypass to real auth), clear simulated role/email
+    if (iamOn && wasOff) {
+      try {
+        sessionStorage.removeItem('simulateSignedOut');
+        sessionStorage.removeItem('currentRole');
+        // Fire event so TopNavigation recomputes and shows real signed-in state or Sign in
+        window.dispatchEvent(new CustomEvent('auth:session-changed', { detail: { session: null, action: 'iam-toggle-on' } }));
+      } catch {}
+    } else if (!iamOn && previous === 'on') {
+      // Turning IAM OFF, restore a default role if none selected yet
+      if (!sessionStorage.getItem('currentRole')) {
+        const defaultRole = { label: 'Program Administrator', value: 'Program Administrator' };
+        try {
+          sessionStorage.setItem('currentRole', JSON.stringify(defaultRole));
+        } catch {}
+      }
+      window.dispatchEvent(new CustomEvent('auth:session-changed', { detail: { session: null, action: 'iam-toggle-off' } }));
     }
   }, [iamOn]);
 
@@ -107,6 +127,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
           placeholder="Select role"
           className={styles.roleSelect}
           style={{ minWidth: 200 }}
+          disabled={iamOn} // Disable RBAC simulation when IAM is ON
         />
       </div>
       {purgeCasesResult && (

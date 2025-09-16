@@ -1,0 +1,67 @@
+{# Signature Acknowledgment Component Macro (Draft) #}
+{#
+  Responsibilities:
+  - Render a 1/3 width name entry "signature" input with Sign / Clear buttons to the right.
+  - Provide accessible label & optional hint.
+  - Provide hooks (data-* attributes) that admin & portal React layers can enhance (sign, clear logic, font transform) without DOM surgery rewriting layout.
+  - Avoid relying on client JS for basic structure.
+
+  Expected props shape (subset):
+  {
+    name: 'applicantSignature',
+    id: 'applicantSignature', (optional; fallback to name)
+    label: { text: 'Your signature' },
+    hint: { text: 'Type your full legal name, then press Sign.' },
+    actionLabel: 'Sign',
+    clearLabel: 'Clear',
+    placeholder: 'Full legal name',
+    required: true|false,
+    classes: 'optional extra classes',
+    value: '' | prefilled value (rare in preview)
+  }
+
+  BEM Root: signature-ack
+  Sub-elements: __row, __input-wrapper, __actions, __status
+
+  NOTE: This macro does not implement handwriting font toggle; that remains a behavior layer.
+#}
+
+{% macro signatureAck(props) %}
+{% set fieldId = props.id or props.name or 'signature_ack_' + (props._autoId or 'unknown') %}
+{% set actionLabel = props.actionLabel or 'Sign' %}
+{% set clearLabel = props.clearLabel or 'Clear' %}
+{% set placeholder = props.placeholder or '' %}
+{% set required = props.required %}
+{% set labelText = (props.label and (props.label.text or props.label.html)) or 'Signature' %}
+{% set hintText = props.hint and (props.hint.text or props.hint.html) %}
+<div class="signature-ack govuk-!-margin-bottom-6 {{ props.classes or '' }}" data-component="signature-ack" data-signature-name="{{ props.name }}">
+  <div class="signature-ack__row" style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;">
+    <div class="signature-ack__input-wrapper" style="flex:0 0 33%;min-width:260px;">
+      <label class="govuk-label" for="{{ fieldId }}">{{ labelText | safe }}</label>
+      {% if hintText %}<div class="govuk-hint">{{ hintText | safe }}</div>{% endif %}
+      <input
+        class="govuk-input signature-ack__input"
+        id="{{ fieldId }}"
+        name="{{ props.name or fieldId }}"
+        type="text"
+        value="{{ props.value or '' }}"
+        {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+        {% if required %}aria-required="true" required{% endif %}
+        autocomplete="off"
+        data-signature-input
+      />
+    </div>
+    <div class="signature-ack__actions" style="display:flex;gap:8px;">
+      <button type="button" class="govuk-button govuk-button--secondary signature-ack__sign-btn" data-signature-sign>
+        {{ actionLabel }}
+      </button>
+      <button type="button" class="govuk-button govuk-button--warning signature-ack__clear-btn" data-signature-clear>
+        {{ clearLabel }}
+      </button>
+    </div>
+    <div class="signature-ack__status govuk-hint" data-signature-status style="flex-basis:100%;margin-top:4px;">
+      {% if props.value %}Signed{% else %}Not signed{% endif %}
+    </div>
+  </div>
+</div>
+{% endmacro %}

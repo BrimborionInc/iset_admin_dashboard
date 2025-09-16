@@ -46,97 +46,67 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) =>
         : getEmailForRole(currentRole);
       setEmail(newEmail);
     };
-    // Listen for our custom session change event and storage sync (multi-tab)
     const onSessionChanged = () => recompute();
     const onStorage = (e) => {
-  if (e.key === 'authSession' || e.key === 'iamBypass' || e.key === 'currentRole' || e.key === 'simulateSignedOut') recompute();
+      if (e.key === 'authSession' || e.key === 'iamBypass' || e.key === 'currentRole' || e.key === 'simulateSignedOut') recompute();
     };
     window.addEventListener('auth:session-changed', onSessionChanged);
     window.addEventListener('storage', onStorage);
-  // Recompute on mount and whenever currentRole changes
-  recompute();
+    recompute();
     return () => {
       window.removeEventListener('auth:session-changed', onSessionChanged);
       window.removeEventListener('storage', onStorage);
     };
   }, [currentRole]);
+
+  const utilities = [];
+  utilities.push({
+    type: 'menu-dropdown',
+    text: currentLanguage === 'en' ? 'English' : 'Français',
+    ariaLabel: 'Select Language',
+    items: [{ id: 'en', text: 'English' }, { id: 'fr', text: 'Français' }],
+    onItemClick: (event) => onLanguageChange(event.detail.id)
+  });
+
+  const roleValue = currentRole?.value || currentRole;
+
+  const simSignedOut = isSimSignedOut();
+  if ((signedIn && !simSignedOut) || (bypass && !simSignedOut)) {
+    if (roleValue === 'System Administrator') {
+      utilities.push({ type: 'button', iconName: 'settings', ariaLabel: 'Settings', onClick: () => console.log('Settings clicked') });
+    }
+    utilities.push({ type: 'button', iconName: 'support', ariaLabel: 'Support', onClick: () => console.log('Support clicked') });
+    if (bypass) {
+      utilities.push({
+        type: 'menu-dropdown',
+        text: email,
+        ariaLabel: 'Dev bypass account',
+        items: [{ id: 'dev-bypass', text: 'Developer bypass mode' }],
+        onItemClick: () => {}
+      });
+    } else {
+      utilities.push({
+        type: 'menu-dropdown',
+        text: email,
+        ariaLabel: 'Account Options',
+        items: [{ id: 'profile', text: 'My Profile' }, { id: 'signout', text: 'Sign Out' }],
+        onItemClick: (e) => {
+          if (e.detail.id === 'signout') {
+            clearSession();
+            window.location.href = buildLogoutUrl();
+          }
+        }
+      });
+    }
+  } else {
+    utilities.push({ type: 'button', text: 'Sign in', onClick: () => { window.location.href = buildLoginUrl(); } });
+  }
+
   return (
     <div>
       <TopNavigation
-        identity={{
-          href: '/',
-          title: 'Awentech Solutions',
-          logo: {
-            src: '/bromborionLogo.png',
-            alt: 'Awentech Inc Logo',
-          },
-        }}
-        utilities={[
-          {
-            type: 'menu-dropdown',
-            text: currentLanguage === 'en' ? 'English' : 'Français',
-            ariaLabel: 'Select Language',
-            items: [
-              { id: 'en', text: 'English' },
-              { id: 'fr', text: 'Français' },
-            ],
-            onItemClick: (event) => {
-              console.log('Language menu clicked:', event.detail.id);  // Add this for debugging
-              onLanguageChange(event.detail.id);
-            },
-          },
-          {
-            type: 'button',
-            iconName: 'notification',
-            ariaLabel: 'Notifications',
-            onClick: () => console.log('Notifications clicked'),
-          },
-          {
-            type: 'button',
-            iconName: 'support',
-            ariaLabel: 'Support',
-            onClick: () => console.log('Support clicked'),
-          },
-          {
-            type: 'button',
-            iconName: 'settings',
-            ariaLabel: 'Settings',
-            onClick: () => console.log('Settings clicked'),
-          },
-          bypass
-            ? {
-                type: 'menu-dropdown',
-                text: email,
-                ariaLabel: 'Dev bypass account',
-                items: [
-                  { id: 'dev-bypass', text: 'Developer bypass mode' },
-                ],
-                onItemClick: () => {},
-              }
-            : signedIn
-            ? {
-                type: 'menu-dropdown',
-                text: email,
-                ariaLabel: 'Account Options',
-                items: [
-                  { id: 'profile', text: 'My Profile' },
-                  { id: 'signout', text: 'Sign Out' },
-                ],
-                onItemClick: (e) => {
-                  if (e.detail.id === 'signout') {
-                    clearSession();
-                    window.location.href = buildLogoutUrl();
-                  }
-                },
-              }
-            : {
-                type: 'button',
-                text: 'Sign in',
-                onClick: () => {
-                  window.location.href = buildLoginUrl();
-                },
-              },
-        ]}
+        identity={{ href: '/', title: 'Awentech Solutions', logo: { src: '/bromborionLogo.png', alt: 'Awentech Inc Logo' } }}
+        utilities={utilities}
       />
     </div>
   );

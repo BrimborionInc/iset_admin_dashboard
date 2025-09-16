@@ -10,6 +10,65 @@ import jsonLogic from 'json-logic-js';
 // The portal package is linked via file:../ISET-intake in package.json, so we can import its renderer registry directly.
 import PortalRegistry from '../portalRendererRegistry';
 
+// Dedicated component for signature-ack preview so hooks are not used inside map callback
+function SignatureAckPreview({ comp: c, answerObj, lang, setAnswer, errorMsg }) {
+  const key = c.storageKey || c.id;
+  const signedObj = answerObj;
+  const isSigned = signedObj && typeof signedObj === 'object' && signedObj.signed;
+  const signedName = isSigned ? (signedObj.name || '') : '';
+  const [localName, setLocalName] = React.useState(isSigned ? signedName : '');
+  React.useEffect(() => { if (!isSigned && signedName === '') setLocalName(''); }, [isSigned, signedName]);
+  const actionLabel = (c.actionLabel && (c.actionLabel[lang] || c.actionLabel.en || c.actionLabel.fr)) || 'Sign Now';
+  const clearLabel = (c.clearLabel && (c.clearLabel[lang] || c.clearLabel.en || c.clearLabel.fr)) || 'Clear';
+  const placeholder = (c.placeholder && (c.placeholder[lang] || c.placeholder.en || c.placeholder.fr)) || 'Type your full name';
+  const required = !!(c.required || c.props?.required);
+  const handwritingFont = c.handwritingFont || c.props?.handwritingFont || 'cursive';
+  const canSign = !isSigned && localName.trim().length > 0;
+  const doSign = () => { if (!canSign) return; setAnswer(c, { signed: true, name: localName.trim() }); };
+  const doClear = () => { setLocalName(''); setAnswer(c, undefined); };
+  const labelValue = c.label && (typeof c.label === 'object' ? (c.label[lang] || c.label.en || c.label.fr || Object.values(c.label)[0]) : c.label);
+  const hintValue = c.hint && (typeof c.hint === 'object' ? (c.hint[lang] || c.hint.en || c.hint.fr || Object.values(c.hint)[0]) : c.hint);
+  return (
+    <div className={`govuk-form-group${errorMsg ? ' govuk-form-group--error' : ''}`} style={{ marginBottom: 20 }}>
+      {labelValue && <label className="govuk-label" htmlFor={key}>{labelValue}</label>}
+      {hintValue && <div className="govuk-hint" id={`${key}-hint`}>{hintValue}</div>}
+      {errorMsg && <p className="govuk-error-message" id={`${key}-error`}><span className="govuk-visually-hidden">Error:</span> {errorMsg}</p>}
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginTop:4 }}>
+        <div style={{ flex:'0 0 34%', minWidth:260, position:'relative' }}>
+          <input
+            id={key}
+            name={key}
+            type="text"
+            className={`govuk-input${isSigned ? ' sig-locked' : ''}`}
+            style={{
+              width:'100%',
+              background:'#fff',
+              border:'2px solid #0b0c0c',
+              borderRadius:6,
+              padding:'14px 16px',
+              fontFamily: isSigned ? handwritingFont : undefined,
+              fontSize: isSigned ? '1.25rem' : undefined,
+              boxShadow:'0 1px 2px rgba(0,0,0,0.08)'
+            }}
+            value={isSigned ? signedName : localName}
+            onChange={e => { if (!isSigned) setLocalName(e.target.value); }}
+            placeholder={placeholder}
+            readOnly={isSigned}
+            aria-describedby={[hintValue ? `${key}-hint` : null, errorMsg ? `${key}-error` : null].filter(Boolean).join(' ') || undefined}
+            aria-invalid={errorMsg ? 'true' : undefined}
+            required={required}
+          />
+          {isSigned && <div style={{ position:'absolute', top:6, right:10, fontSize:11, letterSpacing:0.5, color:'#555' }}>SIGNED</div>}
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          {!isSigned && <button type="button" className="govuk-button govuk-button--secondary" style={{ margin:0 }} disabled={!canSign} onClick={doSign}>{actionLabel}</button>}
+          {isSigned && <button type="button" className="govuk-link" onClick={doClear}>{clearLabel}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Helper to safely extract a display string from multilingual or raw values
 const textOf = (v) => {
   if (v == null) return '';
@@ -256,6 +315,102 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
   }, [mode, hasSummaryList]);
   const currentStep = steps[runner.stepIndex] || null;
   const answers = runner.answers;
+
+  // --- Conditional Visibility (file-upload) ---------------------------------
+  // v1 scope: only file-upload components honor props.conditions (AND semantics).
+  // No cross-workflow references are supported; any ref not present in current answers fails its rule.
+  // Unrecognized operators or malformed rules => component hidden (fail-closed).
+  // When a file-upload becomes hidden its stored answer is cleared to avoid stale submissions.
+  function refValue(ref) {
+    if (ref == null) return undefined;
+    // Direct key match first
+    if (Object.prototype.hasOwnProperty.call(answers, ref)) return answers[ref];
+    // Fallback: locate component whose props.name or id matches ref, then use its storageKey/id
+    for (const s of steps) {
+      if (!s || !Array.isArray(s.components)) continue;
+      for (const c of s.components) {
+        if (!c) continue;
+        const nameMatch = c.props && (c.props.name === ref || c.props.id === ref);
+        const idMatch = String(c.id) === String(ref);
+        if (nameMatch || idMatch) {
+          const key = c.storageKey || c.id;
+          if (key != null && Object.prototype.hasOwnProperty.call(answers, key)) return answers[key];
+        }
+      }
+    }
+    return undefined;
+  }
+  function valueExists(v) {
+    if (v === null || v === undefined) return false;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === 'object') return Object.keys(v).length > 0;
+    if (typeof v === 'string') return v.trim() !== '';
+    return true;
+  }
+  function coerceForCompare(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  function evaluateConditions(conds) {
+    if (!conds || typeof conds !== 'object') return true; // no conditions => visible
+    const all = Array.isArray(conds.all) ? conds.all : [];
+    if (!all.length) return true;
+    for (const r of all) {
+      if (!r || !r.ref || !r.op) return false; // malformed => fail
+      const raw = refValue(r.ref);
+      switch (r.op) {
+        case 'exists':
+          if (!valueExists(raw)) return false;
+          break;
+        case 'notExists':
+          if (valueExists(raw)) return false;
+          break;
+        case 'equals': {
+          const lhs = raw;
+          const rhs = r.value;
+          // numeric equality if both numeric
+            const ln = coerceForCompare(lhs); const rn = coerceForCompare(rhs);
+            if (ln !== null && rn !== null) { if (ln !== rn) return false; }
+            else { if (String(lhs ?? '') !== String(rhs ?? '')) return false; }
+          break;
+        }
+        case 'notEquals': {
+          const lhs = raw; const rhs = r.value;
+          const ln = coerceForCompare(lhs); const rn = coerceForCompare(rhs);
+          if (ln !== null && rn !== null) { if (ln === rn) return false; }
+          else { if (String(lhs ?? '') === String(rhs ?? '')) return false; }
+          break;
+        }
+        case '>': {
+          const ln = coerceForCompare(raw); const rn = coerceForCompare(r.value);
+          if (ln === null || rn === null) return false; if (!(ln > rn)) return false; break;
+        }
+        case '<': {
+          const ln = coerceForCompare(raw); const rn = coerceForCompare(r.value);
+          if (ln === null || rn === null) return false; if (!(ln < rn)) return false; break;
+        }
+        default:
+          return false; // unknown operator => fail
+      }
+    }
+    return true; // all passed
+  }
+
+  // Detect if current step has file-upload components and all are hidden by conditions
+  function allFileUploadsHidden(stepObj){
+    if(!stepObj) return false;
+    const comps = Array.isArray(stepObj.components)? stepObj.components: [];
+    const fileUploads = comps.filter(c=> c && c.type === 'file-upload');
+    if(!fileUploads.length) return false; // no file-upload components
+    // If every file-upload evaluates to hidden, return true
+    for(const c of fileUploads){
+      const cond = c.props?.conditions || c.conditions;
+      const visible = evaluateConditions(cond);
+      if(visible) return false;
+    }
+    return true;
+  }
 
   // --- Validation (unified schema parity with public portal) --------------
   // Helper: flatten top-level components plus single-level option children (conditional reveals)
@@ -573,6 +728,13 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
                 <div className="govuk-width-container" style={{ paddingLeft: 0, paddingRight: 0 }}>
                   {/* Live region for change validations */}
                   <div aria-live="polite" className="govuk-visually-hidden">{liveAnnouncement}</div>
+                  {allFileUploadsHidden(currentStep) && (
+                    <div style={{ marginBottom:16, padding:12, background:'#f0f7ff', border:'1px solid #b3d6f5', borderRadius:4, fontSize:14 }}>
+                      {previewLang==='fr' ?
+                        "Aucun document requis pour cette étape selon vos réponses actuelles." :
+                        "No documents are required for this step based on your current answers."}
+                    </div>
+                  )}
                   {Object.keys(runner.errors||{}).length>0 && (
                     <div ref={errorSummaryRef} tabIndex="-1" className="govuk-error-summary" aria-labelledby="wp-error-summary-title" role="alert" style={{marginBottom:16}}>
                       <h2 className="govuk-error-summary__title" id="wp-error-summary-title" style={{fontSize:18}}>There is a problem</h2>
@@ -591,8 +753,81 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
                   {(currentStep.components || []).map(c => {
                     const type = c.type;
                     const key = c.storageKey || c.id;
+                    // Apply conditional visibility only to file-upload components (v1 scope)
+                    if (type === 'file-upload') {
+                      const visible = evaluateConditions(c.props?.conditions || c.conditions);
+                      if (!visible) {
+                        // Clear stored answer if present to avoid stale data
+                        if (key && answers[key] !== undefined) {
+                          setRunner(r => ({ ...r, answers: { ...r.answers, [key]: undefined } }));
+                        }
+                        return null; // skip render
+                      }
+                    }
                     if (type === 'summary-list') {
                       return <SummaryListAdapter key={c.id} comp={c} answers={answers} lang={previewLang} />;
+                    }
+                    if (type === 'signature-ack') {
+                      const errorMsg = runner.errors[key];
+                      return (
+                        <SignatureAckPreview
+                          key={c.id}
+                          comp={c}
+                          answerObj={answers[key]}
+                          lang={previewLang}
+                          setAnswer={setAnswer}
+                          errorMsg={errorMsg}
+                        />
+                      );
+                    }
+                    // Inline adapter for warning-text (non-input, display-only)
+                    if (type === 'warning-text') {
+                      const text = (() => {
+                        const t = c.text || c.props?.text;
+                        if (t && typeof t === 'object') return t[previewLang] || t.en || t.fr || Object.values(t)[0];
+                        return t || '';
+                      })();
+                      const assistive = (() => {
+                        const t = c.iconFallbackText || c.props?.iconFallbackText;
+                        if (t && typeof t === 'object') return t[previewLang] || t.en || t.fr || Object.values(t)[0];
+                        return t || '';
+                      })();
+                      return (
+                        <div key={c.id} className={`govuk-warning-text ${c.classes || c.props?.classes || ''}`} role={c.role || c.props?.role || 'alert'} style={{ marginBottom: 16 }}>
+                          <span className="govuk-warning-text__icon" aria-hidden="true">!</span>
+                          <strong className="govuk-warning-text__text">
+                            {assistive && <span className="govuk-warning-text__assistive">{assistive} </span>}{text}
+                          </strong>
+                        </div>
+                      );
+                    }
+                    // Inline adapter for file-upload to ensure labelClass is applied
+                    if (type === 'file-upload') {
+                      const labelObj = c.label || {};
+                      const label = (labelObj && typeof labelObj === 'object') ? (labelObj[previewLang] || labelObj.en || labelObj.fr || '') : (labelObj || '');
+                      const hintObj = c.hint || {};
+                      const hint = (hintObj && typeof hintObj === 'object') ? (hintObj[previewLang] || hintObj.en || hintObj.fr || '') : (hintObj || '');
+                      const labelClass = c.labelClass ? ` ${c.labelClass}` : '';
+                      const disabled = c.disabled === true;
+                      return (
+                        <div key={c.id} className="govuk-form-group" style={{ marginBottom: 20 }}>
+                          <label className={`govuk-label${labelClass}`} htmlFor={key}>{label || key}</label>
+                          {hint && <div id={`${key}-hint`} className="govuk-hint">{hint}</div>}
+                          <input
+                            id={key}
+                            name={key}
+                            type="file"
+                            className="govuk-file-upload"
+                            accept={c.accept || undefined}
+                            disabled={disabled}
+                            aria-describedby={hint ? `${key}-hint` : undefined}
+                            onChange={() => {/* Preview: ignore real file selection */}}
+                          />
+                          {c.maxSizeMb && c.showMaxSize !== false && (
+                            <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>Max size: {c.maxSizeMb}MB</div>
+                          )}
+                        </div>
+                      );
                     }
                     const Comp = PortalRegistry[type];
                     if (!Comp) return <div key={c.id} style={{ fontSize: 12, color: '#666' }}>[Unsupported: {type}]</div>;
