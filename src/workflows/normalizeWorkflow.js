@@ -396,6 +396,20 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         if (typeof props?.showMimeList !== 'undefined') component.showMimeList = !!props.showMimeList;
         if (typeof props?.showMaxSize !== 'undefined') component.showMaxSize = !!props.showMaxSize;
         if (typeof props?.disabled !== 'undefined') component.disabled = !!props.disabled;
+        // Conditional visibility (v1): emit props.conditions if present and structurally valid ({ all: [] })
+        try {
+          const conds = props && props.conditions;
+          if (conds && typeof conds === 'object' && Array.isArray(conds.all) && conds.all.length) {
+            const sanitized = conds.all
+              .filter(r => r && typeof r === 'object' && r.ref && r.op)
+              .map(r => {
+                const out = { ref: String(r.ref), op: String(r.op) };
+                if (!['exists','notExists'].includes(r.op) && r.value !== undefined && r.value !== null && r.value !== '') out.value = String(r.value);
+                return out;
+              });
+            if (sanitized.length) component.conditions = { all: sanitized };
+          }
+        } catch { /* swallow condition extraction errors */ }
       }
       if (tplType === 'date-input') {
         if (props?.namePrefix) component.namePrefix = props.namePrefix;

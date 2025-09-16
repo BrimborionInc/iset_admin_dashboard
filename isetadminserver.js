@@ -1057,6 +1057,14 @@ syncTextBlockTemplateFromFile();
 async function syncSelectTemplateFromFile() { return syncTemplateFromFile('select'); }
 syncSelectTemplateFromFile();
 
+// Warning-text template sync (reuse generic helper)
+async function syncWarningTextTemplateFromFile() { return syncTemplateFromFile('warning-text'); }
+syncWarningTextTemplateFromFile();
+
+// Signature-ack template sync (reuse generic helper)
+async function syncSignatureAckTemplateFromFile() { return syncTemplateFromFile('signature-ack'); }
+syncSignatureAckTemplateFromFile();
+
 // Dev helper endpoint to force re-sync of radio template from filesystem (no versioning bump)
 app.post('/api/dev/sync/radio-template', async (_req, res) => {
   await syncRadioTemplateFromFile();
@@ -1133,6 +1141,12 @@ app.post('/api/dev/sync/text-block-template', async (_req, res) => {
 app.post('/api/dev/sync/select-template', async (_req, res) => {
   await syncSelectTemplateFromFile();
   res.json({ ok: true, message: 'Select template sync attempted' });
+});
+
+// Dev helper to sync signature-ack template
+app.post('/api/dev/sync/signature-ack-template', async (_req, res) => {
+  await syncSignatureAckTemplateFromFile();
+  res.json({ ok: true, message: 'Signature-ack template sync attempted' });
 });
 
 // ---------------- Component Templates Endpoints (Library) -----------------
@@ -1280,6 +1294,10 @@ app.put('/api/component-templates/:id', async (req, res) => {
   }
   if (tk === 'text-block' && default_props) {
     const result = validateTemplatePayload('text-block', default_props);
+    if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
+  }
+  if (tk === 'signature-ack' && default_props) {
+    const result = validateTemplatePayload('signature-ack', default_props);
     if (!result.ok) return res.status(400).json({ error: 'validation_failed', details: result.errors });
   }
 
@@ -1722,6 +1740,7 @@ const SUPPORTED_COMPONENT_TYPES = new Set([
   'character-count',
   'file-upload',
   'summary-list',
+  'signature-ack',
 ]);
 
 // Discoverable list for the Admin UI

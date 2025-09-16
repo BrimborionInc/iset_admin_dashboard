@@ -24,7 +24,6 @@ import LocationsManagementDashboard from '../pages/manageLocations.js';
 import ModifyLocation from '../pages/modifyLocation.js';
 import NewLocationForm from '../pages/newLocationForm.js';
 import CodeTablesDashboard from '../pages/codeTablesDashboard.js';
-import TestConfigDashboard from '../pages/testConfigDashboard.js';
 import ServiceModulesManagementDashboard from '../pages/manageServiceModules.js';
 import ModifyServiceModule from '../pages/modifyServiceModule.js';
 import BookAppointmentQ1 from '../previews/bookAppointmentQ1.js';
@@ -203,24 +202,6 @@ const AppRoutes = ({
       </Route>
       <Route path="/code-tables-dashboard">
         {renderContent(CodeTablesDashboard, [{ text: 'Home', href: '/' }, { text: 'Code Tables', href: '/code-tables-dashboard' }], 'Code Tables', 'codeTables')}
-      </Route>
-      <Route path="/test-config-dashboard">
-        {renderContent(
-          TestConfigDashboard,
-          [{ text: 'Home', href: '/' }, { text: 'Test Config Dashboard', href: '/test-config-dashboard' }],
-          'Test Config Dashboard',
-          'testConfigDashboard',
-          <SpaceBetween direction="horizontal" size="xs">
-            <Button onClick={resetToDefaultLayout}>
-              Reset to default layout
-            </Button>
-            <Button
-              onClick={() => setSplitPanelOpen(true)}
-            >
-              + Add widget
-            </Button>
-          </SpaceBetween>
-        )}
       </Route>
       <Route path="/service-modules-management-dashboard">
         {renderContent(ServiceModulesManagementDashboard, [{ text: 'Home', href: '/' }, { text: 'Manage Service Modules', href: '/service-modules-management-dashboard' }], 'Manage Service Modules', 'serviceModulesManagement')}
@@ -406,7 +387,7 @@ const AppRoutes = ({
         </Guard>
       </Route>
       <Route path="/">
-        {renderContent(AdminDashboard, [{ text: 'Home', href: '/' }, { text: 'Admin Console', href: '#' }], 'Secure Solution Suite Admin Console', AdminDashboardHelp.aiContext)}
+        {renderContent(AdminDashboard, [{ text: 'Home', href: '/' }], 'Secure Solution Suite Admin Console', AdminDashboardHelp.aiContext)}
       </Route>
     </Switch>
   );

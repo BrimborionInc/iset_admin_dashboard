@@ -574,12 +574,64 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
     if (!templateId && !templateKey) inner = <div className="govuk-hint" style={{ color: '#b00' }}>Missing template reference</div>;
     else if (error) inner = <div className="govuk-hint" style={{ color: '#b00' }}>Render error: {error}</div>;
     else if (loading && !html) inner = <div className="govuk-hint">Rendering…</div>;
-    else inner = <div dangerouslySetInnerHTML={{ __html: html }} />;
+    else {
+      // Post-process HTML for signature-ack to provide working-area interactive approximation
+      const lowerType = String(comp?.template_key || comp?.type || '').toLowerCase();
+      if (lowerType === 'signature-ack') {
+        const labelText = (() => {
+          const lbl = comp?.props?.label?.text;
+          if (typeof lbl === 'string') return lbl;
+          if (lbl && typeof lbl === 'object') return lbl[previewLang] || lbl.en || lbl.fr || '';
+          return comp?.label || '';
+        })();
+        const hintText = (() => {
+          const h = comp?.props?.hint?.text;
+          if (typeof h === 'string') return h;
+          if (h && typeof h === 'object') return h[previewLang] || h.en || h.fr || '';
+          return '';
+        })();
+        const placeholder = (() => {
+          const p = comp?.props?.placeholder;
+          if (typeof p === 'string') return p;
+          if (p && typeof p === 'object') return p[previewLang] || p.en || p.fr || '';
+          return 'Type your full name';
+        })();
+        inner = (
+          <div className="govuk-form-group" data-sig-preview="1" style={{ marginBottom: 16 }}>
+            {labelText && <label className="govuk-label" style={{ fontWeight: 600 }}>{labelText}</label>}
+            {hintText && <div className="govuk-hint" style={{ marginBottom: 4 }}>{hintText}</div>}
+            <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+              <div style={{ flex:'0 0 34%', minWidth:260, position:'relative' }}>
+                <input type="text" className="govuk-input" placeholder={placeholder} style={{ width:'100%', background:'#fff', border:'2px solid #0b0c0c', borderRadius:6, padding:'14px 16px', boxShadow:'0 1px 2px rgba(0,0,0,0.08)' }} disabled value="" onChange={()=>{}} />
+                <div style={{ position:'absolute', top:6, right:10, fontSize:11, letterSpacing:0.5, color:'#888' }}>PREVIEW</div>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <button type="button" disabled className="govuk-button govuk-button--secondary" style={{ margin:0 }}>Sign Now</button>
+                <button type="button" disabled className="govuk-link" style={{ background:'none', border:'none', padding:0 }}>Clear</button>
+              </div>
+            </div>
+          </div>
+        );
+      } else {
+        inner = <div dangerouslySetInnerHTML={{ __html: html }} />;
+      }
+    }
 
     // Stop clicks inside editable text from bubbling to card (avoid unintended selection logic)
     useEffect(() => {
       const root = containerRef.current;
       if (!root) return;
+      // Disable actual file selection in preview for file-upload components
+      try {
+        if (String(comp?.template_key || comp?.type || '').toLowerCase() === 'file-upload') {
+          const inputs = root.querySelectorAll('input[type="file"]');
+          inputs.forEach(inp => {
+            inp.setAttribute('disabled','disabled');
+            inp.style.pointerEvents = 'none';
+            inp.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); return false; });
+          });
+        }
+      } catch (_) {}
       const handler = (e) => {
         const el = e.target.closest('[data-inline-edit]');
         if (el) {
@@ -671,6 +723,10 @@ const ModifyComponent = () => {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [initialComponents, setInitialComponents] = useState([]);
   const [selectedComponent, setSelectedComponent] = useState(null);
+  // Draft inputs for adding a conditional visibility rule (file-upload panel)
+  const [condDraftRef, setCondDraftRef] = useState('');
+  const [condDraftOp, setCondDraftOp] = useState('equals');
+  const [condDraftValue, setCondDraftValue] = useState('');
   // Debug instrumentation: expose currently selected component for console inspection
   useEffect(() => {
     if (window.__ISET_DEBUG_INLINE_EDIT) {
@@ -835,7 +891,31 @@ const ModifyComponent = () => {
         wfData = wfDetails;
       }
       if (wfData && Array.isArray(wfData.steps)) {
-        const snapshot = wfData.steps.map((s, si) => {
+        // If steps do not include components, attempt per-step fetch to enrich snapshot
+        const enrichedSteps = [];
+        for (const step of wfData.steps) {
+          let stepObj = step;
+            // Only fetch if components missing
+          if (!Array.isArray(stepObj.components)) {
+            try {
+              const stepResp = await apiFetch(`/api/steps/${step.id}`);
+              if (stepResp && typeof stepResp.json === 'function' && stepResp.ok) {
+                const stepData = await stepResp.json().catch(()=>null);
+                if (stepData && Array.isArray(stepData.components)) {
+                  stepObj = { ...stepObj, components: stepData.components };
+                }
+              } else if (stepResp && Array.isArray(stepResp.components)) {
+                stepObj = { ...stepObj, components: stepResp.components };
+              }
+            } catch (e) {
+              // Non-fatal; continue
+              console.warn('Conditional visibility: step component fetch failed', step.id, e);
+            }
+          }
+          enrichedSteps.push(stepObj);
+        }
+        const stepsForSnapshot = enrichedSteps.length ? enrichedSteps : wfData.steps;
+        const snapshot = stepsForSnapshot.map((s, si) => {
           const comps = Array.isArray(s.components) ? s.components : [];
           const compEntries = comps.map(cc => {
             const ref = cc?.props?.name || cc?.props?.id || cc?.id || cc?.templateId || null;
@@ -853,7 +933,8 @@ const ModifyComponent = () => {
               label = rawLabel;
             }
             if (!label) label = ref;
-            const type = String(cc?.template_key || cc?.type || '').toLowerCase();
+            // Derive canonical type; step API returns camelCase templateKey, while local editor uses snake template_key
+            const type = String(cc?.template_key || cc?.templateKey || cc?.type || '').toLowerCase();
             return { ref, label, type };
           }).filter(Boolean);
           return { stepId: s.id || s.step_id || `step-${si+1}`, stepName: s.name || `Step ${si+1}`, components: compEntries };
@@ -1634,7 +1715,11 @@ const ModifyComponent = () => {
                 const idx = selectedComponent.index;
                 // Gather prior components as potential refs
                 // Local step prior components
-                const priorLocal = components.slice(0, idx).filter(Boolean).map((c,i) => {
+                const inputLikeTypes = new Set(['input','text','email','phone','password','number','textarea','select','radio','radios','checkbox','checkboxes','date','date-input','character-count','file-upload']);
+                const priorLocal = components.slice(0, idx).filter(Boolean).filter(c => {
+                  const ttype = String(c.template_key || c.type || '').toLowerCase();
+                  return inputLikeTypes.has(ttype);
+                }).map((c,i) => {
                   const ref = c.props?.name || c.props?.id || c.id || c.templateId || `comp-${i+1}`;
                   return { label: ref, value: ref, group: 'This Step' };
                 });
@@ -1646,13 +1731,15 @@ const ModifyComponent = () => {
                   if (Array.isArray(snap)) {
                     const includeTypes = new Set(['input','text','email','phone','password','number','textarea','select','radio','checkbox','checkboxes','date','date-input','character-count','file-upload']);
                     snap.forEach(s => {
-                      const sid = s.stepId || 'step';
+                      const sid = s.stepName || s.stepId || 'Step';
                       (s.components||[]).forEach(f => {
                         if (!f) return;
                         const ref = f.ref || f.name || f.id;
                         if (!ref) return;
-                        const ttype = String(f.type || '').toLowerCase();
-                        if (ttype && !includeTypes.has(ttype)) return; // skip non-input display components
+                        let ttype = String(f.type || '').toLowerCase();
+                        if (!ttype && f.templateKey) ttype = String(f.templateKey).toLowerCase();
+                        // Exclude anything not explicitly in allowlist (including missing type)
+                        if (!ttype || !includeTypes.has(ttype)) return; // skip non-input / display-only components
                         const lab = f.label || ref;
                         wfFields.push({ label: `${lab} (${sid})`, value: ref, group: sid });
                       });
@@ -1683,7 +1770,7 @@ const ModifyComponent = () => {
                   setSelectedComponent(sc => sc && sc.index === idx ? { ...components[idx], index: idx } : sc);
                 };
                 // Temporary state for new rule inputs kept in refs to avoid re-renders
-                const newRuleRef = { ref: '', op: 'equals', value: '' };
+                // Replaced ref object with component state (condDraftRef/Op/Value) so inputs are interactive.
                 const condWfId = selectedComponent.props?.conditionsWorkflowId || null;
                 return (
                   <ExpandableSection headerText="Conditional Visibility (Beta)" defaultExpanded={false}>
@@ -1709,6 +1796,18 @@ const ModifyComponent = () => {
                       )}
                       {condWfId && selectedComponent.props?.__workflowFields && (
                         <>
+                          {(() => {
+                            const snap = selectedComponent.props?.__workflowFields || [];
+                            const totalFields = snap.reduce((acc,s)=> acc + ((s.components&&s.components.length)||0),0);
+                            if (totalFields === 0) {
+                              return (
+                                <Alert type="info">
+                                  No input fields found in the selected workflow steps. The field list below will remain empty until that workflow has components with identifiable refs (props.name or id).
+                                </Alert>
+                              );
+                            }
+                            return null;
+                          })()}
                           <Table
                             variant="embedded"
                             columnDefinitions={[
@@ -1726,33 +1825,41 @@ const ModifyComponent = () => {
                           <SpaceBetween size="xs">
                             <FormField label="When field" stretch>
                               <Select
-                                selectedOption={newRuleRef.ref ? { label: newRuleRef.ref, value: newRuleRef.ref } : null}
-                                onChange={({ detail }) => { newRuleRef.ref = detail.selectedOption?.value || ''; }}
+                                selectedOption={condDraftRef ? { label: condDraftRef, value: condDraftRef } : null}
+                                onChange={({ detail }) => { setCondDraftRef(detail.selectedOption?.value || ''); }}
                                 options={prior}
                                 placeholder="Select a field"
                               />
                             </FormField>
                             <FormField label="Operator">
                               <Select
-                                selectedOption={{ label: newRuleRef.op, value: newRuleRef.op }}
-                                onChange={({ detail }) => { newRuleRef.op = detail.selectedOption?.value || 'equals'; }}
+                                selectedOption={{ label: condDraftOp, value: condDraftOp }}
+                                onChange={({ detail }) => {
+                                  const next = detail.selectedOption?.value || 'equals';
+                                  setCondDraftOp(next);
+                                  if (['exists','notExists'].includes(next)) setCondDraftValue('');
+                                }}
                                 options={[ 'equals','notEquals','exists','notExists','>','<' ].map(o => ({ label: o, value: o }))}
                               />
                             </FormField>
                             <FormField label="Value" description="Ignored for exists/notExists">
                               <Input
-                                value={newRuleRef.value}
-                                onChange={({ detail }) => { newRuleRef.value = detail.value; }}
+                                value={condDraftValue}
+                                onChange={({ detail }) => { setCondDraftValue(detail.value); }}
                                 placeholder="e.g. married"
-                                disabled={['exists','notExists'].includes(newRuleRef.op)}
+                                disabled={['exists','notExists'].includes(condDraftOp)}
                               />
                             </FormField>
                             <Button
                               onClick={() => {
-                                if (!newRuleRef.ref) return;
-                                const rule = { ref: newRuleRef.ref, op: newRuleRef.op };
-                                if (!['exists','notExists'].includes(newRuleRef.op)) rule.value = newRuleRef.value;
+                                if (!condDraftRef) return;
+                                const rule = { ref: condDraftRef, op: condDraftOp };
+                                if (!['exists','notExists'].includes(condDraftOp)) rule.value = condDraftValue;
                                 addRule(rule);
+                                // reset draft
+                                setCondDraftRef('');
+                                setCondDraftOp('equals');
+                                setCondDraftValue('');
                               }}
                               variant="primary"
                             >Add condition</Button>

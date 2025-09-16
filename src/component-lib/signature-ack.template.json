@@ -1,0 +1,38 @@
+{
+  "template_key": "signature-ack",
+  "type": "signature-ack",
+  "label": "Signature Acknowledgment",
+  "description": "Captures an attested typed name that is explicitly locked by clicking a Sign action; stores { signed: true, name } object.",
+  "status": "active",
+  "default_props": {
+    "name": "applicantSignature",
+    "id": "",
+    "label": { "text": "Type your full name to sign" },
+    "hint": { "text": "Enter your full legal name then press Sign." },
+    "actionLabel": { "text": "Sign Now" },
+    "clearLabel": { "text": "Clear" },
+    "placeholder": { "text": "First Last" },
+    "handwritingFont": "cursive",
+    "required": true,
+    "classes": "govuk-input"
+  },
+  "prop_schema": [
+    { "key": "name", "path": "name", "type": "text", "label": "Data Key" },
+    { "key": "label.text", "path": "label.text", "type": "text", "label": "Label Text" },
+    { "key": "hint.text", "path": "hint.text", "type": "text", "label": "Hint Text" },
+    { "key": "actionLabel.text", "path": "actionLabel.text", "type": "text", "label": "Sign Button Label" },
+    { "key": "clearLabel.text", "path": "clearLabel.text", "type": "text", "label": "Clear Button Label" },
+    { "key": "placeholder.text", "path": "placeholder.text", "type": "text", "label": "Placeholder Text" },
+    { "key": "handwritingFont", "path": "handwritingFont", "type": "text", "label": "Handwriting Font" },
+    { "key": "required", "path": "required", "type": "select", "label": "Required?", "options": [ { "label": "Yes", "value": true }, { "label": "No", "value": false } ] },
+    { "key": "classes", "path": "classes", "type": "select", "label": "Input Classes", "options": [
+      { "label": "Default (govuk-input)", "value": "govuk-input" },
+      { "label": "Width 20", "value": "govuk-input govuk-input--width-20" },
+      { "label": "Width 10", "value": "govuk-input govuk-input--width-10" },
+      { "label": "Width 5", "value": "govuk-input govuk-input--width-5" }
+    ] }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "{% from \"govuk/components/input/macro.njk\" import govukInput %}\n{% set cls = props.classes or 'govuk-input' %}\n{% if 'govuk-input' not in cls %}{% set cls = 'govuk-input ' + cls %}{% endif %}\n{% set isSigned = (value and value.signed) %}\n{% set effectiveValue = isSigned and value.name or '' %}\n<div class=\"app-signature-ack\">\n  {{ govukInput({\n    name: props.name,\n    id: props.id or props.name,\n    label: props.label,\n    hint: props.hint,\n    classes: cls + (isSigned and ' sig-locked' or ''),\n    value: effectiveValue,\n    attributes: { 'data-component': 'signature-ack' }\n  }) }}\n  {# Authoring/export context does not implement interactive Sign/Clear; runtime React renderer handles logic. #}\n</div>"
+}
