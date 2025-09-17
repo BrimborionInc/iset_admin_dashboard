@@ -121,6 +121,14 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       } else if (isFileUpload(type)) {
         push(getAtPath(p, 'label.text'));
         push(getAtPath(p, 'hint.text'));
+      } else if (type === 'signature-ack') {
+        push(getAtPath(p, 'label.text'));
+        push(getAtPath(p, 'hint.text'));
+        push(getAtPath(p, 'placeholder.text'));
+        push(getAtPath(p, 'actionLabel.text'));
+        push(getAtPath(p, 'clearLabel.text'));
+        push(getAtPath(p, 'statusSignedText.text'));
+        push(getAtPath(p, 'statusUnsignedText.text'));
       } else if (isChoice(type)) {
         if (type === 'select') {
           push(getAtPath(p, 'label.text'));
@@ -221,6 +229,14 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       } else if (isFileUpload(type)) {
         addTasksFor(ci, p, 'label.text');
         addTasksFor(ci, p, 'hint.text');
+      } else if (type === 'signature-ack') {
+        addTasksFor(ci, p, 'label.text');
+        addTasksFor(ci, p, 'hint.text');
+        addTasksFor(ci, p, 'placeholder.text');
+        addTasksFor(ci, p, 'actionLabel.text');
+        addTasksFor(ci, p, 'clearLabel.text');
+        addTasksFor(ci, p, 'statusSignedText.text');
+        addTasksFor(ci, p, 'statusUnsignedText.text');
       } else if (isChoice(type)) {
         if (type === 'select') addTasksFor(ci, p, 'label.text'); else addTasksFor(ci, p, 'fieldset.legend.text');
         addTasksFor(ci, p, 'hint.text');
@@ -363,6 +379,14 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
         } else if (isFileUpload(type)) {
           rows.push({ label: 'Label', path: 'label.text' });
           rows.push({ label: 'Hint', path: 'hint.text' });
+        } else if (type === 'signature-ack') {
+          rows.push({ label: 'Label', path: 'label.text' });
+          rows.push({ label: 'Hint', path: 'hint.text' });
+          rows.push({ label: 'Placeholder', path: 'placeholder.text' });
+          rows.push({ label: 'Sign Button Label', path: 'actionLabel.text' });
+          rows.push({ label: 'Clear Button Label', path: 'clearLabel.text' });
+          rows.push({ label: 'Signed Status Text', path: 'statusSignedText.text' });
+          rows.push({ label: 'Unsigned Status Text', path: 'statusUnsignedText.text' });
         } else if (type === 'select') {
           rows.push({ label: 'Label', path: 'label.text' });
           rows.push({ label: 'Hint', path: 'hint.text' });

@@ -36,6 +36,8 @@ function seedI18nDefaults(props, lang = 'en') {
   const clone = JSON.parse(JSON.stringify(props));
   const translationPaths = [
     'label.text','hint.text','errorMessage.text','value',
+    'actionLabel.text','clearLabel.text','placeholder.text','statusSignedText.text','statusUnsignedText.text',
+    'props.label.text','props.hint.text','props.actionLabel.text','props.clearLabel.text','props.placeholder.text','props.statusSignedText.text','props.statusUnsignedText.text',
     'charCountSingular','charCountPlural','wordCountSingular','wordCountPlural'
   ];
   const setPath = (obj, path, val) => {
@@ -578,37 +580,42 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
       // Post-process HTML for signature-ack to provide working-area interactive approximation
       const lowerType = String(comp?.template_key || comp?.type || '').toLowerCase();
       if (lowerType === 'signature-ack') {
-        const labelText = (() => {
-          const lbl = comp?.props?.label?.text;
-          if (typeof lbl === 'string') return lbl;
-          if (lbl && typeof lbl === 'object') return lbl[previewLang] || lbl.en || lbl.fr || '';
-          return comp?.label || '';
-        })();
-        const hintText = (() => {
-          const h = comp?.props?.hint?.text;
-          if (typeof h === 'string') return h;
-          if (h && typeof h === 'object') return h[previewLang] || h.en || h.fr || '';
-          return '';
-        })();
-        const placeholder = (() => {
-          const p = comp?.props?.placeholder;
-          if (typeof p === 'string') return p;
-          if (p && typeof p === 'object') return p[previewLang] || p.en || p.fr || '';
-          return 'Type your full name';
-        })();
+        const resolveI18n = (val, fallback = '') => {
+          if (!val) return fallback;
+          if (typeof val === 'string') return val;
+          if (typeof val === 'object') {
+            if (typeof val.text !== 'undefined') return resolveI18n(val.text, fallback);
+            return resolveI18n(val[previewLang] || val.en || val.fr || Object.values(val).find(v => typeof v === 'string'), fallback);
+          }
+          return fallback;
+        };
+        const labelText = resolveI18n(comp?.props?.label, resolveI18n(comp?.label, ''));
+        const hintText = resolveI18n(comp?.props?.hint, '');
+        const placeholder = resolveI18n(comp?.props?.placeholder, 'Type your full name');
+        const labelClass = (comp?.props?.label && comp.props.label.classes) ? comp.props.label.classes : '';
+        const paddingScale = {
+          s: { py: 6, px: 18, minHeight: 44 },
+          m: { py: 22, px: 30, minHeight: 68 },
+          l: { py: 38, px: 40, minHeight: 94 },
+          xl: { py: 54, px: 52, minHeight: 120 },
+        };
+        const padKey = String(comp?.props?.boxPadding || 'm').toLowerCase();
+        const pad = paddingScale[padKey] || paddingScale.m;
+        const statusSigned = resolveI18n(comp?.props?.statusSignedText, 'Signed');
+        const statusUnsigned = resolveI18n(comp?.props?.statusUnsignedText, 'Not signed');
         inner = (
           <div className="govuk-form-group" data-sig-preview="1" style={{ marginBottom: 16 }}>
-            {labelText && <label className="govuk-label" style={{ fontWeight: 600 }}>{labelText}</label>}
+            {labelText && <label className={`govuk-label${labelClass ? ' ' + labelClass : ''}`} style={{ fontWeight: labelClass ? undefined : 600 }}>{labelText}</label>}
             {hintText && <div className="govuk-hint" style={{ marginBottom: 4 }}>{hintText}</div>}
-            <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-              <div style={{ flex:'0 0 34%', minWidth:260, position:'relative' }}>
-                <input type="text" className="govuk-input" placeholder={placeholder} style={{ width:'100%', background:'#fff', border:'2px solid #0b0c0c', borderRadius:6, padding:'14px 16px', boxShadow:'0 1px 2px rgba(0,0,0,0.08)' }} disabled value="" onChange={()=>{}} />
-                <div style={{ position:'absolute', top:6, right:10, fontSize:11, letterSpacing:0.5, color:'#888' }}>PREVIEW</div>
+            <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+              <div style={{ flex:'0 0 34%', minWidth:260, maxWidth:420, position:'relative' }}>
+                <input type="text" className="govuk-input" placeholder={placeholder} style={{ width:'100%', background:'#fff', border:'2px solid #0b0c0c', borderRadius:6, padding:`${pad.py}px ${pad.px}px`, textAlign:'center', minHeight: pad.minHeight, boxShadow:'0 1px 2px rgba(0,0,0,0.08)' }} disabled value="" onChange={()=>{}} />
               </div>
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                <button type="button" disabled className="govuk-button govuk-button--secondary" style={{ margin:0 }}>Sign Now</button>
-                <button type="button" disabled className="govuk-link" style={{ background:'none', border:'none', padding:0 }}>Clear</button>
+              <div style={{ display:'flex', alignItems:'center', gap:8, height: pad.minHeight }}>
+                <button type="button" disabled className="govuk-button" style={{ margin:0, height: pad.minHeight, display:'flex', alignItems:'center', justifyContent:'center' }}>{resolveI18n(comp?.props?.actionLabel, 'Sign Now')}</button>
+                <button type="button" disabled className="govuk-button govuk-button--warning" style={{ margin:0, height: pad.minHeight, display:'flex', alignItems:'center', justifyContent:'center' }}>{resolveI18n(comp?.props?.clearLabel, 'Clear')}</button>
               </div>
+              <div className="govuk-hint signature-ack__status" style={{ flexBasis:'100%', marginTop:4 }}>{statusUnsigned}</div>
             </div>
           </div>
         );

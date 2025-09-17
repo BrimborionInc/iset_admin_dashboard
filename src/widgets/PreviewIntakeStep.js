@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Box, Header, ButtonDropdown, SpaceBetween, Link } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import PreviewIntakeStepWidgetHelp from '../helpPanelContents/previewIntakeStepWidgetHelp';
@@ -37,64 +37,8 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
     return val;
   };
 
-  const buildTransformedHtml = useCallback((doc) => {
-    // Try to inject script before </body> in a case-insensitive, whitespace-tolerant way.
-    const injection = `\n<script>(function(){function x(){try{var roots=document.querySelectorAll('[data-component-type="signature-ack"], .signature-ack');if(!roots.length){return;}roots.forEach(function(root){if(root.__sigTransformed) return; root.__sigTransformed=true; var input=root.querySelector('input[type=text]'); if(!input) return; var btn=root.querySelector('button'); if(!btn){var b=document.createElement('button'); b.type='button'; b.className='govuk-button govuk-button--secondary'; b.textContent='Sign'; b.disabled=true; btn=b; root.appendChild(btn);} var wrap=document.createElement('div'); wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.gap='12px'; var box=input; box.style.width='100%'; box.style.background='#fff'; box.style.border='2px solid #0b0c0c'; box.style.borderRadius='6px'; box.style.padding='14px 16px'; box.style.boxShadow='0 1px 2px rgba(0,0,0,0.08)'; var holder=document.createElement('div'); holder.style.flex='0 0 34%'; holder.style.minWidth='260px'; box.parentNode.insertBefore(wrap, box); holder.appendChild(box); wrap.appendChild(holder); btn.style.margin='0'; wrap.appendChild(btn);});}catch(e){/* silent */}} if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',x);}else{x();} setTimeout(x,60); setTimeout(x,250);})();</script>`;
-    const bodyCloseRegex = /<\/body>\s*$/i;
-    if (bodyCloseRegex.test(doc)) {
-      return doc.replace(bodyCloseRegex, injection + '</body>');
-    }
-    return doc + injection; // fallback append
-  }, []);
 
-  // Expose a runtime (iframe onload) transformation as a safety net if injection fails
-  const runtimeTransform = useCallback((iframe) => {
-    if (!iframe?.contentDocument) return;
-    try {
-      const d = iframe.contentDocument;
-      const roots = d.querySelectorAll('[data-component-type="signature-ack"], .signature-ack, .govuk-form-group');
-      roots.forEach(root => {
-        if (root.__sigTransformed) return;
-        const input = root.querySelector('input[type=text]');
-        if (!input) return;
-        // Heuristic: only treat as signature if placeholder or name suggests
-        const nameAttr = (input.getAttribute('name')||'').toLowerCase();
-        const placeholder = (input.getAttribute('placeholder')||'').toLowerCase();
-        if (!root.matches('[data-component-type="signature-ack"], .signature-ack') && !nameAttr.includes('signature') && !placeholder.includes('signature')) return;
-        root.__sigTransformed = true;
-        let btn = root.querySelector('button');
-        if (!btn) {
-          btn = d.createElement('button');
-          btn.type = 'button';
-          btn.className = 'govuk-button govuk-button--secondary';
-          btn.textContent = 'Sign';
-          btn.disabled = true;
-          root.appendChild(btn);
-        }
-        const wrap = d.createElement('div');
-        wrap.style.display = 'flex';
-        wrap.style.alignItems = 'center';
-        wrap.style.gap = '12px';
-        const holder = d.createElement('div');
-        holder.style.flex = '0 0 34%';
-        holder.style.minWidth = '260px';
-        const box = input;
-        box.style.width = '100%';
-        box.style.background = '#fff';
-        box.style.border = '2px solid #0b0c0c';
-        box.style.borderRadius = '6px';
-        box.style.padding = '14px 16px';
-        box.style.boxShadow = '0 1px 2px rgba(0,0,0,0.08)';
-        box.parentNode.insertBefore(wrap, box);
-        holder.appendChild(box);
-        wrap.appendChild(holder);
-        btn.style.margin = '0';
-        wrap.appendChild(btn);
-      });
-    } catch (_) { /* silent */ }
-  }, []);
 
-  const iframeRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false; // fetch + render lifecycle guard
@@ -155,8 +99,7 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
         const doc = await prevRes.text(); // server returns full GOV.UK-wrapped document
         if (!prevRes.ok) throw new Error(`Preview HTTP ${prevRes.status}`);
         if (!cancelled) {
-          const transformed = buildTransformedHtml(doc);
-          setHtml(transformed);
+          setHtml(doc);
         }
       } catch (e) {
         if (!cancelled) setError(String(e.message || e));
@@ -166,7 +109,7 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
     }
     run();
     return () => { cancelled = true; };
-  }, [selectedBlockStep?.id, lang, buildTransformedHtml]);
+  }, [selectedBlockStep?.id, lang]);
 
   // Make iframe height follow the card size
   useEffect(() => {
@@ -256,11 +199,9 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
           }}
         >
           <iframe
-            ref={iframeRef}
             title="Preview"
             style={{ width: '100%', height: `${frameH}px`, border: 0, display: 'block' }}
             srcDoc={html}
-            onLoad={() => runtimeTransform(iframeRef.current)}
           />
         </Box>
       )}

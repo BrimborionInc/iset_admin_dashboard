@@ -5,34 +5,182 @@
   "description": "Captures an attested typed name that is explicitly locked by clicking a Sign action; stores { signed: true, name } object.",
   "status": "active",
   "default_props": {
-    "name": "applicantSignature",
+    "name": "applicant_signature",
     "id": "",
-    "label": { "text": "Type your full name to sign" },
-    "hint": { "text": "Enter your full legal name then press Sign." },
-    "actionLabel": { "text": "Sign Now" },
-    "clearLabel": { "text": "Clear" },
-    "placeholder": { "text": "First Last" },
+    "label": {
+      "text": "Type your full name to sign",
+      "classes": "govuk-label--m"
+    },
+    "hint": {
+      "text": "Enter your full legal name then press Sign."
+    },
+    "actionLabel": {
+      "text": "Sign Now"
+    },
+    "clearLabel": {
+      "text": "Clear"
+    },
+    "placeholder": {
+      "text": "First Last"
+    },
     "handwritingFont": "cursive",
     "required": true,
-    "classes": "govuk-input"
+    "statusSignedText": {
+      "text": "Signed"
+    },
+    "statusUnsignedText": {
+      "text": "Not signed"
+    },
+    "formGroup": {
+      "classes": ""
+    },
+    "boxPadding": "m"
   },
   "prop_schema": [
-    { "key": "name", "path": "name", "type": "text", "label": "Data Key" },
-    { "key": "label.text", "path": "label.text", "type": "text", "label": "Label Text" },
-    { "key": "hint.text", "path": "hint.text", "type": "text", "label": "Hint Text" },
-    { "key": "actionLabel.text", "path": "actionLabel.text", "type": "text", "label": "Sign Button Label" },
-    { "key": "clearLabel.text", "path": "clearLabel.text", "type": "text", "label": "Clear Button Label" },
-    { "key": "placeholder.text", "path": "placeholder.text", "type": "text", "label": "Placeholder Text" },
-    { "key": "handwritingFont", "path": "handwritingFont", "type": "text", "label": "Handwriting Font" },
-    { "key": "required", "path": "required", "type": "select", "label": "Required?", "options": [ { "label": "Yes", "value": true }, { "label": "No", "value": false } ] },
-    { "key": "classes", "path": "classes", "type": "select", "label": "Input Classes", "options": [
-      { "label": "Default (govuk-input)", "value": "govuk-input" },
-      { "label": "Width 20", "value": "govuk-input govuk-input--width-20" },
-      { "label": "Width 10", "value": "govuk-input govuk-input--width-10" },
-      { "label": "Width 5", "value": "govuk-input govuk-input--width-5" }
-    ] }
+    {
+      "key": "name",
+      "path": "name",
+      "type": "text",
+      "label": "Data Key"
+    },
+    {
+      "key": "label.text",
+      "path": "label.text",
+      "type": "text",
+      "label": "Label Text"
+    },
+    {
+      "key": "label.classes",
+      "path": "label.classes",
+      "type": "select",
+      "label": "Label Classes",
+      "options": [
+        {
+          "label": "Default (none)",
+          "value": ""
+        },
+        {
+          "label": "Small (s)",
+          "value": "govuk-label--s"
+        },
+        {
+          "label": "Medium (m)",
+          "value": "govuk-label--m"
+        },
+        {
+          "label": "Large (l)",
+          "value": "govuk-label--l"
+        },
+        {
+          "label": "Extra Large (xl)",
+          "value": "govuk-label--xl"
+        },
+        {
+          "label": "Visually Hidden",
+          "value": "govuk-visually-hidden"
+        }
+      ]
+    },
+    {
+      "key": "hint.text",
+      "path": "hint.text",
+      "type": "text",
+      "label": "Hint Text"
+    },
+    {
+      "key": "actionLabel.text",
+      "path": "actionLabel.text",
+      "type": "text",
+      "label": "Sign Button Label"
+    },
+    {
+      "key": "clearLabel.text",
+      "path": "clearLabel.text",
+      "type": "text",
+      "label": "Clear Button Label"
+    },
+    {
+      "key": "placeholder.text",
+      "path": "placeholder.text",
+      "type": "text",
+      "label": "Placeholder Text"
+    },
+    {
+      "key": "statusSignedText.text",
+      "path": "statusSignedText.text",
+      "type": "text",
+      "label": "Signed Status Text"
+    },
+    {
+      "key": "statusUnsignedText.text",
+      "path": "statusUnsignedText.text",
+      "type": "text",
+      "label": "Unsigned Status Text"
+    },
+    {
+      "key": "handwritingFont",
+      "path": "handwritingFont",
+      "type": "text",
+      "label": "Handwriting Font"
+    },
+    {
+      "key": "required",
+      "path": "required",
+      "type": "select",
+      "label": "Required?",
+      "options": [
+        {
+          "label": "Yes",
+          "value": true
+        },
+        {
+          "label": "No",
+          "value": false
+        }
+      ]
+    },
+    {
+      "key": "boxPadding",
+      "path": "boxPadding",
+      "type": "select",
+      "label": "Box Padding",
+      "options": [
+        {
+          "label": "Small",
+          "value": "s"
+        },
+        {
+          "label": "Medium",
+          "value": "m"
+        },
+        {
+          "label": "Large",
+          "value": "l"
+        },
+        {
+          "label": "Extra Large",
+          "value": "xl"
+        }
+      ]
+    },
+    {
+      "key": "formGroup.classes",
+      "path": "formGroup.classes",
+      "type": "select",
+      "label": "Form Group Classes",
+      "options": [
+        {
+          "label": "Default (none)",
+          "value": ""
+        },
+        {
+          "label": "Error State",
+          "value": "govuk-form-group--error"
+        }
+      ]
+    }
   ],
   "has_options": false,
   "option_schema": null,
-  "export_njk_template": "{% from \"govuk/components/input/macro.njk\" import govukInput %}\n{% set cls = props.classes or 'govuk-input' %}\n{% if 'govuk-input' not in cls %}{% set cls = 'govuk-input ' + cls %}{% endif %}\n{% set isSigned = (value and value.signed) %}\n{% set effectiveValue = isSigned and value.name or '' %}\n<div class=\"app-signature-ack\">\n  {{ govukInput({\n    name: props.name,\n    id: props.id or props.name,\n    label: props.label,\n    hint: props.hint,\n    classes: cls + (isSigned and ' sig-locked' or ''),\n    value: effectiveValue,\n    attributes: { 'data-component': 'signature-ack' }\n  }) }}\n  {# Authoring/export context does not implement interactive Sign/Clear; runtime React renderer handles logic. #}\n</div>"
+  "export_njk_template": "{% set paddingScale = { 's': { 'y': '0.35rem', 'x': '1.25rem' }, 'm': { 'y': '1.35rem', 'x': '1.85rem' }, 'l': { 'y': '2.35rem', 'x': '2.45rem' }, 'xl': { 'y': '3.35rem', 'x': '3.05rem' } } %}\n{% set padKey = props.boxPadding or 'm' %}\n{% set pad = paddingScale[padKey] or paddingScale['m'] %}\n{% set padY = pad.y %}\n{% set padX = pad.x %}\n{% set labelText = props.label and (props.label.text or props.label.en or props.label.fr) %}\n{% set labelClass = props.label and props.label.classes %}\n{% set hintText = props.hint and (props.hint.text or props.hint.en or props.hint.fr) %}\n{% set placeholder = props.placeholder and (props.placeholder.text or props.placeholder.en or props.placeholder.fr) %}\n{% set actionLabel = props.actionLabel and (props.actionLabel.text or props.actionLabel.en or props.actionLabel.fr) or 'Sign' %}\n{% set clearLabel = props.clearLabel and (props.clearLabel.text or props.clearLabel.en or props.clearLabel.fr) or 'Clear' %}\n{% set statusSigned = props.statusSignedText and (props.statusSignedText.text or props.statusSignedText.en or props.statusSignedText.fr) or props.statusSignedText or 'Signed' %}\n{% set statusUnsigned = props.statusUnsignedText and (props.statusUnsignedText.text or props.statusUnsignedText.en or props.statusUnsignedText.fr) or props.statusUnsignedText or 'Not signed' %}\n<div class=\"app-signature-ack\">\n  {% if labelText %}<label class=\"govuk-label{{ labelClass and (' ' + labelClass) or '' }}\" for=\"{{ props.id or props.name }}\">{{ labelText }}</label>{% endif %}\n  {% if hintText %}<div class=\"govuk-hint\">{{ hintText }}</div>{% endif %}\n  <div class=\"signature-ack__row\" style=\"display:flex;align-items:center;gap:12px;flex-wrap:wrap;\">\n    <div class=\"signature-ack__input-wrapper\" style=\"flex:0 0 33%;min-width:260px;max-width:420px;\">\n      <input class=\"govuk-input signature-ack__input\" id=\"{{ props.id or props.name }}\" name=\"{{ props.name }}\" type=\"text\" value=\"{{ props.value or '' }}\"{% if placeholder %} placeholder=\"{{ placeholder }}\"{% endif %}{% if props.required %} aria-required=\"true\" required{% endif %} style=\"padding: {{ padY }} {{ padX }}; text-align:center; min-height: calc({{ padY }} * 2 + 1.25rem); width:100%;\" data-component=\"signature-ack\" />\n    </div>\n    <div class=\"signature-ack__actions\" style=\"display:flex;gap:8px;align-items:center;\">\n      <button type=\"button\" class=\"govuk-button\">{{ actionLabel }}</button>\n      <button type=\"button\" class=\"govuk-button govuk-button--warning\">{{ clearLabel }}</button>\n    </div>\n    <div class=\"signature-ack__status govuk-hint\" data-signature-status style=\"flex-basis:100%;margin-top:4px;\">{% if props.value %}{{ statusSigned }}{% else %}{{ statusUnsigned }}{% endif %}</div>\n  </div>\n</div>"
 }

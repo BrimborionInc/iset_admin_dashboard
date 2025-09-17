@@ -1,9 +1,13 @@
 const path = require('path');
 const { maskName } = require('./src/utils/utils'); // Update the import statement
 const nunjucks = require("nunjucks");
+const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
 
 // Configure Nunjucks to use GOV.UK Frontend components
-nunjucks.configure("node_modules/govuk-frontend/dist/", {
+nunjucks.configure([
+  path.join(__dirname, 'src', 'server-macros'),
+  path.join(__dirname, 'node_modules', 'govuk-frontend', 'dist'),
+], {
   autoescape: true,
   watch: false,
   noCache: true,
@@ -1756,8 +1760,9 @@ let env;
 try {
   // Reconfigure with additional search paths without breaking existing one.
   env = nunjucks.configure([
-    path.join(__dirname, 'node_modules/govuk-frontend/dist'),
-    path.join(__dirname, 'node_modules/govuk-frontend')
+    path.join(__dirname, 'src', 'server-macros'),
+    path.join(__dirname, 'node_modules', 'govuk-frontend', 'dist'),
+    path.join(__dirname, 'node_modules', 'govuk-frontend')
   ], { autoescape: true, noCache: true });
 } catch (e) {
   console.warn('Nunjucks reconfigure for preview failed, using existing instance:', e.message);
@@ -1765,10 +1770,40 @@ try {
 }
 
 // Helper: render a single component template to HTML using export_njk_template from DB
+function renderRegistryComponent(entry, comp) {
+  if (!entry) return null;
+  const props = typeof entry.prepareProps === 'function'
+    ? entry.prepareProps(comp)
+    : ((comp && typeof comp.props === 'object' && comp.props !== null) ? { ...comp.props } : {});
+  const context = { props, component: comp };
+  if (entry.macro) {
+    const macroConfig = entry.macro;
+    const macroFile = macroConfig.file;
+    const macroName = macroConfig.name;
+    if (!macroFile || !macroName) {
+      throw new Error('Macro configuration requires file and name');
+    }
+    const tpl = `{% from "${macroFile}" import ${macroName} %}{{ ${macroName}(props) }}`;
+    return env.renderString(tpl, context);
+  }
+  if (typeof entry.render === 'function') {
+    return entry.render({ env, component: comp, props, context, renderComponentHtml });
+  }
+  throw new Error('Unsupported registry entry');
+}
+
 async function renderComponentHtml(comp, depth = 0) {
   if (depth > 4) return '<!-- max depth reached -->';
   const templateKey = comp.template_key || comp.templateKey || comp.templateKey || null;
   const type = comp.type || null;
+  const registryEntry = getComponentRenderer({ templateKey, type });
+  if (registryEntry) {
+    try {
+      return renderRegistryComponent(registryEntry, comp);
+    } catch (e) {
+      console.warn(`registry render failed for ${templateKey || type}: ${e.message}`);
+    }
+  }
   let rows;
   if (templateKey) {
     [rows] = await pool.query(

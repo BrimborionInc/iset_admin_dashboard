@@ -18,23 +18,45 @@ function SignatureAckPreview({ comp: c, answerObj, lang, setAnswer, errorMsg }) 
   const signedName = isSigned ? (signedObj.name || '') : '';
   const [localName, setLocalName] = React.useState(isSigned ? signedName : '');
   React.useEffect(() => { if (!isSigned && signedName === '') setLocalName(''); }, [isSigned, signedName]);
-  const actionLabel = (c.actionLabel && (c.actionLabel[lang] || c.actionLabel.en || c.actionLabel.fr)) || 'Sign Now';
-  const clearLabel = (c.clearLabel && (c.clearLabel[lang] || c.clearLabel.en || c.clearLabel.fr)) || 'Clear';
-  const placeholder = (c.placeholder && (c.placeholder[lang] || c.placeholder.en || c.placeholder.fr)) || 'Type your full name';
+  const resolve = (val, fallback = '') => {
+    if (!val) return fallback;
+    if (typeof val === 'string') return val;
+    if (typeof val === 'object') {
+      if (typeof val.text !== 'undefined') return resolve(val.text, fallback);
+      const candidate = val[lang] || val.en || val.fr || Object.values(val).find(v => typeof v === 'string');
+      return resolve(candidate, fallback);
+    }
+    return fallback;
+  };
+  const actionLabel = resolve(c.actionLabel || c.props?.actionLabel, 'Sign Now');
+  const clearLabel = resolve(c.clearLabel || c.props?.clearLabel, 'Clear');
+  const placeholder = resolve(c.placeholder || c.props?.placeholder, 'Type your full name');
   const required = !!(c.required || c.props?.required);
   const handwritingFont = c.handwritingFont || c.props?.handwritingFont || 'cursive';
+  const paddingScale = {
+    s: { py: 6, px: 18, minHeight: 44 },
+    m: { py: 22, px: 30, minHeight: 68 },
+    l: { py: 38, px: 40, minHeight: 94 },
+    xl: { py: 54, px: 52, minHeight: 120 }
+  };
+  const padKey = String(c.boxPadding || c.props?.boxPadding || 'm').toLowerCase();
+  const pad = paddingScale[padKey] || paddingScale.m;
+  const statusSigned = resolve(c.statusSignedText || c.props?.statusSignedText, 'Signed');
+  const statusUnsigned = resolve(c.statusUnsignedText || c.props?.statusUnsignedText, 'Not signed');
   const canSign = !isSigned && localName.trim().length > 0;
   const doSign = () => { if (!canSign) return; setAnswer(c, { signed: true, name: localName.trim() }); };
   const doClear = () => { setLocalName(''); setAnswer(c, undefined); };
-  const labelValue = c.label && (typeof c.label === 'object' ? (c.label[lang] || c.label.en || c.label.fr || Object.values(c.label)[0]) : c.label);
-  const hintValue = c.hint && (typeof c.hint === 'object' ? (c.hint[lang] || c.hint.en || c.hint.fr || Object.values(c.hint)[0]) : c.hint);
+  const labelConfig = c.props?.label || {};
+  const labelValue = resolve(labelConfig, resolve(c.label, ''));
+  const labelClass = typeof labelConfig.classes === 'string' ? labelConfig.classes : (typeof c.labelClass === 'string' ? c.labelClass : '');
+  const hintValue = resolve(c.hint || c.props?.hint, '');
   return (
-    <div className={`govuk-form-group${errorMsg ? ' govuk-form-group--error' : ''}`} style={{ marginBottom: 20 }}>
-      {labelValue && <label className="govuk-label" htmlFor={key}>{labelValue}</label>}
+    <div className={`govuk-form-group${errorMsg ? ' govuk-form-group--error' : ''}${c.formGroupClass ? ' ' + c.formGroupClass : ''}`} style={{ marginBottom: 20 }}>
+      {labelValue && <label className={`govuk-label${labelClass ? ' ' + labelClass : ''}`} htmlFor={key}>{labelValue}</label>}
       {hintValue && <div className="govuk-hint" id={`${key}-hint`}>{hintValue}</div>}
       {errorMsg && <p className="govuk-error-message" id={`${key}-error`}><span className="govuk-visually-hidden">Error:</span> {errorMsg}</p>}
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginTop:4 }}>
-        <div style={{ flex:'0 0 34%', minWidth:260, position:'relative' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:12, marginTop:4, flexWrap:'wrap' }}>
+        <div style={{ flex:'0 0 34%', minWidth:260, maxWidth:420, position:'relative' }}>
           <input
             id={key}
             name={key}
@@ -45,9 +67,11 @@ function SignatureAckPreview({ comp: c, answerObj, lang, setAnswer, errorMsg }) 
               background:'#fff',
               border:'2px solid #0b0c0c',
               borderRadius:6,
-              padding:'14px 16px',
+              padding:`${pad.py}px ${pad.px}px`,
               fontFamily: isSigned ? handwritingFont : undefined,
               fontSize: isSigned ? '1.25rem' : undefined,
+              textAlign:'center',
+              minHeight: pad.minHeight,
               boxShadow:'0 1px 2px rgba(0,0,0,0.08)'
             }}
             value={isSigned ? signedName : localName}
@@ -58,12 +82,12 @@ function SignatureAckPreview({ comp: c, answerObj, lang, setAnswer, errorMsg }) 
             aria-invalid={errorMsg ? 'true' : undefined}
             required={required}
           />
-          {isSigned && <div style={{ position:'absolute', top:6, right:10, fontSize:11, letterSpacing:0.5, color:'#555' }}>SIGNED</div>}
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          {!isSigned && <button type="button" className="govuk-button govuk-button--secondary" style={{ margin:0 }} disabled={!canSign} onClick={doSign}>{actionLabel}</button>}
-          {isSigned && <button type="button" className="govuk-link" onClick={doClear}>{clearLabel}</button>}
+        <div style={{ display:'flex', alignItems:'center', gap:8, height: pad.minHeight }}>
+          {!isSigned && <button type="button" className="govuk-button" style={{ margin:0, height: pad.minHeight, display:'flex', alignItems:'center', justifyContent:'center' }} disabled={!canSign} onClick={doSign}>{actionLabel}</button>}
+          {isSigned && <button type="button" className="govuk-button govuk-button--warning" style={{ margin:0, height: pad.minHeight, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={doClear}>{clearLabel}</button>}
         </div>
+        <div className="govuk-hint signature-ack__status" style={{ flexBasis:'100%', marginTop:4 }}>{isSigned ? statusSigned : statusUnsigned}</div>
       </div>
     </div>
   );
