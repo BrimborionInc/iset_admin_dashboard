@@ -26,6 +26,7 @@ const SUPPORTED_COMPONENT_TYPES = new Set([
   'character-count',
   'file-upload',
   'summary-list',
+  'signature-ack',
 ]);
 
 module.exports = { SUPPORTED_COMPONENT_TYPES };

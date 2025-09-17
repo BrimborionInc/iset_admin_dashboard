@@ -27,6 +27,36 @@ function safeParse(v, fallback) {
   try { return JSON.parse(v); } catch { return fallback; }
 }
 
+
+function toI18nObject(raw, fallback) {
+  if (!raw) {
+    if (!fallback) return undefined;
+    if (typeof fallback === 'string') return { en: fallback, fr: fallback };
+    if (typeof fallback === 'object') {
+      const en = typeof fallback.en === 'string' ? fallback.en : (typeof fallback.fr === 'string' ? fallback.fr : '');
+      const fr = typeof fallback.fr === 'string' ? fallback.fr : (typeof fallback.en === 'string' ? fallback.en : en);
+      return en || fr ? { en, fr } : undefined;
+    }
+    return undefined;
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return undefined;
+    return { en: trimmed, fr: trimmed };
+  }
+  if (typeof raw === 'object') {
+    if (typeof raw.text !== 'undefined') return toI18nObject(raw.text, fallback);
+    const en = typeof raw.en === 'string' && raw.en.trim() ? raw.en.trim() : undefined;
+    const fr = typeof raw.fr === 'string' && raw.fr.trim() ? raw.fr.trim() : undefined;
+    if (en || fr) {
+      return { en: en || fr || '', fr: fr || en || '' };
+    }
+  }
+  const str = String(raw).trim();
+  if (!str) return toI18nObject(fallback, undefined);
+  return { en: str, fr: str };
+}
+
 function deepMerge(a, b) {
   if (Array.isArray(a) || Array.isArray(b)) return b ?? a;
   if (a && typeof a === 'object' && b && typeof b === 'object') {
@@ -385,6 +415,22 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
           component.mask = String(props.inputMask).trim().toLowerCase();
         }
       }
+      if (tplType === 'signature-ack') {
+        const actionLabel = toI18nObject(props?.actionLabel, 'Sign Now');
+        if (actionLabel) component.actionLabel = actionLabel;
+        const clearLabel = toI18nObject(props?.clearLabel, 'Clear');
+        if (clearLabel) component.clearLabel = clearLabel;
+        const placeholder = toI18nObject(props?.placeholder, 'Type your full name');
+        if (placeholder) component.placeholder = placeholder;
+        const signedText = toI18nObject(props?.statusSignedText, 'Signed');
+        if (signedText) component.statusSignedText = signedText;
+        const unsignedText = toI18nObject(props?.statusUnsignedText, 'Not signed');
+        if (unsignedText) component.statusUnsignedText = unsignedText;
+        component.boxPadding = String(props?.boxPadding || 'm').toLowerCase();
+        if (props?.handwritingFont) component.handwritingFont = String(props.handwritingFont);
+        if (props?.formGroup?.classes) component.formGroupClass = String(props.formGroup.classes);
+      }
+
       if (tplType === 'file-upload') {
         if (typeof props?.multiple !== 'undefined') component.multiple = !!props.multiple;
         if (props?.accept) component.accept = String(props.accept);

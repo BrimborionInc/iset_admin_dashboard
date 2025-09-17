@@ -28,17 +28,30 @@
 
 {% macro signatureAck(props) %}
 {% set fieldId = props.id or props.name or 'signature_ack_' + (props._autoId or 'unknown') %}
-{% set actionLabel = props.actionLabel or 'Sign' %}
-{% set clearLabel = props.clearLabel or 'Clear' %}
-{% set placeholder = props.placeholder or '' %}
+{% set actionLabel = (props.actionLabel and (props.actionLabel.text or props.actionLabel.en or props.actionLabel.fr)) or props.actionLabel or 'Sign' %}
+{% set clearLabel = (props.clearLabel and (props.clearLabel.text or props.clearLabel.en or props.clearLabel.fr)) or props.clearLabel or 'Clear' %}
+{% set placeholder = (props.placeholder and (props.placeholder.text or props.placeholder.en or props.placeholder.fr)) or props.placeholder or '' %}
 {% set required = props.required %}
 {% set labelText = (props.label and (props.label.text or props.label.html)) or 'Signature' %}
 {% set hintText = props.hint and (props.hint.text or props.hint.html) %}
-<div class="signature-ack govuk-!-margin-bottom-6 {{ props.classes or '' }}" data-component="signature-ack" data-signature-name="{{ props.name }}">
-  <div class="signature-ack__row" style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;">
-    <div class="signature-ack__input-wrapper" style="flex:0 0 33%;min-width:260px;">
-      <label class="govuk-label" for="{{ fieldId }}">{{ labelText | safe }}</label>
-      {% if hintText %}<div class="govuk-hint">{{ hintText | safe }}</div>{% endif %}
+{% set statusSigned = (props.statusSignedText and (props.statusSignedText.text or props.statusSignedText.en or props.statusSignedText.fr)) or props.statusSignedText or 'Signed' %}
+{% set statusUnsigned = (props.statusUnsignedText and (props.statusUnsignedText.text or props.statusUnsignedText.en or props.statusUnsignedText.fr)) or props.statusUnsignedText or 'Not signed' %}
+{% set formGroupClass = props.formGroup and props.formGroup.classes %}
+{% set paddingScale = {
+  's': { 'y': '0.35rem', 'x': '1.25rem' },
+  'm': { 'y': '1.35rem', 'x': '1.85rem' },
+  'l': { 'y': '2.35rem', 'x': '2.45rem' },
+  'xl': { 'y': '3.35rem', 'x': '3.05rem' }
+} %}
+{% set padKey = (props.boxPadding or 'm') %}
+{% set pad = paddingScale[padKey] or paddingScale['m'] %}
+{% set padY = pad.y %}
+{% set padX = pad.x %}
+<div class="signature-ack govuk-!-margin-bottom-6 {{ formGroupClass or '' }}" data-component="signature-ack" data-signature-name="{{ props.name }}">
+  {% if labelText %}<label class="govuk-label{{ (props.label and props.label.classes) and (' '+props.label.classes) or '' }}" for="{{ fieldId }}">{{ labelText | safe }}</label>{% endif %}
+  {% if hintText %}<div class="govuk-hint">{{ hintText | safe }}</div>{% endif %}
+  <div class="signature-ack__row" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div class="signature-ack__input-wrapper" style="flex:0 0 33%;min-width:260px;max-width:420px;">
       <input
         class="govuk-input signature-ack__input"
         id="{{ fieldId }}"
@@ -49,10 +62,11 @@
         {% if required %}aria-required="true" required{% endif %}
         autocomplete="off"
         data-signature-input
+        style="padding: {{ padY }} {{ padX }}; text-align:center; min-height: calc({{ padY }} * 2 + 1.25rem); width:100%;"
       />
     </div>
-    <div class="signature-ack__actions" style="display:flex;gap:8px;">
-      <button type="button" class="govuk-button govuk-button--secondary signature-ack__sign-btn" data-signature-sign>
+    <div class="signature-ack__actions" style="display:flex;gap:8px;align-items:center;height:100%;">
+      <button type="button" class="govuk-button signature-ack__sign-btn" data-signature-sign>
         {{ actionLabel }}
       </button>
       <button type="button" class="govuk-button govuk-button--warning signature-ack__clear-btn" data-signature-clear>
@@ -60,7 +74,7 @@
       </button>
     </div>
     <div class="signature-ack__status govuk-hint" data-signature-status style="flex-basis:100%;margin-top:4px;">
-      {% if props.value %}Signed{% else %}Not signed{% endif %}
+      {% if props.value %}{{ statusSigned }}{% else %}{{ statusUnsigned }}{% endif %}
     </div>
   </div>
 </div>
