@@ -72,6 +72,10 @@ Refer to the component pattern docs in this directory (`component-*.md`) for dee
 4. A publish summary appears with file paths and commit hints for developers.
 5. Republish whenever step or workflow changes are ready for QA/UAT; the portal repo should be committed separately.
 
+## Testing
+- Run `npm test -- --watch=false` (Jest via `react-scripts`) after any authoring UI change. This exercises smoke suites in `src/**/*.test.js` and must stay green before publish.
+- When signature-related components change, exercise the interactive preview (drag a signature step into a test workflow) and confirm `WorkflowPreviewWidget` transitions through unsigned -> signed -> cleared states.
+- For workflow normalization or publish-pipeline updates, run the portal smoke suite (documented in `ISET-intake/docs/features/intake-form.md`).
 ## Portal Consumption & QA
 - The public portal dynamic runner (`ISET-intake/src/pages/DynamicTest.js`) imports `intakeFormSchema.json` at build time. Branching, validation, conditional reveals, and storage key mapping mirror admin previews.
 - The meta file feeds smoke tests (`utils/validatePublishedSchema.js`, `__tests__/schemaValidation.test.js`) and dashboard statistics.
