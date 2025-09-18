@@ -9,7 +9,7 @@ import {
 import Board from '@cloudscape-design/board-components/board';
 import IntakeStepTableWidget from '../widgets/IntakeStepTableWidget'; // Import the renamed IntakeStepTableWidget
 import PreviewIntakeStep from '../widgets/PreviewIntakeStep'; // Import the renamed PreviewIntakeStep
-import PreviewNunjucks from '../widgets/PreviewNunjucks'; // Import the PreviewNunjucks widget
+import PreviewStepJson from '../widgets/PreviewStepJSON'; // Import the Step JSON preview widget
 import IntakeStepLibraryWidgetHelp from '../helpPanelContents/intakeStepLibraryWidgetHelp';
 import PreviewIntakeStepWidgetHelp from '../helpPanelContents/previewIntakeStepWidgetHelp';
 import PreviewNunjucksWidgetHelp from '../helpPanelContents/previewNunjucksWidgetHelp';
@@ -82,7 +82,7 @@ const ManageIntakeSteps = ({ header, headerInfo, toggleHelpPanel, updateBreadcru
             );
           case 'previewNunjucks':
             return (
-              <PreviewNunjucks
+              <PreviewStepJson
                 actions={actions}
                 selectedBlockStep={selectedBlockStep}
                 toggleHelpPanel={toggleHelpPanel}
