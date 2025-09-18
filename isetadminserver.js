@@ -356,7 +356,7 @@ app.post('/api/ai/chat', async (req, res) => {
 
 // PATCH /api/config/runtime/ai-model  { model: "model-name" }
 // Non-persistent (in-memory) override for active session; requires System Administrator role when auth enabled
-app.patch('/api/config/runtime/ai-model', (req, res) => {
+app.patch('/api/config/runtime/ai-model', async (req, res) => {
   try {
     const body = req.body || {};
     const nextModel = (body.model || '').trim();
@@ -412,6 +412,13 @@ app.patch('/api/config/runtime/ai-model', (req, res) => {
       // Fall back to in-memory override if file write fails
       global.__AI_MODEL_OVERRIDE = nextModel;
       console.warn('[ai-model] Failed to persist to .env, using in-memory override only:', fileErr.message);
+    }
+    // Also persist to shared runtime_config for public scope so portal can consume
+    try {
+      await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+      await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.model',JSON_OBJECT('model',?)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [ nextModel ]);
+    } catch (dbErr) {
+      console.warn('[ai-model] DB persist failed (non-fatal):', dbErr.message);
     }
     // Lightweight audit log (stdout). Could be extended to DB later.
     console.log('[audit] ai-model-change', JSON.stringify({ when: new Date().toISOString(), prev, next: nextModel, by: req.auth?.sub || 'dev-bypass', role: effectiveRole || null, persisted }));
@@ -475,7 +482,7 @@ function persistEnvUpdates(updates) {
 }
 
 // PATCH AI generation params
-app.patch('/api/config/runtime/ai-params', (req, res) => {
+app.patch('/api/config/runtime/ai-params', async (req, res) => {
   try {
     const body = req.body || {};
     const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
@@ -506,13 +513,25 @@ app.patch('/api/config/runtime/ai-params', (req, res) => {
     if (frequency_penalty !== null) updates.OPENROUTER_FREQUENCY_PENALTY = frequency_penalty;
     if (!Object.keys(updates).length) return res.status(400).json({ error: 'no_updates' });
     try { persistEnvUpdates(updates); } catch (e) { return res.status(500).json({ error: 'persist_failed', message: e.message }); }
+    try {
+      const payload = {};
+      if (updates.OPENROUTER_TEMPERATURE !== undefined) payload.temperature = Number(updates.OPENROUTER_TEMPERATURE);
+      if (updates.OPENROUTER_TOP_P !== undefined) payload.top_p = Number(updates.OPENROUTER_TOP_P);
+      if (updates.OPENROUTER_PRESENCE_PENALTY !== undefined) payload.presence_penalty = Number(updates.OPENROUTER_PRESENCE_PENALTY);
+      if (updates.OPENROUTER_FREQUENCY_PENALTY !== undefined) payload.frequency_penalty = Number(updates.OPENROUTER_FREQUENCY_PENALTY);
+      if (updates.OPENROUTER_MAX_TOKENS !== undefined) payload.max_tokens = Number(updates.OPENROUTER_MAX_TOKENS);
+      await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+      await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.params',JSON_OBJECT('temperature',?, 'top_p',?, 'presence_penalty',?, 'frequency_penalty',?, 'max_tokens', ?)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [ payload.temperature ?? null, payload.top_p ?? null, payload.presence_penalty ?? null, payload.frequency_penalty ?? null, payload.max_tokens ?? null ]);
+    } catch (dbErr) {
+      console.warn('[ai-params] DB persist failed (non-fatal):', dbErr.message);
+    }
     console.log('[audit] ai-params-change', JSON.stringify({ when: new Date().toISOString(), updates, by: req.auth?.sub || 'dev-bypass', role }));
     res.json({ ok: true, updates });
   } catch (e) { res.status(500).json({ error: 'ai_params_update_failed', message: e.message }); }
 });
 
 // PATCH AI fallback chain (comma-separated list)
-app.patch('/api/config/runtime/ai-fallbacks', (req, res) => {
+app.patch('/api/config/runtime/ai-fallbacks', async (req, res) => {
   try {
     const body = req.body || {};
     const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
@@ -527,6 +546,12 @@ app.patch('/api/config/runtime/ai-fallbacks', (req, res) => {
     const cleaned = list.map(s => String(s).trim()).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
     for (const mdl of cleaned) { if (!isModelAllowed(mdl)) return res.status(400).json({ error: 'unsupported_model_in_fallbacks', model: mdl }); }
     try { persistEnvUpdates({ OPENROUTER_FALLBACK_MODELS: cleaned.join(',') }); } catch (e) { return res.status(500).json({ error: 'persist_failed', message: e.message }); }
+    try {
+      await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+      await pool.query("INSERT INTO iset_runtime_config (scope,k,v) VALUES ('public','ai.fallbacks', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v)", [ JSON.stringify(cleaned) ]);
+    } catch (dbErr) {
+      console.warn('[ai-fallbacks] DB persist failed (non-fatal):', dbErr.message);
+    }
     console.log('[audit] ai-fallbacks-change', JSON.stringify({ when: new Date().toISOString(), fallbackModels: cleaned, by: req.auth?.sub || 'dev-bypass', role }));
     res.json({ ok: true, fallbackModels: cleaned });
   } catch (e) { res.status(500).json({ error: 'ai_fallbacks_update_failed', message: e.message }); }
