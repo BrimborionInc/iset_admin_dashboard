@@ -16,7 +16,7 @@ import {
     TokenGroup
 } from '@cloudscape-design/components';
 import { devTasks as devTasksData } from '../devTasksData';
-import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '../auth/cognito';
+import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../auth/cognito';
 
 // --- Mock Data Providers (to be replaced with real data sources later) ---
 function getMockMyWork(role) {
@@ -66,13 +66,13 @@ function pickQuickActions(role) {
             ];
         case 'Program Administrator':
             return [
-                { label: 'Case Assignment', href: '/case-assignment-dashboard' },
+                { label: 'Case Operations', href: '/case-assignment-dashboard' },
                 { label: 'Reporting & Monitoring', href: '/reporting-and-monitoring-dashboard' },
                 { label: 'Notifications', href: '/manage-notifications' },
             ];
         case 'Regional Coordinator':
             return [
-                { label: 'Case Assignment', href: '/case-assignment-dashboard' },
+                { label: 'Case Operations', href: '/case-assignment-dashboard' },
                 { label: 'Reporting & Monitoring', href: '/reporting-and-monitoring-dashboard' },
                 { label: 'Secure Messaging', href: '/manage-messages' },
             ];
@@ -166,7 +166,7 @@ const AdminDashboard = () => {
             <Container header={<Header variant="h1">Administration Console</Header>}>
                 <SpaceBetween size="m">
                     <Box variant="p">You are not signed in. Please authenticate to access administrative functions.</Box>
-                    <Button variant="primary" onClick={() => window.location.reload()}>Sign in</Button>
+                    <Button variant="primary" onClick={() => window.location.assign(buildLoginUrl())}>Sign in</Button>
                 </SpaceBetween>
             </Container>
         );

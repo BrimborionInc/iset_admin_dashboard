@@ -51,7 +51,14 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
   useEffect(() => {
   apiFetch(`/api/intake-officers`)
       .then(res => res.json())
-      .then(data => setEvaluators(data))
+      .then(data => {
+        // Ensure we always store an array to avoid runtime errors
+        if (Array.isArray(data)) {
+          setEvaluators(data);
+        } else {
+          setEvaluators([]);
+        }
+      })
       .catch(() => setEvaluators([]));
   }, []);
 
@@ -162,7 +169,8 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
 
   // Get current evaluator id and name (for From: field)
   const currentEvaluatorId = caseData?.assigned_to_user_id || '';
-  const currentEvaluator = evaluators.find(e => e.evaluator_id === currentEvaluatorId);
+  const evaluatorList = Array.isArray(evaluators) ? evaluators : [];
+  const currentEvaluator = evaluatorList.find(e => e.evaluator_id === currentEvaluatorId);
   const currentEvaluatorName = currentEvaluator ? currentEvaluator.evaluator_name : '';
 
   // Send message (actual implementation)
@@ -257,7 +265,7 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
   const getModalNames = (msg) => {
     const applicantName = caseData?.applicant_name || 'Applicant';
     // Try to find evaluator name by sender_id
-    const evaluator = evaluators.find(e => e.evaluator_id === msg.sender_id);
+  const evaluator = evaluatorList.find(e => e.evaluator_id === msg.sender_id);
     const evaluatorName = evaluator ? evaluator.evaluator_name : (msg.sender_name || 'Evaluator');
     if (activeTabId === 'inbox') {
       // Evaluator's view: applicant is sender
@@ -305,7 +313,7 @@ const SecureMessagesWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
       replyFrom = currentEvaluatorName;
       replyFromId = currentEvaluatorId;
     } else {
-      const senderEval = evaluators.find(e => e.evaluator_id === selectedMessage.sender_id);
+  const senderEval = evaluatorList.find(e => e.evaluator_id === selectedMessage.sender_id);
       replyTo = senderEval ? senderEval.evaluator_name : '';
       replyToId = selectedMessage.sender_id;
       replyFrom = caseData?.applicant_name || '';

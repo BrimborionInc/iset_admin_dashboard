@@ -6,12 +6,13 @@ import Select from "@cloudscape-design/components/select";
 import styles from './DemoNavigation.module.css'; // Import the CSS module
 import { apiFetch } from '../auth/apiClient';
 
+// Canonical simulated roles aligned with backend Cognito groups & middleware
 const roleOptions = [
   { label: 'Signed Out', value: '__signed_out__' },
+  { label: 'System Administrator', value: 'System Administrator' },
   { label: 'Program Administrator', value: 'Program Administrator' },
   { label: 'Regional Coordinator', value: 'Regional Coordinator' },
-  { label: 'PTMA Staff', value: 'PTMA Staff' },
-  { label: 'System Administrator', value: 'System Administrator' },
+  { label: 'Application Assessor', value: 'Application Assessor' },
 ];
 
 const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setCurrentRole }) => {

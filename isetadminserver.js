@@ -157,6 +157,67 @@ app.all(['/api/admin/upload-config'], async (req, res) => {
   }
 });
 
+// Minimal staff profile upsert middleware.
+// Purpose: ensure a local operational record exists (mirrors Cognito identity) for future assignment logic.
+// Relies on global `pool` defined later in file; waits until pool is available.
+async function staffProfileMiddleware(req, res, next) {
+  try {
+    if (!req.auth || !req.auth.sub) return next();
+    // pool may not yet be defined if this middleware executes before DB init section; poll a few ms.
+    let attempts = 0;
+    while (typeof pool === 'undefined' && attempts < 20) { // ~200ms max wait
+      await new Promise(r => setTimeout(r, 10));
+      attempts++;
+    }
+    if (!pool) return next();
+    const { sub, email, role, regionId } = req.auth;
+    await pool.query(`CREATE TABLE IF NOT EXISTS staff_profiles (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      cognito_sub VARCHAR(64) NOT NULL UNIQUE,
+      email VARCHAR(320) NULL,
+      primary_role VARCHAR(64) NULL,
+      /* region_id optional – legacy tables may not have it */
+      last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_role (primary_role)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`);
+    // Attempt to add region_id if supported (ignore failures / old MySQL not supporting IF NOT EXISTS)
+    try { await pool.query('ALTER TABLE staff_profiles ADD COLUMN region_id INT NULL'); } catch(_) {}
+    try { await pool.query('ALTER TABLE staff_profiles ADD INDEX idx_region (region_id)'); } catch(_) {}
+    // Determine if region_id column exists (cache per process)
+    if (typeof global.__HAS_REGION_ID_COL === 'undefined') {
+      try {
+        await pool.query('SELECT region_id FROM staff_profiles LIMIT 0');
+        global.__HAS_REGION_ID_COL = true;
+      } catch { global.__HAS_REGION_ID_COL = false; }
+    }
+    // Ensure non-null email if schema has NOT NULL constraint (fallback to synthetic)
+    const safeEmail = email || (sub ? `${sub}@placeholder.local` : 'unknown@placeholder.local');
+    if (global.__HAS_REGION_ID_COL) {
+      await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role,region_id) VALUES (?,?,?,?)
+        ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role), region_id=VALUES(region_id)`,
+        [sub, safeEmail, role || null, Number.isFinite(regionId) ? regionId : null]);
+    } else {
+      await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
+        ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`,
+        [sub, safeEmail, role || null]);
+    }
+    let rows;
+    try {
+      [rows] = await pool.query('SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [sub]);
+    } catch (selErr) {
+      if (/region_id/.test(selErr.message)) {
+        [rows] = await pool.query('SELECT id, cognito_sub, email, primary_role FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [sub]);
+      } else throw selErr;
+    }
+    if (rows && rows[0]) req.staffProfile = rows[0];
+  } catch (e) {
+    console.warn('[staff_profiles] middleware failed (non-fatal):', e.message);
+  } finally {
+    return next();
+  }
+}
+
 // --- Authentication (Cognito) - feature flagged ---
 // New: allow local development bypass via DEV_DISABLE_AUTH=true (non-production only)
 try {
@@ -173,7 +234,8 @@ try {
     app.use((req, res, next) => { res.setHeader('X-Auth-Bypassed', 'true'); next(); });
   } else if (authProvider === 'cognito') {
     const { authnMiddleware } = require('./src/middleware/authn');
-    app.use('/api', authnMiddleware());
+    // Attach auth first, then staff profile enrichment
+    app.use('/api', authnMiddleware(), staffProfileMiddleware);
     if (devAuthBypass) {
       console.warn('[AUTH] Cognito auth enabled but DEV_AUTH_BYPASS=true: X-Dev-Bypass header with matching token will short-circuit auth in middleware');
     }
@@ -196,6 +258,87 @@ app.get('/api/auth/me', (req, res) => {
   if (!enabled) return res.status(200).json({ provider: 'none', auth: null });
   if (!req.auth) return res.status(401).json({ error: 'Unauthenticated' });
   res.json({ provider: 'cognito', auth: req.auth });
+});
+
+// List assignable staff for case assignment
+// GET /api/staff/assignable
+// In dev bypass (IAM off) returns placeholder identities; otherwise queries staff_profiles by allowed roles.
+app.get('/api/staff/assignable', async (req, res) => {
+  try {
+    const iamOn = String(process.env.AUTH_PROVIDER || 'none').toLowerCase() === 'cognito';
+    const devBypassEnv = process.env.DEV_DISABLE_AUTH === 'true' || process.env.DEV_AUTH_BYPASS === 'true';
+    const isAuthenticated = !!req.auth && iamOn; // real token processed by auth middleware
+    // If IAM truly off (not Cognito) -> always placeholders.
+    // If IAM on + authenticated -> always real staff (ignore dev bypass env to avoid stale placeholder UI when real users exist).
+    // If IAM on but unauthenticated (edge case) -> fallback placeholders so UI can still render Assign modal meaningfully.
+    if (!iamOn || (!isAuthenticated && devBypassEnv)) {
+      return res.json([
+        { id: 'placeholder-admin', email: 'admin@nwac.ca', role: 'Program Administrator', display_name: 'Admin (Program Administrator)' },
+        { id: 'placeholder-coordinator', email: 'coordinator@nwac.ca', role: 'Regional Coordinator', display_name: 'Coordinator (Regional Coordinator)' },
+        { id: 'placeholder-assessor', email: 'user@nwac.ca', role: 'Application Assessor', display_name: 'Assessor (Application Assessor)' }
+      ]);
+    }
+    const roles = ['Program Administrator','Regional Coordinator','Application Assessor'];
+    const [rows] = await pool.query(
+      `SELECT id, cognito_sub, email, primary_role AS role, email AS display_name
+         FROM staff_profiles
+        WHERE primary_role IN (${roles.map(()=>'?').join(',')})
+        ORDER BY primary_role, email`, roles);
+    res.json(rows.map(r => ({ id: r.id, email: r.email, role: r.role, display_name: r.display_name })));
+  } catch (e) {
+    console.error('GET /api/staff/assignable failed:', e.message);
+    res.status(500).json({ error: 'assignable_fetch_failed' });
+  }
+});
+
+// PATCH /api/cases/:id/assign { assignee_id | placeholder_email }
+// Accepts either a real staff_profiles id or a placeholder email when IAM off.
+app.patch('/api/cases/:id/assign', async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
+  const { assignee_id, placeholder_email } = req.body || {};
+  try {
+    const [[caseRow]] = await pool.query('SELECT id, application_id, assigned_to_user_id FROM iset_case WHERE id=? LIMIT 1', [caseId]);
+    if (!caseRow) return res.status(404).json({ error: 'case_not_found' });
+    let assignId = null;
+    if (assignee_id) {
+      const [[staff]] = await pool.query('SELECT id FROM staff_profiles WHERE id=? LIMIT 1', [assignee_id]);
+      if (!staff) return res.status(400).json({ error: 'staff_not_found' });
+      assignId = staff.id;
+    } else if (placeholder_email) {
+      // For placeholders, create ephemeral staff_profiles row if needed (dev mode convenience)
+      const emailNorm = String(placeholder_email).toLowerCase();
+      const roleMap = {
+        'admin@nwac.ca': 'Program Administrator',
+        'coordinator@nwac.ca': 'Regional Coordinator',
+        'user@nwac.ca': 'Application Assessor'
+      };
+      const inferredRole = roleMap[emailNorm] || 'Application Assessor';
+      const subVal = `placeholder-${emailNorm}`;
+      // Try full column set first
+      try {
+        await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
+          ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`, [ subVal, placeholder_email, inferredRole ]);
+      } catch (insErr) {
+        // Fallback: if table definition differs, attempt minimal insert without role then update
+        try {
+          await pool.query(`INSERT INTO staff_profiles (cognito_sub,email) VALUES (?,?) ON DUPLICATE KEY UPDATE email=VALUES(email)`, [ subVal, placeholder_email ]);
+          await pool.query(`UPDATE staff_profiles SET primary_role=? WHERE cognito_sub=? AND (primary_role IS NULL OR primary_role='')`, [ inferredRole, subVal ]);
+        } catch (fallbackErr) {
+          console.warn('Placeholder staff insert fallback failed:', fallbackErr.message);
+        }
+      }
+      const [[row]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [ subVal ]);
+      assignId = row?.id || null;
+    } else {
+      return res.status(400).json({ error: 'assignee_required' });
+    }
+    await pool.query('UPDATE iset_case SET assigned_to_user_id=?, updated_at=NOW() WHERE id=?', [assignId, caseId]);
+    return res.json({ ok: true, case_id: caseId, assigned_to_user_id: assignId });
+  } catch (e) {
+    console.error('PATCH /api/cases/:id/assign failed:', e.message);
+    res.status(500).json({ error: 'assign_failed', message: e.message });
+  }
 });
 
 // (Removed duplicate linkage-stats route; public version defined earlier before auth.)
@@ -867,6 +1010,79 @@ const dbConfig = {
 };
 
 const pool = mysql.createPool(dbConfig);
+
+// --- Simple SQL Migration Runner (auto-executes .sql files in /sql once) -----------------
+// Strategy:
+// 1. Ensure tracking table `iset_migration` (id, filename, checksum, applied_at, duration_ms, success, error_snippet).
+// 2. Read all *.sql files in ./sql (non-recursive), sort by filename asc.
+// 3. For each file, compute SHA256 checksum. If filename+checksum already recorded with success=1, skip.
+// 4. Execute file contents via single multi-statement split on /;\n/ boundaries (basic splitter ignoring inside strings is overkill here; assume migration scripts are simple). If any statement fails, record failure (first 500 chars of error) and stop further execution to avoid partial ordering surprises.
+// 5. Log summary.
+// ENV Controls:
+//   DISABLE_AUTO_MIGRATIONS=true -> skip runner.
+//   AUTO_MIGRATIONS_DRY_RUN=true -> report pending without executing.
+// Notes: idempotency encouraged inside scripts; runner only executes once per checksum.
+(async () => {
+  try {
+    if (String(process.env.DISABLE_AUTO_MIGRATIONS || 'false').toLowerCase() === 'true') {
+      console.log('[migrations] Auto migration runner disabled via DISABLE_AUTO_MIGRATIONS');
+      return;
+    }
+    const sqlDir = path.join(__dirname, 'sql');
+    if (!fs.existsSync(sqlDir)) {
+      console.log('[migrations] No sql directory present, skipping');
+      return;
+    }
+    await pool.query(`CREATE TABLE IF NOT EXISTS iset_migration (\n      id INT AUTO_INCREMENT PRIMARY KEY,\n      filename VARCHAR(255) NOT NULL,\n      checksum CHAR(64) NOT NULL,\n      applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n      duration_ms INT NOT NULL,\n      success TINYINT(1) NOT NULL DEFAULT 1,\n      error_snippet TEXT NULL,\n      UNIQUE KEY uniq_filename_checksum (filename, checksum)\n    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`);
+    const [appliedRows] = await pool.query('SELECT filename, checksum, success FROM iset_migration');
+    const appliedMap = new Map(appliedRows.map(r => [r.filename + '|' + r.checksum, r]));
+    const files = fs.readdirSync(sqlDir).filter(f => f.endsWith('.sql')).sort();
+    if (!files.length) { console.log('[migrations] No .sql files found'); return; }
+    const crypto = require('crypto');
+    const pending = [];
+    for (const file of files) {
+      const full = path.join(sqlDir, file);
+      const content = fs.readFileSync(full, 'utf8');
+      const checksum = crypto.createHash('sha256').update(content).digest('hex');
+      if (appliedMap.has(file + '|' + checksum)) continue; // already applied this exact content
+      pending.push({ file, full, content, checksum });
+    }
+    if (!pending.length) { console.log('[migrations] No pending migrations'); return; }
+    const dryRun = String(process.env.AUTO_MIGRATIONS_DRY_RUN || 'false').toLowerCase() === 'true';
+    if (dryRun) {
+      console.log('[migrations] DRY RUN pending migrations:', pending.map(p => p.file));
+      return;
+    }
+    console.log('[migrations] Applying', pending.length, 'migration(s):', pending.map(p => p.file).join(', '));
+    for (const m of pending) {
+      const start = Date.now();
+      let success = 0; let errorSnippet = null;
+      try {
+        // Basic split: keep statements simple; allow DELIMITER not used in our scripts.
+        const statements = m.content
+          .split(/;\s*\n+/) // split on semicolon followed by newline(s)
+          .map(s => s.trim())
+          .filter(s => s.length);
+        for (const stmt of statements) {
+          await pool.query(stmt);
+        }
+        success = 1;
+        console.log(`[migrations] Applied ${m.file} (${statements.length} statements)`);
+      } catch (e) {
+        errorSnippet = (e && e.message ? e.message : String(e)).slice(0, 500);
+        console.error(`[migrations] FAILED ${m.file}:`, errorSnippet);
+      }
+      const duration = Date.now() - start;
+      await pool.query('INSERT INTO iset_migration (filename, checksum, duration_ms, success, error_snippet) VALUES (?,?,?,?,?)', [m.file, m.checksum, duration, success, errorSnippet]);
+      if (!success) {
+        console.error('[migrations] Halting further migrations due to failure');
+        break;
+      }
+    }
+  } catch (err) {
+    console.error('[migrations] Runner unexpected error:', err.message);
+  }
+})();
 
 // --- Startup DB diagnostic (enable/disable via ENABLE_DB_DIAG env var; defaults to true) ---------
 // Logs which physical MySQL instance we're connected to plus a quick summary of the step table.
@@ -3949,183 +4165,146 @@ app.get('/api/intake-officers', async (req, res) => {
 /**
  * POST /api/cases
  *
- * Creates a new ISET case for a submitted application and assigns it to a specific evaluator (from iset_evaluators).
- *
- * Expected JSON body:
- * {
- *   application_id: number,          // ID from iset_application
- *   assigned_to_user_id: number,     // Evaluator (iset_evaluators.id)
- *   ptma_id: number | null,          // PTMA (ptma.id) or null
- *   priority: 'low' | 'medium' | 'high' (optional) // Defaults to 'medium'
- * }
- *
- * Behavior:
- * - Checks if a case already exists for the given application_id.
- * - If so, returns 409 Conflict.
- * - If not, inserts a new row into iset_case with:
- *     - status: 'open'
- *     - stage: 'intake_review'
- *     - opened_at: now (default in schema)
- *     - priority: provided or 'medium'
- *     - application_id, assigned_to_user_id, ptma_id as given
+ * In new minimal schema:
+ * - If application_id is provided, create case referencing existing working application.
+ * - Else if submission_id provided, ingest submission -> working application (iset_application) then create case.
+ * Body fields:
+ *   submission_id?: number
+ *   application_id?: number
+ *   assigned_to_user_id?: number | null
  */
 app.post('/api/cases', async (req, res) => {
-  const { application_id, assigned_to_user_id, ptma_id = null, priority = 'medium' } = req.body;
+  const { submission_id, application_id, assigned_to_user_id = null } = req.body || {};
 
-  if (!application_id || !assigned_to_user_id) {
-    return res.status(400).json({ error: 'Missing required fields: application_id and assigned_to_user_id' });
+  if (!application_id && !submission_id) {
+    return res.status(400).json({ error: 'Provide either application_id or submission_id' });
   }
 
+  const conn = await pool.getConnection();
   try {
-    // Check for existing case
-    const [existing] = await pool.query(
-      `SELECT id FROM iset_case WHERE application_id = ?`,
-      [application_id]
-    );
+    await conn.beginTransaction();
 
-    if (existing.length > 0) {
-      return res.status(409).json({ error: 'A case already exists for this application.' });
-    }
+    let workingApplicationId = application_id || null;
 
-    // Insert new case with updated schema fields only
-    const [result] = await pool.query(
-      `INSERT INTO iset_case (
-        application_id, assigned_to_user_id, ptma_id, status, priority, stage, opened_at
-      ) VALUES (?, ?, ?, 'open', ?, 'intake_review', NOW())`,
-      [application_id, assigned_to_user_id, ptma_id, priority]
-    );
-
-    const case_id = result.insertId;
-
-    // Get applicant user_id for this application
-    const [[appRow]] = await pool.query(
-      'SELECT user_id FROM iset_application WHERE id = ?',
-      [application_id]
-    );
-    if (!appRow) {
-      return res.status(500).json({ error: 'Application not found after case creation' });
-    }
-    const applicant_user_id = appRow.user_id;
-
-    // Get all files for this application/applicant
-    const [files] = await pool.query(
-      'SELECT * FROM iset_application_file WHERE user_id = ? AND file_path IS NOT NULL',
-      [applicant_user_id]
-    );
-
-    // Insert each file into iset_case_document
-    for (const file of files) {
-      await pool.query(
-        `INSERT INTO iset_case_document (case_id, uploaded_by_user_id, file_name, file_path, label, uploaded_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-          case_id,
-          file.user_id,
-          file.original_filename,
-          file.file_path,
-          file.document_type,
-          file.uploaded_at || new Date()
-        ]
+    if (!workingApplicationId && submission_id) {
+      // Check existing working application for submission
+      const [existingApp] = await conn.query(
+        'SELECT id FROM iset_application WHERE submission_id = ? LIMIT 1',
+        [submission_id]
       );
-    }
-
-    // Remove the files from iset_application_file
-    if (files.length > 0) {
-      const fileIds = files.map(f => f.id);
-      await pool.query(
-        `DELETE FROM iset_application_file WHERE id IN (${fileIds.map(() => '?').join(',')})`,
-        fileIds
-      );
-    }
-
-    // Log case assignment event
-    const event_type = 'case_assigned';
-    // Fetch evaluator name and PTMA code for event message
-    let evaluatorName = '';
-    let ptmaCode = '';
-    try {
-      const [[evalRow]] = await pool.query(
-        'SELECT name FROM iset_evaluators WHERE id = ?',
-        [assigned_to_user_id]
-      );
-      evaluatorName = evalRow ? evalRow.name : '';
-      if (ptma_id) {
-        const [[ptmaRow]] = await pool.query(
-          'SELECT iset_code FROM ptma WHERE id = ?',
-          [ptma_id]
+      if (existingApp.length > 0) {
+        workingApplicationId = existingApp[0].id;
+      } else {
+        // Fetch submission row
+        const [subRows] = await conn.query(
+          'SELECT * FROM iset_application_submission WHERE id = ? LIMIT 1',
+          [submission_id]
         );
-        ptmaCode = ptmaRow ? ptmaRow.iset_code : '';
+        if (subRows.length === 0) {
+          await conn.rollback();
+          return res.status(404).json({ error: 'submission_not_found' });
+        }
+        const submission = subRows[0];
+        // Build payload snapshot
+        const payload = { source: 'submission_ingest', ingested_at: new Date().toISOString(), submission_snapshot: submission };
+        const [insertApp] = await conn.query(
+          'INSERT INTO iset_application (submission_id, payload_json, status, version, created_at, updated_at) VALUES (?,?,?,?,NOW(),NOW())',
+          [submission_id, JSON.stringify(payload), 'active', 1]
+        );
+        workingApplicationId = insertApp.insertId;
       }
-    } catch (e) {
-      evaluatorName = '';
-      ptmaCode = '';
     }
-    const event_data = {
-      message: `Case assigned to ${evaluatorName} of ${ptmaCode} with priority ${priority}`,
-      application_id,
-      assigned_to_user_id,
-      assigned_to_user_name: evaluatorName,
-      ptma_id,
-      ptma_code: ptmaCode,
-      priority,
-      timestamp: new Date().toISOString()
-    };
-    await pool.query(
-      'INSERT INTO iset_case_event (case_id, user_id, event_type, event_data, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
-      [case_id, applicant_user_id, event_type, JSON.stringify(event_data)]
+
+    // Prevent duplicate case for application
+    const [caseExists] = await conn.query(
+      'SELECT id FROM iset_case WHERE application_id = ? LIMIT 1',
+      [workingApplicationId]
+    );
+    if (caseExists.length > 0) {
+      await conn.rollback();
+      return res.status(409).json({ error: 'case_already_exists', case_id: caseExists[0].id });
+    }
+
+    const [insertCase] = await conn.query(
+      'INSERT INTO iset_case (application_id, assigned_to_user_id, status, created_at, updated_at) VALUES (?,?,?,?,?)',
+      [workingApplicationId, assigned_to_user_id, 'open', new Date(), new Date()]
     );
 
-    res.status(201).json({ message: 'Case created', case_id });
-  } catch (error) {
-    console.error('Error creating case:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    await conn.commit();
+    return res.status(201).json({ message: 'case_created', case_id: insertCase.insertId, application_id: workingApplicationId });
+  } catch (err) {
+    await conn.rollback();
+    console.error('Error creating case (minimal ingestion flow):', err);
+    return res.status(500).json({ error: 'internal_error', detail: err.message });
+  } finally {
+    conn.release();
   }
 });
+
+/**
+ * POST /api/applications/ingest-from-submission
+ * Body: { submission_id }
+ * Idempotent: returns existing working application if already ingested.
+ */
+app.post('/api/applications/ingest-from-submission', async (req, res) => {
+  const { submission_id } = req.body || {};
+  if (!submission_id) return res.status(400).json({ error: 'submission_id_required' });
+  try {
+    const [existing] = await pool.query('SELECT id FROM iset_application WHERE submission_id = ? LIMIT 1', [submission_id]);
+    if (existing.length > 0) {
+      return res.status(200).json({ message: 'already_ingested', application_id: existing[0].id });
+    }
+    const [subRows] = await pool.query('SELECT * FROM iset_application_submission WHERE id = ? LIMIT 1', [submission_id]);
+    if (subRows.length === 0) return res.status(404).json({ error: 'submission_not_found' });
+    const submission = subRows[0];
+    const payload = { source: 'submission_ingest_manual', ingested_at: new Date().toISOString(), submission_snapshot: submission };
+    const [insertApp] = await pool.query(
+      'INSERT INTO iset_application (submission_id, payload_json, status, version, created_at, updated_at) VALUES (?,?,?,?,NOW(),NOW())',
+      [submission_id, JSON.stringify(payload), 'active', 1]
+    );
+    return res.status(201).json({ message: 'ingested', application_id: insertApp.insertId });
+  } catch (err) {
+    console.error('Error ingesting submission:', err);
+    return res.status(500).json({ error: 'internal_error', detail: err.message });
+  }
+});
+
 
 
 /**
  * GET /api/case-assignment/unassigned-applications
  *
- * Returns a list of applications that have been submitted but not yet assigned
- * to a case (i.e. no record exists in the iset_case table for them).
+ * Updated to source from iset_application_submission (new submission persistence table).
+ * Returns submissions that have no corresponding case in iset_case.
  *
- * Each result includes:
- * - application_id
- * - submission timestamp
- * - applicant name and email
- * - program type
+ * Response fields expected by frontend widget:
+ * - application_id (aliased to submission id for now; will map when case created)
+ * - tracking_id (submission reference_number)
+ * - applicant_name
+ * - email
+ * - submitted_at
  */
 app.get('/api/case-assignment/unassigned-applications', async (req, res) => {
   try {
-    // Run a query to find all submitted applications that don't yet have a case
     let sql = `
       SELECT 
-        a.id AS application_id,
-        a.created_at AS submitted_at,
+        s.id AS application_id,
+        s.reference_number AS tracking_id,
+        s.submitted_at AS submitted_at,
         u.name AS applicant_name,
-        u.email,
-        a.tracking_id
-      FROM iset_application a
-      JOIN user u ON a.user_id = u.id
-      LEFT JOIN iset_case c ON a.id = c.application_id
+        u.email AS email
+      FROM iset_application_submission s
+      JOIN user u ON s.user_id = u.id
+      LEFT JOIN iset_case c ON c.application_id = s.id  -- NOTE: temporary if application_id will point to submission id in new model
       WHERE c.id IS NULL\n`;
     const params = [];
-    try {
-      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-      if (authProvider === 'cognito') {
-        const { scopeApplications } = require('./src/lib/dbScope');
-        const { sql: scopeSql, params: scopeParams } = scopeApplications(req.auth || {}, 'a');
-        sql += ` AND ${scopeSql}\n`;
-        params.push(...scopeParams);
-      }
-    } catch (_) {}
-    sql += '      ORDER BY a.created_at DESC';
+    // NOTE: Scoping disabled for submissions until region / ownership columns are defined on iset_application_submission.
+    // Previous attempt tried to use scopeApplications and introduced a nonexistent s.region_id reference causing errors.
+    sql += '      ORDER BY s.submitted_at DESC';
     const [rows] = await pool.query(sql, params);
-
-    // Send results to the frontend
     res.status(200).json(rows);
   } catch (err) {
-    console.error('Error fetching unassigned applications:', err);
+    console.error('Error fetching unassigned applications (submission table):', err);
     res.status(500).json({ error: 'Failed to fetch unassigned applications' });
   }
 });
@@ -4255,15 +4434,15 @@ const generateSystemTasks = async () => {
   }
 };
 
+// Unified applicant documents endpoint now sources from iset_document (generalized store)
 app.get('/api/applicants/:id/documents', async (req, res) => {
   const applicantId = req.params.id;
   try {
-    // Query all documents uploaded by this user (applicant), regardless of case_id
     const [rows] = await pool.query(
-      `SELECT id, case_id, uploaded_by_user_id, file_name, file_path, label, uploaded_at
-       FROM iset_case_document
-       WHERE uploaded_by_user_id = ?
-       ORDER BY uploaded_at DESC`,
+      `SELECT id, case_id, application_id, file_name, file_path, label, source, created_at AS uploaded_at
+       FROM iset_document
+       WHERE applicant_user_id = ? AND status = 'active'
+       ORDER BY created_at DESC`,
       [applicantId]
     );
     res.status(200).json(rows);
@@ -4286,7 +4465,7 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
 app.get('/api/cases', async (req, res) => {
   try {
     const { stage } = req.query;
-  let sql = `
+    let sql = `
       SELECT 
         c.id,
         c.application_id,
@@ -4298,14 +4477,15 @@ app.get('/api/cases', async (req, res) => {
         c.closed_at,
         c.last_activity_at,
 
-        e.name AS assigned_user_name,
-        e.email AS assigned_user_email,
+        ANY_VALUE(e.name) AS assigned_user_name,
+        ANY_VALUE(e.email) AS assigned_user_email,
         GROUP_CONCAT(p.iset_code SEPARATOR ', ') AS assigned_user_ptmas,
 
-        a.tracking_id,
-        a.created_at AS submitted_at,
-        applicant.name AS applicant_name,
-        applicant.email AS applicant_email
+        ANY_VALUE(a.tracking_id) AS tracking_id,
+        ANY_VALUE(a.created_at) AS submitted_at,
+  ANY_VALUE(applicant.name) AS applicant_name,
+  ANY_VALUE(applicant.email) AS applicant_email,
+  ANY_VALUE(applicant.id) AS applicant_user_id
 
       FROM iset_case c
       JOIN iset_evaluators e ON c.assigned_to_user_id = e.id
@@ -4319,7 +4499,6 @@ app.get('/api/cases', async (req, res) => {
       sql += 'WHERE c.stage = ?\n';
       params.push(stage);
     }
-    // RBAC scoping (feature-flagged)
     try {
       const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
       if (authProvider === 'cognito') {
@@ -4330,6 +4509,7 @@ app.get('/api/cases', async (req, res) => {
       }
     } catch (_) {}
 
+    // ONLY_FULL_GROUP_BY compliance: group by primary key and aggregate/ANY_VALUE everything else.
     sql += 'GROUP BY c.id\nORDER BY c.last_activity_at DESC';
 
     const [rows] = await pool.query(sql, params);
@@ -4337,6 +4517,97 @@ app.get('/api/cases', async (req, res) => {
   } catch (error) {
     console.error('Error fetching cases:', error);
     res.status(500).json({ error: 'Failed to fetch cases' });
+  }
+});
+
+// -------------------------------------------------------------
+// Application Versioning (Working Copy) Endpoints (Initial Draft)
+// -------------------------------------------------------------
+// GET /api/cases/:case_id/application/versions  -> list metadata of versions
+// GET /api/cases/:case_id/application/current   -> current working version payload
+// POST /api/cases/:case_id/application/versions -> create new version (full payload replace for now)
+
+app.get('/api/cases/:case_id/application/versions', async (req, res) => {
+  const caseId = Number(req.params.case_id);
+  if (!caseId) return res.status(400).json({ error: 'invalid_case_id' });
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, version_number, created_at, source_type, change_summary, is_current
+         FROM iset_application_version
+        WHERE case_id = ?
+        ORDER BY version_number ASC`,
+      [caseId]
+    );
+    return res.json(rows);
+  } catch (e) {
+    console.error('[versions:list] error', e);
+    return res.status(500).json({ error: 'failed_to_list_versions' });
+  }
+});
+
+app.get('/api/cases/:case_id/application/current', async (req, res) => {
+  const caseId = Number(req.params.case_id);
+  if (!caseId) return res.status(400).json({ error: 'invalid_case_id' });
+  try {
+    const [[row]] = await pool.query(
+      `SELECT id, version_number, payload_json, created_at, source_type, change_summary
+         FROM iset_application_version
+        WHERE case_id = ? AND is_current = 1
+        LIMIT 1`,
+      [caseId]
+    );
+    if (!row) return res.status(404).json({ error: 'no_current_version' });
+    return res.json(row);
+  } catch (e) {
+    console.error('[versions:current] error', e);
+    return res.status(500).json({ error: 'failed_to_fetch_current_version' });
+  }
+});
+
+app.post('/api/cases/:case_id/application/versions', async (req, res) => {
+  const caseId = Number(req.params.case_id);
+  if (!caseId) return res.status(400).json({ error: 'invalid_case_id' });
+  const { payload, changeSummary, sourceType = 'manual_edit' } = req.body || {};
+  if (!payload || typeof payload !== 'object') return res.status(400).json({ error: 'payload_required' });
+  try {
+    // Fetch current version
+    const [[current]] = await pool.query(
+      `SELECT id, version_number, payload_json, submission_id
+         FROM iset_application_version
+        WHERE case_id = ? AND is_current = 1
+        LIMIT 1`,
+      [caseId]
+    );
+    if (!current) {
+      return res.status(409).json({ error: 'no_initial_version', message: 'Initial version not seeded yet.' });
+    }
+    const nextVersion = current.version_number + 1;
+    const crypto = require('crypto');
+    const canonical = JSON.stringify(payload);
+    const hash = crypto.createHash('sha256').update(canonical).digest('hex');
+    // Mark old current
+    await pool.query('UPDATE iset_application_version SET is_current = 0 WHERE id = ?', [current.id]);
+    // Insert new
+    await pool.query(
+      `INSERT INTO iset_application_version (
+         case_id, submission_id, version_number, payload_json, created_by_evaluator_id, change_summary, source_type, previous_version_id, payload_hash, is_current
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      [
+        caseId,
+        current.submission_id,
+        nextVersion,
+        JSON.stringify(payload),
+        null, // TODO: link evaluator (need auth mapping)
+        changeSummary || null,
+        sourceType,
+        current.id,
+        hash
+      ]
+    );
+    return res.status(201).json({ message: 'version_created', version_number: nextVersion, hash });
+  } catch (e) {
+    console.error('[versions:create] error', e);
+    return res.status(500).json({ error: 'failed_to_create_version' });
   }
 });
 
@@ -5839,6 +6110,135 @@ app.get('/api/cases/:case_id/events', async (req, res) => {
   }
 });
 
+// --- Unified Applications Listing Endpoint ----------------------------------
+// GET /api/applications?status=Open,In%20Review&limit=50&offset=0
+// Role scoping rules (no client override):
+//   Program Administrator -> all cases
+//   Regional Coordinator  -> cases in their region/team (derivation TBD: using evaluator_ptma join as proxy)
+//   Application Assessor  -> only cases assigned to them
+// If a submission exists with no case yet:
+//   - Visible only to Program Administrators (future) – currently excluded for simplicity
+// Response: { count, rows:[ { case_id, tracking_id, applicant_name, status, assigned_user_id, assigned_user_name, submitted_at, region, ptma_codes, sla_risk } ] }
+app.get('/api/applications', async (req, res) => {
+  try {
+    if (!req.auth || req.auth.subjectType !== 'staff') return res.status(403).json({ error: 'forbidden' });
+    const { status, limit = 50, offset = 0, search } = req.query;
+    const role = req.auth.role;
+    const regionId = req.auth.regionId || req.staffProfile?.region_id || null;
+
+    // Base case + application join using new lean model.
+    // Assignment user now from staff_profiles (nullable); tracking_id fallback derived from payload_json->submission_snapshot.reference_number if tracking_id column absent.
+    // We'll attempt to select a.tracking_id; if schema lacks it, COALESCE will choose JSON extracted value.
+    let baseSql = `SELECT c.id AS case_id, c.application_id, c.status, c.assigned_to_user_id,
+      c.created_at AS opened_at, c.updated_at AS last_activity_at,
+      sp.email AS assigned_user_email, sp.primary_role AS assigned_user_role,
+      sp.id AS staff_profile_id,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+      a.created_at AS submitted_at,
+      0 AS is_unassigned_submission
+      FROM iset_case c
+      JOIN iset_application a ON c.application_id = a.id
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id`;
+
+    const where = [];
+    const params = [];
+    if (status) {
+      const list = String(status).split(',').map(s => s.trim()).filter(Boolean);
+      if (list.length) { where.push(`c.status IN (${list.map(()=>'?').join(',')})`); params.push(...list); }
+    }
+    if (search) {
+      const term = `%${search}%`;
+  where.push("(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) LIKE ? OR sp.email LIKE ? OR c.case_summary LIKE ?)");
+      params.push(term, term, term);
+    }
+
+    if (role === 'Application Assessor') {
+      if (!req.staffProfile?.id) return res.json({ count: 0, rows: [] });
+      where.push('c.assigned_to_user_id = ?'); params.push(req.staffProfile.id);
+    } else if (role === 'Regional Coordinator') {
+      // For now: filter by shared region (when regionId present) OR assignments directly to coordinator
+      if (regionId) {
+        where.push('(sp.region_id = ? OR c.assigned_to_user_id = ?)');
+        params.push(regionId, req.staffProfile?.id || 0);
+      } else if (req.staffProfile?.id) {
+        where.push('c.assigned_to_user_id = ?'); params.push(req.staffProfile.id);
+      } else {
+        return res.json({ count: 0, rows: [] });
+      }
+    } else if (role === 'System Administrator' || role === 'Program Administrator') {
+      // full access
+    } else {
+      return res.status(403).json({ error: 'forbidden_role' });
+    }
+
+    if (where.length) baseSql += '\nWHERE ' + where.join(' AND ');
+    baseSql += '\nGROUP BY c.id';
+
+    let finalSql = baseSql;
+    const finalParams = [...params];
+
+    // Add unassigned submissions (applications without case) for elevated roles.
+    if (role === 'Program Administrator' || role === 'System Administrator') {
+      finalSql = `(${baseSql})\nUNION ALL\n(
+        SELECT NULL AS case_id, a.id AS application_id, 'New' AS status, NULL AS assigned_to_user_id, NULL AS opened_at, NULL AS last_activity_at,
+        NULL AS assigned_user_email, NULL AS assigned_user_role, NULL AS staff_profile_id,
+  JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+        a.created_at AS submitted_at,
+        1 AS is_unassigned_submission
+        FROM iset_application a
+        LEFT JOIN iset_case c2 ON c2.application_id = a.id
+        WHERE c2.id IS NULL
+      )`;
+    }
+
+    finalSql += `\nORDER BY submitted_at DESC\nLIMIT ? OFFSET ?`;
+    finalParams.push(Number(limit), Number(offset));
+
+    const [rows] = await pool.query(finalSql, finalParams);
+
+    // Count
+    let count = rows.length;
+    try {
+      if (role === 'Program Administrator' || role === 'System Administrator') {
+        let countCaseSql = 'SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c JOIN iset_application a ON c.application_id = a.id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id';
+        if (where.length) countCaseSql += ' WHERE ' + where.join(' AND ');
+        const [[caseCnt]] = await pool.query(countCaseSql, params);
+        const [[unassignedCnt]] = await pool.query('SELECT COUNT(*) AS cnt FROM iset_application a LEFT JOIN iset_case c2 ON c2.application_id = a.id WHERE c2.id IS NULL');
+        count = (caseCnt?.cnt || 0) + (unassignedCnt?.cnt || 0);
+      } else {
+        let countSql = 'SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c JOIN iset_application a ON c.application_id = a.id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id';
+        if (where.length) countSql += ' WHERE ' + where.join(' AND ');
+        const [[cRow]] = await pool.query(countSql, params);
+        if (cRow && typeof cRow.cnt === 'number') count = cRow.cnt;
+      }
+    } catch (_) {}
+
+    const now = Date.now();
+    const rowsOut = rows.map(r => {
+      const submittedMs = r.submitted_at ? new Date(r.submitted_at).getTime() : now;
+      const ageDays = (now - submittedMs) / 86400000;
+      const sla_risk = (r.status !== 'Closed' && r.status !== 'Rejected' && ageDays > 14) ? 'overdue' : 'ok';
+      return {
+        case_id: r.case_id,
+        tracking_id: r.tracking_id,
+        status: r.status,
+        assigned_user_id: r.assigned_to_user_id,
+        assigned_user_email: r.assigned_user_email || null,
+        assigned_user_role: r.assigned_user_role || null,
+        submitted_at: r.submitted_at,
+        ptma_codes: null, // legacy field removed; placeholder for future taxonomy
+        region: null, // region derivation TBD (could parse from application payload or staff profile)
+        is_unassigned: r.is_unassigned_submission === 1,
+        sla_risk
+      };
+    });
+    res.json({ count, rows: rowsOut });
+  } catch (e) {
+    console.error('GET /api/applications failed:', e);
+    res.status(500).json({ error: 'applications_fetch_failed', message: e.message });
+  }
+});
+
 
 /**
  * POST /api/purge-cases
@@ -5874,6 +6274,7 @@ app.post('/api/purge-applications', async (req, res) => {
     res.status(500).json({ error: 'Failed to purge applications.' });
   }
 });
+
 
 // Endpoint to get the content of a .njk file
 app.get('/api/get-njk-file', (req, res) => {
@@ -6173,30 +6574,45 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
     let caseId = caseIdFromQuery;
     // (Optional: fallback logic if you want to support legacy messages)
 
-    // For each attachment, add to iset_case_document if not already present
+    // Derive applicant_user_id for adoption (best effort)
+    let applicantUserId = null;
+    if (caseId) {
+      try {
+        const [[caseRow]] = await pool.query(
+          'SELECT application_id FROM iset_case WHERE id = ? LIMIT 1',
+          [caseId]
+        );
+        if (caseRow && caseRow.application_id) {
+          const [[appRow]] = await pool.query(
+            'SELECT user_id FROM iset_application WHERE id = ? LIMIT 1',
+            [caseRow.application_id]
+          );
+            applicantUserId = appRow ? appRow.user_id : null;
+        }
+      } catch (_) {}
+    }
+    // Adopt each attachment into iset_document (idempotent on file_path)
     if (caseId) {
       for (const att of attachments) {
-        // Ensure file_path is relative (e.g., 'uploads/filename.pdf')
-        let relativeFilePath = att.file_path;
-        // Normalize slashes for Windows/Unix
-        relativeFilePath = relativeFilePath.replace(/\\/g, '/');
-        // Remove everything before and including 'uploads/'
+        let relativeFilePath = att.file_path.replace(/\\/g, '/');
         const uploadsIndex = relativeFilePath.lastIndexOf('uploads/');
         if (uploadsIndex !== -1) {
           relativeFilePath = relativeFilePath.substring(uploadsIndex);
         }
-        // Always use forward slashes in DB
         relativeFilePath = relativeFilePath.replace(/\\/g, '/');
         try {
           await pool.query(
-            `INSERT INTO iset_case_document (case_id, uploaded_by_user_id, file_name, file_path, label, uploaded_at)
-             VALUES (?, ?, ?, ?, ?, ?)` ,
+            `INSERT INTO iset_document (case_id, application_id, applicant_user_id, user_id, origin_message_id, source, file_name, file_path, label, created_at)
+             VALUES (?, ?, ?, ?, ?, 'secure_message_attachment', ?, ?, 'Secure Message Attachment', ?)
+             ON DUPLICATE KEY UPDATE origin_message_id = VALUES(origin_message_id), updated_at = NOW()` ,
             [
               caseId,
+              (caseId ? (await pool.query('SELECT application_id FROM iset_case WHERE id = ? LIMIT 1', [caseId]))[0][0]?.application_id || null : null),
+              applicantUserId,
               att.user_id || message.sender_id || message.recipient_id,
+              messageId,
               att.original_filename,
               relativeFilePath,
-              'Secure Message Attachment',
               att.uploaded_at || new Date()
             ]
           );
@@ -6204,7 +6620,7 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
           if (err && (err.code === 'ER_DUP_ENTRY' || err.code === '23505')) {
             continue;
           } else {
-            console.error('Error inserting into iset_case_document:', err);
+            console.error('Error inserting into iset_document:', err);
             throw err;
           }
         }
