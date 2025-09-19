@@ -17,6 +17,8 @@
     "/case-management": ["System Administrator", "Program Administrator", "Regional Coordinator", "PTMA Staff"],
     "/application-case/:id": ["System Administrator", "Program Administrator", "Regional Coordinator", "PTMA Staff"],
 
+  "/case-assignment-dashboard": ["System Administrator", "Program Administrator", "Regional Coordinator", "PTMA Staff", "Application Assessor"],
+
     "/manage-messages": ["System Administrator", "Program Administrator", "Regional Coordinator", "PTMA Staff"],
 
     "/reporting-and-monitoring-dashboard": ["System Administrator", "Program Administrator", "Regional Coordinator"],

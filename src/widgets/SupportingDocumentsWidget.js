@@ -9,18 +9,25 @@ const SupportingDocumentsWidget = ({ actions, caseData }) => {
   const applicantUserId = caseData?.applicant_user_id;
 
   useEffect(() => {
-    if (!applicantUserId) return;
+    // If we don't yet have an applicant id, stop loading to avoid perpetual spinner
+    if (!applicantUserId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     apiFetch(`/api/applicants/${applicantUserId}/documents`)
-      .then(res => res.json())
+      .then(res => res.ok ? res.json() : [])
       .then(data => {
-        setDocuments(data);
-        setLoading(false);
+        if (Array.isArray(data)) {
+          setDocuments(data);
+        } else {
+          setDocuments([]);
+        }
       })
       .catch(() => {
         setDocuments([]);
-        setLoading(false);
-      });
+      })
+      .finally(() => setLoading(false));
   }, [applicantUserId]);
 
   return (
@@ -54,13 +61,14 @@ const SupportingDocumentsWidget = ({ actions, caseData }) => {
           columnDefinitions={[
             { id: 'file_name', header: 'File Name', cell: item => item.file_name },
             { id: 'label', header: 'Label', cell: item => item.label || '' },
+            { id: 'source', header: 'Source', cell: item => (item.source || '').replace(/_/g,' ') },
             { id: 'uploaded_at', header: 'Uploaded', cell: item => new Date(item.uploaded_at).toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' }) },
             {
               id: 'actions',
               header: 'Actions',
               cell: item => {
-                // Normalize file_path for URL (replace backslashes with slashes)
-                const fileUrl = `${process.env.REACT_APP_API_BASE_URL}/${item.file_path.replace(/\\|\\/g, '/')}`;
+                const normalized = item.file_path ? item.file_path.replace(/\\/g, '/') : '';
+                const fileUrl = `${process.env.REACT_APP_API_BASE_URL.replace(/\/$/, '')}/${normalized.replace(/^\//,'')}`;
                 return (
                   <Button
                     variant="inline-link"

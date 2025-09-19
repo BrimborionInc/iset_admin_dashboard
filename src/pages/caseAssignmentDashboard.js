@@ -2,13 +2,11 @@ import React, { useState } from 'react';
 import { ContentLayout, Header } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import BlankTemplate from '../widgets/blankTemplate';
-import UnassignedApplicationsWidget from '../widgets/UnassignedApplicationsWidget';
-import AssignedCasesWidget from '../widgets/AssignedCasesWidget';
+import ApplicationsWidget from '../widgets/ApplicationsWidget';
 
-const CaseAssignmentDashboard = ({ header = 'Case Assignment', headerInfo, toggleHelpPanel, updateBreadcrumbs, setSplitPanelOpen, setAvailableItems }) => {
+const CaseAssignmentDashboard = ({ header = 'Case Operations', headerInfo, toggleHelpPanel, updateBreadcrumbs, setSplitPanelOpen, setAvailableItems }) => {
   const [boardItems, setBoardItems] = useState([
-    { id: 'unassigned-applications', rowSpan: 4, columnSpan: 4, data: { title: 'Unassigned Applications' } },
-    { id: 'assigned-cases', rowSpan: 4, columnSpan: 4, data: { title: 'Assigned Cases' } },
+  { id: 'applications-unified', rowSpan: 6, columnSpan: 12, data: { title: 'Active Cases' } }
   ]);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -23,12 +21,7 @@ const CaseAssignmentDashboard = ({ header = 'Case Assignment', headerInfo, toggl
           if (item.id === 'blank-template') {
             return <BlankTemplate actions={actions} />;
           }
-          if (item.id === 'unassigned-applications') {
-            return <UnassignedApplicationsWidget actions={actions} onCaseAssigned={handleRefresh} refreshKey={refreshKey} />;
-          }
-          if (item.id === 'assigned-cases') {
-            return <AssignedCasesWidget actions={actions} refreshKey={refreshKey} />;
-          }
+          if (item.id === 'applications-unified') return <ApplicationsWidget actions={actions} refreshKey={refreshKey} />;
           return null;
         }}
         items={boardItems}

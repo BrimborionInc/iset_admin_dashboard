@@ -3,11 +3,13 @@ import { Box, Header, ButtonDropdown, Link, Select } from '@cloudscape-design/co
 import { BoardItem } from '@cloudscape-design/board-components';
 import CaseManagementDemoControlsHelp from '../helpPanelContents/CaseManagementDemoControlsHelp';
 
-const CaseManagementDemoControlsWidget = ({ actions, toggleHelpPanel, evaluators = [], simulatedUser, setSimulatedUser }) => {
-  // Handle select change
+const CaseManagementDemoControlsWidget = ({ actions, toggleHelpPanel, evaluators, simulatedUser, setSimulatedUser }) => {
+  // Normalize evaluators to array to prevent runtime errors if legacy prop shape changed.
+  const safeEvaluators = Array.isArray(evaluators) ? evaluators : (evaluators && typeof evaluators === 'object' ? Object.values(evaluators) : []);
+
   const handleUserChange = (event) => {
     const selectedId = event.detail.selectedOption.value;
-    const user = evaluators.find(e => e.evaluator_id === selectedId);
+    const user = safeEvaluators.find(e => e.evaluator_id === selectedId);
     setSimulatedUser(user);
   };
 
@@ -51,9 +53,10 @@ const CaseManagementDemoControlsWidget = ({ actions, toggleHelpPanel, evaluators
       <Select
         selectedOption={simulatedUser ? { label: simulatedUser.evaluator_name, value: simulatedUser.evaluator_id } : null}
         onChange={handleUserChange}
-        options={evaluators.map(e => ({ label: e.evaluator_name, value: e.evaluator_id }))}
-        placeholder="Select evaluator..."
+        options={safeEvaluators.map(e => ({ label: e.evaluator_name || e.email || `ID ${e.evaluator_id || e.id}` , value: e.evaluator_id || e.id }))}
+        placeholder={safeEvaluators.length ? "Select evaluator..." : "No evaluators available"}
         ariaLabel="Select evaluator"
+        disabled={safeEvaluators.length === 0}
         expandToViewport
       />
       <Box margin={{ top: 's' }}>

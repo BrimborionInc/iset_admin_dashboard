@@ -54,14 +54,15 @@ const SideNavigation = ({ currentRole }) => {
       type: 'section',
       text: 'ISET Assessment',
       items: [
-        { type: 'link', text: 'Application Assessment', href: '/case-management' },
+        { type: 'link', text: 'Case Operations', href: '/case-assignment-dashboard' },
+        { type: 'link', text: 'My Case Queue', href: '/case-management' },
       ],
     },
     {
       type: 'section',
       text: 'Other Dashboards',
-      items: [
-  // Removed duplicate href '/case-management' (already present as Application Assessment above)
+    items: [
+  // Removed duplicate href '/case-management' (already present as My Case Queue above)
         { type: 'link', text: 'Reminders and Notifications', href: '/manage-notifications' },
         { type: 'link', text: 'Secure Messaging', href: '/manage-messages' },
         { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },
@@ -144,70 +145,49 @@ const SideNavigation = ({ currentRole }) => {
     const roleValue = role?.value || role;
     if (roleValue === 'System Administrator') return [...allNavItems, ...commonFooterItems];
     if (roleValue === 'Program Administrator') {
-  let filteredSections = allNavItems.map(section => {
+      const filteredSections = allNavItems.map(section => {
         if (section.type === 'section' && section.text === 'ISET Administration') {
-          const newItems = section.items.filter(item => item.text !== 'ARMS Integration' && item.text !== 'Notification Settings');
-          // Do not push another Assessment Review link here
-          return { ...section, items: newItems };
+          return section; // retain full admin section for now (can prune later)
+        }
+        if (section.type === 'section' && section.text === 'ISET Assessment') {
+          return section; // keep Case Operations + My Case Queue
         }
         if (section.type === 'section' && section.text === 'Other Dashboards') {
-          return {
-            ...section,
-            items: section.items.filter(item =>
-              item.text !== 'Manage Intake Steps' &&
-              item.text !== 'Manage Workflows' &&
-              item.text !== 'Reminders and Notifications'
-            ),
-          };
-        }
-        if (section.type === 'section' && section.text === 'Configuration') {
-          return {
-            ...section,
-            items: section.items.filter(item =>
-              item.text === 'Options' || item.text === 'Visual Settings'
-            ),
-          };
+          return section; // keep for visibility; routeMatrix will still gate links
         }
         return section;
-      });
-      filteredSections = filteredSections.map(section => ({
+      }).map(section => ({
         ...section,
         items: section.items?.filter(item => isAllowed(item.href, roleValue))
       }));
       return [...filteredSections, ...commonFooterItems];
     }
     if (roleValue === 'Regional Coordinator') {
+      // Preserve full 'ISET Assessment' (ensures 'Case Operations' always visible)
       let filteredSections = allNavItems.map(section => {
         if (section.type === 'section' && section.text === 'ISET Administration') {
           return {
             ...section,
-            items: section.items.filter(item =>
-              item.text === 'Application Assignment' || item.text === 'PTMA Management'
-            ),
+            items: section.items.filter(item => item.text === 'Application Assignment' || item.text === 'PTMA Management')
           };
         }
         if (section.type === 'section' && section.text === 'ISET Assessment') {
-          return section;
+          return section; // keep all items including Case Operations
         }
         if (section.type === 'section' && section.text === 'Other Dashboards') {
           return {
             ...section,
-            items: section.items.filter(item =>
-              item.text === 'Secure Messaging' || item.text === 'Reporting and Monitoring'
-            ),
+            items: section.items.filter(item => item.text === 'Secure Messaging' || item.text === 'Reporting and Monitoring')
           };
         }
         if (section.type === 'section' && section.text === 'Configuration') {
           return {
             ...section,
-            items: section.items.filter(item =>
-              item.text === 'User Management' || item.text === 'Options' || item.text === 'Visual Settings'
-            ),
+            items: section.items.filter(item => item.text === 'User Management' || item.text === 'Options' || item.text === 'Visual Settings')
           };
         }
         return section;
-      });
-      filteredSections = filteredSections.map(section => ({
+      }).map(section => ({
         ...section,
         items: section.items?.filter(item => isAllowed(item.href, roleValue))
       }));
@@ -217,20 +197,15 @@ const SideNavigation = ({ currentRole }) => {
       const filteredSections = allNavItems
         .map(section => {
           if (section.type === 'section' && section.text === 'ISET Assessment') {
-            return {
-              ...section,
-              items: section.items.filter(item => item.text === 'Application Assessment'),
-            };
+            return section; // keep full assessment including Case Operations
           }
           if (section.type === 'section' && section.text === 'Other Dashboards') {
             return {
               ...section,
-              items: section.items.filter(item => item.text === 'Secure Messaging'),
+              items: section.items.filter(item => item.text === 'Secure Messaging')
             };
           }
-          if (section.type === 'section' && section.text === 'Support') {
-            return section;
-          }
+          if (section.type === 'section' && section.text === 'Support') return section;
           return null;
         })
         .filter(Boolean)
