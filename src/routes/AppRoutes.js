@@ -349,12 +349,21 @@ const AppRoutes = ({
       <Route path="/case-assignment-dashboard">
         {renderContent(CaseAssignmentDashboard, [
           { text: 'Home', href: '/' },
-          { text: 'Case Operations', href: '/case-assignment-dashboard' }
-        ], 'Case Operations', 'caseAssignment')}
+          { text: 'Manage Applications', href: '/case-assignment-dashboard' }
+  ], 'Manage Applications', 'caseAssignment')}
       </Route>
       <Route path="/application-case/:id">
         <Guard path="/application-case/:id">
-          {renderContent(ApplicationCaseDashboard, [{ text: 'Home', href: '/' }, { text: 'Case Management', href: '/case-management' }, { text: 'Application' }], 'ISET Application Management', 'applicationCaseDashboard')}
+          {renderContent(
+            ApplicationCaseDashboard,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Manage Applications', href: '/case-assignment-dashboard' },
+              { text: 'Assessment' }
+            ],
+            'ISET Application Assessment',
+            'applicationCaseDashboard'
+          )}
         </Guard>
       </Route>
       <Route path="/arms-reporting">

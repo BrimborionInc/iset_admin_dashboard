@@ -66,13 +66,13 @@ function pickQuickActions(role) {
             ];
         case 'Program Administrator':
             return [
-                { label: 'Case Operations', href: '/case-assignment-dashboard' },
+                { label: 'Manage Applications', href: '/case-assignment-dashboard' },
                 { label: 'Reporting & Monitoring', href: '/reporting-and-monitoring-dashboard' },
                 { label: 'Notifications', href: '/manage-notifications' },
             ];
         case 'Regional Coordinator':
             return [
-                { label: 'Case Operations', href: '/case-assignment-dashboard' },
+                { label: 'Manage Applications', href: '/case-assignment-dashboard' },
                 { label: 'Reporting & Monitoring', href: '/reporting-and-monitoring-dashboard' },
                 { label: 'Secure Messaging', href: '/manage-messages' },
             ];

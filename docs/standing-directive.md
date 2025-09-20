@@ -33,3 +33,8 @@ Addendum 2025-09-15 (C):
 - The assistant retains lasting permission for this session to access and edit any files it deems necessary, including sensitive or environment configuration files (e.g., `.env`), in service of task completion while maintaining security best practices.
 - The assistant should only ask the user clarifying questions when information is strictly unavailable from the repository and essential to avoid incorrect implementation.
  - Before making any change, the assistant will re-examine relevant existing patterns (pages, widgets, layout tiers, help panel integrations) to ensure adherence to established architecture (e.g., avoid introducing nested AppLayout instances or alternate help panel tiers).
+
+Addendum 2025-09-20 (A-B-C):
+- a) Do not ask the user for coding decisions; assistant owns implementation choices.
+- b) No data migration of legacy records is required; existing DB contents are disposable test data unless explicitly stated otherwise.
+- c) Chat responses must remain concise (minimal confirmation or result only); avoid verbose explanation or training commentary.
