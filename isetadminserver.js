@@ -4156,6 +4156,11 @@ app.get('/api/intake-officers', async (req, res) => {
     `);
     res.status(200).json(rows);
   } catch (error) {
+    // Graceful fallback if table(s) not present in current environment (dev migrations not applied yet)
+    if (error && (error.code === 'ER_NO_SUCH_TABLE' || /no such table/i.test(error.message))) {
+      console.warn('[intake-officers] evaluator tables missing; returning empty list fallback');
+      return res.status(200).json([]);
+    }
     console.error('Error fetching intake officers:', error);
     res.status(500).json({ error: 'Failed to fetch intake officers' });
   }
@@ -4384,7 +4389,8 @@ const generateSystemTasks = async () => {
   try {
     // Fetch all 'documents_overdue' events
     const [events] = await pool.query(
-      `SELECT e.id, e.case_id, e.event_type, e.event_data, e.created_at, a.tracking_id
+      `SELECT e.id, e.case_id, e.event_type, e.event_data, e.created_at,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id
        FROM iset_case_event e
        JOIN iset_case c ON e.case_id = c.id
        JOIN iset_application a ON c.application_id = a.id
@@ -4481,14 +4487,14 @@ app.get('/api/cases', async (req, res) => {
         ANY_VALUE(e.email) AS assigned_user_email,
         GROUP_CONCAT(p.iset_code SEPARATOR ', ') AS assigned_user_ptmas,
 
-        ANY_VALUE(a.tracking_id) AS tracking_id,
+  ANY_VALUE(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
         ANY_VALUE(a.created_at) AS submitted_at,
   ANY_VALUE(applicant.name) AS applicant_name,
   ANY_VALUE(applicant.email) AS applicant_email,
   ANY_VALUE(applicant.id) AS applicant_user_id
 
-      FROM iset_case c
-      JOIN iset_evaluators e ON c.assigned_to_user_id = e.id
+  FROM iset_case c
+  LEFT JOIN iset_evaluators e ON c.assigned_to_user_id = e.id
       LEFT JOIN iset_evaluator_ptma ep ON e.id = ep.evaluator_id AND (ep.unassigned_at IS NULL OR ep.unassigned_at > CURDATE())
       LEFT JOIN ptma p ON ep.ptma_id = p.id
       JOIN iset_application a ON c.application_id = a.id
@@ -4651,21 +4657,22 @@ app.get('/api/cases/:id', async (req, res) => {
         c.assessment_nwac_reason,
         e.name AS assigned_user_name,
         e.email AS assigned_user_email,
-        p.name AS assigned_user_ptma_name,
-        a.tracking_id,
+  p.name AS assigned_user_ptma_name,
+  JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
         a.created_at AS submitted_at,
-        applicant.name AS applicant_name,
-        applicant.email AS applicant_email,
-        applicant.id AS applicant_user_id,
+  applicant.name AS applicant_name,
+  applicant.email AS applicant_email,
+  COALESCE(applicant.id, s.user_id) AS applicant_user_id,
         -- Application fields for assessment pre-population
         a.employment_goals,
         a.employment_barriers,
         a.target_employer AS institution
-      FROM iset_case c
-      JOIN iset_evaluators e ON c.assigned_to_user_id = e.id
+  FROM iset_case c
+  LEFT JOIN iset_evaluators e ON c.assigned_to_user_id = e.id
       LEFT JOIN ptma p ON c.ptma_id = p.id
       JOIN iset_application a ON c.application_id = a.id
-      JOIN user applicant ON a.user_id = applicant.id
+      LEFT JOIN iset_application_submission s ON a.submission_id = s.id
+      LEFT JOIN user applicant ON s.user_id = applicant.id
       WHERE c.id = ?
     `;
 
@@ -4680,15 +4687,97 @@ app.get('/api/cases/:id', async (req, res) => {
       }
     } catch (_) {}
 
-    const [rows] = await pool.query(baseSql + ' LIMIT 1', params);
+    let rows;
+    try {
+      [rows] = await pool.query(baseSql + ' LIMIT 1', params);
+    } catch (e) {
+      const noTable = e && e.code === 'ER_NO_SUCH_TABLE';
+      const badField = e && e.code === 'ER_BAD_FIELD_ERROR';
+      if (noTable || badField) {
+        console.warn('[case:detail] falling back (reason=' + e.code + '): building dynamic minimal query');
+        // Discover existing columns on iset_case for safe selection
+        let existingCols = [];
+        try {
+          const [colRows] = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='iset_case'");
+          existingCols = colRows.map(r => r.column_name);
+        } catch (_) { /* ignore */ }
+        const preferred = [
+          'id','application_id','assigned_to_user_id','status','priority','stage','opened_at','closed_at','last_activity_at'
+        ];
+        const picked = preferred.filter(c => existingCols.includes(c));
+        if (picked.length === 0) picked.push('id','application_id','status');
+        const caseSelect = picked.map(c => `c.${c}`).join(', ');
+        // Discover application + submission columns to safely build applicant join
+        let appCols = []; let subCols = []; let hasApp = true; let hasSubmission = true;
+        try {
+          const [ac] = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='iset_application'");
+          appCols = ac.map(r=>r.column_name);
+        } catch(_) { hasApp = false; }
+        if (appCols.includes('submission_id')) {
+          try {
+            const [sc] = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='iset_application_submission'");
+            subCols = sc.map(r=>r.column_name);
+          } catch(_) { hasSubmission = false; }
+        }
+        const hasAppUserId = appCols.includes('user_id');
+  const hasSubmissionUser = appCols.includes('submission_id') && subCols.includes('user_id');
+        let applicantJoin = ''; let applicantSelect = 'NULL AS applicant_name, NULL AS applicant_email, NULL AS applicant_user_id';
+        if (hasSubmissionUser) {
+          applicantJoin = 'JOIN iset_application_submission s ON a.submission_id = s.id JOIN user applicant ON s.user_id = applicant.id';
+          applicantSelect = 'applicant.name AS applicant_name, applicant.email AS applicant_email, applicant.id AS applicant_user_id';
+        } else if (hasAppUserId) {
+          applicantJoin = 'JOIN user applicant ON a.user_id = applicant.id';
+          applicantSelect = 'applicant.name AS applicant_name, applicant.email AS applicant_email, applicant.id AS applicant_user_id';
+        }
+  // Always attempt submission join to recover user id even if no user row
+  const submissionJoin = appCols.includes('submission_id') ? 'LEFT JOIN iset_application_submission s ON a.submission_id = s.id' : '';
+  const coalesceSelect = applicantSelect.includes('applicant_user_id') ? applicantSelect.replace('applicant.id AS applicant_user_id','COALESCE(applicant.id, s.user_id) AS applicant_user_id') : applicantSelect + ', s.user_id AS applicant_user_id';
+  const fallbackSql = `SELECT ${caseSelect}, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id, a.created_at AS submitted_at, ${coalesceSelect} FROM iset_case c JOIN iset_application a ON c.application_id = a.id ${submissionJoin} ${applicantJoin} WHERE c.id = ? LIMIT 1`;
+        [rows] = await pool.query(fallbackSql, [caseId]);
+      } else {
+        throw e;
+      }
+    }
 
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Case not found' });
     }
-    res.status(200).json(rows[0]);
+    const row = rows[0];
+    if (!row.applicant_user_id && row.application_id) {
+      try {
+        const [[r2]] = await pool.query(`SELECT s.user_id FROM iset_application a JOIN iset_application_submission s ON a.submission_id = s.id WHERE a.id=? LIMIT 1`, [row.application_id]);
+        if (r2 && r2.user_id) row.applicant_user_id = r2.user_id;
+      } catch(_) {}
+    }
+    res.set('Cache-Control','no-store, max-age=0');
+    res.status(200).json(row);
   } catch (error) {
     console.error('Error fetching case:', error);
     res.status(500).json({ error: 'Failed to fetch case' });
+  }
+});
+
+// TEMP: Backfill documents from legacy iset_application_file into iset_document (test data only)
+app.post('/api/dev/backfill-documents', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT f.user_id, f.file_path, f.original_filename, f.detected_mime, f.id AS legacy_id, f.size_bytes, a.id AS application_id
+      FROM iset_application_file f
+      LEFT JOIN iset_application a ON a.submission_id = f.submission_id OR a.user_id = f.user_id
+      WHERE f.status='clean' OR f.status='pending'`);
+    let inserted = 0;
+    for (const r of rows) {
+      try {
+        await pool.query(`INSERT INTO iset_document (applicant_user_id, application_id, file_name, file_path, source, status, mime_type, size_bytes)
+          VALUES (?,?,?,?, 'application_submission','active', ?, ?)
+          ON DUPLICATE KEY UPDATE updated_at=VALUES(updated_at), status='active', mime_type=VALUES(mime_type), size_bytes=VALUES(size_bytes)`,
+          [r.user_id, r.application_id || null, r.original_filename, r.file_path, r.detected_mime || null, r.size_bytes || null]);
+        inserted++;
+      } catch(_) {}
+    }
+    res.json({ backfilled: inserted, scanned: rows.length });
+  } catch (e) {
+    console.error('[backfill-documents] error', e.message);
+    res.status(500).json({ error: 'backfill_failed' });
   }
 });
 
@@ -4761,7 +4850,7 @@ app.get('/api/case-events', async (req, res) => {
     const [rows] = await pool.query(`
       SELECT 
         e.id, e.case_id, e.event_type, e.event_data, e.is_read, e.created_at,
-        a.tracking_id,
+  JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
         et.label, et.alert_variant,
         u.name AS user_name
       FROM iset_case_event e
@@ -5941,8 +6030,19 @@ app.get('/api/applications/:id', async (req, res) => {
       if (authProvider === 'cognito') {
         const { scopeApplications } = require('./src/lib/dbScope');
         const { sql: scopeSql, params: scopeParams } = scopeApplications(req.auth || {}, 'a');
-        appSql += ` AND ${scopeSql}`;
-        appParams.push(...scopeParams);
+        if (/\bregion_id\b/.test(scopeSql)) {
+          try {
+            // Detect if region_id column exists on iset_application; skip predicate if missing (legacy schema)
+            await pool.query('SELECT region_id FROM iset_application LIMIT 0');
+            appSql += ` AND ${scopeSql}`;
+            appParams.push(...scopeParams);
+          } catch (colErr) {
+            console.warn('[rbac] skipping application region scope (column missing):', colErr.code || colErr.message);
+          }
+        } else {
+          appSql += ` AND ${scopeSql}`;
+          appParams.push(...scopeParams);
+        }
       }
     } catch (_) {}
     const [[application]] = await pool.query(appSql, appParams);
@@ -5950,8 +6050,63 @@ app.get('/api/applications/:id', async (req, res) => {
       return res.status(404).json({ error: 'Application not found' });
     }
 
-    // Get case info (if exists)
-    let caseSql = `SELECT id, assigned_to_user_id, status, priority, stage, program_type, case_summary, opened_at, closed_at, last_activity_at, ptma_id FROM iset_case c WHERE application_id = ?`;
+    // Enrich payload_json with submission answers if minimal snapshot only
+    try {
+      let payload = application.payload_json;
+      if (payload && typeof payload === 'string') {
+        try { payload = JSON.parse(payload); } catch { payload = {}; }
+      }
+      if (!payload || typeof payload !== 'object') payload = {};
+      const hasAnswers = payload.answers || payload.form_answers || payload.data;
+      const submissionId = application.submission_id;
+      let schemaFields = null;
+      if (!hasAnswers && submissionId) {
+        try {
+          const [[sub]] = await pool.query('SELECT intake_payload, schema_snapshot FROM iset_application_submission WHERE id = ? LIMIT 1', [submissionId]);
+          if (sub && sub.intake_payload) {
+            let intake = sub.intake_payload;
+            if (typeof intake === 'string') {
+              try { intake = JSON.parse(intake); } catch { intake = {}; }
+            }
+            if (intake && typeof intake === 'object') {
+              // Heuristic: prefer explicit answers keys, else attach whole intake as answers
+              const candidate = intake.answers || intake.form_answers || intake.data || intake;
+              if (candidate && typeof candidate === 'object') {
+                payload.answers = candidate;
+              }
+            }
+          }
+          if (sub && sub.schema_snapshot) {
+            try {
+              let snap = sub.schema_snapshot;
+              if (typeof snap === 'string') { try { snap = JSON.parse(snap); } catch { snap = null; } }
+              if (snap && typeof snap === 'object' && snap.fields && typeof snap.fields === 'object') {
+                schemaFields = snap.fields;
+              }
+            } catch(_) {}
+          }
+        } catch (enrichErr) {
+          console.warn('[enrich] submission intake payload unavailable:', enrichErr.code || enrichErr.message);
+        }
+      }
+      // Attach schema field metadata if present
+      if (schemaFields) {
+        payload._schema_fields = schemaFields; // underscored to avoid collision
+      }
+      application.payload_json = payload; // keep as object; frontend handles object or string
+    } catch (payloadErr) {
+      console.warn('[enrich] payload processing failed:', payloadErr.message);
+    }
+
+    // Get case info (if exists) with defensive column detection (legacy schemas may lack some fields)
+    const caseBaseCols = ['id','assigned_to_user_id','status'];
+    const optionalCols = ['priority','stage','program_type','case_summary','opened_at','closed_at','last_activity_at','ptma_id'];
+    const presentOptional = [];
+    for (const col of optionalCols) {
+      try { await pool.query(`SELECT ${col} FROM iset_case LIMIT 0`); presentOptional.push(col); } catch(_) { /* skip missing */ }
+    }
+    const caseCols = [...caseBaseCols, ...presentOptional];
+    let caseSql = `SELECT ${caseCols.join(', ')} FROM iset_case c WHERE application_id = ?`;
     const caseParams = [applicationId];
     try {
       const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
@@ -6059,6 +6214,81 @@ app.put('/api/applications/:id/ptma-case-summary', async (req, res) => {
   } catch (error) {
     console.error('Error updating case summary:', error);
     res.status(500).json({ error: 'Failed to update case summary' });
+  }
+});
+
+// PATCH /api/applications/:id/answers
+// Body: { answers: { key: newValue, ... } }
+// Merges into payload_json.answers without overwriting unspecified keys; does not modify submission snapshot.
+app.patch('/api/applications/:id/answers', async (req, res) => {
+  const applicationId = req.params.id;
+  const { answers } = req.body || {};
+  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) {
+    return res.status(400).json({ error: 'Missing or invalid answers object in body' });
+  }
+  try {
+    // Load current payload plus submission id
+  const [[row]] = await pool.query('SELECT payload_json, submission_id FROM iset_application WHERE id = ? LIMIT 1', [applicationId]);
+    if (!row) return res.status(404).json({ error: 'Application not found' });
+    let payload = row.payload_json;
+    if (payload && typeof payload === 'string') { try { payload = JSON.parse(payload); } catch { payload = {}; } }
+    if (!payload || typeof payload !== 'object') payload = {};
+    if (!payload.answers || typeof payload.answers !== 'object') payload.answers = {};
+
+    // Determine candidate submission id (prefer column, else payload_json.submission_snapshot.id)
+    let candidateSubmissionId = row.submission_id;
+    if (!candidateSubmissionId) {
+      try {
+        if (payload.submission_snapshot && payload.submission_snapshot.id) {
+          candidateSubmissionId = payload.submission_snapshot.id;
+        }
+      } catch(_) { /* ignore */ }
+    }
+
+    // Bootstrap missing keys from immutable submission snapshot so we don't lose fields when saving a single edit.
+    try {
+      if (candidateSubmissionId) {
+        const [[sub]] = await pool.query('SELECT intake_payload FROM iset_application_submission WHERE id = ? LIMIT 1', [candidateSubmissionId]);
+        if (sub && sub.intake_payload) {
+          let intake = sub.intake_payload;
+            if (typeof intake === 'string') { try { intake = JSON.parse(intake); } catch { intake = {}; } }
+          if (intake && typeof intake === 'object') {
+            const sourceAnswers = intake.answers || intake.form_answers || intake.data || intake;
+            if (sourceAnswers && typeof sourceAnswers === 'object') {
+              const existingKeyCount = Object.keys(payload.answers).length;
+              const sourceKeyCount = Object.keys(sourceAnswers).length;
+              // If existing answers look minimal compared to source, hydrate all keys (allow overwrite of sparse placeholder)
+              const hydrateAll = existingKeyCount === 0 || (existingKeyCount < 5 && sourceKeyCount > existingKeyCount);
+              for (const [k,v] of Object.entries(sourceAnswers)) {
+                if (hydrateAll || payload.answers[k] === undefined) payload.answers[k] = v;
+              }
+            }
+          }
+        }
+      }
+    } catch (bootstrapErr) {
+      console.warn('[answers:patch] bootstrap from submission failed:', bootstrapErr.code || bootstrapErr.message);
+    }
+
+    // Apply provided updates
+    for (const [k, v] of Object.entries(answers)) {
+      payload.answers[k] = v;
+    }
+
+    const serialized = JSON.stringify(payload);
+
+    // Optional lightweight versioning: if version table exists, store previous payload before update
+    try {
+      await pool.query('INSERT INTO iset_application_version (application_id, previous_payload_json) VALUES (?, ?)', [applicationId, row.payload_json]);
+    } catch (verErr) {
+      // table may not exist yet; ignore
+    }
+
+    await pool.query('UPDATE iset_application SET payload_json = ? WHERE id = ?', [serialized, applicationId]);
+    res.status(200).json({ updated: Object.keys(answers), answers: payload.answers });
+  } catch (err) {
+    console.error('Error patching application answers:', err);
+    res.status(500).json({ error: 'Failed to update application answers' });
   }
 });
 
@@ -6747,7 +6977,7 @@ app.put('/api/cases/:id', async (req, res) => {
 
     // Fetch the updated case to get user_id, stage, and other info
     const [[caseRow]] = await pool.query(
-      `SELECT c.*, a.user_id AS applicant_user_id, a.tracking_id, e.name AS evaluator_name
+  `SELECT c.*, a.user_id AS applicant_user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id, e.name AS evaluator_name
        FROM iset_case c
        JOIN iset_application a ON c.application_id = a.id
        LEFT JOIN iset_evaluators e ON c.assigned_to_user_id = e.id

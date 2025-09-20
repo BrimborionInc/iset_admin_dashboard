@@ -2,23 +2,22 @@ import React, { useEffect, useState } from 'react';
 import { ContentLayout, SpaceBetween, Box } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import { useParams } from 'react-router-dom';
-import IsetApplicationFormWidget from '../widgets/IsetApplicationFormWidget';
+import { apiFetch } from '../auth/apiClient';
 import SupportingDocumentsWidget from '../widgets/SupportingDocumentsWidget';
-import ApplicationEvents from '../widgets/applicationEvents';
-import SecureMessagesWidget from '../widgets/SecureMessagesWidget';
-import CoordinatorAssessmentWidget from '../widgets/CoordinatorAssessmentWidget';
+import IsetApplicationFormWidget from '../widgets/IsetApplicationFormWidget';
 
 const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs }) => {
   const { id } = useParams(); // id = iset_case.id
   const [caseData, setCaseData] = useState(null);
   const [boardItems, setBoardItems] = useState([
-    { id: 'iset-application-form', rowSpan: 6, columnSpan: 2, data: { title: 'ISET Application Form', application_id: caseData?.application_id, caseData } }
+    { id: 'iset-application-form', rowSpan: 6, columnSpan: 2, data: { title: 'ISET Application Form', application_id: caseData?.application_id, caseData } },
+    { id: 'supporting-documents', rowSpan: 6, columnSpan: 2, data: { title: 'Supporting Documents', application_id: caseData?.application_id, caseData } }
   ]);
 
   useEffect(() => {
     if (!id) return;
-    fetch(`${process.env.REACT_APP_API_BASE_URL}/api/cases/${id}`)
-      .then(res => res.json())
+    apiFetch(`/api/cases/${id}`)
+      .then(res => res.ok ? res.json() : Promise.reject(res))
       .then(data => {
         setCaseData(data);
         updateBreadcrumbs && updateBreadcrumbs([
@@ -27,17 +26,14 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs }) => {
           { text: data.tracking_id || id }
         ]);
       })
-      .catch(err => setCaseData(null));
+      .catch(() => setCaseData(null));
   }, [id, updateBreadcrumbs]);
 
   useEffect(() => {
     if (caseData) {
       setBoardItems([
         { id: 'iset-application-form', rowSpan: 6, columnSpan: 2, data: { title: 'ISET Application Form', application_id: caseData.application_id, caseData } },
-        { id: 'coordinator-assessment', rowSpan: 6, columnSpan: 2, data: { title: 'Coordinator Assessment', application_id: caseData.application_id, caseData } },
-        { id: 'supporting-documents', rowSpan: 3, columnSpan: 2, data: { title: 'Supporting Documents', application_id: caseData.application_id, caseData } },
-        { id: 'secure-messages', rowSpan: 3, columnSpan: 2, data: { title: 'Secure Messages', application_id: caseData.application_id, caseData } },
-        { id: 'application-events', rowSpan: 4, columnSpan: 4, data: { title: 'Events', application_id: caseData.application_id, caseData } }
+        { id: 'supporting-documents', rowSpan: 6, columnSpan: 2, data: { title: 'Supporting Documents', application_id: caseData.application_id, caseData } }
       ]);
     }
   }, [caseData]);
@@ -54,19 +50,10 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs }) => {
           onItemsChange={event => setBoardItems(event.detail.items)}
           renderItem={(item, actions) => {
             if (item.id === 'iset-application-form') {
-              return <IsetApplicationFormWidget actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} toggleHelpPanel={toggleHelpPanel} />;
-            }
-            if (item.id === 'coordinator-assessment') {
-              return <CoordinatorAssessmentWidget actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} toggleHelpPanel={toggleHelpPanel} />;
+              return <IsetApplicationFormWidget actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} />;
             }
             if (item.id === 'supporting-documents') {
               return <SupportingDocumentsWidget actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} />;
-            }
-            if (item.id === 'application-events') {
-              return <ApplicationEvents actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} />;
-            }
-            if (item.id === 'secure-messages') {
-              return <SecureMessagesWidget actions={actions} application_id={item.data.application_id} caseData={item.data.caseData} toggleHelpPanel={toggleHelpPanel} />;
             }
             return null;
           }}

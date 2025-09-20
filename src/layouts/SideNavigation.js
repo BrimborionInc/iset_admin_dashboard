@@ -54,7 +54,7 @@ const SideNavigation = ({ currentRole }) => {
       type: 'section',
       text: 'ISET Assessment',
       items: [
-        { type: 'link', text: 'Case Operations', href: '/case-assignment-dashboard' },
+  { type: 'link', text: 'Manage Applications', href: '/case-assignment-dashboard' },
         { type: 'link', text: 'My Case Queue', href: '/case-management' },
       ],
     },
@@ -150,7 +150,7 @@ const SideNavigation = ({ currentRole }) => {
           return section; // retain full admin section for now (can prune later)
         }
         if (section.type === 'section' && section.text === 'ISET Assessment') {
-          return section; // keep Case Operations + My Case Queue
+          return section; // keep Manage Applications + My Case Queue
         }
         if (section.type === 'section' && section.text === 'Other Dashboards') {
           return section; // keep for visibility; routeMatrix will still gate links
@@ -163,7 +163,7 @@ const SideNavigation = ({ currentRole }) => {
       return [...filteredSections, ...commonFooterItems];
     }
     if (roleValue === 'Regional Coordinator') {
-      // Preserve full 'ISET Assessment' (ensures 'Case Operations' always visible)
+  // Preserve full 'ISET Assessment' (ensures 'Manage Applications' always visible)
       let filteredSections = allNavItems.map(section => {
         if (section.type === 'section' && section.text === 'ISET Administration') {
           return {
@@ -172,7 +172,7 @@ const SideNavigation = ({ currentRole }) => {
           };
         }
         if (section.type === 'section' && section.text === 'ISET Assessment') {
-          return section; // keep all items including Case Operations
+          return section; // keep all items including Manage Applications
         }
         if (section.type === 'section' && section.text === 'Other Dashboards') {
           return {
@@ -197,7 +197,7 @@ const SideNavigation = ({ currentRole }) => {
       const filteredSections = allNavItems
         .map(section => {
           if (section.type === 'section' && section.text === 'ISET Assessment') {
-            return section; // keep full assessment including Case Operations
+            return section; // keep full assessment including Manage Applications
           }
           if (section.type === 'section' && section.text === 'Other Dashboards') {
             return {

@@ -4,7 +4,7 @@ import Board from '@cloudscape-design/board-components/board';
 import BlankTemplate from '../widgets/blankTemplate';
 import ApplicationsWidget from '../widgets/ApplicationsWidget';
 
-const CaseAssignmentDashboard = ({ header = 'Case Operations', headerInfo, toggleHelpPanel, updateBreadcrumbs, setSplitPanelOpen, setAvailableItems }) => {
+const CaseAssignmentDashboard = ({ header = 'Manage Applications', headerInfo, toggleHelpPanel, updateBreadcrumbs, setSplitPanelOpen, setAvailableItems }) => {
   const [boardItems, setBoardItems] = useState([
   { id: 'applications-unified', rowSpan: 6, columnSpan: 12, data: { title: 'Active Cases' } }
   ]);
