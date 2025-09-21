@@ -12,13 +12,14 @@ import {
   ExpandableSection,
   KeyValuePairs,
   Badge,
-  StatusIndicator
+  StatusIndicator,
+  Table,
+  ColumnLayout
 } from '@cloudscape-design/components';
 import IsetApplicationFormHelpPanelContent from '../helpPanelContents/isetApplicationFormHelpPanelContent';
 import { apiFetch } from '../auth/apiClient';
 
 const NOT_PROVIDED = <Box color="text-body-secondary">Not provided</Box>;
-
 const OPTION_LABELS = {
   'eligibility-indigenous': { yes: 'Yes', no: 'No' },
   'eligibility-female': { yes: 'Yes', no: 'No' },
@@ -122,17 +123,67 @@ const DOCUMENT_FIELDS = [
   { key: 'uploaded-file-6', label: 'Band denial letter' }
 ];
 
+const INCOME_FIELDS = [
+  { key: 'income-employment', label: 'Employment income' },
+  { key: 'income-spousal', label: 'Spousal income' },
+  { key: 'income-social-assist', label: 'Social assistance' },
+  { key: 'income-child-benefit', label: 'Canada Child Benefit' },
+  { key: 'income-jordans', label: "Jordan's Principle" },
+  { key: 'income-band-funding', label: 'Band funding' },
+  { key: 'income-other', label: 'Other income' }
+];
+const EXPENSE_FIELDS = [
+  { key: 'expenses-rent', label: 'Rent / Mortgage' },
+  { key: 'expenses-utilities', label: 'Utilities' },
+  { key: 'expenses-groceries', label: 'Groceries' },
+  { key: 'expenses-transitpass', label: 'Transit pass' },
+  { key: 'example-input-5', label: 'Other expenses total' }
+];
 const currencyFormatter = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 0 });
-
 const normaliseString = (value) => (typeof value === 'string' ? value.trim() : value);
-
-const formatCurrency = (value) => {
-  if (value === null || value === undefined) return NOT_PROVIDED;
+const parseCurrencyValue = (value) => {
+  if (value === null || value === undefined) return { number: null, cleaned: '' };
   const cleaned = String(value).replace(/[^0-9.-]/g, '');
-  if (!cleaned) return NOT_PROVIDED;
+  if (!cleaned) return { number: null, cleaned };
   const number = Number(cleaned);
-  if (Number.isNaN(number)) return String(value);
+  if (Number.isNaN(number)) return { number: null, cleaned };
+  return { number, cleaned };
+};
+const formatCurrency = (value) => {
+  const { number, cleaned } = parseCurrencyValue(value);
+  if (number === null) {
+    if (!cleaned || value === null || value === undefined) return NOT_PROVIDED;
+    return String(value);
+  }
   return currencyFormatter.format(number);
+};
+const currencyText = (value) => {
+  const { number } = parseCurrencyValue(value);
+  if (number === null) return '';
+  return currencyFormatter.format(number);
+};
+const buildFinancialRows = (fields, answers, totalLabel) => {
+  let total = 0;
+  let hasValue = false;
+  const rows = fields.map(({ key, label }) => {
+    const { number } = parseCurrencyValue(answers[key]);
+    if (number !== null) {
+      total += number;
+      hasValue = true;
+    }
+    return {
+      name: label,
+      amount: number === null ? '' : currencyFormatter.format(number)
+    };
+  });
+  if (hasValue) {
+    rows.push({
+      name: totalLabel,
+      amount: currencyFormatter.format(total),
+      isTotal: true
+    });
+  }
+  return rows;
 };
 
 const formatDate = (value) => {
@@ -141,7 +192,6 @@ const formatDate = (value) => {
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' });
 };
-
 const asBadge = (value, positiveLabel = 'Yes', negativeLabel = 'No') => {
   if (value === null || value === undefined || value === '') return NOT_PROVIDED;
   const normalised = String(value).toLowerCase();
@@ -153,7 +203,6 @@ const asBadge = (value, positiveLabel = 'Yes', negativeLabel = 'No') => {
   }
   return <Badge color="blue">{String(value)}</Badge>;
 };
-
 const formatOption = (key, value) => {
   if (value === null || value === undefined || value === '') return NOT_PROVIDED;
   const map = OPTION_LABELS[key];
@@ -161,7 +210,6 @@ const formatOption = (key, value) => {
   const normalised = String(value).toLowerCase();
   return map[normalised] || map[value] || String(value);
 };
-
 const formatOptionList = (key, values) => {
   if (!values || (Array.isArray(values) && values.length === 0)) return NOT_PROVIDED;
   const list = Array.isArray(values) ? values : [values];
@@ -174,12 +222,10 @@ const formatOptionList = (key, values) => {
   });
   return <SpaceBetween direction="horizontal" size="xs">{chips}</SpaceBetween>;
 };
-
 const renderTextBlock = (value) => {
   if (!value || !String(value).trim()) return NOT_PROVIDED;
   return <Box whiteSpace="pre-wrap">{value}</Box>;
 };
-
 const renderAddress = (answers) => {
   const parts = [
     answers['address-street-address'],
@@ -190,18 +236,15 @@ const renderAddress = (answers) => {
   if (!parts.length) return NOT_PROVIDED;
   return <Box>{parts.join(', ')}</Box>;
 };
-
 const renderMailingAddress = (value) => {
   if (!value || !String(value).trim()) return NOT_PROVIDED;
   return <Box>{value}</Box>;
 };
-
 const normaliseFilePath = (filePath) => {
   if (!filePath) return null;
   const normalised = String(filePath).replace(/\\/g, '/').replace(/\/{2,}/g, '/');
   return normalised.startsWith('/') ? normalised : `/${normalised}`;
 };
-
 const renderDocumentLinks = (value) => {
   if (!value) return NOT_PROVIDED;
   const files = Array.isArray(value) ? value : [value];
@@ -225,7 +268,6 @@ const renderDocumentLinks = (value) => {
     </SpaceBetween>
   );
 };
-
 const signatureStatus = (value) => {
   if (!value || typeof value !== 'object') {
     return <StatusIndicator type="pending">Not signed</StatusIndicator>;
@@ -239,18 +281,70 @@ const signatureStatus = (value) => {
   );
 };
 
-const Section = ({ title, description, columns = 2, items, defaultExpanded = true }) => {
-  const prepared = items.map(({ label, value }) => ({
+const Section = ({ title, description, columns = 2, items = [], defaultExpanded = true, tableRows, tableColumns, tables }) => {
+  const prepared = (items || []).map(({ label, value }) => ({
     label,
     value: value === null || value === undefined ? NOT_PROVIDED : value,
   }));
+  const resolvedTables = tables || (tableRows ? [{ items: tableRows, columnDefinitions: tableColumns }] : []);
+  const defaultTableColumns = [
+    {
+      id: 'name',
+      header: 'Category',
+      cell: item => <Box fontWeight={item.isTotal ? 'bold' : undefined}>{item.name}</Box>
+    },
+    {
+      id: 'amount',
+      header: 'Amount',
+      cell: item => (
+        <Box textAlign="right" fontWeight={item.isTotal ? 'bold' : undefined}>
+          {item.amount}
+        </Box>
+      )
+    }
+  ];
   return (
     <ExpandableSection
       headerText={title}
-      text={description}
+      headerDescription={description}
       defaultExpanded={defaultExpanded}
     >
-      <KeyValuePairs columns={columns} items={prepared} />
+      <SpaceBetween size="s">
+        {resolvedTables.length > 0 && (
+          resolvedTables.length > 1 ? (
+            <ColumnLayout columns={Math.min(2, resolvedTables.length)} variant="text-grid">
+              {resolvedTables.map((config, index) => (
+                <div key={config.id || index}>
+                  <Table
+                    variant="embedded"
+                    stripedRows
+                    resizableColumns={false}
+                    wrapLines
+                    header={config.header}
+                    items={config.items}
+                    columnDefinitions={config.columnDefinitions || defaultTableColumns}
+                    trackBy={config.trackBy || 'name'}
+                  />
+                </div>
+              ))}
+            </ColumnLayout>
+          ) : (
+            <Table
+              variant="embedded"
+              stripedRows
+              resizableColumns={false}
+              wrapLines
+              header={resolvedTables[0].header}
+              items={resolvedTables[0].items}
+              columnDefinitions={resolvedTables[0].columnDefinitions || defaultTableColumns}
+              trackBy={resolvedTables[0].trackBy || 'name'}
+            />
+          )
+        )}
+        {prepared.length > 0 && (
+          <KeyValuePairs columns={columns} items={prepared} />
+        )}
+      </SpaceBetween>
     </ExpandableSection>
   );
 };
@@ -263,7 +357,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   const [caseSummary, setCaseSummary] = useState('');
   const [initialCaseSummary, setInitialCaseSummary] = useState('');
   const [savingCaseSummary, setSavingCaseSummary] = useState(false);
-
   useEffect(() => {
     let cancelled = false;
     if (!application_id) {
@@ -273,10 +366,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         cancelled = true;
       };
     }
-
     setLoading(true);
     setLoadError(null);
-
     apiFetch(`/api/applications/${application_id}`)
       .then(async res => {
         if (res.ok) return res.json();
@@ -318,12 +409,10 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-
     return () => {
       cancelled = true;
     };
   }, [application_id]);
-
   const { answers, payload } = useMemo(() => {
     if (!application) return { answers: {}, payload: {} };
     const payload = application.__payload || {};
@@ -333,10 +422,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
       answers: rawAnswers && typeof rawAnswers === 'object' ? rawAnswers : {}
     };
   }, [application]);
-
   const sections = useMemo(() => {
     const sections = [];
-
     sections.push({
       id: 'consent',
       title: 'Consent & declarations',
@@ -347,7 +434,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         { label: 'Indigenous declaration', value: signatureStatus(answers?.indigenous_declaration) }
       ]
     });
-
     sections.push({
       id: 'eligibility',
       title: 'Eligibility screening',
@@ -364,9 +450,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         { label: 'Previous ISET default', value: formatOptionList('eligibility-disqualified', answers['eligibility-disqualified']) }
       ]
     });
-
     const fullName = [answers['first-name'], answers['middle-names'], answers['last-name']].filter(Boolean).join(' ');
-
     sections.push({
       id: 'identity',
       title: 'Applicant identity',
@@ -383,7 +467,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         { label: 'Home community', value: answers['home-comminuty'] ? <Box>{answers['home-comminuty']}</Box> : NOT_PROVIDED }
       ]
     });
-
     sections.push({
       id: 'contact',
       title: 'Contact information',
@@ -397,7 +480,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         { label: 'Email address', value: answers['contact-email-address'] ? <Box>{answers['contact-email-address']}</Box> : NOT_PROVIDED }
       ]
     });
-
     sections.push({
       id: 'emergency',
       title: 'Emergency contact',
@@ -409,7 +491,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         { label: 'Telephone', value: answers['emergency-contact-telephone'] ? <Box>{answers['emergency-contact-telephone']}</Box> : NOT_PROVIDED }
       ]
     });
-
     sections.push({
       id: 'demographics',
       title: 'Demographics & supports',
@@ -426,7 +507,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         { label: 'Top-up amount', value: formatCurrency(answers['top-up-amount']) }
       ]
     });
-
     sections.push({
       id: 'education',
       title: 'Education & employment',
@@ -440,7 +520,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         { label: 'Identified program / employer', value: formatOption('target-program', answers['target-program']) }
       ]
     });
-
     sections.push({
       id: 'barriers',
       title: 'Barriers & support requests',
@@ -453,54 +532,75 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         { label: 'Other support detail', value: renderTextBlock(answers['other-requested-support']) }
       ]
     });
-
+    const incomeRows = buildFinancialRows(INCOME_FIELDS, answers, 'Total monthly income');
+    const expenseRows = buildFinancialRows(EXPENSE_FIELDS, answers, 'Total monthly expenses');
     sections.push({
-      id: 'income',
-      title: 'Household income',
-      description: 'Reported monthly income sources.',
+      id: 'finances',
+      title: 'Income & expenses',
+      description: 'Monthly household cash flow snapshot.',
+      tables: [
+        {
+          id: 'income-table',
+          header: <Header variant="h4">Monthly income</Header>,
+          items: incomeRows,
+          columnDefinitions: [
+            {
+              id: 'income-source',
+              header: 'Source',
+              cell: item => <Box fontWeight={item.isTotal ? 'bold' : undefined}>{item.name}</Box>
+            },
+            {
+              id: 'income-amount',
+              header: 'Amount',
+              cell: item => (
+                <Box textAlign="right" fontWeight={item.isTotal ? 'bold' : undefined}>
+                  {item.amount}
+                </Box>
+              )
+            }
+          ],
+          trackBy: 'name'
+        },
+        {
+          id: 'expense-table',
+          header: <Header variant="h4">Monthly expenses</Header>,
+          items: expenseRows,
+          columnDefinitions: [
+            {
+              id: 'expense-category',
+              header: 'Category',
+              cell: item => <Box fontWeight={item.isTotal ? 'bold' : undefined}>{item.name}</Box>
+            },
+            {
+              id: 'expense-amount',
+              header: 'Amount',
+              cell: item => (
+                <Box textAlign="right" fontWeight={item.isTotal ? 'bold' : undefined}>
+                  {item.amount}
+                </Box>
+              )
+            }
+          ],
+          trackBy: 'name'
+        }
+      ],
       columns: 2,
       items: [
-        { label: 'Employment income', value: formatCurrency(answers['income-employment']) },
-        { label: 'Spousal income', value: formatCurrency(answers['income-spousal']) },
-        { label: 'Social assistance', value: formatCurrency(answers['income-social-assist']) },
-        { label: 'Canada Child Benefit', value: formatCurrency(answers['income-child-benefit']) },
-        { label: "Jordan's Principle", value: formatCurrency(answers['income-jordans']) },
-        { label: 'Band funding', value: formatCurrency(answers['income-band-funding']) },
-        { label: 'Other income', value: formatCurrency(answers['income-other']) },
-        { label: 'Other income detail', value: renderTextBlock(answers['income-other-description']) }
+        { label: 'Other income detail', value: renderTextBlock(answers['income-other-description']) },
+        { label: 'Other expenses (list)', value: renderTextBlock(answers['expenses-other-list']) }
       ]
     });
-
-    sections.push({
-      id: 'expenses',
-      title: 'Household expenses',
-      description: 'Applicant’s estimated monthly costs.',
-      columns: 2,
-      items: [
-        { label: 'Rent / Mortgage', value: formatCurrency(answers['expenses-rent']) },
-        { label: 'Utilities', value: formatCurrency(answers['expenses-utilities']) },
-        { label: 'Groceries', value: formatCurrency(answers['expenses-groceries']) },
-        { label: 'Transit pass', value: formatCurrency(answers['expenses-transitpass']) },
-        { label: 'Other expenses (list)', value: renderTextBlock(answers['expenses-other-list']) },
-        { label: 'Other expenses total', value: formatCurrency(answers['example-input-5']) }
-      ]
-    });
-
     sections.push({
       id: 'documents',
       title: 'Supporting documents',
-      description: 'Files uploaded alongside the application.',
+      description: "These are the files the applicant uploaded in support of this application. For all files associated with this applicant's email address, and to manage files, see the Supporting Documents widget.",
       columns: 2,
       items: DOCUMENT_FIELDS.map(({ key, label }) => ({ label, value: renderDocumentLinks(answers[key]) }))
     });
-
     return sections;
   }, [answers]);
-
   const employmentNarrative = renderTextBlock(answers['long-term-goal']);
-
   const dirtyCaseSummary = caseSummary !== initialCaseSummary;
-
   const saveCaseSummary = () => {
     setSavingCaseSummary(true);
     apiFetch(`/api/applications/${application_id}/ptma-case-summary`, {
@@ -534,11 +634,9 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
       })
       .finally(() => setSavingCaseSummary(false));
   };
-
   const cancelCaseSummary = () => {
     setCaseSummary(initialCaseSummary);
   };
-
   return (
     <BoardItem
       header={
@@ -581,20 +679,18 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
           {sections.map(section => (
             <Section key={section.id} {...section} />
           ))}
-
           {employmentNarrative !== NOT_PROVIDED && (
             <ExpandableSection
               headerText="Employment goal narrative"
-              text="Applicant's description of their long-term employment objective."
+              headerDescription="Applicant's description of their long-term employment objective."
               defaultExpanded={false}
             >
               {employmentNarrative}
             </ExpandableSection>
           )}
-
           <ExpandableSection
             headerText="Case summary & notes"
-            text="Reviewer notes shared across the assessment team."
+            headerDescription="Reviewer notes shared across the assessment team."
             defaultExpanded={false}
           >
             <SpaceBetween size="s">
@@ -614,12 +710,11 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
               </SpaceBetween>
             </SpaceBetween>
           </ExpandableSection>
-
           {flashbarItems.length > 0 && <Flashbar items={flashbarItems} />}
         </SpaceBetween>
       )}
     </BoardItem>
   );
 };
-
 export default IsetApplicationFormWidget;
+

@@ -5,7 +5,11 @@ const API_BASE = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001';
 
 function getBypassHeaders() {
   try {
-    const flag = sessionStorage.getItem('iamBypass') === 'off';
+    // Prefer explicit UI toggle, but also allow env flag and localhost heuristic
+    const uiFlag = sessionStorage.getItem('iamBypass') === 'off';
+    const envFlag = process.env.REACT_APP_DEV_AUTH_BYPASS === 'true';
+    const devLocal = (typeof window !== 'undefined') && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
+    const flag = uiFlag || envFlag || devLocal;
     if (!flag) return null;
     if (sessionStorage.getItem('simulateSignedOut') === 'true') {
       // Simulate signed-out: don't send any bypass headers so the client path treats it as unauthenticated
@@ -16,7 +20,8 @@ function getBypassHeaders() {
     const role = roleObj?.value || roleObj?.label || roleObj || 'SysAdmin';
     const userId = sessionStorage.getItem('devUserId') || 'dev-user-1';
     const regionId = sessionStorage.getItem('devRegionId') || '';
-    const token = sessionStorage.getItem('devBypassToken') || 'local-dev-secret';
+    // Allow env override to ensure server and client share the key
+    const token = sessionStorage.getItem('devBypassToken') || process.env.REACT_APP_DEV_AUTH_TOKEN || 'local-dev-secret';
     return {
       'X-Dev-Bypass': token,
       'X-Dev-Role': role,

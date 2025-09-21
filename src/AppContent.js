@@ -11,6 +11,7 @@ import {
   ButtonDropdown,
   Container
 } from '@cloudscape-design/components';
+import { ItemsPalette, BoardItem } from '@cloudscape-design/board-components';
 import Avatar from "@cloudscape-design/chat-components/avatar";
 import ChatBubble from "@cloudscape-design/chat-components/chat-bubble";
 import PromptInput from "@cloudscape-design/components/prompt-input";
@@ -36,7 +37,8 @@ const AppContent = ({ currentRole }) => {
   const [splitPanelOpen, setSplitPanelOpen] = useState(false); // State for SplitPanel, initially closed
   const [splitPanelSize, setSplitPanelSize] = useState(360); // State for SplitPanel size
   const [splitPanelPreferences, setSplitPanelPreferences] = useState({ position: 'side' }); // State for SplitPanel preferences
-  const [availableItems, setAvailableItems] = useState([]); // State for available items
+  const [availableItems, setAvailableItems] = useState([]); // State for available items (palette)
+  const [toolsMode, setToolsMode] = useState('help'); // 'help' | 'palette'
   const location = useLocation(); // Get the current location
   const [value, setValue] = React.useState("");
   const [flashbarItems, setFlashbarItems] = useState([
@@ -152,7 +154,25 @@ const AppContent = ({ currentRole }) => {
     }
   }, [chatMessages]);
 
-  return (
+  const openPaletteInTools = useCallback((items) => {
+    try { setAvailableItems(items || []); } catch {}
+    setToolsMode('palette');
+    setIsHelpPanelOpen(true);
+  }, []);
+
+  // Listen for page requests to open the tools palette (avoids prop drilling)
+  useEffect(() => {
+    const onOpenPalette = (e) => {
+      try {
+        const items = (e && e.detail && e.detail.items) || [];
+        setAvailableItems(items);
+        setToolsMode('palette');
+        setIsHelpPanelOpen(true);
+      } catch {}
+    };
+    window.addEventListener('tools:open-palette', onOpenPalette);
+    return () => window.removeEventListener('tools:open-palette', onOpenPalette);
+  }, []);  return (
     <LocationProvider>
       <AppLayout
         navigationOpen={isNavigationOpen}
@@ -166,91 +186,96 @@ const AppContent = ({ currentRole }) => {
         toolsOpen={isHelpPanelOpen}
         onToolsChange={({ detail }) => setIsHelpPanelOpen(detail.open)}
         tools={
-          <HelpPanel
-            header={
-              <Header
-                variant="h2"
-                actions={
-                  <Button
-                    onClick={() => setChatVisible(!chatVisible)}
-                    variant="primary"
-                  >
-                    {chatVisible ? "Close Chat" : "Start Chat"}
-                  </Button>
-                }
-              >
-                {helpPanelTitle}
-              </Header>
-            }
-          >
-            {currentHelpContent}
-            {chatVisible && (
-              <Box margin={{ top: 's' }}>
-                <div
-                  ref={chatContainerRef}
-                  style={{ maxHeight: "200px", overflowY: "auto", marginBottom: "10px" }}
+          toolsMode === 'palette' ? (
+            <ItemsPalette
+              items={availableItems}
+              i18nStrings={{ header: 'Available widgets' }}
+              renderItem={item => (
+                <BoardItem
+                  key={item.id}
+                  header={<Header>{item.data?.title || 'Widget'}</Header>}
+                  i18nStrings={{
+                    dragHandleAriaLabel: 'Drag handle',
+                    dragHandleAriaDescription:
+                      'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to submit, or Escape to discard.',
+                  }}
                 >
-                  {chatMessages.map((message, index) => (
-                    <ChatBubble
-                      key={index}
-                      ariaLabel={`${message.type === "outgoing" ? "You" : "AI"} at ${message.timestamp}`}
-                      type={message.type}
-                      avatar={
-                        message.type === "outgoing" ? (
-                          <Avatar
-                            ariaLabel="You"
-                            tooltipText="You"
-                            initials="You"
-                          />
-                        ) : (
-                          <Avatar
-                            color="gen-ai"
-                            iconName="gen-ai"
-                            ariaLabel="Generative AI assistant"
-                            tooltipText="Generative AI assistant"
-                          />
-                        )
-                      }
+                  <Box variant="p">{item.data?.description || ''}</Box>
+                </BoardItem>
+              )}
+            />
+          ) : (
+            <HelpPanel
+              header={
+                <Header
+                  variant="h2"
+                  actions={
+                    <Button
+                      onClick={() => setChatVisible(!chatVisible)}
+                      variant="primary"
                     >
-                      {message.text}
-                    </ChatBubble>
-                  ))}
-                  {loading && <p>Generating a response...</p>}
-                </div>
-                <div>
-                  <input
-                    type="text"
-                    value={promptValue}
-                    onChange={(e) => setPromptValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                    placeholder="Ask your question here..."
-                    style={{ width: "80%", padding: "10px", marginRight: "10px", marginBottom: "10px" }}
-                  />
-                  <Button onClick={handleSendMessage} variant="primary">
-                    Send
-                  </Button>
-                </div>
-              </Box>
-            )}
-            <div>
-              <h3>
-                Learn more <Icon name="external" size="inherit" />
-              </h3>
-              <ul>
-                <li>
-                  <a href="">Link to documentation</a>
-                </li>
-                <li>
-                  <a href="">Link to documentation</a>
-                </li>
-              </ul>
-            </div>
-          </HelpPanel>
+                      {chatVisible ? "Close Chat" : "Start Chat"}
+                    </Button>
+                  }
+                >
+                  {helpPanelTitle}
+                </Header>
+              }
+            >
+              {currentHelpContent}
+              {chatVisible && (
+                <Box margin={{ top: 's' }}>
+                  <div
+                    ref={chatContainerRef}
+                    style={{ maxHeight: "200px", overflowY: "auto", marginBottom: "10px" }}
+                  >
+                    {chatMessages.map((message, index) => (
+                      <ChatBubble
+                        key={index}
+                        ariaLabel={`${message.type === "outgoing" ? "You" : "AI"} at ${message.timestamp}`}
+                        type={message.type}
+                        avatar={
+                          message.type === "outgoing" ? (
+                            <Avatar ariaLabel="You" tooltipText="You" initials="You" />
+                          ) : (
+                            <Avatar color="gen-ai" iconName="gen-ai" ariaLabel="Generative AI assistant" tooltipText="Generative AI assistant" />
+                          )
+                        }
+                      >
+                        {message.text}
+                      </ChatBubble>
+                    ))}
+                    {loading && <p>Generating a response...</p>}
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      value={promptValue}
+                      onChange={(e) => setPromptValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                      placeholder="Ask your question here..."
+                      style={{ width: "80%", padding: "10px", marginRight: "10px", marginBottom: "10px" }}
+                    />
+                    <Button onClick={handleSendMessage} variant="primary">Send</Button>
+                  </div>
+                </Box>
+              )}
+              <div>
+                <h3>
+                  Learn more <Icon name="external" size="inherit" />
+                </h3>
+                <ul>
+                  <li><a href="">Link to documentation</a></li>
+                  <li><a href="">Link to documentation</a></li>
+                </ul>
+              </div>
+            </HelpPanel>
+          )
         }
         splitPanelOpen={splitPanelOpen}
         onSplitPanelToggle={({ detail }) => setSplitPanelOpen(detail.open)}
@@ -276,6 +301,7 @@ const AppContent = ({ currentRole }) => {
               setSplitPanelSize={setSplitPanelSize}
               splitPanelSize={splitPanelSize}
               setAvailableItems={setAvailableItems}
+              openPaletteInTools={openPaletteInTools}
               breadcrumbs={breadcrumbs}
               helpMessages={helpMessages}
               aiContext={AdminDashboardHelp.aiContext} // Use the static aiContext property
@@ -289,3 +315,4 @@ const AppContent = ({ currentRole }) => {
 };
 
 export default AppContent;
+

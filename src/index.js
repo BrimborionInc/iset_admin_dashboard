@@ -17,7 +17,8 @@ if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
         const headers = (init && init.headers) || (input && input.headers) || {};
         const hdrObj = headers instanceof Headers ? headers : new Headers(headers);
         const hasAuth = !!hdrObj.get('Authorization');
-        if (/\/api\//.test(url) && !hasAuth) {
+        const hasBypass = !!(hdrObj.get('X-Dev-Bypass') || hdrObj.get('x-dev-bypass'));
+        if (/\/api\//.test(url) && !hasAuth && !hasBypass) {
           // console.warn noise filtered by single line prefix
           console.warn('[raw-fetch-no-auth]', url);
         }
