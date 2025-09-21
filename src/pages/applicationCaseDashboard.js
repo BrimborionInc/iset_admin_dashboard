@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ContentLayout, SpaceBetween, Box } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import { useParams } from 'react-router-dom';
@@ -7,19 +7,31 @@ import ApplicationOverviewWidget from '../widgets/ApplicationOverviewWidget';
 import IsetApplicationFormWidget from '../widgets/IsetApplicationFormWidget';
 import CoordinatorAssessmentWidget from '../widgets/CoordinatorAssessmentWidget';
 import SupportingDocumentsWidget from '../widgets/SupportingDocumentsWidget';
+import SecureMessagingWidget from '../widgets/SecureMessagingWidget';
+
+// All widgets available for this dashboard (for palette)
+const ALL_WIDGETS = [
+  { id: 'application-overview', title: 'Application Overview', rowSpan: 2, columnSpan: 4 },
+  { id: 'iset-application-form', title: 'ISET Application Form', rowSpan: 5, columnSpan: 2 },
+  { id: 'coordinator-assessment', title: 'Coordinator Assessment', rowSpan: 5, columnSpan: 2 },
+  { id: 'supporting-documents', title: 'Supporting Documents', rowSpan: 5, columnSpan: 2 },
+  { id: 'secure-messaging', title: 'Secure Messaging', rowSpan: 5, columnSpan: 2 }
+];
 
 const DEFAULT_ITEMS = [
   { id: 'application-overview', rowSpan: 2, columnSpan: 4 },
   { id: 'iset-application-form', rowSpan: 5, columnSpan: 2 },
   { id: 'coordinator-assessment', rowSpan: 5, columnSpan: 2 },
-  { id: 'supporting-documents', rowSpan: 5, columnSpan: 2 }
+  { id: 'supporting-documents', rowSpan: 5, columnSpan: 2 },
+  { id: 'secure-messaging', rowSpan: 5, columnSpan: 2 }
 ];
 
 const TITLES = {
   'application-overview': 'Application Overview',
   'iset-application-form': 'ISET Application Form',
   'coordinator-assessment': 'Coordinator Assessment',
-  'supporting-documents': 'Supporting Documents'
+  'supporting-documents': 'Supporting Documents',
+  'secure-messaging': 'Secure Messaging'
 };
 
 const buildItems = (caseData) => DEFAULT_ITEMS.map(item => ({
@@ -31,50 +43,104 @@ const buildItems = (caseData) => DEFAULT_ITEMS.map(item => ({
   }
 }));
 
-const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs }) => {
+const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplitPanelOpen, setAvailableItems }) => {
   const { id } = useParams(); // id = iset_case.id
   const [caseData, setCaseData] = useState(null);
+  const [loadError, setLoadError] = useState(null);
   const [boardItems, setBoardItems] = useState(buildItems(null));
+  // Palette disabled in reverted version
+  const fetchedRef = useRef(false);
+
+  // No palette items in reverted version
+
+  // Very lightweight dedupe/cache across remounts for the same case id
+  const cacheRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_CACHE || (window.__ISET_CASE_CACHE = new Map())) : new Map());
+  const inflightRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_INFLIGHT || (window.__ISET_CASE_INFLIGHT = new Map())) : new Map());
 
   useEffect(() => {
     if (!id) return;
+    if (fetchedRef.current) return; // prevent repeated fetches in dev/strict-mode or remounts
+    fetchedRef.current = true;
     let isMounted = true;
-    apiFetch(`/api/cases/${id}`)
-      .then(res => (res.ok ? res.json() : Promise.reject(res)))
-      .then(data => {
+    setLoadError(null);
+    // Serve from cache immediately if present
+    const key = String(id);
+    if (cacheRef.current.has(key)) {
+      const cached = cacheRef.current.get(key);
+      setCaseData(cached);
+      return () => { isMounted = false; };
+    }
+    const doFetch = async () => {
+      try {
+        // Deduplicate in-flight requests
+        if (!inflightRef.current.has(key)) {
+          inflightRef.current.set(key, apiFetch(`/api/cases/${id}`).then(r => r));
+        }
+        const res = await inflightRef.current.get(key);
+        inflightRef.current.delete(key);
+        if (!res.ok) throw res;
+        const data = await res.json();
         if (!isMounted) return;
+        cacheRef.current.set(key, data);
         setCaseData(data);
+        setLoadError(null);
         updateBreadcrumbs && updateBreadcrumbs([
           { text: 'Home', href: '/' },
           { text: 'Application Management', href: '/case-management' },
           { text: data.tracking_id || id }
         ]);
-      })
-      .catch(() => {
-        if (isMounted) setCaseData(null);
-      });
+      } catch (res) {
+        if (!isMounted) return;
+        setCaseData(cacheRef.current.get(key) || null);
+        try {
+          const body = res && res.json ? await res.json() : null;
+          setLoadError(body?.error || body?.message || 'Failed to load case');
+        } catch (_) {
+          setLoadError('Failed to load case');
+        }
+      }
+    };
+    doFetch();
     return () => { isMounted = false; };
-  }, [id, updateBreadcrumbs]);
+  }, [id]);
 
   useEffect(() => {
     setBoardItems(buildItems(caseData));
   }, [caseData]);
 
+  // No add/remove events in reverted version
+
+  // Avoid pushing palette items to parent automatically to prevent remount loops
+
   if (!caseData) {
-    return <div>Loading...</div>;
+    return (
+      <ContentLayout>
+        <SpaceBetween size="l">
+          {loadError ? (
+            <Box color="text-status-critical">{loadError}</Box>
+          ) : (
+            <Box>Loading…</Box>
+          )}
+        </SpaceBetween>
+      </ContentLayout>
+    );
   }
 
   return (
     <ContentLayout>
       <SpaceBetween size="l">
+        {/* Add/Remove widgets controls disabled in reverted version */}
         <Board
           items={boardItems}
-          onItemsChange={event => setBoardItems(event.detail.items)}
-          renderItem={(item, actions) => {
+          onItemsChange={event => {
+            // Keep default behavior: accept board's items verbatim to avoid render loops
+            setBoardItems(event.detail.items);
+          }}
+          renderItem={(item) => {
             if (item.id === 'application-overview') {
               return (
                 <ApplicationOverviewWidget
-                  actions={actions}
+                  actions={undefined}
                   application_id={item.data.application_id}
                   caseData={item.data.caseData}
                 />
@@ -83,7 +149,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs }) => {
             if (item.id === 'iset-application-form') {
               return (
                 <IsetApplicationFormWidget
-                  actions={actions}
+                  actions={undefined}
                   application_id={item.data.application_id}
                   caseData={item.data.caseData}
                   toggleHelpPanel={toggleHelpPanel}
@@ -93,7 +159,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs }) => {
             if (item.id === 'coordinator-assessment') {
               return (
                 <CoordinatorAssessmentWidget
-                  actions={actions}
+                  actions={undefined}
                   caseData={item.data.caseData}
                   application_id={item.data.application_id}
                   toggleHelpPanel={toggleHelpPanel}
@@ -103,7 +169,15 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs }) => {
             if (item.id === 'supporting-documents') {
               return (
                 <SupportingDocumentsWidget
-                  actions={actions}
+                  actions={undefined}
+                  caseData={item.data.caseData}
+                />
+              );
+            }
+            if (item.id === 'secure-messaging') {
+              return (
+                <SecureMessagingWidget
+                  actions={undefined}
                   caseData={item.data.caseData}
                 />
               );
@@ -117,7 +191,11 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs }) => {
             liveAnnouncementDndItemResized: () => 'Item resized.',
             liveAnnouncementDndItemInserted: () => 'Item inserted.',
             liveAnnouncementDndCommitted: operationType => `${operationType} committed`,
-            liveAnnouncementDndDiscarded: operationType => `${operationType} discarded`
+            liveAnnouncementDndDiscarded: operationType => `${operationType} discarded`,
+            liveAnnouncementItemRemoved: op => `Removed item ${op.item?.data?.title || ''}.`,
+            navigationAriaLabel: 'Board navigation',
+            navigationAriaDescription: 'Click on non-empty item to move focus over',
+            navigationItemAriaLabel: item => (item ? item.data.title : 'Empty')
           }}
         />
         <Box variant="p">
@@ -129,3 +207,4 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs }) => {
 };
 
 export default ApplicationCaseDashboard;
+

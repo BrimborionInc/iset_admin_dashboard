@@ -43,7 +43,8 @@ const SideNavigation = ({ currentRole }) => {
       type: 'section',
       text: 'ISET Administration',
       items: [
-        { type: 'link', text: 'Application Assignment', href: '/case-assignment-dashboard' },
+        // Ensure unique hrefs across navigation; add query param but route still matches
+        { type: 'link', text: 'Application Assignment', href: '/case-assignment-dashboard?view=assignment' },
                 { type: 'link', text: 'NWAC Hub Management', href: '/nwac-hub-management' }, // Placeholder link
         { type: 'link', text: 'PTMA Management', href: '/ptma-management' },
         { type: 'link', text: 'ARMS Reporting', href: '/arms-reporting' },

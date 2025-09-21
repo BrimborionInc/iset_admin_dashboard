@@ -22,8 +22,11 @@ const CustomSplitPanel = ({ availableItems, handleItemSelect, splitPanelSize, se
       <ItemsPalette
         items={availableItems}
         onItemSelect={({ detail }) => {
-          handleItemSelect(detail.item);
-          console.log("Available Items after selecting:", availableItems);
+          try {
+            const id = detail && detail.item && detail.item.id;
+            if (id) window.dispatchEvent(new CustomEvent('palette:add', { detail: { id } }));
+          } catch {}
+          if (handleItemSelect) handleItemSelect(detail.item);
         }}
         i18nStrings={{ header: "Available Widgets" }}
         renderItem={(item) => (

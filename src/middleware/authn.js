@@ -103,7 +103,8 @@ function authnMiddleware() {
   return async (req, res, next) => {
     try {
       const devBypassOn = (process.env.NODE_ENV !== 'production') && (process.env.DEV_AUTH_BYPASS === '1' || process.env.DEV_AUTH_BYPASS === 'true');
-      const devBypassKey = process.env.DEV_AUTH_TOKEN || '';
+      // Provide sane default for local development to match frontend default token
+      const devBypassKey = process.env.DEV_AUTH_TOKEN || 'local-dev-secret';
       const hdrBypass = req.get('x-dev-bypass') || req.get('X-Dev-Bypass') || '';
       if (devBypassOn && devBypassKey && hdrBypass && hdrBypass === devBypassKey) {
         const role = req.get('x-dev-role') || undefined;

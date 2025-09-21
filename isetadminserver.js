@@ -4655,20 +4655,16 @@ app.get('/api/cases/:id', async (req, res) => {
         c.assessment_justification,
         c.assessment_nwac_review,
         c.assessment_nwac_reason,
-        e.name AS assigned_user_name,
-        e.email AS assigned_user_email,
+        COALESCE(sp.display_name, sp.name) AS assigned_user_name,
+        sp.email AS assigned_user_email,
   p.name AS assigned_user_ptma_name,
   JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
         a.created_at AS submitted_at,
   applicant.name AS applicant_name,
   applicant.email AS applicant_email,
-  COALESCE(applicant.id, s.user_id) AS applicant_user_id,
-        -- Application fields for assessment pre-population
-        a.employment_goals,
-        a.employment_barriers,
-        a.target_employer AS institution
+  COALESCE(applicant.id, s.user_id) AS applicant_user_id
   FROM iset_case c
-  LEFT JOIN iset_evaluators e ON c.assigned_to_user_id = e.id
+  LEFT JOIN staff_profiles sp ON c.assigned_to_user_id = sp.id
       LEFT JOIN ptma p ON c.ptma_id = p.id
       JOIN iset_application a ON c.application_id = a.id
       LEFT JOIN iset_application_submission s ON a.submission_id = s.id
@@ -4694,7 +4690,10 @@ app.get('/api/cases/:id', async (req, res) => {
       const noTable = e && e.code === 'ER_NO_SUCH_TABLE';
       const badField = e && e.code === 'ER_BAD_FIELD_ERROR';
       if (noTable || badField) {
-        console.warn('[case:detail] falling back (reason=' + e.code + '): building dynamic minimal query');
+        if (!global.__LOGGED_CASE_DETAIL_FALLBACK) {
+          console.warn('[case:detail] falling back (reason=' + e.code + '): building dynamic minimal query');
+          global.__LOGGED_CASE_DETAIL_FALLBACK = true;
+        }
         // Discover existing columns on iset_case for safe selection
         let existingCols = [];
         try {
@@ -4720,7 +4719,7 @@ app.get('/api/cases/:id', async (req, res) => {
           } catch(_) { hasSubmission = false; }
         }
         const hasAppUserId = appCols.includes('user_id');
-  const hasSubmissionUser = appCols.includes('submission_id') && subCols.includes('user_id');
+        const hasSubmissionUser = appCols.includes('submission_id') && subCols.includes('user_id');
         let applicantJoin = ''; let applicantSelect = 'NULL AS applicant_name, NULL AS applicant_email, NULL AS applicant_user_id';
         if (hasSubmissionUser) {
           applicantJoin = 'JOIN iset_application_submission s ON a.submission_id = s.id JOIN user applicant ON s.user_id = applicant.id';
@@ -4729,10 +4728,25 @@ app.get('/api/cases/:id', async (req, res) => {
           applicantJoin = 'JOIN user applicant ON a.user_id = applicant.id';
           applicantSelect = 'applicant.name AS applicant_name, applicant.email AS applicant_email, applicant.id AS applicant_user_id';
         }
-  // Always attempt submission join to recover user id even if no user row
-  const submissionJoin = appCols.includes('submission_id') ? 'LEFT JOIN iset_application_submission s ON a.submission_id = s.id' : '';
-  const coalesceSelect = applicantSelect.includes('applicant_user_id') ? applicantSelect.replace('applicant.id AS applicant_user_id','COALESCE(applicant.id, s.user_id) AS applicant_user_id') : applicantSelect + ', s.user_id AS applicant_user_id';
-  const fallbackSql = `SELECT ${caseSelect}, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id, a.created_at AS submitted_at, ${coalesceSelect} FROM iset_case c JOIN iset_application a ON c.application_id = a.id ${submissionJoin} ${applicantJoin} WHERE c.id = ? LIMIT 1`;
+        // Only include submission join if application table exists and has submission_id
+        const submissionJoin = (hasApp && appCols.includes('submission_id'))
+          ? 'LEFT JOIN iset_application_submission s ON a.submission_id = s.id'
+          : '';
+        // Build applicant select, coalescing to submission user id if available
+        const coalesceSelect = applicantSelect.includes('applicant_user_id')
+          ? applicantSelect.replace('applicant.id AS applicant_user_id','COALESCE(applicant.id, s.user_id) AS applicant_user_id')
+          : (hasSubmissionUser ? applicantSelect + ', s.user_id AS applicant_user_id' : applicantSelect + ', NULL AS applicant_user_id');
+
+        // Tracking fields only when application table exists
+        const trackingSelect = hasApp
+          ? "JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id, a.created_at AS submitted_at"
+          : "NULL AS tracking_id, NULL AS submitted_at";
+
+        const fromClause = hasApp
+          ? 'FROM iset_case c JOIN iset_application a ON c.application_id = a.id'
+          : 'FROM iset_case c';
+
+        const fallbackSql = `SELECT ${caseSelect}, ${trackingSelect}, ${coalesceSelect} ${fromClause} ${submissionJoin} ${applicantJoin} WHERE c.id = ? LIMIT 1`;
         [rows] = await pool.query(fallbackSql, [caseId]);
       } else {
         throw e;
@@ -5559,6 +5573,111 @@ app.put('/api/admin/messages/:id/status', async (req, res) => {
   } catch (error) {
     console.error('Error updating message status:', error);
     res.status(500).json({ error: 'Failed to update message status' });
+  }
+});
+
+// Secure messaging: case-scoped thread fetch
+// GET /api/cases/:id/messages
+// Returns latest messages involving the applicant for this case (either direction)
+app.get('/api/cases/:id/messages', async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
+  try {
+    // Resolve applicant user id for this case
+    let caseRow;
+    try {
+      [[caseRow]] = await pool.query(
+        `SELECT COALESCE(applicant.id, s.user_id) AS applicant_user_id
+         FROM iset_case c
+         JOIN iset_application a ON c.application_id = a.id
+         LEFT JOIN iset_application_submission s ON a.submission_id = s.id
+         LEFT JOIN user applicant ON s.user_id = applicant.id
+         WHERE c.id = ?
+         LIMIT 1`,
+        [caseId]
+      );
+    } catch (e) {
+      const noTable = e && e.code === 'ER_NO_SUCH_TABLE';
+      const badField = e && e.code === 'ER_BAD_FIELD_ERROR';
+      if (noTable || badField) {
+        // During migrations or on minimal schemas, return empty thread gracefully
+        return res.json({ applicant_user_id: null, items: [] });
+      }
+      throw e;
+    }
+    const applicantId = caseRow?.applicant_user_id || null;
+    if (!applicantId) return res.status(404).json({ error: 'applicant_not_found' });
+
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 1000);
+    const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
+    const [rows] = await pool.query(
+      `SELECT id, sender_id, recipient_id, subject, body, status, deleted, urgent, created_at
+       FROM messages
+       WHERE sender_id = ? OR recipient_id = ?
+       ORDER BY created_at ASC
+       LIMIT ? OFFSET ?`,
+      [applicantId, applicantId, limit, offset]
+    );
+    res.json({ applicant_user_id: applicantId, items: rows });
+  } catch (e) {
+    console.error('GET /api/cases/:id/messages failed:', e.message);
+    res.status(500).json({ error: 'failed_to_fetch_messages' });
+  }
+});
+
+// Secure messaging: send message to applicant for case
+// POST /api/cases/:id/messages  { subject, body, urgent }
+app.post('/api/cases/:id/messages', async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  const { subject, body, urgent } = req.body || {};
+  if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
+  if (!subject || !body) return res.status(400).json({ error: 'missing_required_fields' });
+  try {
+    // Resolve applicant user id
+    const [[caseRow]] = await pool.query(
+      `SELECT COALESCE(applicant.id, s.user_id) AS applicant_user_id
+       FROM iset_case c
+       JOIN iset_application a ON c.application_id = a.id
+       LEFT JOIN iset_application_submission s ON a.submission_id = s.id
+       LEFT JOIN user applicant ON s.user_id = applicant.id
+       WHERE c.id = ?
+       LIMIT 1`,
+      [caseId]
+    );
+    const recipientId = caseRow?.applicant_user_id || null;
+    if (!recipientId) return res.status(404).json({ error: 'applicant_not_found' });
+
+    // Resolve sender user id from Cognito auth context (create if missing)
+    const email = req?.auth?.email || null;
+    const sub = req?.auth?.sub || null;
+    if (!email && !sub) return res.status(401).json({ error: 'unauthorized' });
+    let senderId = null;
+    let row;
+    if (sub) { [[row]] = await pool.query('SELECT id FROM user WHERE cognito_sub = ? LIMIT 1', [sub]); }
+    if (!row && email) { [[row]] = await pool.query('SELECT id FROM user WHERE email = ? LIMIT 1', [email]); }
+    if (!row) {
+      const safeEmail = email || `${sub}@placeholder.local`;
+      const preferredLanguage = 'en';
+      const name = req?.auth?.name || safeEmail;
+      const [ins] = await pool.query(
+        `INSERT INTO user (name,email,cognito_sub,email_verified,suspended,preferred_language)
+         VALUES (?,?,?,1,0,?)`,
+        [name, safeEmail, sub || null, preferredLanguage]
+      );
+      senderId = ins.insertId;
+    } else {
+      senderId = row.id;
+    }
+
+    const [result] = await pool.query(
+      `INSERT INTO messages (sender_id, recipient_id, subject, body, status, deleted, urgent, created_at)
+       VALUES (?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
+      [senderId, recipientId, subject, body, !!urgent]
+    );
+    res.status(201).json({ message: 'Message sent', messageId: result.insertId });
+  } catch (e) {
+    console.error('POST /api/cases/:id/messages failed:', e.message);
+    res.status(500).json({ error: 'failed_to_send_message' });
   }
 });
 
