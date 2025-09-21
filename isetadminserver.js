@@ -6919,12 +6919,10 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
       return res.status(404).json({ error: 'Message not found' });
     }
 
-    // Use case_id from query if provided, else fallback to previous logic (which will not work if no application_id)
     let caseId = caseIdFromQuery;
-    // (Optional: fallback logic if you want to support legacy messages)
-
-    // Derive applicant_user_id for adoption (best effort)
+    let caseApplicationId = null;
     let applicantUserId = null;
+
     if (caseId) {
       try {
         const [[caseRow]] = await pool.query(
@@ -6932,37 +6930,67 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
           [caseId]
         );
         if (caseRow && caseRow.application_id) {
+          caseApplicationId = caseRow.application_id;
           const [[appRow]] = await pool.query(
             'SELECT user_id FROM iset_application WHERE id = ? LIMIT 1',
             [caseRow.application_id]
           );
-            applicantUserId = appRow ? appRow.user_id : null;
+          if (appRow && appRow.user_id) {
+            applicantUserId = appRow.user_id;
+          }
         }
-      } catch (_) {}
+      } catch (err) {
+        console.warn('[admin:attachments] failed to resolve application for case %s: %s', caseId, err.message);
+      }
     }
-    // Adopt each attachment into iset_document (idempotent on file_path)
+
+    const resolvedApplicationId = caseApplicationId || message.application_id || null;
+    if (!applicantUserId) {
+      applicantUserId =
+        message.applicant_user_id ||
+        message.applicantUserId ||
+        message.sender_id ||
+        message.recipient_id ||
+        null;
+    }
+
     if (caseId) {
       for (const att of attachments) {
+        const docApplicantUserId =
+          applicantUserId ||
+          att.applicant_user_id ||
+          att.user_id ||
+          message.sender_id ||
+          message.recipient_id ||
+          null;
+        const docUserId = att.user_id || message.sender_id || message.recipient_id || null;
+
         let relativeFilePath = att.file_path.replace(/\\/g, '/');
         const uploadsIndex = relativeFilePath.lastIndexOf('uploads/');
         if (uploadsIndex !== -1) {
           relativeFilePath = relativeFilePath.substring(uploadsIndex);
         }
         relativeFilePath = relativeFilePath.replace(/\\/g, '/');
+
+        let createdAt = att.uploaded_at ? new Date(att.uploaded_at) : new Date();
+        if (Number.isNaN(createdAt.getTime())) {
+          createdAt = new Date();
+        }
+
         try {
           await pool.query(
             `INSERT INTO iset_document (case_id, application_id, applicant_user_id, user_id, origin_message_id, source, file_name, file_path, label, created_at)
              VALUES (?, ?, ?, ?, ?, 'secure_message_attachment', ?, ?, 'Secure Message Attachment', ?)
-             ON DUPLICATE KEY UPDATE origin_message_id = VALUES(origin_message_id), updated_at = NOW()` ,
+             ON DUPLICATE KEY UPDATE applicant_user_id = VALUES(applicant_user_id), application_id = VALUES(application_id), user_id = VALUES(user_id), origin_message_id = VALUES(origin_message_id), updated_at = NOW()` ,
             [
               caseId,
-              (caseId ? (await pool.query('SELECT application_id FROM iset_case WHERE id = ? LIMIT 1', [caseId]))[0][0]?.application_id || null : null),
-              applicantUserId,
-              att.user_id || message.sender_id || message.recipient_id,
+              resolvedApplicationId,
+              docApplicantUserId,
+              docUserId,
               messageId,
-              att.original_filename,
+              att.original_filename || 'Attachment',
               relativeFilePath,
-              att.uploaded_at || new Date()
+              createdAt
             ]
           );
         } catch (err) {
