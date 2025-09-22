@@ -2,6 +2,11 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2025-09-22
+- Feature: Access Control matrix widget now supports in-place role toggles with instant persistence.
+- UX: Navigation and route guards consume the shared RBAC matrix and hide empty sections per role.
+- Docs: Refreshed RBAC notes to reflect self-service configuration flow.
+
 ## 2025-09-21
 - Feature: Restored Secure Messaging widget with inbox/sent/deleted tabs, Cloudscape tables, modal compose, and attachment adoption triggers.
 - Feature: Supporting Documents widget gains refresh button, auto-refresh event listener, simplified columns.

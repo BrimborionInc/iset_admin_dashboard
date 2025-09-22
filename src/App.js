@@ -43,6 +43,7 @@ import { helpMessages } from './utils/helpMessages.js';
 import Icon from '@cloudscape-design/components/icon';
 import { ItemsPalette, BoardItem } from '@cloudscape-design/board-components';
 import ErrorBoundary from './context/ErrorBoundary.js';
+import { RoleMatrixProvider } from './context/RoleMatrixContext';
 import SlotManagementWidget from './widgets/slotManagementWidget.js';
 
 import '@cloudscape-design/global-styles/index.css';
@@ -82,12 +83,13 @@ const App = () => {
   }, [currentRole]);
 
   return (
-    <DarkModeProvider>
-      <I18nProvider
-        locale={currentLanguage}
-        messages={currentLanguage === 'en' ? [frMessages] : [enMessages]}
-      >
-        <Router>
+    <RoleMatrixProvider>
+      <DarkModeProvider>
+        <I18nProvider
+          locale={currentLanguage}
+          messages={currentLanguage === 'en' ? [frMessages] : [enMessages]}
+        >
+          <Router>
           <DemoNavigation
             currentLanguage={currentLanguage}
             onLanguageChange={handleLanguageChange}
@@ -104,9 +106,10 @@ const App = () => {
             <AppContent currentRole={currentRole} />
           </ErrorBoundary>
           <BottomFooter />
-        </Router>
-      </I18nProvider>
-    </DarkModeProvider>
+          </Router>
+        </I18nProvider>
+      </DarkModeProvider>
+    </RoleMatrixProvider>
   );
 };
 

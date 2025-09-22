@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { SideNavigation as CloudscapeSideNavigation, Badge } from '@cloudscape-design/components';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '../auth/cognito';
-import roleMatrix from '../config/roleMatrix.json';
+import { useRoleMatrix, toCanonicalRole } from '../context/RoleMatrixContext';
 
 const commonFooterItems = [
   { type: 'divider' },
@@ -10,7 +10,16 @@ const commonFooterItems = [
 ];
 
 const SideNavigation = ({ currentRole }) => {
+  const pruneSections = (items = []) =>
+    items.filter(item => {
+      if (!item) return false;
+      if (item.type !== 'section') return true;
+      const childItems = Array.isArray(item.items) ? item.items.filter(Boolean) : [];
+      return childItems.length > 0;
+    });
+
   const history = useHistory();
+  const { roleMatrix } = useRoleMatrix();
   const [tick, setTick] = useState(0);
   const [expandedSections, setExpandedSections] = useState(() => {
     try {
@@ -70,17 +79,15 @@ const SideNavigation = ({ currentRole }) => {
         // Authoring links moved to dedicated 'Intake Form Editor' section
       ],
     },
-    // Dedicated section for intake form editing / workflow authoring (System Administrator only)
-    ...(((effectiveRole?.value || effectiveRole) === 'System Administrator' || (effectiveRole?.value || effectiveRole) === 'SysAdmin') ? [
-      {
-        type: 'section',
-        text: 'Intake Form Editor',
-        items: [
-          { type: 'link', text: 'Manage Intake Steps', href: '/manage-components' },
-          { type: 'link', text: 'Manage Workflows', href: '/manage-workflows' },
-        ]
-      }
-    ] : []),
+    // Dedicated section for intake form editing / workflow authoring
+    {
+      type: 'section',
+      text: 'Intake Form Editor',
+      items: [
+        { type: 'link', text: 'Manage Intake Steps', href: '/manage-components' },
+        { type: 'link', text: 'Manage Workflows', href: '/manage-workflows' },
+      ]
+    },
     {
       type: 'section',
       text: 'Analytics Dashboard',
@@ -102,10 +109,8 @@ const SideNavigation = ({ currentRole }) => {
         { type: 'link', text: 'Release Management', href: '/release-management-dashboard' },
         { type: 'link', text: 'Notification Settings', href: '/notification-settings-dashboard' },
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
-        ...(((effectiveRole?.value || effectiveRole) === 'System Administrator' || (effectiveRole?.value || effectiveRole) === 'SysAdmin') ? [
-          { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
-          { type: 'link', text: 'File Upload Config', href: '/admin/upload-config' }
-        ] : []),
+        { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
+        { type: 'link', text: 'File Upload Config', href: '/admin/upload-config' },
   // Removed duplicate href '/manage-components' (already present under Other Dashboards)
       ],
     },
@@ -133,7 +138,8 @@ const SideNavigation = ({ currentRole }) => {
   function isAllowed(href, roleValue) {
     if (!href) return true;
     const allowed = roleMatrix?.routes?.[href];
-    if (allowed) return allowed.includes(roleValue);
+    const canonicalRole = toCanonicalRole(roleValue);
+    if (allowed) return allowed.includes(canonicalRole);
     if (roleMatrix?.default === 'deny') return false;
     return true;
   }
@@ -144,90 +150,16 @@ const SideNavigation = ({ currentRole }) => {
       return [...commonFooterItems];
     }
     const roleValue = role?.value || role;
-    if (roleValue === 'System Administrator') return [...allNavItems, ...commonFooterItems];
-    if (roleValue === 'Program Administrator') {
-      const filteredSections = allNavItems.map(section => {
-        if (section.type === 'section' && section.text === 'ISET Administration') {
-          return section; // retain full admin section for now (can prune later)
-        }
-        if (section.type === 'section' && section.text === 'ISET Assessment') {
-          return section; // keep Manage Applications + My Case Queue
-        }
-        if (section.type === 'section' && section.text === 'Other Dashboards') {
-          return section; // keep for visibility; routeMatrix will still gate links
-        }
-        return section;
-      }).map(section => ({
-        ...section,
-        items: section.items?.filter(item => isAllowed(item.href, roleValue))
-      }));
-      return [...filteredSections, ...commonFooterItems];
-    }
-    if (roleValue === 'Regional Coordinator') {
-  // Preserve full 'ISET Assessment' (ensures 'Manage Applications' always visible)
-      let filteredSections = allNavItems.map(section => {
-        if (section.type === 'section' && section.text === 'ISET Administration') {
-          return {
-            ...section,
-            items: section.items.filter(item => item.text === 'Application Assignment' || item.text === 'PTMA Management')
-          };
-        }
-        if (section.type === 'section' && section.text === 'ISET Assessment') {
-          return section; // keep all items including Manage Applications
-        }
-        if (section.type === 'section' && section.text === 'Other Dashboards') {
-          return {
-            ...section,
-            items: section.items.filter(item => item.text === 'Secure Messaging' || item.text === 'Reporting and Monitoring')
-          };
-        }
-        if (section.type === 'section' && section.text === 'Configuration') {
-          return {
-            ...section,
-            items: section.items.filter(item => item.text === 'User Management' || item.text === 'Options' || item.text === 'Visual Settings')
-          };
-        }
-        return section;
-      }).map(section => ({
-        ...section,
-        items: section.items?.filter(item => isAllowed(item.href, roleValue))
-      }));
-      return [...filteredSections, ...commonFooterItems];
-    }
-    if (roleValue === 'PTMA Staff') {
-      const filteredSections = allNavItems
-        .map(section => {
-          if (section.type === 'section' && section.text === 'ISET Assessment') {
-            return section; // keep full assessment including Manage Applications
-          }
-          if (section.type === 'section' && section.text === 'Other Dashboards') {
-            return {
-              ...section,
-              items: section.items.filter(item => item.text === 'Secure Messaging')
-            };
-          }
-          if (section.type === 'section' && section.text === 'Support') return section;
-          return null;
-        })
-        .filter(Boolean)
-        .map(section => ({
-          ...section,
-          items: section.items?.filter(item => isAllowed(item.href, roleValue))
-        }));
-      return [...filteredSections, ...commonFooterItems];
-    }
-    // Default: show all items for unknown role
-    // Additionally enforce deny-by-default against roleMatrix for non-SA roles
+    const canonicalRole = toCanonicalRole(roleValue);
     const filteredSections = allNavItems.map(section => {
       if (!section.items) return section;
       return {
         ...section,
-        items: section.items.filter(item => isAllowed(item.href, roleValue))
+        items: section.items.filter(item => isAllowed(item.href, canonicalRole)),
       };
     });
-    return [...filteredSections, ...commonFooterItems];
+    return [...pruneSections(filteredSections), ...commonFooterItems];
   }
-
   const filteredNavItems = filterNavItemsForRole(effectiveRole, (iamOn && !signedIn) || (!iamOn && simSignedOut));
 
   const itemsWithExpandState = useMemo(() => {
