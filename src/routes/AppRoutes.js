@@ -2,7 +2,7 @@ import ManageWorkflows from '../pages/manageWorkflows.js';
 import ManageWorkflowsHelpPanel from '../helpPanelContents/manageWorkflowsHelpPanel';
 import React from 'react';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../auth/cognito';
-import roleMatrix from '../config/roleMatrix.json';
+import { useRoleMatrix, toCanonicalRole } from '../context/RoleMatrixContext';
 import { Route, Switch, useLocation } from 'react-router-dom';
 import ModifyWorkflow from '../pages/modifyWorkflow.js';
 import {
@@ -79,6 +79,7 @@ const AppRoutes = ({
   breadcrumbs,
   helpMessages,
 }) => {
+  const { roleMatrix, isLoading: roleMatrixLoading } = useRoleMatrix();
   const location = useLocation();
 
   const resetToDefaultLayout = () => {
@@ -127,7 +128,10 @@ const AppRoutes = ({
       return renderContent(AuthRequired, [{ text: 'Home', href: '/' }], 'Authentication required');
     }
     const claims = getIdTokenClaims();
-    const role = getRoleFromClaims(claims);
+    if (!roles && (roleMatrixLoading || !roleMatrix)) {
+      return children;
+    }
+    const role = toCanonicalRole(getRoleFromClaims(claims));
     const allowed = (() => {
       if (Array.isArray(roles) && roles.length) return roles;
       if (path && roleMatrix?.routes) {

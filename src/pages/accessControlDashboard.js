@@ -22,7 +22,7 @@ export default function AccessControlDashboard({ updateBreadcrumbs, setAvailable
   }, [updateBreadcrumbs, setAvailableItems]);
 
   return (
-    <ContentLayout header={<Header variant="h1">Access Control</Header>}>
+    <ContentLayout >
       <SpaceBetween size="l">
         <Board
           renderItem={(item) => {
