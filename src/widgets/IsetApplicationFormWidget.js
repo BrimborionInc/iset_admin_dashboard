@@ -114,6 +114,24 @@ const OPTION_LABELS = {
   }
 };
 
+// Normalise a wide variety of yes/no input shapes to 'yes' | 'no' | null
+const normaliseYesNo = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const s = String(value).trim().toLowerCase();
+  if (['yes', 'true', '1', 'y'].includes(s)) return 'yes';
+  if (['no', 'false', '0', 'n'].includes(s)) return 'no';
+  return null;
+};
+
+// Render a Pass/Fail badge for eligibility keys, with inverted logic for 'eligibility-disqualified'.
+const formatEligibility = (key, value) => {
+  const yn = normaliseYesNo(value);
+  if (yn === null) return NOT_PROVIDED;
+  const inverted = key === 'eligibility-disqualified';
+  const pass = inverted ? yn === 'no' : yn === 'yes';
+  return <Badge color={pass ? 'green' : 'red'}>{pass ? 'Pass' : 'Fail'}</Badge>;
+};
+
 const DOCUMENT_FIELDS = [
   { key: 'status-card', label: 'Status / Treaty Card (or equivalent)' },
   { key: 'govt-id', label: 'Government-issued ID' },
@@ -211,12 +229,17 @@ const formatOption = (key, value) => {
   return map[normalised] || map[value] || String(value);
 };
 const formatOptionList = (key, values) => {
-  if (!values || (Array.isArray(values) && values.length === 0)) return NOT_PROVIDED;
+  // Treat null/undefined/empty array as not provided, but allow 0/false
+  if ((values === null || values === undefined) || (Array.isArray(values) && values.length === 0)) return NOT_PROVIDED;
   const list = Array.isArray(values) ? values : [values];
   const chips = list.map((item, index) => {
+    // Special-case eligibility keys to display Pass/Fail instead of raw Yes/No or 1/0
+    if (String(key).startsWith('eligibility-')) {
+      return <React.Fragment key={index}>{formatEligibility(key, item)}</React.Fragment>;
+    }
     const label = formatOption(key, item);
-    if (typeof label === "string" && ["Yes", "No"].includes(label)) {
-      return <Badge key={index} color={label === "Yes" ? "green" : "grey"}>{label}</Badge>;
+    if (typeof label === 'string' && ['Yes', 'No'].includes(label)) {
+      return <Badge key={index} color={label === 'Yes' ? 'green' : 'grey'}>{label}</Badge>;
     }
     return <Badge key={index} color="blue">{label}</Badge>;
   });

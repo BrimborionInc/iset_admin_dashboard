@@ -8,6 +8,7 @@ import IsetApplicationFormWidget from '../widgets/IsetApplicationFormWidget';
 import CoordinatorAssessmentWidget from '../widgets/CoordinatorAssessmentWidget';
 import SupportingDocumentsWidget from '../widgets/SupportingDocumentsWidget';
 import SecureMessagingWidget from '../widgets/SecureMessagingWidget';
+import ApplicationEvents from '../widgets/applicationEvents';
 
 // All widgets available for this dashboard (for palette)
 const ALL_WIDGETS = [
@@ -15,7 +16,8 @@ const ALL_WIDGETS = [
   { id: 'iset-application-form', title: 'ISET Application Form', rowSpan: 5, columnSpan: 2 },
   { id: 'coordinator-assessment', title: 'Coordinator Assessment', rowSpan: 5, columnSpan: 2 },
   { id: 'supporting-documents', title: 'Supporting Documents', rowSpan: 5, columnSpan: 2 },
-  { id: 'secure-messaging', title: 'Secure Messaging', rowSpan: 5, columnSpan: 2 }
+  { id: 'secure-messaging', title: 'Secure Messaging', rowSpan: 5, columnSpan: 2 },
+  { id: 'application-events', title: 'Application Events', rowSpan: 5, columnSpan: 2 }
 ];
 
 const DEFAULT_ITEMS = [
@@ -23,7 +25,8 @@ const DEFAULT_ITEMS = [
   { id: 'iset-application-form', rowSpan: 5, columnSpan: 2 },
   { id: 'coordinator-assessment', rowSpan: 5, columnSpan: 2 },
   { id: 'supporting-documents', rowSpan: 5, columnSpan: 2 },
-  { id: 'secure-messaging', rowSpan: 5, columnSpan: 2 }
+  { id: 'secure-messaging', rowSpan: 5, columnSpan: 2 },
+  { id: 'application-events', rowSpan: 5, columnSpan: 2 }
 ];
 
 const TITLES = {
@@ -31,7 +34,8 @@ const TITLES = {
   'iset-application-form': 'ISET Application Form',
   'coordinator-assessment': 'Coordinator Assessment',
   'supporting-documents': 'Supporting Documents',
-  'secure-messaging': 'Secure Messaging'
+  'secure-messaging': 'Secure Messaging',
+  'application-events': 'Application Events'
 };
 
 const buildItems = (caseData) => DEFAULT_ITEMS.map(item => ({
@@ -178,6 +182,15 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
               return (
                 <SecureMessagingWidget
                   actions={undefined}
+                  caseData={item.data.caseData}
+                />
+              );
+            }
+            if (item.id === 'application-events') {
+              return (
+                <ApplicationEvents
+                  actions={undefined}
+                  application_id={item.data.application_id}
                   caseData={item.data.caseData}
                 />
               );

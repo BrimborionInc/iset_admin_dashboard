@@ -1,0 +1,27 @@
+CREATE TABLE IF NOT EXISTS `iset_case_assessment` (
+  `case_id` BIGINT UNSIGNED NOT NULL,
+  `date_of_assessment` DATE NULL,
+  `overview` TEXT NULL,
+  `employment_goals` TEXT NULL,
+  `previous_iset` TINYINT(1) NULL,
+  `previous_iset_details` TEXT NULL,
+  `employment_barriers` JSON NULL,
+  `local_area_priorities` JSON NULL,
+  `other_funding_details` TEXT NULL,
+  `esdc_eligibility` VARCHAR(100) NULL,
+  `intervention_start_date` DATE NULL,
+  `intervention_end_date` DATE NULL,
+  `institution` VARCHAR(255) NULL,
+  `program_name` VARCHAR(255) NULL,
+  `itp_payload` JSON NULL,
+  `wage_payload` JSON NULL,
+  `recommendation` VARCHAR(50) NULL,
+  `justification` TEXT NULL,
+  `nwac_review` VARCHAR(50) NULL,
+  `nwac_reason` TEXT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`case_id`),
+  CONSTRAINT `fk_case_assessment_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
