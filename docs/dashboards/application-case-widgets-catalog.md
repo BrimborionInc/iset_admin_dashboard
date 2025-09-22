@@ -1,93 +1,96 @@
 # Application Case Dashboard Widgets Catalog
 
-Purpose: Record the full intended / previously present widget set for the Application Case Dashboard so we can deliberately reâ€‘enable them one at a time after the stabilization phase (during which only Supporting Documents remains active).
+Purpose: Track the Application Case Dashboard widget line-up and note readiness of additional modules as they are reintroduced after the stabilization phase.
 
-## Current State (Stabilization Mode)
-Active widget only:
-- SupportingDocumentsWidget (id: `supporting-documents`) â€“ unified applicant / case documents.
+## Current State (2025-09-21)
+Active widgets on the default board:
+- ApplicationOverviewWidget (`application-overview`) – case summary header.
+- IsetApplicationFormWidget (`iset-application-form`) – read-only application viewer.
+- CoordinatorAssessmentWidget (`coordinator-assessment`) – assessment inputs for adjudicators.
+- SupportingDocumentsWidget (`supporting-documents`) – unified document list with refresh controls.
+- SecureMessagingWidget (`secure-messaging`) – inbox/sent/deleted tabs plus compose modal.
 
-All other widgets are temporarily removed from the board composition in `src/pages/applicationCaseDashboard.js` to avoid 500s and schema-mismatch churn while the backend evolves.
+These widgets are wired in `src/pages/applicationCaseDashboard.js` and rely on `/api/cases/:id` exposing `application_id`, applicant identity, and the assigned evaluator.
 
-## Widget Inventory (To Reintroduce Incrementally)
-Below each widget: purpose, critical backend dependencies, and reâ€‘enablement prerequisites.
+## Widget Inventory (additional candidates)
+Below each widget: purpose, critical backend dependencies, and enablement notes.
 
-1. IsetApplicationFormWidget (id: `iset-application-form`) â€“ ACTIVE (refactored)
+1. SecureMessagingWidget (id: `secure-messaging`) – **ACTIVE**
+   - Purpose: Cloudscape-driven messaging workspace (Inbox/Sent/Deleted tabs, tab actions, modal viewer, compose with urgent flag).
+   - Data sources: `/api/admin/messages`, `/api/admin/messages/:id/attachments?case_id=...`, `/api/cases/:id`.
+   - 2025-09-21 updates: restored legacy UX; optimistic read receipts; reply quoting; dispatches Supporting Documents refresh when attachments adopt.
+   - Follow-ups: bulk delete actions once server endpoints exist (currently placeholders).
+
+2. SupportingDocumentsWidget (id: `supporting-documents`) – **ACTIVE**
+   - Purpose: Unified document library spanning submissions and secure message attachments.
+   - Data source: `/api/applicants/:applicant_user_id/documents` (backed by `iset_document`).
+   - 2025-09-21 updates: header refresh button, listens for `iset:supporting-documents:refresh`, simplified columns (File, Source, Uploaded, Actions), dismissible error messaging.
+   - Follow-ups: staff upload entry point and soft-delete controls.
+
+3. IsetApplicationFormWidget (id: `iset-application-form`) – **ACTIVE**
    - Purpose: Read-only rendering of the submitted application (dynamic JSON driven).
-   - Data Source: `/api/applications/:id` (now consumed via `apiFetch`; widget parses `payload_json` if present).
-   - Implementation Notes (2025-09-20 refactor):
-     * Removed direct flat column assumptions; uses resolver over `application`, `__payload.answers`, and `submission_snapshot`.
-     * Income / expense tables computed from config arrays; gracefully default 0 / empty.
-     * Case summary PUT unchanged; save feedback via Flashbar.
-     * Safe parsing of stringified `payload_json`.
-   - Follow-ups: If field taxonomy changes, update only the resolver mapping arrays (no layout rewrite needed).
+   - Data Source: `/api/applications/:id` via `apiFetch`.
+   - 2025-09-20 refactor: resilient resolver for nested payloads, tabular income/expense helpers, friendly defaults, safe parsing.
+   - Follow-ups: update mapping arrays if submission schema changes.
 
-2. CoordinatorAssessmentWidget (id: `assessment`)
-   - Purpose: Capture / edit assessment fields (employment goals, barriers, recommendation, wage, dates, etc.).
-   - Depends on: Writable `/api/cases/:id` (PUT) or dedicated assessment endpoint; assessment columns present in `iset_case` (already partially present); role-based auth for who can edit.
-   - Prereqs: Finalize which assessment columns survive migration; confirm RBAC.
+4. CoordinatorAssessmentWidget (id: `coordinator-assessment`)
+   - Purpose: Capture/edit assessment fields (employment goals, barriers, recommendations, program dates, wage, etc.).
+   - Depends on: Writable `/api/cases/:id` (PUT) or dedicated endpoint; assessment columns present in `iset_case`; RBAC for edit rights.
+   - Prereqs: finalize assessment schema migration; confirm auth scopes.
 
-3. SecureMessagesWidget (id: `secure-messages`)
-   - Purpose: View and send secure messages; adopt attachments into `iset_document`.
-   - Depends on: Message list endpoint (existing), message create endpoint, attachment adoption endpoint, and applicant user identifier (`applicant_user_id`).
-   - Prereqs: Stable applicant identity derivation in `/api/cases/:id` fallback; confirm attachment adoption remains idempotent.
+5. CaseUpdates (`case-updates`)
+   - Purpose: Timeline of recent case events (submission, document adoption, assignments).
+   - Depends on: `/api/case-events` with pagination and read/unread semantics.
+   - Prereqs: event emission audit and taxonomy lock-down.
 
-4. CaseUpdates (caseUpdates.js) (id: `case-updates`)
-   - Purpose: Timeline of recent events (submitted, documents added, assignments, etc.).
-   - Depends on: `/api/case-events` with filtering & read/unread semantics.
-   - Prereqs: Event emission parity across key flows; finalize event type taxonomy.
+6. CaseTasks (`case-tasks`)
+   - Purpose: Surface actionable tasks tied to case events or manual creation.
+   - Depends on: tasks table + CRUD endpoints (planned).
+   - Prereqs: decide lifecycle (open/complete/auto-close) and notification triggers.
 
-5. CaseTasks (caseTasks.js) (id: `case-tasks`)
-   - Purpose: Display tasks linked to events or manual creation (future work).
-   - Depends on: Tasks table + CRUD endpoints (partial / planned). Currently may be stubbed.
-   - Prereqs: Decide persistence model & lifecycle (open/complete/auto-close).
+7. NotificationSettingsWidget (`notification-settings`)
+   - Purpose: Configure which workflow events trigger secure messages / email nudges.
+   - Depends on: `/api/events`, notification templates, localization assets.
+   - Prereqs: finalize event registry + template linkage; confirm RBAC.
 
-6. (Optional) ApplicationEvents / notificationSettingsWidget (id: `notification-settings`)
-   - Purpose: Admin configuration of which events trigger notifications and channels.
-   - Depends on: `/api/events` and notification settings endpoints (in-progress / prototype).
-   - Prereqs: Harden event registry & template linkage.
+8. IsetEvaluatorsWidget (`evaluators`)
+   - Purpose: Display evaluator availability, allow case assignment.
+   - Depends on: canonical evaluator roster (`iset_evaluators` vs `staff_profiles`).
+   - Prereqs: converge staff schema to avoid dual maintenance.
 
-7. IsetEvaluatorsWidget (id: `evaluators`)
-   - Purpose: Display staff/evaluator availability & allow assignment.
-   - Depends on: Evaluator / staff profiles source (currently fallback to `staff_profiles`).
-   - Prereqs: Decide canonical evaluator schema (retain `iset_evaluators` or consolidate into `staff_profiles`).
+9. (Future) Combined Application Overview widget bundling key stats + shortcuts once case data model stabilizes.
 
-8. (Future) Reinstated combined Application Overview widget (if created) bundling summary stats.
+## Suggested Enablement Order for Remaining Widgets
+1. CaseUpdates (observability for subsequent work).
+2. CoordinatorAssessmentWidget (after schema + RBAC confirmation).
+3. CaseTasks (after task lifecycle endpoints exist).
+4. IsetEvaluatorsWidget (after staff schema decision).
+5. NotificationSettingsWidget (after event taxonomy & templates stabilize).
 
-## Suggested Re-Enable Order
-1. IsetApplicationFormWidget (low write risk, read-only).
-2. CaseUpdates (observability for subsequent widget actions).
-3. SecureMessagesWidget (communication channel) â€“ requires applicant identity stability.
-4. CoordinatorAssessmentWidget (writes to case record; ensure migration complete first).
-5. CaseTasks (once task lifecycle endpoints finalized).
-6. IsetEvaluatorsWidget (after evaluator/staff schema decision).
-7. NotificationSettings (after event taxonomy & templates stabilized).
-
-## Technical Guardrails for Reintroduction
-- Each widget added back should: (a) Feature-flag or conditional mount; (b) Use `apiFetch`; (c) Handle missing optional fields gracefully; (d) Avoid causing the entire dashboard to block rendering.
-- `/api/cases/:id` must always return a minimal object with: `id`, `application_id`, `status` (plus applicant identity or explicit nulls) â€” never 500.
-- Use progressive enhancement: attempt richer joins only when columns and tables confirmed present (already pattern in fallback logic).
+## Technical Guardrails
+- Each widget must: (a) be feature-flag friendly, (b) call `apiFetch`, (c) degrade gracefully when optional fields absent, (d) avoid blocking the whole board on failure.
+- `/api/cases/:id` should always return the minimal payload (`id`, `application_id`, `status`, applicant identity or explicit nulls).
+- Use progressive enhancement: attempt richer joins only when columns confirmed present.
 
 ## File References
 - Dashboard composition: `src/pages/applicationCaseDashboard.js`
 - Widgets directory: `src/widgets/`
+  - Application overview: `ApplicationOverviewWidget.js`
   - Application form: `IsetApplicationFormWidget.js`
   - Assessment: `CoordinatorAssessmentWidget.js`
-  - Secure messages: `SecureMessagesWidget.js`
-  - Supporting docs: `SupportingDocumentsWidget.js`
+  - Secure messaging: `SecureMessagingWidget.js`
+  - Supporting documents: `SupportingDocumentsWidget.js`
   - Case updates: `caseUpdates.js`
   - Tasks: `caseTasks.js`
   - Evaluators: `IsetEvaluatorsWidget.js`
   - Notification settings: `notificationSettingsWidget.js`
 
-## Open Questions to Resolve Before Full Restore
-- Final canonical source of applicant identity if `a.user_id` column remains absent (submission join vs derived user mapping).
-- Assessment columns: confirm which remain in `iset_case` vs move to versioned table.
-- Task model: adopt existing event-driven tasks or create dedicated workflow.
-- Evaluator schema convergence: unify `iset_evaluators` and `staff_profiles` to avoid double maintenance.
-- Event taxonomy & notification templates: lock stable identifiers to prevent migration churn.
-
-## Next Action
-When beginning reintroduction, create a small helper in the dashboard to compose `boardItems` from an ordered feature list that checks environment readiness (schema + endpoints) before pushing each widget. This avoids repeated manual edits.
+## Open Questions
+- Canonical applicant identity source when submission lacks `user_id`.
+- Assessment persistence model vs future versioning.
+- Task lifecycle + notification strategy.
+- Evaluator roster convergence.
+- Event taxonomy + notification template governance.
 
 ---
-Document created: 2025-09-20
+Updated: 2025-09-21
