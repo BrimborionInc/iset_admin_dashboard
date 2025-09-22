@@ -1,6 +1,6 @@
 # Unified Documents Model (iset_document)
 
-Date: 2025-09-19
+Date: 2025-09-21
 
 ## Summary
 Replaced the previously dropped `iset_case_document` table with a generalized `iset_document` table that can represent any uploaded or adopted file associated with an applicant, application, case, or secure message.
@@ -21,15 +21,19 @@ Key columns:
 
 ## Endpoint Changes
 - `GET /api/applicants/:id/documents` now queries `iset_document` where `applicant_user_id = :id AND status='active'`.
-- `GET /api/admin/messages/:id/attachments` auto-inserts (upserts) each attachment into `iset_document` when a `case_id` query param is provided.
+- `GET /api/admin/messages/:id/attachments` auto-inserts (upserts) each attachment into `iset_document` when a `case_id` query param is provided, updating applicant/application/user columns if they were previously null.
 
 ## Widget Updates
-`SupportingDocumentsWidget` now displays an added `Source` column and uses `created_at AS uploaded_at` from the new table. File URL normalization improved to be resilient to trailing/leading slashes.
+`SupportingDocumentsWidget` now shows File, Source, Uploaded, and Actions columns, includes a refresh button, listens for the `iset:supporting-documents:refresh` event fired by Secure Messaging, and uses `created_at AS uploaded_at` with normalized URLs.
+
+## Cross-widget Hooks (2025-09-21)
+- SecureMessagingWidget dispatches `iset:supporting-documents:refresh` after attachments load, giving SupportingDocumentsWidget an immediate view of newly adopted files.
+- The admin API now back-fills `applicant_user_id`, `application_id`, and `user_id` when re-adopting attachments so the unified list stays filtered correctly.
 
 ## Adoption Logic Notes
 - Attachments adoption only occurs when the attachments endpoint is called with `?case_id=...`.
 - Applicant linkage derived via `case -> application -> user` resolution.
-- Idempotency: enforced via `UNIQUE (file_path)` + `ON DUPLICATE KEY UPDATE origin_message_id`.
+- Idempotency: enforced via `UNIQUE (file_path)` + `ON DUPLICATE KEY UPDATE` for applicant/application/user/origin fields so re-opening a message repairs missing metadata.
 
 ## Future Enhancements
 - Add an upload endpoint for manual staff uploads: `POST /api/cases/:id/documents`.
