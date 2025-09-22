@@ -4622,66 +4622,45 @@ app.post('/api/cases/:case_id/application/versions', async (req, res) => {
 app.get('/api/cases/:id', async (req, res) => {
   const caseId = req.params.id;
   try {
-    // Fetch case and joined application fields
-  let baseSql = `
-      SELECT 
+    // Fetch case core details + assessment snapshot
+    const baseSql = `
+      SELECT
         c.id,
         c.application_id,
         c.assigned_to_user_id,
         c.status,
-        c.priority,
-        c.stage,
-        c.program_type,
-        c.case_summary,
-        c.opened_at,
-        c.closed_at,
-        c.last_activity_at,
-        c.ptma_id,
-        c.assessment_date_of_assessment,
-        c.assessment_employment_goals,
-        c.assessment_previous_iset,
-        c.assessment_previous_iset_details,
-        c.assessment_employment_barriers,
-        c.assessment_local_area_priorities,
-        c.assessment_other_funding_details,
-        c.assessment_esdc_eligibility,
-        c.assessment_intervention_start_date,
-        c.assessment_intervention_end_date,
-        c.assessment_institution,
-        c.assessment_program_name,
-        c.assessment_itp,
-        c.assessment_wage,
-        c.assessment_recommendation,
-        c.assessment_justification,
-        c.assessment_nwac_review,
-        c.assessment_nwac_reason,
-        COALESCE(sp.display_name, sp.name) AS assigned_user_name,
-        sp.email AS assigned_user_email,
-  p.name AS assigned_user_ptma_name,
-  JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
-        a.created_at AS submitted_at,
-  applicant.name AS applicant_name,
-  applicant.email AS applicant_email,
-  COALESCE(applicant.id, s.user_id) AS applicant_user_id
-  FROM iset_case c
-  LEFT JOIN staff_profiles sp ON c.assigned_to_user_id = sp.id
-      LEFT JOIN ptma p ON c.ptma_id = p.id
-      JOIN iset_application a ON c.application_id = a.id
-      LEFT JOIN iset_application_submission s ON a.submission_id = s.id
-      LEFT JOIN user applicant ON s.user_id = applicant.id
+        c.created_at,
+        c.updated_at,
+        COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
+        COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
+        s.created_at AS submitted_at,
+        ca.date_of_assessment AS assessment_date_of_assessment,
+        ca.overview AS case_summary,
+        ca.employment_goals AS assessment_employment_goals,
+        ca.previous_iset AS assessment_previous_iset,
+        ca.previous_iset_details AS assessment_previous_iset_details,
+        ca.employment_barriers AS assessment_employment_barriers,
+        ca.local_area_priorities AS assessment_local_area_priorities,
+        ca.other_funding_details AS assessment_other_funding_details,
+        ca.esdc_eligibility AS assessment_esdc_eligibility,
+        ca.intervention_start_date AS assessment_intervention_start_date,
+        ca.intervention_end_date AS assessment_intervention_end_date,
+        ca.institution AS assessment_institution,
+        ca.program_name AS assessment_program_name,
+        ca.itp_payload AS assessment_itp,
+        ca.wage_payload AS assessment_wage,
+        ca.recommendation AS assessment_recommendation,
+        ca.justification AS assessment_justification,
+        ca.nwac_review AS assessment_nwac_review,
+        ca.nwac_reason AS assessment_nwac_reason
+      FROM iset_case c
+      LEFT JOIN iset_application a ON c.application_id = a.id
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
       WHERE c.id = ?
     `;
 
     const params = [caseId];
-    try {
-      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-      if (authProvider === 'cognito') {
-        const { scopeCases } = require('./src/lib/dbScope');
-        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
-        baseSql += ` AND ${scopeSql}`;
-        params.push(...scopeParams);
-      }
-    } catch (_) {}
 
     let rows;
     try {
@@ -7038,104 +7017,211 @@ app.delete('/api/admin/messages/:id/hard-delete', async (req, res) => {
 
 // Update assessment fields for a case
 app.put('/api/cases/:id', async (req, res) => {
-  const caseId = req.params.id;
-  const {
-    assessment_date_of_assessment,
-    assessment_employment_goals,
-    assessment_previous_iset,
-    assessment_previous_iset_details,
-    assessment_employment_barriers,
-    assessment_local_area_priorities,
-    assessment_other_funding_details,
-    assessment_esdc_eligibility,
-    assessment_intervention_start_date,
-    assessment_intervention_end_date,
-    assessment_institution,
-    assessment_program_name,
-    assessment_itp,
-    assessment_wage,
-    assessment_recommendation,
-    assessment_justification,
-    assessment_nwac_review,
-    assessment_nwac_reason,
-    case_summary, // <-- add this
-    status // <-- add this
-  } = req.body;
+  const caseId = Number(req.params.id);
+  if (!Number.isInteger(caseId)) {
+    return res.status(400).json({ success: false, error: 'Invalid case id' });
+  }
 
-  // Helper: convert blank to null
+  const body = req.body || {};
+
   const toNull = v => (v === undefined || v === null || v === '' ? null : v);
-  // Helper: ensure JSON fields are valid and currency fields are 0 if blank
-  const safeJson = (obj) => {
-    if (!obj || typeof obj !== 'object') return JSON.stringify({});
-    return JSON.stringify(obj);
+  const toJsonValue = (val, fallback) => {
+    if (typeof val === 'undefined') return undefined;
+    if (val === null) return null;
+    try { return JSON.stringify(val); } catch { return JSON.stringify(fallback); }
+  };
+  const toTinyInt = (val) => {
+    if (typeof val === 'undefined') return undefined;
+    if (val === null || val === '') return null;
+    const str = String(val).trim().toLowerCase();
+    if (['1','true','yes','y','on'].includes(str)) return 1;
+    if (['0','false','no','n','off'].includes(str)) return 0;
+    return null;
   };
 
+  let conn;
+  let beforeStatus = null;
+  let normalizedStatus;
+  let statusChanged = false;
+
   try {
-    const [result] = await pool.query(
-      `UPDATE iset_case SET
-        assessment_date_of_assessment = ?,
-        assessment_employment_goals = ?,
-        assessment_previous_iset = ?,
-        assessment_previous_iset_details = ?,
-        assessment_employment_barriers = ?,
-        assessment_local_area_priorities = ?,
-        assessment_other_funding_details = ?,
-        assessment_esdc_eligibility = ?,
-        assessment_intervention_start_date = ?,
-        assessment_intervention_end_date = ?,
-        assessment_institution = ?,
-        assessment_program_name = ?,
-        assessment_itp = ?,
-        assessment_wage = ?,
-        assessment_recommendation = ?,
-        assessment_justification = ?,
-        assessment_nwac_review = ?,
-        assessment_nwac_reason = ?,
-        case_summary = ?,
-        status = COALESCE(?, status)
-      WHERE id = ?`,
-      [
-        toNull(assessment_date_of_assessment),
-        toNull(assessment_employment_goals),
-        toNull(assessment_previous_iset),
-        toNull(assessment_previous_iset_details),
-        assessment_employment_barriers ? JSON.stringify(assessment_employment_barriers) : null,
-        assessment_local_area_priorities ? JSON.stringify(assessment_local_area_priorities) : null,
-        toNull(assessment_other_funding_details),
-        toNull(assessment_esdc_eligibility),
-        toNull(assessment_intervention_start_date),
-        toNull(assessment_intervention_end_date),
-        toNull(assessment_institution),
-        toNull(assessment_program_name),
-        safeJson(assessment_itp),
-        safeJson(assessment_wage),
-        toNull(assessment_recommendation),
-        toNull(assessment_justification),
-        toNull(assessment_nwac_review),
-        toNull(assessment_nwac_reason),
-        toNull(case_summary), // <-- add this
-        toNull(status), // <-- add this
-        caseId
-      ]
-    );
-    if (result.affectedRows === 0) {
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [[existingCase]] = await conn.query('SELECT status FROM iset_case WHERE id = ? LIMIT 1', [caseId]);
+    if (!existingCase) {
+      await conn.rollback();
       return res.status(404).json({ success: false, error: 'Case not found' });
     }
+    beforeStatus = existingCase.status || null;
 
-    // Fetch the updated case to get user_id, stage, and other info
+    if (Object.prototype.hasOwnProperty.call(body, 'status')) {
+      normalizedStatus = toNull(body.status);
+      if (normalizedStatus !== beforeStatus) {
+        await conn.query('UPDATE iset_case SET status = ? WHERE id = ?', [normalizedStatus || beforeStatus, caseId]);
+        statusChanged = true;
+      }
+    }
+
+    const assessmentKeys = [
+      'assessment_date_of_assessment',
+      'assessment_employment_goals',
+      'assessment_previous_iset',
+      'assessment_previous_iset_details',
+      'assessment_employment_barriers',
+      'assessment_local_area_priorities',
+      'assessment_other_funding_details',
+      'assessment_esdc_eligibility',
+      'assessment_intervention_start_date',
+      'assessment_intervention_end_date',
+      'assessment_institution',
+      'assessment_program_name',
+      'assessment_itp',
+      'assessment_wage',
+      'assessment_recommendation',
+      'assessment_justification',
+      'assessment_nwac_review',
+      'assessment_nwac_reason',
+      'case_summary'
+    ];
+
+    const hasAssessmentPayload = assessmentKeys.some(key => Object.prototype.hasOwnProperty.call(body, key));
+
+    if (hasAssessmentPayload) {
+      const insertColumns = ['case_id'];
+      const insertValues = [caseId];
+      const updateAssignments = [];
+      const add = (column, value) => {
+        if (typeof value === 'undefined') return;
+        insertColumns.push(column);
+        insertValues.push(value);
+        updateAssignments.push(`${column} = VALUES(${column})`);
+      };
+
+      add('date_of_assessment', toNull(body.assessment_date_of_assessment));
+      add('overview', toNull(body.case_summary));
+      add('employment_goals', toNull(body.assessment_employment_goals));
+      add('previous_iset', toTinyInt(body.assessment_previous_iset));
+      add('previous_iset_details', toNull(body.assessment_previous_iset_details));
+      add('employment_barriers', toJsonValue(body.assessment_employment_barriers ?? null, []));
+      add('local_area_priorities', toJsonValue(body.assessment_local_area_priorities ?? null, []));
+      add('other_funding_details', toNull(body.assessment_other_funding_details));
+      add('esdc_eligibility', toNull(body.assessment_esdc_eligibility));
+      add('intervention_start_date', toNull(body.assessment_intervention_start_date));
+      add('intervention_end_date', toNull(body.assessment_intervention_end_date));
+      add('institution', toNull(body.assessment_institution));
+      add('program_name', toNull(body.assessment_program_name));
+      add('itp_payload', toJsonValue(body.assessment_itp ?? null, { tuition: '', books: '', materials: '', living: '' }));
+      add('wage_payload', toJsonValue(body.assessment_wage ?? null, { wages: '', mercs: '', nonwages: '', other: '' }));
+      add('recommendation', toNull(body.assessment_recommendation));
+      add('justification', toNull(body.assessment_justification));
+      add('nwac_review', toNull(body.assessment_nwac_review));
+      add('nwac_reason', toNull(body.assessment_nwac_reason));
+
+      if (updateAssignments.length) {
+        const placeholders = insertColumns.map(() => '?').join(', ');
+        const updateClause = updateAssignments.join(', ');
+        await conn.query(
+          `INSERT INTO iset_case_assessment (${insertColumns.join(', ')}) VALUES (${placeholders})
+           ON DUPLICATE KEY UPDATE ${updateClause}`,
+          insertValues
+        );
+      }
+    }
+
+    await conn.commit();
+  } catch (error) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) {}
+      conn.release();
+      conn = null;
+    }
+    console.error('Error updating assessment:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  } finally {
+    if (conn) conn.release();
+  }
+
+  try {
     const [[caseRow]] = await pool.query(
-  `SELECT c.*, a.user_id AS applicant_user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id, e.name AS evaluator_name
-       FROM iset_case c
-       JOIN iset_application a ON c.application_id = a.id
-       LEFT JOIN iset_evaluators e ON c.assigned_to_user_id = e.id
-       WHERE c.id = ?`,
+      `SELECT c.status, c.application_id,
+              COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
+              COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
+              ca.date_of_assessment,
+              ca.overview,
+              ca.employment_goals,
+              ca.previous_iset,
+              ca.previous_iset_details,
+              ca.employment_barriers,
+              ca.local_area_priorities,
+              ca.other_funding_details,
+              ca.esdc_eligibility,
+              ca.intervention_start_date,
+              ca.intervention_end_date,
+              ca.institution,
+              ca.program_name,
+              ca.itp_payload,
+              ca.wage_payload,
+              ca.recommendation,
+              ca.justification,
+              ca.nwac_review,
+              ca.nwac_reason
+         FROM iset_case c
+         JOIN iset_application a ON c.application_id = a.id
+         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+         LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+        WHERE c.id = ?`,
       [caseId]
     );
 
-    // Log event for coordinator assessment submission
-    if (assessment_recommendation && assessment_justification) {
-      // Always use applicant's user id for event logging
-      const coordinatorName = caseRow.evaluator_name || '';
+    try {
+      caseRow.assessment_employment_barriers = caseRow.assessment_employment_barriers
+        ? (typeof caseRow.assessment_employment_barriers === 'string'
+            ? JSON.parse(caseRow.assessment_employment_barriers)
+            : caseRow.assessment_employment_barriers)
+        : [];
+    } catch { caseRow.assessment_employment_barriers = []; }
+    try {
+      caseRow.assessment_local_area_priorities = caseRow.assessment_local_area_priorities
+        ? (typeof caseRow.assessment_local_area_priorities === 'string'
+            ? JSON.parse(caseRow.assessment_local_area_priorities)
+            : caseRow.assessment_local_area_priorities)
+        : [];
+    } catch { caseRow.assessment_local_area_priorities = []; }
+    try {
+      caseRow.assessment_itp = caseRow.assessment_itp
+        ? (typeof caseRow.assessment_itp === 'string'
+            ? JSON.parse(caseRow.assessment_itp)
+            : caseRow.assessment_itp)
+        : { tuition: '', books: '', materials: '', living: '' };
+    } catch { caseRow.assessment_itp = { tuition: '', books: '', materials: '', living: '' }; }
+    try {
+      caseRow.assessment_wage = caseRow.assessment_wage
+        ? (typeof caseRow.assessment_wage === 'string'
+            ? JSON.parse(caseRow.assessment_wage)
+            : caseRow.assessment_wage)
+        : { wages: '', mercs: '', nonwages: '', other: '' };
+    } catch { caseRow.assessment_wage = { wages: '', mercs: '', nonwages: '', other: '' }; }
+    if (caseRow.assessment_previous_iset !== null && caseRow.assessment_previous_iset !== undefined) {
+      caseRow.assessment_previous_iset = Number(caseRow.assessment_previous_iset);
+    }
+
+    const afterStatus = (normalizedStatus !== undefined ? normalizedStatus : caseRow.status) || caseRow.status;
+
+    if (statusChanged) {
+      try {
+        await addCaseEvent({
+          user_id: caseRow.applicant_user_id,
+          case_id: caseId,
+          event_type: 'status_changed',
+          event_data: { from: beforeStatus || null, to: afterStatus, tracking_id: caseRow.tracking_id || null }
+        });
+      } catch(_) {}
+    }
+
+    const assessmentSubmitted = body.assessment_recommendation && body.assessment_justification;
+    if (assessmentSubmitted) {
+      const coordinatorName = req.auth?.name || '';
       await addCaseEvent({
         user_id: caseRow.applicant_user_id,
         case_id: caseId,
@@ -7149,15 +7235,14 @@ app.put('/api/cases/:id', async (req, res) => {
         }
       });
     }
-    // Log event for NWAC review submission
-    if (assessment_nwac_review) {
-      // Always use applicant's user id for event logging
+
+    if (body.assessment_nwac_review) {
       await addCaseEvent({
         user_id: caseRow.applicant_user_id,
         case_id: caseId,
         event_type: 'nwac_review_submitted',
         event_data: {
-          evaluator_name: caseRow.evaluator_name || null,
+          evaluator_name: req.auth?.name || null,
           tracking_id: caseRow.tracking_id || null,
           message: 'NWAC review submitted.'
         }
@@ -7179,6 +7264,24 @@ app.put('/api/cases/:id/stage', async (req, res) => {
     return res.status(400).json({ error: 'Missing stage in request body' });
   }
   try {
+    if (!global.__stageColumnChecked) {
+      try {
+        const [cols] = await pool.query(
+          "SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='iset_case' AND column_name='stage'"
+        );
+        global.__stageColumnChecked = true;
+        global.__stageColumnPresent = cols.length > 0;
+      } catch (_) {
+        global.__stageColumnChecked = true;
+        global.__stageColumnPresent = false;
+      }
+    }
+
+    if (!global.__stageColumnPresent) {
+      // Schema no longer includes stage; treat request as no-op for compatibility
+      return res.status(200).json({ success: true, stage, persisted: false });
+    }
+
     const [result] = await pool.query(
       'UPDATE iset_case SET stage = ?, last_activity_at = NOW() WHERE id = ?',
       [stage, caseId]
@@ -7186,9 +7289,13 @@ app.put('/api/cases/:id/stage', async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Case not found' });
     }
-    // Optionally log event
-    res.status(200).json({ success: true });
+    res.status(200).json({ success: true, stage, persisted: true });
   } catch (error) {
+    if (error && error.code === 'ER_BAD_FIELD_ERROR') {
+      // Stage column really does not exist; remember and succeed silently
+      global.__stageColumnPresent = false;
+      return res.status(200).json({ success: true, stage, persisted: false });
+    }
     console.error('Error updating case stage:', error);
     res.status(500).json({ error: 'Failed to update case stage' });
   }
