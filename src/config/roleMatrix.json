@@ -79,7 +79,8 @@
       "PTMA Staff"
     ],
     "/manage-notifications": [
-      "System Administrator"
+      "System Administrator",
+      "Program Administrator"
     ],
     "/manage-organisations": [
       "System Administrator",
@@ -96,10 +97,6 @@
     ],
     "/modify-workflow": [
       "System Administrator"
-    ],
-    "/notification-settings-dashboard": [
-      "System Administrator",
-      "Program Administrator"
     ],
     "/nwac-hub-management": [
       "System Administrator"

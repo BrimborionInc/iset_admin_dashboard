@@ -51,7 +51,7 @@ import '@cloudscape-design/global-styles/index.css';
 const roleOptions = [
   { label: 'Program Administrator', value: 'Program Administrator' },
   { label: 'Regional Coordinator', value: 'Regional Coordinator' },
-  { label: 'PTMA Staff', value: 'PTMA Staff' },
+  { label: 'Application Assessor', value: 'Application Assessor' },
   { label: 'System Administrator', value: 'System Administrator' },
 ];
 

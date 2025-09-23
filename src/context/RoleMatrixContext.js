@@ -2,11 +2,11 @@ import React, { createContext, useContext, useState, useMemo, useCallback } from
 import roleMatrixData from '../config/roleMatrix.json';
 
 const STORAGE_KEY = 'iset-role-matrix';
-const ROLE_ORDER = ['System Administrator', 'Program Administrator', 'Regional Coordinator', 'PTMA Staff'];
+const ROLE_ORDER = ['System Administrator', 'Program Administrator', 'Regional Coordinator', 'Application Assessor'];
 
 const ROLE_ALIASES = {
-  'Application Assessor': 'PTMA Staff',
-  'PTMA Staff': 'PTMA Staff',
+  'Application Assessor': 'Application Assessor',
+  'PTMA Staff': 'Application Assessor',
   'SysAdmin': 'System Administrator',
   'Program Admin': 'Program Administrator',
 };

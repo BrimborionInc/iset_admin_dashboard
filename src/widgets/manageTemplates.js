@@ -16,8 +16,10 @@ import {
   Link
 } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
+import { apiFetch } from '../auth/apiClient';
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL;
+// Network calls now use apiFetch (handles auth + base URL) with relative paths
+// const API_BASE_URL = process.env.REACT_APP_API_BASE_URL; // no longer needed for these calls
 
 const placeholders = [
   { label: 'Applicant Name', value: '{applicant_name}' },
@@ -56,20 +58,20 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
 
   const fetchTemplates = () => {
     setLoading(true);
-    fetch(`${API_BASE_URL}/api/templates`)
+    apiFetch('/api/templates')
       .then((response) => response.json())
       .then((data) => {
-        setTemplates(data);
+        setTemplates(Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []));
         setLoading(false);
       })
       .catch((error) => {
-        console.error("Error fetching templates:", error);
+        console.error('Error fetching templates:', error);
         setLoading(false);
       });
   };
 
   const handleTemplateSelection = (templateId) => {
-    fetch(`${API_BASE_URL}/api/templates/${templateId}`)
+    apiFetch(`/api/templates/${templateId}`)
       .then((response) => response.json())
       .then((data) => {
         setSelectedTemplate(data);
@@ -78,7 +80,7 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
         setStatus(data.status);
         setNotificationType(data.type);
       })
-      .catch((error) => console.error("Error fetching template details:", error));
+      .catch((error) => console.error('Error fetching template details:', error));
   };
 
   const handleSaveTemplate = () => {
@@ -92,7 +94,7 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
       content: templateContent,
     };
 
-    fetch(`${API_BASE_URL}/api/templates/${selectedTemplate.id}`, {
+    apiFetch(`/api/templates/${selectedTemplate.id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedTemplate)
@@ -132,7 +134,7 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
   const handleDeleteTemplate = () => {
     if (!templateToDelete) return;
 
-    fetch(`${API_BASE_URL}/api/templates/${templateToDelete.id}`, {
+    apiFetch(`/api/templates/${templateToDelete.id}`, {
       method: 'DELETE'
     })
     .then((response) => {

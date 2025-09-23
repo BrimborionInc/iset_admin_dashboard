@@ -4,12 +4,12 @@ import { SideNavigation as CloudscapeSideNavigation, Badge } from '@cloudscape-d
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '../auth/cognito';
 import { useRoleMatrix, toCanonicalRole } from '../context/RoleMatrixContext';
 
-const commonFooterItems = [
+const defaultFooterItems = [
   { type: 'divider' },
   { type: 'link', text: 'Documentation', href: 'https://example.com', external: true },
 ];
 
-const SideNavigation = ({ currentRole }) => {
+const SideNavigation = ({ currentRole, notificationCount = 0 }) => {
   const pruneSections = (items = []) =>
     items.filter(item => {
       if (!item) return false;
@@ -28,6 +28,7 @@ const SideNavigation = ({ currentRole }) => {
       return new Set(Array.isArray(arr) ? arr : []);
     } catch { return new Set(); }
   });
+
   useEffect(() => {
     const onChange = () => setTick(t => t + 1);
     window.addEventListener('auth:session-changed', onChange);
@@ -37,10 +38,11 @@ const SideNavigation = ({ currentRole }) => {
       window.removeEventListener('storage', onChange);
     };
   }, []);
+
   useEffect(() => {
     try { sessionStorage.setItem('sideNavExpanded', JSON.stringify(Array.from(expandedSections))); } catch {}
   }, [expandedSections]);
-  // Compute role context early so it can be used inside nav item construction
+
   const iamOn = isIamOn();
   const simSignedOut = (() => { try { return sessionStorage.getItem('simulateSignedOut') === 'true'; } catch { return false; } })();
   const signedIn = hasValidSession();
@@ -52,9 +54,8 @@ const SideNavigation = ({ currentRole }) => {
       type: 'section',
       text: 'ISET Administration',
       items: [
-        // Ensure unique hrefs across navigation; add query param but route still matches
         { type: 'link', text: 'Application Assignment', href: '/case-assignment-dashboard?view=assignment' },
-                { type: 'link', text: 'NWAC Hub Management', href: '/nwac-hub-management' }, // Placeholder link
+        { type: 'link', text: 'NWAC Hub Management', href: '/nwac-hub-management' },
         { type: 'link', text: 'PTMA Management', href: '/ptma-management' },
         { type: 'link', text: 'ARMS Reporting', href: '/arms-reporting' },
         { type: 'link', text: 'Assessment Review', href: '/assessment-review' },
@@ -64,29 +65,25 @@ const SideNavigation = ({ currentRole }) => {
       type: 'section',
       text: 'ISET Assessment',
       items: [
-  { type: 'link', text: 'Manage Applications', href: '/case-assignment-dashboard' },
+        { type: 'link', text: 'Manage Applications', href: '/case-assignment-dashboard' },
         { type: 'link', text: 'My Case Queue', href: '/case-management' },
       ],
     },
     {
       type: 'section',
       text: 'Other Dashboards',
-    items: [
-  // Removed duplicate href '/case-management' (already present as My Case Queue above)
-        { type: 'link', text: 'Reminders and Notifications', href: '/manage-notifications' },
+      items: [
         { type: 'link', text: 'Secure Messaging', href: '/manage-messages' },
         { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },
-        // Authoring links moved to dedicated 'Intake Form Editor' section
       ],
     },
-    // Dedicated section for intake form editing / workflow authoring
     {
       type: 'section',
       text: 'Intake Form Editor',
       items: [
         { type: 'link', text: 'Manage Intake Steps', href: '/manage-components' },
         { type: 'link', text: 'Manage Workflows', href: '/manage-workflows' },
-      ]
+      ],
     },
     {
       type: 'section',
@@ -107,11 +104,10 @@ const SideNavigation = ({ currentRole }) => {
       items: [
         { type: 'link', text: 'User Management', href: '/user-management-dashboard' },
         { type: 'link', text: 'Release Management', href: '/release-management-dashboard' },
-        { type: 'link', text: 'Notification Settings', href: '/notification-settings-dashboard' },
+        { type: 'link', text: 'Notification Settings', href: '/manage-notifications' },
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
         { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
         { type: 'link', text: 'File Upload Config', href: '/admin/upload-config' },
-  // Removed duplicate href '/manage-components' (already present under Other Dashboards)
       ],
     },
     {
@@ -121,7 +117,7 @@ const SideNavigation = ({ currentRole }) => {
       items: [
         { type: 'link', text: 'Audit and Logs', href: '/audit-logs-dashboard' },
         { type: 'link', text: 'Security Settings', href: '/manage-security-options' },
-  { type: 'link', text: 'Access Control', href: '/access-control' },
+        { type: 'link', text: 'Access Control', href: '/access-control' },
       ],
     },
     {
@@ -135,6 +131,19 @@ const SideNavigation = ({ currentRole }) => {
     },
   ];
 
+  const notificationsFooterItem = notificationCount > 0
+    ? {
+        type: 'link',
+        text: 'Notifications',
+        href: '/manage-notifications',
+        info: <Badge color="red">{notificationCount}</Badge>,
+      }
+    : {
+        type: 'link',
+        text: 'Notifications',
+        href: '/manage-notifications',
+      };
+
   function isAllowed(href, roleValue) {
     if (!href) return true;
     const allowed = roleMatrix?.routes?.[href];
@@ -146,11 +155,12 @@ const SideNavigation = ({ currentRole }) => {
 
   function filterNavItemsForRole(role, signedOut) {
     if (signedOut) {
-      // Signed out: no navigation sections, minimal footer (documentation link only)
-      return [...commonFooterItems];
+      return [...defaultFooterItems];
     }
+
     const roleValue = role?.value || role;
     const canonicalRole = toCanonicalRole(roleValue);
+
     const filteredSections = allNavItems.map(section => {
       if (!section.items) return section;
       return {
@@ -158,8 +168,17 @@ const SideNavigation = ({ currentRole }) => {
         items: section.items.filter(item => isAllowed(item.href, canonicalRole)),
       };
     });
-    return [...pruneSections(filteredSections), ...commonFooterItems];
+
+    const footerItems = [...defaultFooterItems];
+    if (isAllowed('/manage-notifications', canonicalRole)) {
+      const dividerIndex = footerItems.findIndex(item => item?.type === 'divider');
+      const insertAt = dividerIndex >= 0 ? dividerIndex + 1 : 0;
+      footerItems.splice(insertAt, 0, notificationsFooterItem);
+    }
+
+    return [...pruneSections(filteredSections), ...footerItems];
   }
+
   const filteredNavItems = filterNavItemsForRole(effectiveRole, (iamOn && !signedIn) || (!iamOn && simSignedOut));
 
   const itemsWithExpandState = useMemo(() => {
@@ -197,7 +216,6 @@ const SideNavigation = ({ currentRole }) => {
         }
       }}
       onFollow={(e) => {
-        // Intercept to use SPA navigation and avoid full reloads
         if (e.detail && e.detail.href && !e.detail.external) {
           e.preventDefault();
           history.push(e.detail.href);

@@ -4232,7 +4232,7 @@ app.post('/api/cases', async (req, res) => {
 
     const [insertCase] = await conn.query(
       'INSERT INTO iset_case (application_id, assigned_to_user_id, status, created_at, updated_at) VALUES (?,?,?,?,?)',
-      [workingApplicationId, assigned_to_user_id, 'open', new Date(), new Date()]
+      [workingApplicationId, assigned_to_user_id, 'submitted', new Date(), new Date()]
     );
 
     await conn.commit();
@@ -5095,13 +5095,13 @@ app.get('/api/roles', (_req, res) => {
     { id: 'SysAdmin', name: 'System Administrator', description: 'Full administrative access to the Admin Portal.' },
     { id: 'ProgramAdmin', name: 'Program Administrator', description: 'Manage programs, templates, and reporting.' },
     { id: 'RegionalCoordinator', name: 'Regional Coordinator', description: 'Coordinate case assignments and oversee regional workflows.' },
-    { id: 'PTMAStaff', name: 'PTMA Staff', description: 'PTMA-level view and updates for assigned cases.' },
+    { id: 'ApplicationAssessor', name: 'Application Assessor', description: 'Assessor-level view and updates for assigned cases.' },
   ];
   res.status(200).json(roles);
 });
 
 // Minimal notifications summary for Manage Notifications landing
-app.get('/api/notifications', async (_req, res) => {
+app.get('/api/notifications/summary', async (_req, res) => {
   try {
     // Provide a simple summary based on existing notification_template rows if present
     const [rows] = await pool.query(
@@ -5908,7 +5908,7 @@ app.get('/api/ptmas', async (req, res) => {
     const [openCaseCounts] = await pool.query(`
       SELECT ptma_id, COUNT(*) AS cases
       FROM iset_case
-      WHERE ptma_id IS NOT NULL AND status = 'open'
+      WHERE ptma_id IS NOT NULL AND status IN ('submitted','open')
       GROUP BY ptma_id
     `);
     // Build lookup maps
@@ -7358,10 +7358,10 @@ app.delete('/api/notifications/:id', async (req, res) => {
 // GET all notification events (from iset_event_type)
 app.get('/api/events', async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT event_type as value, label, description FROM iset_event_type ORDER BY sort_order, event_type');
+        const [rows] = await pool.query('SELECT event_type as value, label, description, alert_variant FROM iset_event_type ORDER BY sort_order, event_type');
         res.json(rows);
     } catch (err) {
-        console.error(err);
+        console.error('[events:list] failed', err);
         res.status(500).json({ error: 'Failed to fetch events' });
     }
 });
@@ -7412,6 +7412,37 @@ app.get('/api/users/:id', async (req, res) => {
   } catch (error) {
     console.error('Error fetching user:', error);
     res.status(500).send({ message: 'Failed to fetch user' });
+  }
+});
+
+// --- Internal Notifications API ---
+app.get('/api/me/notifications', async (req, res) => {
+  try {
+    const notifications = await getInternalNotifications(pool, req.auth);
+    res.status(200).json(notifications);
+  } catch (error) {
+    console.error('[notifications] fetch failed', error);
+    res.status(500).json({ error: 'Failed to load notifications' });
+  }
+});
+
+app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
+  const notificationId = Number(req.params.id);
+
+  if (!notificationId || Number.isNaN(notificationId)) {
+    return res.status(400).json({ error: 'Invalid notification id' });
+  }
+
+  try {
+    await dismissInternalNotification(pool, req.auth, notificationId);
+    res.status(200).json({ success: true });
+  } catch (error) {
+    if (error && error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+
+    console.error('[notifications] dismiss failed', error);
+    res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
 

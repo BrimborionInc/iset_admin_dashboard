@@ -176,8 +176,8 @@ function normalizeRole(r) {
     RegionalCoordinator: 'Regional Coordinator',
     'Regional Coordinator': 'Regional Coordinator',
     Adjudicator: 'Adjudicator',
-    'PTMA Staff': 'PTMA Staff',
-    PTMA: 'PTMA Staff'
+    'Application Assessor': 'Application Assessor',
+    PTMA: 'Application Assessor'
   };
   return map[r] || r; // fall back to raw if unknown
 }

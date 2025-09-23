@@ -10,8 +10,8 @@ function getEmailForRole(role) {
       return 'coordinator@nwac.ca';
     case 'System Administrator':
       return 'sysadmin@nwac.ca';
-    case 'PTMA Staff':
-      return 'staff@ptma.org';
+    case 'Application Assessor':
+      return 'assessor@iset.org';
     default:
       return 'user@nwac.ca';
   }
