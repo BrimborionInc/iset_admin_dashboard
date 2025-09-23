@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Container, Header, Table, Link, SpaceBetween, Alert } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import ManageTemplates from '../widgets/manageTemplates';
-import ConfigureNotifications from '../widgets/configureNotifications'; // Import the new widget
+// import ConfigureNotifications from '../widgets/configureNotifications'; // Import the new widget
 import NotificationSettingsWidget from '../widgets/notificationSettingsWidget';
 import { apiFetch } from '../auth/apiClient';
 
@@ -22,12 +22,12 @@ const ManageNotifications = ({ toggleHelpPanel, updateBreadcrumbs, setSplitPanel
       columnSpan: 3,
       data: { title: 'Template Editor' },
     },
-    {
-      id: 'configure-notifications',
-      rowSpan: 7,
-      columnSpan: 1,
-      data: { title: 'Configure Reminders and Notifications' },
-    },
+    // {
+    //   id: 'configure-notifications',
+    //   rowSpan: 7,
+    //   columnSpan: 1,
+    //   data: { title: 'Configure Reminders and Notifications' },
+    // },
     // Add more widgets here as needed
   ]);
 
@@ -71,20 +71,20 @@ const ManageNotifications = ({ toggleHelpPanel, updateBreadcrumbs, setSplitPanel
               />
             );
           }
-          if (item.id === 'configure-notifications') {
-            return (
-              <ConfigureNotifications
-                actions={actions}
-                dragHandleAriaLabel="Drag handle"
-                i18nStrings={{
-                  dragHandleAriaLabel: 'Drag handle',
-                  dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
-                  resizeHandleAriaLabel: 'Resize handle',
-                  resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.',
-                }}
-              />
-            );
-          }
+          // if (item.id === 'configure-notifications') {
+          // return (
+          // <ConfigureNotifications
+          // actions={actions}
+          // dragHandleAriaLabel="Drag handle"
+          // i18nStrings={{
+          // dragHandleAriaLabel: 'Drag handle',
+          // dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
+          // resizeHandleAriaLabel: 'Resize handle',
+          // resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.',
+          // }}
+          // />
+          // );
+          // }
           // Render other items here if needed
           return null;
         }}

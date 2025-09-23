@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   AppLayout,
   Flashbar,
@@ -41,15 +41,64 @@ const AppContent = ({ currentRole }) => {
   const [toolsMode, setToolsMode] = useState('help'); // 'help' | 'palette'
   const location = useLocation(); // Get the current location
   const [value, setValue] = React.useState("");
-  const [flashbarItems, setFlashbarItems] = useState([
-    {
-      type: 'info',
-      dismissible: true,
-      content: 'Operating in DEMO environment. Servers: CLOUD, Serverless?: NO, Security: OFF',
-      id: 'message_1',
-      onDismiss: () => setFlashbarItems([]),
-    },
-  ]);
+
+  // Notifications state (moved inside component)
+  const [notifications, setNotifications] = useState([]);
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      const response = await apiFetch('/api/me/notifications');
+      let data = [];
+      try { data = await response.json(); } catch { data = []; }
+      if (!response.ok) {
+        const message = Array.isArray(data) ? 'Failed to load notifications' : (data?.error || 'Failed to load notifications');
+        throw new Error(message);
+      }
+      setNotifications(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('[notifications] load failed', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadNotifications();
+    const interval = setInterval(loadNotifications, 60000);
+    return () => clearInterval(interval);
+  }, [loadNotifications]);
+
+  const handleDismissNotification = useCallback(async (notificationId) => {
+    try {
+      const response = await apiFetch(`/api/me/notifications/${notificationId}/dismiss`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(body || `Failed to dismiss notification (${response.status})`);
+      }
+      setNotifications(prev => prev.filter(n => n.id !== notificationId));
+    } catch (error) {
+      console.error('[notifications] dismiss failed', error);
+    }
+  }, []);
+
+  const mapSeverityToType = useCallback((severity = 'info') => {
+    const normalised = String(severity).toLowerCase();
+    if (normalised === 'critical' || normalised === 'error') return 'error';
+    if (normalised === 'warning' || normalised === 'warn') return 'warning';
+    if (normalised === 'success') return 'success';
+    return 'info';
+  }, []);
+
+  const notificationFlashbarItems = useMemo(() =>
+    notifications
+      .filter(n => n && n.dismissible !== false)
+      .map(n => ({
+        type: mapSeverityToType(n.severity),
+        header: n.title || undefined,
+        content: n.message,
+        dismissible: true,
+        onDismiss: () => handleDismissNotification(n.id),
+        id: `notification-${n.id}`,
+      })),
+  [notifications, handleDismissNotification, mapSeverityToType]);
 
   const { useDarkMode: isDarkMode, setUseDarkMode } = useDarkMode(); // ✅ Corrected
 
@@ -178,11 +227,7 @@ const AppContent = ({ currentRole }) => {
         navigationOpen={isNavigationOpen}
         onNavigationChange={({ detail }) => setIsNavigationOpen(detail.open)}
         navigation={<SideNavigation currentRole={currentRole} />}
-        notifications={
-          <Flashbar
-            items={flashbarItems}
-          />
-        }
+        notifications={<Flashbar items={notificationFlashbarItems} />}
         toolsOpen={isHelpPanelOpen}
         onToolsChange={({ detail }) => setIsHelpPanelOpen(detail.open)}
         tools={
@@ -315,4 +360,6 @@ const AppContent = ({ currentRole }) => {
 };
 
 export default AppContent;
+
+
 

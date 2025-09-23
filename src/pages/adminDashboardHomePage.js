@@ -28,7 +28,7 @@ function getMockMyWork(role) {
             return { ...base, assigned: 8, awaitingReview: 2 };
         case 'Regional Coordinator':
             return { ...base, assigned: 15, overdue: 1 };
-        case 'PTMA Staff':
+        case 'Application Assessor':
             return { ...base, assigned: 5 };
         default:
             return base;
@@ -76,7 +76,7 @@ function pickQuickActions(role) {
                 { label: 'Reporting & Monitoring', href: '/reporting-and-monitoring-dashboard' },
                 { label: 'Secure Messaging', href: '/manage-messages' },
             ];
-        case 'PTMA Staff':
+        case 'Application Assessor':
             return [
                 { label: 'My Queue', href: '/case-management' },
                 { label: 'Continue Last Case', href: '/case-management' },
@@ -114,7 +114,7 @@ function getWelcomeMessage(role) {
             return 'Manage program-wide policies, oversee workload distribution, and ensure service quality across coordinators and staff.';
         case 'Regional Coordinator':
             return 'Coordinate case distribution, monitor regional performance, and support staff with escalations.';
-        case 'PTMA Staff':
+        case 'Application Assessor':
             return 'Work your assigned cases efficiently. Review recent updates and prioritize overdue tasks.';
         case 'Guest':
             return 'Explore limited console features. Sign in for full access.';

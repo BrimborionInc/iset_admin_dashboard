@@ -35,9 +35,9 @@ const computeSlaMeta = (row) => {
 const columnDefinitions = [
   { id: 'tracking_id', header: 'Case / Submission ID', cell: i => i.tracking_id, minWidth: 140, isRowHeader: true },
   { id: 'status', header: 'Status', cell: i => {
-      // Normalize display: if no assignee & status 'open' (lowercase from DB) show 'Unassigned'
-      let rawStatus = i.case_id ? (i.status || 'open') : 'New';
-      const unassigned = i.case_id && !i.assigned_user_id && rawStatus.toLowerCase() === 'open';
+      // Normalize display: if no assignee & status 'submitted'/'open' show 'Unassigned'
+      let rawStatus = i.case_id ? (i.status || 'submitted') : 'New';
+      const unassigned = i.case_id && !i.assigned_user_id && ['open','submitted'].includes(rawStatus.toLowerCase());
       const display = unassigned ? 'Unassigned' : (rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1));
       const type = unassigned ? 'pending' : (!i.case_id ? 'pending' : (display === 'Closed' ? 'success' : (i.sla_risk === 'overdue' ? 'warning' : 'info')));
       return <StatusIndicator type={type}>{display}</StatusIndicator>;
@@ -128,7 +128,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
 
   const actionsColumn = {
     id: 'actions', header: 'Actions', minWidth: 160, cell: item => {
-      const unassigned = item.case_id && !item.assigned_user_id && (item.status || '').toLowerCase() === 'open';
+      const unassigned = item.case_id && !item.assigned_user_id && ['open','submitted'].includes((item.status || '').toLowerCase());
   const reassignRoles = ['Program Administrator','Regional Coordinator','System Administrator'];
   const canReassign = item.case_id && item.assigned_user_id && reassignRoles.includes((userRole || '').trim());
       const openAssignModal = (caseItem, preselectId) => {
@@ -269,3 +269,5 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
 };
 
 export default ApplicationsWidget;
+
+
