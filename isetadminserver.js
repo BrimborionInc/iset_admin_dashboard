@@ -34,6 +34,7 @@ if (process.env.NODE_ENV !== 'production' && !process.env.ALLOWED_ORIGIN) {
 }
 
 const express = require('express');
+const { CognitoIdentityProviderClient, ListUsersInGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
@@ -260,24 +261,152 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ provider: 'cognito', auth: req.auth });
 });
 
+const ASSIGNABLE_COGNITO_GROUPS = [
+  { group: 'ProgramAdmin', label: 'Program Administrator' },
+  { group: 'RegionalCoordinator', label: 'Regional Coordinator' },
+  { group: 'Adjudicator', label: 'Application Assessor' },
+  { group: 'SysAdmin', label: 'System Administrator' }
+];
+const ASSIGNABLE_GROUP_LABEL = new Map(ASSIGNABLE_COGNITO_GROUPS.map(entry => [entry.group, entry.label]));
+const ASSIGNABLE_GROUP_NAMES = ASSIGNABLE_COGNITO_GROUPS.map(entry => entry.group);
+const PLACEHOLDER_ASSIGNABLE_STAFF = [
+  { id: 'placeholder-program-admin', email: 'admin@nwac.ca', role: 'Program Administrator', display_name: 'Admin (Program Administrator)' },
+  { id: 'placeholder-regional-coordinator', email: 'coordinator@nwac.ca', role: 'Regional Coordinator', display_name: 'Coordinator (Regional Coordinator)' },
+  { id: 'placeholder-adjudicator', email: 'user@nwac.ca', role: 'Application Assessor', display_name: 'Assessor (Application Assessor)' }
+];
+const PLACEHOLDER_ASSIGNABLE_LOOKUP = new Map(PLACEHOLDER_ASSIGNABLE_STAFF.map(entry => [entry.email.toLowerCase(), entry]));
+
+const COGNITO_POOL_ID = process.env.COGNITO_USER_POOL_ID || process.env.USER_POOL_ID || process.env.AWS_USER_POOL_ID || null;
+const COGNITO_REGION = process.env.AWS_REGION || process.env.COGNITO_REGION || null;
+let cognitoAssignableClient = null;
+function getCognitoAssignableClient() {
+  if (!COGNITO_REGION) throw new Error('Missing AWS region for Cognito');
+  if (!cognitoAssignableClient) {
+    cognitoAssignableClient = new CognitoIdentityProviderClient({ region: COGNITO_REGION });
+  }
+  return cognitoAssignableClient;
+}
+async function ensureStaffProfile(pool, username, email, roleLabel) {
+  try {
+    const [[bySub]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [username]);
+    if (bySub && bySub.id) return bySub.id;
+    if (email) {
+      const [[byEmail]] = await pool.query('SELECT id FROM staff_profiles WHERE email=? LIMIT 1', [email]);
+      if (byEmail && byEmail.id) {
+        await pool.query('UPDATE staff_profiles SET cognito_sub=?, primary_role=? WHERE id=?', [username, roleLabel, byEmail.id]);
+        return byEmail.id;
+      }
+    }
+    if (!email) return null;
+    try {
+      await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
+        ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`, [username, email, roleLabel]);
+    } catch (insertErr) {
+      try {
+        await pool.query(`INSERT INTO staff_profiles (cognito_sub,email) VALUES (?,?) ON DUPLICATE KEY UPDATE email=VALUES(email)`, [username, email]);
+        await pool.query(`UPDATE staff_profiles SET primary_role=? WHERE cognito_sub=? AND (primary_role IS NULL OR primary_role='')`, [roleLabel, username]);
+      } catch (fallbackErr) {
+        console.warn('[staff-assignable] ensureStaffProfile fallback failed:', fallbackErr.message);
+      }
+    }
+    const [[finalRow]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [username]);
+    return finalRow && finalRow.id ? finalRow.id : null;
+  } catch (err) {
+    console.warn('[staff-assignable] ensureStaffProfile error:', err.message);
+    return null;
+  }
+}
+async function fetchAssignableFromCognito(pool) {
+  if (!COGNITO_POOL_ID || !COGNITO_REGION) return null;
+  try {
+    const client = getCognitoAssignableClient();
+    const seen = new Map();
+    for (const groupName of ASSIGNABLE_GROUP_NAMES) {
+      let nextToken = undefined;
+      do {
+        const resp = await client.send(new ListUsersInGroupCommand({ UserPoolId: COGNITO_POOL_ID, GroupName: groupName, Limit: 60, NextToken: nextToken }));
+        const users = resp.Users || [];
+        for (const user of users) {
+          const username = user?.Username;
+          if (!username) continue;
+          if (seen.has(username)) continue;
+          const attr = Object.fromEntries((user.Attributes || []).map(a => [a.Name, a.Value]));
+          const email = attr.email || username;
+          if (!email) continue;
+          const staffId = await ensureStaffProfile(pool, username, email, ASSIGNABLE_GROUP_LABEL.get(groupName) || groupName);
+          if (!staffId) continue;
+          const displayName = attr.name || attr['custom:display_name'] || email;
+          seen.set(username, {
+            id: staffId,
+            email,
+            role: ASSIGNABLE_GROUP_LABEL.get(groupName) || groupName,
+            display_name: displayName
+          });
+        }
+        nextToken = resp.NextToken;
+      } while (nextToken);
+    }
+    return Array.from(seen.values());
+  } catch (err) {
+    console.error('[staff-assignable] Cognito fetch failed:', err.message);
+    return null;
+  }
+}
+
 // List assignable staff for case assignment
 // GET /api/staff/assignable
 // In dev bypass (IAM off) returns placeholder identities; otherwise queries staff_profiles by allowed roles.
 app.get('/api/staff/assignable', async (req, res) => {
   try {
-    const iamOn = String(process.env.AUTH_PROVIDER || 'none').toLowerCase() === 'cognito';
+    const placeholderStaff = PLACEHOLDER_ASSIGNABLE_STAFF;
+    const iamModeHeader = (req.get('x-iam-mode') || req.get('X-Iam-Mode') || '').toLowerCase();
+    const bypassHeader = !!(req.get('x-dev-bypass') || req.get('X-Dev-Bypass'));
+    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
+    const envIamEnabled = authProvider === 'cognito';
     const devBypassEnv = process.env.DEV_DISABLE_AUTH === 'true' || process.env.DEV_AUTH_BYPASS === 'true';
-    const isAuthenticated = !!req.auth && iamOn; // real token processed by auth middleware
-    // If IAM truly off (not Cognito) -> always placeholders.
-    // If IAM on + authenticated -> always real staff (ignore dev bypass env to avoid stale placeholder UI when real users exist).
-    // If IAM on but unauthenticated (edge case) -> fallback placeholders so UI can still render Assign modal meaningfully.
-    if (!iamOn || (!isAuthenticated && devBypassEnv)) {
-      return res.json([
-        { id: 'placeholder-admin', email: 'admin@nwac.ca', role: 'Program Administrator', display_name: 'Admin (Program Administrator)' },
-        { id: 'placeholder-coordinator', email: 'coordinator@nwac.ca', role: 'Regional Coordinator', display_name: 'Coordinator (Regional Coordinator)' },
-        { id: 'placeholder-assessor', email: 'user@nwac.ca', role: 'Application Assessor', display_name: 'Assessor (Application Assessor)' }
-      ]);
+    const isAuthenticated = !!req.auth && envIamEnabled;
+    const explicitOn = iamModeHeader === 'on';
+    const explicitOff = iamModeHeader === 'off';
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[staff-assignable] context', {
+        iamModeHeader,
+        bypassHeader,
+        authProvider,
+        envIamEnabled,
+        devBypassEnv,
+        isAuthenticated,
+        explicitOn,
+        explicitOff,
+        hasAuth: !!req.auth,
+        authRole: req.auth ? req.auth.role : null
+      });
     }
+
+    if ((bypassHeader && !explicitOn) || explicitOff) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[staff-assignable] returning placeholders (bypass or explicitOff)');
+      }
+      return res.json(placeholderStaff);
+    }
+
+    if (!envIamEnabled || (!isAuthenticated && devBypassEnv && !explicitOn)) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[staff-assignable] returning placeholders (env or unauthenticated)');
+      }
+      return res.json(placeholderStaff);
+    }
+
+    if (envIamEnabled) {
+      const cognitoStaff = await fetchAssignableFromCognito(pool);
+      if (Array.isArray(cognitoStaff) && cognitoStaff.length) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[staff-assignable] returning', cognitoStaff.length, 'staff from Cognito');
+        }
+        return res.json(cognitoStaff);
+      }
+    }
+
     const roles = ['Program Administrator','Regional Coordinator','Application Assessor'];
     const [rows] = await pool.query(
       `SELECT id, cognito_sub, email, primary_role AS role, email AS display_name
@@ -308,12 +437,8 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
     } else if (placeholder_email) {
       // For placeholders, create ephemeral staff_profiles row if needed (dev mode convenience)
       const emailNorm = String(placeholder_email).toLowerCase();
-      const roleMap = {
-        'admin@nwac.ca': 'Program Administrator',
-        'coordinator@nwac.ca': 'Regional Coordinator',
-        'user@nwac.ca': 'Application Assessor'
-      };
-      const inferredRole = roleMap[emailNorm] || 'Application Assessor';
+      const placeholderMeta = PLACEHOLDER_ASSIGNABLE_LOOKUP.get(emailNorm);
+      const inferredRole = placeholderMeta?.role || 'Application Assessor';
       const subVal = `placeholder-${emailNorm}`;
       // Try full column set first
       try {
