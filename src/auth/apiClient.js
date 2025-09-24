@@ -3,14 +3,22 @@ import { buildLoginUrl, loadSession, ensureFreshSession, clearSession } from './
 
 const API_BASE = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001';
 
-function getBypassHeaders() {
+const REAL_AUTH_PREFIXES = ['/api/staff/assignable', '/api/applications', '/api/cases'];
+
+function requiresRealAuth(requestPath) {
+  const pathOnly = (requestPath || '').split('?')[0];
+  return REAL_AUTH_PREFIXES.some(prefix => pathOnly === prefix || pathOnly.startsWith(prefix + '/'));
+}
+
+function getBypassHeaders(iamMode, requestPath) {
   try {
     // Prefer explicit UI toggle, but also allow env flag and localhost heuristic
     const uiFlag = sessionStorage.getItem('iamBypass') === 'off';
     const envFlag = process.env.REACT_APP_DEV_AUTH_BYPASS === 'true';
     const devLocal = (typeof window !== 'undefined') && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
     const flag = uiFlag || envFlag || devLocal;
-    if (!flag) return null;
+    const forceRealAuth = requiresRealAuth(requestPath) && !envFlag;
+    if (!flag || forceRealAuth) return null;
     if (sessionStorage.getItem('simulateSignedOut') === 'true') {
       // Simulate signed-out: don't send any bypass headers so the client path treats it as unauthenticated
       return null;
@@ -34,7 +42,10 @@ function getBypassHeaders() {
 }
 
 export async function apiFetch(path, options = {}) {
-  const url = path.startsWith('http') ? path : API_BASE + path;
+  const isAbsolute = path.startsWith('http');
+  const requestUrl = isAbsolute ? new URL(path) : null;
+  const requestPath = requestUrl ? (requestUrl.pathname + (requestUrl.search || '')) : path;
+  const url = isAbsolute ? path : API_BASE + path;
   const headers = new Headers(options.headers || {});
   let iamMode = 'unknown';
   try {
@@ -45,9 +56,9 @@ export async function apiFetch(path, options = {}) {
     }
   } catch (_) {}
   headers.set('X-Iam-Mode', iamMode);
-  if (process.env.NODE_ENV !== 'production') { try { console.debug('[apiFetch] iamMode=', iamMode, 'path=', path); } catch (_) {} }
+  if (process.env.NODE_ENV !== 'production') { try { console.debug('[apiFetch] iamMode=', iamMode, 'path=', requestPath); } catch (_) {} }
 
-  const bypass = getBypassHeaders();
+  const bypass = getBypassHeaders(iamMode, requestPath);
   if (bypass) {
     // Dev simulation headers (may be ignored if server dev bypass not enabled)
     Object.entries(bypass).forEach(([k, v]) => headers.set(k, v));

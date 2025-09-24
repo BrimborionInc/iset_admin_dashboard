@@ -193,7 +193,8 @@ async function staffProfileMiddleware(req, res, next) {
       } catch { global.__HAS_REGION_ID_COL = false; }
     }
     // Ensure non-null email if schema has NOT NULL constraint (fallback to synthetic)
-    const safeEmail = email || (sub ? `${sub}@placeholder.local` : 'unknown@placeholder.local');
+    const derivedEmail = email || req.auth?.claims?.email || req.auth?.claims?.Email || null;
+    const safeEmail = derivedEmail || (sub ? `${sub}@placeholder.local` : 'unknown@placeholder.local');
     if (global.__HAS_REGION_ID_COL) {
       await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role,region_id) VALUES (?,?,?,?)
         ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role), region_id=VALUES(region_id)`,
@@ -286,30 +287,47 @@ function getCognitoAssignableClient() {
   }
   return cognitoAssignableClient;
 }
-async function ensureStaffProfile(pool, username, email, roleLabel) {
+async function ensureStaffProfile(pool, cognitoSub, email, roleLabel, legacyKey) {
   try {
-    const [[bySub]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [username]);
-    if (bySub && bySub.id) return bySub.id;
-    if (email) {
+    const subKey = cognitoSub || null;
+    const legacy = legacyKey && legacyKey !== subKey ? legacyKey : null;
+
+    let targetId = null;
+    if (subKey) {
+      const [[bySub]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [subKey]);
+      if (bySub && bySub.id) targetId = bySub.id;
+    }
+    if (!targetId && legacy) {
+      const [[byLegacy]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [legacy]);
+      if (byLegacy && byLegacy.id) targetId = byLegacy.id;
+    }
+    if (!targetId && email) {
       const [[byEmail]] = await pool.query('SELECT id FROM staff_profiles WHERE email=? LIMIT 1', [email]);
-      if (byEmail && byEmail.id) {
-        await pool.query('UPDATE staff_profiles SET cognito_sub=?, primary_role=? WHERE id=?', [username, roleLabel, byEmail.id]);
-        return byEmail.id;
-      }
+      if (byEmail && byEmail.id) targetId = byEmail.id;
     }
-    if (!email) return null;
-    try {
-      await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
-        ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`, [username, email, roleLabel]);
-    } catch (insertErr) {
-      try {
-        await pool.query(`INSERT INTO staff_profiles (cognito_sub,email) VALUES (?,?) ON DUPLICATE KEY UPDATE email=VALUES(email)`, [username, email]);
-        await pool.query(`UPDATE staff_profiles SET primary_role=? WHERE cognito_sub=? AND (primary_role IS NULL OR primary_role='')`, [roleLabel, username]);
-      } catch (fallbackErr) {
-        console.warn('[staff-assignable] ensureStaffProfile fallback failed:', fallbackErr.message);
+
+    const finalSub = subKey || legacy || email || null;
+    if (targetId) {
+      const updates = [];
+      const params = [];
+      if (finalSub) { updates.push('cognito_sub=?'); params.push(finalSub); }
+      if (email) { updates.push('email=?'); params.push(email); }
+      if (roleLabel) { updates.push('primary_role=?'); params.push(roleLabel); }
+      if (updates.length) {
+        const sql = `UPDATE staff_profiles SET ${updates.join(', ')} WHERE id=?`;
+        params.push(targetId);
+        await pool.query(sql, params);
       }
+      return targetId;
     }
-    const [[finalRow]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [username]);
+
+    if (!finalSub && !email) return null;
+    const insertKey = finalSub || email || legacy;
+    if (!insertKey) return null;
+    const insertEmail = email || `${insertKey}@placeholder.local`;
+    await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
+      ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`, [insertKey, insertEmail, roleLabel || null]);
+    const [[finalRow]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [insertKey]);
     return finalRow && finalRow.id ? finalRow.id : null;
   } catch (err) {
     console.warn('[staff-assignable] ensureStaffProfile error:', err.message);
@@ -333,7 +351,8 @@ async function fetchAssignableFromCognito(pool) {
           const attr = Object.fromEntries((user.Attributes || []).map(a => [a.Name, a.Value]));
           const email = attr.email || username;
           if (!email) continue;
-          const staffId = await ensureStaffProfile(pool, username, email, ASSIGNABLE_GROUP_LABEL.get(groupName) || groupName);
+          const canonicalSub = attr.sub || username;
+          const staffId = await ensureStaffProfile(pool, canonicalSub, email, ASSIGNABLE_GROUP_LABEL.get(groupName) || groupName, username);
           if (!staffId) continue;
           const displayName = attr.name || attr['custom:display_name'] || email;
           seen.set(username, {

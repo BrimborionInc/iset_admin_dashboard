@@ -6,9 +6,14 @@ const ROLE_ORDER = ['System Administrator', 'Program Administrator', 'Regional C
 
 const ROLE_ALIASES = {
   'Application Assessor': 'Application Assessor',
+  'ApplicationAssessor': 'Application Assessor',
   'PTMA Staff': 'Application Assessor',
+  'PTMAStaff': 'Application Assessor',
+  'Adjudicator': 'Application Assessor',
   'SysAdmin': 'System Administrator',
+  'System Admin': 'System Administrator',
   'Program Admin': 'Program Administrator',
+  'ProgramAdministrator': 'Program Administrator',
 };
 
 export const toCanonicalRole = (role) => ROLE_ALIASES[role] || role;

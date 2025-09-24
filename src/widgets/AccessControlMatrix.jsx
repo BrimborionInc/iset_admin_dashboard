@@ -15,7 +15,7 @@ const ROLE_COLUMNS = [
   { key: 'System Administrator', label: 'System Administrator', editable: false },
   { key: 'Program Administrator', label: 'Program Admin', editable: true },
   { key: 'Regional Coordinator', label: 'Regional Coordinator', editable: true },
-  { key: 'PTMA Staff', label: 'Application Assessor', editable: true }
+  { key: 'Application Assessor', label: 'Application Assessor', editable: true }
 ];
 
 const ROUTE_LABELS = {
