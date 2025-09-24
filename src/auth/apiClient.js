@@ -36,6 +36,16 @@ function getBypassHeaders() {
 export async function apiFetch(path, options = {}) {
   const url = path.startsWith('http') ? path : API_BASE + path;
   const headers = new Headers(options.headers || {});
+  let iamMode = 'unknown';
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      const stored = sessionStorage.getItem('iamBypass');
+      if (stored === 'off') iamMode = 'off';
+      else if (stored === 'on') iamMode = 'on';
+    }
+  } catch (_) {}
+  headers.set('X-Iam-Mode', iamMode);
+  if (process.env.NODE_ENV !== 'production') { try { console.debug('[apiFetch] iamMode=', iamMode, 'path=', path); } catch (_) {} }
 
   const bypass = getBypassHeaders();
   if (bypass) {
