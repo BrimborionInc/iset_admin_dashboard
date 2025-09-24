@@ -58,7 +58,9 @@ const groupRoleMap = {
   SysAdmin: 'System Administrator',
   ProgramAdmin: 'Program Administrator',
   RegionalCoordinator: 'Regional Coordinator',
-  Assessor: 'Application Assessor'
+  Assessor: 'Application Assessor',
+  Adjudicator: 'Application Assessor',
+  ApplicationAssessor: 'Application Assessor'
 };
 
 async function verifyAnyPool(token) {
@@ -89,6 +91,8 @@ function extractAuthFromClaims(claims, poolType) {
     role: mappedRole,
     regionId: Number.isFinite(regionId) ? regionId : null,
     userId: userId || null,
+    email: claims.email || claims.Email || null,
+    name: claims.name || claims.Name || null,
     groups,
     subjectType: poolType === 'staff' ? 'staff' : 'applicant',
     claims

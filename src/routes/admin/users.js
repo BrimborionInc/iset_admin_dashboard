@@ -13,14 +13,36 @@ function getClient() {
 
 // Guard matrix
 const CAN_CREATE = {
-  SysAdmin: new Set(['SysAdmin', 'ProgramAdmin']),
-  ProgramAdmin: new Set(['RegionalCoordinator']),
+  SysAdmin: new Set(['SysAdmin', 'ProgramAdmin', 'RegionalCoordinator', 'Adjudicator']),
+  ProgramAdmin: new Set(['ProgramAdmin', 'RegionalCoordinator', 'Adjudicator']),
   RegionalCoordinator: new Set(['Adjudicator']),
+  Adjudicator: new Set(),
 };
 
-function canCreateRole(actorRole, targetRole) {
-  const set = CAN_CREATE[actorRole];
-  return !!set && set.has(targetRole);
+function normalizeRoleKey(role) {
+  if (!role) return null;
+  const cleaned = String(role).trim();
+  const slug = cleaned.toLowerCase().replace(/[\s_-]+/g, '');
+  switch (slug) {
+    case 'sysadmin':
+    case 'systemadministrator':
+    case 'systemadmin':
+      return 'SysAdmin';
+    case 'programadmin':
+    case 'programadministrator':
+      return 'ProgramAdmin';
+    case 'regionalcoordinator':
+      return 'RegionalCoordinator';
+    case 'adjudicator':
+      return 'Adjudicator';
+    default:
+      return cleaned;
+  }
+}
+
+function canCreateRole(actorKey, targetKey) {
+  const set = CAN_CREATE[actorKey];
+  return !!set && set.has(targetKey);
 }
 
 const AUTH_ENABLED = String(process.env.AUTH_PROVIDER || 'none').toLowerCase() === 'cognito';
@@ -115,9 +137,12 @@ if (!AUTH_ENABLED) {
     try {
       const actor = req.auth;
       const { email, role, region_id, user_id, suppressInvite } = req.body || {};
-      if (!email || !role) return res.status(400).json({ error: 'email and role are required' });
-      if (!canCreateRole(actor.role, role)) return res.status(403).json({ error: 'Not allowed to create this role' });
-      if (role !== 'SysAdmin' && role !== 'ProgramAdmin' && !Number.isFinite(region_id)) return res.status(400).json({ error: 'region_id required for regional roles' });
+      const actorKey = normalizeRoleKey(actor?.role);
+      const targetKey = normalizeRoleKey(role);
+      if (!email || !targetKey) return res.status(400).json({ error: 'email and role are required' });
+      if (!actorKey) return res.status(403).json({ error: 'Forbidden' });
+      if (!canCreateRole(actorKey, targetKey)) return res.status(403).json({ error: 'Not allowed to create this role' });
+      if (targetKey !== 'SysAdmin' && targetKey !== 'ProgramAdmin' && !Number.isFinite(region_id)) return res.status(400).json({ error: 'region_id required for regional roles' });
 
       const client = getClient();
       const createCmd = new AdminCreateUserCommand({
@@ -135,7 +160,7 @@ if (!AUTH_ENABLED) {
         ...(suppressInvite ? { MessageAction: 'SUPPRESS' } : {}),
       });
       const createResp = await client.send(createCmd);
-      await client.send(new AdminAddUserToGroupCommand({ UserPoolId: POOL_ID, Username: email, GroupName: role }));
+      await client.send(new AdminAddUserToGroupCommand({ UserPoolId: POOL_ID, Username: email, GroupName: targetKey }));
       res.status(201).json({
         message: 'User created',
         cognito: createResp?.User?.Username || email,
@@ -151,13 +176,16 @@ if (!AUTH_ENABLED) {
       const actor = req.auth;
       const { role } = req.body || {};
       const username = req.params.username;
+      const actorKey = normalizeRoleKey(actor?.role);
+      const targetKey = normalizeRoleKey(role);
       console.log('[admin-users][disable] actor=', actor?.role, 'body.role=', role, 'headers.x-dev-bypass=', req.get('x-dev-bypass'));
       // Dev bypass inside auth-enabled mode (simulate success without Cognito)
       if (req.get('x-dev-bypass')) {
         return res.json({ message: 'Dev bypass: user disabled (mock)' });
       }
-      if (!role) return res.status(400).json({ error: 'role required' });
-      if (!canCreateRole(actor.role, role) && actor.role !== 'SysAdmin') return res.status(403).json({ error: 'Forbidden' });
+      if (!targetKey) return res.status(400).json({ error: 'role required' });
+      if (!actorKey) return res.status(403).json({ error: 'Forbidden' });
+      if (!canCreateRole(actorKey, targetKey) && actorKey !== 'SysAdmin') return res.status(403).json({ error: 'Forbidden' });
       const client = getClient();
       await client.send(new AdminDisableUserCommand({ UserPoolId: POOL_ID, Username: username }));
       res.json({ message: 'User disabled' });
@@ -203,15 +231,19 @@ if (!AUTH_ENABLED) {
       const actor = req.auth;
       const username = req.params.username;
       const { newRole, currentRole } = req.body || {};
-      if (!newRole || !currentRole) return res.status(400).json({ error: 'newRole and currentRole required' });
-      if (!canCreateRole(actor.role, newRole) && actor.role !== 'SysAdmin') return res.status(403).json({ error: 'Forbidden' });
+      const actorKey = normalizeRoleKey(actor?.role);
+      const newRoleKey = normalizeRoleKey(newRole);
+      const currentRoleKey = normalizeRoleKey(currentRole);
+      if (!newRoleKey || !currentRoleKey) return res.status(400).json({ error: 'newRole and currentRole required' });
+      if (!actorKey) return res.status(403).json({ error: 'Forbidden' });
+      if (!canCreateRole(actorKey, newRoleKey) && actorKey !== 'SysAdmin') return res.status(403).json({ error: 'Forbidden' });
       // NOTE: For full correctness we would call AdminRemoveUserFromGroup for current role and AdminAddUserToGroup for new role.
       const { AdminRemoveUserFromGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
       const client = getClient();
       try {
-        await client.send(new AdminRemoveUserFromGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: currentRole }));
+        await client.send(new AdminRemoveUserFromGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: currentRoleKey }));
       } catch (e) { /* ignore removal failures */ }
-      await client.send(new AdminAddUserToGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: newRole }));
+      await client.send(new AdminAddUserToGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: newRoleKey }));
       res.json({ message: 'Role updated' });
     } catch (e) {
       res.status(500).json({ error: 'Failed to change role', detail: e?.message });
