@@ -30,6 +30,7 @@ const ROUTE_LABELS = {
   '/case-assignment-dashboard?view=assignment': 'Application Assignment',
   '/case-management': 'My Case Queue',
   '/configuration-settings': 'Configuration Settings',
+  '/configuration/events': 'Event Capture',
   '/custom-dashboards-dashboard': 'Custom Dashboards',
   '/help-support-dashboard': 'Help and Support',
   '/language-settings-dashboard': 'Language Settings',

@@ -106,6 +106,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0 }) => {
         { type: 'link', text: 'Release Management', href: '/release-management-dashboard' },
         { type: 'link', text: 'Notification Settings', href: '/manage-notifications' },
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
+        { type: 'link', text: 'Event Capture', href: '/configuration/events' },
         { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
         { type: 'link', text: 'File Upload Config', href: '/admin/upload-config' },
       ],

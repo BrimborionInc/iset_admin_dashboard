@@ -1,40 +1,41 @@
-ï»¿# Application Case Dashboard Widgets Catalog
+# Application Case Dashboard Widgets Catalog
 
 Purpose: Track the Application Case Dashboard widget line-up and note readiness of additional modules as they are reintroduced after the stabilization phase.
 
-## Current State (2025-09-21)
+## Current State (2025-09-25)
 Active widgets on the default board:
-- ApplicationOverviewWidget (`application-overview`) â€“ case summary header.
-- IsetApplicationFormWidget (`iset-application-form`) â€“ read-only application viewer.
-- CoordinatorAssessmentWidget (`coordinator-assessment`) â€“ assessment inputs for adjudicators.
-- SupportingDocumentsWidget (`supporting-documents`) â€“ unified document list with refresh controls.
-- SecureMessagingWidget (`secure-messaging`) â€“ inbox/sent/deleted tabs plus compose modal.
+- ApplicationOverviewWidget (`application-overview`) – case summary header.
+- IsetApplicationFormWidget (`iset-application-form`) – read-only application viewer.
+- CoordinatorAssessmentWidget (`coordinator-assessment`) – assessment inputs for adjudicators.
+- SupportingDocumentsWidget (`supporting-documents`) – unified document list with refresh controls.
+- SecureMessagingWidget (`secure-messaging`) – inbox/sent/deleted tabs plus compose modal.
 
 ### Application Overview status colours
 The `ApplicationOverviewWidget` displays status badges using Cloudscape colours with this mapping:
-- Green â€“ approved, completed
-- Blue â€“ submitted, in review, in_review, in progress, pending, assigned
-- Orange â€“ docs requested, docs_requested, action required, action required (docs requested)
-- Red â€“ rejected, declined, errored
-- Grey â€“ withdrawn, closed, inactive, or any unrecognised status
+- Green – approved, completed
+- Blue – submitted, in review, in_review, in progress, pending, assigned
+- Orange – docs requested, docs_requested, action required, action required (docs requested)
+- Red – rejected, declined, errored
+- Grey – withdrawn, closed, inactive, or any unrecognised status
 These widgets are wired in `src/pages/applicationCaseDashboard.js` and rely on `/api/cases/:id` exposing `application_id`, applicant identity, and the assigned evaluator.
 
 ## Widget Inventory (additional candidates)
 Below each widget: purpose, critical backend dependencies, and enablement notes.
 
-1. SecureMessagingWidget (id: `secure-messaging`) â€“ **ACTIVE**
+1. SecureMessagingWidget (id: `secure-messaging`) – **ACTIVE**
    - Purpose: Cloudscape-driven messaging workspace (Inbox/Sent/Deleted tabs, tab actions, modal viewer, compose with urgent flag).
    - Data sources: `/api/admin/messages`, `/api/admin/messages/:id/attachments?case_id=...`, `/api/cases/:id`.
    - 2025-09-21 updates: restored legacy UX; optimistic read receipts; reply quoting; dispatches Supporting Documents refresh when attachments adopt.
    - Follow-ups: bulk delete actions once server endpoints exist (currently placeholders).
+   - 2025-09-25 updates: admin sends now persist case/application IDs; applicant portal displays booking reference sourced from submission reference.
 
-2. SupportingDocumentsWidget (id: `supporting-documents`) â€“ **ACTIVE**
+2. SupportingDocumentsWidget (id: `supporting-documents`) – **ACTIVE**
    - Purpose: Unified document library spanning submissions and secure message attachments.
    - Data source: `/api/applicants/:applicant_user_id/documents` (backed by `iset_document`).
    - 2025-09-21 updates: header refresh button, listens for `iset:supporting-documents:refresh`, simplified columns (File, Source, Uploaded, Actions), dismissible error messaging.
    - Follow-ups: staff upload entry point and soft-delete controls.
 
-3. IsetApplicationFormWidget (id: `iset-application-form`) â€“ **ACTIVE**
+3. IsetApplicationFormWidget (id: `iset-application-form`) – **ACTIVE**
    - Purpose: Read-only rendering of the submitted application (dynamic JSON driven).
    - Data Source: `/api/applications/:id` via `apiFetch`.
    - 2025-09-20 refactor: resilient resolver for nested payloads, tabular income/expense helpers, friendly defaults, safe parsing.
@@ -100,4 +101,4 @@ Below each widget: purpose, critical backend dependencies, and enablement notes.
 - Event taxonomy + notification template governance.
 
 ---
-Updated: 2025-09-21
+Updated: 2025-09-25
