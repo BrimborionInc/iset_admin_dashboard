@@ -22,9 +22,9 @@ const CaseUpdates = ({ actions }) => {
   useEffect(() => {
     const fetchEvents = async () => {
       try {
-        const response = await apiFetch(`/api/case-events?limit=20`);
+        const response = await apiFetch('/api/events/feed?limit=20');
         const data = await response.json();
-        setEvents(data);
+        setEvents(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error('Error fetching case events:', error);
       } finally {
