@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { BoardItem } from '@cloudscape-design/board-components';
 
@@ -56,6 +56,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
   const [statusValue, setStatusValue] = useState(caseData?.status || '');
   const [savingStatus, setSavingStatus] = useState(false);
   const [statusFeedback, setStatusFeedback] = useState(null);
+  const manualStatusRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,8 +118,24 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
   useEffect(() => {
     if (savingStatus) return;
     const nextStatus = caseData?.status || application?.status || '';
-    setStatusValue(nextStatus || '');
-  }, [caseData?.status, application?.status, savingStatus]);
+    const manual = manualStatusRef.current;
+    if (manual) {
+      if (nextStatus === manual.pending) {
+        manualStatusRef.current = null;
+        if ((nextStatus || '') !== (statusValue || '')) {
+          setStatusValue(nextStatus || '');
+        }
+        return;
+      }
+      if (nextStatus === manual.previous || (!nextStatus && manual.previous)) {
+        return;
+      }
+      manualStatusRef.current = null;
+    }
+    if ((nextStatus || '') !== (statusValue || '')) {
+      setStatusValue(nextStatus || '');
+    }
+  }, [caseData?.status, application?.status, savingStatus, statusValue]);
 
   const { answers, payload } = useMemo(() => {
     if (!application) return { answers: {}, payload: {} };
@@ -147,6 +164,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
     const previousStatus = statusValue;
     const nextOption = STATUS_OPTIONS.find(option => option.value === nextStatus);
     setStatusFeedback(null);
+    manualStatusRef.current = { pending: nextStatus, previous: previousStatus || '' };
     setStatusValue(nextStatus);
     setSavingStatus(true);
     try {
@@ -175,6 +193,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
       const label = nextOption?.label || nextStatus;
       setStatusFeedback({ type: 'success', content: `Case status updated to ${label}.` });
     } catch (err) {
+      manualStatusRef.current = null;
       setStatusValue(previousStatus);
       setStatusFeedback({ type: 'error', content: err?.message || 'Failed to update status.' });
     } finally {
@@ -280,7 +299,6 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
       }
     >
       <SpaceBetween size="l">
-        {overviewContent}
         {statusFeedback && (
           <Alert
             type={statusFeedback.type}
@@ -290,6 +308,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
             {statusFeedback.content}
           </Alert>
         )}
+        {overviewContent}
       </SpaceBetween>
     </BoardItem>
   );

@@ -458,36 +458,35 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       // 3. Log NWAC review submitted event
       const userId = caseData?.user_id || caseData?.applicant_user_id || null;
       if (userId) {
-        await apiFetch(`/api/case-events`, {
+        await apiFetch('/api/events', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            user_id: userId,
-            case_id: caseData.id,
-            event_type: 'nwac_review_submitted',
-            event_data: {
+            type: 'nwac_review_submitted',
+            caseId: caseData.id,
+            payload: {
               message: 'NWAC review submitted.',
               nwac_review: assessment.nwacReview,
-              timestamp: new Date().toISOString()
-            }
-          })
+              timestamp: new Date().toISOString(),
+            },
+          }),
         });
         // 4. Log event for approval/rejection
-        await apiFetch(`/api/case-events`, {
+        await apiFetch('/api/events', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            user_id: userId,
-            case_id: caseData.id,
-            event_type: assessment.nwacReviewStatus === 'approve' ? 'case_approved' : 'case_rejected',
-            event_data: {
+            type: assessment.nwacReviewStatus === 'approve' ? 'case_approved' : 'case_rejected',
+            caseId: caseData.id,
+            payload: {
               message: assessment.nwacReviewStatus === 'approve' ? 'Case approved by NWAC.' : 'Case rejected by NWAC.',
               reason: assessment.nwacReason || '',
               nwac_review: assessment.nwacReview,
-              timestamp: new Date().toISOString()
-            }
-          })
+              timestamp: new Date().toISOString(),
+            },
+          }),
         });
+
       }
       // 5. Refresh caseData to reflect new stage
       if (typeof actions?.refreshCaseData === 'function') {

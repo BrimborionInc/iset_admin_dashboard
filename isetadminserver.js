@@ -2,9 +2,31 @@ const path = require('path');
 const { maskName } = require('./src/utils/utils'); // Update the import statement
 const nunjucks = require("nunjucks");
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
-const { loadEventCaptureState, updateEventCaptureRules } = require('./src/lib/events/service');
-const { getEventCatalog } = require('./src/lib/events/catalog');
+const { loadEventCaptureState, updateEventCaptureRules } = require('../shared/events/service');
+const { getEventCatalog } = require('../shared/events/catalog');
+const { registerEventStorePool, emitEvent, getCaseEvents, getEventFeed, markEventRead } = require('../shared/events/emitter');
 
+function resolveRequestActor(req) {
+  const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || req.auth?.userId || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
+  const actorName = req.auth?.name || req.get('X-Dev-Username') || req.get('x-dev-username') || null;
+  return { actorId, actorName };
+}
+
+async function captureCaseEvent({ type, caseId, payload, actorId, actorName, actorType = 'staff', trackingId, correlationId }) {
+  try {
+    await emitEvent({
+      type,
+      subject: { type: 'case', id: caseId },
+      actor: { type: actorType, id: actorId || null, displayName: actorName || null },
+      payload,
+      trackingId,
+      correlationId,
+    });
+  } catch (err) {
+    console.error('[events] captureCaseEvent failed', type, err?.message || err);
+  }
+
+}
 // Configure Nunjucks to use GOV.UK Frontend components
 nunjucks.configure([
   path.join(__dirname, 'src', 'server-macros'),
@@ -1220,6 +1242,7 @@ const dbConfig = {
 };
 
 const pool = mysql.createPool(dbConfig);
+registerEventStorePool(pool);
 
 // --- Simple SQL Migration Runner (auto-executes .sql files in /sql once) -----------------
 // Strategy:
@@ -4322,17 +4345,6 @@ app.delete('/api/steps/:id', async (req, res) => {
  * @param {boolean} [params.is_read=false] - Optional. Mark event as read (default false).
  * @returns {Promise<number>} The inserted event's ID.
  */
-async function addCaseEvent({ user_id, event_type, event_data, case_id = null, is_read = false }) {
-  if (!user_id || !event_type || typeof event_data === 'undefined') {
-    throw new Error('Missing required fields for addCaseEvent');
-  }
-  const [result] = await pool.query(
-    `INSERT INTO iset_case_event (user_id, case_id, event_type, event_data, is_read, created_at)
-     VALUES (?, ?, ?, ?, ?, NOW())`,
-    [user_id, case_id, event_type, JSON.stringify(event_data), is_read]
-  );
-  return result.insertId;
-}
 
 /**
  * GET /api/intake-officers
@@ -4981,180 +4993,6 @@ app.post('/api/dev/backfill-documents', async (req, res) => {
   } catch (e) {
     console.error('[backfill-documents] error', e.message);
     res.status(500).json({ error: 'backfill_failed' });
-  }
-});
-
-
-/**
- * GET /api/case-events
- *
- * Returns recent case-related events for the authenticated caseworker (user_id = 18).
- *
- * Query Parameters:
- * - unread=true        → Only return unread events
- * - type=event_type    → Filter by specific event type (optional)
- * - limit=25           → Max number of events to return (default: 25)
- *
- * Response fields:
- * - id, case_id, event_type, event_data, is_read, created_at
- * - tracking_id        → from iset_application
- * - label              → from iset_event_type
- * - alert_variant      → from iset_event_type (info, success, warning, error)
- */
-app.get('/api/case-events', async (req, res) => {
-  const userId = req.query.user_id ? Number(req.query.user_id) : null;
-  const caseId = req.query.case_id ? Number(req.query.case_id) : null;
-  const limit = Number(req.query.limit) || 50;
-  const offset = Number(req.query.offset) || 0;
-  const eventType = req.query.type;
-  const unread = req.query.unread === 'true';
-
-  if (!userId && !caseId) {
-    return res.status(400).json({ error: 'user_id or case_id is required' });
-  }
-
-  let whereClauses = [];
-  let params = [];
-
-  if (userId && caseId) {
-    whereClauses.push('(e.user_id = ? OR e.case_id = ?)');
-    params.push(userId, caseId);
-  } else if (userId) {
-    whereClauses.push('e.user_id = ?');
-    params.push(userId);
-  } else if (caseId) {
-    whereClauses.push('e.case_id = ?');
-    params.push(caseId);
-  }
-
-  if (eventType) {
-    whereClauses.push('e.event_type = ?');
-    params.push(eventType);
-  }
-  if (unread) {
-    whereClauses.push('e.is_read = 0');
-  }
-
-  let whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
-
-  try {
-    // RBAC scoping if enabled: ensure events are for cases within scope
-    const scopedParams = [...params];
-    try {
-      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-      if (authProvider === 'cognito') {
-        const { scopeCases } = require('./src/lib/dbScope');
-        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
-        whereSql += (whereSql ? ' AND ' : 'WHERE ') + scopeSql;
-        scopedParams.push(...scopeParams);
-      }
-    } catch (_) {}
-
-    const [rows] = await pool.query(`
-      SELECT 
-        e.id, e.case_id, e.event_type, e.event_data, e.is_read, e.created_at,
-  JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
-        et.label, et.alert_variant,
-        u.name AS user_name
-      FROM iset_case_event e
-      LEFT JOIN iset_case c ON e.case_id = c.id
-      LEFT JOIN iset_application a ON c.application_id = a.id
-      LEFT JOIN iset_event_type et ON e.event_type = et.event_type
-      LEFT JOIN user u ON e.user_id = u.id
-      ${whereSql}
-      ORDER BY e.created_at DESC, e.id DESC
-      LIMIT ? OFFSET ?
-    `, [...scopedParams, limit, offset]);
-    // Parse event_data JSON if needed
-    rows.forEach(row => {
-      if (typeof row.event_data === 'string') {
-        try { row.event_data = JSON.parse(row.event_data); } catch {}
-      }
-    });
-    res.status(200).json(rows);
-  } catch (error) {
-    console.error('Error fetching case events:', error);
-    res.status(500).json({ error: 'Failed to fetch case events' });
-  }
-});
-
-
-/**
- * PUT /api/case-events/:id/read
- *
- * Marks a specific case event as read for the authenticated user (hardcoded to user_id = 18).
- *
- * Path Parameter:
- * - :id → the ID of the event to update
- *
- * Behavior:
- * - Updates `is_read` to true if the event belongs to the current user.
- *
- * Response:
- * - 200 OK with success message
- * - 403 Forbidden if the event does not belong to the user
- * - 404 Not Found if the event ID doesn’t exist
- */
-app.put('/api/case-events/:id/read', async (req, res) => {
-  const userId = 18;
-  const eventId = req.params.id;
-
-  try {
-    const [rows] = await pool.query(
-      'SELECT id FROM iset_case_event WHERE id = ? AND user_id = ?',
-      [eventId, userId]
-    );
-
-    if (rows.length === 0) {
-      return res.status(403).json({ error: 'Not authorized or event not found' });
-    }
-
-    await pool.query(
-      'UPDATE iset_case_event SET is_read = TRUE WHERE id = ?',
-      [eventId]
-    );
-
-    res.status(200).json({ message: 'Event marked as read' });
-  } catch (err) {
-    console.error('Error updating event read status:', err);
-    res.status(500).json({ error: 'Failed to update event status' });
-  }
-});
-
-
-/**
- * POST /api/case-events
- *
- * Request body:
- * {
- *   user_id: number (required),
- *   case_id: number | null (nullable),
- *   event_type: string (required, must match iset_event_type),
- *   event_data: object (required, valid JSON)
- * }
- *
- * Response: { id, message }
- */
-app.post('/api/case-events', async (req, res) => {
-  const { user_id, case_id = null, event_type, event_data } = req.body;
-  if (!user_id || !event_type || typeof event_data === 'undefined' ) {
-    return res.status(400).json({ error: 'Missing required fields: user_id, event_type, event_data' });
-  }
-  try {
-    // Validate event_type exists in iset_event_type
-    const [eventTypeRows] = await pool.query('SELECT event_type FROM iset_event_type WHERE event_type = ?', [event_type]);
-    if (eventTypeRows.length === 0) {
-      return res.status(400).json({ error: 'Invalid event_type' });
-    }
-    // Insert event
-    const [result] = await pool.query(
-      'INSERT INTO iset_case_event (case_id, user_id, event_type, event_data, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
-      [case_id, user_id, event_type, JSON.stringify(event_data)]
-    );
-    res.status(201).json({ id: result.insertId, message: 'Event created' });
-  } catch (error) {
-    console.error('Error creating case event:', error);
-    res.status(500).json({ error: 'Failed to create case event' });
   }
 });
 
@@ -6612,41 +6450,20 @@ app.listen(port, '0.0.0.0', () => {
 
 // Get all events for a specific case (with user name, event type label, and alert variant)
 app.get('/api/cases/:case_id/events', async (req, res) => {
-  const caseId = req.params.case_id;
-  const { limit = 50, offset = 0 } = req.query;
+  const caseId = Number(req.params.case_id);
+  if (!Number.isInteger(caseId)) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
   try {
-    let sql = `
-      SELECT 
-        e.id AS event_id,
-        e.case_id,
-        e.event_type,
-        et.label AS event_type_label,
-        et.alert_variant,
-        e.event_data,
-        e.created_at,
-        u.id AS user_id,
-        u.name AS user_name
-      FROM iset_case_event e
-      JOIN user u ON e.user_id = u.id
-      JOIN iset_event_type et ON e.event_type = et.event_type
-      JOIN iset_case c ON e.case_id = c.id
-      WHERE e.case_id = ?\n`;
-    const qParams = [caseId];
-    try {
-      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-      if (authProvider === 'cognito') {
-        const { scopeCases } = require('./src/lib/dbScope');
-        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
-        sql += ` AND ${scopeSql}\n`;
-        qParams.push(...scopeParams);
-      }
-    } catch (_) {}
-    sql += '      ORDER BY e.created_at DESC\n      LIMIT ? OFFSET ?';
-    const [rows] = await pool.query(sql, [...qParams, Number(limit), Number(offset)]);
-    res.status(200).json(rows);
+    const { actorId } = resolveRequestActor(req);
+    const limit = Number(req.query.limit) || 50;
+    const offset = Number(req.query.offset) || 0;
+    const items = await getCaseEvents({ caseId, requesterId: actorId, limit, offset });
+    console.log('[events] case timeline', caseId, items.length);
+    res.json(items);
   } catch (error) {
-    console.error('Error fetching case events:', error);
-    res.status(500).json({ error: 'Failed to fetch case events' });
+    console.error('[events] failed to load case timeline', error);
+    res.status(500).json({ error: 'case_events_fetch_failed', message: error.message });
   }
 });
 
@@ -7419,45 +7236,54 @@ app.put('/api/cases/:id', async (req, res) => {
     }
 
     const afterStatus = (normalizedStatus !== undefined ? normalizedStatus : caseRow.status) || caseRow.status;
+    const { actorId, actorName } = resolveRequestActor(req);
+    const trackingId = caseRow?.tracking_id || null;
 
     if (statusChanged) {
       try {
-        await addCaseEvent({
-          user_id: caseRow.applicant_user_id,
-          case_id: caseId,
-          event_type: 'status_changed',
-          event_data: { from: beforeStatus || null, to: afterStatus, tracking_id: caseRow.tracking_id || null }
+        await captureCaseEvent({
+          type: 'status_changed',
+          caseId,
+          payload: { from: beforeStatus || null, to: afterStatus, tracking_id: trackingId },
+          trackingId,
+          actorId,
+          actorName,
         });
-      } catch(_) {}
+      } catch (_) {}
     }
 
     const assessmentSubmitted = body.assessment_recommendation && body.assessment_justification;
     if (assessmentSubmitted) {
-      const coordinatorName = req.auth?.name || '';
-      await addCaseEvent({
-        user_id: caseRow.applicant_user_id,
-        case_id: caseId,
-        event_type: 'assessment_submitted',
-        event_data: {
+      const coordinatorName = actorName || '';
+      await captureCaseEvent({
+        type: 'assessment_submitted',
+        caseId,
+        payload: {
           evaluator_name: coordinatorName || null,
-          tracking_id: caseRow.tracking_id || null,
+          tracking_id: trackingId,
           message: coordinatorName
-            ? `Assessment submitted by coordinator: ${coordinatorName}.`
-            : 'Assessment submitted by coordinator.'
-        }
+            ? 'Assessment submitted by coordinator: ' + coordinatorName + '.'
+            : 'Assessment submitted by coordinator.',
+        },
+        trackingId,
+        actorId,
+        actorName: coordinatorName || actorName,
       });
     }
 
     if (body.assessment_nwac_review) {
-      await addCaseEvent({
-        user_id: caseRow.applicant_user_id,
-        case_id: caseId,
-        event_type: 'nwac_review_submitted',
-        event_data: {
-          evaluator_name: req.auth?.name || null,
-          tracking_id: caseRow.tracking_id || null,
-          message: 'NWAC review submitted.'
-        }
+      await captureCaseEvent({
+        type: 'nwac_review_submitted',
+        caseId,
+        payload: {
+          evaluator_name: actorName || null,
+          tracking_id: trackingId,
+          message: 'NWAC review submitted.',
+        },
+
+        trackingId,
+        actorId,
+        actorName,
       });
     }
 
@@ -7465,6 +7291,89 @@ app.put('/api/cases/:id', async (req, res) => {
   } catch (error) {
     console.error('Error updating assessment:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+// --- Event timeline endpoints (new pipeline) ---
+
+app.get('/api/events/feed', async (req, res) => {
+  const limitRaw = req.query.limit;
+  let limit = Number(limitRaw);
+  if (!Number.isFinite(limit) || limit <= 0) {
+    limit = 50;
+  }
+  try {
+    const { actorId } = resolveRequestActor(req);
+    const items = await getEventFeed({ limit, requesterId: actorId });
+    res.json(items);
+  } catch (err) {
+    console.error('[events] failed to load feed', err);
+    res.status(500).json({ error: 'event_feed_fetch_failed' });
+  }
+});
+
+app.post('/api/events', async (req, res) => {
+  const body = req.body || {};
+  const type = body.type || body.eventType || body.event_type;
+  if (!type) {
+    return res.status(400).json({ error: 'type_required' });
+  }
+  const { actorId, actorName } = resolveRequestActor(req);
+  const payload = body.payload || body.event_data || {};
+  const correlationId = body.correlationId || body.correlation_id || null;
+
+  let subject = body.subject || null;
+  if (!subject) {
+    if (body.caseId != null) subject = { type: 'case', id: body.caseId };
+    else if (body.case_id != null) subject = { type: 'case', id: body.case_id };
+    else if (body.subjectType && typeof body.subjectId !== 'undefined') {
+      subject = { type: body.subjectType, id: body.subjectId };
+    } else if (body.subject_type && typeof body.subject_id !== 'undefined') {
+      subject = { type: body.subject_type, id: body.subject_id };
+    }
+  }
+
+  const actor = body.actor || {
+    type: body.actorType || 'staff',
+    id: body.actorId || actorId || null,
+    displayName: body.actorName || actorName || null,
+  };
+
+  try {
+    const event = await emitEvent({
+      type,
+      subject,
+      actor,
+      payload,
+      trackingId: body.trackingId || payload.tracking_id || body.caseTrackingId || null,
+      correlationId,
+    });
+    res.status(201).json(event);
+  } catch (err) {
+    console.error('[events] failed to emit event', err);
+    res.status(500).json({ error: 'event_emit_failed', message: err?.message || 'Unable to emit event' });
+  }
+});
+
+app.patch('/api/events/:eventId/read', async (req, res) => {
+  const eventId = req.params.eventId;
+  const { actorId } = resolveRequestActor(req);
+  if (!eventId) {
+    return res.status(400).json({ error: 'event_id_required' });
+  }
+  if (!actorId) {
+    return res.status(400).json({ error: 'actor_required' });
+  }
+  try {
+    const updated = await markEventRead({ eventId, requesterId: actorId });
+    if (!updated) {
+      return res.status(404).json({ error: 'event_not_found' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[events] failed to mark read', err);
+    res.status(500).json({ error: 'event_mark_read_failed' });
   }
 });
 
@@ -7657,4 +7566,10 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
+
+
+
+
+
+
 

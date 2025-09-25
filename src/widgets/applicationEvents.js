@@ -3,7 +3,7 @@ import { apiFetch } from '../auth/apiClient';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { Header, ButtonDropdown, Table, StatusIndicator, Box, Spinner, TextFilter, SpaceBetween } from '@cloudscape-design/components';
 
-const ApplicationEvents = ({ actions, application_id, caseData, user_id: propUserId }) => {
+const ApplicationEvents = ({ actions, caseData }) => {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -11,22 +11,22 @@ const ApplicationEvents = ({ actions, application_id, caseData, user_id: propUse
   const [sortingColumn, setSortingColumn] = useState({ sortingField: 'created_at' });
   const [isDescending, setIsDescending] = useState(true);
 
-  // Prefer explicit user_id prop, else from caseData, else null
-  const userId = propUserId || caseData?.user_id || caseData?.applicant_user_id || null;
+  // Prefer the explicit case id when available
+  const caseId = caseData?.id || caseData?.case_id || null;
 
   useEffect(() => {
-    if (!userId) return;
+    if (!caseId) return;
     setLoading(true);
     setError(null);
-    apiFetch(`/api/case-events?user_id=${userId}`)
+    apiFetch('/api/cases/' + caseId + '/events')
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch events');
         return res.json();
       })
-      .then(data => setEvents(data))
+      .then(data => setEvents(Array.isArray(data) ? data : []))
       .catch(() => setError('Failed to load events'))
       .finally(() => setLoading(false));
-  }, [userId]);
+  }, [caseId]);
 
   // Filtering logic: match any column (date, type, data, user)
   const filteredEvents = events.filter(item => {

@@ -1,4 +1,4 @@
-ï»¿# Events Tracking Overhaul
+# Events Tracking Overhaul
 
 ## Purpose and Scope
 - Establish a refreshed, end-to-end strategy for logging and surfacing ISET application events.
@@ -14,12 +14,31 @@
 - **Security**: Enforce scoping so staff only see events tied to cases they manage.
 
 ## Current State Summary (for reference)
-- Backend helper `addCaseEvent` inserts into iset_case_event; other paths call POST /api/case-events directly.
-- Event data stored as JSON blobs with minimal validation; limited indexing beyond created_at and event_type.
-- Frontend widgets (ApplicationEvents, CaseUpdates) query /api/case-events with varying filters.
-- Event taxonomy lives in iset_event_type with label and alert_variant only.
+- Backend helper `addCaseEvent` inserts into `iset_case_event`; other paths relied on POST `/api/case-events`; this is being replaced with the unified `/api/events` emitter.
+- Event data is stored as JSON blobs with minimal validation and limited indexing beyond `created_at` and `event_type`.
+- Frontend widgets (`ApplicationEvents`, `CaseUpdates`) now read from the new `/api/cases/:id/events` and `/api/events/feed` surfaces.
+- Event taxonomy lives in `iset_event_type` with `label` and `alert_variant` only.
+
+## Progress Log
+
+### 2025-09-25 - Event capture enablement (admin)
+- Lifted the event catalogue, capture service, and emitter into `../shared/events` so both admin and portal stacks can reuse the same emit/update logic (portal wiring still outstanding).
+- Hooked the admin server to the shared emitter/service, exposing `/api/admin/event-types` and `/api/admin/event-capture-rules` while consulting runtime capture toggles before persisting events.
+- Added a lightweight cache in the emitter that honours `iset_runtime_config` rules and invalidates itself whenever capture rules are updated.
+- Refined the Event Capture dashboard by replacing the vertical list with an embedded Cloudscape table that surfaces attributes, last-updated metadata, and per-type capture toggles.
+- Noted a remaining gap: the public portal still writes to `iset_case_event`; we will rebuild that backend in a clean workspace before adopting the shared emitter there.
 
 ## Proposed Documentation Outline
+
+## Event Store Schema (Phase 1 rollout)
+- **iset_event_entry**: canonical event rows (char(36) UUID id, category, event_type, severity, source, subject_type, subject_id, actor_type, actor_id, actor_display_name, payload_json, tracking_id, correlation_id, captured_by, captured_at, ingested_at). Indexed on (subject_type, subject_id, captured_at DESC) and (event_type, captured_at DESC).
+- **iset_event_receipt**: per-recipient read/ack state (composite PK on event_id + recipient_id) storing `read_at`, enabling dashboards to track unread counts without mutating event rows.
+- **iset_event_outbox**: async fan-out queue (pending/delivering/delivered/failed) with attempt counters and next_attempt_at so future workers can push into notification buses or analytics sinks without blocking emitters.
+- Existing iset_case_event / iset_event_type remain read-only for reference during the transition and will be retired once emitters migrate.
+
+Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these tables idempotently; the server's migration bootstraper already executes migrations on startup.
+
+
 1. **Domain Concepts**
    - Actors (staff, applicants, system jobs)
    - Subjects (case, application, document)
@@ -49,12 +68,15 @@
    - Items requiring stakeholder input
    - Implementation milestones
 
+
+
 ## Configuration Dashboard Concept
 - **Audience**: System Administrators with appropriate RBAC permissions.
 - **UI Sketch**: Table listing event categories (and optionally individual event types) with columns for Category, Description, Severity, Enabled. Include search/filter and inline tooltips.
 - **Granularity**: Default to category-level toggles; allow drilling into specific event types where finer control is warranted.
+- **Current Policy**: All categories and event types stay configurable until we formally designate compliance locks.
 - **Safety Rails**:
-  - Flag or lock categories that are compliance-critical so they cannot be disabled.
+  - Keep the capability to mark compliance-critical categories for future locking even though none are locked today.
   - Display warnings if disabling will impact downstream features (dashboards, notifications, reports).
 - **Persistence**: New event_capture_rules table storing environment, category/type, enabled flag, metadata (who changed it, when, reason).
 - **Runtime Behaviour**: Event emitter module hydrates rules into an in-memory cache with periodic refresh or change notifications. Emission calls consult the cache before persisting.
@@ -107,7 +129,7 @@
     }
   }
   ```
-- Critical portal events (e.g., submission receipts) can be flagged with "locked": true to prevent accidental disablement.
+- Critical portal events (e.g., submission receipts) can be earmarked for locking later, but at this stage every type remains configurable.
 - Ensure RBAC updates reflect that only authorised system administrators can alter these shared settings.
 
 ## Current Event Type Inventory
@@ -133,28 +155,28 @@
 - status_changed *(inserted by backend helper; not registered in the catalogue)*
 
 ### Backend Auto-Emitted (bypassing catalogue)
-- status_changed â€” added in `PUT /api/cases/:id` when coordinator status changes.
-- assessment_submitted â€” emitted alongside assessment submission.
-- nwac_review_submitted â€” emitted when NWAC review payload is present.
-- case_approved / case_rejected â€” sent by the coordinator widget via `/api/case-events`.
-- documents_overdue â€” referenced by reporting queries; no matching emitter located.
+- status_changed — added in `PUT /api/cases/:id` when coordinator status changes.
+- assessment_submitted — emitted alongside assessment submission.
+- nwac_review_submitted — emitted when NWAC review payload is present.
+- case_approved / case_rejected — sent by the coordinator widget via `/api/events`.
+- documents_overdue — referenced by reporting queries; no matching emitter located.
 
 ### Frontend Expectations & Draft Event Types
-- case_reassigned â€” rendered in `CaseUpdates` widget, but no current emitter.
-- note_added â€” expected by `CaseUpdates`; relies on future notes feature.
-- followup_due â€” expected by `CaseUpdates`; likely tied to task SLA logic.
+- case_reassigned — rendered in `CaseUpdates` widget, but no current emitter.
+- note_added — expected by `CaseUpdates`; relies on future notes feature.
+- followup_due — expected by `CaseUpdates`; likely tied to task SLA logic.
 
 ### Gaps Identified
 - Several emitted event types (`status_changed`, `assessment_submitted`, `nwac_review_submitted`, `case_approved`, `case_rejected`) are missing from `iset_event_type`, so metadata (label, alert variant) is unavailable in the UI.
 - Seeded catalogue entries (e.g., `case_assigned`, `message_sent`) have no emitting code paths in the current admin backend, suggesting either unfinished features or portal-only flows.
-- The configuration dashboard will need an authoritative list that merges catalogue entries with code expectations; we should validate each before locking/retiring them.
+- The configuration dashboard will need an authoritative list that merges catalogue entries with code expectations; we should validate each before deciding whether to lock or retire them later.
 - Future retention/compliance requirements may introduce additional event types; keep the catalogue extensible and versioned.
 
 ## Configuration Dashboard UI Plan
 - **Navigation**: Add a new board under the existing "Configuration" category in the left-hand navigation (e.g., `/configuration/events`). Menu entry visible only to `System Administrator` role via RBAC matrix updates.
 - **Route / Component**: Introduce a dedicated React page (`src/pages/configuration/EventCaptureDashboard.js`) that renders within the existing ContentLayout shell. Use lazy loading so it does not impact default bundles.
 - **Layout**: Top-level `ContentLayout` with a header describing the purpose, followed by a `Table` listing categories/types. Include toolbar actions for search/filter and future bulk enable/disable operations.
-- **Columns**: Category, Event Type (optional when expanded), Description, Severity, Enabled toggle, Locked indicator, Last Updated (user + timestamp), Source (portal/admin).
+- **Columns**: Category, Event Type (optional when expanded), Description, Severity, Enabled toggle, Locked indicator (future use), Last Updated (user + timestamp), Source (portal/admin).
 - **Interactions**:
   - Toggle switches patch `iset_runtime_config` via `/api/admin/event-capture-rules` (new endpoint) with optimistic UI updates and error toasts.
   - Expand rows (accordion) to reveal individual event types when a category groups multiple items.
@@ -175,7 +197,7 @@
    - Provide CLI/dev tooling to seed rules and types for local environments.
 4. **Configuration APIs**
    - Implement `/api/admin/event-capture-rules` (GET/PATCH) and `/api/admin/event-types` for the dashboard.
-   - Ensure responses include lock status and audit metadata sourced from `iset_runtime_config` and the catalogue.
+   - Ensure responses include lock status placeholders and audit metadata sourced from `iset_runtime_config` and the catalogue.
 5. **Frontend Wiring**
    - Build the Event Capture dashboard page, connect to new APIs, and integrate into the nav.
    - Update `ApplicationEvents` to gracefully handle the transitional state (placeholder data) until the new event store is live.
@@ -192,7 +214,7 @@
 - Provide a single entry point emitEvent({ category, type, subject, actor, payload, channel, correlationId, options }) that all backends call.
 - Responsibilities:
   - Hydrate capture rules (cached from iset_runtime_config scope events_capture).
-  - Enforce mandatory/locked events; short-circuit disabled categories/types.
+  - Prepare for future mandatory/locked events while short-circuiting disabled categories/types.
   - Enrich payload with identifiers (event UUID, timestamps, environment, correlation ID).
   - Persist to the canonical event store (DB table or queuing outbox) and optionally fan out to secondary sinks (logs, notifications).
   - Expose async guarantees (e.g., options.deliveryMode = 'async' | 'sync').
@@ -201,7 +223,7 @@
 - New tables:
   - event_entry capturing core fields: id, category, type, subject_type, subject_id, actor_type, actor_id, actor_snapshot, payload_version, payload_json, correlation_id, channel, environment, captured_at, emitted_by, capture_status.
   - event_receipt (optional) to track user-specific read/ack states without bloating event_entry.
-  - event_type_catalog defining category/type metadata (labels, severity, lock flags).
+  - event_type_catalog defining category/type metadata (labels, severity, optional lock flags).
 - Indexing strategy: composite indexes on (subject_type, subject_id, captured_at DESC) and (category, type, captured_at DESC) to keep timeline queries performant.
 - Retention: plan archival routine (e.g., move events older than X years to cold storage) while keeping audit guarantees.
 
@@ -211,7 +233,7 @@
 - Health metrics: queue depth, failed writes, config cache staleness.
 
 ### API Surface Refresh
-- Replace existing /api/case-events endpoints to read from event_entry, honour filters (category, type, subject, time range).
+- Expose `/api/cases/:id/events` and `/api/events/feed` endpoints backed by the new store, honouring filters (category, type, subject, time range).
 - Provide mutation endpoints for marking events read, acknowledging, or updating receipts (driven by event_receipt).
 - Ensure responses include structured metadata (category, type, payload_version, actor summary) so modernised widgets render richer output.
 
@@ -263,13 +285,36 @@
 
 ## TODO (Implementation Follow-up)
 - Hook the new event service into the future event outbox/migration scripts once the storage schema is ready.
-- Expand the API contract to return detailed validation errors (locked/mandatory events) instead of silently skipping updates.
+- Expand the API contract to return detailed validation errors (future locked/mandatory events) instead of silently skipping updates.
 - Tighten the Event Capture dashboard with search, filtering, and audit trails when the catalogue grows.
 
 ## Next Steps (Immediate)
 - Finalise scope for Step 2 (legacy code removal) and create tracking tasks.
 - Draft schema migration scripts and event service interface skeletons.
 - Define API contracts (OpenAPI/TypeScript types) for frontend and portal teams.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

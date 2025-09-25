@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ContentLayout from '@cloudscape-design/components/content-layout';
 import Header from '@cloudscape-design/components/header';
 import Table from '@cloudscape-design/components/table';
@@ -198,6 +198,56 @@ const EventCaptureDashboard = () => {
       ),
     },
   ]), [handleCategoryToggle, saving]);
+  const typeColumns = useMemo(() => ([
+    {
+      id: 'eventType',
+      header: 'Event type',
+      cell: item => (
+        <SpaceBetween size="xxs">
+          <Box fontWeight="bold">{item.label}</Box>
+          {item.description && <Box color="text-label">{item.description}</Box>}
+        </SpaceBetween>
+      ),
+    },
+    {
+      id: 'attributes',
+      header: 'Attributes',
+      cell: item => (
+        <SpaceBetween direction="horizontal" size="xs">
+          <Badge color={severityToColor(item.severity)}>{item.severity || 'info'}</Badge>
+          <Badge color="blue">{item.source || 'admin'}</Badge>
+          {item.draft && <Badge color="grey">Draft</Badge>}
+          {item.locked && <Badge color="grey">Locked</Badge>}
+        </SpaceBetween>
+      ),
+    },
+    {
+      id: 'updatedAt',
+      header: 'Last updated',
+      cell: item => (
+        item.updatedAt ? (
+          <Box variant="small" color="text-label">
+            {new Date(item.updatedAt).toLocaleString()} {item.updatedBy ? `by ${item.updatedBy}` : ''}
+          </Box>
+        ) : (
+          <Box color="text-label">Not updated yet</Box>
+        )
+      ),
+    },
+    {
+      id: 'capture',
+      header: 'Capture',
+      cell: item => (
+        <Toggle
+          checked={item.enabled}
+          disabled={!selectedCategory || item.locked || saving}
+          onChange={({ detail }) => selectedCategory && handleTypeToggle(selectedCategory, item, detail.checked)}
+        >
+          {item.enabled ? 'Enabled' : 'Disabled'}
+        </Toggle>
+      ),
+    },
+  ]), [handleTypeToggle, saving, selectedCategory]);
 
   return (
     <ContentLayout
@@ -248,38 +298,18 @@ const EventCaptureDashboard = () => {
                   <Box variant="small" color="text-label">Last updated {new Date(selectedCategory.updatedAt).toLocaleString()}</Box>
                 )}
               </Box>
-              <SpaceBetween size="s">
-                {selectedCategory.types.map(type => (
-                  <Box key={type.id} padding={{ top: 'xs', bottom: 'xs' }}>
-                    <SpaceBetween direction="horizontal" size="m" alignItems="center">
-                      <SpaceBetween size="xxs">
-                        <Box fontWeight="bold">{type.label}</Box>
-                        <SpaceBetween direction="horizontal" size="s">
-                          <Badge color={severityToColor(type.severity)}>{type.severity || 'info'}</Badge>
-                          {type.draft && <Badge color="grey">Draft</Badge>}
-                          {type.locked && <Badge color="grey">Locked</Badge>}
-                          <Badge color="blue">{type.source || 'admin'}</Badge>
-                        </SpaceBetween>
-                      </SpaceBetween>
-                      <Toggle
-                        checked={type.enabled}
-                        disabled={type.locked || saving}
-                        onChange={({ detail }) => handleTypeToggle(selectedCategory, type, detail.checked)}
-                      >
-                        {type.enabled ? 'Enabled' : 'Disabled'}
-                      </Toggle>
-                    </SpaceBetween>
-                    {type.updatedAt && (
-                      <Box variant="small" color="text-label">
-                        Last updated {new Date(type.updatedAt).toLocaleString()} {type.updatedBy ? `by ${type.updatedBy}` : ''}
-                      </Box>
-                    )}
-                  </Box>
-                ))}
-                {selectedCategory.types.length === 0 && (
-                  <Box color="text-label">No event types registered for this category.</Box>
-                )}
-              </SpaceBetween>
+              {selectedCategory.types.length === 0 ? (
+                <Box color="text-label">No event types registered for this category.</Box>
+              ) : (
+                <Table
+                  items={selectedCategory.types}
+                  columnDefinitions={typeColumns}
+                  trackBy="id"
+                  variant="embedded"
+                  wrapLines
+                  resizableColumns
+                />
+              )}
             </SpaceBetween>
           )}
         </Container>
@@ -308,9 +338,4 @@ async function safeReadMessage(response) {
 }
 
 export default EventCaptureDashboard;
-
-
-
-
-
 

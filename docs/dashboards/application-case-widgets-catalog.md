@@ -48,7 +48,7 @@ Below each widget: purpose, critical backend dependencies, and enablement notes.
 
 5. CaseUpdates (`case-updates`)
    - Purpose: Timeline of recent case events (submission, document adoption, assignments).
-   - Depends on: `/api/case-events` with pagination and read/unread semantics.
+   - Depends on: `/api/cases/:id/events` & `/api/events/feed` with pagination and read/unread semantics.
    - Prereqs: event emission audit and taxonomy lock-down.
 
 6. CaseTasks (`case-tasks`)
