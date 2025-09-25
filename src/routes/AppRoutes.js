@@ -67,6 +67,7 @@ import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Impor
 import AssessmentReviewDashboard from '../pages/assessmentReview.js'; // Import the new Assessment Review dashboard
 import AuthCallback from '../pages/AuthCallback.js';
 import UploadConfigDashboard from '../pages/uploadConfigDashboard.js';
+import EventCaptureDashboard from '../pages/configuration/EventCaptureDashboard.js';
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -175,7 +176,7 @@ const AppRoutes = ({
             { text: 'Modify Workflow', href: '/modify-workflow' }
             ], 'Modify Workflow', 'modifyWorkflow')}
           </Guard>
-        </Route>
+      </Route>
       <Route path="/experiment">
         {renderContent(Experiment, [{ text: 'Home', href: '/' }, { text: 'Experiment', href: '/experiment' }], 'Experiment Page', 'experiment')}
       </Route>
@@ -241,6 +242,15 @@ const AppRoutes = ({
         <Guard roles={['System Administrator']} path="/configuration-settings">
           {renderContent(ConfigurationSettings, [{ text: 'Home', href: '/' }, { text: 'Configuration Settings', href: '/configuration-settings' }], 'Configuration Settings', 'configurationSettings')}
         </Guard>
+      </Route>
+      <Route path="/configuration/events">
+        <Guard roles={['System Administrator']} path="/configuration/events">
+          {renderContent(EventCaptureDashboard, [
+              { text: 'Home', href: '/' },
+              { text: 'Configuration', href: '/configuration-settings' },
+              { text: 'Event Capture', href: '/configuration/events' }
+            ], 'Event Capture Configuration', 'eventCapture')}
+          </Guard>
       </Route>
       <Route path="/admin/upload-config">
         <Guard roles={['System Administrator']} path="/admin/upload-config">

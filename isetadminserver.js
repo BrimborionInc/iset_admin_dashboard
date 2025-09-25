@@ -2,6 +2,8 @@ const path = require('path');
 const { maskName } = require('./src/utils/utils'); // Update the import statement
 const nunjucks = require("nunjucks");
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
+const { loadEventCaptureState, updateEventCaptureRules } = require('./src/lib/events/service');
+const { getEventCatalog } = require('./src/lib/events/catalog');
 
 // Configure Nunjucks to use GOV.UK Frontend components
 nunjucks.configure([
@@ -129,14 +131,21 @@ app.all(['/api/admin/upload-config'], async (req, res) => {
     const headers = { 'Content-Type': 'application/json' };
     // Forward dev bypass + role headers for local auth simulation
     const fwdHeaders = ['x-dev-bypass','x-dev-role','x-dev-userid'];
+    let devBypassActive = false;
     for (const h of fwdHeaders) {
       const v = req.headers[h];
-      if (v) headers[h] = v;
+      if (v) {
+        headers[h] = v;
+        if (h === 'x-dev-bypass') devBypassActive = true;
+      }
     }
-    // Forward bearer token if present
-    if (req.headers['authorization']) headers['authorization'] = req.headers['authorization'];
-    // Forward cookies if present (for access/id tokens)
-    if (req.headers['cookie']) headers['cookie'] = req.headers['cookie'];
+    // Only forward tokens/cookies when not explicitly using dev bypass
+    if (!devBypassActive && req.headers['authorization']) {
+      headers['authorization'] = req.headers['authorization'];
+    }
+    if (!devBypassActive && req.headers['cookie']) {
+      headers['cookie'] = req.headers['cookie'];
+    }
     let body;
     if (method === 'PATCH') {
       body = JSON.stringify(req.body || {});
@@ -998,6 +1007,63 @@ app.get('/api/config/runtime', (req, res) => {
     res.status(500).json({ error: 'config_runtime_failed', message: e.message });
   }
 });
+
+// --- Event capture configuration (SysAdmin only) ---
+app.get('/api/admin/event-types', (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const catalog = getEventCatalog().map(category => ({
+      id: category.id,
+      label: category.label,
+      description: category.description,
+      severity: category.severity,
+      source: category.source || null,
+      draft: Boolean(category.draft),
+      locked: Boolean(category.locked),
+      types: category.types.map(type => ({
+        id: type.id,
+        label: type.label,
+        severity: type.severity,
+        source: type.source || null,
+        draft: Boolean(type.draft),
+        locked: Boolean(type.locked)
+      }))
+    }));
+    res.json({ categories: catalog });
+  } catch (err) {
+    console.error('[events] failed to load event catalog', err);
+    res.status(500).json({ error: 'event_types_fetch_failed', message: err.message });
+  }
+});
+
+app.get('/api/admin/event-capture-rules', async (req, res) => {
+  if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+  try {
+    const state = await loadEventCaptureState(pool);
+    res.json(state);
+  } catch (err) {
+    console.error('[events] failed to load capture rules', err);
+    res.status(500).json({ error: 'event_capture_rules_fetch_failed', message: err.message });
+  }
+});
+
+app.patch('/api/admin/event-capture-rules', async (req, res) => {
+  if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+  try {
+    const body = req.body || {};
+    let updates = [];
+    if (Array.isArray(body.updates)) updates = body.updates;
+    else if (Array.isArray(body)) updates = body;
+    else if (body.categoryId || body.category) updates = [body];
+    const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
+    const state = await updateEventCaptureRules(pool, updates, actorId);
+    res.json(state);
+  } catch (err) {
+    console.error('[events] failed to update capture rules', err);
+    res.status(500).json({ error: 'event_capture_rules_update_failed', message: err.message });
+  }
+});
+
 
 // PATCH auth session TTLs (supports scope=admin|public, fallback both if none)
 app.patch('/api/config/runtime/auth-session', (req, res) => {
@@ -5734,11 +5800,11 @@ app.get('/api/cases/:id/messages', async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 1000);
     const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
     const [rows] = await pool.query(
-      `SELECT id, sender_id, recipient_id, subject, body, status, deleted, urgent, created_at
-       FROM messages
-       WHERE sender_id = ? OR recipient_id = ?
-       ORDER BY created_at ASC
-       LIMIT ? OFFSET ?`,
+      `SELECT id, case_id, application_id, sender_id, recipient_id, subject, body, status, deleted, urgent, created_at
+         FROM messages
+        WHERE sender_id = ? OR recipient_id = ?
+        ORDER BY created_at ASC
+        LIMIT ? OFFSET ?`,
       [applicantId, applicantId, limit, offset]
     );
     res.json({ applicant_user_id: applicantId, items: rows });
@@ -5758,13 +5824,15 @@ app.post('/api/cases/:id/messages', async (req, res) => {
   try {
     // Resolve applicant user id
     const [[caseRow]] = await pool.query(
-      `SELECT COALESCE(applicant.id, s.user_id) AS applicant_user_id
-       FROM iset_case c
-       JOIN iset_application a ON c.application_id = a.id
-       LEFT JOIN iset_application_submission s ON a.submission_id = s.id
-       LEFT JOIN user applicant ON s.user_id = applicant.id
-       WHERE c.id = ?
-       LIMIT 1`,
+      `SELECT c.application_id,
+              COALESCE(applicant.id, s.user_id) AS applicant_user_id,
+              s.reference_number AS submission_reference
+         FROM iset_case c
+         JOIN iset_application a ON c.application_id = a.id
+         LEFT JOIN iset_application_submission s ON a.submission_id = s.id
+         LEFT JOIN user applicant ON s.user_id = applicant.id
+        WHERE c.id = ?
+        LIMIT 1`,
       [caseId]
     );
     const recipientId = caseRow?.applicant_user_id || null;
@@ -5793,9 +5861,9 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     }
 
     const [result] = await pool.query(
-      `INSERT INTO messages (sender_id, recipient_id, subject, body, status, deleted, urgent, created_at)
-       VALUES (?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
-      [senderId, recipientId, subject, body, !!urgent]
+      `INSERT INTO messages (sender_id, recipient_id, case_id, application_id, subject, body, status, deleted, urgent, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
+      [senderId, recipientId, caseId, caseRow?.application_id || null, subject, body, !!urgent]
     );
     res.status(201).json({ message: 'Message sent', messageId: result.insertId });
   } catch (e) {

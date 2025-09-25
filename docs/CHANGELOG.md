@@ -2,6 +2,11 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+
+## 2025-09-25
+- Fix: Admin secure messages now persist case/application IDs so applicant booking references render consistently.
+- Feature: Portal message view surfaces the booking reference for case-linked threads.
+- Docs: Added secure messaging notes and refreshed widget catalog to reflect case-scoped behaviour.
 ## 2025-09-22
 - Feature: Access Control matrix widget now supports in-place role toggles with instant persistence.
 - UX: Navigation and route guards consume the shared RBAC matrix and hide empty sections per role.

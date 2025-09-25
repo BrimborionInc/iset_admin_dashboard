@@ -68,8 +68,15 @@ const buildAttachmentUrl = filePath => {
 };
 
 const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
-  const caseId = caseData?.id || null;
-  const applicantUserId = caseData?.applicant_user_id || null;
+  const rawCaseId = caseData?.id ?? null;
+  const caseIdNum = Number(rawCaseId);
+  const caseId = rawCaseId == null || rawCaseId === '' || Number.isNaN(caseIdNum) ? null : caseIdNum;
+  const rawApplicantUserId = caseData?.applicant_user_id ?? null;
+  const applicantUserIdNum = Number(rawApplicantUserId);
+  const applicantUserId =
+    rawApplicantUserId == null || rawApplicantUserId === '' || Number.isNaN(applicantUserIdNum)
+      ? null
+      : applicantUserIdNum;
   const applicantName = caseData?.applicant_name || 'Applicant';
   const assignedToUserId = caseData?.assigned_to_user_id || null;
   const assignedToName = caseData?.assigned_to_name || '';
@@ -118,7 +125,16 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
         if (!response.ok) throw new Error('Failed to load messages');
         const data = await response.json().catch(() => []);
         const items = Array.isArray(data?.items) ? data.items : resolveList(data);
-        setMessages(items);
+        const scopedItems = caseId
+          ? items.filter(item => {
+              const messageCaseId = item?.case_id ?? item?.caseId ?? null;
+              if (messageCaseId == null) return true;
+              const numericMsgCaseId = Number(messageCaseId);
+              return !Number.isNaN(numericMsgCaseId) && numericMsgCaseId === caseId;
+            })
+          : items;
+        setMessages(scopedItems);
+
       } catch (err) {
         setLoadError(err?.message || 'Failed to load messages');
       } finally {
@@ -870,3 +886,4 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
 };
 
 export default SecureMessagingWidget;
+

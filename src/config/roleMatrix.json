@@ -46,6 +46,10 @@
       "Regional Coordinator",
       "PTMA Staff"
     ],
+    "/configuration/events": [
+      "System Administrator"
+    ],
+
     "/configuration-settings": [
       "System Administrator"
     ],
