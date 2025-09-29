@@ -48,6 +48,7 @@ const dotenvPath = process.env.NODE_ENV === 'production'
   : path.resolve(__dirname, '.env'); // Development/local path
 require('dotenv').config({ path: dotenvPath });
 
+
 console.log("Loaded .env from:", dotenvPath);  // Debugging log
 console.log("CORS Allowed Origin:", process.env.ALLOWED_ORIGIN);
 
@@ -63,6 +64,11 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const fs = require('fs');
+const intakeEnvPath = path.resolve(__dirname, '../ISET-intake/.env');
+if (fs.existsSync(intakeEnvPath)) {
+  require('dotenv').config({ path: intakeEnvPath, override: false });
+  console.log('Loaded intake .env fallback from:', intakeEnvPath);
+}
 const cheerio = require('cheerio');
 const axios = require('axios');
 // Workflow normalization (shared preview/publish schema builder)
@@ -78,6 +84,22 @@ try { ({ validateWorkflow } = require('./src/workflows/validateComponents')); } 
 // We only attempt to import if not present (in older restored versions). If shadowed, ignore.
 let importedSupportedTypes;
 try { ({ SUPPORTED_COMPONENT_TYPES: importedSupportedTypes } = require('./src/workflows/constants')); } catch (e) { /* optional */ }
+
+// --- Dual Portal Workflow Publish Helper (writes normalized schema to both portals) ---
+function writeIfChanged(file, content) {
+  try {
+    if (fs.existsSync(file)) {
+      const existing = fs.readFileSync(file, 'utf8');
+      if (existing === content) return false;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content, 'utf8');
+    return true;
+  } catch (err) {
+    console.error('[publish] write failed', file, err.message);
+    throw err;
+  }
+}
 
 const app = express();
 const port = process.env.PORT || 5001; // Use port from .env
@@ -97,6 +119,41 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+// Publish endpoint for workflows (dev/internal) - writes normalized schema to legacy & new portals
+app.post('/api/workflows/:id/publish', async (req, res) => {
+  const idRaw = req.params.id;
+  const workflowId = Number(idRaw);
+  if (!Number.isFinite(workflowId) || workflowId <= 0) {
+    return res.status(400).json({ error: 'invalid_workflow_id', detail: idRaw });
+  }
+  if (!buildWorkflowSchema) {
+    return res.status(500).json({ error: 'unavailable', message: 'buildWorkflowSchema not loaded' });
+  }
+  try {
+    let schema;
+    try { schema = await buildWorkflowSchema({ pool, workflowId }); } catch (eInner) {
+      return res.status(500).json({ error: 'normalization_failed', message: eInner.message });
+    }
+    if (!schema) return res.status(500).json({ error: 'schema_null' });
+  // Full normalized schema object retained for new portal; legacy portal expects array of step objects only.
+  const fullJson = JSON.stringify(schema, null, 2);
+  const legacyJson = Array.isArray(schema) ? JSON.stringify(schema, null, 2) : JSON.stringify(schema.steps || [], null, 2);
+    const meta = { workflowId, generatedAt: new Date().toISOString() };
+    const metaJson = JSON.stringify(meta, null, 2);
+    const legacyPath = path.resolve(__dirname, '../ISET-intake/src/intakeFormSchema.json');
+    const legacyMeta = path.resolve(__dirname, '../ISET-intake/src/intakeFormSchema.meta.json');
+    const newPortalPath = path.resolve(__dirname, '../iset-public-portal/apps/api/src/data/intakeFormSchema.json');
+    const newPortalMeta = path.resolve(__dirname, '../iset-public-portal/apps/api/src/data/intakeFormSchema.meta.json');
+    const results = [];
+  try { const changed = writeIfChanged(legacyPath, legacyJson); const metaChanged = writeIfChanged(legacyMeta, metaJson); results.push({ target: 'legacy', file: legacyPath, changed, metaChanged, shape: 'steps[]' }); } catch (eL) { results.push({ target: 'legacy', error: eL.message }); }
+  try { const changed = writeIfChanged(newPortalPath, fullJson); const metaChanged = writeIfChanged(newPortalMeta, metaJson); results.push({ target: 'new', file: newPortalPath, changed, metaChanged, shape: 'full-schema' }); } catch (eN) { results.push({ target: 'new', error: eN.message }); }
+    const hadError = results.some(r => r.error);
+    res.status(hadError ? 207 : 200).json({ ok: !hadError, workflowId, results });
+  } catch (err) {
+    res.status(500).json({ error: 'publish_failed', message: err.message });
+  }
+});
 
 // --- Public Linkage Coverage Proxy (moved before auth middleware) ---------
 // Returns aggregate, non-sensitive linkage stats from the intake service WITHOUT requiring admin auth.
@@ -3721,42 +3778,7 @@ app.get('/api/meta/supported-component-types', (_req, res) => {
   res.json({ types: Array.from(SUPPORTED_COMPONENT_TYPES) });
 });
 
-// --- Publish workflow to Public Portal (v1: immediate push) -----------------
-// This builds a self-contained JSON array of steps (bilingual titles/descriptions only for now),
-// supporting linear and single-field option-based routing, and writes it to the portal project.
-// Target file (dev): ../ISET-intake/src/intakeFormSchema.json relative to this server file.
-app.post('/api/workflows/:id/publish', async (req, res) => {
-  const { id } = req.params;
-  try {
-    // Use unified normalization (includes conditional embedding) + template audit
-    if (!buildWorkflowSchema) {
-      return res.status(500).json({ error: 'normalizer_unavailable' });
-    }
-    const out = await buildWorkflowSchema({ pool, workflowId: id, auditTemplates: true });
-    // Persist primary schema (steps array only for backward compatibility)
-    const portalPath = path.resolve(__dirname, '..', 'ISET-intake', 'src', 'intakeFormSchema.json');
-    fs.writeFileSync(portalPath, JSON.stringify(out.steps, null, 2), 'utf8');
-    // Persist meta sidecar (reuse meta from normalizer, ensuring counts accurate to normalized output)
-    const metaPath = path.resolve(__dirname, '..', 'ISET-intake', 'src', 'intakeFormSchema.meta.json');
-    try {
-      fs.writeFileSync(metaPath, JSON.stringify(out.meta, null, 2), 'utf8');
-    } catch (e) {
-      console.warn('Failed to write workflow schema meta file:', e && e.message ? e.message : e);
-    }
-    res.status(200).json({ message: 'Published', portalPath, steps: out.steps.length, metaPath });
-  } catch (err) {
-    if (err && err.code === 400) {
-      const payload = { error: err.message || 'Validation failed' };
-      if (err.details) payload.details = err.details;
-      return res.status(400).json(payload);
-    }
-    if (err && err.code === 404) {
-      return res.status(404).json({ error: err.message || 'Workflow not found' });
-    }
-    console.error('Publish failed:', err);
-    res.status(500).json({ error: 'Failed to publish workflow' });
-  }
-});
+// (Legacy single-portal publish endpoint removed; dual-portal version defined earlier.)
 
 // --- Component Templates API (for Step Editor library) ---------------------
 // Returns the catalogue of reusable component templates (active only by default)
@@ -4677,6 +4699,53 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
   } catch (error) {
     console.error('Error fetching applicant documents:', error);
     res.status(500).json({ error: 'Failed to fetch applicant documents' });
+  }
+});
+
+app.get('/api/documents/:id/presign-download', async (req, res) => {
+  const documentId = Number(req.params.id);
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return res.status(400).json({ error: 'invalid_document_id' });
+  }
+  try {
+    const [[doc]] = await pool.query(
+      "SELECT id, file_name, file_path FROM iset_document WHERE id = ? AND status = 'active' LIMIT 1",
+      [documentId]
+    );
+    if (!doc) {
+      return res.status(404).json({ error: 'document_not_found' });
+    }
+    if (!doc.file_path) {
+      return res.status(404).json({ error: 'file_missing' });
+    }
+    const storageModeEnv = (process.env.UPLOAD_MODE || process.env.UPLOAD_DRIVER || '').toLowerCase();
+    const storageMode = storageModeEnv === 's3' ? 's3' : 'local-direct';
+    if (storageMode === 's3') {
+      try {
+        const { presignGet } = require('../ISET-intake/s3Provider');
+        const presigned = await presignGet({ key: doc.file_path });
+        return res.json({
+          mode: 's3',
+          fileId: doc.id,
+          filename: doc.file_name,
+          key: doc.file_path,
+          presigned
+        });
+      } catch (err) {
+        console.error('[admin:documents:presign-download:s3] error', err);
+        return res.status(500).json({ error: 's3_presign_failed' });
+      }
+    }
+    const normalizedPath = String(doc.file_path).replace(/\\\\/g, '/').replace(/^\/+/, '');
+    return res.json({
+      mode: 'local-direct',
+      fileId: doc.id,
+      filename: doc.file_name,
+      path: '/' + normalizedPath
+    });
+  } catch (error) {
+    console.error('[admin:documents:presign-download] error', error);
+    return res.status(500).json({ error: 'failed_to_presign_document' });
   }
 });
 
@@ -7566,6 +7635,11 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
+
+
+
+
+
 
 
 

@@ -292,8 +292,17 @@ export default function ModifyWorkflowEditorWidget() {
     if (!wfId) return;
     try {
       setSaving(true); setSaveMsg('');
-  await apiFetch(`/api/workflows/${wfId}/publish`, { method: 'POST' });
-      setSaveMsg('Published.');
+      const resp = await apiFetch(`/api/workflows/${wfId}/publish`, { method: 'POST' });
+      const data = await resp.json();
+      if (!resp.ok || data?.error) {
+        setSaveMsg('Publish failed');
+      } else {
+        const parts = (data?.results || []).map(r => {
+          if (r.error) return `${r.target}: error`;
+          return `${r.target}: ${r.changed ? 'updated' : 'no change'}`;
+        });
+        setSaveMsg('Published (' + parts.join(', ') + ').');
+      }
     } catch (e) { setSaveMsg('Publish failed'); }
     finally { setSaving(false); setTimeout(() => setSaveMsg(''), 3000); }
   }, [wfId]);
