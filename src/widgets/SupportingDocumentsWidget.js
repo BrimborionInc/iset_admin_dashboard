@@ -3,6 +3,8 @@ import { apiFetch } from '../auth/apiClient';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { Header, Table, Box, Button, ButtonDropdown, SpaceBetween, Alert } from '@cloudscape-design/components';
 
+const API_BASE_URL = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
+
 const REFRESH_EVENT = 'iset:supporting-documents:refresh';
 
 const formatDate = value => {
@@ -13,18 +15,12 @@ const formatDate = value => {
     : date.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
 };
 
-const normalizeFileUrl = path => {
-  if (!path) return '';
-  const sanitized = path.replace(/\\/g, '/').replace(/^\/+/, '');
-  const base = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
-  return base ? `${base}/${sanitized}` : sanitized;
-};
-
 const SupportingDocumentsWidget = ({ actions, caseData }) => {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [pendingDownloads, setPendingDownloads] = useState({});
   const applicantUserId = caseData?.applicant_user_id || null;
 
   const loadDocuments = useCallback(
@@ -83,6 +79,49 @@ const SupportingDocumentsWidget = ({ actions, caseData }) => {
     };
   }, [applicantUserId, loadDocuments]);
 
+  const handleViewDocument = useCallback(
+    async item => {
+      const documentId = item?.id;
+      if (!documentId) return;
+      setError(null);
+      setPendingDownloads(prev => ({ ...prev, [documentId]: true }));
+      try {
+        const res = await apiFetch(`/api/documents/${documentId}/presign-download`);
+        if (!res || !res.ok) {
+          const message = res && res.status === 404 ? 'Document not found' : 'Failed to prepare download';
+          throw new Error(message);
+        }
+        const payload = await res.json().catch(() => null);
+        if (!payload) throw new Error('Invalid download response');
+        let targetUrl = '';
+        if (payload.mode === 's3') {
+          targetUrl = payload.presigned?.url || '';
+        } else if (payload.mode === 'local-direct') {
+          const path = payload.path || '';
+          if (path) {
+            const normalized = path.startsWith('/') ? path : `/${path}`;
+            targetUrl = API_BASE_URL ? `${API_BASE_URL}${normalized}` : normalized;
+          }
+        }
+        if (!targetUrl) {
+          throw new Error('Document download unavailable');
+        }
+        if (typeof window !== 'undefined') {
+          window.open(targetUrl, '_blank', 'noopener,noreferrer');
+        }
+      } catch (err) {
+        console.error('[SupportingDocumentsWidget] document open failed', err);
+        setError(err?.message || 'Failed to open document');
+      } finally {
+        setPendingDownloads(prev => {
+          const next = { ...prev };
+          delete next[documentId];
+          return next;
+        });
+      }
+    },
+    []
+  );
   const handleRefresh = () => {
     if (!applicantUserId) return;
     loadDocuments({ silent: true });
@@ -153,16 +192,20 @@ const SupportingDocumentsWidget = ({ actions, caseData }) => {
               id: 'actions',
               header: 'Actions',
               cell: item => {
-                const url = normalizeFileUrl(item.file_path || '');
-                return url ? (
+                const isAvailable = Boolean(item?.id && item?.file_path);
+                if (!isAvailable) {
+                  return <span style={{ color: '#888' }}>Unavailable</span>;
+                }
+                const inFlight = !!pendingDownloads[item.id];
+                return (
                   <Button
                     variant="inline-link"
-                    onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+                    onClick={() => handleViewDocument(item)}
+                    disabled={inFlight}
+                    loading={inFlight}
                   >
                     View
                   </Button>
-                ) : (
-                  <span style={{ color: '#888' }}>Unavailable</span>
                 );
               }
             }
