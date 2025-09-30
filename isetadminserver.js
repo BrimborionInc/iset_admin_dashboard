@@ -2,9 +2,7 @@ const path = require('path');
 const { maskName } = require('./src/utils/utils'); // Update the import statement
 const nunjucks = require("nunjucks");
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
-const { loadEventCaptureState, updateEventCaptureRules } = require('../shared/events/service');
-const { getEventCatalog } = require('../shared/events/catalog');
-const { registerEventStorePool, emitEvent, getCaseEvents, getEventFeed, markEventRead } = require('../shared/events/emitter');
+const { createEventService, EventValidationError } = require('../shared/events');
 
 function resolveRequestActor(req) {
   const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || req.auth?.userId || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
@@ -12,18 +10,59 @@ function resolveRequestActor(req) {
   return { actorId, actorName };
 }
 
+function parseListQueryParam(raw) {
+  if (typeof raw === 'undefined' || raw === null) return [];
+  const values = Array.isArray(raw) ? raw : [raw];
+  const tokens = [];
+  for (const value of values) {
+    if (value === null || typeof value === 'undefined') continue;
+    const parts = String(value).split(',');
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (trimmed) tokens.push(trimmed);
+    }
+  }
+  return tokens;
+}
+
+function parseDateQueryParam(raw) {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof first === 'undefined' || first === null || first === '') {
+    return { provided: false, value: null };
+  }
+  if (first instanceof Date && !Number.isNaN(first.getTime())) {
+    return { provided: true, value: first };
+  }
+  const date = new Date(first);
+  if (Number.isNaN(date.getTime())) {
+    return { provided: true, value: null };
+  }
+  return { provided: true, value: date };
+}
+
+function firstQueryValue(raw) {
+  if (Array.isArray(raw)) {
+    return raw.length ? raw[0] : undefined;
+  }
+  return raw;
+}
+
 async function captureCaseEvent({ type, caseId, payload, actorId, actorName, actorType = 'staff', trackingId, correlationId }) {
   try {
-    await emitEvent({
+    await emitCaseEventSdk({
       type,
-      subject: { type: 'case', id: caseId },
+      caseId,
       actor: { type: actorType, id: actorId || null, displayName: actorName || null },
       payload,
       trackingId,
       correlationId,
     });
   } catch (err) {
-    console.error('[events] captureCaseEvent failed', type, err?.message || err);
+    if (err instanceof EventValidationError) {
+      console.warn('[events] captureCaseEvent validation failed', type, err.message, err.details || {});
+    } else {
+      console.error('[events] captureCaseEvent failed', type, err?.message || err);
+    }
   }
 
 }
@@ -1118,7 +1157,7 @@ app.get('/api/admin/event-types', (req, res) => {
 app.get('/api/admin/event-capture-rules', async (req, res) => {
   if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
   try {
-    const state = await loadEventCaptureState(pool);
+    const state = await loadEventCaptureState();
     res.json(state);
   } catch (err) {
     console.error('[events] failed to load capture rules', err);
@@ -1135,7 +1174,7 @@ app.patch('/api/admin/event-capture-rules', async (req, res) => {
     else if (Array.isArray(body)) updates = body;
     else if (body.categoryId || body.category) updates = [body];
     const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
-    const state = await updateEventCaptureRules(pool, updates, actorId);
+    const state = await updateEventCaptureRules(updates, actorId);
     res.json(state);
   } catch (err) {
     console.error('[events] failed to update capture rules', err);
@@ -1299,7 +1338,36 @@ const dbConfig = {
 };
 
 const pool = mysql.createPool(dbConfig);
-registerEventStorePool(pool);
+const eventService = createEventService({ pool, logger: console });
+const emitEvent = eventService.emit;
+const emitCaseEventSdk = eventService.emitCaseEvent;
+const getCaseEvents = eventService.getCaseTimeline;
+const getEventFeed = eventService.getEventFeed;
+const markEventRead = eventService.markRead;
+const loadEventCaptureState = eventService.loadCaptureState;
+const updateEventCaptureRules = eventService.updateCaptureRules;
+const getEventCatalog = eventService.getCatalog;
+
+function isMissingTableErrorLocal(err) {
+  if (!err) return false;
+  if (err.code === 'ER_NO_SUCH_TABLE') return true;
+  const message = typeof err.message === 'string' ? err.message : '';
+  return /no such table/i.test(message) || /does not exist/i.test(message) || /doesn't exist/i.test(message);
+}
+
+async function deleteTableIfExists(tableName) {
+  try {
+    await pool.query(`DELETE FROM ${tableName}`);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      console.warn(`[purge] skipped missing table ${tableName}`);
+      return;
+    }
+    throw err;
+  }
+}
+
+
 
 // --- Simple SQL Migration Runner (auto-executes .sql files in /sql once) -----------------
 // Strategy:
@@ -4357,16 +4425,6 @@ app.delete('/api/steps/:id', async (req, res) => {
   }
 });
 
-/**
- * Helper to insert a new event into iset_case_event.
- * @param {Object} params
- * @param {number} params.user_id - Required. User ID for the event.
- * @param {string} params.event_type - Required. Event type (must match iset_event_type).
- * @param {Object} params.event_data - Required. Event data as JS object (will be stored as JSON).
- * @param {number|null} [params.case_id=null] - Optional. Case ID (nullable).
- * @param {boolean} [params.is_read=false] - Optional. Mark event as read (default false).
- * @returns {Promise<number>} The inserted event's ID.
- */
 
 /**
  * GET /api/intake-officers
@@ -4631,53 +4689,90 @@ app.get('/api/tasks', async (req, res) => {
 ///Casework Task Scheduler
 const generateSystemTasks = async () => {
   try {
-    // Fetch all 'documents_overdue' events
-    const [events] = await pool.query(
-      `SELECT e.id, e.case_id, e.event_type, e.event_data, e.created_at,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id
-       FROM iset_case_event e
-       JOIN iset_case c ON e.case_id = c.id
-       JOIN iset_application a ON c.application_id = a.id
-       WHERE e.event_type = 'documents_overdue'`
-    );
+    // Fetch all 'documents_overdue' events from the unified event store
+    let events = [];
+    try {
+      const [rows] = await pool.query(
+        `SELECT e.id,
+                e.subject_id,
+                CAST(e.subject_id AS UNSIGNED) AS case_id,
+                e.payload_json AS payload,
+                e.captured_at,
+                JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id
+           FROM iset_event_entry e
+           JOIN iset_case c ON c.id = CAST(e.subject_id AS UNSIGNED)
+           JOIN iset_application a ON c.application_id = a.id
+          WHERE e.subject_type = 'case' AND e.event_type = 'documents_overdue'`
+      );
+      events = rows;
+    } catch (err) {
+      if (isMissingTableErrorLocal(err)) {
+        console.warn('[tasks] event store unavailable; skipping documents_overdue sync');
+        events = [];
+      } else {
+        throw err;
+      }
+    }
 
     for (const event of events) {
-      const { case_id, event_data, tracking_id } = event;
-      const data =
-        typeof event_data === 'string' ? JSON.parse(event_data) : event_data || {};
+      const caseIdRaw = event.case_id ?? event.subject_id;
+      const caseId = Number(caseIdRaw);
+      if (!Number.isFinite(caseId)) continue;
 
-      // Check if a task already exists for this case
+      let payload = event.payload;
+      if (payload && typeof payload === 'string') {
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          payload = {};
+        }
+      } else if (!payload || typeof payload !== 'object') {
+        payload = {};
+      }
+
+      let missingItems = payload.missing;
+      if (Array.isArray(missingItems)) {
+        missingItems = missingItems.filter(item => item != null && item !== '');
+      } else if (typeof missingItems === 'string' && missingItems.trim()) {
+        missingItems = [missingItems.trim()];
+      } else {
+        missingItems = [];
+      }
+
+      if (missingItems.length === 0) continue;
+
+      const trackingId = event.tracking_id || payload.tracking_id || `CASE-${caseId}`;
+
       const [existingTask] = await pool.query(
         `SELECT id FROM iset_case_task WHERE case_id = ? AND title = 'Request missing documents' AND status != 'completed'`,
-        [case_id]
+        [caseId]
       );
 
-      if (existingTask.length === 0) {
-        // No task exists, create a new one
-        const title = 'Request missing documents';
-        const description = `Follow up with applicant to submit ${data.missing.join(', ')}`;
-        const dueDate = new Date();
-        dueDate.setDate(dueDate.getDate() + 2); // Due in 2 days
+      if (existingTask.length > 0) continue;
 
-        await pool.query(
-          `INSERT INTO iset_case_task (
-            case_id, assigned_to_user_id, title, description, due_date, priority, status, source, created_by_user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            case_id,
-            18, // Assign to caseworker 18, you can modify this based on case assignment logic
-            title,
-            description,
-            dueDate,
-            'high',
-            'open',
-            'system',
-            null // If system-generated, created_by_user_id can be NULL
-          ]
-        );
+      const title = 'Request missing documents';
+      const description = `Follow up with applicant to submit ${missingItems.join(', ')}`;
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 2);
 
-        console.log(`Task created for case ${tracking_id}: ${title}`);
-      }
+      await pool.query(
+        `INSERT INTO iset_case_task (
+          case_id, assigned_to_user_id, title, description, due_date, priority, status, source, created_by_user_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          caseId,
+          18,
+          title,
+          description,
+          dueDate,
+          'high',
+          'open',
+          'system',
+          null,
+        ]
+      );
+
+      console.log(`[tasks] created documents_overdue task for case ${trackingId}`);
     }
   } catch (err) {
     console.error('Error generating system tasks:', err);
@@ -5206,6 +5301,53 @@ app.get('/api/users', async (_req, res) => {
 });
 
 // Static role catalogue for the Roles table in Manage Users
+function severityToAlertVariant(severity) {
+  const value = (severity || '').toLowerCase();
+  if (value === 'success') return 'success';
+  if (value === 'warning') return 'warning';
+  if (value === 'error') return 'error';
+  return 'info';
+}
+
+// GET event catalogue entries (shared configuration)
+app.get('/api/events', async (req, res) => {
+  try {
+    const catalog = getEventCatalog();
+    const rows = [];
+
+    for (const category of catalog) {
+      if (!category) continue;
+      const categoryId = category.id;
+      const types = Array.isArray(category.types) ? category.types : [];
+      const categoryDescription = category.description || '';
+      const categorySource = category.source || null;
+      const categorySeverity = category.severity || 'info';
+      for (const type of types) {
+        if (!type || !type.id) continue;
+        const severity = type.severity || categorySeverity || 'info';
+        rows.push({
+          value: type.id,
+          label: type.label || type.id,
+          description: type.description || categoryDescription,
+          category: categoryId,
+          category_label: category.label || categoryId,
+          category_description: categoryDescription,
+          severity,
+          alert_variant: severityToAlertVariant(severity),
+          source: type.source || categorySource,
+          locked: Boolean(type.locked),
+          draft: Boolean(type.draft || category.draft),
+        });
+      }
+    }
+
+    res.json(rows);
+  } catch (err) {
+    console.error('[events:list] failed', err);
+    res.status(500).json({ error: 'Failed to fetch events' });
+  }
+});
+
 app.get('/api/roles', (_req, res) => {
   // Keep in sync with navigation/feature flags as needed
   const roles = [
@@ -6525,9 +6667,33 @@ app.get('/api/cases/:case_id/events', async (req, res) => {
   }
   try {
     const { actorId } = resolveRequestActor(req);
-    const limit = Number(req.query.limit) || 50;
-    const offset = Number(req.query.offset) || 0;
-    const items = await getCaseEvents({ caseId, requesterId: actorId, limit, offset });
+    const limitParam = Number(req.query.limit);
+    const offsetParam = Number(req.query.offset);
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 50;
+    const offset = Number.isFinite(offsetParam) && offsetParam >= 0 ? offsetParam : 0;
+
+    const typeFilter = parseListQueryParam(req.query.type ?? req.query.types ?? req.query.event_type ?? req.query.eventType);
+    const categoryFilter = parseListQueryParam(req.query.category ?? req.query.categories ?? req.query.event_category ?? req.query.eventCategory);
+
+    const sinceMeta = parseDateQueryParam(req.query.since ?? req.query.after ?? req.query.from);
+    if (sinceMeta.provided && !sinceMeta.value) {
+      return res.status(400).json({ error: 'invalid_since' });
+    }
+    const untilMeta = parseDateQueryParam(req.query.until ?? req.query.before ?? req.query.to);
+    if (untilMeta.provided && !untilMeta.value) {
+      return res.status(400).json({ error: 'invalid_until' });
+    }
+
+    const items = await getCaseEvents({
+      caseId,
+      requesterId: actorId,
+      limit,
+      offset,
+      types: typeFilter,
+      categories: categoryFilter,
+      since: sinceMeta.value,
+      until: untilMeta.value,
+    });
     console.log('[events] case timeline', caseId, items.length);
     res.json(items);
   } catch (error) {
@@ -6669,17 +6835,19 @@ app.get('/api/applications', async (req, res) => {
 /**
  * POST /api/purge-cases
  *
- * Deletes all rows from iset_case_document, iset_case_event, iset_case_note, iset_case_task, then iset_case.
+ * Clears case-related tables (documents, notes, tasks) and wipes the event store before removing cases.
  * Used for demo reset purposes only.
  */
 app.post('/api/purge-cases', async (req, res) => {
   try {
     // Delete from child tables first due to foreign key constraints
-    await pool.query('DELETE FROM iset_case_document');
-    await pool.query('DELETE FROM iset_case_event');
-    await pool.query('DELETE FROM iset_case_note');
-    await pool.query('DELETE FROM iset_case_task');
-    await pool.query('DELETE FROM iset_case');
+    await deleteTableIfExists('iset_case_document');
+    await deleteTableIfExists('iset_case_note');
+    await deleteTableIfExists('iset_case_task');
+    await deleteTableIfExists('iset_event_receipt');
+    await deleteTableIfExists('iset_event_outbox');
+    await deleteTableIfExists('iset_event_entry');
+    await deleteTableIfExists('iset_case');
     res.status(200).json({ message: 'All cases and related data purged.' });
   } catch (error) {
     console.error('Error purging cases:', error);
@@ -7367,14 +7535,39 @@ app.put('/api/cases/:id', async (req, res) => {
 // --- Event timeline endpoints (new pipeline) ---
 
 app.get('/api/events/feed', async (req, res) => {
-  const limitRaw = req.query.limit;
-  let limit = Number(limitRaw);
-  if (!Number.isFinite(limit) || limit <= 0) {
-    limit = 50;
+  const limitParam = Number(req.query.limit);
+  const offsetParam = Number(req.query.offset);
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 50;
+  const offset = Number.isFinite(offsetParam) && offsetParam >= 0 ? offsetParam : 0;
+
+  const typeFilter = parseListQueryParam(req.query.type ?? req.query.types ?? req.query.event_type ?? req.query.eventType);
+  const categoryFilter = parseListQueryParam(req.query.category ?? req.query.categories ?? req.query.event_category ?? req.query.eventCategory);
+  const subjectTypeFilter = parseListQueryParam(req.query.subjectType ?? req.query.subject_type ?? req.query.subjectTypes);
+  const subjectIdRaw = firstQueryValue(req.query.subjectId ?? req.query.subject_id ?? null);
+  const normalizedSubjectId = subjectIdRaw === undefined || subjectIdRaw === null ? null : (String(subjectIdRaw).trim() || null);
+
+  const sinceMeta = parseDateQueryParam(req.query.since ?? req.query.after ?? req.query.from);
+  if (sinceMeta.provided && !sinceMeta.value) {
+    return res.status(400).json({ error: 'invalid_since' });
   }
+  const untilMeta = parseDateQueryParam(req.query.until ?? req.query.before ?? req.query.to);
+  if (untilMeta.provided && !untilMeta.value) {
+    return res.status(400).json({ error: 'invalid_until' });
+  }
+
   try {
     const { actorId } = resolveRequestActor(req);
-    const items = await getEventFeed({ limit, requesterId: actorId });
+    const items = await getEventFeed({
+      limit,
+      offset,
+      requesterId: actorId,
+      types: typeFilter,
+      categories: categoryFilter,
+      subjectType: subjectTypeFilter,
+      subjectId: normalizedSubjectId,
+      since: sinceMeta.value,
+      until: untilMeta.value,
+    });
     res.json(items);
   } catch (err) {
     console.error('[events] failed to load feed', err);
@@ -7420,6 +7613,9 @@ app.post('/api/events', async (req, res) => {
     });
     res.status(201).json(event);
   } catch (err) {
+    if (err instanceof EventValidationError) {
+      return res.status(400).json({ error: 'event_validation_failed', message: err.message, details: err.details || null });
+    }
     console.error('[events] failed to emit event', err);
     res.status(500).json({ error: 'event_emit_failed', message: err?.message || 'Unable to emit event' });
   }
@@ -7545,18 +7741,7 @@ app.delete('/api/notifications/:id', async (req, res) => {
     }
 });
 
-// GET all notification events (from iset_event_type)
-app.get('/api/events', async (req, res) => {
-    try {
-        const [rows] = await pool.query('SELECT event_type as value, label, description, alert_variant FROM iset_event_type ORDER BY sort_order, event_type');
-        res.json(rows);
-    } catch (err) {
-        console.error('[events:list] failed', err);
-        res.status(500).json({ error: 'Failed to fetch events' });
-    }
-});
-
-// GET all roles (from iset_role or static list)
+// GET all roles (legacy SQL directory)
 app.get('/api/roles', async (req, res) => {
     try {
         const [roles] = await pool.query('SELECT RoleID as id, RoleName as name, RoleDescription as description FROM role');
