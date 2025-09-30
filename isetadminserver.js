@@ -4,6 +4,54 @@ const nunjucks = require("nunjucks");
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
 const { createEventService, EventValidationError } = require('../shared/events');
 
+const ISET_TEST_DATA_TABLE_ORDER = [
+  'iset_internal_notification_dismissal',
+  'iset_internal_notification',
+  'iset_case_assessment',
+  'iset_case_document',
+  'iset_case_note',
+  'iset_case_task',
+  'iset_event_receipt',
+  'iset_event_outbox',
+  'iset_event_entry',
+  'iset_document',
+  'iset_application_draft_dynamic',
+  'iset_application_file',
+  'iset_application_submission',
+  'iset_application_draft',
+  'iset_case',
+  'iset_application',
+];
+
+const isMissingTableErrorLocal = (err) => {
+  if (!err) return false;
+  if (err.code === 'ER_NO_SUCH_TABLE') return true;
+  const message = typeof err.message === 'string' ? err.message : '';
+  return /does(n't| not) exist/i.test(message) || /no such table/i.test(message);
+};
+
+async function clearTableWithCount(connection, tableName) {
+  try {
+    const [[countRow]] = await connection.query(`SELECT COUNT(*) AS total FROM ${tableName}`);
+    const deleted = Number(countRow?.total ?? 0);
+    await connection.query(`DELETE FROM ${tableName}`);
+    try {
+      await connection.query(`ALTER TABLE ${tableName} AUTO_INCREMENT = 1`);
+    } catch (resetErr) {
+      if (!isMissingTableErrorLocal(resetErr)) {
+        console.warn(`[clear-test] auto_increment reset failed for ${tableName}:`, resetErr.message);
+      }
+    }
+    return { table: tableName, deleted };
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return { table: tableName, skipped: true, reason: 'missing_table' };
+    }
+    throw err;
+  }
+}
+
+
 function resolveRequestActor(req) {
   const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || req.auth?.userId || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
   const actorName = req.auth?.name || req.get('X-Dev-Username') || req.get('x-dev-username') || null;
@@ -575,23 +623,26 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
   try {
     const [[caseRow]] = await pool.query('SELECT id, application_id, assigned_to_user_id FROM iset_case WHERE id=? LIMIT 1', [caseId]);
     if (!caseRow) return res.status(404).json({ error: 'case_not_found' });
+    const previousAssigneeId = caseRow.assigned_to_user_id != null ? Number(caseRow.assigned_to_user_id) : null;
+    let previousAssigneeMeta = null;
+    if (previousAssigneeId) {
+      const [[prevMeta]] = await pool.query('SELECT id, display_name, email FROM staff_profiles WHERE id=? LIMIT 1', [previousAssigneeId]);
+      previousAssigneeMeta = prevMeta || null;
+    }
     let assignId = null;
     if (assignee_id) {
       const [[staff]] = await pool.query('SELECT id FROM staff_profiles WHERE id=? LIMIT 1', [assignee_id]);
       if (!staff) return res.status(400).json({ error: 'staff_not_found' });
       assignId = staff.id;
     } else if (placeholder_email) {
-      // For placeholders, create ephemeral staff_profiles row if needed (dev mode convenience)
       const emailNorm = String(placeholder_email).toLowerCase();
       const placeholderMeta = PLACEHOLDER_ASSIGNABLE_LOOKUP.get(emailNorm);
       const inferredRole = placeholderMeta?.role || 'Application Assessor';
       const subVal = `placeholder-${emailNorm}`;
-      // Try full column set first
       try {
         await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
           ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`, [ subVal, placeholder_email, inferredRole ]);
       } catch (insErr) {
-        // Fallback: if table definition differs, attempt minimal insert without role then update
         try {
           await pool.query(`INSERT INTO staff_profiles (cognito_sub,email) VALUES (?,?) ON DUPLICATE KEY UPDATE email=VALUES(email)`, [ subVal, placeholder_email ]);
           await pool.query(`UPDATE staff_profiles SET primary_role=? WHERE cognito_sub=? AND (primary_role IS NULL OR primary_role='')`, [ inferredRole, subVal ]);
@@ -604,11 +655,96 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
     } else {
       return res.status(400).json({ error: 'assignee_required' });
     }
-    await pool.query('UPDATE iset_case SET assigned_to_user_id=?, updated_at=NOW() WHERE id=?', [assignId, caseId]);
-    return res.json({ ok: true, case_id: caseId, assigned_to_user_id: assignId });
+    const normalizedAssignId = assignId != null ? Number(assignId) : null;
+    await pool.query('UPDATE iset_case SET assigned_to_user_id=?, updated_at=NOW() WHERE id=?', [normalizedAssignId, caseId]);
+    let newAssigneeMeta = null;
+    if (normalizedAssignId) {
+      const [[nextMeta]] = await pool.query('SELECT id, display_name, email FROM staff_profiles WHERE id=? LIMIT 1', [normalizedAssignId]);
+      newAssigneeMeta = nextMeta || null;
+    }
+    let trackingId = null;
+    if (caseRow.application_id) {
+      const [[trackingRow]] = await pool.query(`SELECT JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.submission_snapshot.reference_number')) AS submission_ref FROM iset_application WHERE id=? LIMIT 1`, [caseRow.application_id]);
+      trackingId = trackingRow?.submission_ref || null;
+    }
+    if (!trackingId) trackingId = `CASE-${caseId}`;
+    const { actorId, actorName } = resolveRequestActor(req);
+    let eventType = null;
+    if (previousAssigneeId && normalizedAssignId && previousAssigneeId !== normalizedAssignId) {
+      eventType = 'case_reassigned';
+    } else if (!previousAssigneeId && normalizedAssignId) {
+      eventType = 'case_assigned';
+    } else if (previousAssigneeId && normalizedAssignId === null) {
+      eventType = 'case_unassigned';
+    }
+    if (eventType) {
+      const payload = {
+        tracking_id: trackingId,
+        from_assignee_id: previousAssigneeMeta?.id ?? null,
+        from_assignee_email: previousAssigneeMeta?.email ?? null,
+        from_assignee_name: previousAssigneeMeta?.display_name ?? null,
+        to_assignee_id: newAssigneeMeta?.id ?? null,
+        to_assignee_email: newAssigneeMeta?.email ?? placeholder_email ?? null,
+        to_assignee_name: newAssigneeMeta?.display_name ?? null,
+      };
+      const fromLabel = payload.from_assignee_name || payload.from_assignee_email || previousAssigneeId || 'previous assignee';
+      const toLabel = eventType === 'case_unassigned' ? 'Unassigned' : (payload.to_assignee_name || payload.to_assignee_email || normalizedAssignId || 'assignee');
+      if (eventType === 'case_reassigned') {
+        payload.message = `Case reassigned from ${fromLabel} to ${toLabel}.`;
+      } else if (eventType === 'case_assigned') {
+        payload.message = `Case assigned to ${toLabel}.`;
+      } else if (eventType === 'case_unassigned') {
+        payload.message = `Case unassigned from ${fromLabel}.`;
+      }
+      try {
+        await captureCaseEvent({
+          type: eventType,
+          caseId,
+          payload,
+          trackingId,
+          actorId,
+          actorName,
+        });
+      } catch (_) {}
+    }
+    return res.json({ ok: true, case_id: caseId, assigned_to_user_id: normalizedAssignId });
   } catch (e) {
     console.error('PATCH /api/cases/:id/assign failed:', e.message);
     res.status(500).json({ error: 'assign_failed', message: e.message });
+  }
+});
+
+app.post('/api/clear-iset-test-data', async (_req, res) => {
+  let connection;
+  const report = [];
+  const startedAt = Date.now();
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    await connection.query('SET FOREIGN_KEY_CHECKS = 0');
+    for (const tableName of ISET_TEST_DATA_TABLE_ORDER) {
+      try {
+        const outcome = await clearTableWithCount(connection, tableName);
+        report.push(outcome);
+      } catch (err) {
+        err.tableName = tableName;
+        throw err;
+      }
+    }
+    await connection.query('SET FOREIGN_KEY_CHECKS = 1');
+    await connection.commit();
+    res.json({ ok: true, cleared: report, durationMs: Date.now() - startedAt });
+  } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+      try { await connection.query('SET FOREIGN_KEY_CHECKS = 1'); } catch (_) {}
+    }
+    const message = err?.message || 'Failed to clear test data';
+    const table = err?.tableName || null;
+    console.error('[clear-iset-test-data] failed', table ? `${table}:` : '', message);
+    res.status(500).json({ error: 'clear_test_data_failed', message, table });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -1347,13 +1483,6 @@ const markEventRead = eventService.markRead;
 const loadEventCaptureState = eventService.loadCaptureState;
 const updateEventCaptureRules = eventService.updateCaptureRules;
 const getEventCatalog = eventService.getCatalog;
-
-function isMissingTableErrorLocal(err) {
-  if (!err) return false;
-  if (err.code === 'ER_NO_SUCH_TABLE') return true;
-  const message = typeof err.message === 'string' ? err.message : '';
-  return /no such table/i.test(message) || /does not exist/i.test(message) || /doesn't exist/i.test(message);
-}
 
 async function deleteTableIfExists(tableName) {
   try {
@@ -4778,6 +4907,152 @@ const generateSystemTasks = async () => {
     console.error('Error generating system tasks:', err);
   }
 };
+
+// --- Dummy Draft Insertion (test helper) ------------------------------------
+// POST /api/create-dummy-draft
+// Body (optional): { userId?: number, stepCursor?: string, workflowId?: string }
+// Inserts or updates a single-row draft (table has UNIQUE user_id) to speed portal testing.
+app.post('/api/create-dummy-draft', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = Number(body.userId) || 35;               // default test applicant
+    const workflowId = String(body.workflowId || 'iset-v1');
+    const stepCursor = String(body.stepCursor || 'summary-page');
+
+    // Provided draft payload (exactly as requested)
+    const draftPayload = {
+      "dob": "1971-03-10",
+      "consent": { "name": "Bill Sillery", "signed": true },
+      "barriers": ["other"],
+      "last-name": "Sillery",
+      "first-name": "William",
+      "address-city": "Westmount",
+      "income-other": "",
+      "middle-names": "John",
+      "spouses-name": "Marina Sharpe",
+      "expenses-rent": "4500",
+      "other-barrier": "No clients",
+      "telephone-alt": "",
+      "telephone-day": "(514) 975 1690",
+      "top-up-amount": "200",
+      "education-year": "1993",
+      "has-disability": 1,
+      "home-comminuty": "Westmount",
+      "income-jordans": "",
+      "income-spousal": "",
+      "long-term-goal": "To be the charman of Awentech",
+      "marital-status": "married",
+      "preferred-name": "Bill",
+      "target-program": "not_yet",
+      "eligibility-age": 1,
+      "example-input-5": "",
+      "example-radio-2": "masters_degree",
+      "address-postcode": "H3Z 2G9",
+      "address-province": "qc",
+      "ages-of-children": "11",
+      "visible-minority": "false",
+      "income-employment": "100",
+      "social-assistance": 1,
+      "dependent-children": 1,
+      "edication-location": "Oxford, UK",
+      "eligibility-female": 1,
+      "expenses-groceries": "",
+      "expenses-utilities": "",
+      "preferred-language": "en",
+      "requested-supports": ["other"],
+      "expenses-other-list": "",
+      "income-band-funding": "20",
+      "labour-force-status": "self-employed",
+      "registration-number": "12134231",
+      "eligibility-canadian": 1,
+      "eligibility-training": 1,
+      "expenses-transitpass": "",
+      "income-child-benefit": "",
+      "income-social-assist": "",
+      "contact-email-address": "bill@sillery.co.uk",
+      "eligibility-financial": 1,
+      "address-street-address": "251 Avenue Kensington",
+      "disability-description": "I am Engligh and don't steak French.",
+      "eligibility-employment": 1,
+      "eligibility-indigenous": 1,
+      "emergency-contact-name": "Marina Sharpe",
+      "indigenous_declaration": { "name": "Bill Sillery", "signed": true },
+      "address-mailing-address": "",
+      "other-requested-support": "Contact money",
+      "social-insurance-number": "987 987 987",
+      "eligibility-disqualified": 0,
+      "income-other-description": "",
+      "legal-indigenous-identity": "metis",
+      "emergency-contact-telephone": "(514) 924 5602",
+      "what-is-your-gender-identity": "5",
+      "emergency-contact-relationship": "Wife"
+    };
+
+    // Simulated traversal history (pruned)
+    const history = [
+      "consent",
+      "indigenous-declaration",
+      "eligibility",
+      "social-insurance-number",
+      "name",
+      "date-of-birth",
+      "gender",
+      "contact-information",
+      "emergency-contact",
+      "indigenous-legal-identity",
+      "registration-number",
+      "home-community",
+      "demographics",
+      "disability",
+      "summary-page"
+    ];
+
+    // Check existing row
+    const [existingRows] = await pool.query(
+      'SELECT id, version FROM iset_intake.iset_application_draft_dynamic WHERE user_id = ? LIMIT 1',
+      [userId]
+    );
+
+    if (existingRows.length) {
+      const current = existingRows[0];
+      const newVersion = Number(current.version || 1) + 1;
+      await pool.query(
+        `UPDATE iset_intake.iset_application_draft_dynamic
+           SET workflow_id = ?, step_cursor = ?, draft_payload = ?, history = ?, doc_refs = NULL, version = ?
+         WHERE user_id = ?`,
+        [workflowId, stepCursor, JSON.stringify(draftPayload), JSON.stringify(history), newVersion, userId]
+      );
+      return res.json({
+        ok: true,
+        action: 'updated',
+        userId,
+        version: newVersion,
+        stepCursor,
+        workflowId
+      });
+    }
+
+    // Insert fresh
+    await pool.query(
+      `INSERT INTO iset_intake.iset_application_draft_dynamic
+         (user_id, workflow_id, step_cursor, draft_payload, history, doc_refs, version)
+       VALUES (?,?,?,?,?,NULL,1)`,
+      [userId, workflowId, stepCursor, JSON.stringify(draftPayload), JSON.stringify(history)]
+    );
+
+    res.json({
+      ok: true,
+      action: 'inserted',
+      userId,
+      version: 1,
+      stepCursor,
+      workflowId
+    });
+  } catch (err) {
+    console.error('[dummy-draft] error:', err.message);
+    res.status(500).json({ error: 'dummy_draft_failed', message: err.message });
+  }
+});
 
 // Unified applicant documents endpoint now sources from iset_document (generalized store)
 app.get('/api/applicants/:id/documents', async (req, res) => {

@@ -35,18 +35,18 @@ function statusColor(status = '') {
   if (['submitted', 'in review', 'in_review', 'in progress', 'pending', 'assigned'].includes(normalized)) return 'blue';
   if (['docs requested', 'docs_requested', 'action required', 'action required (docs requested)'].includes(normalized)) return 'orange';
   if (['rejected', 'declined', 'errored'].includes(normalized)) return 'red';
-  if (['withdrawn', 'closed', 'inactive'].includes(normalized)) return 'grey';
+  if (['withdrawn', 'closed', 'inactive', 'archived'].includes(normalized)) return 'grey';
   return 'grey';
 }
 
 const STATUS_OPTIONS = [
   { label: 'Submitted', value: 'submitted' },
-  { label: 'In review', value: 'in_review' },
-  { label: 'Action required (docs requested)', value: 'docs_requested' },
+  { label: 'In Review', value: 'in_review' },
+  { label: 'Action Required', value: 'docs_requested' },
   { label: 'Approved', value: 'approved' },
-  { label: 'Completed', value: 'completed' },
   { label: 'Rejected', value: 'rejected' },
   { label: 'Withdrawn', value: 'withdrawn' },
+  { label: 'Archived', value: 'archived' },
 ];
 
 const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
