@@ -22,6 +22,27 @@
 ## Progress Log
 
 ### 2025-09-25 - Event capture enablement (admin)
+
+### 2025-09-29 - Legacy event pipeline retirement (admin)
+
+### 2025-09-29 - Event store schema deployed (admin)
+- Ran migration 20250926 to drop the legacy case-event tables and create `iset_event_entry`, `iset_event_receipt`, and `iset_event_outbox` in the dev database.
+- Verified new tables exist and old ones are gone; shared emitter can now write to the canonical store for continued work.
+
+### 2025-09-29 - Event service SDK & validation (shared)
+- Introduced `shared/events/index.js` with `createEventService`, exposing pooled helpers for emit/get/mark operations plus capture-rule utilities.
+- Hardened the emitter with validation errors for unknown types, missing case ids, and non-object payloads; admin APIs now surface 400s on validation failures.
+- Admin server now consumes the shared service wrapper instead of direct module wiring, keeping backend emitters consistent across stacks.
+
+### 2025-09-29 - Event API filtering & validation (admin)
+- Added type/category/time-range filters (plus subject targeting for feeds) to `/api/cases/:id/events` and `/api/events/feed`, powered by the new emitter query options.
+- Admin endpoints now reject invalid date filters with 400s and reuse the shared service helpers for consistent behaviour across stacks.
+
+- Removed server dependencies on `iset_case_event` and `iset_event_type`; `/api/events` now serves catalogue metadata directly from `shared/events`.
+- Added missing-table fallbacks and placeholder seeding to the shared emitter so timelines keep working before the new event store schema is deployed.
+- Updated admin purge and task-generation routines to target the new event store tables, ensuring demo resets and automated follow-ups stay aligned with the unified pipeline.
+- Updated the Phase 1 migration to drop `iset_case_event`/`iset_event_type`, letting the new event store stand alone before backfilling data.
+
 - Lifted the event catalogue, capture service, and emitter into `../shared/events` so both admin and portal stacks can reuse the same emit/update logic (portal wiring still outstanding).
 - Hooked the admin server to the shared emitter/service, exposing `/api/admin/event-types` and `/api/admin/event-capture-rules` while consulting runtime capture toggles before persisting events.
 - Added a lightweight cache in the emitter that honours `iset_runtime_config` rules and invalidates itself whenever capture rules are updated.
@@ -248,40 +269,37 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 - Public portal backend reads same keys; if offline, falls back to last-seen snapshot with version tokens.
 ## Implementation Plan (High-Level)
 
-1. **Documentation & Design Finalisation**
-   - Socialise this document with backend/frontend/portal stakeholders.
-   - Confirm schema, API shapes, and configuration format.
+1. **Design & Stakeholder Sign-off**
+   - Circulate the updated architecture doc (including fallback strategy) with admin, portal, and frontend leads.
+   - Capture feedback on schema, API contracts, and configuration keys; record final decisions.
 
-2. **Clean Break Preparation**
-   - Remove legacy event helpers/routes/tables from codebase (retain widget shell with placeholder data).
-   - Feature-flag the new event surfaces so we can ship incrementally.
+2. **Schema & Migration Delivery**
+   - Author Phase 1 migrations for `iset_event_entry`, `iset_event_receipt`, and `iset_event_outbox`; run them in dev and document rollback steps.
+   - Provide seed scripts/sample data so emitters can be smoke-tested immediately after deployment.
 
-3. **Core Infrastructure**
-   - Create new database schema (event_entry, event_type_catalog, optional event_receipt, event_outbox).
-   - Implement the event service layer with rule cache + emit pipeline.
-   - Wire configuration lookups to iset_runtime_config.
+3. **Service & SDK Enablement**
+   - Flesh out the shared event service (validation hooks, capture-rule cache refresh, error handling) and publish lightweight SDK helpers for other services.
+   - Remove remaining legacy emitters/queries now that the schema exists (work mostly done in the admin stack).
 
 4. **Backend APIs**
-   - Build new REST endpoints (and service methods) to fetch events, mark read, etc., using the fresh schema.
-   - Add admin endpoints to manage event catalog (if needed) and to expose capture-rule status.
+   - Finalise `/api/cases/:id/events`, `/api/events/feed`, `/api/events` emit, and mark-read endpoints using the new store.
+   - Add admin tooling endpoints for capture-rule management and catalogue inspection on top of the shared service.
 
 5. **Frontend Integration**
-   - Update ApplicationEvents widget to call new endpoints while preserving layout.
-   - Add admin configuration dashboard UI (table of categories/types with toggles, audit info).
-   - Ensure RBAC matrix includes the new dashboard.
+   - Wire ApplicationEvents and CaseUpdates widgets to the finalised API contract; add state for capture-rule warnings if necessary.
+   - Ship the admin capture dashboard enhancements aligned with the shared catalogue metadata.
 
 6. **Portal Alignment**
-   - Refactor public portal backend to emit via the shared event service (or shared module) and honour capture settings.
-   - Add health logging to confirm portal cache refresh.
+   - Migrate the public portal backend onto the shared emitter, honouring capture toggles.
+   - Verify event ingestion parity (existing portal timelines vs new pipeline) during rollout.
 
 7. **Observability & Ops**
-   - Instrument metrics/logging around emit success/fail, queue depth, cache refresh.
-   - Create dashboards/alerts for configuration mismatches or backlog spikes.
+   - Instrument metrics/logging around emit success/failure, cache refresh, and outbox queue depth.
+   - Produce dashboards and alerts for event delivery, capture-rule staleness, and backlog growth.
 
 8. **Rollout & Cleanup**
-   - Backfill any seed event types into event_type_catalog.
-   - Remove feature flags once the new pipeline runs end-to-end.
-   - Document operator runbooks (configuration updates, troubleshooting).
+   - Backfill required catalogue entries and archive the deprecated tables once consumers are migrated.
+   - Remove feature toggles, document operator runbooks, and schedule follow-up audits for retention/archival policies.
 
 ## TODO (Implementation Follow-up)
 - Hook the new event service into the future event outbox/migration scripts once the storage schema is ready.

@@ -1,6 +1,10 @@
 -- Event store schema for new capture pipeline (idempotent)
 SET FOREIGN_KEY_CHECKS = 0;
 
+-- Drop legacy case events tables (no data retained)
+DROP TABLE IF EXISTS `iset_case_event`;
+DROP TABLE IF EXISTS `iset_event_type`;
+
 CREATE TABLE IF NOT EXISTS `iset_event_entry` (
   `id` CHAR(36) NOT NULL,
   `category` VARCHAR(64) NOT NULL,
