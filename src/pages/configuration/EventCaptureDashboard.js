@@ -256,7 +256,6 @@ const EventCaptureDashboard = () => {
           variant="h1"
           description="Toggle which event categories and event types are written to the central event store. Changes apply immediately across admin and portal backends."
         >
-          Event Capture Configuration
         </Header>
       }
     >

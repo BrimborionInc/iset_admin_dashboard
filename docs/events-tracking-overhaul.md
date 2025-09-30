@@ -13,41 +13,59 @@
 - **Performance**: Efficient querying for timeline widgets and notification feeds.
 - **Security**: Enforce scoping so staff only see events tied to cases they manage.
 
-## Current State Summary (for reference)
-- Backend helper `addCaseEvent` inserts into `iset_case_event`; other paths relied on POST `/api/case-events`; this is being replaced with the unified `/api/events` emitter.
-- Event data is stored as JSON blobs with minimal validation and limited indexing beyond `created_at` and `event_type`.
-- Frontend widgets (`ApplicationEvents`, `CaseUpdates`) now read from the new `/api/cases/:id/events` and `/api/events/feed` surfaces.
-- Event taxonomy lives in `iset_event_type` with `label` and `alert_variant` only.
+## Current State Summary (2025-09-30)
+- Admin server now instantiates `createEventService` from `../shared/events` in `isetadminserver.js`, replacing the legacy `addCaseEvent` helper and deprecated `/api/case-events` endpoint; the public portal backend still needs to migrate.
+- Event emission flows through `shared/events/emitter.js` (`emitEvent`), which validates types and subjects, enforces object payloads, honours capture toggles stored in `iset_runtime_config` (scope `events_capture`), persists to `iset_event_entry`, queues `iset_event_outbox`, and falls back to an in-memory buffer if tables are missing.
+- `/api/cases/:case_id/events`, `/api/events/feed`, `/api/events` (POST), and `/api/events/:eventId/read` now proxy to the shared service with filter/receipt support and consistent error handling.
+- Event taxonomy and metadata are sourced from `shared/events/catalog.js`, providing category, severity, source, draft, and lock flags consumed by the capture-rule tooling.
+- Frontend widgets (`src/widgets/ApplicationEvents.js`, `src/widgets/caseUpdates.js`) consume the new endpoints, rendering severity badges, read-state indicators, and filter/sort controls against the normalized event payloads.
 
 ## Progress Log
 
 ### 2025-09-25 - Event capture enablement (admin)
+- Added `loadEventCaptureState` and `updateEventCaptureRules` in `shared/events/service.js` to persist capture toggles in `iset_runtime_config` while hydrating defaults from the shared catalog.
+- Introduced a 5-second cached lookup in `shared/events/emitter.js` so emitters avoid redundant queries and gracefully fall back when configuration tables are absent.
 
 ### 2025-09-29 - Legacy event pipeline retirement (admin)
+- Replaced all `iset_case_event` dependencies with the shared `createEventService` wiring in `isetadminserver.js`; legacy helpers remain only in `prev_isetadminserver.js` for reference.
+- Updated purge/reset routines to include `iset_event_entry`, `iset_event_receipt`, and `iset_event_outbox`, while memory fallbacks keep the UI functional until the migration runs.
 
 ### 2025-09-29 - Event store schema deployed (admin)
 - Ran migration 20250926 to drop the legacy case-event tables and create `iset_event_entry`, `iset_event_receipt`, and `iset_event_outbox` in the dev database.
 - Verified new tables exist and old ones are gone; shared emitter can now write to the canonical store for continued work.
 
-### 2025-09-29 - Event service SDK & validation (shared)
-- Introduced `shared/events/index.js` with `createEventService`, exposing pooled helpers for emit/get/mark operations plus capture-rule utilities.
-- Hardened the emitter with validation errors for unknown types, missing case ids, and non-object payloads; admin APIs now surface 400s on validation failures.
-- Admin server now consumes the shared service wrapper instead of direct module wiring, keeping backend emitters consistent across stacks.
+### 2025-09-30 - Admin endpoints & widgets upgraded
+- Hardened `/api/cases/:case_id/events`, `/api/events/feed`, and `/api/events` with filter parsing, validation (types, categories, date bounds), and consistent error codes.
+- Added `markEventRead` support via `/api/events/:eventId/read`, storing acknowledgements in `iset_event_receipt`.
+- Refreshed `ApplicationEvents` and `CaseUpdates` widgets to consume the normalized payloads, surface status indicators, and honour read/unread toggles.
 
-### 2025-09-29 - Event API filtering & validation (admin)
-- Added type/category/time-range filters (plus subject targeting for feeds) to `/api/cases/:id/events` and `/api/events/feed`, powered by the new emitter query options.
-- Admin endpoints now reject invalid date filters with 400s and reuse the shared service helpers for consistent behaviour across stacks.
+## Admin Dashboard Implementation Details
 
-- Removed server dependencies on `iset_case_event` and `iset_event_type`; `/api/events` now serves catalogue metadata directly from `shared/events`.
-- Added missing-table fallbacks and placeholder seeding to the shared emitter so timelines keep working before the new event store schema is deployed.
-- Updated admin purge and task-generation routines to target the new event store tables, ensuring demo resets and automated follow-ups stay aligned with the unified pipeline.
-- Updated the Phase 1 migration to drop `iset_case_event`/`iset_event_type`, letting the new event store stand alone before backfilling data.
+### Shared event service
+- `shared/events/index.js` returns pooled helpers (`emit`, `emitCaseEvent`, `getCaseTimeline`, `getEventFeed`, `markRead`, capture rule loaders) bound to the MySQL pool supplied by `isetadminserver.js`.
+- `shared/events/emitter.js` enforces known event types (via `getEventType`), requires case subjects for case events, ensures payloads are objects, honours capture toggles, writes to `iset_event_entry`, and enqueues serialized payloads into `iset_event_outbox` (worker pending). Missing tables trigger logging and population of an in-memory cache so early environments can continue to function.
+- `shared/events/service.js` builds the capture state by overlaying `iset_runtime_config` updates onto the catalog, tracks `updated_at`/`updated_by`, and invalidates the cache whenever capture rules change.
+- `shared/events/catalog.js` defines the current taxonomy across `application_lifecycle`, `case_lifecycle`, `assessment`, `documents`, `messaging`, `notes`, and `system` categories with severity/source metadata and draft/locked flags.
 
-- Lifted the event catalogue, capture service, and emitter into `../shared/events` so both admin and portal stacks can reuse the same emit/update logic (portal wiring still outstanding).
-- Hooked the admin server to the shared emitter/service, exposing `/api/admin/event-types` and `/api/admin/event-capture-rules` while consulting runtime capture toggles before persisting events.
-- Added a lightweight cache in the emitter that honours `iset_runtime_config` rules and invalidates itself whenever capture rules are updated.
-- Refined the Event Capture dashboard by replacing the vertical list with an embedded Cloudscape table that surfaces attributes, last-updated metadata, and per-type capture toggles.
-- Noted a remaining gap: the public portal still writes to `iset_case_event`; we will rebuild that backend in a clean workspace before adopting the shared emitter there.
+### HTTP API wiring (`isetadminserver.js`)
+- Instantiates the shared service once (reusing the MySQL pool) and exposes `/api/events`, `/api/admin/event-capture-rules` (GET/PATCH for SysAdmin), `/api/cases/:case_id/events`, `/api/events/feed`, `/api/events` (POST), and `/api/events/:eventId/read`.
+- Request parsing normalizes limit/offset, comma-separated types/categories, optional subject filters, and validates ISO-like date bounds before delegating to the service helpers, returning 400s for invalid inputs.
+- `captureCaseEvent` wraps `emitCaseEvent` for structured case emissions triggered by assessment/NWAC updates, supplying actor context derived from the authenticated request.
+
+### Frontend consumers
+- `src/widgets/ApplicationEvents.js` loads `/api/cases/:case_id/events`, provides free-text filtering across columns, client-side sorting, and exposes read-state via `is_read`.
+- `src/widgets/caseUpdates.js` fetches `/api/events/feed?limit=20`, highlights unread items, persists user preferences (localStorage), and renders severity through `StatusIndicator`.
+
+### Persistence, receipts, and outbox
+- Successful emissions create rows in `iset_event_entry` with UUID identifiers plus optional `tracking_id`/`correlation_id`; acknowledgements live in `iset_event_receipt` keyed by `recipient_id`.
+- Each event is also serialized into `iset_event_outbox` with `status='pending'`, `attempts=0`, and `next_attempt_at=captured_at`, preparing the ground for a future fan-out worker.
+
+### Fallback behaviour & known gaps
+- When tables are missing (e.g., local dev without migrations), the emitter stores events in an in-memory ring buffer so dashboards keep working until the schema is provisioned.
+- The public portal backend still posts directly to `iset_case_event`; migrating it onto the shared service remains outstanding.
+- No worker currently drains `iset_event_outbox`, so downstream notifications/analytics are not yet triggered.
+
+*The sections below outline future phases that have not yet been implemented as of 2025-09-30.*
 
 ## Proposed Documentation Outline
 

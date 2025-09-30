@@ -2,13 +2,14 @@
 const express = require('express');
 const router = express.Router();
 const { requireRole } = require('../../middleware/authz');
+const { resolveAwsCredentials } = require('../../lib/awsCredentials');
 const { CognitoIdentityProviderClient, ListUsersCommand, ListUsersInGroupCommand, AdminCreateUserCommand, AdminAddUserToGroupCommand, AdminDisableUserCommand, AdminEnableUserCommand, AdminUpdateUserAttributesCommand } = require('@aws-sdk/client-cognito-identity-provider');
 
 const POOL_ID = process.env.COGNITO_USER_POOL_ID;
 const REGION = process.env.AWS_REGION || process.env.COGNITO_REGION;
 
 function getClient() {
-  return new CognitoIdentityProviderClient({ region: REGION });
+  return new CognitoIdentityProviderClient({ region: REGION, credentials: resolveAwsCredentials() });
 }
 
 // Guard matrix
@@ -65,40 +66,86 @@ router.get('/users', async (req, res) => {
     }
 
     const client = getClient();
-    // For each target administrative group, list users in group to infer role.
+    // New approach: build user list ONLY from ListUsersInGroup (avoids needing cognito-idp:ListUsers permission).
+    // If ListUsers is permitted we can optionally enrich, but it's no longer required.
     const groups = ['SysAdmin','ProgramAdmin','RegionalCoordinator','Adjudicator'];
-    const roleMap = {};
+    const ROLE_RANK = { SysAdmin: 4, ProgramAdmin: 3, RegionalCoordinator: 2, Adjudicator: 1 };
+    const userMap = new Map(); // username -> user object
     for (const g of groups) {
       try {
         const resp = await client.send(new ListUsersInGroupCommand({ UserPoolId: POOL_ID, GroupName: g }));
-        for (const u of resp.Users || []) roleMap[u.Username] = g;
-      } catch (e) { /* swallow for non-existing groups */ }
+        for (const u of resp.Users || []) {
+          const attr = Object.fromEntries((u.Attributes||[]).map(a => [a.Name, a.Value]));
+          const existing = userMap.get(u.Username);
+            const candidate = {
+              username: u.Username,
+              email: attr.email || u.Username,
+              role: g,
+              status: u.UserStatus || 'UNKNOWN',
+              regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : null,
+              mfa: !!u.MFAOptions && u.MFAOptions.length > 0,
+              lastSignIn: u.UserLastModifiedDate ? new Date(u.UserLastModifiedDate).toISOString() : null,
+              createdAt: u.UserCreateDate ? new Date(u.UserCreateDate).toISOString() : null
+            };
+            if (!existing) {
+              userMap.set(u.Username, candidate);
+            } else {
+              // If user appears in multiple admin groups, keep the highest-ranked role.
+              if ((ROLE_RANK[candidate.role]||0) > (ROLE_RANK[existing.role]||0)) {
+                userMap.set(u.Username, { ...existing, role: candidate.role });
+              }
+            }
+        }
+      } catch (e) { /* ignore missing group or permission issues per-group */ }
     }
-    // Fallback full list to gather attributes & status
-    const listResp = await client.send(new ListUsersCommand({ UserPoolId: POOL_ID, Limit: 60 })); // small scale
-  const users = (listResp.Users || []).filter(u => roleMap[u.Username]).map(u => {
-      const attr = Object.fromEntries((u.Attributes||[]).map(a => [a.Name, a.Value]));
-      return {
-        username: u.Username,
-        email: attr.email || u.Username,
-        role: roleMap[u.Username],
-        status: u.UserStatus || 'UNKNOWN',
-        regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : null,
-        mfa: !!u.MFAOptions && u.MFAOptions.length > 0,
-    lastSignIn: u.UserLastModifiedDate ? new Date(u.UserLastModifiedDate).toISOString() : null,
-    createdAt: u.UserCreateDate ? new Date(u.UserCreateDate).toISOString() : null
-      };
-    });
-  const filtered = q ? users.filter(u => [u.username, u.email, u.role].some(v => v && v.toLowerCase().includes(q))) : users;
-  res.json({ source: 'cognito', users: filtered });
+    let users = Array.from(userMap.values());
+
+    // Optional enrichment if ListUsers allowed (adds any users that might have a role assigned but not returned above â€“ rare) / or refresh attributes.
+    try {
+      const listResp = await client.send(new ListUsersCommand({ UserPoolId: POOL_ID, Limit: 60 }));
+      for (const u of listResp.Users || []) {
+        if (!userMap.has(u.Username)) continue; // only update known admin users
+        const attr = Object.fromEntries((u.Attributes||[]).map(a => [a.Name, a.Value]));
+        const existing = userMap.get(u.Username);
+        userMap.set(u.Username, {
+          ...existing,
+          email: attr.email || existing.email,
+          status: u.UserStatus || existing.status,
+          regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : existing.regionId,
+          mfa: !!u.MFAOptions && u.MFAOptions.length > 0,
+          lastSignIn: u.UserLastModifiedDate ? new Date(u.UserLastModifiedDate).toISOString() : existing.lastSignIn,
+          createdAt: u.UserCreateDate ? new Date(u.UserCreateDate).toISOString() : existing.createdAt
+        });
+      }
+      users = Array.from(userMap.values());
+    } catch (enrichErr) {
+      if (/not authorized to perform: cognito-idp:ListUsers/i.test(enrichErr?.message || '')) {
+        // Silently ignore missing ListUsers permission (now optional)
+      } else {
+        // Non-authorization errors in enrichment phase are logged but not fatal.
+        console.warn('[admin-users] Optional ListUsers enrichment failed:', enrichErr.message, 'AWS_ACCESS_KEY_ID=' + (process.env.AWS_ACCESS_KEY_ID || 'missing'), 'AWS_SECRET_ACCESS_KEY=' + (process.env.AWS_SECRET_ACCESS_KEY || 'missing'));
+      }
+    }
+
+    const filtered = q ? users.filter(u => [u.username, u.email, u.role].some(v => v && v.toLowerCase().includes(q))) : users;
+    return res.json({ source: 'cognito', enriched: filtered.length === users.length, users: filtered });
   } catch (e) {
-    res.status(500).json({ error: 'Failed to list users', detail: e?.message });
+    const msg = e?.message || '';
+    if (/not authorized to perform: cognito-idp:ListUsers/i.test(msg)) {
+      return res.status(503).json({
+        error: 'cognito_access_denied',
+        detail: 'Backend AWS credentials lack permission cognito-idp:ListUsers (now optional) or ListUsersInGroup (required).',
+        hint: 'Grant cognito-idp:ListUsersInGroup and related admin actions to see users.',
+        users: []
+      });
+    }
+    res.status(500).json({ error: 'Failed to list users', detail: msg });
   }
 });
 
 // In dev (auth disabled) short-circuit create/modify routes with mock behavior
 if (!AUTH_ENABLED) {
-  console.log('[admin-users] AUTH disabled – using mock mutation endpoints');
+  console.log('[admin-users] AUTH disabled â€“ using mock mutation endpoints');
   router.post('/users', (req, res) => {
     console.log('[admin-users][mock] create user body=', req.body);
     return res.status(201).json({ message: 'Mock user created (auth disabled)' });
@@ -292,3 +339,5 @@ if (!AUTH_ENABLED) {
 }
 
 module.exports = router;
+
+
