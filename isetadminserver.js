@@ -1,8 +1,10 @@
 const path = require('path');
-const { maskName } = require('./src/utils/utils'); // Update the import statement
+const { maskName } = require('./src/utils/utils');
+const { getInternalNotifications, dismissInternalNotification } = require('./src/internalNotifications');
+const { dispatchInternalNotifications } = require('../shared/events/notificationDispatcher');
 const nunjucks = require("nunjucks");
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
-const { createEventService, EventValidationError } = require('../shared/events');
+const { createEventService, EventValidationError, registerNotificationHook } = require('../shared/events');
 
 const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_internal_notification_dismissal',
@@ -1475,6 +1477,10 @@ const dbConfig = {
 
 const pool = mysql.createPool(dbConfig);
 const eventService = createEventService({ pool, logger: console });
+registerNotificationHook(async (event) => {
+  await dispatchInternalNotifications({ pool, event, logger: console });
+});
+
 const emitEvent = eventService.emit;
 const emitCaseEventSdk = eventService.emitCaseEvent;
 const getCaseEvents = eventService.getCaseTimeline;
@@ -7981,20 +7987,20 @@ app.get('/api/notifications', async (req, res) => {
 
 // POST create or update a notification setting
 app.post('/api/notifications', async (req, res) => {
-    const { id, event, role, template_id, language, enabled, email_alert } = req.body;
+    const { id, event, role, template_id, language, enabled, email_alert, bell_alert } = req.body;
     try {
         if (id) {
             // Update existing
             await pool.query(
-                `UPDATE notification_setting SET event=?, role=?, template_id=?, language=?, enabled=?, email_alert=?, updated_at=NOW() WHERE id=?`,
-                [event, role, template_id, language, enabled, email_alert ?? 0, id]
+                `UPDATE notification_setting SET event=?, role=?, template_id=?, language=?, enabled=?, email_alert=?, bell_alert=?, updated_at=NOW() WHERE id=?`,
+                [event, role, template_id, language, enabled, email_alert ?? 0, bell_alert ?? 0, id]
             );
             res.json({ success: true, id });
         } else {
             // Insert new
             const [result] = await pool.query(
-                `INSERT INTO notification_setting (event, role, template_id, language, enabled, email_alert) VALUES (?, ?, ?, ?, ?, ?)`,
-                [event, role, template_id, language, enabled, email_alert ?? 0]
+                `INSERT INTO notification_setting (event, role, template_id, language, enabled, email_alert, bell_alert) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [event, role, template_id, language, enabled, email_alert ?? 0, bell_alert ?? 0]
             );
             res.json({ success: true, id: result.insertId });
         }
