@@ -8074,7 +8074,33 @@ app.get('/api/users/:id', async (req, res) => {
 // --- Internal Notifications API ---
 app.get('/api/me/notifications', async (req, res) => {
   try {
-    const notifications = await getInternalNotifications(pool, req.auth);
+    const { actorId } = resolveRequestActor(req);
+    const staffProfileId = req.staffProfile?.id || null;
+    const headerUserId = req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
+    const candidateIds = [staffProfileId, actorId, headerUserId];
+    let normalizedUserId = null;
+    for (const value of candidateIds) {
+      if (value === null || typeof value === 'undefined') continue;
+      const numeric = Number(value);
+      if (!Number.isNaN(numeric) && numeric > 0) {
+        normalizedUserId = numeric;
+        break;
+      }
+    }
+
+    let authContext = req.auth ? { ...req.auth } : {};
+    if (normalizedUserId && !authContext.user_id && !authContext.userId && !authContext.id) {
+      authContext.user_id = normalizedUserId;
+    }
+    if (!authContext.role && req.staffProfile?.primary_role) {
+      authContext.role = req.staffProfile.primary_role;
+    }
+    if (!authContext.role) {
+      const headerRole = req.get('X-Dev-Role') || req.get('x-dev-role') || null;
+      if (headerRole) authContext.role = headerRole;
+    }
+
+    const notifications = await getInternalNotifications(pool, authContext);
     res.status(200).json(notifications);
   } catch (error) {
     console.error('[notifications] fetch failed', error);
@@ -8089,8 +8115,43 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     return res.status(400).json({ error: 'Invalid notification id' });
   }
 
+  const { actorId } = resolveRequestActor(req);
+  const staffProfileId = req.staffProfile?.id || null;
+  const headerUserId = req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
+  const candidateIds = [staffProfileId, actorId, headerUserId];
+  let normalizedUserId = null;
+  for (const value of candidateIds) {
+    if (value === null || typeof value === 'undefined') continue;
+    const numeric = Number(value);
+    if (!Number.isNaN(numeric) && numeric > 0) {
+      normalizedUserId = numeric;
+      break;
+    }
+  }
+
+  let authContext = req.auth ? { ...req.auth } : null;
+  if (!authContext) {
+    authContext = normalizedUserId ? { user_id: normalizedUserId } : null;
+  } else if (!authContext.user_id && !authContext.userId && !authContext.id && normalizedUserId) {
+    authContext.user_id = normalizedUserId;
+  }
+  if (authContext) {
+    if (!authContext.role && req.staffProfile?.primary_role) {
+      authContext.role = req.staffProfile.primary_role;
+    }
+    if (!authContext.role) {
+      const headerRole = req.get('X-Dev-Role') || req.get('x-dev-role') || null;
+      if (headerRole) authContext.role = headerRole;
+    }
+  }
+
+  const resolvedUserId = authContext?.user_id || authContext?.userId || authContext?.id || null;
+  if (!resolvedUserId) {
+    return res.status(401).json({ error: 'User context not available' });
+  }
+
   try {
-    await dismissInternalNotification(pool, req.auth, notificationId);
+    await dismissInternalNotification(pool, authContext, notificationId);
     res.status(200).json({ success: true });
   } catch (error) {
     if (error && error.statusCode) {

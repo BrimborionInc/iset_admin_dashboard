@@ -66,6 +66,18 @@ const AppContent = ({ currentRole }) => {
     return () => clearInterval(interval);
   }, [loadNotifications]);
 
+  useEffect(() => {
+    const handleAuthChange = () => {
+      loadNotifications();
+    };
+    window.addEventListener('auth:session-changed', handleAuthChange);
+    window.addEventListener('storage', handleAuthChange);
+    return () => {
+      window.removeEventListener('auth:session-changed', handleAuthChange);
+      window.removeEventListener('storage', handleAuthChange);
+    };
+  }, [loadNotifications]);
+
   const handleDismissNotification = useCallback(async (notificationId) => {
     try {
       const response = await apiFetch(`/api/me/notifications/${notificationId}/dismiss`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
@@ -360,6 +372,7 @@ const AppContent = ({ currentRole }) => {
 };
 
 export default AppContent;
+
 
 
 
