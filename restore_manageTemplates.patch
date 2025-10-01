@@ -1,0 +1,517 @@
+--- src/widgets/manageTemplates.js
++++ src/widgets/manageTemplates.js
+@@ -1,5 +1,4 @@
+-
+-import React, { useState, useEffect, useRef, useCallback } from 'react';
++import React, { useState, useEffect } from 'react';
+ import {
+   Container,
+   Header,
+@@ -14,13 +13,21 @@
+   ButtonDropdown,
+   Grid,
+   Modal,
+-  Link,
+-  Flashbar
++  Link
+ } from '@cloudscape-design/components';
+ import { BoardItem } from '@cloudscape-design/board-components';
+ import { apiFetch } from '../auth/apiClient';
+ 
+-const STATUSES = [
++// Network calls now use apiFetch (handles auth + base URL) with relative paths
++// const API_BASE_URL = process.env.REACT_APP_API_BASE_URL; // no longer needed for these calls
++
++const placeholders = [
++  { label: 'Applicant Name', value: '{applicant_name}' },
++  { label: 'Appointment Date', value: '{appointment_date}' },
++  { label: 'VAC Address', value: '{VAC_address}' }
++];
++
++const statuses = [
+   'Draft',
+   'For Review',
+   'For Approval',
+@@ -30,242 +37,257 @@
+   'Archived'
+ ];
+ 
+-const LANGUAGES = ['English', 'French', 'Spanish', 'Mandarin', 'Hindi'];
+-
+-const NOTIFICATION_TYPES = ['Email', 'SMS', 'Robo-Caller'];
+-
+-const PLACEHOLDERS = [
+-  { label: 'Applicant full name', value: '{applicant_name}' },
+-  { label: 'Applicant first name', value: '{applicant_first_name}' },
+-  { label: 'Tracking ID', value: '{tracking_id}' },
+-  { label: 'Submission date', value: '{submission_date}' },
+-  { label: 'Portal dashboard URL', value: '{portal_dashboard_url}' },
+-  { label: 'Support email address', value: '{support_email}' },
+-  { label: 'Support phone number', value: '{support_phone}' },
+-  { label: 'Assessor name', value: '{assessor_name}' }
+-];
+-
+-const DEFAULT_TEMPLATE = {
+-  id: null,
+-  name: 'New Template',
+-  type: 'Email',
+-  status: 'Draft',
+-  language: 'English',
+-  subject: '',
+-  content: ''
+-};
+-
+-const TEMPLATE_CONTENT_ID = 'template-editor-content';
+-const DRAFT_STORAGE_KEY = 'manageTemplates.draft';
+-const safeSessionStorage = () => {
+-  try {
+-    if (typeof window === 'undefined' || !window.sessionStorage) {
+-      return null;
+-    }
+-    return window.sessionStorage;
+-  } catch (err) {
+-    console.warn('[templates] sessionStorage unavailable', err);
+-    return null;
+-  }
+-};
+-
+-const readStoredDraft = () => {
+-  try {
+-    const storage = safeSessionStorage();
+-    if (!storage) return null;
+-    const raw = storage.getItem(DRAFT_STORAGE_KEY);
+-    return raw ? JSON.parse(raw) : null;
+-  } catch (err) {
+-    console.warn('[templates] failed to read draft cache', err);
+-    return null;
+-  }
+-};
+-
+-const writeStoredDraft = (payload) => {
+-  try {
+-    const storage = safeSessionStorage();
+-    if (!storage) return;
+-    storage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(payload));
+-  } catch (err) {
+-    console.warn('[templates] failed to persist draft cache', err);
+-  }
+-};
+-
+-const removeStoredDraft = () => {
+-  try {
+-    const storage = safeSessionStorage();
+-    if (!storage) return;
+-    storage.removeItem(DRAFT_STORAGE_KEY);
+-  } catch (err) {
+-    console.warn('[templates] failed to clear draft cache', err);
+-  }
+-};
++const languages = ['English', 'French', 'Spanish', 'Mandarin', 'Hindi'];
++
++const notificationTypes = ['Email', 'SMS', 'Robo-Caller'];
++
+ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
+   const [templates, setTemplates] = useState([]);
+   const [loading, setLoading] = useState(true);
+   const [selectedTemplate, setSelectedTemplate] = useState(null);
+   const [templateContent, setTemplateContent] = useState('');
+-  const [selectedLanguage, setSelectedLanguage] = useState(DEFAULT_TEMPLATE.language);
+-  const [status, setStatus] = useState(DEFAULT_TEMPLATE.status);
+-  const [notificationType, setNotificationType] = useState(DEFAULT_TEMPLATE.type);
++  const [selectedLanguage, setSelectedLanguage] = useState('English');
++  const [status, setStatus] = useState('Draft');
++  const [notificationType, setNotificationType] = useState('Email');
+   const [showDeleteModal, setShowDeleteModal] = useState(false);
+   const [templateToDelete, setTemplateToDelete] = useState(null);
+-  const [flashMessages, setFlashMessages] = useState([]);
+-  const [saving, setSaving] = useState(false);
+-  const [insertFieldOption, setInsertFieldOption] = useState(null);
+-  const [pendingDraft, setPendingDraft] = useState(() => readStoredDraft());
+-
+-  const textareaRef = useRef(null);
+-  const selectionRef = useRef({ start: 0, end: 0 });
+-
+-  const pushFlash = useCallback(({ type, content }) => {
+-    const id = 	emplate-msg-;
+-    setFlashMessages([
+-      {
+-        id,
+-        type,
+-        content,
+-        dismissible: true,
+-        onDismiss: () => setFlashMessages((current) => current.filter((item) => item.id !== id))
+-      }
+-    ]);
+-  }, []);
+-
+-  const fetchTemplates = useCallback(async () => {
+-    setLoading(true);
+-    try {
+-      const response = await apiFetch('/api/templates');
+-      const data = await response.json();
+-      setTemplates(Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []));
+-    } catch (error) {
+-      console.error('Error fetching templates:', error);
+-      pushFlash({ type: 'error', content: 'Failed to load templates. Please try again.' });
+-    } finally {
+-      setLoading(false);
+-    }
+-  }, [pushFlash]);
+ 
+   useEffect(() => {
+     fetchTemplates();
+-  }, [fetchTemplates]);
+-
+-  const clearDraft = useCallback(() => {
+-    removeStoredDraft();
+-    setPendingDraft(null);
+   }, []);
+ 
+-  const getTextarea = useCallback(() => {
+-    const refNode = textareaRef.current;
+-    if (refNode) {
+-      if (typeof refNode.setSelectionRange === 'function') {
+-        return refNode;
++  const fetchTemplates = () => {
++    setLoading(true);
++    apiFetch('/api/templates')
++      .then((response) => response.json())
++      .then((data) => {
++        setTemplates(Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []));
++        setLoading(false);
++      })
++      .catch((error) => {
++        console.error('Error fetching templates:', error);
++        setLoading(false);
++      });
++  };
++
++  const handleTemplateSelection = (templateId) => {
++    apiFetch(/api/templates/)
++      .then((response) => response.json())
++      .then((data) => {
++        setSelectedTemplate(data);
++        setTemplateContent(data.content);
++        setSelectedLanguage(data.language);
++        setStatus(data.status);
++        setNotificationType(data.type);
++      })
++      .catch((error) => console.error('Error fetching template details:', error));
++  };
++
++  const handleSaveTemplate = () => {
++    if (!selectedTemplate) return;
++    const updatedTemplate = {
++      name: selectedTemplate.name,
++      type: notificationType,
++      status,
++      language: selectedLanguage,
++      subject: selectedTemplate.subject,
++      content: templateContent,
++    };
++
++    apiFetch(/api/templates/, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify(updatedTemplate)
++    })
++      .then((response) => response.json())
++      .then(() => {
++        alert("Template saved successfully!");
++        fetchTemplates();
++        setSelectedTemplate(null);
++      })
++      .catch((error) => console.error("Error saving template:", error));
++  };
++
++  const handleCancelEdit = () => {
++    setSelectedTemplate(null);
++  };
++
++  const handleNewTemplate = () => {
++    const newTemplate = {
++      name: "New Template",
++      type: "Email",
++      status: "Draft",
++      language: "English",
++      content: "Enter your template content here..."
++    };
++    setSelectedTemplate(newTemplate);
++    setTemplateContent(newTemplate.content);
++    setSelectedLanguage(newTemplate.language);
++    setStatus(newTemplate.status);
++    setNotificationType(newTemplate.type);
++  };
++
++  const handleInsertPlaceholder = (placeholder) => {
++    setTemplateContent((prevContent) => prevContent + placeholder.value);
++  };
++
++  const handleDeleteTemplate = () => {
++    if (!templateToDelete) return;
++
++    apiFetch(/api/templates/, {
++      method: 'DELETE'
++    })
++      .then((response) => {
++        if (response.ok) {
++          alert("Template deleted successfully!");
++          fetchTemplates();
++          setTemplateToDelete(null);
++        } else {
++          console.error("Error deleting template:", response.statusText);
++        }
++      })
++      .catch((error) => console.error("Error deleting template:", error));
++  };
++
++  return (
++    <BoardItem
++      header={
++        <Header
++          variant="h2"
++          actions={<Button onClick={handleNewTemplate}>New Template</Button>}
++        >
++          Template Editor
++        </Header>
+       }
+-      if (refNode instanceof HTMLElement) {
+-        const inner = refNode.querySelector('textarea');
+-        if (inner) {
+-          return inner;
+-        }
++      dragHandleAriaLabel={dragHandleAriaLabel}
++      i18nStrings={i18nStrings}
++      settings={
++        <ButtonDropdown
++          items={[{ id: 'remove', text: 'Remove' }]}
++          ariaLabel="Board item settings"
++          variant="icon"
++          onItemClick={() => actions.removeItem()}
++        />
+       }
+-    }
+-    const fallback = document.getElementById(TEMPLATE_CONTENT_ID);
+-    if (!fallback) {
+-      return null;
+-    }
+-    if (typeof fallback.setSelectionRange === 'function') {
+-      return fallback;
+-    }
+-    if (fallback instanceof HTMLElement) {
+-      const inner = fallback.querySelector('textarea');
+-      if (inner) {
+-        return inner;
+-      }
+-    }
+-    return null;
+-  }, []);
+-
+-  const cacheSelection = useCallback(() => {
+-    const textarea = getTextarea();
+-    if (!textarea) return;
+-    const start = typeof textarea.selectionStart === 'number' ? textarea.selectionStart : 0;
+-    const end = typeof textarea.selectionEnd === 'number' ? textarea.selectionEnd : start;
+-    selectionRef.current = { start, end };
+-  }, [getTextarea]);
+-
+-  const setSelection = useCallback((start, end) => {
+-    requestAnimationFrame(() => {
+-      const textarea = getTextarea();
+-      if (!textarea) return;
+-      const nextStart = start;
+-      const nextEnd = typeof end === 'number' ? end : start;
+-      if (typeof textarea.focus === 'function') {
+-        textarea.focus();
+-      }
+-      if (typeof textarea.setSelectionRange === 'function') {
+-        textarea.setSelectionRange(nextStart, nextEnd);
+-      }
+-      selectionRef.current = { start: nextStart, end: nextEnd };
+-    });
+-  }, [getTextarea]);
+-
+-  const applyDraft = useCallback((baseTemplate, content, overrides = {}) => {
+-    const mergedTemplate = { ...baseTemplate, ...overrides };
+-    setSelectedTemplate(mergedTemplate);
+-    const nextContent = content ?? mergedTemplate.content ?? '';
+-    setTemplateContent(nextContent);
+-    setSelectedLanguage(mergedTemplate.language || DEFAULT_TEMPLATE.language);
+-    setStatus(mergedTemplate.status || DEFAULT_TEMPLATE.status);
+-    setNotificationType(mergedTemplate.type || DEFAULT_TEMPLATE.type);
+-    setInsertFieldOption(null);
+-    const cursor = nextContent.length;
+-    selectionRef.current = { start: cursor, end: cursor };
+-    setSelection(cursor, cursor);
+-    pushFlash({ type: 'info', content: 'Restored unsaved template changes.' });
+-    setPendingDraft(null);
+-  }, [pushFlash, setSelection]);
+-
+-  useEffect(() => {
+-    if (!pendingDraft) {
+-      return;
+-    }
+-
+-    const { templateId, content, template: overrides = {} } = pendingDraft;
+-
+-    if (templateId === 'new') {
+-      applyDraft({ ...DEFAULT_TEMPLATE }, content, overrides);
+-      return;
+-    }
+-
+-    if (templates.length === 0) {
+-      if (loading) {
+-        return;
+-      }
+-    }
+-
+-    const existing = templates.find((item) => String(item.id) === String(templateId));
+-
+-    if (existing) {
+-      applyDraft({ ...existing }, content, overrides);
+-    } else if (!loading) {
+-      applyDraft({ ...DEFAULT_TEMPLATE, id: templateId ?? null }, content, overrides);
+-    }
+-  }, [pendingDraft, templates, loading, applyDraft]);
+-
+-  useEffect(() => {
+-    if (!selectedTemplate) {
+-      clearDraft();
+-      return;
+-    }
+-
+-    writeStoredDraft({
+-      templateId: selectedTemplate.id ?? 'new',
+-      template: {
+-        id: selectedTemplate.id ?? null,
+-        name: selectedTemplate.name || '',
+-        subject: selectedTemplate.subject || '',
+-        type: notificationType,
+-        status,
+-        language: selectedLanguage
+-      },
+-      content: templateContent
+-    });
+-  }, [selectedTemplate, templateContent, selectedLanguage, status, notificationType, clearDraft]);
++    >
++      <SpaceBetween size="l">
++        <Table
++          header={<Header variant="h2">Notification and Reminder Templates Library</Header>}
++          items={templates}
++          columnDefinitions={[
++            {
++              id: 'name',
++              header: 'Template Name',
++              cell: item => (
++                <Link onClick={() => handleTemplateSelection(item.id)}>
++                  {item.name}
++                </Link>
++              )
++            },
++            { id: 'type', header: 'Type', cell: item => item.type },
++            { id: 'status', header: 'Status', cell: item => item.status },
++            { id: 'language', header: 'Language', cell: item => item.language || '' },
++            {
++              id: 'actions',
++              header: 'Actions',
++              cell: item => (
++                <Button
++                  variant="inline-link"
++                  ariaLabel={Delete }
++                  onClick={() => { setTemplateToDelete(item); setShowDeleteModal(true); }}
++                >
++                  Delete
++                </Button>
++              ),
++              minWidth: 170
++            }
++          ]}
++          loading={loading}
++        />
++
++        {selectedTemplate && (
++          <Container header={<Header variant="h2">Edit Template</Header>}>
++            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
++              <SpaceBetween size="m">
++                <FormField label="Subject">
++                  <Input
++                    value={selectedTemplate.subject}
++                    onChange={({ detail }) => setSelectedTemplate({ ...selectedTemplate, subject: detail.value })}
++                  />
++                </FormField>
++                <FormField label="Template Content">
++                  <Textarea
++                    value={templateContent}
++                    onChange={({ detail }) => setTemplateContent(detail.value)}
++                    placeholder="Enter template text here..."
++                    rows={10}
++                  />
++                </FormField>
++                <FormField label="Insert Field">
++                  <Select
++                    options={placeholders}
++                    selectedOption={null}
++                    onChange={({ detail }) => handleInsertPlaceholder(detail.selectedOption)}
++                    placeholder="Select a field to insert"
++                  />
++                </FormField>
++              </SpaceBetween>
++              <SpaceBetween size="m">
++                <FormField label="Template Name">
++                  <Input
++                    value={selectedTemplate.name}
++                    onChange={({ detail }) => setSelectedTemplate({ ...selectedTemplate, name: detail.value })}
++                  />
++                </FormField>
++                <FormField label="Language">
++                  <Select
++                    options={languages.map(lang => ({ label: lang, value: lang }))}
++                    selectedOption={{ label: selectedLanguage, value: selectedLanguage }}
++                    onChange={({ detail }) => setSelectedLanguage(detail.selectedOption.value)}
++                  />
++                </FormField>
++                <FormField label="Notification Type">
++                  <Select
++                    options={notificationTypes.map(type => ({ label: type, value: type }))}
++                    selectedOption={{ label: notificationType, value: notificationType }}
++                    onChange={({ detail }) => setNotificationType(detail.selectedOption.value)}
++                  />
++                </FormField>
++                <FormField label="Status">
++                  <Select
++                    options={statuses.map(status => ({ label: status, value: status }))}
++                    selectedOption={{ label: status, value: status }}
++                    onChange={({ detail }) => setStatus(detail.selectedOption.value)}
++                  />
++                </FormField>
++                <SpaceBetween direction="horizontal" size="s">
++                  <Button variant="primary" onClick={handleSaveTemplate}>Save Changes</Button>
++                  <Button variant="normal" onClick={handleCancelEdit}>Cancel</Button>
++                </SpaceBetween>
++              </SpaceBetween>
++            </Grid>
++          </Container>
++        )}
++      </SpaceBetween>
++
++      {showDeleteModal && (
++        <Modal
++          onDismiss={() => setShowDeleteModal(false)}
++          visible={showDeleteModal}
++          closeAriaLabel="Close modal"
++          header="Delete Template"
++          footer={
++            <SpaceBetween direction="horizontal" size="s">
++              <Button variant="primary" onClick={() => { handleDeleteTemplate(); setShowDeleteModal(false); }}>Delete</Button>
++              <Button variant="normal" onClick={() => setShowDeleteModal(false)}>Cancel</Button>
++            </SpaceBetween>
++          }
++        >
++          Are you sure you want to delete this template?
++        </Modal>
++      )}
++    </BoardItem>
++  );
++};
++
++export default ManageTemplates;

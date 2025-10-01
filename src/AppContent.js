@@ -62,8 +62,6 @@ const AppContent = ({ currentRole }) => {
 
   useEffect(() => {
     loadNotifications();
-    const interval = setInterval(loadNotifications, 60000);
-    return () => clearInterval(interval);
   }, [loadNotifications]);
 
   useEffect(() => {
