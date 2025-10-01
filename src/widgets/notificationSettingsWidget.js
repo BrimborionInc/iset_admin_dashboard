@@ -6,6 +6,8 @@ import { apiFetch } from '../auth/apiClient';
 
 const DEFAULT_LANGUAGE = 'en'; // Adjust as needed
 
+const NONE_TEMPLATE_OPTION = { label: 'No template', value: '__none__' };
+
 const APPLICATION_ASSESSOR_ROLE = 'ApplicationAssessor';
 const APPLICATION_ASSESSOR_LABEL = 'Application Assessor';
 const LEGACY_ROLE_VALUES = new Set(['PTMA Staff', 'PTMAStaff']);
@@ -24,6 +26,11 @@ const ensureArray = (value) => {
   }
   return [];
 };
+
+const cloneEventRows = (rows = []) => rows.map(event => ({
+  ...event,
+  children: Array.isArray(event.children) ? event.children.map(child => ({ ...child })) : [],
+}));
 
 const normaliseRoleValue = (value) => {
   const key = toKey(value);
@@ -66,14 +73,17 @@ const normaliseRolesList = (rolesData) => {
   return normalised;
 };
 
-const buildTemplateOptions = (templatesData) =>
-  ensureArray(templatesData).map((template) => ({
+const buildTemplateOptions = (templatesData) => {
+  const options = ensureArray(templatesData).map((template) => ({
     value: toKey(template?.id),
     label: template?.name || `Template ${template?.id}`,
   }));
+  return [NONE_TEMPLATE_OPTION, ...options];
+};
 
 const toTemplatePayloadValue = (option) => {
   if (!option || option.value === undefined || option.value === null) return null;
+  if (option.value === NONE_TEMPLATE_OPTION.value) return null;
   const numeric = Number(option.value);
   return Number.isNaN(numeric) ? option.value : numeric;
 };
@@ -115,9 +125,10 @@ const buildEventRows = (eventsData, rolesList, templateOptions, settingsData) =>
           id: `${eventId}_${roleValue}`,
           role,
           enabled: setting ? !!setting.enabled : false,
-          template: templateOption,
+          template: templateOption || null,
           settingId: setting ? setting.id : null,
           emailAlert: setting ? !!setting.email_alert : false,
+          bellAlert: setting ? !!setting.bell_alert : false,
         };
       })
       .filter(Boolean);
@@ -148,6 +159,13 @@ const parseJsonOrThrow = async (response, label) => {
   }
 
   return body;
+};
+
+const normaliseTemplateSelection = (option) => {
+  if (!option || option.value === NONE_TEMPLATE_OPTION.value) {
+    return null;
+  }
+  return option;
 };
 
 const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
@@ -195,8 +213,9 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
 
         if (cancelled) return;
 
-        setEvents(eventRows);
-        setSavedEvents(eventRows);
+        const preparedRows = cloneEventRows(eventRows);
+        setEvents(preparedRows);
+        setSavedEvents(cloneEventRows(preparedRows));
         setTemplates(templateOptions);
         setDirty(false);
       } catch (error) {
@@ -282,6 +301,23 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
     markDirty();
   };
 
+  const handleBellAlertToggle = (parentIdx, childIdx) => {
+    setEvents((current) =>
+      current.map((event, i) =>
+        i === parentIdx
+          ? {
+              ...event,
+              children: event.children.map((child, j) =>
+                j === childIdx ? { ...child, bellAlert: !child.bellAlert } : child,
+              ),
+            }
+          : event,
+      ),
+    );
+
+    markDirty();
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setFlashMessages([]);
@@ -300,16 +336,21 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
             !savedChild ||
             savedChild.enabled !== child.enabled ||
             savedTemplate !== currentTemplate ||
-            (!!savedChild?.emailAlert !== !!child.emailAlert)
+            (!!savedChild?.emailAlert !== !!child.emailAlert) ||
+            (!!savedChild?.bellAlert !== !!child.bellAlert)
           ) {
+            const settingId = savedChild?.settingId ?? child.settingId ?? null;
+            const roleValue = child.role?.value || child.role;
+
             changed.push({
-              id: child.settingId,
+              id: settingId,
               event: event.eventId,
-              role: child.role.value,
+              role: roleValue,
               template_id: toTemplatePayloadValue(child.template),
               language: DEFAULT_LANGUAGE,
               enabled: child.enabled ? 1 : 0,
               email_alert: child.emailAlert ? 1 : 0,
+              bell_alert: child.bellAlert ? 1 : 0,
             });
           }
         });
@@ -359,8 +400,9 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
 
       const { eventRows, templateOptions } = await loadAllData();
 
-      setEvents(eventRows);
-      setSavedEvents(eventRows);
+      const preparedRows = cloneEventRows(eventRows);
+      setEvents(preparedRows);
+      setSavedEvents(cloneEventRows(preparedRows));
       setTemplates(templateOptions);
       setDirty(false);
       setSaving(false);
@@ -390,7 +432,7 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
   };
 
   const handleCancel = () => {
-    setEvents(savedEvents);
+    setEvents(cloneEventRows(savedEvents));
     setDirty(false);
     setFlashMessages([]);
   };
@@ -448,15 +490,17 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
 
         const validOption =
           templates.find((t) => t.value === item.template?.value) || null;
+        const noneOption = templates.find((t) => t.value === NONE_TEMPLATE_OPTION.value) || NONE_TEMPLATE_OPTION;
+        const selectedOption = validOption || (item.template ? null : noneOption);
 
         return (
           <Select
-            selectedOption={validOption}
+            selectedOption={selectedOption}
             onChange={({ detail }) =>
               handleTemplateChange(
                 item.parentIdx,
                 item.childIdx,
-                detail.selectedOption,
+                normaliseTemplateSelection(detail.selectedOption),
               )
             }
             options={templates}
@@ -480,6 +524,23 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
               handleEmailAlertToggle(item.parentIdx, item.childIdx)
             }
             ariaLabel={`Enable email alert for ${events[item.parentIdx]?.eventLabel || 'event'} (${item.role?.label || item.role?.value || 'role'})`}
+          />
+        ),
+      minWidth: 120,
+    },
+    {
+      id: 'bellAlert',
+      header: 'Bell alert?',
+      cell: (item) =>
+        item.isParent ? (
+          ''
+        ) : (
+          <Toggle
+            checked={!!item.bellAlert}
+            onChange={() =>
+              handleBellAlertToggle(item.parentIdx, item.childIdx)
+            }
+            ariaLabel={`Enable bell alert for ${events[item.parentIdx]?.eventLabel || 'event'} (${item.role?.label || item.role?.value || 'role'})`}
           />
         ),
       minWidth: 120,
