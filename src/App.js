@@ -2,49 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import enMessages from '@cloudscape-design/components/i18n/messages/all.en';
 import frMessages from '@cloudscape-design/components/i18n/messages/all.fr';
-import { DarkModeProvider } from "./context/DarkModeContext.js"; // Import the context provider
-import { BrowserRouter as Router } from 'react-router-dom';
-import {
-  AppLayout,
-  BreadcrumbGroup,
-  ContentLayout,
-  Flashbar,
-  Header,
-  HelpPanel,
-  Link,
-  SplitPanel,
-  Box,
-  SpaceBetween,
-  Button,
-} from '@cloudscape-design/components';
+import { DarkModeProvider } from './context/DarkModeContext.js';
+import { BrowserRouter as Router, useLocation } from 'react-router-dom';
 import AppContent from './AppContent.js';
 import TopNavigation from './layouts/TopNavigation.js';
 import DemoNavigation from './layouts/DemoNavigation.js';
 import BottomFooter from './layouts/BottomFooter.js';
-import SideNavigation from './layouts/SideNavigation.js';
-import AdminDashboard from './pages/adminDashboardHomePage.js';
-import UserManagementDashboard from './pages/manageUsers.js';
-import LocationsManagementDashboard from './pages/manageLocations.js';
-import ModifyLocation from './pages/modifyLocation.js';
-import NewLocationForm from './pages/newLocationForm.js';
-import CodeTablesDashboard from './pages/codeTablesDashboard.js';
-import TestConfigDashboard from './pages/testConfigDashboard.js';
-import ServiceModulesManagementDashboard from './pages/manageServiceModules.js';
-import ModifyServiceModule from './pages/modifyServiceModule.js';
-import BookAppointmentQ1 from './previews/bookAppointmentQ1.js';
-import BookAppointmentQ2 from './previews/bookAppointmentQ2.js';
-import BookAppointmentQ3 from './previews/bookAppointmentQ3.js';
-import BookAppointmentQ4 from './previews/bookAppointmentQ4.js';
-import BookAppointmentQ5 from './previews/bookAppointmentQ5.js';
-import BookAppointmentQ6 from './previews/bookAppointmentQ6.js';
-import BookAppointmentQ7 from './previews/bookAppointmentQ7.js';
-import BookAppointmentQ8 from './previews/bookAppointmentQ8.js';
-import { helpMessages } from './utils/helpMessages.js';
-import Icon from '@cloudscape-design/components/icon';
-import { ItemsPalette, BoardItem } from '@cloudscape-design/board-components';
 import ErrorBoundary from './context/ErrorBoundary.js';
 import { RoleMatrixProvider } from './context/RoleMatrixContext';
-import SlotManagementWidget from './widgets/slotManagementWidget.js';
+import LandingPage from './pages/LandingPage.jsx';
+import { hasValidSession, isIamOn } from './auth/cognito';
 
 import '@cloudscape-design/global-styles/index.css';
 
@@ -57,7 +24,6 @@ const roleOptions = [
 
 const App = () => {
   const [currentLanguage, setCurrentLanguage] = useState('fr');
-  // Initialize role from sessionStorage to make it sticky for the session
   const [currentRole, setCurrentRole] = useState(() => {
     try {
       const saved = sessionStorage.getItem('currentRole');
@@ -66,6 +32,8 @@ const App = () => {
       return roleOptions[0];
     }
   });
+  const [isAuthenticated, setIsAuthenticated] = useState(() => hasValidSession());
+  const [iamEnabled, setIamEnabled] = useState(() => isIamOn());
 
   const handleLanguageChange = (lang) => {
     setCurrentLanguage(lang);
@@ -75,12 +43,57 @@ const App = () => {
     console.log(`I18nProvider locale: ${currentLanguage}`);
   }, [currentLanguage]);
 
-  // Persist role selection for the session
   useEffect(() => {
     try {
       sessionStorage.setItem('currentRole', JSON.stringify(currentRole));
     } catch {}
   }, [currentRole]);
+
+  useEffect(() => {
+    const updateAuthState = () => {
+      setIsAuthenticated(hasValidSession());
+      setIamEnabled(isIamOn());
+    };
+
+    updateAuthState();
+    window.addEventListener('auth:session-changed', updateAuthState);
+    window.addEventListener('storage', updateAuthState);
+
+    return () => {
+      window.removeEventListener('auth:session-changed', updateAuthState);
+      window.removeEventListener('storage', updateAuthState);
+    };
+  }, []);
+
+  const LandingOrAppLayout = () => {
+    const location = useLocation();
+    const isAuthRoute = location.pathname.startsWith('/auth/');
+
+    if (iamEnabled && !isAuthenticated && !isAuthRoute) {
+      return <LandingPage />;
+    }
+
+    return (
+      <>
+        <DemoNavigation
+          currentLanguage={currentLanguage}
+          onLanguageChange={handleLanguageChange}
+          currentRole={currentRole}
+          setCurrentRole={setCurrentRole}
+        />
+        <TopNavigation
+          currentLanguage={currentLanguage}
+          onLanguageChange={handleLanguageChange}
+          currentRole={currentRole}
+          setCurrentRole={setCurrentRole}
+        />
+        <ErrorBoundary>
+          <AppContent currentRole={currentRole} />
+        </ErrorBoundary>
+        <BottomFooter />
+      </>
+    );
+  };
 
   return (
     <RoleMatrixProvider>
@@ -90,22 +103,7 @@ const App = () => {
           messages={currentLanguage === 'en' ? [frMessages] : [enMessages]}
         >
           <Router>
-          <DemoNavigation
-            currentLanguage={currentLanguage}
-            onLanguageChange={handleLanguageChange}
-            currentRole={currentRole}
-            setCurrentRole={setCurrentRole}
-          />
-          <TopNavigation
-            currentLanguage={currentLanguage}
-            onLanguageChange={handleLanguageChange}
-            currentRole={currentRole}
-            setCurrentRole={setCurrentRole}
-          />
-          <ErrorBoundary>
-            <AppContent currentRole={currentRole} />
-          </ErrorBoundary>
-          <BottomFooter />
+            <LandingOrAppLayout />
           </Router>
         </I18nProvider>
       </DarkModeProvider>
