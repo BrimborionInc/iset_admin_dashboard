@@ -99,13 +99,13 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedTemplate)
     })
-    .then((response) => response.json())
-    .then(() => {
-      alert("Template saved successfully!");
-      fetchTemplates();
-      setSelectedTemplate(null);
-    })
-    .catch((error) => console.error("Error saving template:", error));
+      .then((response) => response.json())
+      .then(() => {
+        alert("Template saved successfully!");
+        fetchTemplates();
+        setSelectedTemplate(null);
+      })
+      .catch((error) => console.error("Error saving template:", error));
   };
 
   const handleCancelEdit = () => {
@@ -137,16 +137,16 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
     apiFetch(`/api/templates/${templateToDelete.id}`, {
       method: 'DELETE'
     })
-    .then((response) => {
-      if (response.ok) {
-        alert("Template deleted successfully!");
-        fetchTemplates();
-        setTemplateToDelete(null);
-      } else {
-        console.error("Error deleting template:", response.statusText);
-      }
-    })
-    .catch((error) => console.error("Error deleting template:", error));
+      .then((response) => {
+        if (response.ok) {
+          alert("Template deleted successfully!");
+          fetchTemplates();
+          setTemplateToDelete(null);
+        } else {
+          console.error("Error deleting template:", response.statusText);
+        }
+      })
+      .catch((error) => console.error("Error deleting template:", error));
   };
 
   return (
@@ -210,9 +210,9 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
             <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
               <SpaceBetween size="m">
                 <FormField label="Subject">
-                  <Input 
-                    value={selectedTemplate.subject} 
-                    onChange={({ detail }) => setSelectedTemplate({ ...selectedTemplate, subject: detail.value })} 
+                  <Input
+                    value={selectedTemplate.subject}
+                    onChange={({ detail }) => setSelectedTemplate({ ...selectedTemplate, subject: detail.value })}
                   />
                 </FormField>
                 <FormField label="Template Content">
@@ -233,10 +233,10 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
                 </FormField>
               </SpaceBetween>
               <SpaceBetween size="m">
-              <FormField label="Template Name">
-                  <Input 
-                    value={selectedTemplate.name} 
-                    onChange={({ detail }) => setSelectedTemplate({ ...selectedTemplate, name: detail.value })} 
+                <FormField label="Template Name">
+                  <Input
+                    value={selectedTemplate.name}
+                    onChange={({ detail }) => setSelectedTemplate({ ...selectedTemplate, name: detail.value })}
                   />
                 </FormField>
                 <FormField label="Language">

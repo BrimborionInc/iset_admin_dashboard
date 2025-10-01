@@ -159,6 +159,7 @@ if (fs.existsSync(intakeEnvPath)) {
   console.log('Loaded intake .env fallback from:', intakeEnvPath);
 }
 const cheerio = require('cheerio');
+const { sendSecureMessageAlert, sendDecisionOutcome } = require('../ISET-intake/notifications/applicantEmailNotifications');
 const axios = require('axios');
 // Workflow normalization (shared preview/publish schema builder)
 let buildWorkflowSchema; // lazy require inside try-catch to avoid crash if file missing
@@ -6156,7 +6157,10 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     const [[caseRow]] = await pool.query(
       `SELECT c.application_id,
               COALESCE(applicant.id, s.user_id) AS applicant_user_id,
-              s.reference_number AS submission_reference
+              COALESCE(
+                s.reference_number,
+                JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))
+              ) AS tracking_reference
          FROM iset_case c
          JOIN iset_application a ON c.application_id = a.id
          LEFT JOIN iset_application_submission s ON a.submission_id = s.id
@@ -6195,6 +6199,15 @@ app.post('/api/cases/:id/messages', async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
       [senderId, recipientId, caseId, caseRow?.application_id || null, subject, body, !!urgent]
     );
+    try {
+      await sendSecureMessageAlert({
+        pool,
+        userId: recipientId,
+        trackingId: caseRow?.tracking_reference || null,
+      });
+    } catch (notifyErr) {
+      console.error('[notifications] secure message email failed', notifyErr?.message || notifyErr);
+    }
     res.status(201).json({ message: 'Message sent', messageId: result.insertId });
   } catch (e) {
     console.error('POST /api/cases/:id/messages failed:', e.message);
@@ -7768,6 +7781,16 @@ app.put('/api/cases/:id', async (req, res) => {
           actorName,
         });
       } catch (_) {}
+      try {
+        await sendDecisionOutcome({
+          pool,
+          userId: caseRow?.applicant_user_id || null,
+          trackingId,
+          status: afterStatus,
+        });
+      } catch (notifyErr) {
+        console.error('[notifications] decision email failed', notifyErr?.message || notifyErr);
+      }
     }
 
     const assessmentSubmitted = body.assessment_recommendation && body.assessment_justification;
@@ -8162,15 +8185,3 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-

@@ -1,43 +1,33 @@
-# Internal Notifications Proposal
+# Internal Notifications Overview
 
-Last updated: 2025-09-23
+Last updated: 2025-10-01
 
 ## Goal
-Provide in-app notices for staff that mirror the existing Notification Settings configuration, using Cloudscape alerts for prominent reminders and the Flashbar for dismissible detail.
+Provide staff with in-app notifications that mirror the Notification Settings matrix, using Cloudscape UI components for surfaced alerts and allowing per-role control via `notification_setting`.
 
 ## Data Model
 - `iset_internal_notification`
-  - `id`, `severity`, `title`, `message`, `event_key`
-  - `audience_type`: `role`, `user`, `global`
-  - `audience_role` / `audience_user_id` (nullable depending on type)
-  - `dismissible`, `requires_ack`, `starts_at`, `expires_at`, `created_by`
-  - `delivered_at`, `metadata` (JSON payload for templating)
+  - `id`, `event_key`, `severity`, `title`, `message`
+  - `audience_type` (`global` | `role` | `user`), `audience_role`, `audience_user_id`
+  - `dismissible`, `requires_ack`, optional `starts_at`/`expires_at`
+  - `metadata` JSON payload (stores event/case identifiers), `created_by`, timestamps
 - `iset_internal_notification_dismissal`
-  - `notification_id`, `user_id`, `dismissed_at`
+  - Composite primary key on `(notification_id, user_id)` plus `dismissed_at`
 
-## Backend Flow
-1. **Configuration**: `notification_setting` continues to store enable/disable state per event/role (managed in Notification Settings widget).
-2. **Event Trigger**: When an event fires (e.g. `case_assigned`), the dispatcher checks `notification_setting` and, if enabled for a role/user, creates rows in `iset_internal_notification`.
-3. **Delivery**:
-   - `GET /api/me/notifications` returns all active, non-dismissed notifications for the signed-in user (role + direct audience).
-   - `POST /api/me/notifications/:id/dismiss` records the user’s dismissal.
-4. **Counts**: expose an aggregate (e.g. `GET /api/me/notifications?summary=true`) for nav badges.
-
-## Frontend Integration
-- Move notification fetch into `AppContent` (or a provider) after auth resolves.
-- Spread result into two channels:
-  - **Banner**: render critical alerts as Cloudscape `<Alert>` at the top of the layout.
-  - **Flashbar**: render the full list (excluding banner items or duplicates) in the existing Flashbar component.
-- Keep notifications in React context for reuse (e.g. side nav badge, dedicated notifications page).
-- Side nav placeholder uses the summary count; clicking it routes to `/manage-notifications` or opens a panel.
+## What's Implemented
+1. **Configuration Bridge** - `notification_setting` now stores `bell_alert` per event/role. The shared dispatcher (`shared/events/notificationDispatcher`) queries these rows and inserts notifications when enabled.
+2. **Event Hook** - `isetadminserver.js` registers the dispatcher with the shared event service, so emissions such as `application_submitted` and `case_assigned` can create bell notifications.
+3. **API Surface** - `/api/me/notifications` returns active, non-dismissed notifications for the signed-in user (combining role and direct audiences). `/api/me/notifications/:id/dismiss` records per-user dismissals.
+4. **Frontend Consumption** - `AppContent` fetches notifications during initial load (and when the auth session changes), renders dismissible items in a top-level `Flashbar`, and wires dismiss actions back to the API.
 
 ## Behavioural Notes
-- Email dispatch remains aligned with `notification_setting.email_alert` (separate path).
-- Dismissals are per user; role-wide alerts persist for other admins.
-- Expired notifications (`expires_at`) are filtered server-side.
+- Notifications are dismissible by default; a dismissal hides the entry for that user only.
+- Unresolved audiences (e.g. a role entry without an assigned user) are skipped gracefully.
+- Severity is mapped to Flashbar variants (`info`, `success`, `warning`, `error`).
+- Expiry filtering happens in SQL; expired rows are not returned to clients.
 
-## Next Steps
-1. Add the tables + migrations.
-2. Extend event dispatcher to honour enabled settings and enqueue notifications.
-3. Build the `GET/POST /api/me/notifications` endpoints.
-4. Wire AppContent banner + Flashbar to the new API.
+## Remaining Enhancements
+- Expose a lightweight summary endpoint (nav badge counts) when the UI is ready.
+- Support non-dismissible/ack-required alerts if workflow needs escalate (requires UI affordances).
+- Add richer metadata to the client (e.g. deep links to cases) once the dispatcher populates `metadata` consistently.
+- Evaluate batching or pagination if notification volume grows beyond the current use cases.
