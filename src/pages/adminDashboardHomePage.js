@@ -153,7 +153,12 @@ const AdminDashboard = () => {
             }
         } catch {}
 
-        const role = tokenRole || simulatedRole || 'Guest';
+        const role = (() => {
+            if (iamOn) {
+                return tokenRole || simulatedRole || 'Guest';
+            }
+            return simulatedRole || tokenRole || 'Guest';
+        })();
 
     const quickActions = useMemo(() => pickQuickActions(role), [role]);
     const myWork = useMemo(() => getMockMyWork(role), [role]);
@@ -368,3 +373,4 @@ const DevTaskTracker = () => {
 };
 
 export default AdminDashboard;
+
