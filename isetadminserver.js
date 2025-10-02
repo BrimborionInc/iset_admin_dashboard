@@ -3,6 +3,7 @@ const { maskName } = require('./src/utils/utils');
 const { getInternalNotifications, dismissInternalNotification } = require('./src/internalNotifications');
 const { dispatchInternalNotifications } = require('../shared/events/notificationDispatcher');
 const nunjucks = require("nunjucks");
+let pool; // Initialized after DB config loads
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
 const { createEventService, EventValidationError, registerNotificationHook } = require('../shared/events');
 
@@ -24,6 +25,18 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_case',
   'iset_application',
 ];
+
+const SLA_STAGE_PLACEHOLDER = [
+  { stage_key: 'intake_triage', display_name: 'Intake triage', target_hours: 24, description: 'Time to first open and triage new application.' },
+  { stage_key: 'assignment', display_name: 'Assignment', target_hours: 72, description: 'Time to assign a coordinator or assessor after triage.' },
+  { stage_key: 'assessment', display_name: 'Assessment', target_hours: 240, description: 'Working time for assessors to complete review (10 days).' },
+  { stage_key: 'program_decision', display_name: 'Program decision', target_hours: 48, description: 'Decision turnaround once assessment is complete.' },
+];
+
+const SLA_STAGE_LABELS = SLA_STAGE_PLACEHOLDER.reduce((acc, item) => {
+  acc[item.stage_key] = item.display_name;
+  return acc;
+}, {});
 
 const isMissingTableErrorLocal = (err) => {
   if (!err) return false;
@@ -465,6 +478,399 @@ function getCognitoAssignableClient() {
   }
   return cognitoAssignableClient;
 }
+async function fetchActiveSlaTargets(pool) {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, stage_key, display_name, target_hours, description, applies_to_role, active_from, active_to, created_at, created_by, updated_at, updated_by
+       FROM sla_stage_target
+       WHERE active_to IS NULL
+       ORDER BY stage_key, COALESCE(applies_to_role, '')`
+    );
+    return rows;
+  } catch (err) {
+    if (err && err.code === 'ER_NO_SUCH_TABLE') {
+      return SLA_STAGE_PLACEHOLDER.map(item => ({
+        id: null,
+        stage_key: item.stage_key,
+        display_name: item.display_name,
+        target_hours: item.target_hours,
+        description: item.description,
+        applies_to_role: null,
+        active_from: null,
+        active_to: null,
+        created_at: null,
+        created_by: null,
+        updated_at: null,
+        updated_by: null
+      }));
+    }
+    throw err;
+  }
+}
+
+async function fetchSlaTargetById(pool, id) {
+  const [[row]] = await pool.query(
+    'SELECT id, stage_key, display_name, target_hours, description, applies_to_role, active_from, active_to, created_at, created_by, updated_at, updated_by FROM sla_stage_target WHERE id = ?',
+    [id]
+  );
+  return row || null;
+}
+
+function normalizeSlaTarget(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    stage_key: row.stage_key,
+    display_name: row.display_name,
+    target_hours: row.target_hours,
+    description: row.description,
+    applies_to_role: row.applies_to_role,
+    active_from: row.active_from,
+    active_to: row.active_to,
+    created_at: row.created_at,
+    created_by: row.created_by,
+    updated_at: row.updated_at,
+    updated_by: row.updated_by,
+  };
+}
+
+
+const WORK_QUEUE_BUCKET_META = {
+  'overdue': {
+    label: 'Overdue',
+    description: 'Cases past the program turnaround target.'
+  },
+  'awaiting-decision': {
+    label: 'Awaiting program decision',
+    description: 'Assessments that need a Program Administrator approval.'
+  },
+  'new-submissions': {
+    label: 'New submissions',
+    description: 'Applications received in the last 24 hours awaiting triage.'
+  },
+  'unassigned': {
+    label: 'Unassigned backlog',
+    description: 'Cases ready to be routed to regional teams or assessors.'
+  },
+  'in-assessment': {
+    label: 'In assessment',
+    description: 'Applications actively under review across all regions.'
+  },
+  'on-hold': {
+    label: 'On hold / info requested',
+    description: 'Applicants have been asked for more information.'
+  }
+};
+
+const CASE_STATUS_TERMINAL_VALUES = ['closed', 'archived', 'withdrawn', 'cancelled', 'approved', 'rejected', 'completed'];
+const CASE_STATUS_HOLD_VALUES = [
+  'docs_requested',
+  'docs requested',
+  'action required',
+  'action required (docs requested)',
+  'pending info',
+  'pending information',
+  'info requested',
+  'information requested',
+  'on hold',
+  'on_hold'
+];
+const CASE_STATUS_EXCLUDED_FOR_ASSESSMENT = Array.from(new Set([...CASE_STATUS_TERMINAL_VALUES, ...CASE_STATUS_HOLD_VALUES]));
+const CASE_STAGE_AWAITING_DECISION = ['assessment_submitted', 'review_complete'];
+
+
+
+async function countProgramAdminNewSubmissions(pool) {
+  try {
+    const [[row]] = await pool.query(
+      `SELECT COUNT(*) AS total
+         FROM iset_application_submission s
+         LEFT JOIN iset_application a ON a.submission_id = s.id
+         LEFT JOIN iset_case c ON c.application_id = a.id
+        WHERE s.submitted_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+          AND c.id IS NULL`
+    );
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+
+async function countProgramAdminUnassignedBacklog(pool) {
+  try {
+    const terminalValues = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
+    const params = [];
+    let statusCondition = 'c.status IS NULL';
+    if (terminalValues.length) {
+      const placeholders = terminalValues.map(() => '?').join(',');
+      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+      params.push(...terminalValues);
+    }
+    const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+        WHERE (c.assigned_to_user_id IS NULL OR c.assigned_to_user_id = 0)
+          AND ${statusCondition}`;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function countProgramAdminInAssessment(pool) {
+  try {
+    const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT.map(v => v.toLowerCase());
+    const stageValues = CASE_STAGE_AWAITING_DECISION.map(v => v.toLowerCase());
+    const params = [];
+    let stageCondition = 'c.stage IS NULL';
+    if (stageValues.length) {
+      const placeholders = stageValues.map(() => '?').join(',');
+      stageCondition = `(c.stage IS NULL OR LOWER(c.stage) NOT IN (${placeholders}))`;
+      params.push(...stageValues);
+    }
+    let statusCondition = 'c.status IS NULL';
+    if (excludedValues.length) {
+      const placeholders = excludedValues.map(() => '?').join(',');
+      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+      params.push(...excludedValues);
+    }
+    const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+        WHERE c.assigned_to_user_id IS NOT NULL
+          AND ${stageCondition}
+          AND ${statusCondition}`;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (err && err.code === 'ER_BAD_FIELD_ERROR') {
+      return 0;
+    }
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function countProgramAdminAwaitingDecision(pool) {
+  try {
+    const stageValues = CASE_STAGE_AWAITING_DECISION.map(v => v.toLowerCase());
+    if (!stageValues.length) {
+      return 0;
+    }
+    const stagePlaceholders = stageValues.map(() => '?').join(',');
+    const params = [...stageValues];
+    const terminalValues = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
+    let statusCondition = 'c.status IS NULL';
+    if (terminalValues.length) {
+      const placeholders = terminalValues.map(() => '?').join(',');
+      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+      params.push(...terminalValues);
+    }
+    const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+        WHERE c.stage IS NOT NULL
+          AND LOWER(c.stage) IN (${stagePlaceholders})
+          AND ${statusCondition}`;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (err && err.code === 'ER_BAD_FIELD_ERROR') {
+      return 0;
+    }
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function countProgramAdminOverdue(pool) {
+  try {
+    const targets = await fetchActiveSlaTargets(pool);
+    const stageTargets = new Map();
+    for (const row of targets) {
+      if (!row || row.applies_to_role) continue;
+      stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
+    }
+    const getTarget = stageKey => {
+      if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
+      const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
+      return fallback ? fallback.target_hours : 0;
+    };
+
+    const assignmentHours = getTarget('assignment');
+    const assessmentHours = getTarget('assessment');
+    const decisionHours = getTarget('program_decision');
+
+    const terminalValues = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
+    const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT.map(v => v.toLowerCase());
+    const stageValues = CASE_STAGE_AWAITING_DECISION.map(v => v.toLowerCase());
+
+    let total = 0;
+
+    if (assignmentHours > 0) {
+      const params = [];
+      let statusCondition = 'c.status IS NULL';
+      if (terminalValues.length) {
+        const placeholders = terminalValues.map(() => '?').join(',');
+        statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+        params.push(...terminalValues);
+      }
+      const sql = `SELECT COUNT(*) AS total
+           FROM iset_case c
+          WHERE (c.assigned_to_user_id IS NULL OR c.assigned_to_user_id = 0)
+            AND ${statusCondition}
+            AND TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW()) > ?`;
+      params.push(assignmentHours);
+      try {
+        const [[row]] = await pool.query(sql, params);
+        total += Number(row?.total ?? 0);
+      } catch (err) {
+        if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
+          throw err;
+        }
+      }
+    }
+
+    if (assessmentHours > 0) {
+      const params = [];
+      let stageCondition = 'c.stage IS NULL';
+      if (stageValues.length) {
+        const placeholders = stageValues.map(() => '?').join(',');
+        stageCondition = `(c.stage IS NULL OR LOWER(c.stage) NOT IN (${placeholders}))`;
+        params.push(...stageValues);
+      }
+      let statusCondition = 'c.status IS NULL';
+      if (excludedValues.length) {
+        const placeholders = excludedValues.map(() => '?').join(',');
+        statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+        params.push(...excludedValues);
+      }
+      const sql = `SELECT COUNT(*) AS total
+           FROM iset_case c
+          WHERE c.assigned_to_user_id IS NOT NULL
+            AND ${stageCondition}
+            AND ${statusCondition}
+            AND TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW()) > ?`;
+      params.push(assessmentHours);
+      try {
+        const [[row]] = await pool.query(sql, params);
+        total += Number(row?.total ?? 0);
+      } catch (err) {
+        if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
+          throw err;
+        }
+      }
+    }
+
+    if (decisionHours > 0 && stageValues.length) {
+      const params = [...stageValues];
+      let statusCondition = 'c.status IS NULL';
+      if (terminalValues.length) {
+        const placeholders = terminalValues.map(() => '?').join(',');
+        statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+        params.push(...terminalValues);
+      }
+      const stagePlaceholders = stageValues.map(() => '?').join(',');
+      const sql = `SELECT COUNT(*) AS total
+           FROM iset_case c
+          WHERE c.stage IS NOT NULL
+            AND LOWER(c.stage) IN (${stagePlaceholders})
+            AND ${statusCondition}
+            AND TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW()) > ?`;
+      params.push(decisionHours);
+      try {
+        const [[row]] = await pool.query(sql, params);
+        total += Number(row?.total ?? 0);
+      } catch (err) {
+        if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
+          throw err;
+        }
+      }
+    }
+
+    return total;
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function countProgramAdminOnHold(pool) {
+  try {
+    const holdValues = CASE_STATUS_HOLD_VALUES.map(v => v.toLowerCase());
+    if (!holdValues.length) return 0;
+    const placeholders = holdValues.map(() => '?').join(',');
+    const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+        WHERE c.status IS NOT NULL
+          AND LOWER(c.status) IN (${placeholders})`;
+    const [[row]] = await pool.query(sql, holdValues);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+
+async function countProgramAdminOnHold(pool) {
+  try {
+    if (!CASE_STATUS_HOLD_VALUES.length) return 0;
+    const placeholders = CASE_STATUS_HOLD_VALUES.map(() => '?').join(',');
+    const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+        WHERE c.status IS NOT NULL
+          AND LOWER(c.status) IN (${placeholders})`;
+    const [[row]] = await pool.query(sql, CASE_STATUS_HOLD_VALUES);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+
+function inferUserRole(req) {
+  if (req.staffProfile && req.staffProfile.primary_role) return req.staffProfile.primary_role;
+  if (req.auth && req.auth.role) return req.auth.role;
+  if (req.get) {
+    const headerRole = req.get('X-Dev-Role') || req.get('x-dev-role');
+    if (headerRole) return headerRole;
+  }
+  return null;
+}
+
+function hasSlaAdminAccess(req) {
+  const role = inferUserRole(req);
+  return role === 'System Administrator' || role === 'Program Administrator';
+}
+
+function resolveActorLabel(req) {
+  const { actorId, actorName } = resolveRequestActor(req) || {};
+  if (actorName) return actorName;
+  if (actorId) return actorId;
+  if (req.get) {
+    const headerUser = req.get('X-Dev-UserId') || req.get('x-dev-userid');
+    if (headerUser) return headerUser;
+  }
+  return 'admin-dashboard';
+}
+
 async function ensureStaffProfile(pool, cognitoSub, email, roleLabel, legacyKey) {
   try {
     const subKey = cognitoSub || null;
@@ -1476,7 +1882,200 @@ const dbConfig = {
   database: process.env.DB_NAME
 };
 
-const pool = mysql.createPool(dbConfig);
+pool = mysql.createPool(dbConfig);
+
+app.get('/api/config/sla-targets', async (req, res) => {
+  try {
+    if (!hasSlaAdminAccess(req)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const targets = await fetchActiveSlaTargets(pool);
+    const normalized = targets.map(normalizeSlaTarget).filter(Boolean);
+    res.json({ targets: normalized });
+  } catch (e) {
+    console.error('[sla-targets] fetch failed:', e.message);
+    res.status(500).json({ error: 'sla_targets_fetch_failed', message: e.message });
+  }
+});
+
+app.put('/api/config/sla-targets/:id', async (req, res) => {
+  try {
+    if (!hasSlaAdminAccess(req)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'invalid_target_id' });
+    }
+    const existing = await fetchSlaTargetById(pool, id);
+    if (!existing) {
+      return res.status(404).json({ error: 'target_not_found' });
+    }
+    if (existing.active_to) {
+      return res.status(409).json({ error: 'target_inactive' });
+    }
+    const body = req.body || {};
+    const hoursRaw = body.target_hours ?? body.targetHours;
+    if (hoursRaw === null || typeof hoursRaw === 'undefined') {
+      return res.status(400).json({ error: 'target_hours_required' });
+    }
+    const targetHours = Number(hoursRaw);
+    if (!Number.isFinite(targetHours) || !Number.isInteger(targetHours) || targetHours <= 0) {
+      return res.status(400).json({ error: 'target_hours_invalid' });
+    }
+    const description = typeof body.description === 'string' ? body.description.trim() : '';
+    const actorLabel = resolveActorLabel(req);
+    await pool.query(
+      'UPDATE sla_stage_target SET target_hours = ?, description = ?, updated_by = ? WHERE id = ? AND active_to IS NULL',
+      [targetHours, description || null, actorLabel, id]
+    );
+    const updated = await fetchSlaTargetById(pool, id);
+    res.json({ ok: true, target: normalizeSlaTarget(updated) });
+  } catch (e) {
+    console.error('[sla-targets] update failed:', e.message);
+    res.status(500).json({ error: 'sla_target_update_failed', message: e.message });
+  }
+});
+
+app.post('/api/config/sla-targets', async (req, res) => {
+  let connection;
+  try {
+    if (!hasSlaAdminAccess(req)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const body = req.body || {};
+    const stageKey = String(body.stage_key || body.stage || '').trim();
+    if (!stageKey) {
+      return res.status(400).json({ error: 'stage_key_required' });
+    }
+    const hoursRaw = body.target_hours ?? body.targetHours;
+    if (hoursRaw === null || typeof hoursRaw === 'undefined') {
+      return res.status(400).json({ error: 'target_hours_required' });
+    }
+    const targetHours = Number(hoursRaw);
+    if (!Number.isFinite(targetHours) || !Number.isInteger(targetHours) || targetHours <= 0) {
+      return res.status(400).json({ error: 'target_hours_invalid' });
+    }
+    const appliesToRoleRaw = body.applies_to_role ?? body.appliesToRole ?? null;
+    const appliesToRole = typeof appliesToRoleRaw === 'string' && appliesToRoleRaw.trim() ? appliesToRoleRaw.trim() : null;
+    const displayNameRaw = body.display_name || body.displayName || SLA_STAGE_LABELS[stageKey] || stageKey;
+    const displayName = typeof displayNameRaw === 'string' && displayNameRaw.trim() ? displayNameRaw.trim() : stageKey;
+    const description = typeof body.description === 'string' ? body.description.trim() : '';
+    const actorLabel = resolveActorLabel(req);
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    await connection.query(
+      `UPDATE sla_stage_target
+       SET active_to = NOW(), updated_by = ?
+       WHERE stage_key = ?
+         AND active_to IS NULL
+         AND (
+           (applies_to_role IS NULL AND ? IS NULL)
+           OR applies_to_role = ?
+         )`,
+      [actorLabel, stageKey, appliesToRole, appliesToRole]
+    );
+    const [result] = await connection.query(
+      `INSERT INTO sla_stage_target (stage_key, display_name, target_hours, description, applies_to_role, is_default, created_by, updated_by)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      [
+        stageKey,
+        displayName,
+        targetHours,
+        description || null,
+        appliesToRole || null,
+        appliesToRole ? 0 : 1,
+        actorLabel,
+        actorLabel
+      ]
+    );
+    await connection.commit();
+    const created = await fetchSlaTargetById(pool, result.insertId);
+    res.status(201).json({ ok: true, target: normalizeSlaTarget(created) });
+  } catch (e) {
+    if (connection) {
+      try { await connection.rollback(); } catch { /* ignore */ }
+    }
+    console.error('[sla-targets] create failed:', e.message);
+    res.status(500).json({ error: 'sla_target_create_failed', message: e.message });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+
+
+app.get('/api/dashboard/application-work-queue', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  try {
+    if (role === 'Program Administrator') {
+      const [newSubmissionCount, unassignedCount, inAssessmentCount, awaitingDecisionCount, onHoldCount, overdueCount] = await Promise.all([
+        countProgramAdminNewSubmissions(pool),
+        countProgramAdminUnassignedBacklog(pool),
+        countProgramAdminInAssessment(pool),
+        countProgramAdminAwaitingDecision(pool),
+        countProgramAdminOnHold(pool),
+        countProgramAdminOverdue(pool)
+      ]);
+      const metaNew = WORK_QUEUE_BUCKET_META['new-submissions'];
+      const metaUnassigned = WORK_QUEUE_BUCKET_META['unassigned'];
+      const metaAssessment = WORK_QUEUE_BUCKET_META['in-assessment'];
+      const metaDecision = WORK_QUEUE_BUCKET_META['awaiting-decision'];
+      const metaOnHold = WORK_QUEUE_BUCKET_META['on-hold'];
+      return res.json({
+        role,
+        generatedAt: new Date().toISOString(),
+        buckets: [
+          {
+            id: 'new-submissions',
+            label: metaNew?.label || 'New submissions',
+            description: metaNew?.description || null,
+            count: newSubmissionCount
+          },
+          {
+            id: 'unassigned',
+            label: metaUnassigned?.label || 'Unassigned backlog',
+            description: metaUnassigned?.description || null,
+            count: unassignedCount
+          },
+          {
+            id: 'in-assessment',
+            label: metaAssessment?.label || 'In assessment',
+            description: metaAssessment?.description || null,
+            count: inAssessmentCount
+          },
+          {
+            id: 'awaiting-decision',
+            label: metaDecision?.label || 'Awaiting program decision',
+            description: metaDecision?.description || null,
+            count: awaitingDecisionCount
+          },
+          {
+            id: 'on-hold',
+            label: metaOnHold?.label || 'On hold / info requested',
+            description: metaOnHold?.description || null,
+            count: onHoldCount
+          },
+          {
+            id: 'overdue',
+            label: WORK_QUEUE_BUCKET_META['overdue']?.label || 'Overdue',
+            description: WORK_QUEUE_BUCKET_META['overdue']?.description || null,
+            count: overdueCount
+          }
+        ]
+      });
+
+    }
+    res.json({ role, generatedAt: new Date().toISOString(), buckets: [] });
+  } catch (e) {
+    console.error('[work-queue] fetch failed:', e.message);
+    res.status(500).json({ error: 'work_queue_fetch_failed', message: e.message });
+  }
+});
+
+
+
+
 const eventService = createEventService({ pool, logger: console });
 registerNotificationHook(async (event) => {
   await dispatchInternalNotifications({ pool, event, logger: console });
@@ -8185,3 +8784,12 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
+
+
+
+
+
+
+
+
+

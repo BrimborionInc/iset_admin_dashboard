@@ -17,21 +17,48 @@ import {
 } from '@cloudscape-design/components';
 import { devTasks as devTasksData } from '../devTasksData';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../auth/cognito';
+import { apiFetch } from '../auth/apiClient';
 
 // --- Mock Data Providers (to be replaced with real data sources later) ---
 function getMockMyWork(role) {
-    const base = { assigned: 0, awaitingReview: 0, overdue: 0 };
     switch (role) {
-        case 'System Administrator':
-            return { ...base, awaitingReview: 4 };
         case 'Program Administrator':
-            return { ...base, assigned: 8, awaitingReview: 2 };
+            return [
+                { id: 'new-submissions', label: 'New submissions', count: 18, description: 'Applications received in the last 24 hours awaiting triage.' },
+                { id: 'unassigned', label: 'Unassigned backlog', count: 32, description: 'Cases ready to be routed to regional teams or assessors.' },
+                { id: 'in-assessment', label: 'In assessment', count: 57, description: 'Applications actively under review across all regions.' },
+                { id: 'awaiting-decision', label: 'Awaiting program decision', count: 9, description: 'Assessments that need a Program Administrator approval.' },
+                { id: 'on-hold', label: 'On hold / info requested', count: 6, description: 'Applicants have been asked for more information.' },
+                { id: 'overdue', label: 'Overdue', count: 4, description: 'Cases past the program turnaround target.' }
+            ];
         case 'Regional Coordinator':
-            return { ...base, assigned: 15, overdue: 1 };
+            return [
+                { id: 'region-queue', label: 'Assigned to my region', count: 21, description: 'Cases owned by you or assessors in your region.' },
+                { id: 'needs-reassignment', label: 'Needs reassignment', count: 3, description: 'Cases waiting for you to re-route or pick up.' },
+                { id: 'awaiting-info', label: 'Awaiting applicant info', count: 5, description: 'Follow-ups sent to applicants from your region.' },
+                { id: 'due-this-week', label: 'Due this week', count: 12, description: 'Cases with upcoming SLA deadlines.' },
+                { id: 'overdue', label: 'Overdue', count: 1, description: 'Items breaching SLA within your region.' }
+            ];
         case 'Application Assessor':
-            return { ...base, assigned: 5 };
+            return [
+                { id: 'assigned-to-me', label: 'Assigned to me', count: 7, description: 'Your active assessment queue.' },
+                { id: 'due-today', label: 'Due today', count: 2, description: 'Assessments due in the next 24 hours.' },
+                { id: 'awaiting-applicant', label: 'Awaiting applicant response', count: 1, description: 'Cases paused while the applicant responds.' },
+                { id: 'quality-review', label: 'In quality review', count: 1, description: 'Submitted decisions awaiting QA sign-off.' },
+                { id: 'overdue', label: 'Overdue', count: 0, description: 'Cases past SLA that need immediate attention.' }
+            ];
+        case 'System Administrator':
+            return [
+                { id: 'workflow-drafts', label: 'Workflow drafts', count: 4, description: 'Draft workflows pending publish.' },
+                { id: 'release-prep', label: 'Release prep tasks', count: 3, description: 'Configuration or release items awaiting action.' },
+                { id: 'platform-alerts', label: 'Platform alerts', count: 2, description: 'Active platform alerts requiring follow-up.' }
+            ];
         default:
-            return base;
+            return [
+                { id: 'assigned', label: 'Assigned cases', count: 0, description: 'Cases currently assigned to you.' },
+                { id: 'awaiting-review', label: 'Awaiting review', count: 0, description: 'Cases needing your review.' },
+                { id: 'overdue', label: 'Overdue', count: 0, description: 'Items past their target date.' }
+            ];
     }
 }
 
@@ -42,6 +69,45 @@ function getMockRecentActivity(role) {
         { id: 'a2', title: 'New workflow version published', ts: now - 1000 * 60 * 42 },
         ...(role === 'System Administrator' ? [{ id: 'a3', title: 'Config setting changed', ts: now - 1000 * 60 * 90 }] : []),
     ];
+}
+
+
+
+function mergeWorkQueueBuckets(base, updates) {
+    if (!Array.isArray(base)) {
+        return [];
+    }
+    const updateMap = new Map();
+    (Array.isArray(updates) ? updates : []).forEach(bucket => {
+        if (bucket && bucket.id) {
+            updateMap.set(bucket.id, bucket);
+        }
+    });
+    const merged = base.map(item => {
+        const update = updateMap.get(item.id);
+        if (!update) {
+            return item;
+        }
+        const parsedCount = Number(update.count);
+        return {
+            ...item,
+            count: Number.isFinite(parsedCount) ? parsedCount : item.count,
+            label: update.label || item.label,
+            description: typeof update.description === 'string' && update.description.trim().length ? update.description : item.description
+        };
+    });
+    updateMap.forEach((bucket, id) => {
+        if (!merged.some(entry => entry.id === id)) {
+            const parsedCount = Number(bucket.count);
+            merged.push({
+                id,
+                label: bucket.label || id,
+                count: Number.isFinite(parsedCount) ? parsedCount : 0,
+                description: typeof bucket.description === 'string' ? bucket.description : ''
+            });
+        }
+    });
+    return merged;
 }
 
 function relativeTime(ts) {
@@ -160,10 +226,60 @@ const AdminDashboard = () => {
             return simulatedRole || tokenRole || 'Guest';
         })();
 
-    const quickActions = useMemo(() => pickQuickActions(role), [role]);
-    const myWork = useMemo(() => getMockMyWork(role), [role]);
-    const recentActivity = useMemo(() => getMockRecentActivity(role), [role]);
+
+        const [myWork, setMyWork] = useState(() => getMockMyWork(role));
+
+        useEffect(() => {
+            setMyWork(getMockMyWork(role));
+        }, [role]);
+
+        useEffect(() => {
+            let ignore = false;
+
+async function loadWorkQueue() {
+    try {
+        const options = {};
+        try {
+            const headerBag = { Accept: 'application/json' };
+            if (role && role !== 'Guest') {
+                headerBag['X-Dev-Role'] = role;
+            }
+            if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('iamBypass') === 'off') {
+                const token = sessionStorage.getItem('devBypassToken') || process.env.REACT_APP_DEV_AUTH_TOKEN || 'local-dev-secret';
+                headerBag['X-Dev-Bypass'] = token;
+                const simulatedUser = sessionStorage.getItem('devUserId');
+                if (simulatedUser) headerBag['X-Dev-UserId'] = simulatedUser;
+                const simulatedRegion = sessionStorage.getItem('devRegionId');
+                if (simulatedRegion) headerBag['X-Dev-RegionId'] = simulatedRegion;
+            }
+            options.headers = headerBag;
+        } catch {}
+        const response = await apiFetch('/api/dashboard/application-work-queue', options);
+        if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+        }
+        const payload = await response.json();
+                    if (ignore) {
+                        return;
+                    }
+                    if (payload && Array.isArray(payload.buckets) && (!payload.role || payload.role === role)) {
+                        setMyWork(mergeWorkQueueBuckets(getMockMyWork(role), payload.buckets));
+                    }
+                } catch (err) {
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.warn('[dashboard] application work queue fetch failed', err);
+                    }
+                }
+            }
+
+            loadWorkQueue();
+            return () => { ignore = true; };
+        }, [role]);
+
+        const quickActions = useMemo(() => pickQuickActions(role), [role]);
+        const recentActivity = useMemo(() => getMockRecentActivity(role), [role]);
         const alerts = useMemo(() => getMockAlerts(role), [role]);
+
 
     const simulateSignedOut = (() => { try { return sessionStorage.getItem('simulateSignedOut') === 'true'; } catch { return false; } })();
     if ((iamOn && !signedIn) || (!iamOn && simulateSignedOut)) {
@@ -179,7 +295,7 @@ const AdminDashboard = () => {
 
     return (
             <SpaceBetween size="l">
-                <Container header={<Header variant="h1">Welcome{role && role !== 'Guest' ? ` – ${role}` : ''}</Header>}>
+                <Container header={<Header variant="h1">Welcome{role && role !== 'Guest' ? ` - ${role}` : ''}</Header>}>
                     <Box variant="p">{getWelcomeMessage(role)}</Box>
             </Container>
 
@@ -206,21 +322,33 @@ const AdminDashboard = () => {
                     )}
 
             <ColumnLayout columns={3} variant="text-grid">
-                <Container header={<Header variant="h2">My Work</Header>}>
+                <Container header={<Header variant="h2" description="Applications currently in your remit by status.">Application Work Queue</Header>}>
+                    {Array.isArray(myWork) && myWork.length ? (
+                        <ColumnLayout columns={3} variant="text-grid">
+                            {myWork.map(item => (
+                                <Box key={item.id} padding={{ bottom: 's' }}>
+                                    <Box fontSize="display-l" fontWeight="bold">{item.count}</Box>
+                                    <Box fontWeight="bold" margin={{ top: 'xxs' }}>{item.label}</Box>
+                                    {item.description && (
+                                        <Box fontSize="body-s" color="text-status-inactive" margin={{ top: 'xxs' }}>
+                                            {item.description}
+                                        </Box>
+                                    )}
+                                </Box>
+                            ))}
+                        </ColumnLayout>
+                    ) : (
+                        <Box variant="p">No work items to display.</Box>
+                    )}
+                </Container>
+                <Container header={<Header variant="h2">Recent Activity</Header>}>
                     <SpaceBetween size="xs">
-                        <Box>Assigned: <strong>{myWork.assigned}</strong></Box>
-                        <Box>Awaiting Review: <strong>{myWork.awaitingReview}</strong></Box>
-                        <Box>Overdue: <strong>{myWork.overdue}</strong></Box>
+                        {recentActivity.map(item => (
+                            <Box key={item.id} variant="p" title={new Date(item.ts).toLocaleString()}>{item.title} - <span style={{ color: '#61738e' }}>{relativeTime(item.ts)}</span></Box>
+                        ))}
+                        {!recentActivity.length && <Box variant="p">No recent activity.</Box>}
                     </SpaceBetween>
                 </Container>
-                        <Container header={<Header variant="h2">Recent Activity</Header>}>
-                            <SpaceBetween size="xs">
-                                {recentActivity.map(item => (
-                                    <Box key={item.id} variant="p" title={new Date(item.ts).toLocaleString()}>{item.title} – <span style={{ color: '#61738e' }}>{relativeTime(item.ts)}</span></Box>
-                                ))}
-                                {!recentActivity.length && <Box variant="p">No recent activity.</Box>}
-                            </SpaceBetween>
-                        </Container>
                 <Container header={<Header variant="h2">Resources</Header>}>
                     <SpaceBetween size="xs">
                         <Link href="https://example.com" external>Documentation</Link>
@@ -373,4 +501,3 @@ const DevTaskTracker = () => {
 };
 
 export default AdminDashboard;
-

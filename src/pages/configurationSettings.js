@@ -30,6 +30,18 @@ const STATIC_MODEL_PLACEHOLDERS = [
   { label: 'GPT-4.1 Mini', value: 'openai/gpt-4.1-mini' },
 ];
 
+const SLA_STAGE_PLACEHOLDER = [
+  { stage_key: 'intake_triage', display_name: 'Intake triage', target_hours: 24, description: 'Time to first open and triage new application.' },
+  { stage_key: 'assignment', display_name: 'Assignment', target_hours: 72, description: 'Time to assign a coordinator or assessor after triage.' },
+  { stage_key: 'assessment', display_name: 'Assessment', target_hours: 240, description: 'Working time for assessors to complete review (10 days).' },
+  { stage_key: 'program_decision', display_name: 'Program decision', target_hours: 48, description: 'Decision turnaround once assessment is complete.' }
+];
+
+const SLA_STAGE_LABELS = SLA_STAGE_PLACEHOLDER.reduce((acc, item) => {
+  acc[item.stage_key] = item.display_name;
+  return acc;
+}, {});
+
 export default function ConfigurationSettings({ toggleHelpPanel }) {
   const [runtime, setRuntime] = useState(null);
   const [security, setSecurity] = useState(null);
@@ -46,6 +58,11 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
   const [role, setRole] = useState('');
   const { useDarkMode: isDarkMode, setUseDarkMode } = useDarkModeContext();
   const [demoToolbarVisibility, setDemoToolbarVisibility] = useState(() => readDemoNavigationVisibility());
+  const [slaTargets, setSlaTargets] = useState([]);
+  const [slaEdits, setSlaEdits] = useState({});
+  const [slaLoading, setSlaLoading] = useState(false);
+  const [slaError, setSlaError] = useState(null);
+  const [savingSla, setSavingSla] = useState(false);
   // Auth Phase 4 multi-scope state: separate Admin vs Applicants ("public")
   // Each scope gets its own session/token TTL edits and policy edits
   const [authSessionAdminOriginal, setAuthSessionAdminOriginal] = useState(null);
@@ -92,6 +109,7 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
   // Capability gates
   const canEditAI = role === 'System Administrator';
   const canEditAuth = role === 'System Administrator';
+  const canEditSla = role === 'System Administrator' || role === 'Program Administrator';
   const visibility = security?.visibility;
   const canSeeAny = visibility === 'admin' || visibility === 'restricted';
   const fullyAdmin = visibility === 'admin';
@@ -100,6 +118,7 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
   const defaultBoardItems = React.useMemo(() => ([
     { id: 'ai', columnSpan: 2, rowSpan: 4, data: { type: 'ai' } },
     { id: 'auth', columnSpan: 2, rowSpan: 4, data: { type: 'auth' } },
+    { id: 'slaConfig', columnSpan: 2, rowSpan: 3, data: { type: 'sla' }, label: 'SLA Config' },
     { id: 'sessionAudit', columnSpan: 2, rowSpan: 3, data: { type: 'sessionAudit' } },
     { id: 'cors', columnSpan: 2, rowSpan: 2, data: { type: 'cors' } },
     { id: 'env', columnSpan: 2, rowSpan: 4, data: { type: 'env' } },
@@ -282,6 +301,150 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
       />
     );
   }
+
+  const seedSlaEdits = React.useCallback((items = []) => {
+    const next = items.reduce((acc, item) => {
+      const hours = item?.target_hours;
+      acc[item.stage_key] = {
+        target_hours: hours === null || hours === undefined ? '' : String(hours),
+        description: item?.description || ''
+      };
+      return acc;
+    }, {});
+    setSlaEdits(next);
+  }, []);
+
+  const fetchSlaTargets = React.useCallback(async () => {
+    setSlaLoading(true);
+    setSlaError(null);
+    try {
+      const response = await fetchJSON('/api/config/sla-targets');
+      const items = Array.isArray(response?.targets) ? response.targets : [];
+      const normalised = items.length ? items.map(item => ({
+        id: item.id || null,
+        stage_key: item.stage_key || item.stage || '',
+        display_name: item.display_name || SLA_STAGE_LABELS[item.stage_key] || item.stage_key,
+        target_hours: item.target_hours ?? item.targetHours ?? '',
+        description: item.description || '',
+        applies_to_role: item.applies_to_role ?? item.appliesToRole ?? null
+      })) : SLA_STAGE_PLACEHOLDER.map(item => ({ ...item }));
+      setSlaTargets(normalised);
+      seedSlaEdits(normalised);
+    } catch (error) {
+      const message = error?.message || 'Failed to load SLA targets';
+      let fallbackApplied = false;
+      setSlaTargets(prev => {
+        if (prev.length) {
+          return prev;
+        }
+        const fallback = SLA_STAGE_PLACEHOLDER.map(item => ({ ...item }));
+        seedSlaEdits(fallback);
+        fallbackApplied = true;
+        return fallback;
+      });
+      if (fallbackApplied) {
+        setSlaError(null);
+      } else if (String(message).includes('404')) {
+        setSlaError(null);
+      } else {
+        setSlaError(message);
+      }
+    } finally {
+      setSlaLoading(false);
+    }
+  }, [seedSlaEdits]);
+
+  React.useEffect(() => {
+    fetchSlaTargets();
+  }, [fetchSlaTargets]);
+
+  const effectiveSlaTargets = React.useMemo(() => (
+    slaTargets.length ? slaTargets : SLA_STAGE_PLACEHOLDER
+  ), [slaTargets]);
+
+  const isSlaDirty = React.useMemo(() => (
+    effectiveSlaTargets.some(item => {
+      const edit = slaEdits[item.stage_key];
+      if (!edit) return false;
+      const originalHours = item.target_hours === null || item.target_hours === undefined ? '' : String(item.target_hours);
+      const originalNotes = item.description || '';
+      return edit.target_hours !== originalHours || (edit.description || '') !== originalNotes;
+    })
+  ), [effectiveSlaTargets, slaEdits]);
+
+  const handleSlaEdit = React.useCallback((stageKey, field, value) => {
+    setSlaEdits(prev => ({
+      ...prev,
+      [stageKey]: {
+        ...prev[stageKey],
+        target_hours: field === 'target_hours' ? value.replace(/[^0-9]/g, '') : (prev[stageKey]?.target_hours ?? ''),
+        description: field === 'description' ? value : (prev[stageKey]?.description ?? '')
+      }
+    }));
+  }, []);
+
+  const handleSlaReset = React.useCallback(() => {
+    seedSlaEdits(effectiveSlaTargets);
+    setSlaError(null);
+  }, [effectiveSlaTargets, seedSlaEdits]);
+
+  const handleSlaSave = React.useCallback(async () => {
+    if (!canEditSla) return;
+
+    const payloads = effectiveSlaTargets.map(item => {
+      const edit = slaEdits[item.stage_key] || { target_hours: '', description: '' };
+      const hoursValue = edit.target_hours === '' ? null : Number(edit.target_hours);
+      return {
+        id: item.id,
+        stage_key: item.stage_key,
+        target_hours: hoursValue,
+        description: edit.description || '',
+        applies_to_role: item.applies_to_role || null,
+        display_name: item.display_name
+      };
+    });
+
+    for (const target of payloads) {
+      if (target.target_hours === null || Number.isNaN(target.target_hours)) {
+        setSlaError(`Target hours required for ${SLA_STAGE_LABELS[target.stage_key] || target.stage_key}`);
+        return;
+      }
+    }
+
+    setSavingSla(true);
+    setSlaError(null);
+    try {
+      await Promise.all(payloads.map(async target => {
+        const body = {
+          target_hours: target.target_hours,
+          description: target.description
+        };
+        if (target.id) {
+          await fetchJSON(`/api/config/sla-targets/${target.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+        } else {
+          await fetchJSON('/api/config/sla-targets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              stage_key: target.stage_key,
+              target_hours: target.target_hours,
+              description: target.description,
+              applies_to_role: target.applies_to_role
+            })
+          });
+        }
+      }));
+      await fetchSlaTargets();
+    } catch (error) {
+      setSlaError(error?.message || 'Failed to save SLA targets');
+    } finally {
+      setSavingSla(false);
+    }
+  }, [canEditSla, effectiveSlaTargets, fetchSlaTargets, slaEdits]);
 
   // Auth rendering (separate to keep switch simple)
   function renderAuth() {
@@ -601,6 +764,7 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
     sessionAudit: require('../helpPanelContents/sessionAuditWidgetHelp.js').default,
     cors: require('../helpPanelContents/corsOriginsWidgetHelp.js').default,
     env: require('../helpPanelContents/environmentWidgetHelp.js').default,
+    sla: require('../helpPanelContents/slaWidgetHelp.js').default,
     secrets: require('../helpPanelContents/secretsWidgetHelp.js').default,
     appearance: require('../helpPanelContents/appearanceWidgetHelp.js').default
   };
@@ -646,6 +810,51 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
         );
       case 'auth':
         return renderAuth();
+      case 'sla':
+        return (
+          <SpaceBetween size="s">
+            {slaError && <Alert type="error" header="SLA configuration">{slaError}</Alert>}
+            {slaLoading ? (
+              <StatusIndicator type="loading">Loading SLA targets</StatusIndicator>
+            ) : (
+              <Table
+                columnDefinitions={[
+                  { id: 'stage', header: 'Stage', cell: item => item.display_name || SLA_STAGE_LABELS[item.stage_key] || item.stage_key },
+                  { id: 'target', header: 'Target (hours)', cell: item => (
+                    canEditSla ? (
+                      <Input
+                        type="number"
+                        value={slaEdits[item.stage_key]?.target_hours ?? ''}
+                        onChange={e => handleSlaEdit(item.stage_key, 'target_hours', e.detail.value)}
+                        inputMode="numeric"
+                        ariaLabel={`Target hours for ${item.display_name || SLA_STAGE_LABELS[item.stage_key] || item.stage_key}`}
+                      />
+                    ) : (
+                      <Box>{item.target_hours}</Box>
+                    )
+                  )},
+                  { id: 'notes', header: 'Notes', cell: item => (
+                    canEditSla ? (
+                      <Input
+                        value={slaEdits[item.stage_key]?.description ?? ''}
+                        onChange={e => handleSlaEdit(item.stage_key, 'description', e.detail.value)}
+                        placeholder="Optional"
+                      />
+                    ) : (
+                      <Box>{item.description || '—'}</Box>
+                    )
+                  )}
+                ]}
+                items={effectiveSlaTargets}
+                trackBy="stage_key"
+                variant="embedded"
+                header={<Header variant="h3">SLA Target Baselines</Header>}
+                empty={<Box>No SLA targets configured.</Box>}
+              />
+            )}
+            {!canEditSla && <StatusIndicator type="stopped">Read only</StatusIndicator>}
+          </SpaceBetween>
+        );
       case 'sessionAudit':
         return (
           <SpaceBetween size="s">
@@ -771,11 +980,23 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
                         item.id === 'cors' ? 'CORS / Origins' :
                         item.id === 'env' ? 'Environment' :
                         item.id === 'appearance' ? 'Appearance & Theme' :
+                        item.id === 'slaConfig' ? 'SLA Config' :
                         item.id === 'sessionAudit' ? 'Session Audit' : 'Info'
                       ), (Comp.aiContext || ''));
                     }
                   }}>Info</Link>}
                   actions={(() => {
+                    if (item.id === 'slaConfig') {
+                      if (!canEditSla) {
+                        return <Badge color="grey">Read only</Badge>;
+                      }
+                      return (
+                        <SpaceBetween direction="horizontal" size="xs">
+                          <Button onClick={handleSlaSave} loading={savingSla} disabled={!isSlaDirty || savingSla}>Save</Button>
+                          <Button variant="link" onClick={handleSlaReset} disabled={!isSlaDirty || savingSla}>Cancel</Button>
+                        </SpaceBetween>
+                      );
+                    }
                     if (item.id === 'ai') {
                       return (
                         <SpaceBetween direction="horizontal" size="xs">
@@ -842,7 +1063,9 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
                           ? 'Environment'
                           : item.id === 'appearance'
                             ? 'Appearance & Theme'
-                            : item.id.charAt(0).toUpperCase() + item.id.slice(1)}
+                            : item.id === 'slaConfig'
+                              ? 'SLA Config'
+                              : item.id.charAt(0).toUpperCase() + item.id.slice(1)}
                 </Header>
               }
               i18nStrings={boardItemI18n}
