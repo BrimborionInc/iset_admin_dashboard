@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { SideNavigation as CloudscapeSideNavigation, Badge } from '@cloudscape-design/components';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '../auth/cognito';
@@ -79,7 +79,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0 }) => {
     },
     {
       type: 'section',
-      text: 'Intake Form Editor',
+      text: 'Intake Workflow Studio',
       items: [
         { type: 'link', text: 'Manage Intake Steps', href: '/manage-components' },
         { type: 'link', text: 'Manage Workflows', href: '/manage-workflows' },
@@ -106,7 +106,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0 }) => {
         { type: 'link', text: 'Release Management', href: '/release-management-dashboard' },
         { type: 'link', text: 'Notification Settings', href: '/manage-notifications' },
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
-        { type: 'link', text: 'Event Capture', href: '/configuration/events' },
+        { type: 'link', text: 'Event Logging', href: '/configuration/events' },
         { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
         { type: 'link', text: 'File Upload Config', href: '/admin/upload-config' },
       ],

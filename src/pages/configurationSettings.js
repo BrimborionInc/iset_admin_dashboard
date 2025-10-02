@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Button, SpaceBetween, Box, Select, FormField, StatusIndicator, Toggle, ColumnLayout, Input, Multiselect, Header, Badge, Checkbox, Modal, Tabs, Alert, Link } from '@cloudscape-design/components';
+import { Button, SpaceBetween, Box, Select, FormField, StatusIndicator, Toggle, ColumnLayout, Input, Multiselect, Header, Badge, Checkbox, Modal, Tabs, Alert, Link, Table } from '@cloudscape-design/components';
 import { Board, BoardItem } from '@cloudscape-design/board-components';
 import { getIdTokenClaims, getRoleFromClaims, isIamOn, hasValidSession } from '../auth/cognito';
 import { apiFetch } from '../auth/apiClient';
+import { readDemoNavigationVisibility, writeDemoNavigationVisibility, subscribeToDemoNavigationVisibility, DEMO_NAVIGATION_ROLES } from '../utils/demoNavigationVisibility';
+import { useDarkMode as useDarkModeContext } from '../context/DarkModeContext';
 
 // Centralized JSON fetch using apiFetch (ensures correct API base + auth headers)
 async function fetchJSON(path, opts) {
@@ -42,7 +44,8 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
   const [fallbacks, setFallbacks] = useState([]); // array of {label,value}
   const [error, setError] = useState(null);
   const [role, setRole] = useState('');
-  const [darkMode, setDarkMode] = useState(false); // placeholder formerly on visual settings
+  const { useDarkMode: isDarkMode, setUseDarkMode } = useDarkModeContext();
+  const [demoToolbarVisibility, setDemoToolbarVisibility] = useState(() => readDemoNavigationVisibility());
   // Auth Phase 4 multi-scope state: separate Admin vs Applicants ("public")
   // Each scope gets its own session/token TTL edits and policy edits
   const [authSessionAdminOriginal, setAuthSessionAdminOriginal] = useState(null);
@@ -189,7 +192,50 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
       } catch (e) { setError(e.message); } finally { setLoading(false); }
     }, []);
 
+  useEffect(() => {
+    const unsubscribe = subscribeToDemoNavigationVisibility(map => {
+      setDemoToolbarVisibility(map || readDemoNavigationVisibility());
+    });
+    return unsubscribe;
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+
+  const handleDemoToolbarVisibilityChange = useCallback((roleName, visible) => {
+    setDemoToolbarVisibility(prev => {
+      const next = { ...(prev || {}), [roleName]: visible };
+      writeDemoNavigationVisibility(next);
+      return next;
+    });
+  }, []);
+
+  const demoToolbarRows = React.useMemo(() => {
+    const map = demoToolbarVisibility || {};
+    return DEMO_NAVIGATION_ROLES.map(roleName => ({
+      role: roleName,
+      visible: Object.prototype.hasOwnProperty.call(map, roleName) ? !!map[roleName] : true
+    }));
+  }, [demoToolbarVisibility]);
+
+  const demoToolbarColumns = React.useMemo(() => ([
+    {
+      id: 'role',
+      header: 'Role',
+      cell: item => item.role
+    },
+    {
+      id: 'visible',
+      header: 'Visible',
+      cell: item => (
+        <Toggle
+          checked={item.visible}
+          onChange={({ detail }) => handleDemoToolbarVisibilityChange(item.role, detail.checked)}
+        >
+          {item.visible ? 'Visible' : 'Hidden'}
+        </Toggle>
+      )
+    }
+  ]), [handleDemoToolbarVisibilityChange]);
 
     async function saveModel() {
       if (!aiModel) return; setSavingModel(true); setError(null);
@@ -636,7 +682,22 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
       case 'cors':
         return runtime && (<SpaceBetween size="xs">{(runtime.cors?.allowedOrigins || []).map(o => <Box key={o}>{o}</Box>)}</SpaceBetween>);
       case 'env':
-        return runtime && <Box>NODE_ENV: {runtime.env?.nodeEnv}</Box>;
+        return (
+          <SpaceBetween size="s">
+            {runtime
+              ? <Box>NODE_ENV: {runtime.env?.nodeEnv || 'unknown'}</Box>
+              : <StatusIndicator type="loading">Loading environment</StatusIndicator>}
+            <Table
+              variant="embedded"
+              resizableColumns={false}
+              columnDefinitions={demoToolbarColumns}
+              items={demoToolbarRows}
+              trackBy="role"
+              header={<Header variant="h3">Demo Toolbar Visibility</Header>}
+              empty={<Box>No roles available</Box>}
+            />
+          </SpaceBetween>
+        );
       case 'secrets':
         return security && canSeeAny ? (
           <SpaceBetween size="xs">
@@ -650,7 +711,7 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
         return (
           <SpaceBetween size="s">
             <Box fontSize="body-s" color="text-status-info">Dark mode preference (scaffold only).</Box>
-            <Toggle checked={darkMode} onChange={e => setDarkMode(e.detail.checked)}>Dark Mode</Toggle>
+            <Toggle checked={isDarkMode} onChange={e => setUseDarkMode(e.detail.checked)}>Dark Mode</Toggle>
           </SpaceBetween>
         );
       default:

@@ -6,9 +6,15 @@ const DarkModeContext = createContext();
 
 // Provide context to the app
 export const DarkModeProvider = ({ children }) => {
-    // Load dark mode state from localStorage (default to false if not set)
     const [useDarkMode, setUseDarkMode] = useState(() => {
-        return localStorage.getItem("darkMode") === "true"; // Retrieve from localStorage
+        if (typeof window === "undefined") {
+            return false;
+        }
+        try {
+            return sessionStorage.getItem("darkMode") === "true";
+        } catch (_) {
+            return false;
+        }
     });
 
     // Apply mode when state changes & log mode
@@ -16,9 +22,34 @@ export const DarkModeProvider = ({ children }) => {
         console.log(`Dark Mode State Changed: ${useDarkMode ? "Dark" : "Light"}`);
         applyMode(useDarkMode ? Mode.Dark : Mode.Light);
 
-        // Store the new dark mode state in localStorage
-        localStorage.setItem("darkMode", useDarkMode);
+        try {
+            sessionStorage.setItem("darkMode", useDarkMode ? "true" : "false");
+        } catch (_) {
+            // ignore storage failures
+        }
     }, [useDarkMode]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") {
+            return undefined;
+        }
+
+        const handleAuthChange = (event) => {
+            if (!event?.detail?.session) {
+                setUseDarkMode(false);
+                try {
+                    sessionStorage.removeItem("darkMode");
+                } catch (_) {
+                    // ignore storage failures
+                }
+            }
+        };
+
+        window.addEventListener("auth:session-changed", handleAuthChange);
+        return () => {
+            window.removeEventListener("auth:session-changed", handleAuthChange);
+        };
+    }, [setUseDarkMode]);
 
     return (
         <DarkModeContext.Provider value={{ useDarkMode, setUseDarkMode }}>
