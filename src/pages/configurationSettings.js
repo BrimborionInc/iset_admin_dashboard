@@ -101,8 +101,8 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
     { id: 'ai', columnSpan: 2, rowSpan: 4, data: { type: 'ai' } },
     { id: 'auth', columnSpan: 2, rowSpan: 4, data: { type: 'auth' } },
     { id: 'sessionAudit', columnSpan: 2, rowSpan: 3, data: { type: 'sessionAudit' } },
-    { id: 'cors', columnSpan: 2, rowSpan: 4, data: { type: 'cors' } },
-    { id: 'env', columnSpan: 2, rowSpan: 2, data: { type: 'env' } },
+    { id: 'cors', columnSpan: 2, rowSpan: 2, data: { type: 'cors' } },
+    { id: 'env', columnSpan: 2, rowSpan: 4, data: { type: 'env' } },
     { id: 'secrets', columnSpan: 2, rowSpan: 3, data: { type: 'secrets' } },
     { id: 'appearance', columnSpan: 2, rowSpan: 2, data: { type: 'appearance' } }
   ]), []);
