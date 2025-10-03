@@ -34,7 +34,7 @@ function getMockMyWork(role) {
         case 'Regional Coordinator':
             return [
                 { id: 'region-queue', label: 'Assigned to my region', count: 21, description: 'Cases owned by you or assessors in your region.' },
-                { id: 'needs-reassignment', label: 'Needs reassignment', count: 3, description: 'Cases waiting for you to re-route or pick up.' },
+                { id: 'needs-reassignment', label: 'Assigned to me', count: 3, description: 'Cases waiting for you to re-route or pick up.' },
                 { id: 'awaiting-info', label: 'Awaiting applicant info', count: 5, description: 'Follow-ups sent to applicants from your region.' },
                 { id: 'due-this-week', label: 'Due this week', count: 12, description: 'Cases with upcoming SLA deadlines.' },
                 { id: 'overdue', label: 'Overdue', count: 1, description: 'Items breaching SLA within your region.' }
@@ -42,9 +42,8 @@ function getMockMyWork(role) {
         case 'Application Assessor':
             return [
                 { id: 'assigned-to-me', label: 'Assigned to me', count: 7, description: 'Your active assessment queue.' },
-                { id: 'due-today', label: 'Due today', count: 2, description: 'Assessments due in the next 24 hours.' },
+                { id: 'due-today', label: 'Due today', count: 2, description: 'Assessments approaching their SLA window.' },
                 { id: 'awaiting-applicant', label: 'Awaiting applicant response', count: 1, description: 'Cases paused while the applicant responds.' },
-                { id: 'quality-review', label: 'In quality review', count: 1, description: 'Submitted decisions awaiting QA sign-off.' },
                 { id: 'overdue', label: 'Overdue', count: 0, description: 'Cases past SLA that need immediate attention.' }
             ];
         case 'System Administrator':
@@ -517,7 +516,7 @@ async function loadWorkQueue() {
                                     const caseId = caseIdRaw !== undefined && caseIdRaw !== null ? String(caseIdRaw) : null;
                                     const trackingId = pickFirstText(item.tracking_id, eventData && eventData.tracking_id, eventData && eventData.reference_number);
                                     return (
-                                        <Box key={key} variant="p" title={tooltip}>
+                                        <Box key={key} title={tooltip} margin={{ bottom: 'xxs' }}>
                                             <Box display="inline" margin={{ right: 'xs' }}>{title}</Box>
                                             {actorName && (
                                                 <Box display="inline" margin={{ right: 'xs' }} color="text-status-inactive">by {actorName}</Box>
@@ -693,5 +692,6 @@ const DevTaskTracker = () => {
 };
 
 export default AdminDashboard;
+
 
 

@@ -6,8 +6,8 @@
 
 ## Roles & Buckets
 - **Program Administrator**: New submissions, Unassigned backlog, In assessment, Awaiting program decision, On hold / info requested, Overdue.
-- **Regional Coordinator**: Assigned to my region, Needs reassignment, Awaiting applicant info, Due this week, Overdue.
-- **Application Assessor**: Assigned to me, Due today, Awaiting applicant response, In quality review, Overdue.
+- **Regional Coordinator**: Assigned to my region, Assigned to me, Awaiting applicant info, Due this week, Overdue.
+- **Application Assessor**: Assigned to me, Due today, Awaiting applicant response, Overdue.
 - **System Administrator**: Workflow drafts, Release prep tasks, Platform alerts.
 
 ## Implementation

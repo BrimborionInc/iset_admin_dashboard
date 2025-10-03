@@ -368,7 +368,7 @@ async function staffProfileMiddleware(req, res, next) {
       cognito_sub VARCHAR(64) NOT NULL UNIQUE,
       email VARCHAR(320) NULL,
       primary_role VARCHAR(64) NULL,
-      /* region_id optional – legacy tables may not have it */
+      /* region_id optional ??? legacy tables may not have it */
       last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_role (primary_role)
@@ -545,16 +545,28 @@ const WORK_QUEUE_BUCKET_META = {
     description: 'Cases owned by the coordinator or assessors in their region.'
   },
   'needs-reassignment': {
-    label: 'Needs reassignment',
+    label: 'Assigned to me',
     description: 'Cases currently assigned to the coordinator.'
+  },
+  'assigned-to-me': {
+    label: 'Assigned to me',
+    description: 'Cases currently assigned to the assessor.'
   },
   'awaiting-info': {
     label: 'Awaiting applicant info',
     description: 'Regional cases waiting on applicant action.'
   },
+  'awaiting-applicant': {
+    label: 'Awaiting applicant response',
+    description: 'Cases waiting for applicant action.'
+  },
   'due-this-week': {
     label: 'Due this week',
     description: 'Cases in the region approaching their SLA deadline within 7 days.'
+  },
+  'due-today': {
+    label: 'Due today',
+    description: 'Cases approaching their SLA deadline within the next working day.'
   },
   'awaiting-decision': {
     label: 'Awaiting program decision',
@@ -600,6 +612,7 @@ const CASE_STATUS_HOLD_VALUES_LOWER = CASE_STATUS_HOLD_VALUES.map(v => v.toLower
 const CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT.map(v => v.toLowerCase());
 const CASE_STAGE_AWAITING_DECISION_LOWER = CASE_STAGE_AWAITING_DECISION.map(v => v.toLowerCase());
 const DUE_SOON_THRESHOLD_HOURS = 7 * 24;
+const DUE_TODAY_THRESHOLD_HOURS = 24;
 
 
 async function countProgramAdminNewSubmissions(pool) {
@@ -856,54 +869,248 @@ function normalizeStaffIdList(list) {
 
 async function resolveRegionalCoordinatorContext(req) {
   if (!pool) return { valid: false, staffIds: [] };
-  const staffProfileIdRaw = req.staffProfile?.id ?? null;
-  const regionIdRaw = req.staffProfile?.region_id ?? req.auth?.regionId ?? null;
+  const headerUserIdRaw = req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
+  const headerRegionIdRaw = req.get('X-Dev-RegionId') || req.get('x-dev-regionid') || null;
+  const candidateIdRaw = headerUserIdRaw ?? req.staffProfile?.id ?? null;
+  let regionIdRaw = headerRegionIdRaw ?? req.staffProfile?.region_id ?? req.auth?.regionId ?? null;
+
   const collected = [];
-  if (staffProfileIdRaw != null) {
-    const id = Number(staffProfileIdRaw);
-    if (Number.isInteger(id) && id > 0) collected.push(id);
-  }
-  if (regionIdRaw != null) {
+  let coordinatorId = null;
+
+  const tryResolveCoordinator = async (rawId) => {
+    const numeric = Number(rawId);
+    if (!Number.isInteger(numeric) || numeric <= 0) return null;
+    if (req.staffProfile && req.staffProfile.id === numeric) {
+      if (!collected.includes(numeric)) collected.push(numeric);
+      if (regionIdRaw == null && req.staffProfile.region_id != null) regionIdRaw = req.staffProfile.region_id;
+      return numeric;
+    }
     try {
-      const [rows] = await pool.query('SELECT id FROM staff_profiles WHERE region_id = ?', [regionIdRaw]);
+      const [[profile]] = await pool.query('SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles WHERE id = ? LIMIT 1', [numeric]);
+      if (profile) {
+        req.staffProfile = req.staffProfile || profile;
+        if (!collected.includes(numeric)) collected.push(numeric);
+        if (regionIdRaw == null && profile.region_id != null) regionIdRaw = profile.region_id;
+        return numeric;
+      }
+    } catch (err) {
+      if (!isMissingTableErrorLocal(err)) throw err;
+    }
+    return null;
+  };
+
+  coordinatorId = await tryResolveCoordinator(candidateIdRaw);
+
+  if (regionIdRaw == null && coordinatorId != null) {
+    try {
+      const [[row]] = await pool.query('SELECT region_id FROM staff_profiles WHERE id = ? LIMIT 1', [coordinatorId]);
+      if (row && row.region_id != null) regionIdRaw = row.region_id;
+    } catch (err) {
+      if (!isMissingTableErrorLocal(err)) throw err;
+    }
+  }
+
+  const normalizedRegionId = Number(regionIdRaw);
+  if (Number.isInteger(normalizedRegionId) && normalizedRegionId > 0) {
+    try {
+      const [rows] = await pool.query('SELECT id FROM staff_profiles WHERE region_id = ?', [normalizedRegionId]);
       for (const row of rows || []) {
-        if (row && row.id != null) {
-          const id = Number(row.id);
-          if (Number.isInteger(id) && id > 0) collected.push(id);
-        }
+        if (!row || row.id == null) continue;
+        const id = Number(row.id);
+        if (Number.isInteger(id) && id > 0 && !collected.includes(id)) collected.push(id);
+      }
+      regionIdRaw = normalizedRegionId;
+    } catch (err) {
+      if (!isMissingTableErrorLocal(err)) throw err;
+    }
+  }
+
+  const staffIds = normalizeStaffIdList(collected);
+  const coordinatorInList = coordinatorId && staffIds.includes(coordinatorId) ? coordinatorId : null;
+  const staffProfileId = coordinatorInList || (staffIds.length ? staffIds[0] : null);
+  const regionId = Number.isInteger(Number(regionIdRaw)) && Number(regionIdRaw) > 0 ? Number(regionIdRaw) : null;
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[work-queue][rc-context]', {
+      requestedId: candidateIdRaw,
+      requestedRegion: regionIdRaw,
+      resolvedStaffProfileId: staffProfileId,
+      resolvedRegionId: regionId,
+      staffIds
+    });
+  }
+
+  return {
+    valid: Number.isInteger(staffProfileId) && staffProfileId > 0,
+    staffProfileId: Number.isInteger(staffProfileId) && staffProfileId > 0 ? staffProfileId : null,
+    regionId,
+    staffIds
+  };
+}
+
+async function resolveApplicationAssessorContext(req) {
+  if (!pool) return { valid: false, staffIds: [] };
+  const headerUserIdRaw = req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
+  const headerRegionIdRaw = req.get('X-Dev-RegionId') || req.get('x-dev-regionid') || null;
+  const candidateIdRaw = headerUserIdRaw ?? req.staffProfile?.id ?? null;
+  let regionIdRaw = headerRegionIdRaw ?? req.staffProfile?.region_id ?? req.auth?.regionId ?? null;
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[assessor-resolve:start]', {
+      headerUserIdRaw,
+      staffProfileId: req.staffProfile?.id ?? null,
+      staffProfileRole: req.staffProfile?.primary_role ?? null,
+      candidateIdRaw,
+      regionIdRaw
+    });
+  }
+
+  const matchesAssessorRole = (profile) => {
+    const role = profile?.primary_role;
+    if (typeof role !== 'string') return false;
+    return role.toLowerCase().replace(/\s+/g, '') === 'applicationassessor';
+  };
+
+  const tryResolveById = async (rawId) => {
+    const numeric = Number(rawId);
+    if (!Number.isInteger(numeric) || numeric <= 0) return null;
+    if (req.staffProfile && req.staffProfile.id === numeric) {
+      return matchesAssessorRole(req.staffProfile) ? numeric : null;
+    }
+    try {
+      const [[profile]] = await pool.query('SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles WHERE id = ? LIMIT 1', [numeric]);
+      if (profile && matchesAssessorRole(profile)) {
+        req.staffProfile = req.staffProfile || profile;
+        return numeric;
+      }
+    } catch (err) {
+      if (!isMissingTableErrorLocal(err)) throw err;
+    }
+    return null;
+  };
+
+  const tryResolveByRegion = async (regionNumeric) => {
+    try {
+      const [rows] = await pool.query('SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles WHERE region_id = ? ORDER BY id ASC', [regionNumeric]);
+      const match = (rows || []).find(row => row && matchesAssessorRole(row));
+      if (match && Number.isInteger(Number(match.id)) && Number(match.id) > 0) {
+        req.staffProfile = req.staffProfile || match;
+        return Number(match.id);
+      }
+    } catch (err) {
+      if (!isMissingTableErrorLocal(err)) throw err;
+    }
+    return null;
+  };
+
+  let resolvedId = await tryResolveById(candidateIdRaw);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[assessor-resolve:after-id]', { candidateIdRaw, resolvedId });
+  }
+
+  if (!resolvedId && regionIdRaw != null) {
+    const regionNumeric = Number(regionIdRaw);
+    if (Number.isInteger(regionNumeric) && regionNumeric > 0) {
+      resolvedId = await tryResolveByRegion(regionNumeric);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[assessor-resolve:after-region]', { regionNumeric, resolvedId });
+      }
+      if (resolvedId) {
+        regionIdRaw = regionNumeric;
+      }
+    }
+  }
+
+  if (!resolvedId) {
+    try {
+      const [[row]] = await pool.query('SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles WHERE primary_role = ? ORDER BY id ASC LIMIT 1', ['Application Assessor']);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[assessor-resolve:global-fallback]', row || null);
+      }
+      if (row && matchesAssessorRole(row)) {
+        req.staffProfile = req.staffProfile || row;
+        resolvedId = Number(row.id);
+        if (row.region_id != null) regionIdRaw = row.region_id;
       }
     } catch (err) {
       if (!isMissingTableErrorLocal(err)) throw err;
     }
   }
-  const staffIds = normalizeStaffIdList(collected);
-  const staffProfileId = Number(staffProfileIdRaw);
-  return {
-    valid: Number.isInteger(staffProfileId) && staffProfileId > 0,
-    staffProfileId: Number.isInteger(staffProfileId) && staffProfileId > 0 ? staffProfileId : null,
-    regionId: regionIdRaw ?? null,
+
+  if (!resolvedId) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[work-queue][assessor-context]', { requestedId: candidateIdRaw, reason: 'no_assessor_profile' });
+    }
+    return { valid: false, staffIds: [] };
+  }
+
+  const staffIds = normalizeStaffIdList([resolvedId]);
+  const context = {
+    valid: staffIds.length === 1,
+    staffProfileId: staffIds.length === 1 ? staffIds[0] : null,
+    regionId: req.staffProfile?.region_id ?? (regionIdRaw != null ? Number(regionIdRaw) : null),
     staffIds
   };
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[work-queue][assessor-context]', {
+      requestedId: candidateIdRaw,
+      resolvedId: context.staffProfileId,
+      resolvedRegionId: context.regionId,
+      staffIds: context.staffIds
+    });
+  }
+
+  return context;
 }
 
-async function countRegionalAssignedToRegion(pool, staffIds) {
+
+
+async function countRegionalAssignedToRegion(pool, staffIds, context = {}) {
   const ids = normalizeStaffIdList(staffIds);
-  if (!ids.length) return 0;
-  const placeholders = ids.map(() => '?').join(',');
-  const params = [...ids];
+  const coordinatorIdRaw = context?.staffProfileId ?? context?.coordinatorId ?? null;
+  const regionIdRaw = context?.regionId ?? null;
+  const coordinatorId = Number(coordinatorIdRaw);
+  const regionId = Number(regionIdRaw);
+  const filters = [];
+  const params = [];
+
+  if (Number.isInteger(coordinatorId) && coordinatorId > 0) {
+    filters.push('c.assigned_to_user_id = ?');
+    params.push(coordinatorId);
+  }
+
+  if (Number.isInteger(regionId) && regionId > 0) {
+    filters.push('sp.region_id = ?');
+    params.push(regionId);
+  }
+
+  if (!filters.length && ids.length) {
+    const placeholders = ids.map(() => '?').join(',');
+    filters.push(`c.assigned_to_user_id IN (${placeholders})`);
+    params.push(...ids);
+  }
+
+  if (!filters.length) return 0;
+
   let statusCondition = 'c.status IS NULL';
   if (CASE_STATUS_TERMINAL_VALUES_LOWER.length) {
     const statusPlaceholders = CASE_STATUS_TERMINAL_VALUES_LOWER.map(() => '?').join(',');
     statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${statusPlaceholders}))`;
     params.push(...CASE_STATUS_TERMINAL_VALUES_LOWER);
   }
+
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
-        WHERE c.assigned_to_user_id IN (${placeholders})
+         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        WHERE c.assigned_to_user_id IS NOT NULL
+          AND (${filters.join(' OR ')})
           AND ${statusCondition}`;
   const [[row]] = await pool.query(sql, params);
   return Number(row?.total ?? 0);
 }
+
+
 
 async function countRegionalNeedsReassignment(pool, staffProfileId) {
   const coordinatorId = Number(staffProfileId);
@@ -1116,6 +1323,139 @@ async function countRegionalOverdue(pool, staffIds) {
 
   return total;
 }
+
+async function countAssessorAssignedToMe(pool, staffProfileId) {
+  const assessorId = Number(staffProfileId);
+  if (!Number.isInteger(assessorId) || assessorId <= 0) return 0;
+  const params = [assessorId];
+  let statusCondition = 'c.status IS NULL';
+  if (CASE_STATUS_TERMINAL_VALUES_LOWER.length) {
+    const placeholders = CASE_STATUS_TERMINAL_VALUES_LOWER.map(() => '?').join(',');
+    statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+    params.push(...CASE_STATUS_TERMINAL_VALUES_LOWER);
+  }
+  const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+        WHERE c.assigned_to_user_id = ?
+          AND ${statusCondition}`;
+  const [[row]] = await pool.query(sql, params);
+  return Number(row?.total ?? 0);
+}
+
+async function countAssessorAwaitingApplicantResponse(pool, staffProfileId) {
+  const assessorId = Number(staffProfileId);
+  if (!Number.isInteger(assessorId) || assessorId <= 0) return 0;
+  if (!CASE_STATUS_HOLD_VALUES_LOWER.length) return 0;
+  const statusPlaceholders = CASE_STATUS_HOLD_VALUES_LOWER.map(() => '?').join(',');
+  const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+        WHERE c.assigned_to_user_id = ?
+          AND c.status IS NOT NULL
+          AND LOWER(c.status) IN (${statusPlaceholders})`;
+  const params = [assessorId, ...CASE_STATUS_HOLD_VALUES_LOWER];
+  const [[row]] = await pool.query(sql, params);
+  return Number(row?.total ?? 0);
+}
+
+async function countAssessorDueToday(pool, staffProfileId) {
+  const ids = normalizeStaffIdList([staffProfileId]);
+  if (!ids.length) return 0;
+  const targets = await fetchActiveSlaTargets(pool);
+  const stageTargets = new Map();
+  for (const row of targets) {
+    if (!row || row.applies_to_role) continue;
+    stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
+  }
+  const getTarget = stageKey => {
+    if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
+    const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
+    return fallback ? fallback.target_hours : 0;
+  };
+
+  const assessmentHours = getTarget('assessment');
+  const decisionHours = getTarget('program_decision');
+  const awaitingStatuses = CASE_STAGE_AWAITING_DECISION_LOWER;
+  const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER;
+  const terminalValues = CASE_STATUS_TERMINAL_VALUES_LOWER;
+  const disallowedForAssessment = Array.from(new Set([...excludedValues, ...awaitingStatuses]));
+  const staffPlaceholders = ids.map(() => '?').join(',');
+  const elapsedExpr = 'TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW())';
+
+  let total = 0;
+
+  if (assessmentHours > 0) {
+    const lowerBound = Math.max(assessmentHours - DUE_TODAY_THRESHOLD_HOURS, 0);
+    const upperBound = assessmentHours;
+    if (upperBound > lowerBound) {
+      const params = [...ids];
+      let statusCondition = 'c.status IS NULL';
+      if (disallowedForAssessment.length) {
+        const placeholders = disallowedForAssessment.map(() => '?').join(',');
+        statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+        params.push(...disallowedForAssessment);
+      }
+      params.push(lowerBound, upperBound);
+      const sql = `SELECT COUNT(*) AS total
+           FROM iset_case c
+          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+            AND ${statusCondition}
+            AND ${elapsedExpr} >= ?
+            AND ${elapsedExpr} < ?`;
+      try {
+        const [[row]] = await pool.query(sql, params);
+        total += Number(row?.total ?? 0);
+      } catch (err) {
+        if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
+          throw err;
+        }
+      }
+    }
+  }
+
+  if (decisionHours > 0 && awaitingStatuses.length) {
+    const lowerBound = Math.max(decisionHours - DUE_TODAY_THRESHOLD_HOURS, 0);
+    const upperBound = decisionHours;
+    if (upperBound > lowerBound) {
+      const stagePlaceholders = awaitingStatuses.map(() => '?').join(',');
+      const params = [...ids, ...awaitingStatuses];
+      let statusCondition = 'c.status IS NULL';
+      if (terminalValues.length) {
+        const placeholders = terminalValues.map(() => '?').join(',');
+        statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+        params.push(...terminalValues);
+      }
+      params.push(lowerBound, upperBound);
+      const sql = `SELECT COUNT(*) AS total
+           FROM iset_case c
+          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+            AND c.stage IS NOT NULL
+            AND LOWER(c.stage) IN (${stagePlaceholders})
+            AND ${statusCondition}
+            AND ${elapsedExpr} >= ?
+            AND ${elapsedExpr} < ?`;
+      try {
+        const [[row]] = await pool.query(sql, params);
+        total += Number(row?.total ?? 0);
+      } catch (err) {
+        if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
+          throw err;
+        }
+      }
+    }
+  }
+
+  return total;
+}
+
+
+
+async function countAssessorOverdue(pool, staffProfileId) {
+  const ids = normalizeStaffIdList([staffProfileId]);
+  if (!ids.length) return 0;
+  return countRegionalOverdue(pool, ids);
+}
+
+
 
 function inferUserRole(req) {
   if (req.staffProfile && req.staffProfile.primary_role) return req.staffProfile.primary_role;
@@ -2278,7 +2618,25 @@ app.post('/api/config/sla-targets', async (req, res) => {
 
 
 app.get('/api/dashboard/application-work-queue', async (req, res) => {
-  const role = inferUserRole(req) || 'Guest';
+  let role = inferUserRole(req) || 'Guest';
+  const iamModeHeader = (req.get('X-Iam-Mode') || req.get('x-iam-mode') || req.headers['x-iam-mode'] || '').toLowerCase();
+  if (iamModeHeader === 'off') {
+    const simRole = req.get('X-Dev-Role') || req.get('x-dev-role') || null;
+    if (simRole) {
+      role = simRole;
+    }
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[work-queue][role]', {
+      iamMode: iamModeHeader,
+      headerRole: req.get('X-Dev-Role') || req.get('x-dev-role') || null,
+      resolvedRole: role,
+      staffRole: req.staffProfile?.primary_role || null,
+      authRole: req.auth?.role || null
+    });
+  }
+
   try {
     if (role === 'Program Administrator') {
       const [newSubmissionCount, unassignedCount, inAssessmentCount, awaitingDecisionCount, onHoldCount, overdueCount] = await Promise.all([
@@ -2336,12 +2694,149 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
           }
         ]
       });
-
     }
-    res.json({ role, generatedAt: new Date().toISOString(), buckets: [] });
+
+    if (role === 'Regional Coordinator') {
+      const metaRegion = WORK_QUEUE_BUCKET_META['region-queue'];
+      const metaNeeds = WORK_QUEUE_BUCKET_META['needs-reassignment'];
+      const metaAwaiting = WORK_QUEUE_BUCKET_META['awaiting-info'];
+      const metaDueWeek = WORK_QUEUE_BUCKET_META['due-this-week'];
+      const metaOverdue = WORK_QUEUE_BUCKET_META['overdue'];
+
+      let regionQueueCount = 0;
+      let needsReassignmentCount = 0;
+      let awaitingInfoCount = 0;
+      let dueThisWeekCount = 0;
+      let overdueCount = 0;
+
+      const context = await resolveRegionalCoordinatorContext(req);
+      if (context?.valid) {
+        const { staffIds, staffProfileId, regionId } = context;
+        const contextParams = { staffProfileId, regionId };
+        [
+          regionQueueCount,
+          needsReassignmentCount,
+          awaitingInfoCount,
+          dueThisWeekCount,
+          overdueCount
+        ] = await Promise.all([
+          countRegionalAssignedToRegion(pool, staffIds, contextParams),
+          countRegionalNeedsReassignment(pool, staffProfileId),
+          countRegionalAwaitingApplicantInfo(pool, staffIds),
+          countRegionalDueThisWeek(pool, staffIds),
+          countRegionalOverdue(pool, staffIds)
+        ]);
+      } else if (process.env.NODE_ENV !== 'production') {
+        console.log('[work-queue][regional] context invalid', context);
+      }
+
+      return res.json({
+        role,
+        generatedAt: new Date().toISOString(),
+        buckets: [
+          {
+            id: 'region-queue',
+            label: metaRegion?.label || 'Assigned to my region',
+            description: metaRegion?.description || null,
+            count: regionQueueCount
+          },
+          {
+            id: 'needs-reassignment',
+            label: metaNeeds?.label || 'Assigned to me',
+            description: metaNeeds?.description || null,
+            count: needsReassignmentCount
+          },
+          {
+            id: 'awaiting-info',
+            label: metaAwaiting?.label || 'Awaiting applicant info',
+            description: metaAwaiting?.description || null,
+            count: awaitingInfoCount
+          },
+          {
+            id: 'due-this-week',
+            label: metaDueWeek?.label || 'Due this week',
+            description: metaDueWeek?.description || null,
+            count: dueThisWeekCount
+          },
+          {
+            id: 'overdue',
+            label: metaOverdue?.label || 'Overdue',
+            description: metaOverdue?.description || null,
+            count: overdueCount
+          }
+        ]
+      });
+    }
+
+    if (role === 'Application Assessor') {
+      const metaAssigned = WORK_QUEUE_BUCKET_META['assigned-to-me'];
+      const metaDueToday = WORK_QUEUE_BUCKET_META['due-today'];
+      const metaAwaitingApplicant = WORK_QUEUE_BUCKET_META['awaiting-applicant'];
+      const metaOverdue = WORK_QUEUE_BUCKET_META['overdue'];
+
+      let assignedCount = 0;
+      let dueTodayCount = 0;
+      let awaitingApplicantCount = 0;
+      let overdueCount = 0;
+
+      const context = await resolveApplicationAssessorContext(req);
+      if (context?.valid && context.staffProfileId) {
+        const staffId = context.staffProfileId;
+        [
+          assignedCount,
+          dueTodayCount,
+          awaitingApplicantCount,
+          overdueCount
+        ] = await Promise.all([
+          countAssessorAssignedToMe(pool, staffId),
+          countAssessorDueToday(pool, staffId),
+          countAssessorAwaitingApplicantResponse(pool, staffId),
+          countAssessorOverdue(pool, staffId)
+        ]);
+      } else if (process.env.NODE_ENV !== 'production') {
+        console.log('[work-queue][assessor] context invalid', context);
+      }
+
+      return res.json({
+        role,
+        generatedAt: new Date().toISOString(),
+        buckets: [
+          {
+            id: 'assigned-to-me',
+            label: metaAssigned?.label || 'Assigned to me',
+            description: metaAssigned?.description || null,
+            count: assignedCount
+          },
+          {
+            id: 'due-today',
+            label: metaDueToday?.label || 'Due today',
+            description: metaDueToday?.description || null,
+            count: dueTodayCount
+          },
+          {
+            id: 'awaiting-applicant',
+            label: metaAwaitingApplicant?.label || 'Awaiting applicant response',
+            description: metaAwaitingApplicant?.description || null,
+            count: awaitingApplicantCount
+          },
+          {
+            id: 'overdue',
+            label: metaOverdue?.label || 'Overdue',
+            description: metaOverdue?.description || null,
+            count: overdueCount
+          }
+        ]
+      });
+    }
+
+    return res.json({
+      role,
+      generatedAt: new Date().toISOString(),
+      buckets: []
+    });
   } catch (e) {
     console.error('[work-queue] fetch failed:', e.message);
-    res.status(500).json({ error: 'work_queue_fetch_failed', message: e.message });
+    res.status(500).json({ error: 'application_work_queue_fetch_failed', message: e.message });
   }
 });
 
@@ -2868,7 +3363,7 @@ app.put('/api/component-templates/:id', async (req, res) => {
   const has_options = body.has_options;
   const option_schema = body.option_schema;
 
-  // Schema validation (radio only for now) – use template_key or type to identify
+  // Schema validation (radio only for now) ??? use template_key or type to identify
   const tk = (template_key || type || '').toLowerCase();
   if (tk === 'radio' && default_props) {
     const result = validateTemplatePayload('radio', default_props);
@@ -3013,7 +3508,7 @@ app.post('/api/component-templates/fix/character-count-prune-prefix-suffix', asy
 });
 
 // One-off migration endpoint to persist label.classes insertion and legacy required removal.
-// Safe to run multiple times (idempotent) – it will only update rows needing changes.
+// Safe to run multiple times (idempotent) ??? it will only update rows needing changes.
 app.post('/api/component-templates/migrate/label-required-cleanup', async (_req, res) => {
   try {
     const [rows] = await pool.query(`SELECT id, template_key, type, default_props, prop_schema FROM iset_intake.component_template`);
@@ -5627,7 +6122,7 @@ app.get('/api/case-assignment/unassigned-applications', async (req, res) => {
 /**
  * GET /api/tasks
  *
- * Returns all open tasks assigned to the authenticated caseworker (hard‑coded to user_id = 18 for now).
+ * Returns all open tasks assigned to the authenticated caseworker (hard???coded to user_id = 18 for now).
  *
  * Response fields:
  * - id
@@ -6895,7 +7390,7 @@ app.delete('/api/templates/:templateId', async (req, res) => {
 
 app.get('/api/admin/messages', async (req, res) => {
   try {
-    console.log("Fetching messages...");  // 🔴 Log request start
+    console.log("Fetching messages...");  // ???? Log request start
 
     const [messages] = await pool.query(`
           SELECT id, sender_id, recipient_id, subject, body, status, deleted, urgent, created_at 
@@ -6903,12 +7398,12 @@ app.get('/api/admin/messages', async (req, res) => {
           ORDER BY urgent DESC, created_at DESC
       `);
 
-    console.log("Messages fetched:", messages);  // 🔴 Log retrieved messages
+    console.log("Messages fetched:", messages);  // ???? Log retrieved messages
 
     res.json(messages);
   } catch (error) {
-    console.error('Error fetching messages:', error);  // 🔴 Log error details
-    res.status(500).json({ error: error.message });  // 🔴 Send error details in response
+    console.error('Error fetching messages:', error);  // ???? Log error details
+    res.status(500).json({ error: error.message });  // ???? Send error details in response
   }
 });
 
@@ -7874,7 +8369,7 @@ app.get('/api/cases/:case_id/events', async (req, res) => {
 //   Regional Coordinator  -> cases in their region/team (derivation TBD: using evaluator_ptma join as proxy)
 //   Application Assessor  -> only cases assigned to them
 // If a submission exists with no case yet:
-//   - Visible only to Program Administrators (future) – currently excluded for simplicity
+//   - Visible only to Program Administrators (future) ??? currently excluded for simplicity
 // Response: { count, rows:[ { case_id, tracking_id, applicant_name, status, assigned_user_id, assigned_user_name, submitted_at, region, ptma_codes, sla_risk } ] }
 app.get('/api/applications', async (req, res) => {
   try {
@@ -9056,6 +9551,7 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
+
 
 
 
