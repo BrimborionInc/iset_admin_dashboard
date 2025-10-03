@@ -540,6 +540,22 @@ const WORK_QUEUE_BUCKET_META = {
     label: 'Overdue',
     description: 'Cases past the program turnaround target.'
   },
+  'region-queue': {
+    label: 'Assigned to my region',
+    description: 'Cases owned by the coordinator or assessors in their region.'
+  },
+  'needs-reassignment': {
+    label: 'Needs reassignment',
+    description: 'Cases currently assigned to the coordinator.'
+  },
+  'awaiting-info': {
+    label: 'Awaiting applicant info',
+    description: 'Regional cases waiting on applicant action.'
+  },
+  'due-this-week': {
+    label: 'Due this week',
+    description: 'Cases in the region approaching their SLA deadline within 7 days.'
+  },
   'awaiting-decision': {
     label: 'Awaiting program decision',
     description: 'Assessments that need a Program Administrator approval.'
@@ -578,6 +594,12 @@ const CASE_STATUS_HOLD_VALUES = [
 const CASE_STATUS_EXCLUDED_FOR_ASSESSMENT = Array.from(new Set([...CASE_STATUS_TERMINAL_VALUES, ...CASE_STATUS_HOLD_VALUES]));
 const CASE_STAGE_AWAITING_DECISION = ['assessment_submitted', 'review_complete'];
 
+
+const CASE_STATUS_TERMINAL_VALUES_LOWER = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
+const CASE_STATUS_HOLD_VALUES_LOWER = CASE_STATUS_HOLD_VALUES.map(v => v.toLowerCase());
+const CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT.map(v => v.toLowerCase());
+const CASE_STAGE_AWAITING_DECISION_LOWER = CASE_STAGE_AWAITING_DECISION.map(v => v.toLowerCase());
+const DUE_SOON_THRESHOLD_HOURS = 7 * 24;
 
 
 async function countProgramAdminNewSubmissions(pool) {
@@ -844,6 +866,280 @@ async function countProgramAdminOnHold(pool) {
   }
 }
 
+
+
+function normalizeStaffIdList(list) {
+  if (!Array.isArray(list)) return [];
+  const normalized = [];
+  for (const value of list) {
+    const id = Number(value);
+    if (Number.isInteger(id) && id > 0) normalized.push(id);
+  }
+  return Array.from(new Set(normalized));
+}
+
+async function resolveRegionalCoordinatorContext(req) {
+  if (!pool) return { valid: false, staffIds: [] };
+  const staffProfileIdRaw = req.staffProfile?.id ?? null;
+  const regionIdRaw = req.staffProfile?.region_id ?? req.auth?.regionId ?? null;
+  const collected = [];
+  if (staffProfileIdRaw != null) {
+    const id = Number(staffProfileIdRaw);
+    if (Number.isInteger(id) && id > 0) collected.push(id);
+  }
+  if (regionIdRaw != null) {
+    try {
+      const [rows] = await pool.query('SELECT id FROM staff_profiles WHERE region_id = ?', [regionIdRaw]);
+      for (const row of rows || []) {
+        if (row && row.id != null) {
+          const id = Number(row.id);
+          if (Number.isInteger(id) && id > 0) collected.push(id);
+        }
+      }
+    } catch (err) {
+      if (!isMissingTableErrorLocal(err)) throw err;
+    }
+  }
+  const staffIds = normalizeStaffIdList(collected);
+  const staffProfileId = Number(staffProfileIdRaw);
+  return {
+    valid: Number.isInteger(staffProfileId) && staffProfileId > 0,
+    staffProfileId: Number.isInteger(staffProfileId) && staffProfileId > 0 ? staffProfileId : null,
+    regionId: regionIdRaw ?? null,
+    staffIds
+  };
+}
+
+async function countRegionalAssignedToRegion(pool, staffIds) {
+  const ids = normalizeStaffIdList(staffIds);
+  if (!ids.length) return 0;
+  const placeholders = ids.map(() => '?').join(',');
+  const params = [...ids];
+  let statusCondition = 'c.status IS NULL';
+  if (CASE_STATUS_TERMINAL_VALUES_LOWER.length) {
+    const statusPlaceholders = CASE_STATUS_TERMINAL_VALUES_LOWER.map(() => '?').join(',');
+    statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${statusPlaceholders}))`;
+    params.push(...CASE_STATUS_TERMINAL_VALUES_LOWER);
+  }
+  const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+        WHERE c.assigned_to_user_id IN (${placeholders})
+          AND ${statusCondition}`;
+  const [[row]] = await pool.query(sql, params);
+  return Number(row?.total ?? 0);
+}
+
+async function countRegionalNeedsReassignment(pool, staffProfileId) {
+  const coordinatorId = Number(staffProfileId);
+  if (!Number.isInteger(coordinatorId) || coordinatorId <= 0) return 0;
+  const params = [coordinatorId];
+  let statusCondition = 'c.status IS NULL';
+  if (CASE_STATUS_TERMINAL_VALUES_LOWER.length) {
+    const statusPlaceholders = CASE_STATUS_TERMINAL_VALUES_LOWER.map(() => '?').join(',');
+    statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${statusPlaceholders}))`;
+    params.push(...CASE_STATUS_TERMINAL_VALUES_LOWER);
+  }
+  const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+        WHERE c.assigned_to_user_id = ?
+          AND ${statusCondition}`;
+  const [[row]] = await pool.query(sql, params);
+  return Number(row?.total ?? 0);
+}
+
+async function countRegionalAwaitingApplicantInfo(pool, staffIds) {
+  const ids = normalizeStaffIdList(staffIds);
+  if (!ids.length) return 0;
+  if (!CASE_STATUS_HOLD_VALUES_LOWER.length) return 0;
+  const staffPlaceholders = ids.map(() => '?').join(',');
+  const holdPlaceholders = CASE_STATUS_HOLD_VALUES_LOWER.map(() => '?').join(',');
+  const params = [...ids, ...CASE_STATUS_HOLD_VALUES_LOWER];
+  const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+        WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+          AND c.status IS NOT NULL
+          AND LOWER(c.status) IN (${holdPlaceholders})`;
+  const [[row]] = await pool.query(sql, params);
+  return Number(row?.total ?? 0);
+}
+
+async function countRegionalDueThisWeek(pool, staffIds) {
+  const ids = normalizeStaffIdList(staffIds);
+  if (!ids.length) return 0;
+  const targets = await fetchActiveSlaTargets(pool);
+  const stageTargets = new Map();
+  for (const row of targets) {
+    if (!row || row.applies_to_role) continue;
+    stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
+  }
+  const getTarget = stageKey => {
+    if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
+    const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
+    return fallback ? fallback.target_hours : 0;
+  };
+
+  const assessmentHours = getTarget('assessment');
+  const decisionHours = getTarget('program_decision');
+  const stageValues = CASE_STAGE_AWAITING_DECISION_LOWER;
+  const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER;
+  const terminalValues = CASE_STATUS_TERMINAL_VALUES_LOWER;
+  const staffPlaceholders = ids.map(() => '?').join(',');
+  const elapsedExpr = 'TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW())';
+
+  let total = 0;
+
+  if (assessmentHours > 0) {
+    const params = [...ids];
+    let stageCondition = 'c.stage IS NULL';
+    if (stageValues.length) {
+      const placeholders = stageValues.map(() => '?').join(',');
+      stageCondition = `(c.stage IS NULL OR LOWER(c.stage) NOT IN (${placeholders}))`;
+      params.push(...stageValues);
+    }
+    let statusCondition = 'c.status IS NULL';
+    if (excludedValues.length) {
+      const placeholders = excludedValues.map(() => '?').join(',');
+      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+      params.push(...excludedValues);
+    }
+    const lowerBound = Math.max(assessmentHours - DUE_SOON_THRESHOLD_HOURS, 0);
+    const upperBound = assessmentHours;
+    const sql = `SELECT COUNT(*) AS total
+           FROM iset_case c
+          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+            AND ${stageCondition}
+            AND ${statusCondition}
+            AND ${elapsedExpr} >= ?
+            AND ${elapsedExpr} < ?`;
+    params.push(lowerBound, upperBound);
+    try {
+      const [[row]] = await pool.query(sql, params);
+      total += Number(row?.total ?? 0);
+    } catch (err) {
+      if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
+        throw err;
+      }
+    }
+  }
+
+  if (decisionHours > 0 && stageValues.length) {
+    const stagePlaceholders = stageValues.map(() => '?').join(',');
+    const params = [...ids, ...stageValues];
+    let statusCondition = 'c.status IS NULL';
+    if (terminalValues.length) {
+      const placeholders = terminalValues.map(() => '?').join(',');
+      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+      params.push(...terminalValues);
+    }
+    const lowerBound = Math.max(decisionHours - DUE_SOON_THRESHOLD_HOURS, 0);
+    const upperBound = decisionHours;
+    const sql = `SELECT COUNT(*) AS total
+           FROM iset_case c
+          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+            AND c.stage IS NOT NULL
+            AND LOWER(c.stage) IN (${stagePlaceholders})
+            AND ${statusCondition}
+            AND ${elapsedExpr} >= ?
+            AND ${elapsedExpr} < ?`;
+    params.push(lowerBound, upperBound);
+    try {
+      const [[row]] = await pool.query(sql, params);
+      total += Number(row?.total ?? 0);
+    } catch (err) {
+      if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
+        throw err;
+      }
+    }
+  }
+
+  return total;
+}
+
+async function countRegionalOverdue(pool, staffIds) {
+  const ids = normalizeStaffIdList(staffIds);
+  if (!ids.length) return 0;
+  const targets = await fetchActiveSlaTargets(pool);
+  const stageTargets = new Map();
+  for (const row of targets) {
+    if (!row || row.applies_to_role) continue;
+    stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
+  }
+  const getTarget = stageKey => {
+    if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
+    const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
+    return fallback ? fallback.target_hours : 0;
+  };
+
+  const assessmentHours = getTarget('assessment');
+  const decisionHours = getTarget('program_decision');
+  const stageValues = CASE_STAGE_AWAITING_DECISION_LOWER;
+  const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER;
+  const terminalValues = CASE_STATUS_TERMINAL_VALUES_LOWER;
+  const staffPlaceholders = ids.map(() => '?').join(',');
+  const elapsedExpr = 'TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW())';
+
+  let total = 0;
+
+  if (assessmentHours > 0) {
+    const params = [...ids];
+    let stageCondition = 'c.stage IS NULL';
+    if (stageValues.length) {
+      const placeholders = stageValues.map(() => '?').join(',');
+      stageCondition = `(c.stage IS NULL OR LOWER(c.stage) NOT IN (${placeholders}))`;
+      params.push(...stageValues);
+    }
+    let statusCondition = 'c.status IS NULL';
+    if (excludedValues.length) {
+      const placeholders = excludedValues.map(() => '?').join(',');
+      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+      params.push(...excludedValues);
+    }
+    params.push(assessmentHours);
+    const sql = `SELECT COUNT(*) AS total
+           FROM iset_case c
+          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+            AND ${stageCondition}
+            AND ${statusCondition}
+            AND ${elapsedExpr} > ?`;
+    try {
+      const [[row]] = await pool.query(sql, params);
+      total += Number(row?.total ?? 0);
+    } catch (err) {
+      if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
+        throw err;
+      }
+    }
+  }
+
+  if (decisionHours > 0 && stageValues.length) {
+    const stagePlaceholders = stageValues.map(() => '?').join(',');
+    const params = [...ids, ...stageValues];
+    let statusCondition = 'c.status IS NULL';
+    if (terminalValues.length) {
+      const placeholders = terminalValues.map(() => '?').join(',');
+      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+      params.push(...terminalValues);
+    }
+    params.push(decisionHours);
+    const sql = `SELECT COUNT(*) AS total
+           FROM iset_case c
+          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+            AND c.stage IS NOT NULL
+            AND LOWER(c.stage) IN (${stagePlaceholders})
+            AND ${statusCondition}
+            AND ${elapsedExpr} > ?`;
+    try {
+      const [[row]] = await pool.query(sql, params);
+      total += Number(row?.total ?? 0);
+    } catch (err) {
+      if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
+        throw err;
+      }
+    }
+  }
+
+  return total;
+}
 
 function inferUserRole(req) {
   if (req.staffProfile && req.staffProfile.primary_role) return req.staffProfile.primary_role;

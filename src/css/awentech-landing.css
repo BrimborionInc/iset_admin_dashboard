@@ -233,6 +233,21 @@
   font-size: 1.25rem;
 }
 
+.release-notes-heading {
+  text-transform: lowercase;
+  letter-spacing: 0.12em;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-align: center;
+  color: #2563eb;
+  margin: 0 0 2.1rem;
+}
+
+.release-notes-heading::first-letter {
+  text-transform: uppercase;
+}
+
+
 .landing-card p {
   margin: 0;
   color: #475569;
@@ -243,6 +258,38 @@
   transform: translateY(-4px);
   box-shadow: 0 22px 40px rgba(15, 23, 42, 0.12);
 }
+
+.release-notes-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+  padding-top: 0.8rem;
+}
+
+.release-notes-sections section {
+  margin: 0;
+}
+
+.release-notes-sections h4 {
+  margin: 0 0 0.45rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.release-notes-sections p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+  margin-bottom: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .release-notes-sections {
+    gap: 1.4rem;
+  }
+}
+
 
 .landing-section {
   padding: 4.5rem 3rem;

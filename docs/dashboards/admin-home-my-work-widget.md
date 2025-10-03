@@ -1,51 +1,40 @@
-# Admin Home – “Application Work Queue” Widget Design
+# Admin Home - "Application Work Queue" Widget Design
 
 ## Scope
 - Surface the work queue for ISET applications that a signed-in user is responsible for.
 - Role-aware counts and descriptions; single shared widget used across personas.
 
-## Roles & Responsibility Filters
-- **Program Administrator**: sees every application across the program, including items awaiting assignment.
-- **Regional Coordinator**: limited to applications assigned to their region (self or their assessors) plus regional backlog.
-- **Application Assessor**: only cases directly assigned to them.
-- **System Administrator**: non-application operational tasks (placeholder until workflow tooling work begins).
+## Roles & Buckets
+- **Program Administrator**: New submissions, Unassigned backlog, In assessment, Awaiting program decision, On hold / info requested, Overdue.
+- **Regional Coordinator**: Assigned to my region, Needs reassignment, Awaiting applicant info, Due this week, Overdue.
+- **Application Assessor**: Assigned to me, Due today, Awaiting applicant response, In quality review, Overdue.
+- **System Administrator**: Workflow drafts, Release prep tasks, Platform alerts.
 
-## Status Buckets (Program Administrator)
-1. **New submissions** – Applications received within the last 24 hours that have not completed triage.
-2. **Unassigned backlog** – Triage-complete applications with no coordinator/assessor assigned. SLA clock starts here.
-3. **In assessment** – Applications currently owned by an assessor or regional coordinator.
-4. **Awaiting program decision** – Assessments requiring a program-level approval/denial.
-5. **On hold / info requested** – Cases paused because applicants must provide more information.
-6. **Overdue** – Any application breaching the program turnaround target (can overlap with other categories; shown here for visibility).
+## Implementation
+### Backend Endpoint
+- `/api/dashboard/application-work-queue` fetches all Program Administrator buckets in one request.
+- Helpers in `isetadminserver.js` compute each count:
+  - **New submissions**: submissions in the last 24 hours with no linked case.
+  - **Unassigned backlog**: cases missing an assignee and not in a terminal status.
+  - **In assessment**: active cases with an assignee whose stage is not `assessment_submitted`/`review_complete`.
+  - **Awaiting program decision**: cases with stage `assessment_submitted` or `review_complete` still awaiting outcome.
+  - **On hold / info requested**: cases whose status matches on-hold values (`docs_requested`, `action required`, etc.).
+  - **Overdue**: compares elapsed hours since `COALESCE(last_activity_at, updated_at, created_at)` against SLA targets from `sla_stage_target` for assignment, assessment, and program decision stages.
+- SLA targets are loaded via `fetchActiveSlaTargets` with placeholder defaults if the table is missing.
+- Helper constants manage status/stage normalization and guard against missing schema.
 
-## Status Progression
-- Intake places new records into **New submissions** (status `received`, created < 24h).
-- Triage marks items ready for assignment. Until an owner is set they appear in **Unassigned backlog**.
-- Once assigned to a coordinator or assessor they move to **In assessment**.
-- Completed assessments needing PA judgement transition to **Awaiting program decision**.
-- Cases with outstanding applicant actions move into **On hold / info requested**.
-- SLA evaluation runs across all buckets; any overdue item additionally increments the **Overdue** count.
+### Frontend Wiring
+- `src/pages/adminDashboardHomePage.js` fetches the endpoint with `apiFetch` inside a `useEffect`.
+- When IAM is toggled off, dev-bypass headers (`X-Dev-Role`, `X-Dev-Bypass`, etc.) are attached so the call works without Cognito.
+- API results merge into the persona-specific mock array; tiles render counts in the returned order.
 
-## Regional Coordinator View (draft)
-- **Assigned to my region** – Work owned by the coordinator or their assessors.
-- **Needs reassignment** – Cases explicitly waiting for the coordinator to re-route.
-- **Awaiting applicant info** – Region-scoped holds awaiting applicant response.
-- **Due this week** – Items with SLA deadlines inside the next 7 days.
-- **Overdue** – Region workload breaching SLA.
+### Notes
+- Queries default to zero when `stage`, `last_activity_at`, or `sla_stage_target` are absent.
+- Status comparisons are case-insensitive.
+- Overdue numbers reflect current SLA targets and will be zero until cases exceed those thresholds.
+- Regional Coordinator / Application Assessor buckets remain placeholders until wired to data.
 
-## Application Assessor View (draft)
-- **Assigned to me** – Personal queue of active assessments.
-- **Due today** – Items with deadlines inside the next 24 hours.
-- **Awaiting applicant response** – Paused while waiting on applicant action.
-- **In quality review** – Completed assessments pending QA.
-- **Overdue** – Personal SLA breaches.
-
-## Outstanding Questions
-- Confirm SLA windows (24h for “new submissions”, backlog thresholds, etc.).
-- Determine whether “Overdue” should exclude items already in “Awaiting program decision”.
-- Clarify data sources: likely `application_case` plus coordination metadata; needs API endpoint design.
-
-## Next Steps
-1. Validate role filters against the case lifecycle model.
-2. Define backend queries / materialized views that emit these counts.
-3. Replace the current mock scaffold with live data fetching per role.
+### Recent Implementation Changes
+- Backend helpers now compute live counts for all Program Administrator buckets (new submissions, unassigned, in assessment, awaiting decision, on hold, overdue).
+- Overdue detection pulls SLA targets from `sla_stage_target` and compares elapsed hours in assignment/assessment/program decision stages.
+- Frontend uses `apiFetch` with IAM toggle support; dev bypass headers are appended automatically.
