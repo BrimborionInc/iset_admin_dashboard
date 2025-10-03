@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { TopNavigation } from '@cloudscape-design/components';
 import { buildLoginUrl, buildLogoutUrl, clearSession, hasValidSession, loadSession } from '../auth/cognito';
 
@@ -62,9 +62,9 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) =>
   const utilities = [];
   utilities.push({
     type: 'menu-dropdown',
-    text: currentLanguage === 'en' ? 'English' : 'Français',
+    text: currentLanguage === 'en' ? 'English' : 'FranÃ§ais',
     ariaLabel: 'Select Language',
-    items: [{ id: 'en', text: 'English' }, { id: 'fr', text: 'Français' }],
+    items: [{ id: 'en', text: 'English' }, { id: 'fr', text: 'FranÃ§ais' }],
     onItemClick: (event) => onLanguageChange(event.detail.id)
   });
 

@@ -57,7 +57,16 @@ const deriveActiveRoleName = (iamOnFlag, isAuthenticatedFlag, currentRoleOption)
 };
 
 const App = () => {
-  const [currentLanguage, setCurrentLanguage] = useState('fr');
+  const [currentLanguage, setCurrentLanguage] = useState(() => {
+    if (typeof window === 'undefined') {
+      return 'en';
+    }
+    try {
+      return sessionStorage.getItem('currentLanguage') || 'en';
+    } catch {
+      return 'en';
+    }
+  });
   const [currentRole, setCurrentRole] = useState(() => getInitialRole());
   const [isAuthenticated, setIsAuthenticated] = useState(() => hasValidSession());
   const [iamEnabled, setIamEnabled] = useState(() => isIamOn());
@@ -66,6 +75,9 @@ const App = () => {
 
   const handleLanguageChange = lang => {
     setCurrentLanguage(lang);
+    try {
+      sessionStorage.setItem('currentLanguage', lang);
+    } catch {}
   };
 
   useEffect(() => {
@@ -149,7 +161,7 @@ const App = () => {
     const isAuthRoute = location.pathname.startsWith('/auth/');
 
     if (iamEnabled && !isAuthenticated && !isAuthRoute) {
-      return <LandingPage />;
+      return <LandingPage currentLanguage={currentLanguage} onLanguageChange={handleLanguageChange} />;
     }
 
     return (
@@ -181,7 +193,7 @@ const App = () => {
       <DarkModeProvider>
         <I18nProvider
           locale={currentLanguage}
-          messages={currentLanguage === 'en' ? [frMessages] : [enMessages]}
+          messages={currentLanguage === 'fr' ? [frMessages] : [enMessages]}
         >
           <Router>
             <LandingOrAppLayout />
