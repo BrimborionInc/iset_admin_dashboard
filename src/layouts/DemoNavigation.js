@@ -133,6 +133,31 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
   const [isCreatingDummy, setIsCreatingDummy] = useState(false);
   const [dummyResult, setDummyResult] = useState(null);
 
+  const applySimulatedStaff = (roleValue) => {
+    try {
+      switch (roleValue) {
+        case 'Program Administrator':
+          sessionStorage.setItem('devUserId', '13');
+          sessionStorage.removeItem('devRegionId');
+          break;
+        case 'Regional Coordinator':
+          sessionStorage.setItem('devUserId', '1');
+          sessionStorage.setItem('devRegionId', '14');
+          break;
+        case 'Application Assessor':
+          sessionStorage.setItem('devUserId', '21');
+          sessionStorage.setItem('devRegionId', '14');
+          break;
+        default:
+          sessionStorage.removeItem('devUserId');
+          sessionStorage.removeItem('devRegionId');
+          break;
+      }
+    } catch (err) {
+      // ignore storage failures
+    }
+  };
+
   // Persist IAM toggle and apply dev-bypass token defaults
   useEffect(() => {
     const previous = sessionStorage.getItem('iamBypass');
@@ -286,7 +311,10 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
         </Button>
         <Select
           selectedOption={currentRole}
-          onChange={({ detail }) => setCurrentRole(detail.selectedOption)}
+          onChange={({ detail }) => {
+            setCurrentRole(detail.selectedOption);
+            applySimulatedStaff(detail.selectedOption?.value || null);
+          }}
           options={roleOptions}
           ariaLabel="Select role"
           selectedAriaLabel="Selected role"
