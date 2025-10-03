@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import '@cloudscape-design/global-styles/index.css';
 import {
     Box,
@@ -69,8 +69,6 @@ function getMockRecentActivity(role) {
         ...(role === 'System Administrator' ? [{ id: 'a3', title: 'Config setting changed', ts: now - 1000 * 60 * 90 }] : []),
     ];
 }
-
-
 
 function mergeWorkQueueBuckets(base, updates) {
     if (!Array.isArray(base)) {
@@ -180,74 +178,6 @@ function pickFirstText(...candidates) {
     return '';
 }
 
-function pickQuickActions(role) {
-    switch (role) {
-        case 'System Administrator':
-            return [
-                { label: 'Manage Users', href: '/user-management-dashboard' },
-                { label: 'Workflows', href: '/manage-workflows' },
-                { label: 'Upload Config', href: '/admin/upload-config' },
-                { label: 'Release Mgmt', href: '/release-management-dashboard' },
-            ];
-        case 'Program Administrator':
-            return [
-                { label: 'Manage Applications', href: '/case-assignment-dashboard' },
-                { label: 'Reporting & Monitoring', href: '/reporting-and-monitoring-dashboard' },
-                { label: 'Notifications', href: '/manage-notifications' },
-            ];
-        case 'Regional Coordinator':
-            return [
-                { label: 'Manage Applications', href: '/case-assignment-dashboard' },
-                { label: 'Reporting & Monitoring', href: '/reporting-and-monitoring-dashboard' },
-                { label: 'Secure Messaging', href: '/manage-messages' },
-            ];
-        case 'Application Assessor':
-            return [
-                { label: 'My Queue', href: '/case-management' },
-                { label: 'Continue Last Case', href: '/case-management' },
-                { label: 'Secure Messaging', href: '/manage-messages' },
-            ];
-        default:
-            return [
-                { label: 'Case Management', href: '/case-management' },
-                { label: 'Help & Docs', href: 'https://example.com', external: true },
-            ];
-    }
-}
-
-function getMockAlerts(role) {
-    const base = [];
-    if (role === 'System Administrator') {
-        return [
-            { id: 'al1', type: 'warning', header: 'Pending workflow draft', content: 'A workflow draft has not been published for 5 days.' },
-            { id: 'al2', type: 'info', header: 'Release window', content: 'Planned release scheduled for tomorrow 09:00 UTC.' },
-        ];
-    }
-    if (role === 'Program Administrator') {
-        return [
-            { id: 'al3', type: 'info', header: '3 cases awaiting assignment', content: 'Assign to case managers to maintain SLA.' }
-        ];
-    }
-    return base;
-}
-
-function getWelcomeMessage(role) {
-    switch (role) {
-        case 'System Administrator':
-            return 'Oversee platform configuration, monitor system health, and plan upcoming releases. Use the Development Tracker below to coordinate engineering tasks.';
-        case 'Program Administrator':
-            return 'Manage program-wide policies, oversee workload distribution, and ensure service quality across coordinators and staff.';
-        case 'Regional Coordinator':
-            return 'Coordinate case distribution, monitor regional performance, and support staff with escalations.';
-        case 'Application Assessor':
-            return 'Work your assigned cases efficiently. Review recent updates and prioritize overdue tasks.';
-        case 'Guest':
-            return 'Explore limited console features. Sign in for full access.';
-        default:
-            return 'Access your current work, take quick actions, and review recent changes.';
-    }
-}
-
 // Import baseline tasks
 const initialDevTasks = devTasksData;
 
@@ -284,7 +214,6 @@ const AdminDashboard = () => {
             }
             return simulatedRole || tokenRole || 'Guest';
         })();
-
 
         const [myWork, setMyWork] = useState(() => getMockMyWork(role));
 
@@ -334,12 +263,9 @@ async function loadWorkQueue() {
             loadWorkQueue();
             return () => { ignore = true; };
         }, [role]);
-
-        const quickActions = useMemo(() => pickQuickActions(role), [role]);
         const [recentActivity, setRecentActivity] = useState(() => getMockRecentActivity(role));
         const [recentActivityLoading, setRecentActivityLoading] = useState(true);
         const [recentActivityError, setRecentActivityError] = useState(null);
-        const alerts = useMemo(() => getMockAlerts(role), [role]);
 
         useEffect(() => {
             setRecentActivity(getMockRecentActivity(role));
@@ -402,7 +328,6 @@ async function loadWorkQueue() {
             return () => { ignore = true; };
         }, [role, tick]);
 
-
     const simulateSignedOut = (() => { try { return sessionStorage.getItem('simulateSignedOut') === 'true'; } catch { return false; } })();
     if ((iamOn && !signedIn) || (!iamOn && simulateSignedOut)) {
         return (
@@ -416,34 +341,8 @@ async function loadWorkQueue() {
     }
 
     return (
-            <SpaceBetween size="l">
-                <Container header={<Header variant="h1">Welcome{role && role !== 'Guest' ? ` - ${role}` : ''}</Header>}>
-                    <Box variant="p">{getWelcomeMessage(role)}</Box>
-            </Container>
-
-            <Container header={<Header variant="h2">Quick Actions</Header>}>
-                <SpaceBetween size="xs" direction="horizontal">
-                    {quickActions.map(a => (
-                        <Button key={a.label} href={a.href} target={a.external ? '_blank' : undefined} iconName={a.external ? 'external' : undefined}>
-                            {a.label}
-                        </Button>
-                    ))}
-                </SpaceBetween>
-            </Container>
-
-                    {!!alerts.length && (
-                        <Container header={<Header variant="h2">Alerts</Header>}>
-                            <SpaceBetween size="xs">
-                                {alerts.map(al => (
-                                    <Box key={al.id} variant="p" style={{ borderLeft: '4px solid #f90', paddingLeft: 8 }}>
-                                        <strong>{al.header}:</strong> {al.content}
-                                    </Box>
-                                ))}
-                            </SpaceBetween>
-                        </Container>
-                    )}
-
-            <ColumnLayout columns={3} variant="text-grid">
+        <SpaceBetween size="l">
+            <ColumnLayout columns={2} variant="text-grid">
                 <Container header={<Header variant="h2" description="Applications currently in your remit by status.">Application Work Queue</Header>}>
                     {Array.isArray(myWork) && myWork.length ? (
                         <ColumnLayout columns={3} variant="text-grid">
@@ -540,20 +439,13 @@ async function loadWorkQueue() {
                         )}
                     </SpaceBetween>
                 </Container>
-                <Container header={<Header variant="h2">Resources</Header>}>
-                    <SpaceBetween size="xs">
-                        <Link href="https://example.com" external>Documentation</Link>
-                        <Link href="/manage-messages">Secure Messaging</Link>
-                        <Link href="/help-support-dashboard">Help & Support</Link>
-                    </SpaceBetween>
-                </Container>
             </ColumnLayout>
 
-                    {role === 'System Administrator' && (
-                        <Container header={<Header variant="h2">Development Tracker</Header>}>
-                            <DevTaskTracker />
-                        </Container>
-                    )}
+            {role === 'System Administrator' && (
+                <Container header={<Header variant="h2">Development Tracker</Header>}>
+                    <DevTaskTracker />
+                </Container>
+            )}
         </SpaceBetween>
     );
 };
@@ -692,6 +584,4 @@ const DevTaskTracker = () => {
 };
 
 export default AdminDashboard;
-
-
 
