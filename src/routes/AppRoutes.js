@@ -410,7 +410,7 @@ const AppRoutes = ({
         </Guard>
       </Route>
       <Route path="/">
-        {renderContent(AdminDashboard, [{ text: 'Home', href: '/' }], 'Secure Solution Suite Admin Console', AdminDashboardHelp.aiContext)}
+        {renderContent(AdminDashboard, [{ text: 'Home', href: '/' }], 'NWAC ISET Homepage', AdminDashboardHelp.aiContext)}
       </Route>
     </Switch>
   );
