@@ -32,7 +32,7 @@ function formatDateTime(value) {
 function statusColor(status = '') {
   const normalized = (status || '').toLowerCase();
   if (['approved', 'completed'].includes(normalized)) return 'green';
-  if (['submitted', 'in review', 'in_review', 'in progress', 'pending', 'assigned'].includes(normalized)) return 'blue';
+  if (['submitted', 'in review', 'in_review', 'in progress', 'pending', 'assigned', 'pending_approval'].includes(normalized)) return 'blue';
   if (['docs requested', 'docs_requested', 'action required', 'action required (docs requested)'].includes(normalized)) return 'orange';
   if (['rejected', 'declined', 'errored'].includes(normalized)) return 'red';
   if (['withdrawn', 'closed', 'inactive', 'archived'].includes(normalized)) return 'grey';
@@ -43,6 +43,7 @@ const STATUS_OPTIONS = [
   { label: 'Submitted', value: 'submitted' },
   { label: 'In Review', value: 'in_review' },
   { label: 'Action Required', value: 'docs_requested' },
+  { label: 'Assessed, Pending Approval', value: 'pending_approval' },
   { label: 'Approved', value: 'approved' },
   { label: 'Rejected', value: 'rejected' },
   { label: 'Withdrawn', value: 'withdrawn' },

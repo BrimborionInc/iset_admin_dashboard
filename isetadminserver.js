@@ -592,7 +592,7 @@ const CASE_STATUS_HOLD_VALUES = [
   'on_hold'
 ];
 const CASE_STATUS_EXCLUDED_FOR_ASSESSMENT = Array.from(new Set([...CASE_STATUS_TERMINAL_VALUES, ...CASE_STATUS_HOLD_VALUES]));
-const CASE_STAGE_AWAITING_DECISION = ['assessment_submitted', 'review_complete'];
+const CASE_STAGE_AWAITING_DECISION = ['pending_approval'];
 
 
 const CASE_STATUS_TERMINAL_VALUES_LOWER = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
@@ -648,25 +648,17 @@ async function countProgramAdminUnassignedBacklog(pool) {
 
 async function countProgramAdminInAssessment(pool) {
   try {
-    const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT.map(v => v.toLowerCase());
-    const stageValues = CASE_STAGE_AWAITING_DECISION.map(v => v.toLowerCase());
+    const excludedStatuses = ['approved', 'rejected', 'withdrawn', 'archived', 'pending_approval'];
     const params = [];
-    let stageCondition = 'c.stage IS NULL';
-    if (stageValues.length) {
-      const placeholders = stageValues.map(() => '?').join(',');
-      stageCondition = `(c.stage IS NULL OR LOWER(c.stage) NOT IN (${placeholders}))`;
-      params.push(...stageValues);
-    }
     let statusCondition = 'c.status IS NULL';
-    if (excludedValues.length) {
-      const placeholders = excludedValues.map(() => '?').join(',');
+    if (excludedStatuses.length) {
+      const placeholders = excludedStatuses.map(() => '?').join(',');
       statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-      params.push(...excludedValues);
+      params.push(...excludedStatuses);
     }
     const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
         WHERE c.assigned_to_user_id IS NOT NULL
-          AND ${stageCondition}
           AND ${statusCondition}`;
     const [[row]] = await pool.query(sql, params);
     return Number(row?.total ?? 0);
@@ -681,27 +673,15 @@ async function countProgramAdminInAssessment(pool) {
   }
 }
 
+
+
 async function countProgramAdminAwaitingDecision(pool) {
   try {
-    const stageValues = CASE_STAGE_AWAITING_DECISION.map(v => v.toLowerCase());
-    if (!stageValues.length) {
-      return 0;
-    }
-    const stagePlaceholders = stageValues.map(() => '?').join(',');
-    const params = [...stageValues];
-    const terminalValues = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
-    let statusCondition = 'c.status IS NULL';
-    if (terminalValues.length) {
-      const placeholders = terminalValues.map(() => '?').join(',');
-      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-      params.push(...terminalValues);
-    }
     const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
-        WHERE c.stage IS NOT NULL
-          AND LOWER(c.stage) IN (${stagePlaceholders})
-          AND ${statusCondition}`;
-    const [[row]] = await pool.query(sql, params);
+        WHERE c.status IS NOT NULL
+          AND LOWER(c.status) = ?`;
+    const [[row]] = await pool.query(sql, ['pending_approval']);
     return Number(row?.total ?? 0);
   } catch (err) {
     if (err && err.code === 'ER_BAD_FIELD_ERROR') {
@@ -713,6 +693,8 @@ async function countProgramAdminAwaitingDecision(pool) {
     throw err;
   }
 }
+
+
 
 async function countProgramAdminOverdue(pool) {
   try {
@@ -734,7 +716,8 @@ async function countProgramAdminOverdue(pool) {
 
     const terminalValues = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
     const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT.map(v => v.toLowerCase());
-    const stageValues = CASE_STAGE_AWAITING_DECISION.map(v => v.toLowerCase());
+    const awaitingStatuses = CASE_STAGE_AWAITING_DECISION.map(v => v.toLowerCase());
+    const disallowedForAssessment = Array.from(new Set([...excludedValues, ...awaitingStatuses]));
 
     let total = 0;
 
@@ -764,22 +747,15 @@ async function countProgramAdminOverdue(pool) {
 
     if (assessmentHours > 0) {
       const params = [];
-      let stageCondition = 'c.stage IS NULL';
-      if (stageValues.length) {
-        const placeholders = stageValues.map(() => '?').join(',');
-        stageCondition = `(c.stage IS NULL OR LOWER(c.stage) NOT IN (${placeholders}))`;
-        params.push(...stageValues);
-      }
       let statusCondition = 'c.status IS NULL';
-      if (excludedValues.length) {
-        const placeholders = excludedValues.map(() => '?').join(',');
+      if (disallowedForAssessment.length) {
+        const placeholders = disallowedForAssessment.map(() => '?').join(',');
         statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-        params.push(...excludedValues);
+        params.push(...disallowedForAssessment);
       }
       const sql = `SELECT COUNT(*) AS total
            FROM iset_case c
           WHERE c.assigned_to_user_id IS NOT NULL
-            AND ${stageCondition}
             AND ${statusCondition}
             AND TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW()) > ?`;
       params.push(assessmentHours);
@@ -793,21 +769,20 @@ async function countProgramAdminOverdue(pool) {
       }
     }
 
-    if (decisionHours > 0 && stageValues.length) {
-      const params = [...stageValues];
-      let statusCondition = 'c.status IS NULL';
+    if (decisionHours > 0 && awaitingStatuses.length) {
+      const awaitingPlaceholders = awaitingStatuses.map(() => '?').join(',');
+      const conditions = ['c.status IS NOT NULL', `LOWER(c.status) IN (${awaitingPlaceholders})`];
+      const params = [...awaitingStatuses];
       if (terminalValues.length) {
-        const placeholders = terminalValues.map(() => '?').join(',');
-        statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+        const terminalPlaceholders = terminalValues.map(() => '?').join(',');
+        conditions.push(`LOWER(c.status) NOT IN (${terminalPlaceholders})`);
         params.push(...terminalValues);
       }
-      const stagePlaceholders = stageValues.map(() => '?').join(',');
+      const whereClause = conditions.join('\n          AND ');
       const sql = `SELECT COUNT(*) AS total
            FROM iset_case c
-          WHERE c.stage IS NOT NULL
-            AND LOWER(c.stage) IN (${stagePlaceholders})
-            AND ${statusCondition}
-            AND TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW()) > ?`;
+          WHERE ${whereClause}
+          AND TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW()) > ?`;
       params.push(decisionHours);
       try {
         const [[row]] = await pool.query(sql, params);
@@ -827,6 +802,7 @@ async function countProgramAdminOverdue(pool) {
     throw err;
   }
 }
+
 
 async function countProgramAdminOnHold(pool) {
   try {
