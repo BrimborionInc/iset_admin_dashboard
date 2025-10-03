@@ -121,6 +121,66 @@ function relativeTime(ts) {
     return diffD + 'd ago';
 }
 
+function pickFirstText(...candidates) {
+    const visited = new Set();
+
+    const extract = (value) => {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        const valueType = typeof value;
+        if (valueType === 'string') {
+            const trimmed = value.trim();
+            return trimmed.length ? trimmed : '';
+        }
+        if (valueType === 'number' || valueType === 'bigint') {
+            return String(value);
+        }
+        if (valueType === 'boolean') {
+            return value ? 'true' : 'false';
+        }
+        if (valueType === 'object') {
+            if (visited.has(value)) {
+                return '';
+            }
+            visited.add(value);
+            if (Array.isArray(value)) {
+                for (const entry of value) {
+                    const nested = extract(entry);
+                    if (nested) {
+                        return nested;
+                    }
+                }
+                return '';
+            }
+            const fields = ['displayName', 'name', 'label', 'title', 'text', 'summary', 'message', 'email', 'value', 'description'];
+            for (const field of fields) {
+                if (field in value) {
+                    const nested = extract(value[field]);
+                    if (nested) {
+                        return nested;
+                    }
+                }
+            }
+            if ('id' in value) {
+                const nested = extract(value.id);
+                if (nested) {
+                    return nested;
+                }
+            }
+        }
+        return '';
+    };
+
+    for (const candidate of candidates) {
+        const result = extract(candidate);
+        if (result) {
+            return result;
+        }
+    }
+    return '';
+}
+
 function pickQuickActions(role) {
     switch (role) {
         case 'System Administrator':
@@ -277,8 +337,71 @@ async function loadWorkQueue() {
         }, [role]);
 
         const quickActions = useMemo(() => pickQuickActions(role), [role]);
-        const recentActivity = useMemo(() => getMockRecentActivity(role), [role]);
+        const [recentActivity, setRecentActivity] = useState(() => getMockRecentActivity(role));
+        const [recentActivityLoading, setRecentActivityLoading] = useState(true);
+        const [recentActivityError, setRecentActivityError] = useState(null);
         const alerts = useMemo(() => getMockAlerts(role), [role]);
+
+        useEffect(() => {
+            setRecentActivity(getMockRecentActivity(role));
+        }, [role]);
+
+        useEffect(() => {
+            let ignore = false;
+            setRecentActivityLoading(true);
+            setRecentActivityError(null);
+
+            async function loadRecentActivity() {
+                try {
+                    const options = {};
+                    const headers = { Accept: 'application/json' };
+                    try {
+                        if (role && role !== 'Guest') {
+                            headers['X-Dev-Role'] = role;
+                        }
+                        if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('iamBypass') === 'off') {
+                            const token = sessionStorage.getItem('devBypassToken') || process.env.REACT_APP_DEV_AUTH_TOKEN || 'local-dev-secret';
+                            headers['X-Dev-Bypass'] = token;
+                            const simulatedUser = sessionStorage.getItem('devUserId');
+                            if (simulatedUser) headers['X-Dev-UserId'] = simulatedUser;
+                            const simulatedRegion = sessionStorage.getItem('devRegionId');
+                            if (simulatedRegion) headers['X-Dev-RegionId'] = simulatedRegion;
+                        }
+                    } catch {}
+                    options.headers = headers;
+
+                    const response = await apiFetch('/api/events/feed?limit=5', options);
+                    if (!response.ok) {
+                        throw new Error(`Request failed: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    if (ignore) {
+                        return;
+                    }
+                    if (Array.isArray(data)) {
+                        setRecentActivity(data);
+                    } else {
+                        setRecentActivity([]);
+                    }
+                } catch (err) {
+                    if (ignore) {
+                        return;
+                    }
+                    setRecentActivityError(err);
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.warn('[dashboard] recent activity feed fetch failed', err);
+                    }
+                    setRecentActivity(getMockRecentActivity(role));
+                } finally {
+                    if (!ignore) {
+                        setRecentActivityLoading(false);
+                    }
+                }
+            }
+
+            loadRecentActivity();
+            return () => { ignore = true; };
+        }, [role, tick]);
 
 
     const simulateSignedOut = (() => { try { return sessionStorage.getItem('simulateSignedOut') === 'true'; } catch { return false; } })();
@@ -343,10 +466,79 @@ async function loadWorkQueue() {
                 </Container>
                 <Container header={<Header variant="h2">Recent Activity</Header>}>
                     <SpaceBetween size="xs">
-                        {recentActivity.map(item => (
-                            <Box key={item.id} variant="p" title={new Date(item.ts).toLocaleString()}>{item.title} - <span style={{ color: '#61738e' }}>{relativeTime(item.ts)}</span></Box>
-                        ))}
-                        {!recentActivity.length && <Box variant="p">No recent activity.</Box>}
+                        {recentActivityLoading ? (
+                            <StatusIndicator type="loading">Loading activity</StatusIndicator>
+                        ) : (
+                            <>
+                                {recentActivityError && (
+                                    <Box color="text-status-inactive">Showing sample activity (live feed unavailable).</Box>
+                                )}
+                                {recentActivity.map((item, idx) => {
+                                                                        const key = pickFirstText(
+                                        item.id,
+                                        item.event_id,
+                                        item.event_entry_id,
+                                        item.uuid,
+                                        item.eventId,
+                                        item.tracking_id
+                                    ) || `event-${idx}`;
+                                    const eventData = item.event_data && typeof item.event_data === 'object' ? item.event_data : null;
+                                    const candidateTimestamp = (() => {
+                                        if (typeof item.ts === 'number' && Number.isFinite(item.ts)) {
+                                            return item.ts;
+                                        }
+                                        const rawTs = item.created_at || item.createdAt || item.timestamp || item.occurred_at;
+                                        if (!rawTs) {
+                                            return null;
+                                        }
+                                        if (typeof rawTs === 'number' && Number.isFinite(rawTs)) {
+                                            return rawTs;
+                                        }
+                                        if (typeof rawTs === 'string') {
+                                            const normalized = rawTs.includes('T') ? rawTs : rawTs.replace(' ', 'T');
+                                            const parsed = Date.parse(normalized);
+                                            if (!Number.isNaN(parsed)) {
+                                                return parsed;
+                                            }
+                                            const parsedWithZone = Date.parse(normalized.endsWith('Z') ? normalized : normalized + 'Z');
+                                            if (!Number.isNaN(parsedWithZone)) {
+                                                return parsedWithZone;
+                                            }
+                                        }
+                                        return null;
+                                    })();
+                                    const timestamp = Number.isFinite(candidateTimestamp) ? candidateTimestamp : null;
+                                    const tooltip = timestamp !== null ? new Date(timestamp).toLocaleString() : undefined;
+                                    const timeLabel = timestamp !== null ? relativeTime(timestamp) : '';
+                                    const title = pickFirstText(item.title, item.summary, item.label, item.event_type, eventData && eventData.summary, eventData && eventData.message) || 'Activity update';
+                                    const actorName = pickFirstText(item.actor_name, item.actor, item.user_name, item.user, eventData && eventData.actor_name, eventData && eventData.actor);
+                                    const message = pickFirstText(item.message, eventData && eventData.message, eventData && eventData.summary, eventData && eventData.note_preview, eventData && eventData.description);
+                                    const caseIdRaw = item.case_id !== undefined && item.case_id !== null ? item.case_id : (item.subject_type === 'case' ? item.subject_id : (eventData && eventData.case_id));
+                                    const caseId = caseIdRaw !== undefined && caseIdRaw !== null ? String(caseIdRaw) : null;
+                                    const trackingId = pickFirstText(item.tracking_id, eventData && eventData.tracking_id, eventData && eventData.reference_number);
+                                    return (
+                                        <Box key={key} variant="p" title={tooltip}>
+                                            <Box display="inline" margin={{ right: 'xs' }}>{title}</Box>
+                                            {actorName && (
+                                                <Box display="inline" margin={{ right: 'xs' }} color="text-status-inactive">by {actorName}</Box>
+                                            )}
+                                            {caseId && (
+                                                <Box display="inline" margin={{ right: 'xs' }}>
+                                                    <Link href={`/case/${caseId}`}>{trackingId || `Case ${caseId}`}</Link>
+                                                </Box>
+                                            )}
+                                            {message && (
+                                                <Box display="inline" margin={{ right: 'xs' }}>{message}</Box>
+                                            )}
+                                            {timeLabel && (
+                                                <Box display="inline" color="text-status-inactive">{timeLabel}</Box>
+                                            )}
+                                        </Box>
+                                    );
+                                })}
+                                {!recentActivity.length && <Box variant="p">No recent activity.</Box>}
+                            </>
+                        )}
                     </SpaceBetween>
                 </Container>
                 <Container header={<Header variant="h2">Resources</Header>}>
@@ -501,3 +693,5 @@ const DevTaskTracker = () => {
 };
 
 export default AdminDashboard;
+
+

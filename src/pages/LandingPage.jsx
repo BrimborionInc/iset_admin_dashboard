@@ -23,7 +23,7 @@ const LandingPage = () => {
 
   const navItems = [
     { id: 'hero', label: 'Overview' },
-    { id: 'capabilities', label: 'Capabilities' },
+    { id: 'release-notes', label: 'Release Notes' },
     { id: 'resources', label: 'Resources' },
     { id: 'contact', label: 'Support' },
   ];
@@ -75,7 +75,7 @@ const LandingPage = () => {
                 Sign in to manage NWAC programs
               </button>
               <button type="button" className="secondary" onClick={openPublicPortal}>
-                Open the public portal
+                View the applicants' portal
               </button>
             </div>
             <div className="landing-hero__meta">
@@ -86,29 +86,101 @@ const LandingPage = () => {
           </div>
         </section>
 
-        <section id="capabilities" className="landing-implementations landing-section">
-          <h2>Capabilities tailored for NWAC operations</h2>
+        <section id="release-notes" className="landing-implementations landing-section">
+          <h2>Release Notes - Patch v0.1.0</h2>
           <p className="description">
-            Every module in the dashboard maps to a live operational requirement - from intake configuration and case assignment to security governance and regional reporting.
+            The latest patch updates keep administrators informed about what changed, what issues remain, and what is coming next.
           </p>
           <div className="landing-card-grid">
             <article className="landing-card">
-              <h3>Intake Workflow Studio</h3>
-              <p>
-                Design, test, and publish intake steps with reusable components. Apply governance with Role Matrix controls and preview the applicant experience before rollout.
-              </p>
+              <h3 className="release-notes-heading">Features</h3>
+              <div className="release-notes-sections">
+                <section>
+                  <h4>Case Management</h4>
+                  <p>Intake submissions flow in from the public portal with notifications targeted to the responsible role.</p>
+                  <p>Program Administrators and Regional Coordinators assign applications through routing controls aligned to their teams.</p>
+                  <p>The dashboard holds the overview, application record, assessment form, secure messaging, supporting documents, event log, and status controls.</p>
+                  <p>Overdue checks raise alerts whenever an application stalls at any stage.</p>
+                </section>
+                <section>
+                  <h4>Intake Workflow Studio</h4>
+                  <p>Editors assemble intake steps from reusable components.</p>
+                  <p>Validation rules and controls enforce required data before submission.</p>
+                  <p>AI assists with step wording, edits, and bilingual translation between French and English.</p>
+                  <p>Conditional fields, summary pages, and rules-based file uploads adapt the form to applicant responses.</p>
+                  <p>The workflow editor supports linear, conditional, and branching paths with testing, preview, and publication tools.</p>
+                </section>
+                <section>
+                  <h4>Secure Messaging</h4>
+                  <p>Secure messaging links applicants and the ISET team within each case.</p>
+                  <p>Every application keeps a dedicated inbox so the full thread stays together.</p>
+                  <p>Uploaded attachments store against the applicant record and remain available to staff.</p>
+                </section>
+                <section>
+                  <h4>Configuration</h4>
+                  <p>Configure AI defaults, parameters, and fallback providers for guidance tools.</p>
+                  <p>Manage MFA mode, session timeouts, SSO providers, and federation sync.</p>
+                  <p>Set SLA targets across lifecycle stages and maintain notification templates for reminders, channels, acknowledgements, and language fallbacks.</p>
+                  <p>Adjust allowed origins, demo toolbar visibility, appearance preferences, and monitor required secrets.</p>
+                </section>
+                <section>
+                  <h4>Security</h4>
+                  <p>AWS Cognito sign-on with access control matrix enforcement covers role-based authorization.</p>
+                  <p>Session auditing and event logging record system access.</p>
+                  <p>Databases, document stores, and configuration secrets stay encrypted with KMS-managed keys.</p>
+                  <p>CORS allowlists, TLS enforcement, and certificate management harden the perimeter.</p>
+                </section>
+              </div>
             </article>
             <article className="landing-card">
-              <h3>Assessment &amp; Case Coordination</h3>
-              <p>
-                Track appeals through Assessment Review, Case Assignment, and Application dashboards. Surface decision history, manage supporting materials, and route tasks to the right NWAC reviewers.
-              </p>
+              <h3 className="release-notes-heading">Known Bugs</h3>
+              <div className="release-notes-sections">
+                <section>
+                  <h4>Workflow Studio</h4>
+                  <p>The "flowchart" views do not pan or zoom consistently, making drag interactions unreliable.</p>
+                </section>
+                <section>
+                  <h4>Intake Step Editor</h4>
+                  <p>Dragging components within the workspace causes flicker and the insertion point is unclear.</p>
+                </section>
+                <section>
+                  <h4>Notification Settings</h4>
+                  <p>Email notifications are currently fixed to account verification, password reset, submission confirmation, and secure message events; the configurable dashboard is inactive.</p>
+                </section>
+                <section>
+                  <h4>Default French Strings</h4>
+                  <p>Certain intake components ship with default French text that interferes with AI-driven translation.</p>
+                </section>
+                <section>
+                  <h4>AI Support</h4>
+                  <p>The support assistant is not yet fully trained on the solution and can drift off topic.</p>
+                </section>
+              </div>
             </article>
             <article className="landing-card">
-              <h3>Secure Messaging &amp; Document Exchange</h3>
-              <p>
-                Coordinate with applicants and regional delivery teams through Secure Client Messaging, request uploads, and maintain an audit trail for every file and conversation.
-              </p>
+              <h3 className="release-notes-heading">Coming next patch</h3>
+              <div className="release-notes-sections">
+                <section>
+                  <h4>Records Retention and Archiving</h4>
+                  <p>Introduce configurable retention, archiving, and disposition policies, backed by warehouse storage, automated record-keeping, and legal hold controls.</p>
+                </section>
+                <section>
+                  <h4>Analytics Dashboard</h4>
+                  <p>Deliver a dedicated analytics view with charts, reports, and metrics.</p>
+                </section>
+                <section>
+                  <h4>Release Management</h4>
+                  <p>Add enhanced release tooling to stage and control changes to intake workflows.</p>
+                </section>
+                <section>
+                  <h4>Tutorials</h4>
+                  <p>Publish guided walkthroughs for each primary function.</p>
+                </section>
+                <section>
+                  <h4>Enhanced Workflow</h4>
+                  <p>Strengthen workflow-driven status controls to replace the current manual status updates.</p>
+                </section>
+              </div>
             </article>
           </div>
         </section>
