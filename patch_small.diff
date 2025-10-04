@@ -1,0 +1,67 @@
+index 95dcc1a..603aeac 100644
+--- a/src/widgets/IsetApplicationFormWidget.js
++++ b/src/widgets/IsetApplicationFormWidget.js
+@@ -373,6 +373,12 @@ const Section = ({ title, description, columns = 2, items = [], defaultExpanded
+ };
+ 
+ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHelpPanel }) => {
++  const buildApplicationUrl = suffix => {
++    if (!application_id) return null;
++    if (!suffix) return `/api/applications/${application_id}`;
++    return `/api/applications/${application_id}${suffix.startsWith('/') ? suffix : '/' + suffix}`;
++  };
++
+   const [application, setApplication] = useState(null);
+   const [loading, setLoading] = useState(Boolean(application_id));
+   const [loadError, setLoadError] = useState(null);
+@@ -382,7 +388,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+   const [savingCaseSummary, setSavingCaseSummary] = useState(false);
+   useEffect(() => {
+     let cancelled = false;
+-    if (!application_id) {
++    const detailUrl = buildApplicationUrl();
++    if (!detailUrl) {
+       setApplication(null);
+       setLoading(false);
+       return () => {
+@@ -391,7 +398,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+     }
+     setLoading(true);
+     setLoadError(null);
+-    apiFetch(`/api/applications/${application_id}`)
++    apiFetch(detailUrl)
+       .then(async res => {
+         if (res.ok) return res.json();
+         let message = 'Failed to load application';
+@@ -613,20 +620,23 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+         { label: 'Other expenses (list)', value: renderTextBlock(answers['expenses-other-list']) }
+       ]
+     });
+-    sections.push({
+-      id: 'documents',
+-      title: 'Supporting documents',
+-      description: "These are the files the applicant uploaded in support of this application. For all files associated with this applicant's email address, and to manage files, see the Supporting Documents widget.",
+-      columns: 2,
+-      items: DOCUMENT_FIELDS.map(({ key, label }) => ({ label, value: renderDocumentLinks(answers[key]) }))
+-    });
++    sections.push({
++      id: 'documents',
++      title: 'Supporting documents',
++      description: "These are the files the applicant uploaded in support of this application. For all files associated with this applicant's email address, and to manage files, see the Supporting Documents widget.",
++      columns: 2,
++      items: DOCUMENT_FIELDS.map(({ key, label }) => ({ label, value: renderDocumentLinks(answers[key]) }))
++    });
+     return sections;
+   }, [answers]);
+   const employmentNarrative = renderTextBlock(answers['long-term-goal']);
+   const dirtyCaseSummary = caseSummary !== initialCaseSummary;
+   const saveCaseSummary = () => {
++    if (!application_id) return;
++    const endpoint = buildApplicationUrl('/ptma-case-summary');
++    if (!endpoint) return;
+     setSavingCaseSummary(true);
+-    apiFetch(`/api/applications/${application_id}/ptma-case-summary`, {
++    apiFetch(endpoint, {
+       method: 'PUT',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({ case_summary: caseSummary })

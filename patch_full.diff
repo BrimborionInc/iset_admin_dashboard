@@ -1,0 +1,228 @@
+﻿diff --git a/src/widgets/IsetApplicationFormWidget.js b/src/widgets/IsetApplicationFormWidget.js
+index 95dcc1a..603aeac 100644
+--- a/src/widgets/IsetApplicationFormWidget.js
++++ b/src/widgets/IsetApplicationFormWidget.js
+@@ -20,7 +20,7 @@ import IsetApplicationFormHelpPanelContent from '../helpPanelContents/isetApplic
+ import { apiFetch } from '../auth/apiClient';
+ 
+ const NOT_PROVIDED = <Box color="text-body-secondary">Not provided</Box>;
+-const OPTION_LABELS = {
++const OPTION_LABELS = {
+   'eligibility-indigenous': { yes: 'Yes', no: 'No' },
+   'eligibility-female': { yes: 'Yes', no: 'No' },
+   'eligibility-canadian': { yes: 'Yes', no: 'No' },
+@@ -112,26 +112,26 @@ const OPTION_LABELS = {
+     transportation: 'Transportation',
+     other: 'Other'
+   }
+-};
+-
+-// Normalise a wide variety of yes/no input shapes to 'yes' | 'no' | null
+-const normaliseYesNo = (value) => {
+-  if (value === null || value === undefined || value === '') return null;
+-  const s = String(value).trim().toLowerCase();
+-  if (['yes', 'true', '1', 'y'].includes(s)) return 'yes';
+-  if (['no', 'false', '0', 'n'].includes(s)) return 'no';
+-  return null;
+-};
+-
+-// Render a Pass/Fail badge for eligibility keys, with inverted logic for 'eligibility-disqualified'.
+-const formatEligibility = (key, value) => {
+-  const yn = normaliseYesNo(value);
+-  if (yn === null) return NOT_PROVIDED;
+-  const inverted = key === 'eligibility-disqualified';
+-  const pass = inverted ? yn === 'no' : yn === 'yes';
+-  return <Badge color={pass ? 'green' : 'red'}>{pass ? 'Pass' : 'Fail'}</Badge>;
+-};
+-
++};
++
++// Normalise a wide variety of yes/no input shapes to 'yes' | 'no' | null
++const normaliseYesNo = (value) => {
++  if (value === null || value === undefined || value === '') return null;
++  const s = String(value).trim().toLowerCase();
++  if (['yes', 'true', '1', 'y'].includes(s)) return 'yes';
++  if (['no', 'false', '0', 'n'].includes(s)) return 'no';
++  return null;
++};
++
++// Render a Pass/Fail badge for eligibility keys, with inverted logic for 'eligibility-disqualified'.
++const formatEligibility = (key, value) => {
++  const yn = normaliseYesNo(value);
++  if (yn === null) return NOT_PROVIDED;
++  const inverted = key === 'eligibility-disqualified';
++  const pass = inverted ? yn === 'no' : yn === 'yes';
++  return <Badge color={pass ? 'green' : 'red'}>{pass ? 'Pass' : 'Fail'}</Badge>;
++};
++
+ const DOCUMENT_FIELDS = [
+   { key: 'status-card', label: 'Status / Treaty Card (or equivalent)' },
+   { key: 'govt-id', label: 'Government-issued ID' },
+@@ -212,7 +212,7 @@ const formatDate = (value) => {
+ };
+ const asBadge = (value, positiveLabel = 'Yes', negativeLabel = 'No') => {
+   if (value === null || value === undefined || value === '') return NOT_PROVIDED;
+-  const normalised = String(value).toLowerCase();
++  const normalised = String(value).toLowerCase();
+   if (['yes', 'true', '1', 'y'].includes(normalised)) {
+     return <Badge color="green">{positiveLabel}</Badge>;
+   }
+@@ -228,23 +228,23 @@ const formatOption = (key, value) => {
+   const normalised = String(value).toLowerCase();
+   return map[normalised] || map[value] || String(value);
+ };
+-const formatOptionList = (key, values) => {
+-  // Treat null/undefined/empty array as not provided, but allow 0/false
+-  if ((values === null || values === undefined) || (Array.isArray(values) && values.length === 0)) return NOT_PROVIDED;
+-  const list = Array.isArray(values) ? values : [values];
+-  const chips = list.map((item, index) => {
+-    // Special-case eligibility keys to display Pass/Fail instead of raw Yes/No or 1/0
+-    if (String(key).startsWith('eligibility-')) {
+-      return <React.Fragment key={index}>{formatEligibility(key, item)}</React.Fragment>;
+-    }
+-    const label = formatOption(key, item);
+-    if (typeof label === 'string' && ['Yes', 'No'].includes(label)) {
+-      return <Badge key={index} color={label === 'Yes' ? 'green' : 'grey'}>{label}</Badge>;
+-    }
+-    return <Badge key={index} color="blue">{label}</Badge>;
+-  });
+-  return <SpaceBetween direction="horizontal" size="xs">{chips}</SpaceBetween>;
+-};
++const formatOptionList = (key, values) => {
++  // Treat null/undefined/empty array as not provided, but allow 0/false
++  if ((values === null || values === undefined) || (Array.isArray(values) && values.length === 0)) return NOT_PROVIDED;
++  const list = Array.isArray(values) ? values : [values];
++  const chips = list.map((item, index) => {
++    // Special-case eligibility keys to display Pass/Fail instead of raw Yes/No or 1/0
++    if (String(key).startsWith('eligibility-')) {
++      return <React.Fragment key={index}>{formatEligibility(key, item)}</React.Fragment>;
++    }
++    const label = formatOption(key, item);
++    if (typeof label === 'string' && ['Yes', 'No'].includes(label)) {
++      return <Badge key={index} color={label === 'Yes' ? 'green' : 'grey'}>{label}</Badge>;
++    }
++    return <Badge key={index} color="blue">{label}</Badge>;
++  });
++  return <SpaceBetween direction="horizontal" size="xs">{chips}</SpaceBetween>;
++};
+ const renderTextBlock = (value) => {
+   if (!value || !String(value).trim()) return NOT_PROVIDED;
+   return <Box whiteSpace="pre-wrap">{value}</Box>;
+@@ -326,12 +326,12 @@ const Section = ({ title, description, columns = 2, items = [], defaultExpanded
+       )
+     }
+   ];
+-  return (
+-    <ExpandableSection
+-      headerText={title}
+-      headerDescription={description}
+-      defaultExpanded={defaultExpanded}
+-    >
++  return (
++    <ExpandableSection
++      headerText={title}
++      headerDescription={description}
++      defaultExpanded={defaultExpanded}
++    >
+       <SpaceBetween size="s">
+         {resolvedTables.length > 0 && (
+           resolvedTables.length > 1 ? (
+@@ -373,6 +373,12 @@ const Section = ({ title, description, columns = 2, items = [], defaultExpanded
+ };
+ 
+ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHelpPanel }) => {
++const buildApplicationUrl = suffix => {
++  if (!application_id) return null;
++  if (!suffix) return `/api/applications/${application_id}`;
++  return `/api/applications/${application_id}${suffix.startswith('/') ? suffix : '/' + suffix}`;
++};
++
+   const [application, setApplication] = useState(null);
+   const [loading, setLoading] = useState(Boolean(application_id));
+   const [loadError, setLoadError] = useState(null);
+@@ -382,7 +388,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+   const [savingCaseSummary, setSavingCaseSummary] = useState(false);
+   useEffect(() => {
+     let cancelled = false;
+-    if (!application_id) {
++    const detailUrl = buildApplicationUrl();
++    if (!detailUrl) {
+       setApplication(null);
+       setLoading(false);
+       return () => {
+@@ -391,7 +398,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+     }
+     setLoading(true);
+     setLoadError(null);
+-    apiFetch(`/api/applications/${application_id}`)
++    apiFetch(detailUrl)
+       .then(async res => {
+         if (res.ok) return res.json();
+         let message = 'Failed to load application';
+@@ -613,20 +620,23 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+         { label: 'Other expenses (list)', value: renderTextBlock(answers['expenses-other-list']) }
+       ]
+     });
+-    sections.push({
+-      id: 'documents',
+-      title: 'Supporting documents',
+-      description: "These are the files the applicant uploaded in support of this application. For all files associated with this applicant's email address, and to manage files, see the Supporting Documents widget.",
+-      columns: 2,
+-      items: DOCUMENT_FIELDS.map(({ key, label }) => ({ label, value: renderDocumentLinks(answers[key]) }))
+-    });
++    sections.push({
++      id: 'documents',
++      title: 'Supporting documents',
++      description: "These are the files the applicant uploaded in support of this application. For all files associated with this applicant's email address, and to manage files, see the Supporting Documents widget.",
++      columns: 2,
++      items: DOCUMENT_FIELDS.map(({ key, label }) => ({ label, value: renderDocumentLinks(answers[key]) }))
++    });
+     return sections;
+   }, [answers]);
+   const employmentNarrative = renderTextBlock(answers['long-term-goal']);
+   const dirtyCaseSummary = caseSummary !== initialCaseSummary;
+   const saveCaseSummary = () => {
++    if (!application_id) return;
++    const endpoint = buildApplicationUrl('/ptma-case-summary');
++    if (!endpoint) return;
+     setSavingCaseSummary(true);
+-    apiFetch(`/api/applications/${application_id}/ptma-case-summary`, {
++    apiFetch(endpoint, {
+       method: 'PUT',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({ case_summary: caseSummary })
+@@ -702,20 +712,20 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+           {sections.map(section => (
+             <Section key={section.id} {...section} />
+           ))}
+-          {employmentNarrative !== NOT_PROVIDED && (
+-            <ExpandableSection
+-              headerText="Employment goal narrative"
+-              headerDescription="Applicant's description of their long-term employment objective."
+-              defaultExpanded={false}
+-            >
+-              {employmentNarrative}
+-            </ExpandableSection>
+-          )}
+-          <ExpandableSection
+-            headerText="Case summary & notes"
+-            headerDescription="Reviewer notes shared across the assessment team."
+-            defaultExpanded={false}
+-          >
++          {employmentNarrative !== NOT_PROVIDED && (
++            <ExpandableSection
++              headerText="Employment goal narrative"
++              headerDescription="Applicant's description of their long-term employment objective."
++              defaultExpanded={false}
++            >
++              {employmentNarrative}
++            </ExpandableSection>
++          )}
++          <ExpandableSection
++            headerText="Case summary & notes"
++            headerDescription="Reviewer notes shared across the assessment team."
++            defaultExpanded={false}
++          >
+             <SpaceBetween size="s">
+               <Textarea
+                 rows={5}
