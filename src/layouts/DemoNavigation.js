@@ -29,6 +29,7 @@ const CLEAR_TABLES = [
   'iset_event_receipt',
   'iset_event_outbox',
   'iset_event_entry',
+  'iset_application_version',
   'iset_document',
   'iset_application_draft_dynamic',
   'iset_application_file',
