@@ -1013,6 +1013,11 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
     }
   }, [fetchVersionsList, versionsLoaded]);
 
+  const handleViewVersionsFromModal = useCallback(() => {
+    setShowEditConfirm(false);
+    handleOpenVersionModal();
+  }, [handleOpenVersionModal]);
+
   const closeVersionModal = useCallback(() => {
     setVersionModalVisible(false);
     setVersionDetails(null);
@@ -1202,11 +1207,11 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
 
   const headerActions = (
     <SpaceBetween direction="horizontal" size="xs">
-      <Button onClick={handleOpenVersionModal} disabled={loading || saving}>
-        View versions
-      </Button>
       {isEditing ? (
         <>
+          <Button onClick={handleOpenVersionModal} disabled={saving}>
+            View versions
+          </Button>
           <Button onClick={handleSave} disabled={!hasDirtyFields || saving} loading={saving} variant="primary">
             Save
           </Button>
@@ -1303,14 +1308,21 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
           header="Enable editing"
           onDismiss={() => setShowEditConfirm(false)}
           footer={
-            <SpaceBetween direction="horizontal" size="xs" alignItems="end">
-              <Button onClick={() => setShowEditConfirm(false)} variant="link">
-                Cancel
-              </Button>
-              <Button variant="primary" onClick={handleConfirmEdit}>
-                Enable editing
-              </Button>
-            </SpaceBetween>
+            <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+              <div style={{ marginRight: 'auto' }}>
+                <Button onClick={handleViewVersionsFromModal} disabled={versionsLoading}>
+                  View versions
+                </Button>
+              </div>
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button onClick={() => setShowEditConfirm(false)} variant="link">
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={handleConfirmEdit}>
+                  Enable editing
+                </Button>
+              </SpaceBetween>
+            </div>
           }
         >
           <SpaceBetween size="s">
