@@ -1,0 +1,52 @@
+diff --git a/src/widgets/IsetApplicationFormWidget.js b/src/widgets/IsetApplicationFormWidget.js
+--- a/src/widgets/IsetApplicationFormWidget.js
++++ b/src/widgets/IsetApplicationFormWidget.js
+@@ -370,6 +370,12 @@ const renderDocumentLinks = (value) => {
+ };
+ 
+ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHelpPanel }) => {
++  const buildApplicationUrl = suffix => {
++    if (!application_id) return null;
++    if (!suffix) return /api/applications/;
++    return /api/applications/;
++  };
++
+   const [application, setApplication] = useState(null);
+   const [loading, setLoading] = useState(Boolean(application_id));
+   const [loadError, setLoadError] = useState(null);
+@@ -379,7 +385,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+   const [savingCaseSummary, setSavingCaseSummary] = useState(false);
+   useEffect(() => {
+     let cancelled = false;
+-    if (!application_id) {
++    const detailUrl = buildApplicationUrl();
++    if (!detailUrl) {
+       setApplication(null);
+       setLoading(false);
+       return () => {
+@@ -388,7 +395,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+     }
+     setLoading(true);
+     setLoadError(null);
+-    apiFetch(/api/applications/)
++    apiFetch(detailUrl)
+       .then(async res => {
+         if (res.ok) return res.json();
+         let message = 'Failed to load application';
+@@ -611,10 +618,14 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+   }, [answers]);
+   const employmentNarrative = renderTextBlock(answers['long-term-goal']);
+   const dirtyCaseSummary = caseSummary !== initialCaseSummary;
+   const saveCaseSummary = () => {
+-    setSavingCaseSummary(true);
+-    apiFetch(/api/applications//ptma-case-summary, {
++    if (!application_id) return;
++    const endpoint = buildApplicationUrl('/ptma-case-summary');
++    if (!endpoint) return;
++    setSavingCaseSummary(true);
++    apiFetch(endpoint, {
+       method: 'PUT',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({ case_summary: caseSummary })
+     })
+       .then(r => (r.ok ? r.json() : Promise.reject(r)))
