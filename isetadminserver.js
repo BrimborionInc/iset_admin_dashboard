@@ -18,6 +18,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_event_outbox',
   'iset_event_entry',
   'iset_document',
+  'iset_application_version',
   'iset_application_draft_dynamic',
   'iset_application_file',
   'iset_application_submission',
@@ -63,6 +64,18 @@ async function clearTableWithCount(connection, tableName) {
       return { table: tableName, skipped: true, reason: 'missing_table' };
     }
     throw err;
+  }
+}
+
+function clonePayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return {};
+  }
+  try {
+    return JSON.parse(JSON.stringify(payload));
+  } catch (err) {
+    console.warn('[versions] failed to clone payload', err.message || err);
+    return {};
   }
 }
 
@@ -8451,17 +8464,22 @@ app.get('/api/applications/:id/versions', async (req, res) => {
       [applicationId]
     );
     const currentVersionNumber = Number(current.row.version || 1);
-    const versions = rows.map(row => ({
-      id: row.id,
-      version: Number(row.version),
-      changeSummary: row.change_summary || null,
-      savedById: row.created_by_id || null,
-      savedBy: row.created_by_name || null,
-      restoredFromVersion: row.restored_from_version === null ? null : Number(row.restored_from_version),
-      savedAt: row.created_at,
-      isCurrent: Number(row.version) === currentVersionNumber
-    }));
-    if (!versions.some(v => v.isCurrent)) {
+    const versions = rows.map(row => {
+      const versionNumber = Number(row.version);
+      return {
+        id: row.id,
+        version: versionNumber,
+        changeSummary: row.change_summary || null,
+        savedById: row.created_by_id || null,
+        savedBy: row.created_by_name || null,
+        restoredFromVersion: row.restored_from_version === null ? null : Number(row.restored_from_version),
+        savedAt: row.created_at,
+        isCurrent: false,
+        isOriginal: versionNumber === 1,
+        canRestore: false
+      };
+    });
+    if (!versions.some(v => v.version === currentVersionNumber)) {
       versions.unshift({
         id: null,
         version: currentVersionNumber,
@@ -8470,12 +8488,16 @@ app.get('/api/applications/:id/versions', async (req, res) => {
         savedBy: null,
         restoredFromVersion: null,
         savedAt: current.row.updated_at || current.row.created_at,
-        isCurrent: true
+        isCurrent: true,
+        isOriginal: currentVersionNumber === 1,
+        canRestore: false
       });
-    } else {
-      for (const item of versions) {
-        item.isCurrent = item.version === currentVersionNumber;
-      }
+    }
+    const hasMultipleVersions = versions.length > 1;
+    for (const item of versions) {
+      item.isCurrent = item.version === currentVersionNumber;
+      item.isOriginal = item.isOriginal || item.version === 1;
+      item.canRestore = hasMultipleVersions && item.version < currentVersionNumber;
     }
     res.json({ versions, currentVersion: currentVersionNumber });
   } catch (error) {
@@ -8574,19 +8596,23 @@ app.post('/api/applications/:id/versions', async (req, res) => {
       return res.status(404).json({ error: 'Application not found' });
     }
     const currentVersionNumber = Number(current.row.version || 1);
+    const originalPayload = clonePayload(current.payload);
+    const updatedPayload = clonePayload(current.payload);
     const newAnswers = sanitiseAnswersPayload(answers);
-    const payload = current.payload;
-    payload.answers = { ...(payload.answers || {}) };
-    Object.assign(payload.answers, newAnswers);
+    const existingAnswers = updatedPayload.answers && typeof updatedPayload.answers === 'object'
+      ? { ...updatedPayload.answers }
+      : {};
+    updatedPayload.answers = existingAnswers;
+    Object.assign(updatedPayload.answers, newAnswers);
 
-    await ensureVersionSnapshotExists(connection, applicationId, currentVersionNumber, current.payload, null);
+    await ensureVersionSnapshotExists(connection, applicationId, currentVersionNumber, originalPayload, null);
     const highestVersion = await getHighestApplicationVersion(connection, applicationId, currentVersionNumber);
     const nextVersion = highestVersion + 1;
-    await insertNewVersionEntry(connection, applicationId, nextVersion, payload, actorMeta);
+    await insertNewVersionEntry(connection, applicationId, nextVersion, updatedPayload, actorMeta);
 
     await connection.query(
       'UPDATE iset_application SET payload_json = ?, version = ?, updated_at = NOW() WHERE id = ?',
-      [JSON.stringify(payload), nextVersion, applicationId]
+      [JSON.stringify(updatedPayload), nextVersion, applicationId]
     );
 
     await connection.commit();
@@ -8603,7 +8629,6 @@ app.post('/api/applications/:id/versions', async (req, res) => {
 app.post('/api/applications/:id/versions/:versionId/restore', async (req, res) => {
   const applicationId = Number(req.params.id);
   const { versionId } = req.params;
-  const { changeSummary } = req.body || {};
   if (!Number.isInteger(applicationId) || applicationId <= 0) {
     return res.status(400).json({ error: 'invalid_application_id' });
   }
@@ -8614,13 +8639,6 @@ app.post('/api/applications/:id/versions/:versionId/restore', async (req, res) =
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const actor = resolveRequestActor(req);
-    const summaryText = typeof changeSummary === 'string' ? changeSummary.trim() : '';
-    const actorMeta = {
-      actorId: actor.actorId || null,
-      actorName: actor.actorName || null,
-      changeSummary: summaryText ? summaryText.slice(0, 1000) : null
-    };
     const current = await readApplicationPayload(connection, applicationId, { forUpdate: true });
     if (!current) {
       await connection.rollback();
@@ -8635,23 +8653,27 @@ app.post('/api/applications/:id/versions/:versionId/restore', async (req, res) =
       await connection.rollback();
       return res.status(404).json({ error: 'Version not found' });
     }
+    const currentVersionNumber = Number(current.row.version || 1);
+    const targetVersionNumber = Number(versionRow.version);
+    if (targetVersionNumber >= currentVersionNumber) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Only earlier versions can be restored', code: 'cannot_restore_non_earlier_version' });
+    }
     let payload = versionRow.payload_json;
     if (payload && typeof payload === 'string') {
       try { payload = JSON.parse(payload); } catch { payload = {}; }
     }
-    await ensureVersionSnapshotExists(connection, applicationId, Number(current.row.version || 1), current.payload, null);
-    const highestVersion = await getHighestApplicationVersion(connection, applicationId, current.row.version);
-    const nextVersion = highestVersion + 1;
-    await insertNewVersionEntry(connection, applicationId, nextVersion, payload || {}, {
-      ...actorMeta,
-      restoredFromVersion: Number(versionRow.version)
-    });
+    if (!payload || typeof payload !== 'object') {
+      payload = {};
+    }
+    const currentPayloadClone = clonePayload(current.payload);
+    await ensureVersionSnapshotExists(connection, applicationId, currentVersionNumber, currentPayloadClone, null);
     await connection.query(
       'UPDATE iset_application SET payload_json = ?, version = ?, updated_at = NOW() WHERE id = ?',
-      [JSON.stringify(payload || {}), nextVersion, applicationId]
+      [JSON.stringify(payload || {}), targetVersionNumber, applicationId]
     );
     await connection.commit();
-    res.status(200).json({ applicationId, version: nextVersion });
+    res.status(200).json({ applicationId, version: targetVersionNumber, restoredFromVersion: currentVersionNumber });
   } catch (error) {
     await connection.rollback();
     console.error('Error restoring application version:', error);
