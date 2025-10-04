@@ -1056,7 +1056,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   }, [application_id]);
 
   const handleRestoreVersion = useCallback(async (versionRow) => {
-    if (!application_id || !versionRow?.id) return;
+    if (!application_id || !versionRow?.id || !versionRow?.canRestore) return;
     setRestoringVersionId(versionRow.id);
     setVersionError(null);
     try {
@@ -1073,8 +1073,9 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         } catch (_) {}
         throw new Error(message);
       }
-      await res.json().catch(() => ({}));
-      pushFlash({ type: 'success', content: `Restored version ${versionRow.version}` });
+      const result = await res.json().catch(() => ({}));
+      const restoredVersion = Number(result?.version) || versionRow.version;
+      pushFlash({ type: 'success', content: `Restored version ${restoredVersion}` });
       await refreshApplication();
       await fetchVersionsList();
       setVersionDetails(null);
@@ -1162,7 +1163,13 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
     {
       id: 'version',
       header: 'Version',
-      cell: item => item.isCurrent ? `v${item.version} (current)` : `v${item.version}`
+      cell: item => {
+        const qualifiers = [];
+        if (item.isCurrent) qualifiers.push('current');
+        if (item.isOriginal) qualifiers.push('original submission');
+        const suffix = qualifiers.length ? ` (${qualifiers.join(' · ')})` : '';
+        return `v${item.version}${suffix}`;
+      }
     },
     {
       id: 'savedAt',
@@ -1187,15 +1194,17 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
           <Button size="small" onClick={() => handleViewVersion(item)} disabled={versionDetailsLoading}>
             View
           </Button>
-          <Button
-            size="small"
-            variant="primary"
-            onClick={() => handleRestoreVersion(item)}
-            disabled={!item.id || restoringVersionId === item.id}
-            loading={restoringVersionId === item.id}
-          >
-            Restore
-          </Button>
+          {item.canRestore && (
+            <Button
+              size="small"
+              variant="primary"
+              onClick={() => handleRestoreVersion(item)}
+              disabled={restoringVersionId === item.id}
+              loading={restoringVersionId === item.id}
+            >
+              Restore
+            </Button>
+          )}
         </SpaceBetween>
       )
     }
