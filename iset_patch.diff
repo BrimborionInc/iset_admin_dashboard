@@ -1,0 +1,60 @@
+diff --git a/src/widgets/IsetApplicationFormWidget.js b/src/widgets/IsetApplicationFormWidget.js
+--- a/src/widgets/IsetApplicationFormWidget.js
++++ b/src/widgets/IsetApplicationFormWidget.js
+@@ -919,12 +919,22 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+   const diff = useMemo(() => answersDiff(answers, editableAnswers), [answers, editableAnswers]);
+-  const hasDirtyFields = isEditing && Object.keys(diff).length > 0;
+-
+-  const handleRequestEdit = useCallback(() => {
+-    setShowEditConfirm(true);
+-  }, []);
+-
+-  const handleConfirmEdit = useCallback(() => {
+-    setShowEditConfirm(false);
+-    setIsEditing(true);
+-    setEditableAnswers(cloneAnswers(answers));
+-  }, [answers]);
++  const hasDirtyFields = isEditing && Object.keys(diff).length > 0;
++  const isDecisionFinal = ['approved', 'rejected'].includes((caseData?.status || '').toLowerCase());
++
++  useEffect(() => {
++    if (isDecisionFinal) {
++      setIsEditing(false);
++      setShowEditConfirm(false);
++    }
++  }, [isDecisionFinal]);
++
++  const handleRequestEdit = useCallback(() => {
++    if (isDecisionFinal) return;
++    setShowEditConfirm(true);
++  }, [isDecisionFinal]);
++
++  const handleConfirmEdit = useCallback(() => {
++    if (isDecisionFinal) return;
++    setShowEditConfirm(false);
++    setIsEditing(true);
++    setEditableAnswers(cloneAnswers(answers));
++  }, [answers, isDecisionFinal]);
+ 
+   const handleCancelEditing = useCallback(() => {
+     setIsEditing(false);
+@@ -1227,7 +1237,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+ 
+   const headerActions = (
+     <SpaceBetween direction="horizontal" size="xs">
+-      {isEditing ? (
++      {isEditing && !isDecisionFinal ? (
+         <>
+           <Button onClick={handleOpenVersionModal} disabled={saving}>
+             View versions
+@@ -1238,7 +1248,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
+           <Button onClick={handleCancelEditing} disabled={saving}>
+             Cancel
+           </Button>
+         </>
+       ) : (
+-        <Button onClick={handleRequestEdit} disabled={loading || !application} variant="primary">
++        <Button onClick={handleRequestEdit} disabled={loading || !application || isDecisionFinal} variant="primary">
+           Edit
+         </Button>
+       )}
