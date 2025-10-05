@@ -12,7 +12,9 @@ import {
   Select,
   Alert,
   FormField,
-  SpaceBetween
+  SpaceBetween,
+  Button,
+  Modal
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
 
@@ -50,6 +52,17 @@ const STATUS_OPTIONS = [
   { label: 'Archived', value: 'archived' },
 ];
 
+const ADMIN_ROLES = new Set(['program administrator', 'system administrator']);
+const REGIONAL_COORDINATOR_ROLES = new Set(['regional coordinator']);
+const APPLICATION_ASSESSOR_ROLES = new Set(['application assessor']);
+const FINAL_CASE_STATUSES = new Set(['approved', 'rejected', 'withdrawn', 'archived']);
+
+const canonicalizeStatus = (status) => (status || '')
+  .toString()
+  .trim()
+  .toLowerCase()
+  .replace(/[\s-]+/g, '_');
+
 const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
   const [application, setApplication] = useState(null);
   const [loading, setLoading] = useState(Boolean(application_id));
@@ -59,6 +72,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
   const [statusFeedback, setStatusFeedback] = useState(null);
   const manualStatusRef = useRef(null);
   const [userRole, setUserRole] = useState(null);
+  const [confirmStatusChange, setConfirmStatusChange] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -188,30 +202,53 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
   }, [application]);
 
   const fallbackStatus = statusValue || caseData?.status || application?.status || '';
-  const normalizedStatus = (fallbackStatus || '').toLowerCase();
+  const canonicalStatus = canonicalizeStatus(fallbackStatus);
   const normalizedRole = (userRole || '').trim().toLowerCase();
-  const privilegedRoles = ['program administrator', 'system administrator'];
-  const isPrivilegedRole = privilegedRoles.includes(normalizedRole);
-  const isDecisionFinal = ['approved', 'rejected'].includes(normalizedStatus);
-  const canEditStatus = Boolean(caseData?.id) && (!isDecisionFinal || isPrivilegedRole);
+  const isAdminRole = ADMIN_ROLES.has(normalizedRole);
+  const isRegionalCoordinator = REGIONAL_COORDINATOR_ROLES.has(normalizedRole);
+  const isApplicationAssessor = APPLICATION_ASSESSOR_ROLES.has(normalizedRole);
+  const isFinalStatus = FINAL_CASE_STATUSES.has(canonicalStatus);
+  const isPendingApprovalStatus = canonicalStatus === 'pending_approval';
+
+  let canEditStatus = Boolean(caseData?.id);
+  if (canEditStatus) {
+    if (isAdminRole) {
+      canEditStatus = true;
+    } else if (isApplicationAssessor) {
+      canEditStatus = !(isFinalStatus || isPendingApprovalStatus);
+    } else if (isRegionalCoordinator) {
+      canEditStatus = !isFinalStatus;
+    } else {
+      canEditStatus = !isFinalStatus;
+    }
+  }
+
   const statusOption = STATUS_OPTIONS.find(option => option.value === statusValue);
   const selectedStatusOption = statusOption || (fallbackStatus ? { label: fallbackStatus, value: fallbackStatus } : null);
   const badgeLabel = statusOption?.label || (fallbackStatus ? fallbackStatus : 'Unknown');
   const badgeColor = statusColor(statusOption?.value || fallbackStatus || 'unknown');
+  const statusSelectDisabled = !canEditStatus || savingStatus;
 
-  const handleStatusChange = async ({ detail }) => {
-    if (isDecisionFinal && !isPrivilegedRole) {
-      setStatusFeedback({ type: 'info', content: 'Status changes are locked after approval is issued.' });
-      return;
-    }
-    const nextStatus = detail.selectedOption?.value;
-    if (!nextStatus || nextStatus === statusValue) return;
+  const handleConfirmDismiss = () => setConfirmStatusChange(null);
+
+  const handleConfirmProceed = async () => {
+    if (!confirmStatusChange) return;
+    const { nextStatus, nextOption } = confirmStatusChange;
+    setConfirmStatusChange(null);
+    await runStatusUpdate(nextStatus, nextOption);
+  };
+
+  const confirmModalVisible = Boolean(confirmStatusChange);
+  const confirmTargetLabel = confirmStatusChange?.nextOption?.label || confirmStatusChange?.nextStatus;
+  const confirmCurrentLabel = badgeLabel || (fallbackStatus ? fallbackStatus : canonicalStatus || 'current status');
+
+  const runStatusUpdate = async (nextStatus, nextOption) => {
     if (!caseData?.id) {
       setStatusFeedback({ type: 'error', content: 'Case details are unavailable; cannot update status.' });
       return;
     }
     const previousStatus = statusValue;
-    const nextOption = STATUS_OPTIONS.find(option => option.value === nextStatus);
+    const label = nextOption?.label || nextStatus;
     setStatusFeedback(null);
     manualStatusRef.current = { pending: nextStatus, previous: previousStatus || '' };
     setStatusValue(nextStatus);
@@ -239,7 +276,6 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
           // ignore refresh failures, local state already updated
         }
       }
-      const label = nextOption?.label || nextStatus;
       setStatusFeedback({ type: 'success', content: `Case status updated to ${label}.` });
     } catch (err) {
       manualStatusRef.current = null;
@@ -250,66 +286,80 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
     }
   };
 
-  const overviewItems = useMemo(() => {
-    const items = [];
+  const handleStatusChange = ({ detail }) => {
+    const nextOption = detail.selectedOption;
+    const nextStatus = nextOption?.value;
+    if (!nextStatus || nextStatus === statusValue) return;
 
-    const referenceNumber = payload?.submission_snapshot?.reference_number || caseData?.tracking_id;
-    if (referenceNumber) {
-      items.push({ label: 'Reference #', value: referenceNumber });
+    const canonicalNextStatus = canonicalizeStatus(nextStatus);
+
+    if (isAdminRole && isFinalStatus && canonicalNextStatus !== canonicalStatus) {
+      setConfirmStatusChange({ nextStatus, nextOption });
+      return;
     }
 
-    // Inline status selector replaces separate top section
-    items.push({
-      label: 'Case Status',
-      value: (
-        <FormField stretch={true} label="" description="">
-          <Select
-            selectedOption={selectedStatusOption}
-            options={STATUS_OPTIONS}
-            onChange={handleStatusChange}
-            placeholder={canEditStatus ? 'Select status' : 'Status unavailable'}
-            disabled={!canEditStatus || savingStatus}
-            statusType={savingStatus ? 'loading' : undefined}
-            loadingText="Updating status"
-            empty="No status options available"
-            expandToViewport
-            ariaLabel="Case status"
-          />
-        </FormField>
-      )
-    });
-
-    const preferredName = answers['preferred-name'];
-    if (preferredName) items.push({ label: 'Preferred Name', value: preferredName });
-
-    const applicantName = caseData?.applicant_name || [answers['first-name'], answers['middle-names'], answers['last-name']].filter(Boolean).join(' ');
-    if (applicantName) items.push({ label: 'Applicant', value: applicantName });
-
-    const contactEmail = caseData?.applicant_email || answers['contact-email-address'] || answers.email;
-    if (contactEmail) items.push({ label: 'Email', value: contactEmail });
-
-    const phoneNumber = caseData?.applicant_phone || answers['telephone-day'] || answers['telephone-alt'];
-    if (phoneNumber) items.push({ label: 'Phone', value: phoneNumber });
-
-    if (caseData?.stage) items.push({ label: 'Case Stage', value: caseData.stage });
-    if (caseData?.priority) items.push({ label: 'Priority', value: caseData.priority });
-
-    if (application?.created_at) items.push({ label: 'Received At', value: formatDateTime(application.created_at) });
-    if (application?.updated_at) items.push({ label: 'Last Updated', value: formatDateTime(application.updated_at) });
-
-    const assignedName = caseData?.assigned_user_name || application?.assigned_evaluator?.name;
-    const assignedEmail = caseData?.assigned_user_email || application?.assigned_evaluator?.email;
-    if (assignedName || assignedEmail) {
-      const display = assignedName && assignedEmail ? `${assignedName} (${assignedEmail})` : (assignedName || assignedEmail);
-      items.push({ label: 'Assigned Evaluator', value: display });
+    if (statusSelectDisabled) {
+      setStatusFeedback({ type: 'info', content: 'Status changes are not permitted for your role on this case.' });
+      return;
     }
 
-    if (caseData?.assigned_user_ptma_name) {
-      items.push({ label: 'Assigned PTMA', value: caseData.assigned_user_ptma_name });
-    }
+    runStatusUpdate(nextStatus, nextOption);
+  };
 
-    return items;
-  }, [application, answers, payload, caseData, selectedStatusOption, canEditStatus, savingStatus, handleStatusChange]);
+  const statusFormField = (
+    <FormField stretch={true} label="" description="">
+      <Select
+        selectedOption={selectedStatusOption}
+        options={STATUS_OPTIONS}
+        onChange={handleStatusChange}
+        placeholder={canEditStatus ? 'Select status' : 'Status unavailable'}
+        disabled={statusSelectDisabled}
+        statusType={savingStatus ? 'loading' : undefined}
+        loadingText="Updating status"
+        empty="No status options available"
+        expandToViewport
+        ariaLabel="Case status"
+      />
+    </FormField>
+  );
+
+  const overviewItems = [];
+
+  const referenceNumber = payload?.submission_snapshot?.reference_number || caseData?.tracking_id;
+  if (referenceNumber) {
+    overviewItems.push({ label: 'Reference #', value: referenceNumber });
+  }
+
+  overviewItems.push({ label: 'Case Status', value: statusFormField });
+
+  const preferredName = answers['preferred-name'];
+  if (preferredName) overviewItems.push({ label: 'Preferred Name', value: preferredName });
+
+  const applicantName = caseData?.applicant_name || [answers['first-name'], answers['middle-names'], answers['last-name']].filter(Boolean).join(' ');
+  if (applicantName) overviewItems.push({ label: 'Applicant', value: applicantName });
+
+  const contactEmail = caseData?.applicant_email || answers['contact-email-address'] || answers.email;
+  if (contactEmail) overviewItems.push({ label: 'Email', value: contactEmail });
+
+  const phoneNumber = caseData?.applicant_phone || answers['telephone-day'] || answers['telephone-alt'];
+  if (phoneNumber) overviewItems.push({ label: 'Phone', value: phoneNumber });
+
+  if (caseData?.stage) overviewItems.push({ label: 'Case Stage', value: caseData.stage });
+  if (caseData?.priority) overviewItems.push({ label: 'Priority', value: caseData.priority });
+
+  if (application?.created_at) overviewItems.push({ label: 'Received At', value: formatDateTime(application.created_at) });
+  if (application?.updated_at) overviewItems.push({ label: 'Last Updated', value: formatDateTime(application.updated_at) });
+
+  const assignedName = caseData?.assigned_user_name || application?.assigned_evaluator?.name;
+  const assignedEmail = caseData?.assigned_user_email || application?.assigned_evaluator?.email;
+  if (assignedName || assignedEmail) {
+    const display = assignedName && assignedEmail ? `${assignedName} (${assignedEmail})` : (assignedName || assignedEmail);
+    overviewItems.push({ label: 'Assigned Evaluator', value: display });
+  }
+
+  if (caseData?.assigned_user_ptma_name) {
+    overviewItems.push({ label: 'Assigned PTMA', value: caseData.assigned_user_ptma_name });
+  }
 
   // Removed separate caseStatusSection; status selector now inline in overviewItems
 
@@ -320,7 +370,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
   ) : error ? (
     <Box color="text-status-critical">{error}</Box>
   ) : overviewItems.length ? (
-    <KeyValuePairs columns={4} items={overviewItems} />
+  <KeyValuePairs columns={5} items={overviewItems} />
   ) : (
     <Box color="text-status-inactive">No overview data available.</Box>
   );
@@ -356,6 +406,36 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
           </Alert>
         )}
         {overviewContent}
+        {confirmModalVisible && (
+          <Modal
+            visible={confirmModalVisible}
+            onDismiss={handleConfirmDismiss}
+            closeAriaLabel="Close confirmation"
+            header="Confirm status change"
+            footer={
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button onClick={handleConfirmDismiss} disabled={savingStatus}>Cancel</Button>
+                <Button
+                  variant="primary"
+                  onClick={handleConfirmProceed}
+                  loading={savingStatus}
+                  disabled={savingStatus}
+                >
+                  Change status
+                </Button>
+              </SpaceBetween>
+            }
+          >
+            <SpaceBetween direction="vertical" size="s">
+              <Box>
+                This application is currently marked as {confirmCurrentLabel}. Changing a finalized status should only be done when absolutely necessary.
+              </Box>
+              <Box fontWeight="bold">
+                Do you want to move it to {confirmTargetLabel || 'the selected status'}?
+              </Box>
+            </SpaceBetween>
+          </Modal>
+        )}
       </SpaceBetween>
     </BoardItem>
   );
