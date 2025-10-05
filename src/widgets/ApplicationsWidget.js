@@ -216,7 +216,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       return (
         <SpaceBetween direction="horizontal" size="xs">
           {item.case_id && (
-            <Button variant="inline-link" onClick={() => history.push(`/application-case/${item.case_id}`)}>View</Button>
+            <Button variant="inline-link" onClick={() => history.push({ pathname: `/application-case/${item.case_id}`, state: { assessorEmail: item.assigned_user_email } })}>View</Button>
           )}
           {unassigned && (
             <Button variant="inline-link" onClick={() => openAssignModal(item, null)}>Assign</Button>

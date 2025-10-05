@@ -6798,6 +6798,7 @@ app.get('/api/cases/:id', async (req, res) => {
         c.id,
         c.application_id,
         c.assigned_to_user_id,
+        sp.email AS assigned_user_email,
         c.status,
         c.created_at,
         c.updated_at,
@@ -6825,7 +6826,8 @@ app.get('/api/cases/:id', async (req, res) => {
         ca.nwac_reason AS assessment_nwac_reason
       FROM iset_case c
       LEFT JOIN iset_application a ON c.application_id = a.id
-      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+  LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+  LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
       WHERE c.id = ?
     `;
@@ -6854,9 +6856,10 @@ app.get('/api/cases/:id', async (req, res) => {
         ];
         const picked = preferred.filter(c => existingCols.includes(c));
         if (picked.length === 0) picked.push('id','application_id','status');
-        const caseSelect = picked.map(c => `c.${c}`).join(', ');
+        const caseSelectParts = picked.map(c => `c.${c}`);
         // Discover application + submission columns to safely build applicant join
         let appCols = []; let subCols = []; let hasApp = true; let hasSubmission = true;
+        let staffCols = []; let hasStaffProfiles = true;
         try {
           const [ac] = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='iset_application'");
           appCols = ac.map(r=>r.column_name);
@@ -6867,8 +6870,13 @@ app.get('/api/cases/:id', async (req, res) => {
             subCols = sc.map(r=>r.column_name);
           } catch(_) { hasSubmission = false; }
         }
+        try {
+          const [sp] = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='staff_profiles'");
+          staffCols = sp.map(r => r.column_name);
+        } catch(_) { hasStaffProfiles = false; }
         const hasAppUserId = appCols.includes('user_id');
         const hasSubmissionUser = appCols.includes('submission_id') && subCols.includes('user_id');
+        const hasStaffEmail = hasStaffProfiles && staffCols.includes('email');
         let applicantJoin = ''; let applicantSelect = 'NULL AS applicant_name, NULL AS applicant_email, NULL AS applicant_user_id';
         if (hasSubmissionUser) {
           applicantJoin = 'JOIN iset_application_submission s ON a.submission_id = s.id JOIN user applicant ON s.user_id = applicant.id';
@@ -6895,7 +6903,14 @@ app.get('/api/cases/:id', async (req, res) => {
           ? 'FROM iset_case c JOIN iset_application a ON c.application_id = a.id'
           : 'FROM iset_case c';
 
-        const fallbackSql = `SELECT ${caseSelect}, ${trackingSelect}, ${coalesceSelect} ${fromClause} ${submissionJoin} ${applicantJoin} WHERE c.id = ? LIMIT 1`;
+        const staffJoin = (hasStaffEmail && existingCols.includes('assigned_to_user_id'))
+          ? 'LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id'
+          : '';
+
+        caseSelectParts.push(staffJoin ? 'sp.email AS assigned_user_email' : 'NULL AS assigned_user_email');
+        const caseSelect = caseSelectParts.join(', ');
+
+        const fallbackSql = `SELECT ${caseSelect}, ${trackingSelect}, ${coalesceSelect} ${fromClause} ${submissionJoin} ${applicantJoin} ${staffJoin} WHERE c.id = ? LIMIT 1`;
         [rows] = await pool.query(fallbackSql, [caseId]);
       } else {
         throw e;

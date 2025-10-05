@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ContentLayout, SpaceBetween, Box } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { apiFetch } from '../auth/apiClient';
 import ApplicationOverviewWidget from '../widgets/ApplicationOverviewWidget';
 import IsetApplicationFormWidget from '../widgets/IsetApplicationFormWidget';
@@ -43,12 +43,14 @@ const buildItems = (caseData) => DEFAULT_ITEMS.map(item => ({
   data: {
     title: TITLES[item.id],
     application_id: caseData?.application_id ?? null,
-    caseData: caseData ?? null
+    caseData: caseData ?? null,
+    assessorEmail: caseData?.assigned_user_email || null
   }
 }));
 
 const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplitPanelOpen, setAvailableItems }) => {
   const { id } = useParams(); // id = iset_case.id
+  const location = useLocation();
   const [caseData, setCaseData] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [boardItems, setBoardItems] = useState(buildItems(null));
@@ -60,6 +62,10 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   // Very lightweight dedupe/cache across remounts for the same case id
   const cacheRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_CACHE || (window.__ISET_CASE_CACHE = new Map())) : new Map());
   const inflightRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_INFLIGHT || (window.__ISET_CASE_INFLIGHT = new Map())) : new Map());
+
+  const handleCaseUpdate = updates => {
+    setCaseData(prev => (prev ? { ...prev, ...updates } : prev));
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -85,6 +91,9 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         if (!res.ok) throw res;
         const data = await res.json();
         if (!isMounted) return;
+        if (!data.assigned_user_email && location?.state?.assessorEmail) {
+          data.assigned_user_email = location.state.assessorEmail;
+        }
         cacheRef.current.set(key, data);
         setCaseData(data);
         setLoadError(null);
@@ -106,7 +115,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     };
     doFetch();
     return () => { isMounted = false; };
-  }, [id]);
+  }, [id, location?.state?.assessorEmail, updateBreadcrumbs]);
 
   useEffect(() => {
     setBoardItems(buildItems(caseData));
@@ -167,6 +176,8 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
                   caseData={item.data.caseData}
                   application_id={item.data.application_id}
                   toggleHelpPanel={toggleHelpPanel}
+                  onCaseUpdate={handleCaseUpdate}
+                  assessorEmail={item.data.assessorEmail}
                 />
               );
             }
