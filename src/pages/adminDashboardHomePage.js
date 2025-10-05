@@ -19,6 +19,7 @@ import { devTasks as devTasksData } from '../devTasksData';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../auth/cognito';
 import ApplicationWorkQueueWidget from '../widgets/ApplicationWorkQueueWidget';
 import RecentActivityWidget from '../widgets/RecentActivityWidget';
+import StatisticsWidget from '../widgets/StatisticsWidget';
 
 const BOARD_STORAGE_PREFIX = 'admin-dashboard.board.items.v1';
 
@@ -30,7 +31,8 @@ const cloneBoardItems = items => items.map(item => ({
 const buildDefaultBoardItems = role => {
     const defaults = [
         { id: 'application-work-queue', rowSpan: 5, columnSpan: 2, data: { title: 'Application Work Queue' } },
-        { id: 'recent-activity', rowSpan: 5, columnSpan: 2, data: { title: 'Recent Activity' } }
+        { id: 'recent-activity', rowSpan: 5, columnSpan: 2, data: { title: 'Recent Activity' } },
+        { id: 'statistics', rowSpan: 5, columnSpan: 2, data: { title: 'Statistics' } }
     ];
     if (role === 'System Administrator') {
         defaults.push({ id: 'dev-task-tracker', rowSpan: 6, columnSpan: 4, data: { title: 'Development Tracker' } });
@@ -39,10 +41,31 @@ const buildDefaultBoardItems = role => {
 };
 
 const filterAllowedBoardItems = (items, defaults) => {
-    const allowed = new Set(defaults.map(item => item.id));
-    return (Array.isArray(items) ? items : [])
-        .filter(item => item && allowed.has(item.id))
-        .map(item => ({ ...item, data: item.data ? { ...item.data } : undefined }));
+    const defaultsById = new Map(defaults.map(item => [item.id, item]));
+    const merged = [];
+    const seen = new Set();
+
+    (Array.isArray(items) ? items : []).forEach(item => {
+        if (!item || !defaultsById.has(item.id) || seen.has(item.id)) {
+            return;
+        }
+        const defaultItem = defaultsById.get(item.id);
+        merged.push({
+            ...defaultItem,
+            ...item,
+            data: item.data ? { ...defaultItem.data, ...item.data } : (defaultItem.data ? { ...defaultItem.data } : undefined)
+        });
+        seen.add(item.id);
+    });
+
+    defaults.forEach(defaultItem => {
+        if (!seen.has(defaultItem.id)) {
+            merged.push({ ...defaultItem, data: defaultItem.data ? { ...defaultItem.data } : undefined });
+            seen.add(defaultItem.id);
+        }
+    });
+
+    return merged;
 };
 
 const boardI18nStrings = {
@@ -122,17 +145,6 @@ const AdminDashboard = () => {
         }
     }, [authVersion]);
 
-    if ((iamOn && !signedIn) || (!iamOn && simulateSignedOut)) {
-        return (
-            <ContentLayout header={<Header variant="h1">Administration Console</Header>}>
-                <SpaceBetween size="m">
-                    <Box variant="p">You are not signed in. Please authenticate to access administrative functions.</Box>
-                    <Button variant="primary" onClick={() => window.location.assign(buildLoginUrl())}>Sign in</Button>
-                </SpaceBetween>
-            </ContentLayout>
-        );
-    }
-
     const defaultItems = useMemo(() => cloneBoardItems(buildDefaultBoardItems(role)), [role]);
     const storageKey = useMemo(() => `${BOARD_STORAGE_PREFIX}.${role || 'guest'}`, [role]);
     const [boardItems, setBoardItems] = useState(defaultItems);
@@ -172,12 +184,27 @@ const AdminDashboard = () => {
                 return <ApplicationWorkQueueWidget actions={actions} role={role} refreshKey={authVersion} />;
             case 'recent-activity':
                 return <RecentActivityWidget actions={actions} role={role} refreshKey={authVersion} />;
+            case 'statistics':
+                return <StatisticsWidget actions={actions} role={role} refreshKey={authVersion} />;
             case 'dev-task-tracker':
                 return <DevTaskTracker actions={actions} />;
             default:
                 return null;
         }
     };
+
+    const shouldShowAuthPrompt = (iamOn && !signedIn) || (!iamOn && simulateSignedOut);
+
+    if (shouldShowAuthPrompt) {
+        return (
+            <ContentLayout header={<Header variant="h1">Administration Console</Header>}>
+                <SpaceBetween size="m">
+                    <Box variant="p">You are not signed in. Please authenticate to access administrative functions.</Box>
+                    <Button variant="primary" onClick={() => window.location.assign(buildLoginUrl())}>Sign in</Button>
+                </SpaceBetween>
+            </ContentLayout>
+        );
+    }
 
     return (
         <ContentLayout
