@@ -58,6 +58,45 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
   const [savingStatus, setSavingStatus] = useState(false);
   const [statusFeedback, setStatusFeedback] = useState(null);
   const manualStatusRef = useRef(null);
+  const [userRole, setUserRole] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          const role = data?.auth?.role || data?.auth?.primary_role || null;
+          if (!cancelled && role) {
+            setUserRole(role);
+            return;
+          }
+        }
+      } catch (_) {
+        // ignore and attempt fallback
+      }
+      if (cancelled) return;
+      if (typeof window !== 'undefined') {
+        const keys = ['demoRole','simRole','simulatedRole','isetRole','role','currentRole','userRole'];
+        for (const key of keys) {
+          try {
+            const value = window.localStorage.getItem(key);
+            if (value) {
+              setUserRole(value);
+              break;
+            }
+          } catch (_) {
+            // ignore storage errors
+          }
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -148,14 +187,23 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
     };
   }, [application]);
 
-  const canEditStatus = Boolean(caseData?.id);
-  const fallbackStatus = statusValue || application?.status || caseData?.status || '';
+  const fallbackStatus = statusValue || caseData?.status || application?.status || '';
+  const normalizedStatus = (fallbackStatus || '').toLowerCase();
+  const normalizedRole = (userRole || '').trim().toLowerCase();
+  const privilegedRoles = ['program administrator', 'system administrator'];
+  const isPrivilegedRole = privilegedRoles.includes(normalizedRole);
+  const isDecisionFinal = ['approved', 'rejected'].includes(normalizedStatus);
+  const canEditStatus = Boolean(caseData?.id) && (!isDecisionFinal || isPrivilegedRole);
   const statusOption = STATUS_OPTIONS.find(option => option.value === statusValue);
   const selectedStatusOption = statusOption || (fallbackStatus ? { label: fallbackStatus, value: fallbackStatus } : null);
   const badgeLabel = statusOption?.label || (fallbackStatus ? fallbackStatus : 'Unknown');
   const badgeColor = statusColor(statusOption?.value || fallbackStatus || 'unknown');
 
   const handleStatusChange = async ({ detail }) => {
+    if (isDecisionFinal && !isPrivilegedRole) {
+      setStatusFeedback({ type: 'info', content: 'Status changes are locked after approval is issued.' });
+      return;
+    }
     const nextStatus = detail.selectedOption?.value;
     if (!nextStatus || nextStatus === statusValue) return;
     if (!caseData?.id) {

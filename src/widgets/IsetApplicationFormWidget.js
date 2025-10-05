@@ -918,16 +918,26 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
 
   const diff = useMemo(() => answersDiff(answers, editableAnswers), [answers, editableAnswers]);
   const hasDirtyFields = isEditing && Object.keys(diff).length > 0;
+  const isDecisionFinal = ['approved', 'rejected'].includes((caseData?.status || '').toLowerCase());
+
+  useEffect(() => {
+    if (isDecisionFinal) {
+      setIsEditing(false);
+      setShowEditConfirm(false);
+    }
+  }, [isDecisionFinal]);
 
   const handleRequestEdit = useCallback(() => {
+    if (isDecisionFinal) return;
     setShowEditConfirm(true);
-  }, []);
+  }, [isDecisionFinal]);
 
   const handleConfirmEdit = useCallback(() => {
+    if (isDecisionFinal) return;
     setShowEditConfirm(false);
     setIsEditing(true);
     setEditableAnswers(cloneAnswers(answers));
-  }, [answers]);
+  }, [answers, isDecisionFinal]);
 
   const handleCancelEditing = useCallback(() => {
     setIsEditing(false);
@@ -1216,7 +1226,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
 
   const headerActions = (
     <SpaceBetween direction="horizontal" size="xs">
-      {isEditing ? (
+      {isEditing && !isDecisionFinal ? (
+
         <>
           <Button onClick={handleOpenVersionModal} disabled={saving}>
             View versions
@@ -1229,7 +1240,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
           </Button>
         </>
       ) : (
-        <Button onClick={handleRequestEdit} disabled={loading || !application} variant="primary">
+        <Button onClick={handleRequestEdit} disabled={loading || !application || isDecisionFinal} variant="primary">
+
           Edit
         </Button>
       )}
@@ -1298,7 +1310,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
                 headerDescription="Applicant's description of their long-term employment objective."
                 defaultExpanded={false}
               >
-                {isEditing ? (
+                {isEditing && !isDecisionFinal ? (
                   <Textarea
                     rows={5}
                     value={employmentNarrativeValue}
