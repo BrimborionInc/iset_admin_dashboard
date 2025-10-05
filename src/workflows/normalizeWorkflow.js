@@ -309,7 +309,6 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
       // Content only components
       if (tplType === 'paragraph' || c.template_key === 'text-block') {
         const paraText = props?.text ?? labelText ?? '';
-        stepsOut.push; // no-op keep linter calm
         out.components.push({
           id: toIdSlug('paragraph', 'paragraph', i, usedIds),
           type: 'paragraph',

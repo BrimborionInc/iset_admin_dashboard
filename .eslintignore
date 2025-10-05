@@ -1,0 +1,2 @@
+# Temporarily suppress orphaned experimental widget pending cleanup
+src/widgets/ModifyWorkflowEditorWidget.js
