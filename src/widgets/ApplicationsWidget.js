@@ -14,7 +14,8 @@ import {
   ButtonDropdown,
   Modal,
   FormField,
-  Select
+  Select,
+  Alert
 } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useHistory } from 'react-router-dom';
@@ -73,6 +74,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const [selectedAssignee, setSelectedAssignee] = useState(null); // Cloudscape Select expects {label,value}
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [userRole, setUserRole] = useState(null);
+  const [alerts, setAlerts] = useState([]);
 
   // Fetch user role (supports real auth + simulated dev role via localStorage fallbacks)
   useEffect(() => {
@@ -120,6 +122,13 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     return c;
   }, [load, refreshKey]);
 
+  const addAlert = useCallback((alert) => {
+    setAlerts(prev => [...prev, { id: `${Date.now()}-${Math.random()}`, ...alert }]);
+  }, []);
+  const dismissAlert = useCallback((id) => {
+    setAlerts(prev => prev.filter(a => a.id !== id));
+  }, []);
+
   const handleAssignSubmit = useCallback(async () => {
     if (!assignTargetCase || !selectedAssignee) return;
     if (!assignTargetCase.case_id) {
@@ -141,7 +150,9 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     }
 
     const shouldPromoteStatus = (assignTargetCase.status || '').toLowerCase() === 'submitted';
-
+    const isReassign = Boolean(assignTargetCase?.assigned_user_id);
+    const trackingLabel = assignTargetCase?.tracking_id || assignTargetCase?.case_id;
+    const assigneeLabel = selectedAssignee?.label;
     try {
       const response = await apiFetch(`/api/cases/${assignTargetCase.case_id}/assign`, {
         method: 'PATCH',
@@ -161,6 +172,11 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         });
 
         if (!statusResponse.ok) {
+          addAlert({
+            type: 'warning',
+            header: 'Status update failed',
+            content: `Case ${trackingLabel} was assigned but could not be moved to In Review. Please refresh and try again.`
+          });
           throw new Error('status_update_failed');
         }
       }
@@ -170,6 +186,11 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       setAssignTargetCase(null);
       setSelectedAssignee(null);
       load();
+      addAlert({
+        type: 'success',
+        header: isReassign ? 'Case reassigned' : 'Case assigned',
+        content: `Case ${trackingLabel} ${isReassign ? 'reassigned' : 'assigned'} to ${assigneeLabel || 'selected staff'}.`
+      });
     } catch (error) {
       setAssignSubmitting(false);
       if (error?.message === 'status_update_failed') {
@@ -177,9 +198,14 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         load();
       } else {
         setAssignError('Assignment failed');
+        addAlert({
+          type: 'error',
+          header: 'Assignment failed',
+          content: `Case ${trackingLabel} could not be assigned. Please try again.`
+        });
       }
     }
-  }, [assignTargetCase, selectedAssignee, assignableStaff, load]);
+  }, [assignTargetCase, selectedAssignee, assignableStaff, load, addAlert]);
 
   // Client filtering (post-fetch) for quick text search; can be pushed server-side later
   const filteredItems = items.filter(i => {
@@ -210,7 +236,10 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
               }
             }
           })
-          .catch(() => setAssignError('Failed to load staff'))
+          .catch(() => {
+            setAssignError('Failed to load staff');
+            addAlert({ type: 'error', header: 'Unable to load staff', content: 'Could not load assignable staff list.' });
+          })
           .finally(() => setAssignableLoading(false));
       };
       return (
@@ -249,7 +278,18 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       settings={<ButtonDropdown items={[{ id: 'remove', text: 'Remove' }]} ariaLabel="Board item settings" variant="icon" onItemClick={() => actions?.removeItem?.()} />}
     >
       <SpaceBetween direction="vertical" size="xs">
-  <Box variant="small">The table shows applications in your purview.  Progam Admins can see all applications. Regional Coordinators can see applications assigned to them, or to assessors in their region.  Assessors can only see applications assigned to them.</Box>
+        {alerts.map(alert => (
+          <Alert
+            key={alert.id}
+            type={alert.type}
+            header={alert.header}
+            dismissible
+            onDismiss={() => dismissAlert(alert.id)}
+          >
+            {alert.content}
+          </Alert>
+        ))}
+        <Box variant="small">The table shows applications in your purview.  Progam Admins can see all applications. Regional Coordinators can see applications assigned to them, or to assessors in their region.  Assessors can only see applications assigned to them.</Box>
         <Box>
           {loading ? <Box textAlign="center" padding="m"><Spinner /> Loading...</Box> : error ? <Box color="error" textAlign="center">{error}</Box> : (
             <Table

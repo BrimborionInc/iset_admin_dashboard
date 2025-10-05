@@ -20,10 +20,24 @@ const RECOMMEND_OPTIONS = [
   { label: 'Recommend alternative intervention', value: 'alternative' }
 ];
 
+const FINAL_CASE_STATUSES = new Set(['approved', 'rejected']);
+const LOCKED_CASE_STATUSES = new Set(['pending_approval', 'approved', 'rejected', 'withdrawn']);
+const OUTCOME_NOTICE_STATUSES = new Set(['pending_approval', 'approved', 'rejected']);
+
 // Section header helper for consistent spacing
 const sectionHeader = (label) => (
   <Box variant="h3" margin={{ top: 'l', bottom: 's' }}>{label}</Box>
 );
+
+const scrollToPageTop = () => {
+  if (typeof window !== 'undefined') {
+    try {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (_) {
+      window.scrollTo(0, 0);
+    }
+  }
+};
 
 // Helper to format date as YYYY-MM-DD
 const formatDate = (date) => {
@@ -34,7 +48,7 @@ const formatDate = (date) => {
   return d.toISOString().slice(0, 10);
 };
 
-const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, application_id }) => {
+const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate }) => {
   // State for form fields
   const [assessment, setAssessment] = useState({});
   const [initialAssessment, setInitialAssessment] = useState({});
@@ -44,11 +58,24 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const [showNWACSection, setShowNWACSection] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [validationAlert, setValidationAlert] = useState(null);
   const [isEditingAssessment, setIsEditingAssessment] = useState(false);
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
   const [localAssessmentSubmitted, setLocalAssessmentSubmitted] = useState(false);
   const alertAnchorRef = useRef(null);
+
+  const rawCaseStatus = caseData?.status ?? '';
+  const normalizedCaseStatus = typeof rawCaseStatus === 'string'
+    ? rawCaseStatus.trim().toLowerCase()
+    : String(rawCaseStatus || '').trim().toLowerCase();
+  const canonicalCaseStatus = normalizedCaseStatus.replace(/[\s-]+/g, '_');
+
+  const isDecisionFinal = FINAL_CASE_STATUSES.has(canonicalCaseStatus);
+  const isLockedStatus = LOCKED_CASE_STATUSES.has(canonicalCaseStatus);
+  const showOutcomeByStatus = OUTCOME_NOTICE_STATUSES.has(canonicalCaseStatus);
+  const isPendingApprovalStatus = canonicalCaseStatus === 'pending_approval';
+  const isOutcomeNoticeDisabled = isDecisionFinal;
 
   // Pre-populate fields from application form as placeholders
   useEffect(() => {
@@ -91,15 +118,17 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     setInitialAssessment(placeholders);
   }, [caseData]);
 
-  // Show NWAC section only after assessment submission or final decision
+  // Show NWAC section after submission, review completion, final decision, or outcome-ready status
   useEffect(() => {
     const stage = caseData?.stage;
-    const status = (caseData?.status || '').toLowerCase();
-    const decisionFinal = ['approved', 'rejected'].includes(status);
-    const shouldShowOutcome = stage === 'assessment_submitted' || stage === 'review_complete' || decisionFinal;
+    const stageSubmitted = stage === 'assessment_submitted';
+    const stageReviewed = stage === 'review_complete';
+    const shouldShowOutcome = stageSubmitted || stageReviewed || isDecisionFinal || showOutcomeByStatus;
     setShowNWACSection(shouldShowOutcome);
-    setLocalAssessmentSubmitted(stage === 'assessment_submitted' || stage === 'review_complete' || decisionFinal);
-  }, [caseData?.stage, caseData?.status]);
+
+    const consideredSubmitted = stageSubmitted || stageReviewed || isDecisionFinal || canonicalCaseStatus === 'pending_approval' || canonicalCaseStatus === 'withdrawn';
+    setLocalAssessmentSubmitted(consideredSubmitted);
+  }, [caseData?.stage, caseData?.status, canonicalCaseStatus, isDecisionFinal, showOutcomeByStatus]);
 
   // Track changes
   useEffect(() => {
@@ -234,10 +263,11 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   };
   const handleSubmit = async () => {
     setHasSubmitted(true);
+    setValidationAlert(null);
     const errors = validateAssessment(assessment);
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      console.log('Assessment validation failed:', errors);
+      setValidationAlert([...new Set(Object.values(errors))]);
       // Scroll to first error field
       setTimeout(() => {
         const firstErrorField = document.querySelector('[data-error-focus="true"]');
@@ -308,23 +338,33 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       }
 
       // 4. Reload caseData (to update stage, etc.)
+      const fallbackUpdates = {
+        status: payload.status ?? caseData?.status ?? null,
+        stage: 'assessment_submitted'
+      };
+      if (typeof onCaseUpdate === 'function') {
+        onCaseUpdate(fallbackUpdates);
+      }
       if (typeof actions?.refreshCaseData === 'function') {
-        await actions.refreshCaseData();
+        try {
+          await actions.refreshCaseData();
+        } catch (_) {
+          // ignore refresh errors, fallback already applied
+        }
       }
       setIsEditingAssessment(false);
       setShowNWACSection(true);
       setLocalAssessmentSubmitted(true);
       setFieldErrors({});
       setHasSubmitted(false);
+      scrollToPageTop();
       setAlert({
         type: 'success',
         content: 'Assessment submitted successfully. Case status moved to Pending Approval. Complete the outcome notice to finish the review.',
         dismissible: true,
         statusIconAriaLabel: 'Success'
       });
-      setTimeout(() => {
-        alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 0);
+      setValidationAlert(null);
     } catch (err) {
       setAlert({ type: 'error', content: err.message || 'Failed to submit assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
       setTimeout(() => {
@@ -392,7 +432,11 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         setIsChanged(false);
         // Refresh caseData from backend to reflect latest changes
         if (typeof actions?.refreshCaseData === 'function') {
-          await actions.refreshCaseData();
+          try {
+            await actions.refreshCaseData();
+          } catch (_) {
+            // ignore refresh errors
+          }
         }
         // Scroll to the alert anchor so the alert is visible
         setTimeout(() => {
@@ -416,22 +460,20 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   // UI logic: if stage is 'assessment_submitted', make assessment fields readOnly, show NWAC review fields, change heading, and validate NWAC review on submit
   const isAssessmentSubmitted = caseData?.stage === 'assessment_submitted';
   const isReviewComplete = caseData?.stage === 'review_complete';
-  const normalizedCaseStatus = (caseData?.status || '').toLowerCase();
-  const isDecisionFinal = ['approved', 'rejected'].includes(normalizedCaseStatus);
-  const assessmentSubmitted = localAssessmentSubmitted || isAssessmentSubmitted || isReviewComplete || isDecisionFinal;
-  // Disable all fields (including NWAC) if review is complete or a final decision exists
-  const isAssessmentDisabled = (assessmentSubmitted && !isEditingAssessment) || isReviewComplete || isDecisionFinal;
-  const isNWACFieldsDisabled = !showNWACSection || isReviewComplete || isDecisionFinal;
+  const assessmentSubmitted = localAssessmentSubmitted || isAssessmentSubmitted || isReviewComplete || isDecisionFinal || isLockedStatus;
+  // Disable all fields (including NWAC) if review is complete, a final decision exists, or status is locked
+  const isAssessmentDisabled = isLockedStatus || isReviewComplete || isDecisionFinal || (assessmentSubmitted && !isEditingAssessment);
+  const isNWACFieldsDisabled = !showNWACSection || !isPendingApprovalStatus || isReviewComplete || isDecisionFinal;
 
   // Lock editing state if final decision has been recorded
   useEffect(() => {
-    if (isDecisionFinal) {
+    if (isDecisionFinal || isLockedStatus) {
       setIsEditingAssessment(false);
       setShowEditConfirmModal(false);
       setShowCancelModal(false);
       setShowApproveConfirmModal(false);
     }
-  }, [isDecisionFinal]);
+  }, [isDecisionFinal, isLockedStatus]);
 
   // For NWAC review validation
   const validateNWACReview = (assessment) => {
@@ -449,10 +491,15 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   };
 
   const handleComplete = async () => {
+    if (!isPendingApprovalStatus) {
+      return;
+    }
     setHasSubmitted(true);
+    setValidationAlert(null);
     const errors = validateNWACReview(assessment);
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
+      setValidationAlert([...new Set(Object.values(errors))]);
       setTimeout(() => {
         const firstErrorField = document.querySelector('[data-error-focus="true"]');
         if (firstErrorField) {
@@ -537,16 +584,30 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
 
       }
       // 5. Refresh caseData to reflect new stage
+      const fallbackUpdates = {
+        status: payload.status,
+        stage: 'review_complete',
+        assessment_nwac_review: payload.assessment_nwac_review,
+        assessment_nwac_reason: payload.assessment_nwac_reason
+      };
+      if (typeof onCaseUpdate === 'function') {
+        onCaseUpdate(fallbackUpdates);
+      }
       if (typeof actions?.refreshCaseData === 'function') {
-        await actions.refreshCaseData();
+        try {
+          await actions.refreshCaseData();
+        } catch (_) {
+          // ignore refresh errors, fallback already applied
+        }
       }
       setIsEditingAssessment(false);
       setShowEditConfirmModal(false);
-      setShowApproveConfirmModal(false);
-      setShowCancelModal(false);
-  setLocalAssessmentSubmitted(true);
+    setShowApproveConfirmModal(false);
+    setShowCancelModal(false);
+    setLocalAssessmentSubmitted(true);
       setFieldErrors({});
       setHasSubmitted(false);
+      scrollToPageTop();
       setAlert({
         type: 'success',
         content: assessment.nwacReviewStatus === 'approve' ? 'Outcome notice complete. Case marked Approved.' : 'Outcome notice complete. Case marked Rejected.',
@@ -555,9 +616,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       });
       setInitialAssessment(a => ({ ...a, ...payload }));
       setIsChanged(false);
-      setTimeout(() => {
-        alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 0);
+      setValidationAlert(null);
     } catch (err) {
       setAlert({ type: 'error', content: err.message || 'Failed to submit outcome notice.', dismissible: true, statusIconAriaLabel: 'Error' });
       setTimeout(() => {
@@ -573,31 +632,31 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           variant="h2"
           actions={
             <SpaceBetween direction="horizontal" size="s">
-              {!isDecisionFinal && isReviewComplete && (
+              {!isLockedStatus && !isDecisionFinal && isReviewComplete && (
                 <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
               )}
-              {!isDecisionFinal && !isReviewComplete && assessmentSubmitted && !isEditingAssessment && (
+              {!isLockedStatus && !isDecisionFinal && !isReviewComplete && assessmentSubmitted && !isEditingAssessment && (
                 <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
               )}
-              {!isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+              {!isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
                 <Button variant="primary" disabled={!isChanged} onClick={handleSave}>Save</Button>
               )}
-              {!isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+              {!isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
                 <Button variant="normal" disabled={!isChanged} onClick={handleCancel}>Cancel</Button>
               )}
-              {!isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+              {!isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
                 <Button variant="primary" onClick={handleSubmit}>Submit</Button>
               )}
-              {!isDecisionFinal && !isReviewComplete && assessmentSubmitted && !isEditingAssessment && (
-                <Button variant="primary" onClick={handleComplete}>Complete</Button>
+              {showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && (
+                <Button variant="primary" onClick={handleComplete} disabled={!isPendingApprovalStatus}>Approve/Reject</Button>
               )}
             </SpaceBetween>
           }
           info={
-            <Link variant="info" onFollow={() => toggleHelpPanel && toggleHelpPanel(null, assessmentSubmitted ? 'NWAC Assessment Help' : 'Application Assessment Help')}>Info</Link>
+            <Link variant="info" onFollow={() => toggleHelpPanel && toggleHelpPanel(null, showNWACSection ? 'NWAC Assessment Help' : 'Application Assessment Help')}>Info</Link>
           }
         >
-          {assessmentSubmitted ? 'NWAC Assessment' : 'Application Assessment'}
+          {showNWACSection ? 'NWAC Assessment' : 'Application Assessment'}
         </Header>
       }
       i18nStrings={{
@@ -620,6 +679,22 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           This form is used by the ISET admin team to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, the final approval fields will become available.
         </Box>
         <div ref={alertAnchorRef} style={{ height: 0, margin: 0, padding: 0, border: 0 }} aria-hidden="true" />
+        {validationAlert && (
+          <Alert
+            type="warning"
+            dismissible
+            onDismiss={() => setValidationAlert(null)}
+            statusIconAriaLabel="Warning"
+            header="Please review the fields below."
+          >
+            <Box margin={{ bottom: 'xxs' }}>One or more fields still require attention:</Box>
+            <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
+              {validationAlert.map((message, index) => (
+                <li key={index}>{message}</li>
+              ))}
+            </ul>
+          </Alert>
+        )}
         {alert && (
           <Alert
             type={alert.type}
@@ -639,7 +714,14 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         {showNWACSection && (
           <>
             {sectionHeader('Outcome Notice')}
-            <Box style={isNWACFieldsDisabled ? { opacity: 0.6 } : undefined}>
+            <Box
+              style={
+                isNWACFieldsDisabled || isOutcomeNoticeDisabled
+                  ? { opacity: 0.6, pointerEvents: 'none' }
+                  : undefined
+              }
+              aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
+            >
               <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
                 <FormField label="Funding Decision" errorText={hasSubmitted && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}>
                   <SpaceBetween direction="horizontal" size="xs">
@@ -861,7 +943,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
               />
             ) },
             { id: 'actions', header: 'Actions', cell: item => (
-              <Button size="small" variant="inline-link" onClick={() => handleItp(item.key, '')}>Clear</Button>
+              isAssessmentDisabled ? null : (
+                <Button size="small" variant="inline-link" onClick={() => handleItp(item.key, '')}>Clear</Button>
+              )
             ) }
           ]}
           items={[
@@ -918,7 +1002,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
               />
             ) },
             { id: 'actions', header: 'Actions', cell: item => (
-              <Button size="small" variant="inline-link" onClick={() => handleWage(item.key, '')}>Clear</Button>
+              isAssessmentDisabled ? null : (
+                <Button size="small" variant="inline-link" onClick={() => handleWage(item.key, '')}>Clear</Button>
+              )
             ) }
           ]}
           items={[

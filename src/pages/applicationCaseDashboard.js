@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ContentLayout, SpaceBetween, Box } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import { useParams, useLocation } from 'react-router-dom';
@@ -64,8 +64,44 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   const inflightRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_INFLIGHT || (window.__ISET_CASE_INFLIGHT = new Map())) : new Map());
 
   const handleCaseUpdate = updates => {
-    setCaseData(prev => (prev ? { ...prev, ...updates } : prev));
+    setCaseData(prev => {
+      if (!prev) return prev;
+      const next = { ...prev, ...updates };
+      const key = prev.id || id;
+      if (key) {
+        cacheRef.current.set(String(key), next);
+      }
+      return next;
+    });
   };
+
+  const refreshCaseData = useCallback(async () => {
+    if (!id) return null;
+    try {
+      const res = await apiFetch(`/api/cases/${id}`);
+      if (!res.ok) throw res;
+      const data = await res.json();
+      if (!data.assigned_user_email && location?.state?.assessorEmail) {
+        data.assigned_user_email = location.state.assessorEmail;
+      }
+      cacheRef.current.set(String(id), data);
+      setCaseData(data);
+      setLoadError(null);
+      return data;
+    } catch (err) {
+      let message = 'Failed to refresh case';
+      if (err && typeof err.json === 'function') {
+        try {
+          const body = await err.json();
+          message = body?.error || body?.message || message;
+        } catch (_) {
+          // ignore parse errors
+        }
+      }
+      setLoadError(message);
+      return null;
+    }
+  }, [id, location?.state?.assessorEmail]);
 
   useEffect(() => {
     if (!id) return;
@@ -153,7 +189,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
             if (item.id === 'application-overview') {
               return (
                 <ApplicationOverviewWidget
-                  actions={undefined}
+                  actions={{ refreshCaseData }}
                   application_id={item.data.application_id}
                   caseData={item.data.caseData}
                 />
@@ -172,7 +208,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
             if (item.id === 'coordinator-assessment') {
               return (
                 <CoordinatorAssessmentWidget
-                  actions={undefined}
+                  actions={{ refreshCaseData }}
                   caseData={item.data.caseData}
                   application_id={item.data.application_id}
                   toggleHelpPanel={toggleHelpPanel}
