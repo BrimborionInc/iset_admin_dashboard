@@ -246,9 +246,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
     if (caseData?.stage) items.push({ label: 'Case Stage', value: caseData.stage });
     if (caseData?.priority) items.push({ label: 'Priority', value: caseData.priority });
 
-    if (payload?.ingested_at) items.push({ label: 'Ingested At', value: formatDateTime(payload.ingested_at) });
-
-    if (application?.created_at) items.push({ label: 'Created At', value: formatDateTime(application.created_at) });
+    if (application?.created_at) items.push({ label: 'Received At', value: formatDateTime(application.created_at) });
     if (application?.updated_at) items.push({ label: 'Last Updated', value: formatDateTime(application.updated_at) });
 
     const assignedName = caseData?.assigned_user_name || application?.assigned_evaluator?.name;
@@ -316,3 +314,4 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
 };
 
 export default ApplicationOverviewWidget;
+

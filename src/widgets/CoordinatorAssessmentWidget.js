@@ -528,10 +528,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
             </SpaceBetween>
           }
           info={
-            <Link variant="info" onFollow={() => toggleHelpPanel && toggleHelpPanel(null, isAssessmentSubmitted ? 'NWAC Assessment Help' : 'Coordinator Assessment Help')}>Info</Link>
+            <Link variant="info" onFollow={() => toggleHelpPanel && toggleHelpPanel(null, isAssessmentSubmitted ? 'NWAC Assessment Help' : 'Application Assessment Help')}>Info</Link>
           }
         >
-          {isAssessmentSubmitted ? 'NWAC Assessment' : 'Coordinator Assessment'}
+          {isAssessmentSubmitted ? 'NWAC Assessment' : 'Application Assessment'}
         </Header>
       }
       i18nStrings={{
@@ -551,7 +551,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     >
       <Box>
         <Box variant="small" margin={{ bottom: 's' }}>
-          This form is used by the coordinator to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, NWAC review fields will become available.
+          This form is used by the ISET admin team to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, the final approval fields will become available.
         </Box>
         <div ref={alertAnchorRef} style={{ height: 0, margin: 0, padding: 0, border: 0 }} aria-hidden="true" />
         {alert && (
@@ -916,3 +916,5 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
 };
 
 export default CoordinatorAssessmentWidget;
+
+

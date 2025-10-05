@@ -14,7 +14,7 @@ import ApplicationEvents from '../widgets/applicationEvents';
 const ALL_WIDGETS = [
   { id: 'application-overview', title: 'Application Overview', rowSpan: 2, columnSpan: 4 },
   { id: 'iset-application-form', title: 'ISET Application Form', rowSpan: 5, columnSpan: 2 },
-  { id: 'coordinator-assessment', title: 'Coordinator Assessment', rowSpan: 5, columnSpan: 2 },
+  { id: 'coordinator-assessment', title: 'Application Assessment', rowSpan: 5, columnSpan: 2 },
   { id: 'supporting-documents', title: 'Supporting Documents', rowSpan: 5, columnSpan: 2 },
   { id: 'secure-messaging', title: 'Secure Messaging', rowSpan: 5, columnSpan: 2 },
   { id: 'application-events', title: 'Application Events', rowSpan: 5, columnSpan: 2 }
@@ -32,7 +32,7 @@ const DEFAULT_ITEMS = [
 const TITLES = {
   'application-overview': 'Application Overview',
   'iset-application-form': 'ISET Application Form',
-  'coordinator-assessment': 'Coordinator Assessment',
+  'coordinator-assessment': 'Application Assessment',
   'supporting-documents': 'Supporting Documents',
   'secure-messaging': 'Secure Messaging',
   'application-events': 'Application Events'
@@ -212,7 +212,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
           }}
         />
         <Box variant="p">
-          Use this workspace to review the submitted application, complete the coordinator assessment, and manage supporting documents for the applicant.
+          Use this workspace to review the submitted application, complete the Application Assessment, and manage supporting documents for the applicant.
         </Box>
       </SpaceBetween>
     </ContentLayout>
@@ -220,4 +220,5 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
 };
 
 export default ApplicationCaseDashboard;
+
 

@@ -120,6 +120,67 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     return c;
   }, [load, refreshKey]);
 
+  const handleAssignSubmit = useCallback(async () => {
+    if (!assignTargetCase || !selectedAssignee) return;
+    if (!assignTargetCase.case_id) {
+      setAssignError('Case details are unavailable; cannot assign.');
+      return;
+    }
+
+    setAssignSubmitting(true);
+    setAssignError(null);
+
+    const chosen = selectedAssignee.value;
+    const staffObj = assignableStaff.find(s => String(s.id) === String(chosen));
+    const payload = {};
+
+    if (chosen && String(chosen).startsWith('placeholder-')) {
+      payload.placeholder_email = staffObj?.email || 'user@nwac.ca';
+    } else {
+      payload.assignee_id = chosen;
+    }
+
+    const shouldPromoteStatus = (assignTargetCase.status || '').toLowerCase() === 'submitted';
+
+    try {
+      const response = await apiFetch(`/api/cases/${assignTargetCase.case_id}/assign`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error('assign_failed');
+      }
+
+      if (shouldPromoteStatus) {
+        const statusResponse = await apiFetch(`/api/cases/${assignTargetCase.case_id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'in_review' }),
+        });
+
+        if (!statusResponse.ok) {
+          throw new Error('status_update_failed');
+        }
+      }
+
+      setAssignSubmitting(false);
+      setAssignModalVisible(false);
+      setAssignTargetCase(null);
+      setSelectedAssignee(null);
+      load();
+    } catch (error) {
+      setAssignSubmitting(false);
+      if (error?.message === 'status_update_failed') {
+        setAssignError('Case assigned but status update to In Review failed. Please refresh and try again.');
+        load();
+      } else {
+        setAssignError('Assignment failed');
+      }
+    }
+  }, [assignTargetCase, selectedAssignee, assignableStaff, load]);
+
   // Client filtering (post-fetch) for quick text search; can be pushed server-side later
   const filteredItems = items.filter(i => {
     const s = filteringText.toLowerCase();
@@ -188,7 +249,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       settings={<ButtonDropdown items={[{ id: 'remove', text: 'Remove' }]} ariaLabel="Board item settings" variant="icon" onItemClick={() => actions?.removeItem?.()} />}
     >
       <SpaceBetween direction="vertical" size="xs">
-  <Box variant="small">Operational, role-scoped case queue with SLA health and ownership. Local search only (server filtering coming).</Box>
+  <Box variant="small">The table shows applications in your purview.  Progam Admins can see all applications. Regional Coordinators can see applications assigned to them, or to assessors in their region.  Assessors can only see applications assigned to them.</Box>
         <Box>
           {loading ? <Box textAlign="center" padding="m"><Spinner /> Loading...</Box> : error ? <Box color="error" textAlign="center">{error}</Box> : (
             <Table
@@ -227,24 +288,14 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
             footer={
               <SpaceBetween direction="horizontal" size="xs">
                 <Button onClick={() => { if(!assignSubmitting){ setAssignModalVisible(false); setAssignTargetCase(null);} }} disabled={assignSubmitting}>Cancel</Button>
-                <Button variant="primary" loading={assignSubmitting} disabled={!selectedAssignee || assignSubmitting} onClick={() => {
-                  if(!assignTargetCase || !selectedAssignee) return; setAssignSubmitting(true); setAssignError(null);
-                  // Determine payload: placeholder vs real
-                  const chosen = selectedAssignee.value; // id
-                  const staffObj = assignableStaff.find(s => String(s.id) === String(chosen));
-                  let payload = {};
-                  if (chosen && String(chosen).startsWith('placeholder-')) {
-                    payload.placeholder_email = staffObj?.email || 'user@nwac.ca';
-                  } else {
-                    payload.assignee_id = chosen;
-                  }
-                  apiFetch(`/api/cases/${assignTargetCase.case_id}/assign`, { method: 'PATCH', headers: { 'Content-Type': 'application/json'}, body: JSON.stringify(payload) })
-                    .then(r => { if(!r.ok) throw new Error('assign_failed'); return r.json(); })
-                    .then(() => {
-                      setAssignSubmitting(false); setAssignModalVisible(false); setAssignTargetCase(null); load();
-                    })
-                    .catch(() => { setAssignSubmitting(false); setAssignError('Assignment failed'); });
-                }}>Assign</Button>
+                <Button
+                  variant="primary"
+                  loading={assignSubmitting}
+                  disabled={!selectedAssignee || assignSubmitting}
+                  onClick={handleAssignSubmit}
+                >
+                  Assign
+                </Button>
               </SpaceBetween>
             }
           >
