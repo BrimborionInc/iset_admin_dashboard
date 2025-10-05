@@ -1276,6 +1276,9 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         <Box color="text-status-critical">{loadError}</Box>
       ) : (
         <>
+          <Box variant="small" margin={{ bottom: 's' }}>
+            This view presents the applicant's submitted ISET application. Review each section for accuracy, capture clarifications when needed, and use edit mode to publish updates to the case file.
+          </Box>
           <SpaceBetween size="l">
             {SECTION_DEFINITIONS.map(section => (
               <Section

@@ -614,6 +614,29 @@ CREATE TABLE `iset_application_submission` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `iset_application_version`
+--
+
+DROP TABLE IF EXISTS `iset_application_version`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `iset_application_version` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `application_id` bigint unsigned NOT NULL,
+  `version` int NOT NULL,
+  `payload_json` json NOT NULL,
+  `change_summary` text COLLATE utf8mb4_unicode_ci,
+  `created_by_id` varchar(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_by_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `restored_from_version` int DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_application_version` (`application_id`,`version`),
+  KEY `idx_application_version_created` (`created_at`)
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `iset_case`
 --
 
@@ -756,7 +779,7 @@ CREATE TABLE `iset_event_outbox` (
   KEY `idx_event_outbox_status_next` (`status`,`next_attempt_at`),
   KEY `fk_event_outbox_entry` (`event_id`),
   CONSTRAINT `fk_event_outbox_entry` FOREIGN KEY (`event_id`) REFERENCES `iset_event_entry` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -805,7 +828,7 @@ CREATE TABLE `iset_internal_notification` (
   KEY `idx_iset_internal_notification_audience_role` (`audience_type`,`audience_role`),
   KEY `idx_iset_internal_notification_user` (`audience_type`,`audience_user_id`),
   KEY `idx_iset_internal_notification_active` (`starts_at`,`expires_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=15 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1062,7 +1085,7 @@ CREATE TABLE `messages` (
   KEY `recipient_id` (`recipient_id`),
   KEY `idx_messages_case_id` (`case_id`),
   KEY `idx_messages_application_id` (`application_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1406,7 +1429,7 @@ CREATE TABLE `sla_stage_target` (
   KEY `idx_sla_stage_target_stage` (`stage_key`),
   KEY `idx_sla_stage_target_role` (`applies_to_role`),
   KEY `idx_sla_stage_target_active` (`stage_key`,`applies_to_role`,`active_to`)
-) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1455,7 +1478,7 @@ CREATE TABLE `staff_profiles` (
   KEY `idx_staff_profiles_primary_role` (`primary_role`),
   KEY `idx_staff_profiles_status` (`status`),
   KEY `idx_region` (`region_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=65320 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=66879 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1497,7 +1520,7 @@ CREATE TABLE `step_component` (
   KEY `ix_step_component_template` (`template_id`),
   CONSTRAINT `fk_step_component_step` FOREIGN KEY (`step_id`) REFERENCES `step` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_step_component_template` FOREIGN KEY (`template_id`) REFERENCES `component_template` (`id`) ON DELETE RESTRICT
-) ENGINE=InnoDB AUTO_INCREMENT=1535 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=1542 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1625,7 +1648,7 @@ CREATE TABLE `user_session_audit` (
   PRIMARY KEY (`id`),
   KEY `idx_user` (`user_id`),
   KEY `idx_session` (`session_key`)
-) ENGINE=InnoDB AUTO_INCREMENT=20936 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=21325 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1947,4 +1970,4 @@ DELIMITER ;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-03 11:08:40
+-- Dump completed on 2025-10-04 20:40:43

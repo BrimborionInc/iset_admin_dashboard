@@ -363,7 +363,7 @@ const AppRoutes = ({
       <Route path="/case-assignment-dashboard">
         {renderContent(CaseAssignmentDashboard, [
           { text: 'Home', href: '/' },
-          { text: 'Manaoge Applications', href: '/case-assignment-dashboard' }
+          { text: 'Manage Applications', href: '/case-assignment-dashboard' }
   ], 'Manage Applications', 'caseAssignment')}
       </Route>
       <Route path="/application-case/:id">
