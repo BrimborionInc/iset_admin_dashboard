@@ -9,7 +9,7 @@ const defaultFooterItems = [
   { type: 'link', text: 'Documentation', href: 'https://example.com', external: true },
 ];
 
-const SideNavigation = ({ currentRole, notificationCount = 0 }) => {
+const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotifications, notificationsLoading = false }) => {
   const pruneSections = (items = []) =>
     items.filter(item => {
       if (!item) return false;
@@ -132,18 +132,25 @@ const SideNavigation = ({ currentRole, notificationCount = 0 }) => {
     },
   ];
 
-  const notificationsFooterItem = notificationCount > 0
-    ? {
-        type: 'link',
-        text: 'Notifications',
-        href: '/manage-notifications',
-        info: <Badge color="red">{notificationCount}</Badge>,
-      }
-    : {
-        type: 'link',
-        text: 'Notifications',
-        href: '/manage-notifications',
-      };
+  const notificationsFooterItem = useMemo(() => {
+    const item = {
+      type: 'link',
+      id: 'footer-notifications',
+      text: 'Notifications',
+      href: '#refresh-notifications',
+      external: false,
+    };
+
+    if (notificationCount > 0) {
+      item.info = (
+        <span style={{ display: 'inline-flex', pointerEvents: 'none' }} aria-hidden="true">
+          <Badge color="red">{notificationCount}</Badge>
+        </span>
+      );
+    }
+
+    return item;
+  }, [notificationCount]);
 
   function isAllowed(href, roleValue) {
     if (!href) return true;
@@ -217,9 +224,29 @@ const SideNavigation = ({ currentRole, notificationCount = 0 }) => {
         }
       }}
       onFollow={(e) => {
-        if (e.detail && e.detail.href && !e.detail.external) {
+        const detail = e?.detail;
+        const item = detail?.item;
+        if (item?.id === 'footer-notifications') {
           e.preventDefault();
-          history.push(e.detail.href);
+          if (notificationsLoading) {
+            return;
+          }
+          if (typeof refreshNotifications === 'function') {
+            try {
+              const result = refreshNotifications();
+              if (result && typeof result.catch === 'function') {
+                result.catch(err => console.error('[SideNavigation] notification refresh failed', err));
+              }
+            } catch (err) {
+              console.error('[SideNavigation] notification refresh failed', err);
+            }
+          }
+          return;
+        }
+
+        if (detail && detail.href && !detail.external) {
+          e.preventDefault();
+          history.push(detail.href);
         }
       }}
     />
