@@ -12,13 +12,13 @@ function requiresRealAuth(requestPath) {
 
 function getBypassHeaders(iamMode, requestPath) {
   try {
-    // Prefer explicit UI toggle, but also allow env flag and localhost heuristic
-    const uiFlag = sessionStorage.getItem('iamBypass') === 'off';
     const envFlag = process.env.REACT_APP_DEV_AUTH_BYPASS === 'true';
-    const devLocal = (typeof window !== 'undefined') && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
-    const flag = uiFlag || envFlag || devLocal;
+    const iamActive = iamMode === 'on';
+    const storageBypass = !iamActive && sessionStorage.getItem('iamBypass') === 'off';
+    const devLocal = !iamActive && typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
+    const bypassEnabled = envFlag || storageBypass || devLocal;
     const forceRealAuth = requiresRealAuth(requestPath) && !envFlag;
-    if (!flag || forceRealAuth) return null;
+    if (!bypassEnabled || forceRealAuth) return null;
     if (sessionStorage.getItem('simulateSignedOut') === 'true') {
       // Simulate signed-out: don't send any bypass headers so the client path treats it as unauthenticated
       return null;
@@ -74,10 +74,24 @@ export async function apiFetch(path, options = {}) {
       if (sessionStorage.getItem('iamBypass') === 'off' && sessionStorage.getItem('simulateSignedOut') === 'true') {
         return new Response(JSON.stringify({ error: 'simulated-unauthenticated' }), { status: 401, headers: { 'content-type': 'application/json' } });
       }
+      const pending = (() => {
+        try { return sessionStorage.getItem('authPending') === '1'; } catch { return false; }
+      })();
+      const onCallbackRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/auth/callback');
+      if (pending || onCallbackRoute) {
+        return new Response(JSON.stringify({ error: 'auth_pending' }), { status: 401, headers: { 'content-type': 'application/json' } });
+      }
       window.location.assign(buildLoginUrl());
       return new Response(null, { status: 0, statusText: 'redirecting-to-login' });
     }
     try { sess = await ensureFreshSession() || sess; } catch (e) {
+      const pending = (() => {
+        try { return sessionStorage.getItem('authPending') === '1'; } catch { return false; }
+      })();
+      const onCallbackRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/auth/callback');
+      if (pending || onCallbackRoute) {
+        return new Response(JSON.stringify({ error: 'auth_pending' }), { status: 401, headers: { 'content-type': 'application/json' } });
+      }
       window.location.assign(buildLoginUrl());
       return new Response(null, { status: 0, statusText: 'redirecting-to-login' });
     }
