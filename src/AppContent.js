@@ -25,6 +25,22 @@ import AdminDashboardHelp from './helpPanelContents/adminDashboardHelp.js';
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_STORED_MESSAGES = 24;
 
+const CONTEXT_FACTS = {
+  'iset-application-assessment': `
+- This workspace combines widgets: Application Overview (case summary), ISET Application Form (editable intake submission), Application Assessment (funding decision workflow), Supporting Documents, Secure Messaging, Case Notes, and Application Events (timeline).
+- To correct applicant data, open the ISET Application Form widget and choose **Edit**. Confirm the modal, adjust fields inline, then choose **Save**. Saving creates a new version entry that is accessible via **View versions**; the original submission stays intact.
+- Editing is blocked if the case status is already Approved or Rejected. Otherwise, coordinators may update answers on the applicant's behalf when they have source evidence.
+- Log the change in Case Notes and, if the applicant must be informed, send a Secure Message from the same board before leaving the page.
+- After changes, refresh the Application Overview or Application Events widgets to confirm downstream automations recorded the update.
+`
+};
+
+const normaliseKey = (value = '') => value
+  .toLowerCase()
+  .replace(/&amp;/g, 'and')
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-+|-+$/g, '');
+
 const buildSystemPrompt = ({ focusTitle, aiContext }) => {
   const safeContext = (aiContext || '').trim();
   const sections = [
@@ -36,6 +52,16 @@ const buildSystemPrompt = ({ focusTitle, aiContext }) => {
     sections.push(`Key contextual hints: ${safeContext}`);
   } else {
     sections.push('No additional AI context was provided. Ask for specifics when the request is ambiguous.');
+  }
+
+  const hintCandidates = [focusTitle, safeContext]
+    .filter(Boolean)
+    .map(normaliseKey);
+  const matchedHints = hintCandidates
+    .map(key => CONTEXT_FACTS[key])
+    .find(Boolean);
+  if (matchedHints) {
+    sections.push('', 'Workflow specifics:', matchedHints.trim());
   }
 
   sections.push(
@@ -296,24 +322,6 @@ const FloatingChat = React.memo(function FloatingChat({
       >
         <Box margin={{ bottom: 's' }}>
           <SpaceBetween size="s">
-            <Box
-              padding={{ vertical: 'xs', horizontal: 's' }}
-              style={{
-                backgroundColor: 'var(--color-background-layout-panel-content, #f8fafc)',
-                borderRadius: '12px',
-                border: '1px solid var(--color-border-secondary, #d1d5db)',
-                lineHeight: 1.5
-              }}
-            >
-              <span style={{ display: 'block', fontWeight: 600, color: 'var(--color-text-body-default, #0f172a)' }}>
-                {title || 'Admin Dashboard Assistant'}
-              </span>
-              <span style={{ color: 'var(--color-text-body-secondary, #4b5563)', fontSize: '0.9rem' }}>
-                {aiContext && aiContext.trim()
-                  ? aiContext
-                  : 'The assistant is focused on helping with admin console tasks. Mention specific screens or workflows for more targeted help.'}
-              </span>
-            </Box>
             <div
               ref={chatContainerRef}
               style={{
@@ -372,7 +380,7 @@ const FloatingChat = React.memo(function FloatingChat({
               )}
             </div>
             <Box variant="p" style={{ fontSize: '0.85rem', color: 'var(--color-text-body-secondary, #4b5563)' }}>
-              Tip: Shift + Enter adds a newline. Markdown works for lists and code. Responses stay focused on “{title}”.
+              Tip: Shift + Enter adds a newline. Markdown works for lists and code. Responses stay focused on this help topic.
             </Box>
           </SpaceBetween>
         </Box>
