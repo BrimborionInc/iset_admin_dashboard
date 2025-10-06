@@ -3006,6 +3006,108 @@ async function deleteTableIfExists(tableName) {
 }
 
 
+const getAuthenticatedNumericUserId = (req) => {
+  if (!req) return null;
+  const values = [];
+  if (req.auth) {
+    values.push(req.auth.userId);
+    values.push(req.auth.user_id);
+    values.push(req.auth.id);
+  }
+  if (typeof req.get === 'function') {
+    values.push(req.get('X-Dev-UserId'));
+    values.push(req.get('x-dev-userid'));
+  }
+  for (const value of values) {
+    if (value == null) continue;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric;
+    }
+  }
+  return null;
+};
+
+const CASE_NOTE_MAX_LENGTH = 5000;
+
+const CASE_NOTE_SELECT = `
+  SELECT
+    n.id,
+    n.case_id,
+    n.body,
+    n.is_internal,
+    n.is_pinned,
+    n.created_at,
+    n.updated_at,
+    n.edited_at,
+    n.author_staff_profile_id,
+    n.author_user_id,
+    sp.display_name AS author_display_name,
+    sp.name AS author_name,
+    sp.primary_role AS author_role,
+    sp.email AS author_email,
+    au.email AS author_user_email,
+    n.edited_by_staff_profile_id,
+    esp.display_name AS editor_display_name,
+    esp.name AS editor_name,
+    esp.primary_role AS editor_role,
+    esp.email AS editor_email,
+    n.edited_by_user_id,
+    eu.email AS editor_user_email
+  FROM iset_case_note n
+  LEFT JOIN staff_profiles sp ON sp.id = n.author_staff_profile_id
+  LEFT JOIN user au ON au.id = n.author_user_id
+  LEFT JOIN staff_profiles esp ON esp.id = n.edited_by_staff_profile_id
+  LEFT JOIN user eu ON eu.id = n.edited_by_user_id`;
+
+const mapCaseNoteRow = (row = {}) => {
+  if (!row || Object.keys(row).length === 0) return null;
+  const authorDisplay = row.author_display_name || row.author_name || null;
+  const editorDisplay = row.editor_display_name || row.editor_name || null;
+  const mapped = {
+    id: row.id,
+    caseId: row.case_id,
+    body: row.body,
+    isInternal: row.is_internal == null ? true : row.is_internal === 1,
+    isPinned: row.is_pinned === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    editedAt: row.edited_at || null,
+    author: {
+      staffProfileId: row.author_staff_profile_id || null,
+      userId: row.author_user_id || null,
+      displayName: authorDisplay,
+      name: row.author_name || null,
+      email: row.author_email || row.author_user_email || null,
+      role: row.author_role || null
+    }
+  };
+  if (row.edited_at) {
+    mapped.editor = {
+      staffProfileId: row.edited_by_staff_profile_id || null,
+      userId: row.edited_by_user_id || null,
+      displayName: editorDisplay,
+      name: row.editor_name || null,
+      email: row.editor_email || row.editor_user_email || null,
+      role: row.editor_role || null
+    };
+  } else {
+    mapped.editor = null;
+  }
+  return mapped;
+};
+
+const fetchCaseNotesForCase = async (caseId) => {
+  const sql = `${CASE_NOTE_SELECT}\n WHERE n.case_id = ? AND n.deleted_at IS NULL\n ORDER BY n.is_pinned DESC, n.created_at DESC`;
+  const [rows] = await pool.query(sql, [caseId]);
+  return rows.map(mapCaseNoteRow);
+};
+
+const fetchCaseNoteById = async (caseId, noteId) => {
+  const sql = `${CASE_NOTE_SELECT}\n WHERE n.case_id = ? AND n.id = ? AND n.deleted_at IS NULL\n LIMIT 1`;
+  const [rows] = await pool.query(sql, [caseId, noteId]);
+  return rows.length ? mapCaseNoteRow(rows[0]) : null;
+};
 
 // --- Simple SQL Migration Runner (auto-executes .sql files in /sql once) -----------------
 // Strategy:
@@ -7613,6 +7715,186 @@ app.put('/api/admin/messages/:id/status', async (req, res) => {
   }
 });
 
+// Case notes CRUD
+const ensureCaseExists = async (caseId) => {
+  try {
+    const [[row]] = await pool.query('SELECT id FROM iset_case WHERE id = ? LIMIT 1', [caseId]);
+    return !!row;
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return false;
+    }
+    throw err;
+  }
+};
+
+app.get('/api/cases/:caseId/notes', async (req, res) => {
+  const caseId = parseInt(req.params.caseId, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+  try {
+    const caseExists = await ensureCaseExists(caseId);
+    if (!caseExists) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+    let notes = [];
+    try {
+      notes = await fetchCaseNotesForCase(caseId);
+    } catch (err) {
+      if (isMissingTableErrorLocal(err)) {
+        return res.json([]);
+      }
+      throw err;
+    }
+    return res.json(notes);
+  } catch (err) {
+    console.error('GET /api/cases/:caseId/notes failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_load_notes' });
+  }
+});
+
+app.post('/api/cases/:caseId/notes', async (req, res) => {
+  const caseId = parseInt(req.params.caseId, 10);
+  const { body: bodyInput, isPinned } = req.body || {};
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+  const trimmed = typeof bodyInput === 'string' ? bodyInput.trim() : '';
+  if (!trimmed) {
+    return res.status(400).json({ error: 'invalid_body' });
+  }
+  if (trimmed.length > CASE_NOTE_MAX_LENGTH) {
+    return res.status(400).json({ error: 'body_too_long', max: CASE_NOTE_MAX_LENGTH });
+  }
+  const staffProfileId = req.staffProfile?.id || null;
+  const authorUserId = getAuthenticatedNumericUserId(req);
+  try {
+    const caseExists = await ensureCaseExists(caseId);
+    if (!caseExists) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+    const pinnedValue = isPinned ? 1 : 0;
+    let insertResult;
+    try {
+      [insertResult] = await pool.query(
+        'INSERT INTO iset_case_note (case_id, author_staff_profile_id, author_user_id, body, is_internal, is_pinned) VALUES (?,?,?,?,1,?)',
+        [caseId, staffProfileId, authorUserId, trimmed, pinnedValue]
+      );
+    } catch (err) {
+      if (isMissingTableErrorLocal(err)) {
+        return res.status(500).json({ error: 'case_notes_unavailable' });
+      }
+      throw err;
+    }
+    const note = await fetchCaseNoteById(caseId, insertResult.insertId);
+    return res.status(201).json(note);
+  } catch (err) {
+    console.error('POST /api/cases/:caseId/notes failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_create_note' });
+  }
+});
+
+app.put('/api/cases/:caseId/notes/:noteId', async (req, res) => {
+  const caseId = parseInt(req.params.caseId, 10);
+  const noteId = parseInt(req.params.noteId, 10);
+  const { body: bodyInput, isPinned } = req.body || {};
+  if (!Number.isInteger(caseId) || caseId <= 0 || !Number.isInteger(noteId) || noteId <= 0) {
+    return res.status(400).json({ error: 'invalid_identifier' });
+  }
+  if (bodyInput === undefined && isPinned === undefined) {
+    return res.status(400).json({ error: 'no_fields_to_update' });
+  }
+  let trimmed;
+  if (bodyInput !== undefined) {
+    trimmed = typeof bodyInput === 'string' ? bodyInput.trim() : '';
+    if (!trimmed) {
+      return res.status(400).json({ error: 'invalid_body' });
+    }
+    if (trimmed.length > CASE_NOTE_MAX_LENGTH) {
+      return res.status(400).json({ error: 'body_too_long', max: CASE_NOTE_MAX_LENGTH });
+    }
+  }
+  const updates = [];
+  const params = [];
+  if (bodyInput !== undefined) {
+    updates.push('body = ?');
+    params.push(trimmed);
+  }
+  if (isPinned !== undefined) {
+    updates.push('is_pinned = ?');
+    params.push(isPinned ? 1 : 0);
+  }
+  const staffProfileId = req.staffProfile?.id || null;
+  const editorUserId = getAuthenticatedNumericUserId(req);
+  updates.push('updated_at = CURRENT_TIMESTAMP(3)');
+  updates.push('edited_at = CURRENT_TIMESTAMP(3)');
+  updates.push('edited_by_staff_profile_id = ?');
+  params.push(staffProfileId);
+  updates.push('edited_by_user_id = ?');
+  params.push(editorUserId);
+  try {
+    const caseExists = await ensureCaseExists(caseId);
+    if (!caseExists) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+    let result;
+    try {
+      [result] = await pool.query(
+        `UPDATE iset_case_note SET ${updates.join(', ')} WHERE id = ? AND case_id = ? AND deleted_at IS NULL`,
+        [...params, noteId, caseId]
+      );
+    } catch (err) {
+      if (isMissingTableErrorLocal(err)) {
+        return res.status(404).json({ error: 'note_not_found' });
+      }
+      throw err;
+    }
+    if (!result.affectedRows) {
+      return res.status(404).json({ error: 'note_not_found' });
+    }
+    const note = await fetchCaseNoteById(caseId, noteId);
+    return res.json(note);
+  } catch (err) {
+    console.error('PUT /api/cases/:caseId/notes/:noteId failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_update_note' });
+  }
+});
+
+app.delete('/api/cases/:caseId/notes/:noteId', async (req, res) => {
+  const caseId = parseInt(req.params.caseId, 10);
+  const noteId = parseInt(req.params.noteId, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0 || !Number.isInteger(noteId) || noteId <= 0) {
+    return res.status(400).json({ error: 'invalid_identifier' });
+  }
+  const staffProfileId = req.staffProfile?.id || null;
+  const editorUserId = getAuthenticatedNumericUserId(req);
+  try {
+    const caseExists = await ensureCaseExists(caseId);
+    if (!caseExists) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+    let result;
+    try {
+      [result] = await pool.query(
+        'UPDATE iset_case_note SET deleted_at = CURRENT_TIMESTAMP(3), updated_at = CURRENT_TIMESTAMP(3), edited_at = CURRENT_TIMESTAMP(3), edited_by_staff_profile_id = ?, edited_by_user_id = ? WHERE id = ? AND case_id = ? AND deleted_at IS NULL',
+        [staffProfileId, editorUserId, noteId, caseId]
+      );
+    } catch (err) {
+      if (isMissingTableErrorLocal(err)) {
+        return res.status(404).json({ error: 'note_not_found' });
+      }
+      throw err;
+    }
+    if (!result.affectedRows) {
+      return res.status(404).json({ error: 'note_not_found' });
+    }
+    return res.status(204).send();
+  } catch (err) {
+    console.error('DELETE /api/cases/:caseId/notes/:noteId failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_delete_note' });
+  }
+});
 // Secure messaging: case-scoped thread fetch
 // GET /api/cases/:id/messages
 // Returns latest messages involving the applicant for this case (either direction)
@@ -9937,6 +10219,8 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
+
+
 
 
 

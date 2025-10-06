@@ -8,6 +8,7 @@ import IsetApplicationFormWidget from '../widgets/IsetApplicationFormWidget';
 import CoordinatorAssessmentWidget from '../widgets/CoordinatorAssessmentWidget';
 import SupportingDocumentsWidget from '../widgets/SupportingDocumentsWidget';
 import SecureMessagingWidget from '../widgets/SecureMessagingWidget';
+import CaseNotesWidget from '../widgets/CaseNotesWidget';
 import ApplicationEvents from '../widgets/applicationEvents';
 
 // All widgets available for this dashboard (for palette)
@@ -17,6 +18,7 @@ const ALL_WIDGETS = [
   { id: 'coordinator-assessment', title: 'Application Assessment', rowSpan: 5, columnSpan: 2 },
   { id: 'supporting-documents', title: 'Supporting Documents', rowSpan: 5, columnSpan: 2 },
   { id: 'secure-messaging', title: 'Secure Messaging', rowSpan: 5, columnSpan: 2 },
+  { id: 'case-notes', title: 'Case Notes', rowSpan: 5, columnSpan: 2 },
   { id: 'application-events', title: 'Application Events', rowSpan: 5, columnSpan: 2 }
 ];
 
@@ -26,6 +28,7 @@ const DEFAULT_ITEMS = [
   { id: 'coordinator-assessment', rowSpan: 5, columnSpan: 2 },
   { id: 'supporting-documents', rowSpan: 5, columnSpan: 2 },
   { id: 'secure-messaging', rowSpan: 5, columnSpan: 2 },
+  { id: 'case-notes', rowSpan: 5, columnSpan: 2 },
   { id: 'application-events', rowSpan: 5, columnSpan: 2 }
 ];
 
@@ -35,6 +38,7 @@ const TITLES = {
   'coordinator-assessment': 'Application Assessment',
   'supporting-documents': 'Supporting Documents',
   'secure-messaging': 'Secure Messaging',
+  'case-notes': 'Case Notes',
   'application-events': 'Application Events'
 };
 
@@ -228,6 +232,14 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
             if (item.id === 'secure-messaging') {
               return (
                 <SecureMessagingWidget
+                  actions={undefined}
+                  caseData={item.data.caseData}
+                />
+              );
+            }
+            if (item.id === 'case-notes') {
+              return (
+                <CaseNotesWidget
                   actions={undefined}
                   caseData={item.data.caseData}
                 />
