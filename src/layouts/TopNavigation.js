@@ -9,9 +9,9 @@ function getEmailForRole(role) {
     case 'Regional Coordinator':
       return 'coordinator@nwac.ca';
     case 'System Administrator':
-      return 'sysadmin@nwac.ca';
+      return 'admin@nwac.ca';
     case 'Application Assessor':
-      return 'assessor@iset.org';
+      return 'user@nwac.ca';
     default:
       return 'user@nwac.ca';
   }
