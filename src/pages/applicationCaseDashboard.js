@@ -196,6 +196,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
                   actions={{ refreshCaseData }}
                   application_id={item.data.application_id}
                   caseData={item.data.caseData}
+                   toggleHelpPanel={toggleHelpPanel}
                 />
               );
             }
@@ -226,6 +227,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
                 <SupportingDocumentsWidget
                   actions={undefined}
                   caseData={item.data.caseData}
+                   toggleHelpPanel={toggleHelpPanel}
                 />
               );
             }
@@ -234,6 +236,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
                 <SecureMessagingWidget
                   actions={undefined}
                   caseData={item.data.caseData}
+                   toggleHelpPanel={toggleHelpPanel}
                 />
               );
             }
@@ -242,6 +245,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
                 <CaseNotesWidget
                   actions={undefined}
                   caseData={item.data.caseData}
+                   toggleHelpPanel={toggleHelpPanel}
                 />
               );
             }
@@ -251,6 +255,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
                   actions={undefined}
                   application_id={item.data.application_id}
                   caseData={item.data.caseData}
+                   toggleHelpPanel={toggleHelpPanel}
                 />
               );
             }

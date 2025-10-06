@@ -14,9 +14,11 @@ import {
   FormField,
   SpaceBetween,
   Button,
-  Modal
+  Modal,
+  Link
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
+import ApplicationOverviewHelp from '../helpPanelContents/applicationOverviewHelp';
 
 function formatDateTime(value) {
   if (!value) return '';
@@ -63,7 +65,7 @@ const canonicalizeStatus = (status) => (status || '')
   .toLowerCase()
   .replace(/[\s-]+/g, '_');
 
-const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
+const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHelpPanel }) => {
   const [application, setApplication] = useState(null);
   const [loading, setLoading] = useState(Boolean(application_id));
   const [error, setError] = useState(null);
@@ -377,7 +379,29 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData }) => {
 
   return (
     <BoardItem
-      header={<Header actions={badgeLabel ? <Badge color={badgeColor}>{badgeLabel}</Badge> : null}>Application Overview</Header>}
+      header={
+        <Header
+          actions={badgeLabel ? <Badge color={badgeColor}>{badgeLabel}</Badge> : null}
+          info={
+            toggleHelpPanel ? (
+              <Link
+                variant="info"
+                onFollow={() =>
+                  toggleHelpPanel(
+                    <ApplicationOverviewHelp />,
+                    'Application Overview Help',
+                    ApplicationOverviewHelp.aiContext
+                  )
+                }
+              >
+                Info
+              </Link>
+            ) : undefined
+          }
+        >
+          Application Overview
+        </Header>
+      }
       i18nStrings={{
         dragHandleAriaLabel: 'Drag handle',
         dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',

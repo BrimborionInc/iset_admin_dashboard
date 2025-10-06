@@ -1,5 +1,3 @@
-const sql = require('sql-template-strings');
-
 const NOTIFICATION_AUDIENCE = {
   GLOBAL: 'global',
   ROLE: 'role',

@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../auth/apiClient';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Header, ButtonDropdown, Table, StatusIndicator, Box, Spinner, TextFilter, SpaceBetween } from '@cloudscape-design/components';
+import { Header, ButtonDropdown, Table, StatusIndicator, Box, Spinner, TextFilter, SpaceBetween, Link } from '@cloudscape-design/components';
+import ApplicationEventsHelp from '../helpPanelContents/applicationEventsHelp';
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -136,7 +137,7 @@ const decorateEvent = (event) => {
   };
 };
 
-const ApplicationEvents = ({ actions, caseData }) => {
+const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -220,7 +221,29 @@ const ApplicationEvents = ({ actions, caseData }) => {
 
   return (
     <BoardItem
-      header={<Header variant="h2">Events</Header>}
+      header={
+        <Header
+          variant="h2"
+          info={
+            toggleHelpPanel ? (
+              <Link
+                variant="info"
+                onFollow={() =>
+                  toggleHelpPanel(
+                    <ApplicationEventsHelp />,
+                    'Events Help',
+                    ApplicationEventsHelp.aiContext
+                  )
+                }
+              >
+                Info
+              </Link>
+            ) : undefined
+          }
+        >
+          Events
+        </Header>
+      }
       i18nStrings={{
         dragHandleAriaLabel: 'Drag handle',
         dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
