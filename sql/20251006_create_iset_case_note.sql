@@ -1,0 +1,27 @@
+-- Create table to store per-case internal notes entered by staff.
+CREATE TABLE IF NOT EXISTS `iset_case_note` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `case_id` BIGINT UNSIGNED NOT NULL,
+  `author_staff_profile_id` BIGINT UNSIGNED DEFAULT NULL,
+  `author_user_id` INT DEFAULT NULL,
+  `body` TEXT NOT NULL,
+  `is_internal` TINYINT(1) NOT NULL DEFAULT 1,
+  `is_pinned` TINYINT(1) NOT NULL DEFAULT 0,
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at` DATETIME(3) DEFAULT NULL,
+  `edited_at` DATETIME(3) DEFAULT NULL,
+  `edited_by_staff_profile_id` BIGINT UNSIGNED DEFAULT NULL,
+  `edited_by_user_id` INT DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_case_created_at` (`case_id`, `created_at`),
+  KEY `idx_case_pinned_created` (`case_id`, `is_pinned`, `created_at`),
+  KEY `idx_author_staff_profile` (`author_staff_profile_id`),
+  KEY `idx_author_user` (`author_user_id`),
+  KEY `idx_deleted_at` (`deleted_at`),
+  CONSTRAINT `fk_case_note_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_case_note_author_profile` FOREIGN KEY (`author_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_case_note_author_user` FOREIGN KEY (`author_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_case_note_editor_profile` FOREIGN KEY (`edited_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_case_note_editor_user` FOREIGN KEY (`edited_by_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
