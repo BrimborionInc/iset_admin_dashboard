@@ -420,8 +420,11 @@ const AppContent = ({ currentRole }) => {
 
   // Notifications state (moved inside component)
   const [notifications, setNotifications] = useState([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const flashbarRef = useRef(null);
 
-  const loadNotifications = useCallback(async () => {
+  const loadNotifications = useCallback(async ({ scrollIntoView = false } = {}) => {
+    setNotificationsLoading(true);
     try {
       const response = await apiFetch('/api/me/notifications');
       let data = [];
@@ -430,9 +433,23 @@ const AppContent = ({ currentRole }) => {
         const message = Array.isArray(data) ? 'Failed to load notifications' : (data?.error || 'Failed to load notifications');
         throw new Error(message);
       }
-      setNotifications(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setNotifications(list);
+      if (scrollIntoView && list.length > 0) {
+        window.requestAnimationFrame(() => {
+          if (flashbarRef.current) {
+            try {
+              flashbarRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch {}
+          }
+        });
+      }
+      return list;
     } catch (error) {
       console.error('[notifications] load failed', error);
+      return null;
+    } finally {
+      setNotificationsLoading(false);
     }
   }, []);
 
@@ -485,6 +502,8 @@ const AppContent = ({ currentRole }) => {
         id: `notification-${n.id}`,
       })),
   [notifications, handleDismissNotification, mapSeverityToType]);
+
+  const refreshNotifications = useCallback(() => loadNotifications({ scrollIntoView: true }), [loadNotifications]);
 
   const [aiContext, setAiContext] = useState(AdminDashboardHelp.aiContext || ""); // State to hold AI context
 
@@ -546,8 +565,19 @@ const AppContent = ({ currentRole }) => {
       <AppLayout
         navigationOpen={isNavigationOpen}
         onNavigationChange={({ detail }) => setIsNavigationOpen(detail.open)}
-        navigation={<SideNavigation currentRole={currentRole} />}
-  notifications={<Flashbar stackItems items={notificationFlashbarItems} />}
+        navigation={
+          <SideNavigation
+            currentRole={currentRole}
+            notificationCount={notifications.length}
+            refreshNotifications={refreshNotifications}
+            notificationsLoading={notificationsLoading}
+          />
+        }
+        notifications={
+          <div ref={flashbarRef}>
+            <Flashbar stackItems items={notificationFlashbarItems} />
+          </div>
+        }
         toolsOpen={isHelpPanelOpen}
         onToolsChange={({ detail }) => setIsHelpPanelOpen(detail.open)}
         tools={
