@@ -237,7 +237,7 @@ const AppContent = ({ currentRole }) => {
         navigationOpen={isNavigationOpen}
         onNavigationChange={({ detail }) => setIsNavigationOpen(detail.open)}
         navigation={<SideNavigation currentRole={currentRole} />}
-        notifications={<Flashbar items={notificationFlashbarItems} />}
+  notifications={<Flashbar stackItems items={notificationFlashbarItems} />}
         toolsOpen={isHelpPanelOpen}
         onToolsChange={({ detail }) => setIsHelpPanelOpen(detail.open)}
         tools={
