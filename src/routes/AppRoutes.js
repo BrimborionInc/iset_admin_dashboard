@@ -62,6 +62,7 @@ import ManageApplications from '../pages/manageApplications.js'; // Import the n
 import ManageOrganisations from '../pages/manageOrganisations.js'; // Import the new component
 import CaseAssignmentDashboard from '../pages/caseAssignmentDashboard.js'; // Import the new component
 import ApplicationCaseDashboard from '../pages/applicationCaseDashboard.js'; // Import the new component
+import ApplicationCaseDashboardHelp from '../helpPanelContents/applicationCaseDashboardHelp.js';
 import ArmsReportingDashboard from '../pages/armsReporting.js'; // Import the new component
 import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Import the NWAC Hub Management dashboard
 import AssessmentReviewDashboard from '../pages/assessmentReview.js'; // Import the new Assessment Review dashboard
@@ -376,7 +377,9 @@ const AppRoutes = ({
               { text: 'Assessment' }
             ],
             'ISET Application Assessment',
-            'applicationCaseDashboard'
+            <ApplicationCaseDashboardHelp />,
+            null,
+            ApplicationCaseDashboardHelp.aiContext
           )}
         </Guard>
       </Route>

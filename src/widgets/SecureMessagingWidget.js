@@ -175,7 +175,11 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
 
   const handleInfoClick = () => {
     if (typeof toggleHelpPanel === 'function') {
-      toggleHelpPanel(<SecureMessagesHelpPanelContent />, 'Secure Messaging');
+      toggleHelpPanel(
+        <SecureMessagesHelpPanelContent />,
+        'Secure Messaging Help',
+        SecureMessagesHelpPanelContent.aiContext
+      );
     }
   };
 

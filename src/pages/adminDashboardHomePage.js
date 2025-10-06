@@ -32,7 +32,7 @@ const buildDefaultBoardItems = role => {
     const defaults = [
         { id: 'application-work-queue', rowSpan: 5, columnSpan: 2, data: { title: 'Application Work Queue' } },
         { id: 'recent-activity', rowSpan: 5, columnSpan: 2, data: { title: 'Recent Activity' } },
-        { id: 'statistics', rowSpan: 5, columnSpan: 2, data: { title: 'Statistics' } }
+        { id: 'statistics', rowSpan: 5, columnSpan: 4, data: { title: 'Statistics' } }
     ];
     if (role === 'System Administrator') {
         defaults.push({ id: 'dev-task-tracker', rowSpan: 6, columnSpan: 4, data: { title: 'Development Tracker' } });

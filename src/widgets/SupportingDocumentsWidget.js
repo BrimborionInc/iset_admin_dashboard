@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../auth/apiClient';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Header, Table, Box, Button, ButtonDropdown, SpaceBetween, Alert } from '@cloudscape-design/components';
+import { Header, Table, Box, Button, ButtonDropdown, SpaceBetween, Alert, Link } from '@cloudscape-design/components';
+import SupportingDocumentsHelp from '../helpPanelContents/supportingDocumentsHelp';
 
 const API_BASE_URL = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
 
@@ -15,7 +16,7 @@ const formatDate = value => {
     : date.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
 };
 
-const SupportingDocumentsWidget = ({ actions, caseData }) => {
+const SupportingDocumentsWidget = ({ actions, caseData, toggleHelpPanel }) => {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -141,6 +142,22 @@ const SupportingDocumentsWidget = ({ actions, caseData }) => {
                 disabled={loading || refreshing || !applicantUserId}
               />
             </SpaceBetween>
+          }
+          info={
+            toggleHelpPanel ? (
+              <Link
+                variant="info"
+                onFollow={() =>
+                  toggleHelpPanel(
+                    <SupportingDocumentsHelp />,
+                    'Supporting Documents Help',
+                    SupportingDocumentsHelp.aiContext
+                  )
+                }
+              >
+                Info
+              </Link>
+            ) : undefined
           }
         >
           Supporting Documents

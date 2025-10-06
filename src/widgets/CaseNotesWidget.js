@@ -12,9 +12,11 @@ import {
   Modal,
   FormField,
   Textarea,
-  Badge
+  Badge,
+  Link
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
+import CaseNotesHelp from '../helpPanelContents/caseNotesHelp';
 
 const NOTE_LENGTH_LIMIT = 5000;
 
@@ -53,7 +55,7 @@ const getErrorMessage = async (err, fallback) => {
   return fallback;
 };
 
-const CaseNotesWidget = ({ actions, caseData }) => {
+const CaseNotesWidget = ({ actions, caseData, toggleHelpPanel }) => {
   const caseId = caseData?.id ?? caseData?.case_id ?? null;
   const caseIdentifier =
     caseData?.tracking_id || caseData?.trackingId || (caseId ? `#${caseId}` : null);
@@ -278,6 +280,22 @@ const CaseNotesWidget = ({ actions, caseData }) => {
                   disabled={!canMutate || isLoading || isRefreshing}
                 />
               </SpaceBetween>
+            }
+            info={
+              toggleHelpPanel ? (
+                <Link
+                  variant="info"
+                  onFollow={() =>
+                    toggleHelpPanel(
+                      <CaseNotesHelp />,
+                      'Case Notes Help',
+                      CaseNotesHelp.aiContext
+                    )
+                  }
+                >
+                  Info
+                </Link>
+              ) : undefined
             }
           >
             Case Notes

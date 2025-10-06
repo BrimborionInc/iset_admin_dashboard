@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../auth/apiClient';
 import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup } from '@cloudscape-design/components';
+import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
 
 const BARRIERS = [
@@ -653,7 +654,19 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
             </SpaceBetween>
           }
           info={
-            <Link variant="info" onFollow={() => toggleHelpPanel && toggleHelpPanel(null, showNWACSection ? 'NWAC Assessment Help' : 'Application Assessment Help')}>Info</Link>
+            <Link
+              variant="info"
+              onFollow={() => {
+                if (!toggleHelpPanel) return;
+                if (showNWACSection) {
+                  toggleHelpPanel(<NwacAssessmentHelp />, 'NWAC Assessment Help', NwacAssessmentHelp.aiContext);
+                } else {
+                  toggleHelpPanel(<ApplicationAssessmentHelp />, 'Application Assessment Help', ApplicationAssessmentHelp.aiContext);
+                }
+              }}
+            >
+              Info
+            </Link>
           }
         >
           {showNWACSection ? 'NWAC Assessment' : 'Application Assessment'}
