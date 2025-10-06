@@ -99,6 +99,18 @@ const mapChatToOpenAi = (message) => {
   };
 };
 
+const sanitizeAssistantText = (rawText) => {
+  if (typeof rawText !== 'string') {
+    return '';
+  }
+
+  return rawText
+    .replace(/<\/?s>/gi, '')
+    .replace(/\[\/?(?:out|in|sys|inst)\]/gi, '')
+    .replace(/^\s*::(?:out|in):/i, '')
+    .trim();
+};
+
 const FloatingChat = React.memo(function FloatingChat({
   visible,
   aiContext,
@@ -225,7 +237,7 @@ const FloatingChat = React.memo(function FloatingChat({
         ? data.choices?.[0]?.message?.content || 'Sorry, I didn’t understand that.'
         : data?.message || data?.details?.message || 'AI assistant is disabled or unavailable.';
 
-      appendMessage(createChatMessage('incoming', messageText));
+      appendMessage(createChatMessage('incoming', sanitizeAssistantText(messageText)));
     } catch (error) {
       console.error('AI error:', error);
       appendMessage(createChatMessage('incoming', 'Something went wrong. Please try again later.'));
@@ -344,7 +356,12 @@ const FloatingChat = React.memo(function FloatingChat({
                     type={message.type}
                     avatar={
                       message.type === 'outgoing' ? (
-                        <Avatar ariaLabel="You" tooltipText="You" initials="You" />
+                        <Avatar
+                          ariaLabel="You"
+                          tooltipText="You"
+                          iconName="user-profile"
+                          color="default"
+                        />
                       ) : (
                         <Avatar
                           color="gen-ai"
