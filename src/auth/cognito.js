@@ -175,9 +175,11 @@ function normalizeRole(r) {
     'Program Administrator': 'Program Administrator',
     RegionalCoordinator: 'Regional Coordinator',
     'Regional Coordinator': 'Regional Coordinator',
-    Adjudicator: 'Adjudicator',
-    'Application Assessor': 'Application Assessor',
-    PTMA: 'Application Assessor'
+  Adjudicator: 'Application Assessor',
+  Assessor: 'Application Assessor',
+  'ApplicationAssessor': 'Application Assessor',
+  'Application Assessor': 'Application Assessor',
+  PTMA: 'Application Assessor'
   };
   return map[r] || r; // fall back to raw if unknown
 }
