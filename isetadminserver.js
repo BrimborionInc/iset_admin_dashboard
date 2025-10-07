@@ -5261,16 +5261,83 @@ function normaliseJson(v) {
   return v;
 }
 
+const STEP_EDITOR_GROUPS = new Set(['SysAdmin', 'ProgramAdmin', 'RegionalCoordinator']);
+const STEP_EDITOR_ROLES = new Set(['System Administrator', 'Program Administrator', 'Regional Coordinator']);
+
+function isAuthEnabled() {
+  return String(process.env.AUTH_PROVIDER || 'none').toLowerCase() === 'cognito';
+}
+
+function ensureStepEditor(req, res) {
+  if (!isAuthEnabled()) return true;
+  const groups = Array.isArray(req.auth?.groups) ? req.auth.groups : [];
+  const role = req.auth?.role || null;
+  if (groups.some(g => STEP_EDITOR_GROUPS.has(g)) || (role && STEP_EDITOR_ROLES.has(role))) {
+    return true;
+  }
+  res.status(403).json({ error: 'Not authorized to manage intake steps' });
+  return false;
+}
+
 // --- Steps API (DB-only, versioned component templates) --------------------
 // List steps for the Workflow Editor's library
 app.get('/api/steps', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   try {
-    const [rows] = await pool.query(`
-      SELECT id, name, status
-      FROM iset_intake.step
-      ORDER BY name
-    `);
-    res.status(200).json(rows);
+    const { q, limit, offset, status } = req.query;
+    const filters = [];
+    const params = [];
+    if (typeof q === 'string' && q.trim()) {
+      const search = `%${q.trim().toLowerCase().replace(/\s+/g, '%')}%`;
+      filters.push('LOWER(s.name) LIKE ?');
+      params.push(search);
+    }
+    if (typeof status === 'string' && status.trim()) {
+      const allowedStatuses = ['draft', 'active', 'inactive'];
+      const statuses = status.split(',').map(s => s.trim().toLowerCase()).filter(s => allowedStatuses.includes(s));
+      if (statuses.length) {
+        filters.push(`s.status IN (${statuses.map(() => '?').join(',')})`);
+        params.push(...statuses);
+      }
+    }
+    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    const pageSizeRaw = Number.parseInt(limit, 10);
+    const offsetRaw = Number.parseInt(offset, 10);
+    const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(Math.max(pageSizeRaw, 1), 500) : 200;
+    const offsetValue = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0;
+
+    const selectSql = `
+      SELECT
+        s.id,
+        s.name,
+        s.status,
+        s.created_at,
+        s.updated_at,
+        COUNT(sc.id) AS component_count
+      FROM iset_intake.step s
+      LEFT JOIN iset_intake.step_component sc ON sc.step_id = s.id
+      ${whereClause}
+      GROUP BY s.id, s.name, s.status, s.created_at, s.updated_at
+      ORDER BY s.name
+      LIMIT ? OFFSET ?
+    `;
+    const queryParams = [...params, pageSize, offsetValue];
+    const [rows] = await pool.query(selectSql, queryParams);
+
+    const countSql = `
+      SELECT COUNT(*) AS total
+      FROM iset_intake.step s
+      ${whereClause}
+    `;
+    const [[countRow]] = await pool.query(countSql, params);
+
+    res.status(200).json({
+      items: rows,
+      total: countRow.total,
+      limit: pageSize,
+      offset: offsetValue,
+      query: typeof q === 'string' ? q : null
+    });
   } catch (err) {
     console.error('GET /api/steps failed:', err);
     res.status(500).json({ error: 'Failed to fetch steps' });
@@ -5927,7 +5994,9 @@ async function resolveTemplateIds(components, conn) {
 // --- Create a new step ------------------------------------------------------
 // Body: { name: string, status: 'active'|'inactive', components: [{ templateId:number|, template_key?:string, props?:object }], ui_meta?: any }
 app.post('/api/steps', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   const { name, status = 'active', components = [], ui_meta = null } = req.body || {};
+  const trimmedName = typeof name === 'string' ? name.trim() : '';
   // Defensive sanitation: strip placeholder summary-list rows if dynamic config present
   if (Array.isArray(components)) {
     components.forEach(c => {
@@ -5942,7 +6011,7 @@ app.post('/api/steps', async (req, res) => {
       } catch { /* ignore */ }
     });
   }
-  if (!name || !Array.isArray(components)) {
+  if (!trimmedName || !Array.isArray(components)) {
     return res.status(400).json({ error: 'name and components[] are required' });
   }
   // Server-side validation: Data Key uniqueness + pattern; date-input structural integrity
@@ -5996,9 +6065,19 @@ app.post('/api/steps', async (req, res) => {
   }
   try {
     const stepId = await withTx(async (conn) => {
+      const [dup] = await conn.query(
+        `SELECT id FROM iset_intake.step WHERE LOWER(name) = LOWER(?) LIMIT 1`,
+        [trimmedName]
+      );
+      if (dup.length) {
+        const err = new Error('Step name already exists');
+        err.status = 409;
+        err.code = 'DUPLICATE_STEP_NAME';
+        throw err;
+      }
       const [r] = await conn.query(
         `INSERT INTO iset_intake.step (name, status, ui_meta) VALUES (?,?,?)`,
-        [name, status, ui_meta ? JSON.stringify(ui_meta) : null]
+        [trimmedName, status, ui_meta ? JSON.stringify(ui_meta) : null]
       );
       const newId = r.insertId;
       if (components.length) {
@@ -6019,6 +6098,9 @@ app.post('/api/steps', async (req, res) => {
     });
     res.status(201).json({ id: stepId });
   } catch (err) {
+    if (err.status === 409 || err.code === 'DUPLICATE_STEP_NAME' || err?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Step name already exists' });
+    }
     if (err.code === 400) return res.status(400).json({ error: err.message });
     console.error('POST /api/steps failed:', err);
     res.status(500).json({ error: 'Failed to create step' });
@@ -6028,8 +6110,13 @@ app.post('/api/steps', async (req, res) => {
 // --- Update a step (replace components) -------------------------------------
 // Body: { name?: string, status?: string, components?: [{ templateId|template_key, props }], ui_meta?: any }
 app.put('/api/steps/:id', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   const { id } = req.params;
   const { name, status, components, ui_meta } = req.body || {};
+  if (typeof name === 'string' && !name.trim()) {
+    return res.status(400).json({ error: 'name cannot be empty' });
+  }
+  const trimmedName = typeof name === 'string' ? name.trim() : undefined;
   // Defensive sanitation (same as POST)
   if (Array.isArray(components)) {
     components.forEach(c => {
@@ -6099,6 +6186,19 @@ app.put('/api/steps/:id', async (req, res) => {
       );
       if (!exists) throw Object.assign(new Error('Not found'), { code: 404 });
 
+      if (typeof trimmedName === 'string') {
+        const [dup] = await conn.query(
+          `SELECT id FROM iset_intake.step WHERE LOWER(name) = LOWER(?) AND id <> ? LIMIT 1`,
+          [trimmedName, id]
+        );
+        if (dup.length) {
+          const err = new Error('Step name already exists');
+          err.status = 409;
+          err.code = 'DUPLICATE_STEP_NAME';
+          throw err;
+        }
+      }
+
       if (name != null || status != null || typeof ui_meta !== 'undefined') {
         await conn.query(
           `UPDATE iset_intake.step SET
@@ -6107,7 +6207,7 @@ app.put('/api/steps/:id', async (req, res) => {
              ui_meta = ?
            WHERE id = ?`,
           [
-            name ?? null,
+            typeof trimmedName === 'string' ? trimmedName : null,
             status ?? null,
             typeof ui_meta === 'undefined' ? null : JSON.stringify(ui_meta),
             id
@@ -6138,6 +6238,9 @@ app.put('/api/steps/:id', async (req, res) => {
   } catch (err) {
     if (err.code === 404) return res.status(404).json({ error: 'Step not found' });
     if (err.code === 400) return res.status(400).json({ error: err.message });
+    if (err.status === 409 || err.code === 'DUPLICATE_STEP_NAME' || err?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Step name already exists' });
+    }
     console.error('PUT /api/steps/:id failed:', err);
     res.status(500).json({ error: 'Failed to update step' });
   }
@@ -6145,6 +6248,7 @@ app.put('/api/steps/:id', async (req, res) => {
 
 // --- Delete a step ----------------------------------------------------------
 app.delete('/api/steps/:id', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   const { id } = req.params;
   try {
     const [[ref]] = await pool.query(
@@ -6152,7 +6256,19 @@ app.delete('/api/steps/:id', async (req, res) => {
       [id]
     );
     if (ref.cnt > 0) {
-      return res.status(409).json({ error: `Step is used by ${ref.cnt} workflow(s)` });
+      const [workflowNames] = await pool.query(
+        `SELECT w.name
+           FROM iset_intake.workflow_step ws
+           JOIN iset_intake.workflow w ON w.id = ws.workflow_id
+          WHERE ws.step_id = ?
+          ORDER BY w.name
+          LIMIT 10`,
+        [id]
+      );
+      return res.status(409).json({
+        error: `Step is used by ${ref.cnt} workflow(s)`,
+        workflows: workflowNames.map(row => row.name)
+      });
     }
     await withTx(async (conn) => {
       await conn.query(`DELETE FROM iset_intake.step_component WHERE step_id = ?`, [id]);

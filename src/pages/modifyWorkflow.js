@@ -212,11 +212,18 @@ export default function ModifyWorkflowEditorWidget() {
     (async () => {
       try {
         setLibStatus('loading');
-  const res = await apiFetch('/api/steps', { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const rows = await res.json();
+        const res = await apiFetch('/api/steps', { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const payload = await res.json();
         if (cancelled) return;
-  const items = rows.map(r => ({ id: `step-${r.id}`, stepId: r.id, name: r.name }));
+        const rows = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.items)
+            ? payload.items
+            : Array.isArray(payload?.rows)
+              ? payload.rows
+              : [];
+        const items = rows.map(r => ({ id: `step-${r.id}`, stepId: r.id, name: r.name }));
         setLibrary(items);
         setLibStatus('done');
       } catch (e) {

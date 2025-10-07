@@ -1439,7 +1439,10 @@ const ModifyComponent = () => {
       const res = await apiFetch(`/api/steps/${id}`, { method: 'DELETE' });
       const out = await res.json().catch(() => ({}));
       if (res.status === 409) {
-        setAlert({ type: 'warning', message: out?.error || 'Step is referenced by a workflow.' });
+        const workflows = Array.isArray(out?.workflows) && out.workflows.length
+          ? ` (${out.workflows.slice(0, 5).join(', ')})`
+          : '';
+        setAlert({ type: 'warning', message: `${out?.error || 'Step is referenced by a workflow.'}${workflows}` });
         return;
       }
       if (!res.ok) throw new Error(out?.error || `HTTP ${res.status}`);
