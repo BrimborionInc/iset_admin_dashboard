@@ -21,6 +21,9 @@ const debugDragLog = (...args) => {
   }
 };
 
+const RENDER_CACHE = new Map();
+const RENDER_CACHE_TTL = 5_000;
+
 const setComponentConfigValue = (path, value, selectedComponent) => {
   if (!selectedComponent || !selectedComponent.props) return;
   const keys = path.split('.');
@@ -331,13 +334,36 @@ const DraggablePreviewItem = ({
     const abortRef = useRef(null);
     const debounceRef = useRef(null);
 
+    const propsSignature = useMemo(() => JSON.stringify(props ?? {}), [props]);
+    const cacheKey = useMemo(() => {
+      return `${templateKey ?? 'null'}|${templateId ?? 'null'}|${version ?? 0}|${propsSignature}`;
+    }, [templateKey, templateId, version, propsSignature]);
+
     useEffect(() => {
-      if (!props || !(templateKey || templateId)) { setHtml(''); setError(''); return; }
+      if (!(templateKey || templateId)) {
+        setHtml('');
+        setError('');
+        setLoading(false);
+        return () => {};
+      }
+
       if (debounceRef.current) clearTimeout(debounceRef.current);
+
+      const cached = RENDER_CACHE.get(cacheKey);
+      const now = Date.now();
+      if (cached && now - cached.timestamp <= RENDER_CACHE_TTL) {
+        setHtml(cached.html);
+        setError('');
+        setLoading(false);
+        return () => {};
+      }
+
       debounceRef.current = setTimeout(async () => {
         if (abortRef.current) abortRef.current.abort();
-        const ac = new AbortController(); abortRef.current = ac;
-        setLoading(true); setError('');
+        const ac = new AbortController();
+        abortRef.current = ac;
+        setLoading(true);
+        setError('');
         try {
           const res = await apiFetch(`/api/render/component`, {
             method: 'POST',
@@ -347,50 +373,48 @@ const DraggablePreviewItem = ({
           });
           const txt = await res.text();
           if (!res.ok) throw new Error(txt || `HTTP ${res.status}`);
+          RENDER_CACHE.set(cacheKey, { html: txt, timestamp: Date.now() });
           setHtml(txt);
         } catch (e) {
-          if (e.name !== 'AbortError') setError(String(e.message || e));
+          if (e.name !== 'AbortError') {
+            setError(String(e.message || e));
+          }
         } finally {
           setLoading(false);
         }
       }, 150);
+
       return () => {
         if (debounceRef.current) clearTimeout(debounceRef.current);
         if (abortRef.current) abortRef.current.abort();
       };
-    }, [templateKey, templateId, version, JSON.stringify(props)]);
+    }, [cacheKey, templateKey, templateId, version, props]);
 
     return { html, loading, error };
   }
 
-  const RenderComponentCard = React.memo(({ comp, previewLang = 'en', pendingFocusTargetRef, isSelected }) => {
+  const RenderComponentCard = React.memo(({ comp, previewLang = 'en', pendingFocusTargetRef, selectedIndex, setComponentsRef, itemIndex }) => {
     // Flatten any bilingual values like { en, fr } down to a single string for preview rendering
-    const flattenTranslations = (val, lang = 'en') => {
-      const isLangObj = (v) => v && typeof v === 'object' && (
-        Object.prototype.hasOwnProperty.call(v, 'en') || Object.prototype.hasOwnProperty.call(v, 'fr')
-      );
-      const pickLang = (v) => {
-        // Prefer requested language, then English, then French, then text/html fields, else empty string
-        if (typeof v === 'string' || typeof v === 'number') return String(v);
-        if (isLangObj(v)) {
-          const cand = v[lang] ?? v.en ?? v.fr;
-          return typeof cand === 'string' || typeof cand === 'number' ? String(cand) : '';
-        }
-        if (v && typeof v === 'object') {
-          // if it is a GOV.UK macro object like { text: '...', html: '...' }, keep as object
-          // but recurse into its values
-          const out = Array.isArray(v) ? [] : {};
-          if (Array.isArray(v)) {
-            for (const item of v) out.push(flattenTranslations(item, lang));
-            return out;
+    const flattenTranslations = useCallback((value, langOverride = previewLang) => {
+      const normalise = (val) => {
+        if (val == null) return val;
+        if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') return String(val);
+        if (Array.isArray(val)) return val.map(item => normalise(item));
+        if (typeof val === 'object') {
+          if (Object.prototype.hasOwnProperty.call(val, 'en') || Object.prototype.hasOwnProperty.call(val, 'fr')) {
+            const cand = val[langOverride] ?? val.en ?? val.fr;
+            return (typeof cand === 'string' || typeof cand === 'number') ? String(cand) : '';
           }
-          for (const [k, val2] of Object.entries(v)) out[k] = flattenTranslations(val2, lang);
+          const out = Array.isArray(val) ? [] : {};
+          Object.entries(val).forEach(([key, inner]) => {
+            out[key] = normalise(inner);
+          });
           return out;
         }
-        return v;
+        return val;
       };
-      return pickLang(val);
-    };
+      return normalise(value);
+    }, [previewLang]);
 
     // Prefer templateId from DB, fall back to key/type.
     const templateId  = comp?.templateId ?? comp?.template_id ?? comp?.id ?? null;
@@ -431,7 +455,7 @@ const DraggablePreviewItem = ({
         base.__preview = true; // hint for server template if needed
       }
       return base;
-    }, [comp?.props, previewLang]);
+    }, [comp, previewLang, flattenTranslations]);
     const { html, loading, error } = useNunjucksHTML({
       templateId,
       templateKey,
@@ -440,20 +464,48 @@ const DraggablePreviewItem = ({
     });
     const containerRef = useRef(null);
 
-    // Re-init GOV.UK behaviours when new HTML is injected
-    // Initialise GOV.UK only once (global) to avoid repeated DOM mutations that can steal focus
-  useEffect(() => {
-      if (!html) return;
-      if (!window.__govukOnce) {
-        try {
-          if (document?.body && !document.body.classList.contains('govuk-frontend-supported')) {
-            document.body.classList.add('govuk-frontend-supported');
-          }
-          if (typeof govukInitAll === 'function') govukInitAll();
-          window.__govukOnce = true;
-    } catch (e) { /* silent */ }
+    useEffect(() => {
+      if (typeof document === 'undefined') return;
+      if (!document.body) return;
+      if (!document.body.classList.contains('govuk-frontend-supported')) {
+        document.body.classList.add('govuk-frontend-supported');
       }
-    }, [html]);
+    }, []);
+
+    // Re-init GOV.UK behaviours when new HTML is injected
+    useEffect(() => {
+      if (!html) return;
+      if (!containerRef.current) return;
+      const root = containerRef.current;
+      const rafId = typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame(runInit)
+        : setTimeout(runInit, 0);
+
+      function runInit() {
+        try {
+          Array.from(root.querySelectorAll('[data-module]')).forEach((el) => {
+            if (el.hasAttribute('data-govuk-initialised')) {
+              el.removeAttribute('data-govuk-initialised');
+            }
+          });
+          if (typeof govukInitAll === 'function') {
+            govukInitAll(root);
+          }
+        } catch (err) {
+          if (window?.__ISET_DEBUG_INLINE_EDIT) {
+            console.warn('[GOVUK init] failed to re-run', err); // eslint-disable-line no-console
+          }
+        }
+      }
+
+      return () => {
+        if (typeof cancelAnimationFrame === 'function' && typeof rafId === 'number') {
+          cancelAnimationFrame(rafId);
+        } else {
+          clearTimeout(rafId);
+        }
+      };
+  }, [comp, html]);
 
     // Inline editing effect (runs every render; guarded inside)
     // Use layout effect so we can attach editing before paint to reduce focus races
@@ -461,7 +513,7 @@ const DraggablePreviewItem = ({
       if (!html) return; // nothing to edit yet
       if (!containerRef.current) return;
       const root = containerRef.current;
-      const isSelectedCurrent = selectedComponent?.index === index;
+  const isSelectedCurrent = selectedIndex === itemIndex;
       // If not selected, ensure we remove editing affordances (once) then exit
       if (!isSelectedCurrent) {
         Array.from(root.querySelectorAll('[data-inline-edit]')).forEach(el => {
@@ -507,7 +559,7 @@ const DraggablePreviewItem = ({
         el.style.userSelect = 'text';
         // Click-to-focus caret placement (works even if selection logic already ran)
         el.addEventListener('click', () => {
-          if (selectedComponent?.index === index) {
+          if (selectedIndex === itemIndex) {
             if (document.activeElement !== el) el.focus();
             try {
               const sel = window.getSelection();
@@ -539,8 +591,8 @@ const DraggablePreviewItem = ({
             delete el.dataset.inlineEditFor;
           }
           const value = readValue();
-          setComponents(prev => prev.map((c, i) => {
-            if (i !== index) return c;
+          setComponentsRef(prev => prev.map((c, i) => {
+            if (i !== itemIndex) return c;
             const next = { ...c, props: { ...(c.props || {}) } };
             const parts = path.split('.');
             let cur = next.props;
@@ -696,7 +748,7 @@ const DraggablePreviewItem = ({
         }
       }
       if (pendingFocusTargetRef) pendingFocusTargetRef.current = null;
-    }, [html, selectedComponent?.index, index, comp, previewLang, setComponents]);
+  }, [comp, html, itemIndex, pendingFocusTargetRef, previewLang, selectedIndex, setComponentsRef]);
 
     let inner;
     if (!templateId && !templateKey) inner = <div className="govuk-hint" style={{ color: '#b00' }}>Missing template reference</div>;
@@ -704,8 +756,8 @@ const DraggablePreviewItem = ({
     else if (loading && !html) inner = <div className="govuk-hint">Rendering…</div>;
     else {
       // Post-process HTML for signature-ack to provide working-area interactive approximation
-      const lowerType = String(comp?.template_key || comp?.type || '').toLowerCase();
-      if (lowerType === 'signature-ack') {
+  const lowerType = String(comp?.template_key || comp?.type || '').toLowerCase();
+  if (lowerType === 'signature-ack') {
         const resolveI18n = (val, fallback = '') => {
           if (!val) return fallback;
           if (typeof val === 'string') return val;
@@ -727,7 +779,6 @@ const DraggablePreviewItem = ({
         };
         const padKey = String(comp?.props?.boxPadding || 'm').toLowerCase();
         const pad = paddingScale[padKey] || paddingScale.m;
-        const statusSigned = resolveI18n(comp?.props?.statusSignedText, 'Signed');
         const statusUnsigned = resolveI18n(comp?.props?.statusUnsignedText, 'Not signed');
         inner = (
           <div className="govuk-form-group" data-sig-preview="1" style={{ marginBottom: 16 }}>
@@ -773,12 +824,18 @@ const DraggablePreviewItem = ({
       };
       root.addEventListener('click', handler, true);
       return () => root.removeEventListener('click', handler, true);
-    }, [html]);
+    }, [comp, html]);
 
     return <div ref={containerRef} className="govuk-embedded">{inner}</div>;
   }, (prev, next) => {
     // Custom props equality to avoid needless re-renders
-    return prev.comp === next.comp && prev.previewLang === next.previewLang && prev.isSelected === next.isSelected;
+    return (
+      prev.comp === next.comp &&
+      prev.previewLang === next.previewLang &&
+      prev.itemIndex === next.itemIndex &&
+      prev.selectedIndex === next.selectedIndex &&
+      prev.setComponentsRef === next.setComponentsRef
+    );
   });
 
   const isSelected = selectedComponent?.index === index;
@@ -869,7 +926,14 @@ const DraggablePreviewItem = ({
           paddingRight: 36,
         }}
       >
-  <RenderComponentCard comp={comp} previewLang={previewLang} pendingFocusTargetRef={pendingFocusTargetRef} isSelected={selectedComponent?.index === index} />
+        <RenderComponentCard
+          comp={comp}
+          previewLang={previewLang}
+          pendingFocusTargetRef={pendingFocusTargetRef}
+          selectedIndex={selectedComponent?.index ?? null}
+          itemIndex={index}
+          setComponentsRef={setComponents}
+        />
       </div>
       <Button className="delete" onClick={handleDelete} iconName="close" variant="icon" />
     </div>
@@ -920,7 +984,7 @@ const ModifyComponent = () => {
     return JSON.stringify(a) !== JSON.stringify(b);
   }, [name, status, components, initialName, initialStatus, initialComponents]);
 
-  const pushHistory = (snapshot) => {
+  const pushHistory = useCallback((snapshot) => {
     const serialized = JSON.stringify(snapshot);
     let base = historyIndex >= 0 ? historyStack.slice(0, historyIndex + 1) : [];
     if (base.length) {
@@ -932,7 +996,7 @@ const ModifyComponent = () => {
     if (base.length > 50) base.splice(0, base.length - 50);
     setHistoryStack(base);
     setHistoryIndex(base.length - 1);
-  };
+  }, [historyIndex, historyStack]);
   // Remove dangling conditionalChildId links on radio options whose target component was deleted
   function cleanupOrphanConditionalLinks(list) {
     if (!Array.isArray(list) || !list.length) return list;
@@ -971,14 +1035,14 @@ const ModifyComponent = () => {
     });
     return changed ? cleaned : list;
   }
-  function setComponents(nextOrFn, { skipHistory } = {}) {
+  const setComponents = useCallback((nextOrFn, { skipHistory } = {}) => {
     _setComponents(prev => {
       const rawNext = typeof nextOrFn === 'function' ? nextOrFn(prev) : nextOrFn;
       const next = cleanupOrphanConditionalLinks(rawNext);
       if (!skipHistory && JSON.stringify(prev) !== JSON.stringify(next)) pushHistory(next);
       return next;
     });
-  }
+  }, [pushHistory]);
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex >= 0 && historyIndex < historyStack.length - 1;
   const handleUndo = () => {
