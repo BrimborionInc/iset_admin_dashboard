@@ -255,7 +255,7 @@ const AppRoutes = ({
           </Guard>
       </Route>
       <Route path="/admin/upload-config">
-        <Guard roles={['System Administrator']} path="/admin/upload-config">
+        <Guard path="/admin/upload-config">
           {renderContent(UploadConfigDashboard, [
             { text: 'Home', href: '/' },
             { text: 'Configuration', href: '/configuration-settings' },

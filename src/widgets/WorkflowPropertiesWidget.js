@@ -76,7 +76,12 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated, 
       const resp = await apiFetch(`/api/workflows/${workflow.id}/publish`, { method: 'POST' });
       if (!resp.ok) throw new Error(`Publish failed: ${resp.status}`);
       const data = await resp.json();
-      setAlert({ type: 'success', text: `Published (${data.steps} steps).` });
+      const publishedSteps = Number.isFinite(data?.steps)
+        ? data.steps
+        : Array.isArray(data?.steps)
+          ? data.steps.length
+          : stepsCount;
+      setAlert({ type: 'success', text: `Published (${publishedSteps} steps).` });
     } catch (e) {
       setAlert({ type: 'error', text: 'Publish failed.' });
     } finally {
