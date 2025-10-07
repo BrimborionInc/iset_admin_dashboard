@@ -87,7 +87,7 @@ const copy = {
         sections: [
           { title: 'Workflow Studio', paragraphs: ['The "flowchart" views do not pan or zoom consistently, making drag interactions unreliable.'] },
           { title: 'Intake Step Editor', paragraphs: ['Dragging components within the workspace causes flicker and the insertion point is unclear.'] },
-          { title: 'Notification Settings', paragraphs: ['Email notifications are currently fixed to account verification, password reset, submission confirmation, and secure message events; the configurable dashboard is inactive.'] },
+          { title: 'Notification Settings', paragraphs: ['Email notifications are currently hard-wired: account verification, password reset, submission confirmation, secure message alerts, and NWAC ISET Team triage notices. The Notification Settings dashboard is disabled until configurable templates return.'] },
           { title: 'Default French Strings', paragraphs: ['Certain intake components ship with default French text that interferes with AI-driven translation.'] },
           { title: 'AI Support', paragraphs: ['The support assistant is not yet fully trained on the solution and can drift off topic.'] }
         ]
@@ -99,6 +99,7 @@ const copy = {
           { title: 'Analytics Dashboard', paragraphs: ['Deliver a dedicated analytics view with charts, reports, and metrics.'] },
           { title: 'Release Management', paragraphs: ['Add enhanced release tooling to stage and control changes to intake workflows.'] },
           { title: 'Tutorials', paragraphs: ['Publish guided walkthroughs for each primary function.'] },
+          { title: 'Notification Templates', paragraphs: ['Re-enable the Notification Settings dashboard with editable email templates, dynamic audiences, and audit history.'] },
           { title: 'Enhanced Workflow', paragraphs: ['Strengthen workflow-driven status controls to replace the current manual status updates.'] }
         ]
       }
@@ -200,7 +201,7 @@ const copy = {
         sections: [
           { title: 'Studio des parcours', paragraphs: ['Les vues « organigramme » ne gèrent pas correctement le déplacement ou le zoom, ce qui rend le glisser-déposer instable.'] },
           { title: 'Éditeur d’étapes', paragraphs: ['Le déplacement des composants dans l’aire de travail provoque un scintillement et le point d’insertion demeure flou.'] },
-          { title: 'Paramètres de notification', paragraphs: ['Les notifications courriel sont figées sur la vérification de compte, la réinitialisation de mot de passe, la confirmation de dépôt et la messagerie sécurisée; le tableau configurable est inactif.'] },
+          { title: 'Paramètres de notification', paragraphs: ['Les notifications courriel sont présentement codées en dur : vérification de compte, réinitialisation de mot de passe, accusé de réception de dépôt, alertes de messagerie sécurisée et avis de triage de l’équipe ISET de l’AFAC. Le tableau des paramètres de notification demeure désactivé jusqu’au retour des modèles configurables.'] },
           { title: 'Chaînes françaises par défaut', paragraphs: ['Certains composants d’accueil contiennent un texte français par défaut qui perturbe la traduction pilotée par l’IA.'] },
           { title: 'Assistant IA', paragraphs: ['L’assistant IA n’est pas encore formé sur l’ensemble de la solution et peut sortir du sujet.'] }
         ]
@@ -212,6 +213,7 @@ const copy = {
           { title: 'Tableau analytique', paragraphs: ['Offrir un tableau de bord analytique dédié avec graphiques, rapports et indicateurs.'] },
           { title: 'Gestion des publications', paragraphs: ['Ajouter des outils de publication renforcés pour mettre en scène et contrôler les changements des parcours d’accueil.'] },
           { title: 'Tutoriels', paragraphs: ['Publier des tutoriels guidés pour chaque fonction principale.'] },
+          { title: 'Modèles de notification', paragraphs: ['Réactiver le tableau des paramètres de notification avec des modèles courriel éditables, des publics dynamiques et un historique d’audit.'] },
           { title: 'Flux renforcé', paragraphs: ['Renforcer les contrôles de statut pilotés par le flux pour remplacer les mises à jour manuelles actuelles.'] }
         ]
       }
