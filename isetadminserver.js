@@ -18,6 +18,8 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_event_receipt',
   'iset_event_outbox',
   'iset_event_entry',
+  'iset_intake.message_attachment',
+  'iset_intake.messages',
   'iset_document',
   'iset_application_version',
   'iset_application_draft_dynamic',
@@ -458,11 +460,12 @@ app.all(['/api/admin/upload-config'], async (req, res) => {
         if (h === 'x-dev-bypass') devBypassActive = true;
       }
     }
-    // Only forward tokens/cookies when not explicitly using dev bypass
-    if (!devBypassActive && req.headers['authorization']) {
+    // Always forward bearer/cookie tokens so real Cognito sessions work even if dev bypass headers are present.
+    // The intake service will ignore them when bypass headers are used.
+    if (req.headers['authorization']) {
       headers['authorization'] = req.headers['authorization'];
     }
-    if (!devBypassActive && req.headers['cookie']) {
+    if (req.headers['cookie']) {
       headers['cookie'] = req.headers['cookie'];
     }
     let body;

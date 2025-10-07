@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -95,11 +95,35 @@ export function useWidgetDataLoader(fetcher, {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const normalizedDeps = Array.isArray(dependencies) ? dependencies : [dependencies];
+  const depsSignature = useMemo(() => {
+    if (!normalizedDeps.length) return '__empty__';
+    return normalizedDeps.map((value, index) => {
+      if (value === null) return `null:${index}`;
+      const type = typeof value;
+      if (type === 'object') {
+        if (value instanceof Date) return `date:${value.getTime()}`;
+        try {
+          return `obj:${JSON.stringify(value)}`;
+        } catch (_) {
+          return `obj:${String(value)}`;
+        }
+      }
+      if (type === 'function') {
+        return `fn:${value.name || 'anonymous'}:${index}`;
+      }
+      if (type === 'undefined') return `undefined:${index}`;
+      if (Number.isNaN(value)) return `nan:${index}`;
+      return `prim:${String(value)}:${index}`;
+    }).join('|');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...normalizedDeps]);
+
   useEffect(() => {
     if (!mountedRef.current) return;
     if (!immediate) return;
     load('dep-change');
-  }, [immediate, load, dependencies]);
+  }, [immediate, load, depsSignature]);
 
   const isLoading = status === 'loading';
   const isRefreshing = status === 'refreshing';

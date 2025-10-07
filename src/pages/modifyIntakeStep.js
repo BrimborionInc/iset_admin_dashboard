@@ -6,7 +6,7 @@
   import { DndContext, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
   import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
   import { CSS } from '@dnd-kit/utilities';
-import { Grid, Box, Header, Button, Container, SpaceBetween, Alert, ExpandableSection, SegmentedControl, FormField, Input, Select, Textarea, Toggle, Badge, Table, Modal } from "@cloudscape-design/components";
+import { Grid, Box, Header, Button, Container, SpaceBetween, Alert, ExpandableSection, SegmentedControl, FormField, Input, Select, Badge, Table, Modal } from "@cloudscape-design/components";
 import { useParams, useHistory, useLocation } from "react-router-dom";
 import PropertiesPanel, { ValidationEditor } from './PropertiesPanel.js';
 import { validateStep, summarizeIssues } from '../validation/stepValidator';
@@ -944,6 +944,7 @@ const ModifyComponent = () => {
   const [components, _setComponents] = useState([]);
   const [historyStack, setHistoryStack] = useState([]); // snapshots
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const historyIndexRef = useRef(historyIndex);
   const [initialComponents, setInitialComponents] = useState([]);
   const [selectedComponent, setSelectedComponent] = useState(null);
   // Draft inputs for adding a conditional visibility rule (file-upload panel)
@@ -965,6 +966,7 @@ const ModifyComponent = () => {
   // DB-only model (no file paths)
   // template lookups (filled after library fetch)
   const tplById = useMemo(() => new Map(availableComponents.map(t => [t.id, t])), [availableComponents]);
+  const componentCount = components.length;
   const { id } = useParams();
   const location = useLocation();
   const sp = useMemo(() => new URLSearchParams(location.search), [location.search]);
@@ -984,19 +986,37 @@ const ModifyComponent = () => {
     return JSON.stringify(a) !== JSON.stringify(b);
   }, [name, status, components, initialName, initialStatus, initialComponents]);
 
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
+
   const pushHistory = useCallback((snapshot) => {
     const serialized = JSON.stringify(snapshot);
-    let base = historyIndex >= 0 ? historyStack.slice(0, historyIndex + 1) : [];
-    if (base.length) {
-      const last = JSON.stringify(base[base.length - 1]);
-      if (last === serialized) return;
-    }
-    const clone = JSON.parse(serialized);
-    base = [...base, clone];
-    if (base.length > 50) base.splice(0, base.length - 50);
-    setHistoryStack(base);
-    setHistoryIndex(base.length - 1);
-  }, [historyIndex, historyStack]);
+    setHistoryStack(prevStack => {
+      const currentIndex = historyIndexRef.current;
+      let base = currentIndex >= 0 ? prevStack.slice(0, currentIndex + 1) : [];
+      if (base.length) {
+        const lastSerialized = JSON.stringify(base[base.length - 1]);
+        if (lastSerialized === serialized) {
+          const stableIndex = base.length - 1;
+          if (historyIndexRef.current !== stableIndex) {
+            historyIndexRef.current = stableIndex;
+            setHistoryIndex(stableIndex);
+          }
+          return base;
+        }
+      }
+      const clone = JSON.parse(serialized);
+      base = [...base, clone];
+      if (base.length > 50) {
+        base = base.slice(base.length - 50);
+      }
+      const newIndex = base.length - 1;
+      historyIndexRef.current = newIndex;
+      setHistoryIndex(newIndex);
+      return base;
+    });
+  }, [setHistoryIndex]);
   // Remove dangling conditionalChildId links on radio options whose target component was deleted
   function cleanupOrphanConditionalLinks(list) {
     if (!Array.isArray(list) || !list.length) return list;
@@ -1049,6 +1069,7 @@ const ModifyComponent = () => {
     if (!canUndo) return;
     const newIdx = historyIndex - 1;
     setHistoryIndex(newIdx);
+    historyIndexRef.current = newIdx;
     const snap = historyStack[newIdx];
     _setComponents(JSON.parse(JSON.stringify(snap)));
     setSelectedComponent(sc => (sc && sc.index < snap.length) ? { ...snap[sc.index], index: sc.index } : null);
@@ -1057,6 +1078,7 @@ const ModifyComponent = () => {
     if (!canRedo) return;
     const newIdx = historyIndex + 1;
     setHistoryIndex(newIdx);
+    historyIndexRef.current = newIdx;
     const snap = historyStack[newIdx];
     _setComponents(JSON.parse(JSON.stringify(snap)));
     setSelectedComponent(sc => (sc && sc.index < snap.length) ? { ...snap[sc.index], index: sc.index } : null);
@@ -1387,7 +1409,7 @@ const ModifyComponent = () => {
       };
       fetchStep();
     }
-  }, [id]);
+  }, [id, setComponents]);
 
   // Backfill missing accept on existing file-upload components (post-load)
   useEffect(() => {
@@ -1406,14 +1428,14 @@ const ModifyComponent = () => {
       return c;
     });
     if (changed) setComponents(next);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [components]);
+  }, [components, setComponents]);
 
   // Seed initial history once loading completed
   useEffect(() => {
-    if (!loading && historyIndex === -1) pushHistory(components);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
+    if (!loading && historyIndex === -1) {
+      pushHistory(components);
+    }
+  }, [loading, historyIndex, pushHistory, components]);
 
   useEffect(() => {
     const fetchAvailableComponents = async () => {
@@ -1475,7 +1497,7 @@ const ModifyComponent = () => {
 
   // Enrich components (loaded from DB) with template metadata once templates are known.
   useEffect(() => {
-    if (!components.length || !availableComponents.length) return;
+    if (!componentCount || !availableComponents.length) return;
     setComponents(prev =>
       prev.map(c => {
         const tpl =
@@ -1507,9 +1529,9 @@ const ModifyComponent = () => {
         };
       })
     );
-  }, [components.length, availableComponents, tplById]);
+  }, [componentCount, availableComponents, tplById, setComponents]);
 
-  const handleSelectComponent = index => {
+  const handleSelectComponent = useCallback(index => {
   if (index == null) { setSelectedComponent(null); return; }
   if (!components[index]) return; // guard against race
     const nextSel = index !== null ? {
@@ -1544,7 +1566,7 @@ const ModifyComponent = () => {
       try { window.__ISET_SELECTED = nextSel ? JSON.parse(JSON.stringify(nextSel)) : null; } catch (_) { window.__ISET_SELECTED = nextSel; }
     }
     setSelectedComponent(nextSel);
-  };
+  }, [components, availableComponents, tplById, setSelectedComponent]);
   // After components mutate, if we have a pending selection index, select it once the component exists
   useEffect(() => {
     if (pendingSelectIndexRef.current != null) {
@@ -1554,7 +1576,7 @@ const ModifyComponent = () => {
         pendingSelectIndexRef.current = null;
       }
     }
-  }, [components]);
+  }, [components, handleSelectComponent]);
 
   function setNestedProp(obj, path, value) {
     if (!path) return;
