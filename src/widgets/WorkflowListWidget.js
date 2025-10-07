@@ -1,9 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Header, ButtonDropdown, Link, Table, Button, TextFilter, SpaceBetween, Spinner, Modal, Input, Alert } from '@cloudscape-design/components';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Box, Header, ButtonDropdown, Link, Table, Button, TextFilter, SpaceBetween, Modal, Input, Alert } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { apiFetch } from '../auth/apiClient';
-
-const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
+import useWidgetDataLoader from '../hooks/useWidgetDataLoader';
 
 const getColumnDefinitions = (onSelectWorkflow, onModify, onDelete) => [
   {
@@ -30,64 +29,61 @@ const getColumnDefinitions = (onSelectWorkflow, onModify, onDelete) => [
   {
     id: 'actions',
     header: 'Actions',
-  cell: item => (
+    cell: item => (
       <SpaceBetween direction="horizontal" size="xs">
-    <Button variant="inline-link" onClick={() => onModify(item)}>Modify</Button>
-    <Button variant="inline-link" onClick={() => onDelete(item)}>Delete</Button>
+        <Button variant="inline-link" onClick={() => onModify(item)}>Modify</Button>
+        <Button variant="inline-link" onClick={() => onDelete(item)}>Delete</Button>
       </SpaceBetween>
     )
   }
 ];
 
-const formatDate = (dt) => dt ? new Date(dt).toISOString().slice(0, 10) : '';
+const formatDate = (dt) => (dt ? new Date(dt).toISOString().slice(0, 10) : '');
 
 const WorkflowListWidget = ({ actions, onSelectWorkflow, toggleHelpPanel }) => {
   const [filteringText, setFilteringText] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState([]);
-  const [deleteTarget, setDeleteTarget] = useState(null); // workflow row object
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
-  const [alert, setAlert] = useState(null); // { type, text }
+  const [alert, setAlert] = useState(null);
 
-  const load = async () => {
-    try {
-      setLoading(true);
-      const resp = await apiFetch('/api/workflows');
-      const data = await resp.json().catch(() => []);
-      const rows = (data || []).map(r => ({
-        id: r.id,
-        name: r.name,
+  const loadWorkflows = useCallback(async ({ signal }) => {
+    const resp = await apiFetch('/api/workflows', { signal });
+    const payload = await resp.json().catch(() => []);
+    const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+    return rows.map((r, index) => {
+      const rawName = typeof r.name === 'string' ? r.name : (typeof r.title === 'string' ? r.title : '');
+      const safeName = rawName && rawName.trim() ? rawName.trim() : `Untitled workflow ${r.id ?? index + 1}`;
+      return {
+        id: r.id ?? `wf-${index}`,
+        name: safeName,
         lastModified: formatDate(r.updated_at || r.created_at),
-        status: r.status
-      }));
-      setItems(rows);
-    } catch (e) {
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      if (!mounted) return;
-      await load();
-    })();
-    return () => { mounted = false; };
+        status: r.status || 'unknown'
+      };
+    });
   }, []);
+
+  const {
+    data: items = [],
+    error: loadError,
+    isLoading,
+    isRefreshing,
+    refresh
+  } = useWidgetDataLoader(loadWorkflows, { initialData: [], dependencies: [] });
+
   const onSelectWorkflowInternal = async (item) => {
     try {
       const resp = await apiFetch(`/api/workflows/${item.id}`);
       if (resp.ok) {
         const data = await resp.json();
-        onSelectWorkflow && onSelectWorkflow(data);
+        if (onSelectWorkflow) onSelectWorkflow(data);
         return;
       }
-    } catch {}
-    onSelectWorkflow && onSelectWorkflow(item);
+    } catch (_) {
+      // fall through to best-effort fallback below
+    }
+    if (onSelectWorkflow) onSelectWorkflow(item);
   };
 
   const onModify = (item) => {
@@ -107,10 +103,10 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow, toggleHelpPanel }) => {
     try {
       const resp = await apiFetch(`/api/workflows/${deleteTarget.id}`, { method: 'DELETE' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      setAlert({ type: 'success', text: `Deleted workflow \"${deleteTarget.name}\".` });
+      setAlert({ type: 'success', text: `Deleted workflow "${deleteTarget.name}".` });
       setDeleteTarget(null);
       setDeleteConfirm('');
-      await load();
+      await refresh();
     } catch (e) {
       setDeleteError('Delete failed. Please retry or contact support.');
     } finally {
@@ -119,7 +115,7 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow, toggleHelpPanel }) => {
   };
 
   const cancelDelete = () => {
-    if (deleting) return; // block close while in-flight
+    if (deleting) return;
     setDeleteTarget(null);
     setDeleteConfirm('');
     setDeleteError(null);
@@ -127,8 +123,11 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow, toggleHelpPanel }) => {
 
   const filtered = useMemo(() => {
     const txt = (filteringText || '').toLowerCase();
-    return items.filter(i => i.name.toLowerCase().includes(txt));
+    return (items || []).filter(i => i.name.toLowerCase().includes(txt));
   }, [items, filteringText]);
+
+  const loading = isLoading || isRefreshing;
+  const effectiveError = loadError ? (loadError.message || String(loadError)) : null;
 
   return (
     <BoardItem
@@ -168,15 +167,15 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow, toggleHelpPanel }) => {
           renderAriaLive={({ firstIndex, lastIndex, totalItemsCount }) =>
             `Displaying items ${firstIndex} to ${lastIndex} of ${totalItemsCount}`
           }
-  columnDefinitions={getColumnDefinitions(onSelectWorkflowInternal, onModify, openDelete)}
-      items={filtered}
-      loading={loading}
+          columnDefinitions={getColumnDefinitions(onSelectWorkflowInternal, onModify, openDelete)}
+          items={filtered}
+          loading={loading}
           loadingText="Loading resources"
           empty={
             <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
               <SpaceBetween size="m">
                 <b>No workflows</b>
-        <Button onClick={() => window.location.href = '/modify-workflow'}>Create workflow</Button>
+                <Button onClick={() => window.location.href = '/modify-workflow'}>Create workflow</Button>
               </SpaceBetween>
             </Box>
           }
@@ -185,13 +184,23 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow, toggleHelpPanel }) => {
               filteringPlaceholder="Find workflow"
               filteringText={filteringText}
               onChange={({ detail }) => setFilteringText(detail.filteringText)}
-        countText={`${filtered.length} matches`}
+              countText={`${filtered.length} matches`}
             />
           }
         />
         {alert && (
           <Box margin={{ top: 's' }}>
             <Alert dismissible onDismiss={() => setAlert(null)} type={alert.type}>{alert.text}</Alert>
+          </Box>
+        )}
+        {effectiveError && (
+          <Box margin={{ top: 's' }}>
+            <Alert
+              type="error"
+              action={<Button onClick={() => refresh()} iconName="refresh">Retry</Button>}
+            >
+              Failed to load workflows. {effectiveError}
+            </Alert>
           </Box>
         )}
       </Box>

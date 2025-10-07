@@ -83,6 +83,19 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
   const { apiFetch } = require('../auth/apiClient');
   const [translating, setTranslating] = React.useState(false);
   const [message, setMessage] = React.useState(null); // { type: 'success'|'error'|'info', text }
+  const abortRef = React.useRef(null);
+  const mountedRef = React.useRef(true);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (abortRef.current) {
+        try { abortRef.current.abort(); } catch (_) {}
+        abortRef.current = null;
+      }
+    };
+  }, []);
   // Compute coverage per language (simple: counts non-empty fields over total fields)
   const coverage = useMemo(() => {
     let total = 0; const filled = { en: 0, fr: 0 };
@@ -322,59 +335,85 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
     actions?.markDirty && actions.markDirty();
   };
 
+  const MAX_TRANSLATION_BATCH = 24;
+  const translateBatch = async (batch, signal) => {
+    const system = {
+      role: 'system',
+      content: 'You are a translation assistant. Translate between English and Canadian French. Preserve placeholders, numbers, punctuation, and option values. Respond ONLY with JSON matching the requested schema.'
+    };
+    const user = {
+      role: 'user',
+      content: JSON.stringify({
+        instruction: 'For each item, translate text from `from` language to `to` language. Return JSON only: { "translations": [{ "id": string, "lang": "en"|"fr", "text": string }] }',
+        items: batch
+      })
+    };
+    const res = await apiFetch(`/api/ai/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [system, user] }),
+      signal
+    });
+    if (res.status === 501) {
+      const err = new Error('ai-disabled');
+      err.code = 501;
+      throw err;
+    }
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content || '';
+    const parsed = extractJson(content);
+    const list = parsed?.translations;
+    if (!Array.isArray(list) || !list.length) {
+      throw new Error('unexpected-response');
+    }
+    const clean = list
+      .filter(it => it && typeof it.id === 'string' && (it.lang === 'en' || it.lang === 'fr') && typeof it.text === 'string')
+      .map(it => ({ id: it.id, lang: it.lang, text: it.text }));
+    if (!clean.length) throw new Error('empty-translations');
+    return clean;
+  };
+
   const handleTranslateMissing = async () => {
+    if (translating) return;
     setMessage(null);
     const items = collectTasks();
     if (!items.length) {
       setMessage({ type: 'info', text: 'No missing fields detected.' });
       return;
     }
+    const batches = [];
+    for (let i = 0; i < items.length; i += MAX_TRANSLATION_BATCH) {
+      batches.push(items.slice(i, i + MAX_TRANSLATION_BATCH));
+    }
+    abortRef.current?.abort();
     setTranslating(true);
+    let translatedCount = 0;
     try {
-      const system = {
-        role: 'system',
-        content: 'You are a translation assistant. Translate between English and Canadian French. Preserve placeholders, numbers, punctuation, and option values. Respond ONLY with JSON matching the requested schema.'
-      };
-      const user = {
-        role: 'user',
-        content: JSON.stringify({
-          instruction: 'For each item, translate text from `from` language to `to` language. Return JSON only: { "translations": [{ "id": string, "lang": "en"|"fr", "text": string }] }',
-          items
-        })
-      };
-  const res = await apiFetch(`/api/ai/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [system, user] })
-      });
-      if (res.status === 501) {
-        setMessage({ type: 'error', text: 'AI translation is disabled on the server. Configure the API key to enable it.' });
-        setTranslating(false);
-        return;
+      for (let bi = 0; bi < batches.length; bi += 1) {
+        const controller = new AbortController();
+        abortRef.current = controller;
+        const clean = await translateBatch(batches[bi], controller.signal);
+        translatedCount += clean.length;
+        applyTranslations(clean);
+        if (!mountedRef.current) return;
       }
-      const data = await res.json();
-      const content = data?.choices?.[0]?.message?.content || '';
-      const parsed = extractJson(content);
-      const list = parsed?.translations;
-      if (!Array.isArray(list) || !list.length) {
-        setMessage({ type: 'error', text: 'Translation service returned an unexpected response.' });
-        setTranslating(false);
-        return;
-      }
-      const clean = list
-        .filter(it => it && typeof it.id === 'string' && (it.lang === 'en' || it.lang === 'fr') && typeof it.text === 'string')
-        .map(it => ({ id: it.id, lang: it.lang, text: it.text }));
-      if (!clean.length) {
-        setMessage({ type: 'error', text: 'No valid translations returned.' });
-        setTranslating(false);
-        return;
-      }
-      applyTranslations(clean);
-      setMessage({ type: 'success', text: `Translated ${clean.length} field(s).` });
+      if (!mountedRef.current) return;
+      setMessage({ type: 'success', text: `Translated ${translatedCount} field(s) across ${batches.length} batch${batches.length > 1 ? 'es' : ''}.` });
     } catch (e) {
-      setMessage({ type: 'error', text: `Translation failed: ${e.message || String(e)}` });
+      if (e.name === 'AbortError') {
+        if (mountedRef.current) setMessage({ type: 'info', text: 'Translation cancelled.' });
+      } else if (e.code === 501) {
+        if (mountedRef.current) setMessage({ type: 'error', text: 'AI translation is disabled on the server. Configure the API key to enable it.' });
+      } else if (e.message === 'unexpected-response') {
+        if (mountedRef.current) setMessage({ type: 'error', text: 'Translation service returned an unexpected response.' });
+      } else if (e.message === 'empty-translations') {
+        if (mountedRef.current) setMessage({ type: 'error', text: 'No valid translations returned.' });
+      } else {
+        if (mountedRef.current) setMessage({ type: 'error', text: `Translation failed: ${e.message || String(e)}` });
+      }
     } finally {
-      setTranslating(false);
+      if (mountedRef.current) setTranslating(false);
+      abortRef.current = null;
     }
   };
 
