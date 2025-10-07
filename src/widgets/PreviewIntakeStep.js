@@ -1,16 +1,43 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Box, Header, ButtonDropdown, SpaceBetween, Link } from '@cloudscape-design/components';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Header, ButtonDropdown, SpaceBetween, Link, Button, Alert, Spinner } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import PreviewIntakeStepWidgetHelp from '../helpPanelContents/previewIntakeStepWidgetHelp';
 import { apiFetch } from '../auth/apiClient';
+
+const DEFAULT_FRAME_HEIGHT = 420;
+const MIN_FRAME_HEIGHT = 260;
+const CACHE_MAX_ENTRIES = 12;
+
+const isLangObject = (val) => val && typeof val === 'object' && (Object.prototype.hasOwnProperty.call(val, 'en') || Object.prototype.hasOwnProperty.call(val, 'fr'));
+
+const flattenValueByLang = (val, language) => {
+  if (val == null) return val;
+  if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') return val;
+  if (Array.isArray(val)) return val.map(item => flattenValueByLang(item, language));
+  if (isLangObject(val)) {
+    const candidate = val[language] ?? val.en ?? val.fr;
+    return typeof candidate === 'string' || typeof candidate === 'number' ? String(candidate) : '';
+  }
+  if (typeof val === 'object') {
+    const out = Array.isArray(val) ? [] : {};
+    for (const [key, value] of Object.entries(val)) {
+      out[key] = flattenValueByLang(value, language);
+    }
+    return out;
+  }
+  return val;
+};
 
 const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
   const [html, setHtml] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const wrapRef = useRef(null);
-  const [frameH, setFrameH] = useState(420); // sensible default
-  // Language selection for preview (default English). Designed to support more in future.
+  const [frameH, setFrameH] = useState(DEFAULT_FRAME_HEIGHT);
+  const controllerRef = useRef(null);
+  const cacheRef = useRef(new Map());
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
   const [lang, setLang] = useState(() => {
     try {
       return window.localStorage.getItem('preview.lang') || 'en';
@@ -19,114 +46,197 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
     }
   });
 
-  // Helper: flatten bilingual values like { en, fr } to a single string in the chosen lang
-  const flattenByLang = (val, language = 'en') => {
-    const isLangObj = (v) => v && typeof v === 'object' && (Object.prototype.hasOwnProperty.call(v, 'en') || Object.prototype.hasOwnProperty.call(v, 'fr'));
-    if (val == null) return val;
-    if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') return val;
-    if (Array.isArray(val)) return val.map(v => flattenByLang(v, language));
-    if (isLangObj(val)) {
-      const cand = val[language] ?? val.en ?? val.fr;
-      return typeof cand === 'string' || typeof cand === 'number' ? String(cand) : '';
+  const flattenProps = useCallback((value) => flattenValueByLang(value, lang), [lang]);
+
+  const currentStepId = selectedBlockStep?.id ?? null;
+  const cacheKey = currentStepId ? `${currentStepId}:${lang}` : null;
+
+  const clearController = useCallback(() => {
+    if (controllerRef.current) {
+      controllerRef.current.abort();
+      controllerRef.current = null;
     }
-    if (typeof val === 'object') {
-      const out = Array.isArray(val) ? [] : {};
-      for (const [k, v] of Object.entries(val)) out[k] = flattenByLang(v, language);
-      return out;
-    }
-    return val;
-  };
+  }, []);
 
+  const trimCache = useCallback(() => {
+    const cache = cacheRef.current;
+    if (cache.size <= CACHE_MAX_ENTRIES) return;
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey) cache.delete(oldestKey);
+  }, []);
 
-
+  const manualRefresh = useCallback(() => {
+    if (!cacheKey) return;
+    cacheRef.current.delete(cacheKey);
+    setRefreshNonce(n => n + 1);
+  }, [cacheKey]);
 
   useEffect(() => {
-    let cancelled = false; // fetch + render lifecycle guard
-    async function run() {
-      setError(null);
+    if (!currentStepId) {
+      clearController();
       setHtml('');
-      if (!selectedBlockStep?.id) return;
+      setError(null);
+      setLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    clearController();
+    controllerRef.current = controller;
+
+    const cached = cacheKey ? cacheRef.current.get(cacheKey) : null;
+    if (cached?.html) {
+      setHtml(cached.html);
+    }
+
+    const run = async () => {
       setLoading(true);
+      setError(null);
       try {
-        // 1) fetch full step (includes components) via authenticated apiFetch
-        const stepRes = await apiFetch(`/api/steps/${selectedBlockStep.id}`);
-        if (!stepRes.ok) throw new Error(`Load step HTTP ${stepRes.status}`);
-        const step = await stepRes.json();
-        // Flatten bilingual fields to the selected language for preview rendering
-        const components = Array.isArray(step.components) ? step.components.map(c => {
-          const flatProps = flattenByLang(c?.props || {}, lang) || {};
-          const tKey = String(c.templateKey || c.template_key || c.type || '').toLowerCase();
-          if (['radio','radios','checkbox','checkboxes'].includes(tKey)) {
-            const base = (tKey === 'checkbox' || tKey === 'checkboxes') ? 'govuk-checkboxes' : 'govuk-radios';
+        const stepResp = await apiFetch(`/api/steps/${currentStepId}`, { signal: controller.signal });
+        const stepText = await stepResp.text();
+        let stepPayload = null;
+        try { stepPayload = stepText ? JSON.parse(stepText) : null; } catch { stepPayload = null; }
+        if (!stepResp.ok || !stepPayload) {
+          const message = (stepPayload && (stepPayload.error || stepPayload.message)) || `Failed to load step (HTTP ${stepResp.status})`;
+          throw Object.assign(new Error(message), { code: stepResp.status, scope: 'load-step' });
+        }
+
+        const components = Array.isArray(stepPayload.components) ? stepPayload.components.map(component => {
+          if (!component || typeof component !== 'object') return component;
+          const flatProps = flattenProps(component.props || {}) || {};
+          const templateKey = String(component.templateKey || component.template_key || component.type || '').toLowerCase();
+          if (['radio', 'radios', 'checkbox', 'checkboxes'].includes(templateKey)) {
+            const baseClass = (templateKey === 'checkbox' || templateKey === 'checkboxes') ? 'govuk-checkboxes' : 'govuk-radios';
             const cls = String(flatProps.classes || '').trim();
-            if (!cls.split(/\s+/).some(cn => cn === base)) {
-              flatProps.classes = (base + (cls ? ' ' + cls : ''));
+            if (!cls.split(/\s+/).some(cn => cn === baseClass)) {
+              flatProps.classes = baseClass + (cls ? ` ${cls}` : '');
             }
           }
-          // Summary-list preview support: synthesize rows from included if authoring config present
-          if (tKey === 'summary-list') {
+          if (templateKey === 'summary-list') {
             const included = Array.isArray(flatProps.included) ? flatProps.included : [];
             const hasRows = Array.isArray(flatProps.rows) && flatProps.rows.length;
             if (!hasRows) {
               if (included.length) {
-                flatProps.rows = included.map(r => {
-                  // Determine label: override -> snapshot bilingual -> key
+                flatProps.rows = included.map(item => {
                   let labelText = '';
-                  if (r) {
-                    if (typeof r.labelOverride === 'string') labelText = r.labelOverride;
-                    else if (r.labelOverride && typeof r.labelOverride === 'object') labelText = r.labelOverride[lang] || r.labelOverride.en || r.labelOverride.fr || '';
+                  if (item) {
+                    if (typeof item.labelOverride === 'string') labelText = item.labelOverride;
+                    else if (item.labelOverride && typeof item.labelOverride === 'object') {
+                      labelText = item.labelOverride[lang] || item.labelOverride.en || item.labelOverride.fr || '';
+                    }
                     if (!labelText) {
-                      if (lang === 'fr' && r.labelFr) labelText = r.labelFr;
-                      else if (lang === 'en' && r.labelEn) labelText = r.labelEn;
-                      else labelText = r.labelEn || r.labelFr || r.key || '';
+                      if (lang === 'fr' && item.labelFr) labelText = item.labelFr;
+                      else if (lang === 'en' && item.labelEn) labelText = item.labelEn;
+                      else labelText = item.labelEn || item.labelFr || item.key || '';
                     }
                   }
                   return { key: { text: labelText }, value: { text: '' } };
                 });
               } else {
-                flatProps.rows = [ { key: { text: 'No fields selected' }, value: { text: '' } } ];
+                flatProps.rows = [{ key: { text: 'No fields selected' }, value: { text: '' } }];
               }
             }
           }
-          return { ...c, props: flatProps };
+          return { ...component, props: flatProps };
         }) : [];
-        // 2) render to HTML via server-side Nunjucks
-  const prevRes = await apiFetch('/api/preview/step', {
+
+        const previewResp = await apiFetch('/api/preview/step', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ components })
+          body: JSON.stringify({ components, stepId: currentStepId, language: lang }),
+          signal: controller.signal,
         });
-        const doc = await prevRes.text(); // server returns full GOV.UK-wrapped document
-        if (!prevRes.ok) throw new Error(`Preview HTTP ${prevRes.status}`);
-        if (!cancelled) {
-          setHtml(doc);
-        }
-      } catch (e) {
-        if (!cancelled) setError(String(e.message || e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    run();
-    return () => { cancelled = true; };
-  }, [selectedBlockStep?.id, lang]);
 
-  // Make iframe height follow the card size
+        const previewText = await previewResp.text();
+        if (!previewResp.ok) {
+          let errBody = null;
+          try { errBody = previewText ? JSON.parse(previewText) : null; } catch (_) { errBody = null; }
+          const message = (errBody && (errBody.error || errBody.message)) || previewText || `Preview failed (HTTP ${previewResp.status})`;
+          throw Object.assign(new Error(message), {
+            code: previewResp.status,
+            scope: 'render-preview',
+            componentId: errBody?.componentId || null,
+          });
+        }
+
+        if (cancelled || controller.signal.aborted) return;
+
+        if (cacheKey) {
+          cacheRef.current.set(cacheKey, { html: previewText, timestamp: Date.now() });
+          trimCache();
+        }
+        setHtml(previewText);
+        setError(null);
+        setFrameH(DEFAULT_FRAME_HEIGHT);
+      } catch (err) {
+        if (cancelled || controller.signal.aborted) return;
+        const header = err.scope === 'load-step' ? 'Unable to load intake step' : 'Preview rendering failed';
+        const detail = err.message || 'An unknown error occurred.';
+        console.error('[PreviewIntakeStep] Rendering error', {
+          stepId: currentStepId,
+          lang,
+          scope: err.scope,
+          code: err.code,
+          componentId: err.componentId,
+          detail,
+        });
+        setError({
+          header,
+          message: detail,
+          componentId: err.componentId || null,
+        });
+      } finally {
+        if (!cancelled && !controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStepId, lang, refreshNonce]);
+
   useEffect(() => {
     const el = wrapRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(entries => {
-      const cr = entries[0].contentRect;
-      // leave a little breathing room for padding
-      setFrameH(Math.max(260, Math.floor(cr.height)));
+    const observer = new ResizeObserver(entries => {
+      const rect = entries[0].contentRect;
+      setFrameH(Math.max(MIN_FRAME_HEIGHT, Math.floor(rect.height)));
     });
-    ro.observe(el);
-    return () => ro.disconnect();
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (typeof ResizeObserver !== 'undefined') return;
+    const el = wrapRef.current;
+    if (!el) return;
+    const nextHeight = Math.max(MIN_FRAME_HEIGHT, el.scrollHeight || el.offsetHeight || DEFAULT_FRAME_HEIGHT);
+    setFrameH(nextHeight);
+  }, [html]);
+
+  useEffect(() => () => clearController(), [clearController]);
+
+  const langLabel = lang === 'fr' ? 'FR' : 'EN';
+  const languageItems = useMemo(() => ([
+    { id: 'lang:en', text: 'English' },
+    { id: 'lang:fr', text: 'French' },
+  ]), []);
+
+  const handleRetry = useCallback(() => {
+    setError(null);
+    manualRefresh();
+  }, [manualRefresh]);
 
   const title = selectedBlockStep ? `Preview: ${selectedBlockStep.name}` : 'Preview Intake Step';
 
-  const langLabel = lang === 'fr' ? 'FR' : 'EN';
   return (
     <BoardItem
       header={
@@ -143,11 +253,8 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
           actions={
             <SpaceBetween direction="horizontal" size="xs">
               <ButtonDropdown
-                ariaLabel="Select language"
-                items={[
-                  { id: 'lang:en', text: 'English' },
-                  { id: 'lang:fr', text: 'French' },
-                ]}
+                ariaLabel={`Select preview language. Current ${langLabel}`}
+                items={languageItems}
                 onItemClick={({ detail }) => {
                   const id = detail?.id;
                   if (typeof id === 'string' && id.startsWith('lang:')) {
@@ -184,18 +291,25 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
     >
       {!selectedBlockStep ? (
         <Box>Select a step to preview</Box>
-      ) : loading ? (
-        <Box>Loading preview…</Box>
       ) : error ? (
-        <Box color="text-status-error">Failed to render: {error}</Box>
+        <Alert type="error" header={error.header}>
+          <SpaceBetween size="s">
+            <span>{error.message}</span>
+            {error.componentId ? <Box variant="span">Component: {error.componentId}</Box> : null}
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button onClick={handleRetry} iconName="refresh" variant="primary">Retry</Button>
+            </SpaceBetween>
+          </SpaceBetween>
+        </Alert>
       ) : (
         <Box
           ref={wrapRef}
           style={{
+            position: 'relative',
             overflow: 'hidden',
-            background: '#fff',     // ensure parent is white as well
-            height: '100%',         // allow BoardItem to drive height
-            minHeight: 320          // but don’t collapse when the card is small
+            background: '#fff',
+            height: '100%',
+            minHeight: 320,
           }}
         >
           <iframe
@@ -203,6 +317,23 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
             style={{ width: '100%', height: `${frameH}px`, border: 0, display: 'block' }}
             srcDoc={html}
           />
+          {loading && (
+            <Box
+              display="flex"
+              alignItems="center"
+              justifyContent="center"
+              position="absolute"
+              top={0}
+              left={0}
+              width="100%"
+              height="100%"
+              background="rgba(255,255,255,0.65)"
+              style={{ gap: '0.5rem' }}
+            >
+              <Spinner />
+              <span>Rendering preview…</span>
+            </Box>
+          )}
         </Box>
       )}
     </BoardItem>

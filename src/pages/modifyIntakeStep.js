@@ -59,6 +59,61 @@ function seedI18nDefaults(props, lang = 'en') {
   return clone;
 }
 
+function collectTranslationSeeds(obj) {
+  const seeds = {};
+  const visit = (value, path) => {
+    if (value == null) return;
+    if (Array.isArray(value)) {
+      value.forEach((item, idx) => {
+        const next = path ? `${path}.${idx}` : String(idx);
+        visit(item, next);
+      });
+      return;
+    }
+    if (typeof value === 'object') {
+      if (isI18nObject(value)) {
+        if (path) {
+          const en = typeof value.en === 'string' ? value.en : '';
+          const fr = typeof value.fr === 'string' ? value.fr : '';
+          seeds[path] = { en, fr };
+        }
+        return;
+      }
+      Object.entries(value).forEach(([key, val]) => {
+        const next = path ? `${path}.${key}` : key;
+        visit(val, next);
+      });
+    }
+  };
+  visit(obj, '');
+  return seeds;
+}
+
+function mergeSeedMaps(base = {}, extra = {}) {
+  const normalise = (entry = {}) => ({
+    en: typeof entry.en === 'string' ? entry.en : '',
+    fr: typeof entry.fr === 'string' ? entry.fr : ''
+  });
+  const out = {};
+  Object.entries(base || {}).forEach(([path, entry]) => {
+    out[path] = normalise(entry);
+  });
+  Object.entries(extra || {}).forEach(([path, entry]) => {
+    const current = out[path] ? { ...out[path] } : { en: '', fr: '' };
+    const next = normalise(entry);
+    if (next.en && next.en.trim()) current.en = next.en;
+    if (next.fr && next.fr.trim()) current.fr = next.fr;
+    out[path] = current;
+  });
+  return out;
+}
+
+function buildSeedMapFromTemplate(props = {}) {
+  const seedsEn = collectTranslationSeeds(seedI18nDefaults(props, 'en'));
+  const seedsFr = collectTranslationSeeds(seedI18nDefaults(props, 'fr'));
+  return mergeSeedMaps(seedsEn, seedsFr);
+}
+
 const ComponentItem = ({ component, onAdd, currentLang }) => (
   <div
     style={{ padding: "8px", border: "1px solid #ccc", cursor: "pointer" }}
@@ -1095,6 +1150,9 @@ const ModifyComponent = () => {
         seeded.errorMessage.text = { [lang]: seeded.errorMessage.text };
       }
     }
+    const baseSeeds = buildSeedMapFromTemplate(template.props || {});
+    const seededSeeds = collectTranslationSeeds(seeded);
+    const mergedSeeds = mergeSeedMaps(baseSeeds, seededSeeds);
     setComponents(prev => {
       const instance = {
         id: undefined,
@@ -1106,7 +1164,8 @@ const ModifyComponent = () => {
         props: seeded,
         editable_fields: template.editable_fields || [],
         has_options: !!template.has_options,
-        option_schema: template.option_schema || null
+        option_schema: template.option_schema || null,
+        __i18nSeeds: mergedSeeds
       };
       const next = [...prev, instance];
       pendingSelectIndexRef.current = next.length - 1;
@@ -1270,6 +1329,10 @@ const ModifyComponent = () => {
         if ((c.has_options || tpl.has_options) && !merged.some(f => f.type === 'optionList')) {
           merged.push({ key: 'options', path: 'items', type: 'optionList', label: 'Options' });
         }
+        const templateSeeds = buildSeedMapFromTemplate(tpl.props || {});
+        const seeds = c.__i18nSeeds && Object.keys(c.__i18nSeeds || {}).length
+          ? mergeSeedMaps(templateSeeds, c.__i18nSeeds)
+          : templateSeeds;
         return {
           ...c,
           type: c.type ?? tpl.type,
@@ -1278,7 +1341,8 @@ const ModifyComponent = () => {
           version: c.version ?? tpl.version,
           editable_fields: merged,
           has_options: c.has_options ?? !!tpl.has_options,
-          option_schema: c.option_schema || tpl.option_schema || null
+          option_schema: c.option_schema || tpl.option_schema || null,
+          __i18nSeeds: seeds
         };
       })
     );

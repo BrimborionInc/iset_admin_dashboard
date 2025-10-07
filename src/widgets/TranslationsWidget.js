@@ -189,15 +189,34 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
   // Collect translation tasks for missing EN or FR fields
   const collectTasks = () => {
     const tasks = []; // { id, from: 'en'|'fr', to: 'en'|'fr', text: string }
-    const addTasksFor = (ci, p, path) => {
+    const addTasksFor = (ci, comp, p, path) => {
       const v = getAtPath(p, path);
       const o = ensureLangObject(v);
-      const en = (o.en && String(o.en).trim()) ? String(o.en).trim() : '';
-      const fr = (o.fr && String(o.fr).trim()) ? String(o.fr).trim() : '';
-      // Skip if both are empty
+      const rawEn = typeof o.en === 'string' ? o.en : '';
+      const rawFr = typeof o.fr === 'string' ? o.fr : '';
+      const en = rawEn.trim();
+      const fr = rawFr.trim();
       if (!en && !fr) return;
-      if (en && !fr) tasks.push({ id: `${ci}|${path}`, from: 'en', to: 'fr', text: en });
-      if (fr && !en) tasks.push({ id: `${ci}|${path}`, from: 'fr', to: 'en', text: fr });
+      const seeds = (comp && comp.__i18nSeeds) || {};
+      const seed = seeds[path];
+      const seedEn = typeof seed?.en === 'string' ? seed.en.trim() : '';
+      const seedFr = typeof seed?.fr === 'string' ? seed.fr.trim() : '';
+      const englishChangedFromSeed = !!seedEn && !!en && en !== seedEn;
+      const frenchChangedFromSeed = !!seedFr && !!fr && fr !== seedFr;
+      const englishLooksSeed = !!seedEn && en === seedEn;
+      const frenchLooksSeed = !!seedFr && fr === seedFr;
+      const needsFr = (() => {
+        if (en && !fr) return true;
+        if (englishChangedFromSeed && (!fr || frenchLooksSeed)) return true;
+        return false;
+      })();
+      const needsEn = (() => {
+        if (fr && !en) return true;
+        if (frenchChangedFromSeed && (!en || englishLooksSeed)) return true;
+        return false;
+      })();
+      if (needsFr) tasks.push({ id: `${ci}|${path}`, from: 'en', to: 'fr', text: rawEn });
+      if (needsEn) tasks.push({ id: `${ci}|${path}`, from: 'fr', to: 'en', text: rawFr });
     };
     const hasContent = (val) => {
       if (val == null) return false;
@@ -214,45 +233,45 @@ const TranslationsWidget = ({ actions, components = [], setComponents, asBoardIt
       const type = String(comp?.type || comp?.template_key || '').toLowerCase();
       const p = comp?.props || {};
       if (isInputLike(type)) {
-        addTasksFor(ci, p, 'label.text');
-        addTasksFor(ci, p, 'hint.text');
+        addTasksFor(ci, comp, p, 'label.text');
+        addTasksFor(ci, comp, p, 'hint.text');
         if (canHaveAffixes(type)) {
-          if (hasContent(getAtPath(p, 'prefix.text'))) addTasksFor(ci, p, 'prefix.text');
-          if (hasContent(getAtPath(p, 'suffix.text'))) addTasksFor(ci, p, 'suffix.text');
+          if (hasContent(getAtPath(p, 'prefix.text'))) addTasksFor(ci, comp, p, 'prefix.text');
+          if (hasContent(getAtPath(p, 'suffix.text'))) addTasksFor(ci, comp, p, 'suffix.text');
         }
       } else if (isSummaryList(type)) {
         const rows = Array.isArray(p?.rows) ? p.rows : [];
         rows.forEach((r, ri) => {
-          addTasksFor(ci, p, `rows.${ri}.key.text`);
-          addTasksFor(ci, p, `rows.${ri}.value.text`);
+          addTasksFor(ci, comp, p, `rows.${ri}.key.text`);
+          addTasksFor(ci, comp, p, `rows.${ri}.value.text`);
         });
       } else if (isFileUpload(type)) {
-        addTasksFor(ci, p, 'label.text');
-        addTasksFor(ci, p, 'hint.text');
+        addTasksFor(ci, comp, p, 'label.text');
+        addTasksFor(ci, comp, p, 'hint.text');
       } else if (type === 'signature-ack') {
-        addTasksFor(ci, p, 'label.text');
-        addTasksFor(ci, p, 'hint.text');
-        addTasksFor(ci, p, 'placeholder.text');
-        addTasksFor(ci, p, 'actionLabel.text');
-        addTasksFor(ci, p, 'clearLabel.text');
-        addTasksFor(ci, p, 'statusSignedText.text');
-        addTasksFor(ci, p, 'statusUnsignedText.text');
+        addTasksFor(ci, comp, p, 'label.text');
+        addTasksFor(ci, comp, p, 'hint.text');
+        addTasksFor(ci, comp, p, 'placeholder.text');
+        addTasksFor(ci, comp, p, 'actionLabel.text');
+        addTasksFor(ci, comp, p, 'clearLabel.text');
+        addTasksFor(ci, comp, p, 'statusSignedText.text');
+        addTasksFor(ci, comp, p, 'statusUnsignedText.text');
       } else if (isChoice(type)) {
-        if (type === 'select') addTasksFor(ci, p, 'label.text'); else addTasksFor(ci, p, 'fieldset.legend.text');
-        addTasksFor(ci, p, 'hint.text');
+        if (type === 'select') addTasksFor(ci, comp, p, 'label.text'); else addTasksFor(ci, comp, p, 'fieldset.legend.text');
+        addTasksFor(ci, comp, p, 'hint.text');
         const items = Array.isArray(p?.items) ? p.items : [];
-        items.forEach((it, ii) => { addTasksFor(ci, p, `items.${ii}.text`); if (type !== 'select') addTasksFor(ci, p, `items.${ii}.hint`); });
+        items.forEach((it, ii) => { addTasksFor(ci, comp, p, `items.${ii}.text`); if (type !== 'select') addTasksFor(ci, comp, p, `items.${ii}.hint`); });
       } else if (isDateLike(type)) {
-        addTasksFor(ci, p, 'fieldset.legend.text');
-        addTasksFor(ci, p, 'hint.text');
+        addTasksFor(ci, comp, p, 'fieldset.legend.text');
+        addTasksFor(ci, comp, p, 'hint.text');
       } else {
-        if (getAtPath(p, 'label.text') !== undefined) addTasksFor(ci, p, 'label.text');
-        if (getAtPath(p, 'hint.text') !== undefined) addTasksFor(ci, p, 'hint.text');
-  if (getAtPath(p, 'titleText') !== undefined) addTasksFor(ci, p, 'titleText');
-  if (getAtPath(p, 'summaryText') !== undefined) addTasksFor(ci, p, 'summaryText');
+        if (getAtPath(p, 'label.text') !== undefined) addTasksFor(ci, comp, p, 'label.text');
+        if (getAtPath(p, 'hint.text') !== undefined) addTasksFor(ci, comp, p, 'hint.text');
+  if (getAtPath(p, 'titleText') !== undefined) addTasksFor(ci, comp, p, 'titleText');
+  if (getAtPath(p, 'summaryText') !== undefined) addTasksFor(ci, comp, p, 'summaryText');
   // include static content fields
-  if (getAtPath(p, 'text') !== undefined) addTasksFor(ci, p, 'text');
-  if (getAtPath(p, 'html') !== undefined) addTasksFor(ci, p, 'html');
+  if (getAtPath(p, 'text') !== undefined) addTasksFor(ci, comp, p, 'text');
+  if (getAtPath(p, 'html') !== undefined) addTasksFor(ci, comp, p, 'html');
       }
     });
     return tasks;

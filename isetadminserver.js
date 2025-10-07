@@ -1,4 +1,5 @@
 const path = require('path');
+const crypto = require('crypto');
 const { maskName } = require('./src/utils/utils');
 const { getInternalNotifications, dismissInternalNotification } = require('./src/internalNotifications');
 const { dispatchInternalNotifications } = require('../shared/events/notificationDispatcher');
@@ -4321,110 +4322,336 @@ function wrapGovukDoc(innerHtml) {
   </html>`;
 }
 
+
+// --- Intake step preview cache helpers --------------------------------------
+const PREVIEW_CACHE_MAX_ITEMS = 18;
+const PREVIEW_CACHE_MAX_WEIGHT = 2 * 1024 * 1024; // 2 MB total payload (html + canonical json)
+const PREVIEW_CACHE_PER_STEP_LIMIT = 4;
+const PREVIEW_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+const PREVIEW_CACHE_VERSION = process.env.PREVIEW_CACHE_SALT || process.env.GIT_COMMIT || 'v1';
+const PREVIEW_MAX_COMPONENTS = 400;
+const PREVIEW_MAX_PAYLOAD_BYTES = 1 * 1024 * 1024; // 1 MB
+
+const previewCache = new Map();
+let previewCacheWeight = 0;
+
+function estimateBytes(value) {
+  if (!value) return 0;
+  return Buffer.byteLength(String(value), 'utf8');
+}
+
+function canonicalisePreviewValue(value, seen = new WeakSet()) {
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'undefined') return null;
+  if (typeof value === 'object') {
+    if (seen.has(value)) return null;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      return value.map(item => canonicalisePreviewValue(item, seen));
+    }
+    const result = {};
+    const keys = Object.keys(value).sort();
+    for (const key of keys) {
+      const normalised = canonicalisePreviewValue(value[key], seen);
+      if (typeof normalised === 'undefined') continue;
+      result[key] = normalised;
+    }
+    return result;
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (_) {
+    return String(value);
+  }
+}
+
+function computePreviewSignature(components, language) {
+  const canonical = canonicalisePreviewValue(components);
+  const canonicalJson = JSON.stringify(canonical);
+  const hash = crypto.createHash('sha1').update(`${PREVIEW_CACHE_VERSION}|${language}|${canonicalJson}`).digest('hex');
+  return { canonicalJson, hash };
+}
+
+function removePreviewCacheEntry(cacheKey) {
+  const entry = previewCache.get(cacheKey);
+  if (!entry) return;
+  previewCache.delete(cacheKey);
+  previewCacheWeight = Math.max(0, previewCacheWeight - (entry.weight || 0));
+}
+
+function touchPreviewCacheEntry(cacheKey) {
+  const entry = previewCache.get(cacheKey);
+  if (!entry) return null;
+  previewCache.delete(cacheKey);
+  previewCache.set(cacheKey, entry);
+  return entry;
+}
+
+function trimPreviewCache(stepKey) {
+  if (stepKey) {
+    const perStepKeys = [];
+    for (const [key, entry] of previewCache.entries()) {
+      if (entry.stepKey === stepKey) perStepKeys.push({ key, entry });
+    }
+    while (perStepKeys.length > PREVIEW_CACHE_PER_STEP_LIMIT) {
+      const oldest = perStepKeys.shift();
+      if (oldest) removePreviewCacheEntry(oldest.key);
+    }
+  }
+  while (previewCache.size > PREVIEW_CACHE_MAX_ITEMS || previewCacheWeight > PREVIEW_CACHE_MAX_WEIGHT) {
+    const oldestKey = previewCache.keys().next().value;
+    if (!oldestKey) break;
+    removePreviewCacheEntry(oldestKey);
+  }
+}
+
+function normalisePreviewLanguage(value) {
+  if (typeof value === 'string') {
+    const token = value.trim().toLowerCase();
+    if (token === 'fr' || token === 'fr-ca' || token === 'fr_fr' || token === 'french') {
+      return 'fr';
+    }
+  }
+  return 'en';
+}
+
+function safeParseJson(value) {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch (err) {
+    return null;
+  }
+}
+
 // POST /api/preview/step : render array of components to full HTML doc
 app.post('/api/preview/step', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
+  res.set('Cache-Control', 'no-cache, private');
+  const startedAt = Date.now();
   try {
-    const comps = Array.isArray(req.body?.components) ? req.body.components : [];
-    // Build id lookup for linkage resolution
-    const compById = new Map();
-    for (const c of comps) {
-      if (!c || typeof c !== 'object') continue;
-      if (c.id) compById.set(c.id, c);
-      const nameKey = c.props && c.props.name;
-      if (nameKey && !compById.has(nameKey)) compById.set(nameKey, c);
+    const body = (req.body && typeof req.body === 'object') ? req.body : {};
+    const language = normalisePreviewLanguage(body.language || body.locale || body.localeCode || body.lang);
+    const rawStepId = body.stepId || body.id || null;
+    const stepKey = rawStepId ? `step:${rawStepId}` : `anon:${req.auth?.sub || req.auth?.userId || 'anonymous'}`;
+
+    let componentsInput = typeof body.components === 'undefined' ? [] : body.components;
+    componentsInput = safeParseJson(componentsInput);
+    if (!Array.isArray(componentsInput)) {
+      return res.status(400).json({ error: 'components must be an array' });
     }
-    const referencedChildIds = new Set();
-    // Produce processed components with synthetic embedded conditional.questions for radios & checkboxes based on conditionalChildId
-    const processed = comps.map(orig => {
-      if (!orig || typeof orig !== 'object') return orig;
-      let clone = { ...orig, props: typeof orig.props === 'object' && orig.props !== null ? { ...orig.props } : {} };
+    if (componentsInput.length > PREVIEW_MAX_COMPONENTS) {
+      return res.status(413).json({ error: `Preview payload too large (max ${PREVIEW_MAX_COMPONENTS} components)` });
+    }
+
+    let approxPayloadBytes = 0;
+    try {
+      approxPayloadBytes = Buffer.byteLength(JSON.stringify(componentsInput), 'utf8');
+    } catch (_) {
+      approxPayloadBytes = PREVIEW_MAX_PAYLOAD_BYTES + 1;
+    }
+    if (approxPayloadBytes > PREVIEW_MAX_PAYLOAD_BYTES) {
+      return res.status(413).json({ error: 'Preview payload too large' });
+    }
+
+    const validationErrors = [];
+    const sanitisedComponents = componentsInput.map((component, index) => {
+      if (!component || typeof component !== 'object') {
+        validationErrors.push({ index, code: 'INVALID_COMPONENT', message: 'Component must be an object' });
+        return null;
+      }
+      const clone = { ...component };
+      const props = clone.props && typeof clone.props === 'object' ? { ...clone.props } : {};
+      clone.props = props;
+      if (!clone.template_key && clone.templateKey) clone.template_key = clone.templateKey;
+      const templateToken = typeof clone.template_key === 'string' && clone.template_key.trim()
+        ? clone.template_key.trim()
+        : (typeof clone.type === 'string' ? clone.type.trim() : '');
+      if (!templateToken) {
+        validationErrors.push({
+          index,
+          code: 'MISSING_TEMPLATE_KEY',
+          message: 'template_key (or type) is required for preview rendering',
+          componentId: clone.id || props.name || null,
+        });
+      } else {
+        clone.template_key = templateToken;
+      }
+      return clone;
+    }).filter(Boolean);
+
+    if (validationErrors.length) {
+      return res.status(422).json({ error: 'Invalid component payload', details: validationErrors });
+    }
+
+    const componentLookup = new Map();
+    for (const comp of sanitisedComponents) {
+      const keys = [];
+      if (comp.id !== undefined && comp.id !== null) keys.push(String(comp.id));
+      const nameKey = comp.props?.name;
+      if (nameKey) keys.push(String(nameKey));
+      for (const key of keys) {
+        if (!componentLookup.has(key)) {
+          componentLookup.set(key, comp);
+        }
+      }
+    }
+
+    const referencedChildKeys = new Set();
+    const preparedComponents = sanitisedComponents.map(orig => {
+      const clone = { ...orig, props: { ...(orig.props || {}) } };
       if (!clone.template_key && clone.templateKey) clone.template_key = clone.templateKey;
       const tKey = String(clone.template_key || clone.type || '').toLowerCase();
       if ((tKey === 'radio' || tKey === 'radios' || tKey === 'checkbox' || tKey === 'checkboxes') && Array.isArray(clone.props.items)) {
-        const newItems = clone.props.items.map(it => {
-          if (!it || typeof it !== 'object') return it;
-          if (it.conditionalChildId) {
-            const child = compById.get(it.conditionalChildId);
-            if (child && child !== clone) {
-              const refKey = child.id || (child.props && child.props.name);
-              if (refKey) referencedChildIds.add(refKey);
-              // For checkboxes, GOV.UK expects .govuk-checkboxes__conditional container; radios already handled similarly.
-              // Reuse same structure; macro library differentiates by classes; markup generation handled downstream.
-              return { ...it, conditional: { questions: [ { ...child } ] } };
+        const items = clone.props.items.map(item => {
+          if (!item || typeof item !== 'object') return item;
+          const next = { ...item };
+          if (typeof next.hint === 'string' && next.hint.trim() === '') {
+            delete next.hint;
+          }
+          if (next.conditionalChildId) {
+            const child = componentLookup.get(String(next.conditionalChildId));
+            if (child && child !== orig) {
+              const refKey = child.id != null ? String(child.id) : (child.props?.name ? String(child.props.name) : null);
+              if (refKey) referencedChildKeys.add(refKey);
+              next.conditional = {
+                questions: [
+                  {
+                    ...child,
+                    props: { ...(child.props || {}) },
+                  },
+                ],
+              };
             }
           }
-          return it;
+          return next;
         });
-        clone = { ...clone, props: { ...clone.props, items: newItems } };
+        clone.props = { ...clone.props, items };
       }
       return clone;
     });
-    // Render skipping referenced conditional children at top-level
+
+    const renderTargets = [];
+    for (const comp of preparedComponents) {
+      const key = comp && (comp.id != null ? String(comp.id) : (comp.props?.name ? String(comp.props.name) : null));
+      if (key && referencedChildKeys.has(key)) continue;
+      renderTargets.push({ ...comp, props: { ...(comp.props || {}) } });
+    }
+
+    const { canonicalJson, hash } = computePreviewSignature(renderTargets, language);
+    const cacheKey = `${stepKey}|${language}|${hash}`;
+    const now = Date.now();
+    const cached = previewCache.get(cacheKey);
+    if (cached) {
+      if ((now - cached.createdAt) > PREVIEW_CACHE_TTL_MS) {
+        removePreviewCacheEntry(cacheKey);
+      } else {
+        const fresh = touchPreviewCacheEntry(cacheKey) || cached;
+        res.set('ETag', fresh.etag);
+        res.set('X-Preview-Cache', 'hit');
+        return res.status(200).type('text/html').send(fresh.html);
+      }
+    }
+
+    res.set('X-Preview-Cache', 'miss');
+
     let html = '';
-    for (const raw of processed) {
-      const key = raw && (raw.id || (raw.props && raw.props.name));
-      if (key && referencedChildIds.has(key)) continue;
-      const comp = { ...raw, props: typeof raw?.props === 'object' && raw.props !== null ? raw.props : {} };
-      if (!comp.template_key && comp.templateKey) comp.template_key = comp.templateKey;
-      html += await renderComponentHtml(comp, 0) + '\n';
-    }
-    // Server-side pass to ensure conditionals are hidden unless their input is checked.
-    try {
-      const $ = cheerio.load(html);
-      // Radios
-      $('div.govuk-radios').each((_, group) => {
-        const $group = $(group);
-        $group.find('input.govuk-radios__input').each((__, inp) => {
-          const $inp = $(inp);
-          if(!$inp.attr('aria-controls') && $inp.attr('data-aria-controls')) {
-            $inp.attr('aria-controls', $inp.attr('data-aria-controls'));
-          }
-          const condId = $inp.attr('aria-controls');
-          if (!condId) return;
-          const $cond = $('#' + condId);
-          if (!$cond.length) return;
-          const checked = $inp.is(':checked');
-          $inp.attr('aria-expanded', checked ? 'true' : 'false');
-          if (!checked) {
-            if (!$cond.hasClass('govuk-radios__conditional--hidden')) $cond.addClass('govuk-radios__conditional--hidden');
-          } else {
-            $cond.removeClass('govuk-radios__conditional--hidden');
-            const cleaned = ($cond.attr('style')||'').replace(/display:\s*none;?/,'');
-            if (cleaned) $cond.attr('style', cleaned); else $cond.removeAttr('style');
-          }
+    for (const comp of renderTargets) {
+      try {
+        html += `${await renderComponentHtml(comp, 0)}\n`;
+      } catch (error) {
+        console.error('Preview component render failed', {
+          stepId: rawStepId,
+          language,
+          componentId: comp.id || comp.props?.name || null,
+          template: comp.template_key || null,
+          message: error?.message || error,
         });
-      });
-      // Checkboxes
-      $('div.govuk-checkboxes').each((_, group) => {
-        const $group = $(group);
-        $group.find('input.govuk-checkboxes__input').each((__, inp) => {
-          const $inp = $(inp);
-          if(!$inp.attr('aria-controls') && $inp.attr('data-aria-controls')) {
-            $inp.attr('aria-controls', $inp.attr('data-aria-controls'));
-          }
-          const condId = $inp.attr('aria-controls');
-          if (!condId) return;
-          const $cond = $('#' + condId);
-          if (!$cond.length) return;
-          const checked = $inp.is(':checked');
-          $inp.attr('aria-expanded', checked ? 'true' : 'false');
-          if (!checked) {
-            if (!$cond.hasClass('govuk-checkboxes__conditional--hidden')) $cond.addClass('govuk-checkboxes__conditional--hidden');
-          } else {
-            $cond.removeClass('govuk-checkboxes__conditional--hidden');
-            const cleaned = ($cond.attr('style')||'').replace(/display:\s*none;?/,'');
-            if (cleaned) $cond.attr('style', cleaned); else $cond.removeAttr('style');
-          }
+        return res.status(422).json({
+          error: 'Failed to render component',
+          componentId: comp.id || comp.props?.name || null,
+          templateKey: comp.template_key || null,
+          message: error?.message || 'Render error',
         });
-      });
-      html = $.html();
-    } catch (e) {
-      console.warn('conditional preprocess failed:', e.message);
+      }
     }
-    res.status(200).type('text/html').send(wrapGovukDoc(html));
+
+    if (html) {
+      try {
+        const $ = cheerio.load(html);
+        $('div.govuk-radios').each((_, group) => {
+          const $group = $(group);
+          $group.find('input.govuk-radios__input').each((__, inp) => {
+            const $inp = $(inp);
+            if (!$inp.attr('aria-controls') && $inp.attr('data-aria-controls')) {
+              $inp.attr('aria-controls', $inp.attr('data-aria-controls'));
+            }
+            const condId = $inp.attr('aria-controls');
+            if (!condId) return;
+            const $cond = $('#' + condId);
+            if (!$cond.length) return;
+            const checked = $inp.is(':checked');
+            $inp.attr('aria-expanded', checked ? 'true' : 'false');
+            if (!checked) {
+              if (!$cond.hasClass('govuk-radios__conditional--hidden')) $cond.addClass('govuk-radios__conditional--hidden');
+            } else {
+              $cond.removeClass('govuk-radios__conditional--hidden');
+              const cleaned = ($cond.attr('style') || '').replace(/display:\s*none;?/, '');
+              if (cleaned) $cond.attr('style', cleaned); else $cond.removeAttr('style');
+            }
+          });
+        });
+        $('div.govuk-checkboxes').each((_, group) => {
+          const $group = $(group);
+          $group.find('input.govuk-checkboxes__input').each((__, inp) => {
+            const $inp = $(inp);
+            if (!$inp.attr('aria-controls') && $inp.attr('data-aria-controls')) {
+              $inp.attr('aria-controls', $inp.attr('data-aria-controls'));
+            }
+            const condId = $inp.attr('aria-controls');
+            if (!condId) return;
+            const $cond = $('#' + condId);
+            if (!$cond.length) return;
+            const checked = $inp.is(':checked');
+            $inp.attr('aria-expanded', checked ? 'true' : 'false');
+            if (!checked) {
+              if (!$cond.hasClass('govuk-checkboxes__conditional--hidden')) $cond.addClass('govuk-checkboxes__conditional--hidden');
+            } else {
+              $cond.removeClass('govuk-checkboxes__conditional--hidden');
+              const cleaned = ($cond.attr('style') || '').replace(/display:\s*none;?/, '');
+              if (cleaned) $cond.attr('style', cleaned); else $cond.removeAttr('style');
+            }
+          });
+        });
+        html = $.html();
+      } catch (e) {
+        console.warn('conditional preprocess failed:', e.message);
+      }
+    }
+
+    const doc = wrapGovukDoc(html);
+    const etag = `W/"preview-${hash}"`;
+    const entryWeight = estimateBytes(doc) + estimateBytes(canonicalJson);
+    if (entryWeight <= PREVIEW_CACHE_MAX_WEIGHT) {
+      previewCache.set(cacheKey, { html: doc, createdAt: now, weight: entryWeight, stepKey, etag });
+      previewCacheWeight += entryWeight;
+      trimPreviewCache(stepKey);
+      res.set('X-Preview-Cache', 'store');
+    } else {
+      res.set('X-Preview-Cache', 'bypass');
+    }
+
+    res.set('ETag', etag);
+    return res.status(200).type('text/html').send(doc);
   } catch (err) {
     console.error('POST /api/preview/step failed:', err);
     res.status(500).json({ error: 'Failed to render preview' });
+  } finally {
+    const duration = Date.now() - startedAt;
+    if (duration > 2000) {
+      console.warn('[preview] slow render', { durationMs: duration });
+    }
   }
 });
 
