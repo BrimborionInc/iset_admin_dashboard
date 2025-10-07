@@ -1,10 +1,11 @@
   import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from "react";
-// Ensure GOV.UK styles are available in-editor
-import "../css/govuk-frontend.min.css";
-// Initialize GOV.UK behaviours for dynamic previews
-import { initAll as govukInitAll } from 'govuk-frontend';
-import { DndProvider, useDrag, useDrop, useDragDropManager } from "react-dnd";
-import { HTML5Backend } from "react-dnd-html5-backend";
+  // Ensure GOV.UK styles are available in-editor
+  import "../css/govuk-frontend.min.css";
+  // Initialize GOV.UK behaviours for dynamic previews
+  import { initAll as govukInitAll } from 'govuk-frontend';
+  import { DndContext, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
+  import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+  import { CSS } from '@dnd-kit/utilities';
 import { Grid, Box, Header, Button, Container, SpaceBetween, Alert, ExpandableSection, SegmentedControl, FormField, Input, Select, Textarea, Toggle, Badge, Table, Modal } from "@cloudscape-design/components";
 import { useParams, useHistory, useLocation } from "react-router-dom";
 import PropertiesPanel, { ValidationEditor } from './PropertiesPanel.js';
@@ -13,6 +14,12 @@ import TranslationsWidget from '../widgets/TranslationsWidget';
 import { apiFetch } from '../auth/apiClient';
 
 // API_BASE constant removed; all network calls now go through apiFetch which handles base URL & auth.
+
+const debugDragLog = (...args) => {
+  if (typeof window !== 'undefined' && window.__ISET_DEBUG_DND) {
+    console.debug('[ModifyIntakeStep DnD]', ...args);
+  }
+};
 
 const setComponentConfigValue = (path, value, selectedComponent) => {
   if (!selectedComponent || !selectedComponent.props) return;
@@ -123,88 +130,82 @@ const ComponentItem = ({ component, onAdd, currentLang }) => (
   </div>
 );
 
-// Only create a DnDProvider if one isn't already present to avoid multiple HTML5Backend instances
-const MaybeDndProvider = ({ children }) => {
-  let hasProvider = true;
-  try {
-    // Will throw if not within a DnD context
-    useDragDropManager();
-  } catch (_) {
-    hasProvider = false;
-  }
-  return hasProvider ? <>{children}</> : <DndProvider backend={HTML5Backend}>{children}</DndProvider>;
-};
-
-const DropSlot = ({ slotIndex, draggingIndex, onDrop }) => {
-  const [{ isOver, canDrop }, drop] = useDrop(
-    () => ({
-      accept: 'REORDER_COMPONENT',
-      canDrop: () => draggingIndex != null,
-      drop: () => {
-        if (draggingIndex == null) return undefined;
-        onDrop(slotIndex);
-        return { moved: true };
-      },
-      collect: monitor => ({
-        isOver: monitor.isOver({ shallow: true }),
-        canDrop: monitor.canDrop()
-      })
-    }),
-    [slotIndex, onDrop, draggingIndex]
-  );
-
-  const active = isOver && canDrop;
-  return (
-    <div
-      ref={drop}
-      className={`stage-drop-slot${active ? ' stage-drop-slot--active' : ''}`}
-      aria-hidden="true"
-    />
-  );
-};
-
 const PreviewArea = ({ components, setComponents, handleSelectComponent, selectedComponent, previewLang = 'en' }) => {
-  const draggingRef = useRef({ fromIndex: null });
-  const [isDragging, setIsDragging] = useState(false);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 }
+    })
+  );
 
-  const beginDrag = useCallback((index) => {
-    draggingRef.current = { fromIndex: index };
-    setIsDragging(true);
+  const fallbackIdMapRef = useRef(new WeakMap());
+  const fallbackIdCounterRef = useRef(0);
+
+  const getComponentDndId = useCallback((comp, index) => {
+    if (!comp) return `component-empty-${index}`;
+    const candidates = [
+      comp.__editorUid,
+      comp.props?.name,
+      comp.props?.id,
+      comp.id,
+      comp.templateId,
+      comp.template_id,
+      comp.type
+    ];
+    const baseCandidate = candidates.find(val => typeof val === 'string' && val.trim())
+      ?? candidates.find(val => typeof val === 'number')
+      ?? null;
+    if (baseCandidate != null) {
+      const normalised = String(baseCandidate).trim().replace(/\s+/g, '-');
+      return `component-${normalised || index}`;
+    }
+    if (fallbackIdMapRef.current.has(comp)) {
+      return fallbackIdMapRef.current.get(comp);
+    }
+    const generated = `component-generated-${fallbackIdCounterRef.current++}`;
+    fallbackIdMapRef.current.set(comp, generated);
+    return generated;
   }, []);
 
-  const cancelDrag = useCallback(() => {
-    draggingRef.current = { fromIndex: null };
-    setIsDragging(false);
+  const itemIds = useMemo(
+    () => components.map((comp, index) => getComponentDndId(comp, index)),
+    [components, getComponentDndId]
+  );
+
+  const [activeId, setActiveId] = useState(null);
+
+  const handleDragStart = useCallback((event) => {
+    const { active } = event;
+    setActiveId(active?.id ?? null);
+    if (typeof active?.data?.current?.index === 'number') {
+      debugDragLog('beginDrag', { index: active.data.current.index });
+    } else {
+      debugDragLog('beginDrag', { id: active?.id });
+    }
   }, []);
 
-  const handleDrop = useCallback((slotIndex) => {
-    const fromIndex = draggingRef.current.fromIndex;
-    if (fromIndex == null) {
-      cancelDrag();
+  const handleDragCancel = useCallback(() => {
+    if (activeId != null) debugDragLog('cancelDrag');
+    setActiveId(null);
+  }, [activeId]);
+
+  const handleDragEnd = useCallback((event) => {
+    const { active, over } = event;
+    if (!active || !over) {
+      debugDragLog('dragEnd cancelled', { hasActive: !!active, hasOver: !!over });
+      handleDragCancel();
       return;
     }
-    let targetIndex = null;
-    setComponents(prevComponents => {
-      if (!Array.isArray(prevComponents) || !prevComponents.length) return prevComponents;
-      if (fromIndex < 0 || fromIndex >= prevComponents.length) return prevComponents;
-      if (slotIndex < 0 || slotIndex > prevComponents.length) return prevComponents;
-      const next = [...prevComponents];
-      const [moved] = next.splice(fromIndex, 1);
-      if (!moved) return prevComponents;
-      const insertIndex = slotIndex > fromIndex ? slotIndex - 1 : slotIndex;
-      next.splice(insertIndex, 0, moved);
-      targetIndex = insertIndex;
-      return next;
-    });
-    draggingRef.current = { fromIndex: null };
-    setIsDragging(false);
-    if (targetIndex != null) {
+    const fromIndex = itemIds.indexOf(active.id);
+    const toIndex = itemIds.indexOf(over.id);
+    debugDragLog('dragEnd', { fromIndex, toIndex, activeId: active.id, overId: over.id });
+    if (fromIndex !== -1 && toIndex !== -1 && fromIndex !== toIndex) {
+      setComponents(prev => arrayMove(prev, fromIndex, toIndex));
       const schedule = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (fn) => setTimeout(fn, 0);
-      schedule(() => handleSelectComponent(targetIndex));
+      schedule(() => handleSelectComponent(toIndex));
     }
-  }, [cancelDrag, setComponents, handleSelectComponent]);
+    setActiveId(null);
+  }, [handleDragCancel, handleSelectComponent, itemIds, setComponents]);
 
-  // Derive set of referenced conditional child keys (id or props.name)
   const conditionalRefMap = useMemo(() => {
     const map = new Map();
     const extract = (val) => {
@@ -232,66 +233,56 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
     return map;
   }, [components]);
 
-  const stageClass = `stage${isDragging ? ' stage--dragging' : ''}`;
-
-  const rendered = [];
-  for (let index = 0; index < components.length; index += 1) {
-    rendered.push(
-      <DropSlot
-        key={`slot-${index}`}
-        slotIndex={index}
-        draggingIndex={draggingRef.current.fromIndex}
-        onDrop={handleDrop}
-      />
-    );
-    const comp = components[index];
-    const key = comp?.templateId || comp?.template_id || comp?.id || comp?.props?.id || comp?.props?.name || `${comp?.type || 'component'}-${index}`;
-    rendered.push(
-      <DraggablePreviewItem
-        key={`comp-${key}-${index}`}
-        index={index}
-        comp={comp}
-        setComponents={setComponents}
-        handleSelectComponent={handleSelectComponent}
-        selectedComponent={selectedComponent}
-        previewLang={previewLang}
-        conditionalRef={(() => {
-          const idKey = comp?.id;
-          const nameKey = comp?.props?.name;
-          if (idKey && conditionalRefMap.get(idKey)) return conditionalRefMap.get(idKey);
-          if (nameKey && conditionalRefMap.get(nameKey)) return conditionalRefMap.get(nameKey);
-          return null;
-        })()}
-        onDragStart={beginDrag}
-        onDragCancel={cancelDrag}
-        isDraggingSelf={draggingRef.current.fromIndex === index && isDragging}
-      />
-    );
-  }
-  if (components.length) {
-    rendered.push(
-      <DropSlot
-        key={`slot-${components.length}`}
-        slotIndex={components.length}
-        draggingIndex={draggingRef.current.fromIndex}
-        onDrop={handleDrop}
-      />
-    );
-  }
+  const stageClass = `stage${activeId ? ' stage--dragging' : ''}`;
 
   return (
-    <div className={stageClass}>
-      {rendered}
-      {components.length === 0 && (
-        <Box color="inherit" textAlign="center" padding="m" variant="div" style={{ color: '#777' }}>
-          Drag from the library or click a component to add it here
-        </Box>
-      )}
-    </div>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragCancel={handleDragCancel}
+      onDragEnd={handleDragEnd}
+    >
+      <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+        <div className={stageClass}>
+          {components.length === 0 && (
+            <Box color="inherit" textAlign="center" padding="m" variant="div" style={{ color: '#777' }}>
+              Drag from the library or click a component to add it here
+            </Box>
+          )}
+          {components.map((comp, index) => {
+            const key = comp?.templateId || comp?.template_id || comp?.id || comp?.props?.id || comp?.props?.name || `${comp?.type || 'component'}-${index}`;
+            const id = itemIds[index];
+            return (
+              <DraggablePreviewItem
+                key={`comp-${key}-${index}`}
+                itemId={id}
+                index={index}
+                comp={comp}
+                setComponents={setComponents}
+                handleSelectComponent={handleSelectComponent}
+                selectedComponent={selectedComponent}
+                previewLang={previewLang}
+                conditionalRef={(() => {
+                  const idKey = comp?.id;
+                  const nameKey = comp?.props?.name;
+                  if (idKey && conditionalRefMap.get(idKey)) return conditionalRefMap.get(idKey);
+                  if (nameKey && conditionalRefMap.get(nameKey)) return conditionalRefMap.get(nameKey);
+                  return null;
+                })()}
+                isActiveDrag={activeId === id}
+                isAnySorting={!!activeId}
+              />
+            );
+          })}
+        </div>
+      </SortableContext>
+    </DndContext>
   );
 };
 
 const DraggablePreviewItem = ({
+  itemId,
   comp,
   index,
   setComponents,
@@ -299,28 +290,27 @@ const DraggablePreviewItem = ({
   selectedComponent,
   previewLang = 'en',
   conditionalRef = null,
-  onDragStart = () => {},
-  onDragCancel = () => {},
-  isDraggingSelf = false
+  isActiveDrag = false,
+  isAnySorting = false
 }) => {
-  const handleRef = useRef(null);
   const pendingFocusTargetRef = useRef(null); // stores original mousedown target when selecting
-  const [{ isDragging }, drag] = useDrag(
-    () => ({
-      type: 'REORDER_COMPONENT',
-      item: () => {
-        onDragStart(index);
-        return { index };
-      },
-      end: (_, monitor) => {
-        if (!monitor.didDrop()) onDragCancel();
-      },
-      collect: monitor => ({ isDragging: !!monitor.isDragging() })
-    }),
-    [index, onDragStart, onDragCancel]
-  );
-  // Apply drag behaviour only to the handle, not the whole card, so text selection isn't hijacked
-  useEffect(() => { if (handleRef.current) drag(handleRef.current); }, [drag]);
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id: itemId, data: { index } });
+
+  const mergedHandleRef = useCallback((node) => {
+    if (node) setActivatorNodeRef(node);
+  }, [setActivatorNodeRef]);
+
+  const styleTransform = transform ? CSS.Transform.toString(transform) : undefined;
+  const dragging = isDragging || isActiveDrag;
+  const transitionStyle = (isDragging || isAnySorting) ? 'transform 0s' : transition;
 
   const handleDelete = e => {
     e.stopPropagation();
@@ -792,11 +782,26 @@ const DraggablePreviewItem = ({
   });
 
   const isSelected = selectedComponent?.index === index;
-  const dragging = isDragging || isDraggingSelf;
+
+  useEffect(() => {
+    debugDragLog('draggable state', { index, isDraggingFromMonitor: isDragging, isActiveDrag, combinedDragging: dragging });
+  }, [index, isDragging, isActiveDrag, dragging]);
+
   return (
     <div
+      ref={setNodeRef}
       className={`stage-card${isSelected ? ' selected' : ''}${dragging ? ' stage-card--dragging' : ''}`}
-      style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', opacity: dragging ? 0.6 : 1 }}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        opacity: dragging ? 0.6 : 1,
+        transform: styleTransform,
+        transition: transitionStyle,
+        willChange: isDragging ? 'transform' : undefined,
+        zIndex: isDragging ? 30 : undefined
+      }}
       onMouseDown={e => {
         if (selectedComponent?.index !== index) {
           pendingFocusTargetRef.current = e.target;
@@ -813,11 +818,13 @@ const DraggablePreviewItem = ({
       }}
     >
         <div
-          ref={handleRef}
+          ref={mergedHandleRef}
           className="handle"
           style={{ padding: 5, fontWeight: 'bold', userSelect: 'none' }}
           aria-label="Drag to reorder component"
           aria-grabbed={dragging}
+          {...attributes}
+          {...listeners}
         >
           ⠿
         </div>
@@ -1678,7 +1685,7 @@ const ModifyComponent = () => {
   /* existing state & effects unchanged */
 
   return (
-    <MaybeDndProvider>
+    <>
       <style>{`
   .stage { padding: 8px; background: #fafafa; min-height: 160px; border: 1px dashed #d5dbdb; }
   .stage--dragging { cursor: grabbing; }
@@ -1688,10 +1695,6 @@ const ModifyComponent = () => {
         .stage-card .handle { cursor:grab; position:absolute; left:8px; top:8px; opacity:0.6; }
         .stage-card .delete { cursor:pointer; position:absolute; right:8px; top:8px; opacity:0.7; }
         .stage-card .inline-edit-target { cursor:text; }
-  .stage-drop-slot { position: relative; height: 0; margin: 0; pointer-events: none; }
-  .stage-drop-slot::after { content:""; position:absolute; left:0; right:0; top:-1px; height:4px; border-radius:4px; background:transparent; transform: scaleY(0); transition: background 0.12s ease, transform 0.12s ease; }
-  .stage--dragging .stage-drop-slot { pointer-events: auto; padding: 10px 0; margin: -5px 0; }
-  .stage-drop-slot--active::after { background: rgba(9,114,211,0.65); transform: scaleY(1); box-shadow: 0 0 0 2px rgba(9,114,211,0.2); }
         .stage .govuk-embedded { background:#fff; }
         /* GOV.UK background normalised inside editor */
         .stage .govuk-form-group { margin-bottom: 20px; }
@@ -1701,7 +1704,7 @@ const ModifyComponent = () => {
   .stage-card .conditional-badge__tooltip:before { content:""; position:absolute; top:-5px; right:12px; width:8px; height:8px; background:#1d1d29; transform:rotate(45deg); }
   .stage-card .conditional-badge[data-has-detail]:hover .conditional-badge__tooltip { display:block; }
       `}</style>
-      <Container
+  <Container
         header={
           <Header
             variant="h2"
@@ -2050,7 +2053,7 @@ const ModifyComponent = () => {
           </Box>
         </Grid>
       </Container>
-  </MaybeDndProvider>
+    </>
   );
 };
 export { setComponentConfigValue };
