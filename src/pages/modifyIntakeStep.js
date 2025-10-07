@@ -135,33 +135,75 @@ const MaybeDndProvider = ({ children }) => {
   return hasProvider ? <>{children}</> : <DndProvider backend={HTML5Backend}>{children}</DndProvider>;
 };
 
+const DropSlot = ({ slotIndex, draggingIndex, onDrop }) => {
+  const [{ isOver, canDrop }, drop] = useDrop(
+    () => ({
+      accept: 'REORDER_COMPONENT',
+      canDrop: () => draggingIndex != null,
+      drop: () => {
+        if (draggingIndex == null) return undefined;
+        onDrop(slotIndex);
+        return { moved: true };
+      },
+      collect: monitor => ({
+        isOver: monitor.isOver({ shallow: true }),
+        canDrop: monitor.canDrop()
+      })
+    }),
+    [slotIndex, onDrop, draggingIndex]
+  );
+
+  const active = isOver && canDrop;
+  return (
+    <div
+      ref={drop}
+      className={`stage-drop-slot${active ? ' stage-drop-slot--active' : ''}`}
+      aria-hidden="true"
+    />
+  );
+};
+
 const PreviewArea = ({ components, setComponents, handleSelectComponent, selectedComponent, previewLang = 'en' }) => {
-  // Flatten bilingual { en, fr } to strings for display safety
-  const flattenTranslations = (val, lang = 'en') => {
-    const isLangObj = (v) => v && typeof v === 'object' && (
-      Object.prototype.hasOwnProperty.call(v, 'en') || Object.prototype.hasOwnProperty.call(v, 'fr')
-    );
-    if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') return String(val);
-    if (Array.isArray(val)) return val.map(v => flattenTranslations(v, lang));
-    if (isLangObj(val)) return String(val[lang] ?? val.en ?? val.fr ?? '');
-    if (val && typeof val === 'object') {
-      const out = Array.isArray(val) ? [] : {};
-      for (const [k, v] of Object.entries(val)) out[k] = flattenTranslations(v, lang);
-      return out;
+  const draggingRef = useRef({ fromIndex: null });
+  const [isDragging, setIsDragging] = useState(false);
+
+  const beginDrag = useCallback((index) => {
+    draggingRef.current = { fromIndex: index };
+    setIsDragging(true);
+  }, []);
+
+  const cancelDrag = useCallback(() => {
+    draggingRef.current = { fromIndex: null };
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((slotIndex) => {
+    const fromIndex = draggingRef.current.fromIndex;
+    if (fromIndex == null) {
+      cancelDrag();
+      return;
     }
-    return val;
-  };
-  const moveComponent = (dragIndex, hoverIndex) => {
+    let targetIndex = null;
     setComponents(prevComponents => {
-      if (dragIndex < 0 || hoverIndex < 0 || dragIndex >= prevComponents.length || hoverIndex >= prevComponents.length) {
-        return prevComponents;
-      }
-      const updated = [...prevComponents];
-      const [moved] = updated.splice(dragIndex, 1);
-      updated.splice(hoverIndex, 0, moved);
-      return updated;
+      if (!Array.isArray(prevComponents) || !prevComponents.length) return prevComponents;
+      if (fromIndex < 0 || fromIndex >= prevComponents.length) return prevComponents;
+      if (slotIndex < 0 || slotIndex > prevComponents.length) return prevComponents;
+      const next = [...prevComponents];
+      const [moved] = next.splice(fromIndex, 1);
+      if (!moved) return prevComponents;
+      const insertIndex = slotIndex > fromIndex ? slotIndex - 1 : slotIndex;
+      next.splice(insertIndex, 0, moved);
+      targetIndex = insertIndex;
+      return next;
     });
-  };
+    draggingRef.current = { fromIndex: null };
+    setIsDragging(false);
+    if (targetIndex != null) {
+      const schedule = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (fn) => setTimeout(fn, 0);
+      schedule(() => handleSelectComponent(targetIndex));
+    }
+  }, [cancelDrag, setComponents, handleSelectComponent]);
+
   // Derive set of referenced conditional child keys (id or props.name)
   const conditionalRefMap = useMemo(() => {
     const map = new Map();
@@ -189,28 +231,57 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
     });
     return map;
   }, [components]);
+
+  const stageClass = `stage${isDragging ? ' stage--dragging' : ''}`;
+
+  const rendered = [];
+  for (let index = 0; index < components.length; index += 1) {
+    rendered.push(
+      <DropSlot
+        key={`slot-${index}`}
+        slotIndex={index}
+        draggingIndex={draggingRef.current.fromIndex}
+        onDrop={handleDrop}
+      />
+    );
+    const comp = components[index];
+    const key = comp?.templateId || comp?.template_id || comp?.id || comp?.props?.id || comp?.props?.name || `${comp?.type || 'component'}-${index}`;
+    rendered.push(
+      <DraggablePreviewItem
+        key={`comp-${key}-${index}`}
+        index={index}
+        comp={comp}
+        setComponents={setComponents}
+        handleSelectComponent={handleSelectComponent}
+        selectedComponent={selectedComponent}
+        previewLang={previewLang}
+        conditionalRef={(() => {
+          const idKey = comp?.id;
+          const nameKey = comp?.props?.name;
+          if (idKey && conditionalRefMap.get(idKey)) return conditionalRefMap.get(idKey);
+          if (nameKey && conditionalRefMap.get(nameKey)) return conditionalRefMap.get(nameKey);
+          return null;
+        })()}
+        onDragStart={beginDrag}
+        onDragCancel={cancelDrag}
+        isDraggingSelf={draggingRef.current.fromIndex === index && isDragging}
+      />
+    );
+  }
+  if (components.length) {
+    rendered.push(
+      <DropSlot
+        key={`slot-${components.length}`}
+        slotIndex={components.length}
+        draggingIndex={draggingRef.current.fromIndex}
+        onDrop={handleDrop}
+      />
+    );
+  }
+
   return (
-    <div className="stage">
-  {components.map((comp, index) => (
-        <DraggablePreviewItem
-    key={(comp?.templateId || comp?.template_id || comp?.id || comp?.props?.id || comp?.props?.name || `${comp.type}-${index}`) + `-${index}`}
-          index={index}
-      comp={comp}
-          moveComponent={moveComponent}
-          setComponents={setComponents}
-          handleSelectComponent={handleSelectComponent}
-    selectedComponent={selectedComponent}
-    previewLang={previewLang}
-  // Try both the persisted id and the original props.name (pre-persistence key) for mapping
-  conditionalRef={(() => { 
-    const idKey = comp?.id; 
-    const nameKey = comp?.props?.name; 
-    if (idKey && conditionalRefMap.get(idKey)) return conditionalRefMap.get(idKey);
-    if (nameKey && conditionalRefMap.get(nameKey)) return conditionalRefMap.get(nameKey);
-    return null; 
-  })()}
-        />
-      ))}
+    <div className={stageClass}>
+      {rendered}
       {components.length === 0 && (
         <Box color="inherit" textAlign="center" padding="m" variant="div" style={{ color: '#777' }}>
           Drag from the library or click a component to add it here
@@ -220,26 +291,36 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
   );
 };
 
-const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handleSelectComponent, selectedComponent, previewLang = 'en', conditionalRef = null }) => {
+const DraggablePreviewItem = ({
+  comp,
+  index,
+  setComponents,
+  handleSelectComponent,
+  selectedComponent,
+  previewLang = 'en',
+  conditionalRef = null,
+  onDragStart = () => {},
+  onDragCancel = () => {},
+  isDraggingSelf = false
+}) => {
   const handleRef = useRef(null);
   const pendingFocusTargetRef = useRef(null); // stores original mousedown target when selecting
-  const [{ isDragging }, drag] = useDrag(() => ({
-    type: "REORDER_COMPONENT",
-    item: { index },
-    collect: monitor => ({ isDragging: !!monitor.isDragging() })
-  }));
+  const [{ isDragging }, drag] = useDrag(
+    () => ({
+      type: 'REORDER_COMPONENT',
+      item: () => {
+        onDragStart(index);
+        return { index };
+      },
+      end: (_, monitor) => {
+        if (!monitor.didDrop()) onDragCancel();
+      },
+      collect: monitor => ({ isDragging: !!monitor.isDragging() })
+    }),
+    [index, onDragStart, onDragCancel]
+  );
   // Apply drag behaviour only to the handle, not the whole card, so text selection isn't hijacked
   useEffect(() => { if (handleRef.current) drag(handleRef.current); }, [drag]);
-
-  const [, drop] = useDrop({
-    accept: "REORDER_COMPONENT",
-    hover: (dragged) => {
-      if (dragged.index !== index && dragged.index !== undefined) {
-        moveComponent(dragged.index, index);
-        dragged.index = index;
-      }
-    }
-  });
 
   const handleDelete = e => {
     e.stopPropagation();
@@ -710,11 +791,12 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
     return prev.comp === next.comp && prev.previewLang === next.previewLang && prev.isSelected === next.isSelected;
   });
 
+  const isSelected = selectedComponent?.index === index;
+  const dragging = isDragging || isDraggingSelf;
   return (
-  <div
-      ref={node => drop(node)}
-      className={`stage-card${selectedComponent?.index === index ? ' selected' : ''}`}
-      style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', opacity: isDragging ? 0.9 : 1 }}
+    <div
+      className={`stage-card${isSelected ? ' selected' : ''}${dragging ? ' stage-card--dragging' : ''}`}
+      style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', opacity: dragging ? 0.6 : 1 }}
       onMouseDown={e => {
         if (selectedComponent?.index !== index) {
           pendingFocusTargetRef.current = e.target;
@@ -730,7 +812,15 @@ const DraggablePreviewItem = ({ comp, index, moveComponent, setComponents, handl
         e.stopPropagation();
       }}
     >
-      <div ref={handleRef} className="handle" style={{ padding: 5, fontWeight: 'bold', userSelect: 'none' }}>⠿</div>
+        <div
+          ref={handleRef}
+          className="handle"
+          style={{ padding: 5, fontWeight: 'bold', userSelect: 'none' }}
+          aria-label="Drag to reorder component"
+          aria-grabbed={dragging}
+        >
+          ⠿
+        </div>
       {conditionalRef && (
         <div
           className="conditional-badge"
@@ -1590,12 +1680,18 @@ const ModifyComponent = () => {
   return (
     <MaybeDndProvider>
       <style>{`
-        .stage { padding: 8px; background: #fafafa; min-height: 160px; border: 1px dashed #d5dbdb; }
-        .stage-card { background:#fff; border:1px solid #d5dbdb; border-radius:8px; padding:12px; margin-bottom:12px; position:relative; }
+  .stage { padding: 8px; background: #fafafa; min-height: 160px; border: 1px dashed #d5dbdb; }
+  .stage--dragging { cursor: grabbing; }
+  .stage-card { background:#fff; border:1px solid #d5dbdb; border-radius:8px; padding:12px; margin-bottom:12px; position:relative; transition: transform 0.12s ease, box-shadow 0.12s ease; }
         .stage-card.selected { box-shadow: 0 0 0 2px #0972d3 inset; }
+  .stage-card--dragging { opacity: 0.55; transform: scale(0.995); }
         .stage-card .handle { cursor:grab; position:absolute; left:8px; top:8px; opacity:0.6; }
         .stage-card .delete { cursor:pointer; position:absolute; right:8px; top:8px; opacity:0.7; }
         .stage-card .inline-edit-target { cursor:text; }
+  .stage-drop-slot { position: relative; height: 0; margin: 0; pointer-events: none; }
+  .stage-drop-slot::after { content:""; position:absolute; left:0; right:0; top:-1px; height:4px; border-radius:4px; background:transparent; transform: scaleY(0); transition: background 0.12s ease, transform 0.12s ease; }
+  .stage--dragging .stage-drop-slot { pointer-events: auto; padding: 10px 0; margin: -5px 0; }
+  .stage-drop-slot--active::after { background: rgba(9,114,211,0.65); transform: scaleY(1); box-shadow: 0 0 0 2px rgba(9,114,211,0.2); }
         .stage .govuk-embedded { background:#fff; }
         /* GOV.UK background normalised inside editor */
         .stage .govuk-form-group { margin-bottom: 20px; }
