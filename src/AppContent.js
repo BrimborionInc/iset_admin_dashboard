@@ -24,6 +24,7 @@ import AdminDashboardHelp from './helpPanelContents/adminDashboardHelp.js';
 
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_STORED_MESSAGES = 24;
+const MAX_PROMPT_CHARS = 1000;
 
 const CONTEXT_FACTS = {
   'iset-application-assessment': `
@@ -120,6 +121,7 @@ const FloatingChat = React.memo(function FloatingChat({
   const [chatMessages, setChatMessages] = useState([]);
   const [promptValue, setPromptValue] = useState('');
   const [loading, setLoading] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const chatContainerRef = useRef(null);
   const chatInputRef = useRef(null);
 
@@ -265,6 +267,8 @@ const FloatingChat = React.memo(function FloatingChat({
     }
   }, [chatMessages, visible]);
 
+  const sendDisabled = loading || !promptValue.trim();
+
   return (
     <div
       role="dialog"
@@ -295,36 +299,86 @@ const FloatingChat = React.memo(function FloatingChat({
           </Header>
         }
         footer={
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
-            <textarea
-              ref={chatInputRef}
-              value={promptValue}
-              onChange={(event) => setPromptValue(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  handleSendMessage();
-                }
-              }}
-              placeholder="Ask your question here..."
-              rows={3}
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleSendMessage();
+            }}
+            style={{ width: '100%' }}
+          >
+            <div
               style={{
-                flexGrow: 1,
-                width: '100%',
-                padding: '0.75rem',
-                resize: 'vertical',
-                borderRadius: '8px',
-                border: '1px solid var(--color-border-input-default, #aab7b8)'
+                display: 'flex',
+                alignItems: 'flex-end',
+                gap: '0.5rem',
+                backgroundColor: 'var(--color-background-input-default, #ffffff)',
+                border: '1px solid var(--color-border-input-default, #aab7b8)',
+                borderRadius: '999px',
+                padding: '0.35rem 0.75rem',
+                transition: 'box-shadow 120ms ease, border-color 120ms ease',
+                boxShadow: inputFocused ? '0 0 0 2px rgba(9, 114, 211, 0.35)' : 'none'
               }}
-            />
-            <Button
-              onClick={handleSendMessage}
-              variant="primary"
-              disabled={loading || !promptValue.trim()}
             >
-              {loading ? 'Sending…' : 'Send'}
-            </Button>
-          </div>
+              <textarea
+                ref={chatInputRef}
+                value={promptValue}
+                maxLength={MAX_PROMPT_CHARS}
+                onChange={(event) => setPromptValue(event.target.value)}
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
+                placeholder="Ask me anything about this page..."
+                rows={1}
+                style={{
+                  flexGrow: 1,
+                  resize: 'vertical',
+                  border: 'none',
+                  outline: 'none',
+                  background: 'transparent',
+                  color: 'var(--color-text-body-default, #0f172a)',
+                  fontSize: '0.95rem',
+                  lineHeight: 1.5,
+                  padding: '0.35rem 0',
+                  minHeight: '2.5rem',
+                  maxHeight: '8rem',
+                  width: '100%'
+                }}
+              />
+              <Button
+                type="submit"
+                variant="icon"
+                iconName="send"
+                loading={loading}
+                disabled={sendDisabled}
+                ariaLabel="Send message"
+                style={{
+                  backgroundColor: sendDisabled ? 'var(--color-background-button-icon-disabled, #f2f3f3)' : 'var(--color-background-button-primary-default, #0972d3)',
+                  color: sendDisabled ? 'var(--color-text-button-icon-disabled, #aab7b8)' : '#ffffff',
+                  borderRadius: '999px',
+                  width: '2.75rem',
+                  height: '2.75rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              />
+            </div>
+            <div
+              style={{
+                marginTop: '0.25rem',
+                fontSize: '0.75rem',
+                color: 'var(--color-text-body-secondary, #6b7280)',
+                textAlign: 'right'
+              }}
+            >
+              Max {MAX_PROMPT_CHARS.toLocaleString()} characters
+            </div>
+          </form>
         }
         style={{
           boxShadow: '0 16px 40px rgba(15, 23, 42, 0.35)',

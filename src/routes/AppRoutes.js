@@ -62,6 +62,7 @@ import ManageApplications from '../pages/manageApplications.js'; // Import the n
 import ManageOrganisations from '../pages/manageOrganisations.js'; // Import the new component
 import CaseAssignmentDashboard from '../pages/caseAssignmentDashboard.js'; // Import the new component
 import ApplicationCaseDashboard from '../pages/applicationCaseDashboard.js'; // Import the new component
+import CaseAssignmentDashboardHelp from '../helpPanelContents/caseAssignmentDashboardHelp.js';
 import ApplicationCaseDashboardHelp from '../helpPanelContents/applicationCaseDashboardHelp.js';
 import ArmsReportingDashboard from '../pages/armsReporting.js'; // Import the new component
 import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Import the NWAC Hub Management dashboard
@@ -362,10 +363,17 @@ const AppRoutes = ({
         </Guard>
       </Route>
       <Route path="/case-assignment-dashboard">
-        {renderContent(CaseAssignmentDashboard, [
-          { text: 'Home', href: '/' },
-          { text: 'Manage Applications', href: '/case-assignment-dashboard' }
-  ], 'Manage Applications', 'caseAssignment')}
+        {renderContent(
+          CaseAssignmentDashboard,
+          [
+            { text: 'Home', href: '/' },
+            { text: 'Manage ISET Applications', href: '/case-assignment-dashboard' }
+          ],
+          'Manage ISET Applications',
+          <CaseAssignmentDashboardHelp />,
+          null,
+          CaseAssignmentDashboardHelp.aiContext
+        )}
       </Route>
       <Route path="/application-case/:id">
         <Guard path="/application-case/:id">
@@ -373,7 +381,7 @@ const AppRoutes = ({
             ApplicationCaseDashboard,
             [
               { text: 'Home', href: '/' },
-              { text: 'Manage Applications', href: '/case-assignment-dashboard' },
+                { text: 'Manage ISET Applications', href: '/case-assignment-dashboard' },
               { text: 'Assessment' }
             ],
             'ISET Application Assessment',
