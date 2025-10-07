@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Header, Button, SpaceBetween, Table, TextFilter, ButtonDropdown, Link, Modal, Alert } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useHistory } from 'react-router-dom';
@@ -11,34 +11,69 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
   const [filteringText, setFilteringText] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
-  const [banner, setBanner] = useState(null); // { type: 'info'|'error', message }
+  const [banner, setBanner] = useState(null); // { type: 'info'|'error'|'success', header, message }
+  const [selectedId, setSelectedId] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const history = useHistory();
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const resp = await apiFetch('/api/steps');
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          throw new Error(err.error || err.message || `HTTP ${resp.status}`);
-        }
-        const data = await resp.json();
-        if (cancelled) return;
-        const list = Array.isArray(data) ? data : (Array.isArray(data?.rows) ? data.rows : []);
-        setSteps(list);
-      } catch (e) {
-        if (!cancelled) {
-          console.error('Error fetching steps:', e);
-          setBanner({ type: 'error', message: e.message || 'Failed to load steps' });
-          setSteps([]);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+  const parseJsonBody = useCallback(async (resp) => {
+    try {
+      const text = await resp.text();
+      if (!text) return null;
+      return JSON.parse(text);
+    } catch (err) {
+      throw new Error('Invalid response from server');
+    }
   }, []);
+
+  const fetchSteps = useCallback(async ({ signal, silent = false } = {}) => {
+    if (!silent) setLoading(true);
+    try {
+      const resp = await apiFetch('/api/steps', { signal });
+      if (!resp.ok) {
+        const payload = await parseJsonBody(resp).catch(() => null);
+        const message = payload?.error || payload?.message || `HTTP ${resp.status}`;
+        throw new Error(message);
+      }
+      const payload = await parseJsonBody(resp);
+      if (signal?.aborted) return;
+      const list = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.rows)
+            ? payload.rows
+            : [];
+      setSteps(list);
+      setBanner(prev => (prev?.type === 'error' ? null : prev));
+      if (selectedId && !list.some(item => item?.id === selectedId)) {
+        setSelectedId(null);
+        setSelectedBlockStep?.(null);
+      }
+    } catch (e) {
+      if (signal?.aborted) return;
+      console.error('Error fetching steps:', e);
+      setSteps([]);
+      setBanner({ type: 'error', header: 'Failed to load intake steps', message: e.message || 'Unable to fetch steps.' });
+    } finally {
+      if (!silent && !signal?.aborted) setLoading(false);
+    }
+  }, [parseJsonBody, selectedId, setSelectedBlockStep]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchSteps({ signal: controller.signal });
+    return () => controller.abort();
+  }, [fetchSteps]);
+
+  useEffect(() => {
+    const unlisten = history.listen((location) => {
+      if (location.pathname === '/manage-components') {
+        fetchSteps();
+      }
+    });
+    return unlisten;
+  }, [history, fetchSteps]);
 
   const handleModify = (step) => {
     history.push(`/modify-component/${step.id}`);
@@ -52,21 +87,33 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
   const confirmDelete = async () => {
     const step = pendingDelete;
     if (!step) return;
+    setIsDeleting(true);
     try {
       const resp = await apiFetch(`/api/steps/${step.id}`, { method: 'DELETE' });
+      const payload = await resp.json().catch(() => ({}));
       if (resp.ok) {
         setSteps(prev => prev.filter(item => item.id !== step.id));
-        setBanner({ type: 'info', message: 'Step deleted.' });
+        if (selectedId === step.id) {
+          setSelectedId(null);
+          setSelectedBlockStep?.(null);
+        }
+        setBanner({ type: 'success', header: 'Step deleted', message: `"${step.name}" was removed.` });
+        fetchSteps({ silent: true });
       } else {
-        const err = await resp.json().catch(() => ({}));
-        setBanner({ type: 'error', message: `Failed to delete step: ${err.error || err.message || resp.status}` });
+        const details = [];
+        if (Array.isArray(payload?.workflows) && payload.workflows.length) {
+          details.push(`Referenced by: ${payload.workflows.slice(0, 5).join(', ')}`);
+        }
+        const message = payload?.error || payload?.message || `HTTP ${resp.status}`;
+        setBanner({ type: 'error', header: 'Delete failed', message: [message, ...details].filter(Boolean).join('. ') });
       }
     } catch (error) {
       console.error('Error deleting step:', error);
-      setBanner({ type: 'error', message: 'An error occurred while deleting the step.' });
+      setBanner({ type: 'error', header: 'Delete failed', message: 'An error occurred while deleting the step.' });
     } finally {
       setShowDeleteModal(false);
       setPendingDelete(null);
+      setIsDeleting(false);
     }
   };
 
@@ -76,12 +123,29 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
   };
 
   const handleSelect = (step) => {
+    if (!step) return;
+    setSelectedId(step.id);
     setSelectedBlockStep?.(step);
   };
 
   const handleCreateNew = () => {
     history.push('/modify-component/new');
   };
+
+  const filteredSteps = useMemo(() => {
+    const search = filteringText.trim().toLowerCase();
+    if (!search) return steps;
+    return steps.filter(item => {
+      const name = (item?.name || '').toString().toLowerCase();
+      return name.includes(search);
+    });
+  }, [steps, filteringText]);
+
+  const selectedItems = useMemo(() => {
+    if (!selectedId) return [];
+    const match = steps.find(item => item?.id === selectedId);
+    return match ? [match] : [];
+  }, [steps, selectedId]);
 
   return (
     <BoardItem
@@ -97,12 +161,18 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
             </Link>
           }
           actions={
-            <Button
-              iconAlign="right"
-              onClick={handleCreateNew} // Add onClick handler
-            >
-              Create New Step
-            </Button>
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button iconName="refresh" onClick={() => fetchSteps()} ariaLabel="Refresh intake steps" loading={loading}>
+                Refresh
+              </Button>
+              <Button
+                iconAlign="right"
+                onClick={handleCreateNew}
+                ariaLabel="Create a new intake step"
+              >
+                Create New Step
+              </Button>
+            </SpaceBetween>
           }
         >
           Intake Step Library
@@ -129,13 +199,20 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
             type={banner.type}
             dismissible
             onDismiss={() => setBanner(null)}
-            header={banner.type === 'error' ? 'Delete failed' : 'Step deleted'}
+            header={banner.header || (banner.type === 'error' ? 'Action failed' : 'Notice')}
           >
             {banner.message}
           </Alert>
         )}
         <Table
           variant="embedded"
+          selectionType="single"
+          trackBy="id"
+          selectedItems={selectedItems}
+          onSelectionChange={({ detail }) => {
+            const item = detail.selectedItems?.[0];
+            if (item) handleSelect(item);
+          }}
           renderAriaLive={({ firstIndex, lastIndex, totalItemsCount }) =>
             `Displaying items ${firstIndex} to ${lastIndex} of ${totalItemsCount}`
           }
@@ -151,8 +228,8 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
               id: 'name',
               header: 'Intake Step',
               cell: item => (
-                <Link onClick={() => handleSelect(item)}>
-                  {item.name}
+                <Link onFollow={(event) => { event.preventDefault(); handleSelect(item); }}>
+                  {item?.name || 'Untitled'}
                 </Link>
               ),
               sortingField: 'name'
@@ -160,21 +237,27 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
             {
               id: 'status',
               header: 'Status',
-              cell: item => item.status,
+              cell: item => item?.status || 'unknown',
               sortingField: 'status'
+            },
+            {
+              id: 'updated_at',
+              header: 'Updated',
+              cell: item => item?.updated_at ? new Date(item.updated_at).toLocaleString() : '—',
+              sortingField: 'updated_at'
             },
             {
               id: 'actions',
               header: 'Actions',
               cell: item => (
                 <SpaceBetween direction="horizontal" size="xs">
-                  <Button variant="inline-link" onClick={() => handleModify(item)}>Modify</Button>
-                  <Button variant="inline-link" onClick={() => openDeleteModal(item)}>Delete</Button>
+                  <Button variant="inline-link" onClick={() => handleModify(item)} ariaLabel={`Modify ${item?.name || 'intake step'}`}>Modify</Button>
+                  <Button variant="inline-link" onClick={() => openDeleteModal(item)} ariaLabel={`Delete ${item?.name || 'intake step'}`}>Delete</Button>
                 </SpaceBetween>
               )
             }
           ]}
-          items={steps.filter(item => item.name.toLowerCase().includes(filteringText.toLowerCase()))}
+          items={filteredSteps}
           loading={loading}
           loadingText="Loading resources"
           empty={
@@ -189,8 +272,9 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
             <TextFilter
               filteringPlaceholder="Find intake step"
               filteringText={filteringText}
+              filteringAriaLabel="Filter intake steps"
               onChange={({ detail }) => setFilteringText(detail.filteringText)}
-              countText={`${steps.length} matches`}
+              countText={filteredSteps.length === 1 ? '1 match' : `${filteredSteps.length} matches`}
             />
           }
         />
@@ -203,7 +287,7 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
           footer={
             <SpaceBetween direction="horizontal" size="xs">
               <Button onClick={cancelDelete}>Cancel</Button>
-              <Button variant="primary" onClick={confirmDelete}>Delete</Button>
+              <Button variant="primary" onClick={confirmDelete} disabled={isDeleting} loading={isDeleting}>Delete</Button>
             </SpaceBetween>
           }
         >

@@ -9,7 +9,14 @@ const axios = require('axios');
   try {
     // 1) List steps to choose some
     const stepsRes = await api.get('/api/steps');
-    const steps = stepsRes.data || [];
+    const payload = stepsRes.data || [];
+    const steps = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload.items)
+        ? payload.items
+        : Array.isArray(payload.rows)
+          ? payload.rows
+          : [];
     if (steps.length < 2) {
       console.log('Not enough steps to create a workflow. Found:', steps.length);
       process.exit(0);
