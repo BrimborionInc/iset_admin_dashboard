@@ -218,13 +218,6 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
           }
           columnDefinitions={[
             {
-              id: 'id',
-              header: 'ID',
-              cell: item => item.id,
-              sortingField: 'id',
-              isRowHeader: true
-            },
-            {
               id: 'name',
               header: 'Intake Step',
               cell: item => (
@@ -232,13 +225,8 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
                   {item?.name || 'Untitled'}
                 </Link>
               ),
-              sortingField: 'name'
-            },
-            {
-              id: 'status',
-              header: 'Status',
-              cell: item => item?.status || 'unknown',
-              sortingField: 'status'
+              sortingField: 'name',
+              isRowHeader: true
             },
             {
               id: 'updated_at',
@@ -251,8 +239,8 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
               header: 'Actions',
               cell: item => (
                 <SpaceBetween direction="horizontal" size="xs">
-                  <Button variant="inline-link" onClick={() => handleModify(item)} ariaLabel={`Modify ${item?.name || 'intake step'}`}>Modify</Button>
-                  <Button variant="inline-link" onClick={() => openDeleteModal(item)} ariaLabel={`Delete ${item?.name || 'intake step'}`}>Delete</Button>
+                  <Button variant="inline-link" onClick={() => handleModify(item)} ariaLabel={`Modify ${item?.name || `intake step #${item?.id ?? ''}`}`}>Modify</Button>
+                  <Button variant="inline-link" onClick={() => openDeleteModal(item)} ariaLabel={`Delete ${item?.name || `intake step #${item?.id ?? ''}`}`}>Delete</Button>
                 </SpaceBetween>
               )
             }
