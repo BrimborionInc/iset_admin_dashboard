@@ -56,7 +56,7 @@ export async function apiFetch(path, options = {}) {
     }
   } catch (_) {}
   headers.set('X-Iam-Mode', iamMode);
-  if (process.env.NODE_ENV !== 'production') { try { console.debug('[apiFetch] iamMode=', iamMode, 'path=', requestPath); } catch (_) {} }
+  // Suppress noisy console output in development; logging can be re-enabled by adding a debug flag here if needed.
 
   const bypass = getBypassHeaders(iamMode, requestPath);
   if (bypass) {
