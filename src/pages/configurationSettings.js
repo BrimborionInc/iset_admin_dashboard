@@ -53,6 +53,8 @@ const LOCKING_MODE_OPTIONS = [
   { label: 'Optimistic + Pessimistic', value: 'pessimistic' },
 ];
 
+const LOCKING_HEADER_DESCRIPTION = 'Configure pessimistic locking for application edits. Optimistic version checks remain enabled in all modes; enabling pessimistic locking adds a database lock so only one user can edit at a time within the configured timeout.';
+
 export default function ConfigurationSettings({ toggleHelpPanel }) {
   const [runtime, setRuntime] = useState(null);
   const [security, setSecurity] = useState(null);
@@ -201,6 +203,34 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
     setLockingError(null);
   }, [lockingConfig, toLockingEditState]);
 
+  const lockingUi = useMemo(() => {
+    const currentMode = lockingEdits?.mode || lockingConfig?.mode || DEFAULT_LOCKING_CONFIG.mode;
+    const selectedMode = LOCKING_MODE_OPTIONS.find((option) => option.value === currentMode) || LOCKING_MODE_OPTIONS[0];
+    const ttlInput = lockingEdits?.lockTtlMinutes ?? '';
+    const heartbeatInput = lockingEdits?.heartbeatMinutes ?? '';
+    const parsedTtl = parseLockingMinutes(ttlInput);
+    const ttlError = ttlInput && parsedTtl === null ? 'Enter a positive number of minutes.' : null;
+    const parsedHeartbeat = parseLockingMinutes(heartbeatInput);
+    let heartbeatError = heartbeatInput && parsedHeartbeat === null ? 'Enter a positive number of minutes.' : null;
+    if (!heartbeatError && parsedHeartbeat !== null) {
+      const compareTtl = parsedTtl ?? lockingConfig?.lockTtlMinutes ?? DEFAULT_LOCKING_CONFIG.lockTtlMinutes;
+      if (parsedHeartbeat > compareTtl) {
+        heartbeatError = 'Heartbeat interval must be less than or equal to the lock timeout.';
+      }
+    }
+    const disableInputs = lockingLoading || !canEditLocking;
+    const disableActions = disableInputs || lockingSaving || !lockingDirty || Boolean(ttlError) || Boolean(heartbeatError);
+    return {
+      selectedMode,
+      ttlInput,
+      heartbeatInput,
+      ttlError,
+      heartbeatError,
+      disableInputs,
+      disableActions,
+    };
+  }, [lockingEdits, lockingConfig, parseLockingMinutes, lockingLoading, canEditLocking, lockingSaving, lockingDirty]);
+
   // Layout items
   const defaultBoardItems = React.useMemo(() => ([
     { id: 'ai', columnSpan: 2, rowSpan: 4, data: { type: 'ai' } },
@@ -210,8 +240,8 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
     { id: 'cors', columnSpan: 2, rowSpan: 2, data: { type: 'cors' } },
     { id: 'env', columnSpan: 2, rowSpan: 4, data: { type: 'env' } },
     { id: 'secrets', columnSpan: 2, rowSpan: 3, data: { type: 'secrets' } },
-    { id: 'appearance', columnSpan: 2, rowSpan: 2, data: { type: 'appearance' } },
-    { id: 'locking', columnSpan: 2, rowSpan: 3, data: { type: 'locking' }, label: 'Record Locking' },
+    { id: 'locking', columnSpan: 2, rowSpan: 4, data: { type: 'locking' }, label: 'Record Locking' },
+    { id: 'appearance', columnSpan: 2, rowSpan: 2, data: { type: 'appearance' } }
   ]), []);
   const [boardItems, setBoardItems] = useState(defaultBoardItems);
   const resetLayout = () => setBoardItems(defaultBoardItems);
@@ -960,29 +990,10 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
   case 'auth':
     return renderAuth();
   case 'locking': {
-    const currentMode = lockingEdits?.mode || lockingConfig?.mode || DEFAULT_LOCKING_CONFIG.mode;
-    const selectedMode = LOCKING_MODE_OPTIONS.find((option) => option.value === currentMode) || LOCKING_MODE_OPTIONS[0];
-    const ttlInput = lockingEdits?.lockTtlMinutes ?? '';
-    const heartbeatInput = lockingEdits?.heartbeatMinutes ?? '';
-    const parsedTtl = parseLockingMinutes(ttlInput);
-    const ttlError = ttlInput && parsedTtl === null ? 'Enter a positive number of minutes.' : null;
-    const parsedHeartbeat = parseLockingMinutes(heartbeatInput);
-    let heartbeatError = heartbeatInput && parsedHeartbeat === null ? 'Enter a positive number of minutes.' : null;
-    if (!heartbeatError && parsedHeartbeat !== null) {
-      const compareTtl = parsedTtl ?? lockingConfig?.lockTtlMinutes ?? DEFAULT_LOCKING_CONFIG.lockTtlMinutes;
-      if (parsedHeartbeat > compareTtl) {
-        heartbeatError = 'Heartbeat interval must be less than or equal to the lock timeout.';
-      }
-    }
-
-    const disableInputs = lockingLoading || !canEditLocking;
-    const disableActions = disableInputs || lockingSaving || !lockingDirty || Boolean(ttlError) || Boolean(heartbeatError);
+    const { selectedMode, ttlInput, heartbeatInput, ttlError, heartbeatError, disableInputs } = lockingUi;
 
     return (
       <SpaceBetween size="s">
-        <Alert type="info" header="Record locking">
-          Configure pessimistic locking for application edits. Optimistic version checks remain enabled in all modes; enabling pessimistic locking adds a database lock so only one user can edit at a time within the configured timeout.
-        </Alert>
         {lockingError && (
           <Alert type="error" header="Locking configuration error" onDismiss={() => setLockingError(null)} dismissible>
             {lockingError}
@@ -1032,19 +1043,6 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
             <Box />
           </ColumnLayout>
         )}
-        <SpaceBetween direction="horizontal" size="xs">
-          <Button onClick={resetLockingEdits} disabled={lockingLoading || lockingSaving || !lockingDirty}>
-            Reset
-          </Button>
-          <Button
-            variant="primary"
-            loading={lockingSaving}
-            disabled={disableActions}
-            onClick={saveLockingConfig}
-          >
-            Save locking settings
-          </Button>
-        </SpaceBetween>
         <Box variant="small" color="text-status-inactive">
           Locks are automatically released on save, on cancel, or when the timeout elapses. Heartbeats run only while the editor keeps the form open.
         </Box>
@@ -1211,6 +1209,7 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
               header={
                 <Header
                   variant="h2"
+                  description={item.id === 'locking' ? LOCKING_HEADER_DESCRIPTION : undefined}
                   info={<Link variant="info" onClick={() => {
                     const Comp = helpComponents[item.data.type];
                     if (toggleHelpPanel && Comp) {
@@ -1235,13 +1234,33 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
                         <SpaceBetween direction="horizontal" size="xs">
                           <Button onClick={handleSlaSave} loading={savingSla} disabled={!isSlaDirty || savingSla}>Save</Button>
                           <Button variant="link" onClick={handleSlaReset} disabled={!isSlaDirty || savingSla}>Cancel</Button>
-                        </SpaceBetween>
-                      );
-                    }
-                    if (item.id === 'ai') {
-                      return (
-                        <SpaceBetween direction="horizontal" size="xs">
-                          {runtime?.ai?.model && (
+                    </SpaceBetween>
+                  );
+                }
+                if (item.id === 'locking') {
+                  if (!canEditLocking) {
+                    return <Badge color="grey">Read only</Badge>;
+                  }
+                  return (
+                    <SpaceBetween direction="horizontal" size="xs">
+                      <Button onClick={resetLockingEdits} disabled={lockingLoading || lockingSaving || !lockingDirty}>
+                        Reset
+                      </Button>
+                      <Button
+                        variant="primary"
+                        loading={lockingSaving}
+                        disabled={lockingUi.disableActions}
+                        onClick={saveLockingConfig}
+                      >
+                        Save locking settings
+                      </Button>
+                    </SpaceBetween>
+                  );
+                }
+                if (item.id === 'ai') {
+                  return (
+                    <SpaceBetween direction="horizontal" size="xs">
+                      {runtime?.ai?.model && (
                             <Badge color="blue">{runtime.ai.model}</Badge>
                           )}
                           {runtime?.ai?.enabled != null && (
