@@ -1,0 +1,48 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Applicant Details",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/radios/macro.njk" import govukRadios %}    {{ govukRadios({     name: "example-radio",     fieldset: {       legend: {         text: "Do you have any dependent children?",         isPageHeading: false,         classes: "govuk-fieldset__legend--l"       }     },     hint: {       text: ""     },     classes: "govuk-radios",     formGroup: {       classes: props.formGroup.classes     },     disabled: false,     items: [
+  {
+    "text": "Yes",
+    "value": "1"
+  },
+  {
+    "text": "No",
+    "value": "2"
+  }
+]}) }}
+
+
+{% from "govuk/components/input/macro.njk" import govukInput %}
+
+{{ govukInput({
+  name: "first-name",
+  type: "text",
+  label: {
+    text: "",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "What are their ages?"
+  },
+  classes: "govuk-input",
+  autocomplete: "given-name",
+  formGroup: {
+    classes: props.formGroup.classes
+  },
+  disabled: false
+}) }}

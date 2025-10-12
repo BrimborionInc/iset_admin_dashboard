@@ -1,14 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { Container, Header, Table, Link, SpaceBetween, Alert } from '@cloudscape-design/components';
+import React, { useState } from 'react';
+import { SpaceBetween } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import ManageTemplates from '../widgets/manageTemplates';
 // import ConfigureNotifications from '../widgets/configureNotifications'; // Import the new widget
 import NotificationSettingsWidget from '../widgets/notificationSettingsWidget';
-import { apiFetch } from '../auth/apiClient';
 
-const ManageNotifications = ({ toggleHelpPanel, updateBreadcrumbs, setSplitPanelOpen, splitPanelOpen, setSplitPanelSize, splitPanelSize, setAvailableItems }) => {
-  const [notifications, setNotifications] = useState([]);
-  const [alertVisible, setAlertVisible] = useState(true);
+const ManageNotifications = ({ toggleHelpPanel }) => {
   const [items, setItems] = useState([
     {
       id: 'notification-settings-widget',
@@ -30,20 +27,6 @@ const ManageNotifications = ({ toggleHelpPanel, updateBreadcrumbs, setSplitPanel
     // },
     // Add more widgets here as needed
   ]);
-
-  useEffect(() => {
-    const fetchNotifications = async () => {
-      try {
-  const response = await apiFetch(`/api/notifications`);
-        const data = await response.json();
-        setNotifications(data);
-      } catch (error) {
-        console.error('Error fetching notifications:', error);
-      }
-    };
-
-    fetchNotifications();
-  }, []);
 
   return (
     <SpaceBetween size="l">

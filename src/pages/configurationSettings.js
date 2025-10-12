@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Button, SpaceBetween, Box, Select, FormField, StatusIndicator, Toggle, ColumnLayout, Input, Multiselect, Header, Badge, Checkbox, Modal, Tabs, Alert, Link, Table } from '@cloudscape-design/components';
 import { Board, BoardItem } from '@cloudscape-design/board-components';
 import { getIdTokenClaims, getRoleFromClaims, isIamOn, hasValidSession } from '../auth/cognito';
@@ -42,13 +42,23 @@ const SLA_STAGE_LABELS = SLA_STAGE_PLACEHOLDER.reduce((acc, item) => {
   return acc;
 }, {});
 
+const DEFAULT_LOCKING_CONFIG = {
+  mode: 'optimistic',
+  lockTtlMinutes: 15,
+  heartbeatMinutes: 2,
+};
+
+const LOCKING_MODE_OPTIONS = [
+  { label: 'Optimistic only', value: 'optimistic' },
+  { label: 'Optimistic + Pessimistic', value: 'pessimistic' },
+];
+
 export default function ConfigurationSettings({ toggleHelpPanel }) {
   const [runtime, setRuntime] = useState(null);
   const [security, setSecurity] = useState(null);
-  const [loading, setLoading] = useState(false);
   const [aiModel, setAiModel] = useState(null);
-  const [modelOptions, setModelOptions] = useState(STATIC_MODEL_PLACEHOLDERS);
-  const [modelsLoading, setModelsLoading] = useState(false);
+  const modelOptions = STATIC_MODEL_PLACEHOLDERS;
+  const modelsLoading = false;
   const [savingModel, setSavingModel] = useState(false);
   const [savingParams, setSavingParams] = useState(false);
   const [savingFallbacks, setSavingFallbacks] = useState(false);
@@ -63,6 +73,11 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
   const [slaLoading, setSlaLoading] = useState(false);
   const [slaError, setSlaError] = useState(null);
   const [savingSla, setSavingSla] = useState(false);
+  const [lockingConfig, setLockingConfig] = useState(null);
+  const [lockingEdits, setLockingEdits] = useState(null);
+  const [lockingLoading, setLockingLoading] = useState(true);
+  const [lockingSaving, setLockingSaving] = useState(false);
+  const [lockingError, setLockingError] = useState(null);
   // Auth Phase 4 multi-scope state: separate Admin vs Applicants ("public")
   // Each scope gets its own session/token TTL edits and policy edits
   const [authSessionAdminOriginal, setAuthSessionAdminOriginal] = useState(null);
@@ -110,9 +125,81 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
   const canEditAI = role === 'System Administrator';
   const canEditAuth = role === 'System Administrator';
   const canEditSla = role === 'System Administrator' || role === 'Program Administrator';
+  const canEditLocking = role === 'System Administrator';
   const visibility = security?.visibility;
   const canSeeAny = visibility === 'admin' || visibility === 'restricted';
   const fullyAdmin = visibility === 'admin';
+
+  const parseLockingMinutes = useCallback((value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    return Math.round(numeric);
+  }, []);
+
+  const normaliseLocking = useCallback((value) => {
+    const modeRaw = typeof value?.mode === 'string' ? value.mode.toLowerCase() : DEFAULT_LOCKING_CONFIG.mode;
+    const mode = LOCKING_MODE_OPTIONS.some((option) => option.value === modeRaw) ? modeRaw : DEFAULT_LOCKING_CONFIG.mode;
+    const ttlRaw = Number(value?.lockTtlMinutes);
+    const ttl = Number.isFinite(ttlRaw) && ttlRaw > 0 ? Math.round(ttlRaw) : DEFAULT_LOCKING_CONFIG.lockTtlMinutes;
+    const heartbeatRaw = Number(value?.heartbeatMinutes);
+    let heartbeat = Number.isFinite(heartbeatRaw) && heartbeatRaw > 0 ? Math.round(heartbeatRaw) : null;
+    if (heartbeat !== null && heartbeat > ttl) heartbeat = ttl;
+    return {
+      mode,
+      lockTtlMinutes: ttl,
+      heartbeatMinutes: heartbeat,
+      source: value?.source || null,
+    };
+  }, []);
+
+  const toLockingEditState = useCallback((config) => ({
+    mode: config.mode,
+    lockTtlMinutes: config.lockTtlMinutes != null ? String(config.lockTtlMinutes) : '',
+    heartbeatMinutes: config.heartbeatMinutes != null ? String(config.heartbeatMinutes) : '',
+  }), []);
+
+  const lockingDirty = useMemo(() => {
+    if (!lockingConfig || !lockingEdits) return false;
+    const ttl = parseLockingMinutes(lockingEdits.lockTtlMinutes) ?? lockingConfig.lockTtlMinutes;
+    const heartbeat = parseLockingMinutes(lockingEdits.heartbeatMinutes);
+    const normalizedHeartbeat = heartbeat ?? null;
+    return lockingEdits.mode !== lockingConfig.mode
+      || ttl !== lockingConfig.lockTtlMinutes
+      || (normalizedHeartbeat ?? null) !== (lockingConfig.heartbeatMinutes ?? null);
+  }, [lockingConfig, lockingEdits, parseLockingMinutes]);
+
+  const saveLockingConfig = useCallback(async () => {
+    if (!canEditLocking || !lockingEdits) return;
+    setLockingSaving(true);
+    setLockingError(null);
+    try {
+      const ttl = parseLockingMinutes(lockingEdits.lockTtlMinutes) ?? lockingConfig?.lockTtlMinutes ?? DEFAULT_LOCKING_CONFIG.lockTtlMinutes;
+      const heartbeat = parseLockingMinutes(lockingEdits.heartbeatMinutes);
+      const payload = {
+        mode: lockingEdits.mode || DEFAULT_LOCKING_CONFIG.mode,
+        lockTtlMinutes: ttl,
+        heartbeatMinutes: heartbeat ?? null,
+      };
+      const saved = await fetchJSON('/api/config/runtime/locking', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const normalized = normaliseLocking(saved);
+      setLockingConfig(normalized);
+      setLockingEdits(toLockingEditState(normalized));
+    } catch (err) {
+      setLockingError(err.message);
+    } finally {
+      setLockingSaving(false);
+    }
+  }, [canEditLocking, lockingEdits, lockingConfig, normaliseLocking, parseLockingMinutes, toLockingEditState]);
+
+  const resetLockingEdits = useCallback(() => {
+    if (!lockingConfig) return;
+    setLockingEdits(toLockingEditState(lockingConfig));
+    setLockingError(null);
+  }, [lockingConfig, toLockingEditState]);
 
   // Layout items
   const defaultBoardItems = React.useMemo(() => ([
@@ -123,7 +210,8 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
     { id: 'cors', columnSpan: 2, rowSpan: 2, data: { type: 'cors' } },
     { id: 'env', columnSpan: 2, rowSpan: 4, data: { type: 'env' } },
     { id: 'secrets', columnSpan: 2, rowSpan: 3, data: { type: 'secrets' } },
-    { id: 'appearance', columnSpan: 2, rowSpan: 2, data: { type: 'appearance' } }
+    { id: 'appearance', columnSpan: 2, rowSpan: 2, data: { type: 'appearance' } },
+    { id: 'locking', columnSpan: 2, rowSpan: 3, data: { type: 'locking' }, label: 'Record Locking' },
   ]), []);
   const [boardItems, setBoardItems] = useState(defaultBoardItems);
   const resetLayout = () => setBoardItems(defaultBoardItems);
@@ -147,69 +235,129 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
   useEffect(() => { fetchAudit(); }, [fetchAudit]);
   // Removed linkage fetch logic
 
-    // Missing helpers from prior corruption: load + AI save handlers
-    const load = useCallback(async () => {
-      setLoading(true); setError(null);
-      try {
-        const [r, s] = await Promise.all([
-          fetchJSON('/api/config/runtime'),
-          fetchJSON('/api/config/security')
-        ]);
-        setRuntime(r); setSecurity(s);
-        if (r?.ai?.model) {
-          setAiModel({ label: r.ai.model, value: r.ai.model });
-        }
-        if (r?.ai?.params) {
-          // Sanitize null/undefined values to avoid rendering "null" in number inputs
-          const cleaned = {};
-          const defaults = { temperature: 0.7, top_p: 1, presence_penalty: 0, frequency_penalty: 0 };
-          Object.entries(r.ai.params).forEach(([k, v]) => {
-            if (v === null || v === undefined) {
-              if (k === 'max_tokens') cleaned[k] = ''; else cleaned[k] = defaults[k] != null ? defaults[k] : '';
-            } else {
-              cleaned[k] = v;
-            }
-          });
-          setParams(p => ({ ...p, ...cleaned }));
-        }
-        if (Array.isArray(r?.ai?.fallbackModels)) {
-          setFallbacks(r.ai.fallbackModels.map(m => ({ label: m, value: m })));
-        }
-        // Initialize auth scope originals if available
-        const tokenTtl = r?.auth?.tokenTtl || {};
-        const sessionTemplate = t => ({ access: t.access || '', id: t.id || '', refresh: t.refresh || '', frontendIdle: t.frontendIdle || '', absolute: t.absolute || '' });
-        const ttlCommon = sessionTemplate(tokenTtl);
-        setAuthSessionAdminOriginal(ttlCommon); setAuthSessionAdminEdits(ttlCommon);
-        setAuthSessionPublicOriginal(ttlCommon); setAuthSessionPublicEdits(ttlCommon);
-        const policyTemplate = auth => ({
-          mfaMode: auth?.mfa?.mode || auth?.mfaMode || 'off',
-          pkceRequired: !!(auth?.pkceRequired),
-          passwordPolicy: {
-            minLength: auth?.passwordPolicy?.minLength || 8,
-            requireUpper: !!auth?.passwordPolicy?.requireUpper,
-            requireLower: !!auth?.passwordPolicy?.requireLower,
-            requireNumber: !!auth?.passwordPolicy?.requireNumber,
-              requireSymbol: !!auth?.passwordPolicy?.requireSymbol
-          },
-          lockout: {
-            threshold: auth?.lockout?.threshold || 5,
-            durationSeconds: auth?.lockout?.durationSeconds || 900
-          },
-          federation: {
-            providers: auth?.federation?.providers || [],
-            lastSync: auth?.federation?.lastSync || null
-          },
-          // Public-only fields appear on both templates (default if absent) but only rendered for Applicants tab
-          maxPasswordResetsPerDay: auth?.maxPasswordResetsPerDay != null ? auth.maxPasswordResetsPerDay : 5,
-          anomalyProtection: auth?.anomalyProtection || 'standard'
+  const load = useCallback(async () => {
+    setError(null);
+    setLockingLoading(true);
+    setLockingError(null);
+    try {
+      const [runtimeResponse, securityResponse] = await Promise.all([
+        fetchJSON('/api/config/runtime'),
+        fetchJSON('/api/config/security'),
+      ]);
+
+      setRuntime(runtimeResponse);
+      setSecurity(securityResponse);
+
+      if (runtimeResponse?.ai?.model) {
+        setAiModel({ label: runtimeResponse.ai.model, value: runtimeResponse.ai.model });
+      }
+      if (runtimeResponse?.ai?.params) {
+        const cleaned = {};
+        const defaults = { temperature: 0.7, top_p: 1, presence_penalty: 0, frequency_penalty: 0 };
+        Object.entries(runtimeResponse.ai.params).forEach(([key, value]) => {
+          if (value === null || typeof value === 'undefined') {
+            cleaned[key] = key === 'max_tokens' ? '' : (defaults[key] ?? '');
+          } else {
+            cleaned[key] = value;
+          }
         });
-        const baseAuth = r?.auth || {};
-        const adminPolicy = policyTemplate(baseAuth);
-        const publicPolicy = policyTemplate(baseAuth);
-        setAuthPolicyAdminOriginal(adminPolicy); setAuthPolicyAdminEdits(adminPolicy);
-        setAuthPolicyPublicOriginal(publicPolicy); setAuthPolicyPublicEdits(publicPolicy);
-      } catch (e) { setError(e.message); } finally { setLoading(false); }
-    }, []);
+        setParams((prev) => ({ ...prev, ...cleaned }));
+      }
+      if (Array.isArray(runtimeResponse?.ai?.fallbackModels)) {
+        setFallbacks(runtimeResponse.ai.fallbackModels.map((model) => ({ label: model, value: model })));
+      }
+
+      const tokenTtl = runtimeResponse?.auth?.tokenTtl || {};
+      const sessionTemplate = (scope) => ({
+        access: scope.access || '',
+        id: scope.id || '',
+        refresh: scope.refresh || '',
+        frontendIdle: scope.frontendIdle || '',
+        absolute: scope.absolute || '',
+      });
+      const ttlCommon = sessionTemplate(tokenTtl);
+      setAuthSessionAdminOriginal(ttlCommon);
+      setAuthSessionAdminEdits(ttlCommon);
+      setAuthSessionPublicOriginal(ttlCommon);
+      setAuthSessionPublicEdits(ttlCommon);
+
+      const policyTemplate = (auth) => ({
+        mfaMode: auth?.mfa?.mode || auth?.mfaMode || 'off',
+        pkceRequired: !!auth?.pkceRequired,
+        passwordPolicy: {
+          minLength: auth?.passwordPolicy?.minLength || 8,
+          requireUpper: !!auth?.passwordPolicy?.requireUpper,
+          requireLower: !!auth?.passwordPolicy?.requireLower,
+          requireNumber: !!auth?.passwordPolicy?.requireNumber,
+          requireSymbol: !!auth?.passwordPolicy?.requireSymbol,
+        },
+        lockout: {
+          threshold: auth?.lockout?.threshold || 5,
+          durationSeconds: auth?.lockout?.durationSeconds || 900,
+        },
+        federation: {
+          providers: auth?.federation?.providers || [],
+          lastSync: auth?.federation?.lastSync || null,
+        },
+        maxPasswordResetsPerDay: auth?.maxPasswordResetsPerDay != null ? auth.maxPasswordResetsPerDay : 5,
+        anomalyProtection: auth?.anomalyProtection || 'standard',
+      });
+      const baseAuth = runtimeResponse?.auth || {};
+      const adminPolicy = policyTemplate(baseAuth);
+      const publicPolicy = policyTemplate(baseAuth);
+      setAuthPolicyAdminOriginal(adminPolicy);
+      setAuthPolicyAdminEdits(adminPolicy);
+      setAuthPolicyPublicOriginal(publicPolicy);
+      setAuthPolicyPublicEdits(publicPolicy);
+
+      try {
+        setSlaLoading(true);
+        const response = await fetchJSON('/api/config/sla-targets');
+        const rows = response?.targets || [];
+        setSlaTargets(rows.length ? rows : SLA_STAGE_PLACEHOLDER);
+        const edits = {};
+        rows.forEach((row) => {
+          edits[row.stage_key] = {
+            target_hours: row.target_hours ?? '',
+            description: row.description ?? '',
+          };
+        });
+        setSlaEdits(edits);
+      } catch (slaErr) {
+        setSlaError(slaErr.message);
+        setSlaTargets(SLA_STAGE_PLACEHOLDER);
+        setSlaEdits({});
+      } finally {
+        setSlaLoading(false);
+      }
+
+      try {
+        if (runtimeResponse?.appearance?.darkMode != null) {
+          setUseDarkMode(!!runtimeResponse.appearance.darkMode);
+        }
+      } catch {
+        /* ignore theme sync errors */
+      }
+
+      try {
+        const locking = await fetchJSON('/api/config/runtime/locking');
+        const normalized = normaliseLocking(locking);
+        setLockingConfig(normalized);
+        setLockingEdits(toLockingEditState(normalized));
+      } catch (lockingErr) {
+        setLockingError(lockingErr.message);
+        const fallbackConfig = normaliseLocking(DEFAULT_LOCKING_CONFIG);
+        setLockingConfig(fallbackConfig);
+        setLockingEdits(toLockingEditState(fallbackConfig));
+      } finally {
+        setLockingLoading(false);
+      }
+    } catch (err) {
+      setError(err.message);
+      setLockingLoading(false);
+    } finally {
+    }
+  }, [normaliseLocking, setUseDarkMode, toLockingEditState]);
 
   useEffect(() => {
     const unsubscribe = subscribeToDemoNavigationVisibility(map => {
@@ -766,7 +914,8 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
     env: require('../helpPanelContents/environmentWidgetHelp.js').default,
     sla: require('../helpPanelContents/slaWidgetHelp.js').default,
     secrets: require('../helpPanelContents/secretsWidgetHelp.js').default,
-    appearance: require('../helpPanelContents/appearanceWidgetHelp.js').default
+    appearance: require('../helpPanelContents/appearanceWidgetHelp.js').default,
+    locking: require('../helpPanelContents/lockingSettingsHelp.js').default,
   };
 
   function renderBoardContent(type) {
@@ -806,14 +955,106 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
                 <Button loading={savingFallbacks} onClick={saveFallbacks}>Save Fallbacks</Button>
               </SpaceBetween>
             )}
-          </SpaceBetween>
-        );
-      case 'auth':
-        return renderAuth();
-      case 'sla':
-        return (
-          <SpaceBetween size="s">
-            {slaError && <Alert type="error" header="SLA configuration">{slaError}</Alert>}
+      </SpaceBetween>
+    );
+  case 'auth':
+    return renderAuth();
+  case 'locking': {
+    const currentMode = lockingEdits?.mode || lockingConfig?.mode || DEFAULT_LOCKING_CONFIG.mode;
+    const selectedMode = LOCKING_MODE_OPTIONS.find((option) => option.value === currentMode) || LOCKING_MODE_OPTIONS[0];
+    const ttlInput = lockingEdits?.lockTtlMinutes ?? '';
+    const heartbeatInput = lockingEdits?.heartbeatMinutes ?? '';
+    const parsedTtl = parseLockingMinutes(ttlInput);
+    const ttlError = ttlInput && parsedTtl === null ? 'Enter a positive number of minutes.' : null;
+    const parsedHeartbeat = parseLockingMinutes(heartbeatInput);
+    let heartbeatError = heartbeatInput && parsedHeartbeat === null ? 'Enter a positive number of minutes.' : null;
+    if (!heartbeatError && parsedHeartbeat !== null) {
+      const compareTtl = parsedTtl ?? lockingConfig?.lockTtlMinutes ?? DEFAULT_LOCKING_CONFIG.lockTtlMinutes;
+      if (parsedHeartbeat > compareTtl) {
+        heartbeatError = 'Heartbeat interval must be less than or equal to the lock timeout.';
+      }
+    }
+
+    const disableInputs = lockingLoading || !canEditLocking;
+    const disableActions = disableInputs || lockingSaving || !lockingDirty || Boolean(ttlError) || Boolean(heartbeatError);
+
+    return (
+      <SpaceBetween size="s">
+        <Alert type="info" header="Record locking">
+          Configure pessimistic locking for application edits. Optimistic version checks remain enabled in all modes; enabling pessimistic locking adds a database lock so only one user can edit at a time within the configured timeout.
+        </Alert>
+        {lockingError && (
+          <Alert type="error" header="Locking configuration error" onDismiss={() => setLockingError(null)} dismissible>
+            {lockingError}
+          </Alert>
+        )}
+        {lockingLoading ? (
+          <StatusIndicator type="loading">Loading locking settings</StatusIndicator>
+        ) : (
+          <ColumnLayout columns={2} variant="text-grid">
+            <FormField label="Mode" description="Choose whether to require pessimistic locks during editing sessions.">
+              <Select
+                selectedOption={selectedMode}
+                options={LOCKING_MODE_OPTIONS}
+                disabled={disableInputs}
+                onChange={({ detail }) => {
+                  const next = detail.selectedOption?.value || DEFAULT_LOCKING_CONFIG.mode;
+                  setLockingEdits((prev) => ({ ...(prev || {}), mode: next }));
+                }}
+              />
+            </FormField>
+            <FormField
+              label="Lock timeout (minutes)"
+              description="Locks expire automatically when the timeout is reached."
+              errorText={ttlError || undefined}
+            >
+              <Input
+                type="number"
+                value={ttlInput}
+                disabled={disableInputs}
+                onChange={({ detail }) => setLockingEdits((prev) => ({ ...(prev || {}), lockTtlMinutes: detail.value }))}
+                placeholder={String(lockingConfig?.lockTtlMinutes ?? DEFAULT_LOCKING_CONFIG.lockTtlMinutes)}
+              />
+            </FormField>
+            <FormField
+              label="Heartbeat interval (minutes)"
+              description="Optional: automatically refresh the lock before it expires."
+              errorText={heartbeatError || undefined}
+            >
+              <Input
+                type="number"
+                value={heartbeatInput}
+                disabled={disableInputs}
+                onChange={({ detail }) => setLockingEdits((prev) => ({ ...(prev || {}), heartbeatMinutes: detail.value }))}
+                placeholder="e.g. 2"
+              />
+            </FormField>
+            <Box />
+          </ColumnLayout>
+        )}
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button onClick={resetLockingEdits} disabled={lockingLoading || lockingSaving || !lockingDirty}>
+            Reset
+          </Button>
+          <Button
+            variant="primary"
+            loading={lockingSaving}
+            disabled={disableActions}
+            onClick={saveLockingConfig}
+          >
+            Save locking settings
+          </Button>
+        </SpaceBetween>
+        <Box variant="small" color="text-status-inactive">
+          Locks are automatically released on save, on cancel, or when the timeout elapses. Heartbeats run only while the editor keeps the form open.
+        </Box>
+      </SpaceBetween>
+    );
+  }
+  case 'sla':
+    return (
+      <SpaceBetween size="s">
+        {slaError && <Alert type="error" header="SLA configuration">{slaError}</Alert>}
             {slaLoading ? (
               <StatusIndicator type="loading">Loading SLA targets</StatusIndicator>
             ) : (

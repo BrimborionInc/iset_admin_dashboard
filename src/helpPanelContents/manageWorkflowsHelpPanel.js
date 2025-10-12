@@ -1,5 +1,5 @@
 import React from 'react';
-import { SpaceBetween, Box, Link } from '@cloudscape-design/components';
+import { SpaceBetween, Box } from '@cloudscape-design/components';
 
 const ManageWorkflowsHelpPanel = () => {
   return (

@@ -98,4 +98,6 @@ export function attachMask(el, mask) {
   el._maskCleanup = () => el.removeEventListener('input', handler);
 }
 
-export default { applyMask, normalizeMasked, attachMask };
+const maskUtils = { applyMask, normalizeMasked, attachMask };
+
+export default maskUtils;

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   ContentLayout,
   Header,
-  Link,
 } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import { useParams } from 'react-router-dom';

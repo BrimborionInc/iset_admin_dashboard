@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { buildLoginUrl } from '../auth/cognito';
 import '../css/awentech-landing.css';
 import Button from '@cloudscape-design/components/button';
@@ -264,24 +264,6 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
   };
 
   const navItems = content.navItems;
-
-  const topNavI18nStrings = lang === 'fr'
-    ? {
-        searchIconAriaLabel: 'Rechercher',
-        searchDismissIconAriaLabel: 'Fermer la recherche',
-        overflowMenuTriggerText: 'Plus',
-        overflowMenuTitleText: 'Toutes les sections',
-        overflowMenuBackButtonText: 'Retour',
-        overflowMenuDismissButtonText: 'Fermer le menu'
-      }
-    : {
-        searchIconAriaLabel: 'Search',
-        searchDismissIconAriaLabel: 'Close search',
-        overflowMenuTriggerText: 'All',
-        overflowMenuTitleText: 'All sections',
-        overflowMenuBackButtonText: 'Back',
-        overflowMenuDismissButtonText: 'Close menu'
-      };
 
   const handleSignIn = () => {
     window.location.assign(buildLoginUrl());

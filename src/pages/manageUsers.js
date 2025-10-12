@@ -18,7 +18,6 @@ import {
   ColumnLayout
 } from '@cloudscape-design/components';
 import Tabs from '@cloudscape-design/components/tabs';
-import { buildApiUrl } from '../config/apiConfig';
 import { apiFetch } from '../auth/apiClient';
 import Board from '@cloudscape-design/board-components/board';
 import BoardItem from '@cloudscape-design/board-components/board-item';
@@ -79,7 +78,7 @@ export default function UserManagementDashboard() {
   const [roleChanging, setRoleChanging] = useState(false);
   const [audit, setAudit] = useState([]); // in-memory audit log
 
-  const QUICK_FILTERS = [
+  const QUICK_FILTERS = useMemo(() => [
     { id: 'all', label: 'All', predicate: () => true },
     { id: 'disabled', label: 'Disabled', predicate: u => u.status === 'DISABLED' },
     { id: 'pending', label: 'Pending', predicate: u => u.status === 'FORCE_CHANGE_PASSWORD' },
@@ -87,13 +86,13 @@ export default function UserManagementDashboard() {
     { id: 'admins', label: 'Admins', predicate: u => ['SysAdmin','ProgramAdmin'].includes(u.role) },
     { id: 'recent', label: 'Recently Active', predicate: u => u.lastSignIn && (Date.now() - Date.parse(u.lastSignIn)) < 7*24*3600*1000 },
     { id: 'never', label: 'Never Logged In', predicate: u => !u.lastSignIn }
-  ];
+  ], []);
 
   const filtered = useMemo(() => {
     const ft = filteringText.trim().toLowerCase();
     const active = QUICK_FILTERS.find(f => f.id === quickFilter) || QUICK_FILTERS[0];
     return users.filter(u => active.predicate(u)).filter(u => !ft || [u.username, u.email, u.role].some(v => String(v).toLowerCase().includes(ft)));
-  }, [filteringText, users, quickFilter]);
+  }, [filteringText, users, quickFilter, QUICK_FILTERS]);
 
   // Debounced server search
   useEffect(() => {

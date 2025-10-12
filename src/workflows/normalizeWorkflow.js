@@ -6,7 +6,6 @@
 // Returns { steps, meta, templates: { counts, metaMap }, raw: { usedTemplateIds } }
 
 const path = require('path');
-const fs = require('fs');
 const nunjucks = require('nunjucks');
 const { SUPPORTED_COMPONENT_TYPES } = require('./constants');
 

@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/text-block.schema.json",
+  "title": "Text Block Component",
+  "type": "object",
+  "required": ["text"],
+  "additionalProperties": true,
+  "properties": {
+    "text": {
+      "description": "Bilingual content object or string.",
+      "anyOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "object", "properties": { "en": { "type": "string" }, "fr": { "type": "string" } }, "minProperties": 1 }
+      ]
+    },
+    "html": { "type": ["string", "null"], "description": "Raw HTML override; if present, renderer uses html instead of text." },
+    "classes": { "type": "string" }
+  }
+}

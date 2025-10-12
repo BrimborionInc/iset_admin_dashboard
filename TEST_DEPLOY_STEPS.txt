@@ -1,0 +1,7 @@
+1. Run `npm run build:test` in `admin-dashboard` to generate a fresh React build using `.env.test`.
+2. Stage the deployment bundle (build/, `isetadminserver.js`, `package.json`, `package-lock.json`, `.env.test`, `src/utils`, `blocksteps`, `templates`) ensuring `src/utils` stays under a `src/` directory.
+3. Zip the staged bundle and upload it to `s3://nwac-test-artifacts/admin-dashboard/`.
+4. Create a presigned URL for the uploaded zip so the remote instance can download it.
+5. Prepare the SSM command payload that downloads, unzips, copies the bundle into `/home/ec2-user/admin-dashboard`, runs `npm ci --omit=dev`, and restarts the PM2 process.
+6. Execute `aws ssm send-command` against instance `i-0d52610f86e7d41d4` with that payload.
+7. Monitor `aws ssm list-command-invocations` until the command reports `Success`, investigating and retrying if it fails.

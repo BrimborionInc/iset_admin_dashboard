@@ -1,0 +1,667 @@
+import React, { useMemo } from 'react';
+import { BoardItem } from '@cloudscape-design/board-components';
+import { Box, Header, SpaceBetween, ButtonDropdown, Grid, Input, FormField, Badge, Container, Alert, Spinner } from '@cloudscape-design/components';
+import Avatar from '@cloudscape-design/chat-components/avatar';
+
+// Phase 1: manual bilingual editing for common fields only (EN/FR)
+// - input/text/textarea/password/number/email/phone: label.text, hint.text
+// - radios/checkboxes: fieldset.legend.text, hint.text, items[].text
+// - select: label.text, hint.text, items[].text
+// - date-input: fieldset.legend.text, hint.text
+// - file-upload: label.text, hint.text
+
+const LANGS = ['en', 'fr'];
+
+function getAtPath(obj, path) {
+  if (!obj || !path) return undefined;
+  const parts = path.replace(/\[(\d+)\]/g, '.$1').split('.');
+  let cur = obj;
+  for (const p of parts) {
+    if (cur == null) return undefined;
+    cur = cur[p];
+  }
+  return cur;
+}
+
+function setAtPath(obj, path, value) {
+  if (!obj || !path) return obj;
+  const parts = path.replace(/\[(\d+)\]/g, '.$1').split('.');
+  const last = parts.pop();
+  let cur = obj;
+  for (const p of parts) {
+    if (typeof cur[p] !== 'object' || cur[p] === null) cur[p] = {};
+    cur = cur[p];
+  }
+  cur[last] = value;
+  return obj;
+}
+
+function ensureLangObject(val) {
+  if (val == null) return { en: '', fr: '' };
+  if (typeof val === 'string') return { en: val, fr: '' };
+  const out = { en: '', fr: '' };
+  if (typeof val === 'object') {
+    out.en = typeof val.en === 'string' ? val.en : (typeof val.en === 'number' ? String(val.en) : (typeof val.text === 'string' ? val.text : ''));
+    out.fr = typeof val.fr === 'string' ? val.fr : (typeof val.fr === 'number' ? String(val.fr) : '');
+  }
+  return out;
+}
+
+function isChoice(type) {
+  const t = String(type || '').toLowerCase();
+  return t === 'radio' || t === 'radios' || t === 'checkbox' || t === 'checkboxes' || t === 'select';
+}
+
+function isInputLike(type) {
+  const t = String(type || '').toLowerCase();
+  return ['input','text','email','number','password','phone','password-input','textarea','character-count'].includes(t);
+}
+
+// Only a subset of input-like components support prefix/suffix adornments.
+// Excludes textarea and character-count per product decision (no affix UI, avoid noisy translation keys).
+function canHaveAffixes(type) {
+  const t = String(type || '').toLowerCase();
+  return ['input','text','email','number','password','phone','password-input'].includes(t);
+}
+
+function isFileUpload(type) {
+  return String(type || '').toLowerCase() === 'file-upload';
+}
+
+function isSummaryList(type) {
+  return String(type || '').toLowerCase() === 'summary-list';
+}
+
+function isDateLike(type) {
+  const t = String(type || '').toLowerCase();
+  return t === 'date' || t === 'date-input';
+}
+
+const TranslationsWidget = ({ actions, components = [], setComponents, asBoardItem = true }) => {
+  // All authenticated API calls should use apiFetch wrapper
+  // (lazy import to avoid circulars if any heavy deps load this widget early)
+  const { apiFetch } = require('../auth/apiClient');
+  const [translating, setTranslating] = React.useState(false);
+  const [message, setMessage] = React.useState(null); // { type: 'success'|'error'|'info', text }
+  const abortRef = React.useRef(null);
+  const mountedRef = React.useRef(true);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (abortRef.current) {
+        try { abortRef.current.abort(); } catch (_) {}
+        abortRef.current = null;
+      }
+    };
+  }, []);
+  // Compute coverage per language (simple: counts non-empty fields over total fields)
+  const coverage = useMemo(() => {
+    let total = 0; const filled = { en: 0, fr: 0 };
+    components.forEach(c => {
+      const type = String(c?.type || c?.template_key || '').toLowerCase();
+      const p = c?.props || {};
+      const hasContent = (val) => {
+        if (val == null) return false;
+        if (typeof val === 'string') return val.trim().length > 0;
+        if (typeof val === 'object') {
+          const vEn = typeof val.en === 'string' ? val.en.trim() : '';
+          const vFr = typeof val.fr === 'string' ? val.fr.trim() : '';
+          const vTxt = typeof val.text === 'string' ? val.text.trim() : '';
+            return !!(vEn || vFr || vTxt);
+        }
+        return false;
+      };
+      const push = (v) => {
+        const o = ensureLangObject(v);
+        total += 1;
+        if (o.en && String(o.en).trim()) filled.en += 1;
+        if (o.fr && String(o.fr).trim()) filled.fr += 1;
+      };
+      if (isInputLike(type)) {
+        push(getAtPath(p, 'label.text'));
+        push(getAtPath(p, 'hint.text'));
+        if (canHaveAffixes(type)) {
+          const pref = getAtPath(p, 'prefix.text');
+          const suff = getAtPath(p, 'suffix.text');
+          if (hasContent(pref)) push(pref);
+          if (hasContent(suff)) push(suff);
+        }
+      } else if (isSummaryList(type)) {
+        const rows = Array.isArray(p?.rows) ? p.rows : [];
+        rows.forEach(r => { push(r?.key?.text); push(r?.value?.text); });
+      } else if (isFileUpload(type)) {
+        push(getAtPath(p, 'label.text'));
+        push(getAtPath(p, 'hint.text'));
+      } else if (type === 'signature-ack') {
+        push(getAtPath(p, 'label.text'));
+        push(getAtPath(p, 'hint.text'));
+        push(getAtPath(p, 'placeholder.text'));
+        push(getAtPath(p, 'actionLabel.text'));
+        push(getAtPath(p, 'clearLabel.text'));
+        push(getAtPath(p, 'statusSignedText.text'));
+        push(getAtPath(p, 'statusUnsignedText.text'));
+      } else if (isChoice(type)) {
+        if (type === 'select') {
+          push(getAtPath(p, 'label.text'));
+        } else {
+          push(getAtPath(p, 'fieldset.legend.text'));
+        }
+        push(getAtPath(p, 'hint.text'));
+        const items = Array.isArray(p?.items) ? p.items : [];
+        items.forEach(it => { push(it?.text); if (type !== 'select') push(it?.hint); });
+      } else if (isDateLike(type)) {
+        push(getAtPath(p, 'fieldset.legend.text'));
+        push(getAtPath(p, 'hint.text'));
+      } else {
+        // best-effort: try label.text then hint.text if present
+  if (getAtPath(p, 'titleText') !== undefined) push(getAtPath(p, 'titleText'));
+  if (getAtPath(p, 'summaryText') !== undefined) push(getAtPath(p, 'summaryText'));
+        if (getAtPath(p, 'label.text') !== undefined) push(getAtPath(p, 'label.text'));
+        if (getAtPath(p, 'hint.text') !== undefined) push(getAtPath(p, 'hint.text'));
+  // also support static content components with top-level text/html
+  if (getAtPath(p, 'text') !== undefined) push(getAtPath(p, 'text'));
+  if (getAtPath(p, 'html') !== undefined) push(getAtPath(p, 'html'));
+      }
+    });
+    const pct = (lang) => total ? Math.round((filled[lang] / total) * 100) : 100;
+    return { total, filled, pct: { en: pct('en'), fr: pct('fr') } };
+  }, [components]);
+
+  const handleChange = (compIndex, path, lang, value) => {
+    setComponents(prev => prev.map((c, idx) => {
+      if (idx !== compIndex) return c;
+      const props = { ...(c.props || {}) };
+      const cur = getAtPath(props, path);
+      const lng = ensureLangObject(cur);
+      lng[lang] = value;
+      setAtPath(props, path, lng);
+      return { ...c, props };
+    }));
+    actions?.markDirty && actions.markDirty();
+  };
+
+  const handleItemChange = (compIndex, itemIndex, lang, value, field = 'text') => {
+    setComponents(prev => prev.map((c, idx) => {
+      if (idx !== compIndex) return c;
+      const props = { ...(c.props || {}) };
+      const items = Array.isArray(props.items) ? [...props.items] : [];
+      const it = { ...(items[itemIndex] || {}) };
+      const baseVal = field === 'hint' ? it.hint : it.text;
+      const lng = ensureLangObject(baseVal);
+      lng[lang] = value;
+      if (field === 'hint') it.hint = lng; else it.text = lng;
+      items[itemIndex] = it;
+      props.items = items;
+      return { ...c, props };
+    }));
+    actions?.markDirty && actions.markDirty();
+  };
+
+  // Collect translation tasks for missing EN or FR fields
+  const collectTasks = () => {
+    const tasks = []; // { id, from: 'en'|'fr', to: 'en'|'fr', text: string }
+    const addTasksFor = (ci, comp, p, path) => {
+      const v = getAtPath(p, path);
+      const o = ensureLangObject(v);
+      const rawEn = typeof o.en === 'string' ? o.en : '';
+      const rawFr = typeof o.fr === 'string' ? o.fr : '';
+      const en = rawEn.trim();
+      const fr = rawFr.trim();
+      if (!en && !fr) return;
+      const seeds = (comp && comp.__i18nSeeds) || {};
+      const seed = seeds[path];
+      const seedEn = typeof seed?.en === 'string' ? seed.en.trim() : '';
+      const seedFr = typeof seed?.fr === 'string' ? seed.fr.trim() : '';
+      const englishChangedFromSeed = !!seedEn && !!en && en !== seedEn;
+      const frenchChangedFromSeed = !!seedFr && !!fr && fr !== seedFr;
+      const englishLooksSeed = !!seedEn && en === seedEn;
+      const frenchLooksSeed = !!seedFr && fr === seedFr;
+      const needsFr = (() => {
+        if (en && !fr) return true;
+        if (englishChangedFromSeed && (!fr || frenchLooksSeed)) return true;
+        return false;
+      })();
+      const needsEn = (() => {
+        if (fr && !en) return true;
+        if (frenchChangedFromSeed && (!en || englishLooksSeed)) return true;
+        return false;
+      })();
+      if (needsFr) tasks.push({ id: `${ci}|${path}`, from: 'en', to: 'fr', text: rawEn });
+      if (needsEn) tasks.push({ id: `${ci}|${path}`, from: 'fr', to: 'en', text: rawFr });
+    };
+    const hasContent = (val) => {
+      if (val == null) return false;
+      if (typeof val === 'string') return val.trim().length > 0;
+      if (typeof val === 'object') {
+        const vEn = typeof val.en === 'string' ? val.en.trim() : '';
+        const vFr = typeof val.fr === 'string' ? val.fr.trim() : '';
+        const vTxt = typeof val.text === 'string' ? val.text.trim() : '';
+        return !!(vEn || vFr || vTxt);
+      }
+      return false;
+    };
+    components.forEach((comp, ci) => {
+      const type = String(comp?.type || comp?.template_key || '').toLowerCase();
+      const p = comp?.props || {};
+      if (isInputLike(type)) {
+        addTasksFor(ci, comp, p, 'label.text');
+        addTasksFor(ci, comp, p, 'hint.text');
+        if (canHaveAffixes(type)) {
+          if (hasContent(getAtPath(p, 'prefix.text'))) addTasksFor(ci, comp, p, 'prefix.text');
+          if (hasContent(getAtPath(p, 'suffix.text'))) addTasksFor(ci, comp, p, 'suffix.text');
+        }
+      } else if (isSummaryList(type)) {
+        const rows = Array.isArray(p?.rows) ? p.rows : [];
+        rows.forEach((r, ri) => {
+          addTasksFor(ci, comp, p, `rows.${ri}.key.text`);
+          addTasksFor(ci, comp, p, `rows.${ri}.value.text`);
+        });
+      } else if (isFileUpload(type)) {
+        addTasksFor(ci, comp, p, 'label.text');
+        addTasksFor(ci, comp, p, 'hint.text');
+      } else if (type === 'signature-ack') {
+        addTasksFor(ci, comp, p, 'label.text');
+        addTasksFor(ci, comp, p, 'hint.text');
+        addTasksFor(ci, comp, p, 'placeholder.text');
+        addTasksFor(ci, comp, p, 'actionLabel.text');
+        addTasksFor(ci, comp, p, 'clearLabel.text');
+        addTasksFor(ci, comp, p, 'statusSignedText.text');
+        addTasksFor(ci, comp, p, 'statusUnsignedText.text');
+      } else if (isChoice(type)) {
+        if (type === 'select') addTasksFor(ci, comp, p, 'label.text'); else addTasksFor(ci, comp, p, 'fieldset.legend.text');
+        addTasksFor(ci, comp, p, 'hint.text');
+        const items = Array.isArray(p?.items) ? p.items : [];
+        items.forEach((it, ii) => { addTasksFor(ci, comp, p, `items.${ii}.text`); if (type !== 'select') addTasksFor(ci, comp, p, `items.${ii}.hint`); });
+      } else if (isDateLike(type)) {
+        addTasksFor(ci, comp, p, 'fieldset.legend.text');
+        addTasksFor(ci, comp, p, 'hint.text');
+      } else {
+        if (getAtPath(p, 'label.text') !== undefined) addTasksFor(ci, comp, p, 'label.text');
+        if (getAtPath(p, 'hint.text') !== undefined) addTasksFor(ci, comp, p, 'hint.text');
+  if (getAtPath(p, 'titleText') !== undefined) addTasksFor(ci, comp, p, 'titleText');
+  if (getAtPath(p, 'summaryText') !== undefined) addTasksFor(ci, comp, p, 'summaryText');
+  // include static content fields
+  if (getAtPath(p, 'text') !== undefined) addTasksFor(ci, comp, p, 'text');
+  if (getAtPath(p, 'html') !== undefined) addTasksFor(ci, comp, p, 'html');
+      }
+    });
+    return tasks;
+  };
+
+  const extractJson = (s) => {
+    if (!s || typeof s !== 'string') return null;
+    try { return JSON.parse(s); } catch (_) {}
+    const m = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/);
+    if (m && m[1]) {
+      try { return JSON.parse(m[1]); } catch (_) {}
+    }
+    // fallback: try to find first {...}
+    const start = s.indexOf('{');
+    const end = s.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      const slice = s.slice(start, end + 1);
+      try { return JSON.parse(slice); } catch (_) {}
+    }
+    return null;
+  };
+
+  const applyTranslations = (list) => {
+    // list: [{ id, lang, text }]
+    const byComp = new Map();
+    for (const t of list) {
+      if (!t || typeof t.id !== 'string' || !t.lang || typeof t.text !== 'string') continue;
+      const [ciStr] = t.id.split('|');
+      const ci = parseInt(ciStr, 10);
+      if (!byComp.has(ci)) byComp.set(ci, []);
+      byComp.get(ci).push(t);
+    }
+    setComponents(prev => prev.map((c, idx) => {
+      const updates = byComp.get(idx);
+      if (!updates || !updates.length) return c;
+      const comp = { ...c };
+      const p = { ...(comp.props || {}) };
+      for (const u of updates) {
+        const path = u.id.slice(String(idx).length + 1); // remove "{idx}|"
+        const cur = getAtPath(p, path);
+        const o = ensureLangObject(cur);
+        if (u.lang === 'en') o.en = u.text; else if (u.lang === 'fr') o.fr = u.text;
+        setAtPath(p, path, o);
+      }
+      comp.props = p;
+      return comp;
+    }));
+    actions?.markDirty && actions.markDirty();
+  };
+
+  const MAX_TRANSLATION_BATCH = 24;
+  const translateBatch = async (batch, signal) => {
+    const system = {
+      role: 'system',
+      content: 'You are a translation assistant. Translate between English and Canadian French. Preserve placeholders, numbers, punctuation, and option values. Respond ONLY with JSON matching the requested schema.'
+    };
+    const user = {
+      role: 'user',
+      content: JSON.stringify({
+        instruction: 'For each item, translate text from `from` language to `to` language. Return JSON only: { "translations": [{ "id": string, "lang": "en"|"fr", "text": string }] }',
+        items: batch
+      })
+    };
+    const res = await apiFetch(`/api/ai/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [system, user] }),
+      signal
+    });
+    if (res.status === 501) {
+      const err = new Error('ai-disabled');
+      err.code = 501;
+      throw err;
+    }
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content || '';
+    const parsed = extractJson(content);
+    const list = parsed?.translations;
+    if (!Array.isArray(list) || !list.length) {
+      throw new Error('unexpected-response');
+    }
+    const clean = list
+      .filter(it => it && typeof it.id === 'string' && (it.lang === 'en' || it.lang === 'fr') && typeof it.text === 'string')
+      .map(it => ({ id: it.id, lang: it.lang, text: it.text }));
+    if (!clean.length) throw new Error('empty-translations');
+    return clean;
+  };
+
+  const handleTranslateMissing = async () => {
+    if (translating) return;
+    setMessage(null);
+    const items = collectTasks();
+    if (!items.length) {
+      setMessage({ type: 'info', text: 'No missing fields detected.' });
+      return;
+    }
+    const batches = [];
+    for (let i = 0; i < items.length; i += MAX_TRANSLATION_BATCH) {
+      batches.push(items.slice(i, i + MAX_TRANSLATION_BATCH));
+    }
+    abortRef.current?.abort();
+    setTranslating(true);
+    let translatedCount = 0;
+    try {
+      for (let bi = 0; bi < batches.length; bi += 1) {
+        const controller = new AbortController();
+        abortRef.current = controller;
+        const clean = await translateBatch(batches[bi], controller.signal);
+        translatedCount += clean.length;
+        applyTranslations(clean);
+        if (!mountedRef.current) return;
+      }
+      if (!mountedRef.current) return;
+      setMessage({ type: 'success', text: `Translated ${translatedCount} field(s) across ${batches.length} batch${batches.length > 1 ? 'es' : ''}.` });
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        if (mountedRef.current) setMessage({ type: 'info', text: 'Translation cancelled.' });
+      } else if (e.code === 501) {
+        if (mountedRef.current) setMessage({ type: 'error', text: 'AI translation is disabled on the server. Configure the API key to enable it.' });
+      } else if (e.message === 'unexpected-response') {
+        if (mountedRef.current) setMessage({ type: 'error', text: 'Translation service returned an unexpected response.' });
+      } else if (e.message === 'empty-translations') {
+        if (mountedRef.current) setMessage({ type: 'error', text: 'No valid translations returned.' });
+      } else {
+        if (mountedRef.current) setMessage({ type: 'error', text: `Translation failed: ${e.message || String(e)}` });
+      }
+    } finally {
+      if (mountedRef.current) setTranslating(false);
+      abortRef.current = null;
+    }
+  };
+
+  const content = (
+    <SpaceBetween size="s">
+      {components.map((comp, ci) => {
+        const type = String(comp?.type || comp?.template_key || '').toLowerCase();
+        const props = comp?.props || {};
+        const rows = [];
+        if (isInputLike(type)) {
+          rows.push({ label: 'Label', path: 'label.text' });
+          rows.push({ label: 'Hint', path: 'hint.text' });
+          if (canHaveAffixes(type)) {
+            const hasContent = (val) => {
+              if (val == null) return false; if (typeof val === 'string') return val.trim().length>0; if (typeof val === 'object') { const vEn = typeof val.en==='string'?val.en.trim():''; const vFr = typeof val.fr==='string'?val.fr.trim():''; const vTxt = typeof val.text==='string'?val.text.trim():''; return !!(vEn||vFr||vTxt); } return false; };
+            if (hasContent(getAtPath(props, 'prefix.text'))) rows.push({ label: 'Prefix', path: 'prefix.text' });
+            if (hasContent(getAtPath(props, 'suffix.text'))) rows.push({ label: 'Suffix', path: 'suffix.text' });
+          }
+        } else if (isSummaryList(type)) {
+          // No top-level label/hint; handled per-row below
+        } else if (isFileUpload(type)) {
+          rows.push({ label: 'Label', path: 'label.text' });
+          rows.push({ label: 'Hint', path: 'hint.text' });
+        } else if (type === 'signature-ack') {
+          rows.push({ label: 'Label', path: 'label.text' });
+          rows.push({ label: 'Hint', path: 'hint.text' });
+          rows.push({ label: 'Placeholder', path: 'placeholder.text' });
+          rows.push({ label: 'Sign Button Label', path: 'actionLabel.text' });
+          rows.push({ label: 'Clear Button Label', path: 'clearLabel.text' });
+          rows.push({ label: 'Signed Status Text', path: 'statusSignedText.text' });
+          rows.push({ label: 'Unsigned Status Text', path: 'statusUnsignedText.text' });
+        } else if (type === 'select') {
+          rows.push({ label: 'Label', path: 'label.text' });
+          rows.push({ label: 'Hint', path: 'hint.text' });
+        } else if (isChoice(type)) {
+          if (type === 'select') {
+            rows.push({ label: 'Label', path: 'label.text' });
+          } else {
+            rows.push({ label: 'Question', path: 'fieldset.legend.text' });
+          }
+          rows.push({ label: 'Hint', path: 'hint.text' });
+        } else if (isDateLike(type)) {
+          rows.push({ label: 'Legend', path: 'fieldset.legend.text' });
+          rows.push({ label: 'Hint', path: 'hint.text' });
+        } else {
+          if (getAtPath(props, 'label.text') !== undefined) rows.push({ label: 'Label', path: 'label.text' });
+          if (getAtPath(props, 'hint.text') !== undefined) rows.push({ label: 'Hint', path: 'hint.text' });
+          if (getAtPath(props, 'titleText') !== undefined) rows.push({ label: 'Title', path: 'titleText' });
+          if (getAtPath(props, 'summaryText') !== undefined) rows.push({ label: 'Summary', path: 'summaryText' });
+          // static content fields (e.g., inset-text, text-block)
+          if (getAtPath(props, 'text') !== undefined) rows.push({ label: 'Text', path: 'text' });
+          if (getAtPath(props, 'html') !== undefined) rows.push({ label: 'HTML', path: 'html' });
+        }
+
+  const items = Array.isArray(props.items) ? props.items : [];
+  const summaryRows = isSummaryList(type) ? (Array.isArray(props.rows) ? props.rows : []) : [];
+
+        return (
+          <Box key={ci} padding={{ top: 'xs', bottom: 's' }} border={{ side: 'bottom', color: 'divider' }}>
+            <Header variant="h3">{comp?.props?.name || comp?.name || comp?.storageKey || comp?.label || comp?.type || 'Component'} <small style={{ color: '#6b7280' }}>({type})</small></Header>
+
+            {rows.map((r, idx) => {
+              const val = ensureLangObject(getAtPath(props, r.path));
+              return (
+                <Grid key={idx} gridDefinition={[{ colspan: 3 }, { colspan: 4 }, { colspan: 4 }]}>
+                  <Box variant="div" padding={{ vertical: 'xs' }} style={{ alignSelf: 'center' }}>
+                    <strong>{r.label}</strong>
+                  </Box>
+                  {LANGS.map(lang => (
+                    <FormField key={lang} label={lang.toUpperCase()}>
+                      <Input
+                        value={String(val[lang] ?? '')}
+                        onChange={({ detail }) => handleChange(ci, r.path, lang, detail.value)}
+                      />
+                    </FormField>
+                  ))}
+                </Grid>
+              );
+            })}
+
+            {isChoice(type) && items.length > 0 && (
+              <Box padding={{ top: 's' }}>
+                <Header variant="h4">Options</Header>
+                {items.map((it, ii) => {
+                  const val = ensureLangObject(it?.text);
+                  const hintVal = ensureLangObject(it?.hint);
+                  return (
+                    <React.Fragment key={ii}>
+                      <Grid gridDefinition={[{ colspan: 3 }, { colspan: 4 }, { colspan: 4 }]}>
+                        <Box variant="div" padding={{ vertical: 'xs' }} style={{ alignSelf: 'center' }}>
+                          Value: <code>{String(it?.value ?? '')}</code>
+                        </Box>
+                        {LANGS.map(lang => (
+                          <FormField key={lang} label={lang.toUpperCase()}>
+                            <Input
+                              value={String(val[lang] ?? '')}
+                              onChange={({ detail }) => handleItemChange(ci, ii, lang, detail.value, 'text')}
+                            />
+                          </FormField>
+                        ))}
+                      </Grid>
+                      {type !== 'select' && (
+                        <Grid gridDefinition={[{ colspan: 3 }, { colspan: 4 }, { colspan: 4 }]}>
+                          <Box variant="div" padding={{ vertical: 'xs' }} style={{ alignSelf: 'center' }}>
+                            <em style={{ color: '#555' }}>Hint</em>
+                          </Box>
+                          {LANGS.map(lang => (
+                            <FormField key={lang} label={lang.toUpperCase()}>
+                              <Input
+                                value={String(hintVal[lang] ?? '')}
+                                placeholder="(optional)"
+                                onChange={({ detail }) => handleItemChange(ci, ii, lang, detail.value, 'hint')}
+                              />
+                            </FormField>
+                          ))}
+                        </Grid>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </Box>
+            )}
+            {isSummaryList(type) && summaryRows.length > 0 && (
+              <Box padding={{ top: 's' }}>
+                <Header variant="h4">Rows</Header>
+                {summaryRows.map((r, ri) => {
+                  const keyVal = ensureLangObject(r?.key?.text);
+                  const valueVal = ensureLangObject(r?.value?.text);
+                  const handleRowChange = (lang, field) => ({ detail }) => {
+                    setComponents(prev => prev.map((c2, idx2) => {
+                      if (idx2 !== ci) return c2;
+                      const p2 = { ...(c2.props || {}) };
+                      const rows2 = Array.isArray(p2.rows) ? [...p2.rows] : [];
+                      const row = { ...(rows2[ri] || {}) };
+                      if (field === 'key') {
+                        const cur = ensureLangObject(row.key && row.key.text);
+                        row.key = { ...(row.key || {}), text: { ...cur, [lang]: detail.value } };
+                      } else if (field === 'value') {
+                        const cur = ensureLangObject(row.value && row.value.text);
+                        row.value = { ...(row.value || {}), text: { ...cur, [lang]: detail.value } };
+                      }
+                      rows2[ri] = row;
+                      p2.rows = rows2;
+                      return { ...c2, props: p2 };
+                    }));
+                    actions?.markDirty && actions.markDirty();
+                  };
+                  return (
+                    <React.Fragment key={ri}>
+                      <Grid gridDefinition={[{ colspan: 3 }, { colspan: 4 }, { colspan: 4 }]}>
+                        <Box variant="div" padding={{ vertical: 'xs' }} style={{ alignSelf: 'center' }}>
+                          <strong>Row {ri + 1} Key</strong>
+                        </Box>
+                        {LANGS.map(lang => (
+                          <FormField key={lang} label={lang.toUpperCase()}>
+                            <Input value={String(keyVal[lang] || '')} onChange={handleRowChange(lang, 'key')} />
+                          </FormField>
+                        ))}
+                      </Grid>
+                      <Grid gridDefinition={[{ colspan: 3 }, { colspan: 4 }, { colspan: 4 }]}>
+                        <Box variant="div" padding={{ vertical: 'xs' }} style={{ alignSelf: 'center' }}>
+                          <em style={{ color: '#555' }}>Value</em>
+                        </Box>
+                        {LANGS.map(lang => (
+                          <FormField key={lang} label={lang.toUpperCase()}>
+                            <Input value={String(valueVal[lang] || '')} onChange={handleRowChange(lang, 'value')} />
+                          </FormField>
+                        ))}
+                      </Grid>
+                    </React.Fragment>
+                  );
+                })}
+              </Box>
+            )}
+          </Box>
+        );
+      })}
+      {(!components || components.length === 0) && (
+        <Box variant="div" color="text-status-inactive">No components to translate.</Box>
+      )}
+    </SpaceBetween>
+  );
+
+  const toolbar = (
+    <SpaceBetween direction="horizontal" size="xs">
+      <Badge color={coverage.pct.fr === 100 ? 'green' : 'normal'}>FR {coverage.pct.fr}%</Badge>
+      <Badge color={coverage.pct.en === 100 ? 'green' : 'normal'}>EN {coverage.pct.en}%</Badge>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={translating ? 'Translating in progress' : 'Generate missing translations with AI'}
+        onClick={() => { if (!translating) handleTranslateMissing(); }}
+        onKeyDown={e => { if (!translating && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleTranslateMissing(); } }}
+        style={{ cursor: translating ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:4 }}
+      >
+        <Avatar ariaLabel="AI translation generator" color="gen-ai" iconName="gen-ai" tooltipText={translating ? 'Translating…' : 'AI: Fill missing EN/FR fields'} />
+        {translating && <Spinner size="normal" />}        
+      </div>
+    </SpaceBetween>
+  );
+
+  const headerEl = (
+    <Header variant="h3" actions={toolbar}>Translations</Header>
+  );
+
+  if (asBoardItem) {
+    return (
+      <BoardItem
+        header={headerEl}
+        i18nStrings={{
+          dragHandleAriaLabel: 'Drag handle',
+          dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
+          resizeHandleAriaLabel: 'Resize handle',
+          resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.',
+        }}
+        settings={
+          <ButtonDropdown
+            items={[{ id: 'remove', text: 'Remove' }]}
+            ariaLabel="Board item settings"
+            variant="icon"
+            onItemClick={() => actions?.removeItem && actions.removeItem()}
+          />
+        }
+      >
+        <SpaceBetween size="s">
+          {message && (
+            <Alert type={message.type === 'error' ? 'error' : (message.type === 'success' ? 'success' : 'info')} onDismiss={() => setMessage(null)}>
+              {message.text}
+            </Alert>
+          )}
+          {content}
+        </SpaceBetween>
+      </BoardItem>
+    );
+  }
+
+  return (
+    <Container header={headerEl}>
+      <SpaceBetween size="s">
+        {message && (
+          <Alert type={message.type === 'error' ? 'error' : (message.type === 'success' ? 'success' : 'info')} onDismiss={() => setMessage(null)}>
+            {message.text}
+          </Alert>
+        )}
+        {content}
+      </SpaceBetween>
+    </Container>
+  );
+};
+
+export default TranslationsWidget;

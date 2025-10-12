@@ -33,6 +33,7 @@ CREATE TABLE iset_application (
   current_version_id BIGINT UNSIGNED NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  row_version BIGINT UNSIGNED NOT NULL DEFAULT 1,
   PRIMARY KEY (id),
   UNIQUE KEY uq_tracking (tracking_id),
   KEY idx_status (status),

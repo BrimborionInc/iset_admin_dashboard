@@ -7,8 +7,6 @@ import {
   Button,
   Header,
   ButtonDropdown,
-  Pagination,
-  CollectionPreferences,
   Link,
   Modal,
   Flashbar,
@@ -56,6 +54,7 @@ const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
   const handleDeleteClick = (ptma) => {
     // If you have a check-booked-slots endpoint for PTMA, update here. Otherwise, skip this check or implement as needed.
     setLocationToDelete(ptma);
+    setDeleteWarning('');
     setIsDeleteModalVisible(true);
   };
 
@@ -86,6 +85,7 @@ const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
   const handleDeleteCancel = () => {
     setIsDeleteModalVisible(false);
     setLocationToDelete(null);
+    setDeleteWarning('');
   };
 
   return (
@@ -118,6 +118,7 @@ const PTMAManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => {
                   `Displaying items ${firstIndex} to ${lastIndex} of ${totalItemsCount}`
                 }
                 selectedItems={selectedItems}
+                onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
                 variant="embedded"
                 ariaLabels={{
                   selectionGroupLabel: "Items selection",

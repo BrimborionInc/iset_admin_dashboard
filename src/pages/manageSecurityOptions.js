@@ -130,7 +130,7 @@ export default function ManageSecurityOptions({ updateBreadcrumbs }) {
         />
         <SpaceBetween direction="horizontal" size="xs">
           <Button onClick={resetLayout} variant="link">Reset Layout</Button>
-          <Button onClick={load}>Refresh Data</Button>
+          <Button onClick={load} disabled={loading}>Refresh Data</Button>
         </SpaceBetween>
       </SpaceBetween>
     </>

@@ -1,0 +1,29 @@
+{
+  "template_key": "text-block",
+  "type": "text-block",
+  "label": "Text",
+  "description": "Static text block (body copy or heading).",
+  "status": "active",
+  "default_props": {
+    "text": { "en": "Example text", "fr": "Exemple de texte" },
+    "html": "",
+    "classes": "govuk-body"
+  },
+  "prop_schema": [
+    { "key": "text", "path": "text", "type": "textarea", "label": "Text", "required": true },
+    { "key": "html", "path": "html", "type": "textarea", "label": "HTML (override)" },
+    { "key": "classes", "path": "classes", "type": "select", "label": "Classes", "options": [
+      { "label": "Body (default)", "value": "govuk-body" },
+      { "label": "Body Large", "value": "govuk-body-l" },
+      { "label": "Heading XL", "value": "govuk-heading-xl" },
+      { "label": "Heading L", "value": "govuk-heading-l" },
+      { "label": "Heading M", "value": "govuk-heading-m" },
+      { "label": "Heading S", "value": "govuk-heading-s" },
+      { "label": "Inset Text Style", "value": "govuk-inset-text" },
+      { "label": "Visually Hidden", "value": "govuk-visually-hidden" }
+    ] }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "{% set cls = props.classes or 'govuk-body' %}\n{% if props.html %}\n  {% set body = props.html %}\n{% else %}\n  {% set t = props.text %}\n  {% if t is string %}\n    {% set body = t %}\n  {% else %}\n    {% set body = (t and (t.en or t.fr)) or '' %}\n  {% endif %}\n{% endif %}\n{% if cls and (cls.indexOf('govuk-heading-') != -1) %}\n<h2 class=\"{{ cls }}\">{{ body | safe }}\n</h2>{% elseif cls and (cls.indexOf('govuk-inset-text') != -1) %}\n<div class=\"{{ cls }}\">{{ body | safe }}</div>\n{% else %}\n<p class=\"{{ cls }}\">{{ body | safe }}</p>\n{% endif %}"
+}

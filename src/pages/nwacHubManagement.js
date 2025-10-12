@@ -37,7 +37,10 @@ const NWACHubManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => 
     apiFetch(`/api/ptmas?type=Hub`)
       .then(response => response.json())
       .then(data => setHubs(data))
-      .catch(error => console.error('Error fetching Hubs:', error));
+      .catch(error => {
+        console.error('Error fetching Hubs:', error);
+        setFlashMessages([{ type: 'error', content: 'Error fetching hubs', dismissible: true, onDismiss: () => setFlashMessages([]) }]);
+      });
   };
 
   useEffect(() => {
@@ -78,6 +81,7 @@ const NWACHubManagementDashboard = ({ header, headerInfo, toggleHelpPanel }) => 
                   `Displaying items ${firstIndex} to ${lastIndex} of ${totalItemsCount}`
                 }
                 selectedItems={selectedItems}
+                onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
                 variant="embedded"
                 ariaLabels={{
                   selectionGroupLabel: "Items selection",

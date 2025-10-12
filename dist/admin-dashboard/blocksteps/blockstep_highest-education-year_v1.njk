@@ -1,0 +1,52 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Education",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+
+{% from "govuk/components/date-input/macro.njk" import govukDateInput %}
+
+{{ govukDateInput({
+  id: "dob",
+  namePrefix: "dob",
+  fieldset: {
+    legend: {
+      text: "Year completed highest education?",
+      isPageHeading: props.fieldset.legend.isPageHeading | default(false),
+      classes: "govuk-fieldset__legend--l"
+    }
+  },
+  hint: {
+    text: "What year did you complete your highest level of education"
+  },
+  items: [
+  {
+    "name": "day",
+    "classes": "govuk-input--width-2"
+  },
+  {
+    "name": "month",
+    "classes": "govuk-input--width-2"
+  },
+  {
+    "name": "year",
+    "classes": "govuk-input--width-4"
+  }
+],
+  formGroup: {
+    classes: props.formGroup.classes
+  },
+  disabled: false
+}) }}

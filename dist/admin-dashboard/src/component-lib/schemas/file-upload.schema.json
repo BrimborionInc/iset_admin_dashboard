@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "file-upload.template",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "name": { "type": ["string"], "minLength": 1 },
+    "id": { "type": ["string", "null" ] },
+    "label": {
+      "type": "object",
+      "properties": {
+        "text": { "oneOf": [ { "type": "string" }, { "type": "object", "properties": { "en": {"type":"string"}, "fr": {"type":"string"} }, "additionalProperties": true } ] },
+        "classes": { "type": ["string", "null" ] }
+      },
+      "required": ["text"],
+      "additionalProperties": true
+    },
+    "hint": {
+      "type": "object",
+      "properties": {
+        "text": { "oneOf": [ { "type": "string" }, { "type": "object", "properties": { "en": {"type":"string"}, "fr": {"type":"string"} }, "additionalProperties": true } ] }
+      },
+      "required": ["text"],
+      "additionalProperties": true
+    },
+    "errorMessage": {
+      "type": "object",
+      "properties": { "text": { "type": ["string", "object", "null"] } },
+      "additionalProperties": true
+    },
+    "multiple": { "type": ["boolean", "null"] },
+    "accept": { "type": ["string", "null"], "maxLength": 200 },
+    "documentType": { "type": ["string", "null"], "pattern": "^[-a-zA-Z0-9_]*$", "maxLength": 40 },
+    "classes": { "type": ["string", "null" ] },
+    "formGroup": { "type": "object", "additionalProperties": true },
+    "disabled": { "type": ["boolean", "null"] }
+  },
+  "required": ["name", "label", "hint" ]
+}

@@ -10,10 +10,6 @@ import Board from '@cloudscape-design/board-components/board';
 import IntakeStepTableWidget from '../widgets/IntakeStepTableWidget'; // Import the renamed IntakeStepTableWidget
 import PreviewIntakeStep from '../widgets/PreviewIntakeStep'; // Import the renamed PreviewIntakeStep
 import PreviewStepJson from '../widgets/PreviewStepJSON'; // Import the Step JSON preview widget
-import IntakeStepLibraryWidgetHelp from '../helpPanelContents/intakeStepLibraryWidgetHelp';
-import PreviewIntakeStepWidgetHelp from '../helpPanelContents/previewIntakeStepWidgetHelp';
-import PreviewNunjucksWidgetHelp from '../helpPanelContents/previewNunjucksWidgetHelp';
-
 const ManageIntakeSteps = ({ header, headerInfo, toggleHelpPanel, updateBreadcrumbs }) => { // Rename component
   const [selectedBlockStep, setSelectedBlockStep] = useState(null);
 

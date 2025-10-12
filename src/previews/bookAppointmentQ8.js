@@ -1,13 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import '../css/govuk-frontend.min.css';
 import '../css/style.css';
 
 function BookAppointmentQ8() {
-  const [appointmentData, setAppointmentData] = useState({});
-  const [countries, setCountries] = useState([]);
-  const [services, setServices] = useState([]);
-  const [locations, setLocations] = useState([]);
+  const appointmentData = {
+    serviceType: '1',
+    country: '1',
+    location: '1',
+    members: [],
+    extraTime: 'No',
+    preferredLanguage: 'English',
+    interpreterNeeded: 'No',
+    interpreterLanguage: '',
+    additionalServices: [],
+    additionalNotes: ''
+  };
+  const countries = [{ id: 1, name: 'Canada' }];
+  const services = [{ id: 1, name: 'Biometric Collection' }];
+  const locations = [{ id: 1, name: 'Ottawa VAC' }];
 
 
   const handleConfirmAndBook = () => {

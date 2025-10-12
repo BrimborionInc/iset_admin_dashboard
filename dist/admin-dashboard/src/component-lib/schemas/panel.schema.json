@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/panel.schema.json",
+  "title": "Panel Component",
+  "type": "object",
+  "required": ["titleText", "headingLevel"],
+  "additionalProperties": true,
+  "properties": {
+    "titleText": { "type": ["string", "object"], "minLength": 1, "description": "Main heading text shown inside the panel (bilingual allowed)." },
+    "html": { "type": ["string", "null"], "description": "Optional HTML body below the title." },
+    "headingLevel": { "type": "integer", "enum": [1,2,3,4] },
+    "classes": { "type": "string" }
+  }
+}

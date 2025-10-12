@@ -1,0 +1,60 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Applicant Details",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/radios/macro.njk" import govukRadios %}    {{ govukRadios({     name: "example-radio",     fieldset: {       legend: {         text: "What is your marital status?",         isPageHeading: false,         classes: "govuk-fieldset__legend--l"       }     },     hint: {       text: "Select the option that best describes your current marital status"     },     classes: "govuk-radios",     formGroup: {       classes: props.formGroup.classes     },     disabled: false,     items: [
+  {
+    "text": "Married or equivalent",
+    "value": "1"
+  },
+  {
+    "text": "Single",
+    "value": "2"
+  },
+  {
+    "text": "Separated",
+    "value": "3"
+  },
+  {
+    "text": "Divorced",
+    "value": "4"
+  },
+  {
+    "text": "Widowed",
+    "value": "5"
+  }
+]}) }}
+
+
+{% from "govuk/components/input/macro.njk" import govukInput %}
+
+{{ govukInput({
+  name: "first-name",
+  type: "text",
+  label: {
+    text: "",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "What is your spouse's name?"
+  },
+  classes: "govuk-input",
+  autocomplete: "given-name",
+  formGroup: {
+    classes: props.formGroup.classes
+  },
+  disabled: false
+}) }}

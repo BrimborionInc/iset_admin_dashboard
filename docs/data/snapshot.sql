@@ -436,7 +436,7 @@ CREATE TABLE `iset_application` (
   PRIMARY KEY (`id`),
   KEY `idx_iset_application_submission_id` (`submission_id`),
   KEY `idx_iset_application_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -552,7 +552,7 @@ CREATE TABLE `iset_application_draft_dynamic` (
   UNIQUE KEY `user_id` (`user_id`),
   KEY `idx_iset_app_draft_dynamic_updated_at` (`updated_at`),
   CONSTRAINT `fk_iset_application_draft_dynamic_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -610,7 +610,7 @@ CREATE TABLE `iset_application_submission` (
   KEY `idx_iset_app_sub_workflow` (`workflow_id`),
   KEY `idx_iset_app_sub_status` (`status`),
   CONSTRAINT `fk_iset_app_sub_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE RESTRICT
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -633,7 +633,7 @@ CREATE TABLE `iset_application_version` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_application_version` (`application_id`,`version`),
   KEY `idx_application_version_created` (`created_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -654,7 +654,7 @@ CREATE TABLE `iset_case` (
   KEY `idx_iset_case_application_id` (`application_id`),
   KEY `idx_iset_case_assigned_to_user_id` (`assigned_to_user_id`),
   KEY `idx_iset_case_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -689,6 +689,43 @@ CREATE TABLE `iset_case_assessment` (
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`case_id`),
   CONSTRAINT `fk_iset_case_assessment_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `iset_case_note`
+--
+
+DROP TABLE IF EXISTS `iset_case_note`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `iset_case_note` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `case_id` bigint unsigned NOT NULL,
+  `author_staff_profile_id` bigint unsigned DEFAULT NULL,
+  `author_user_id` int DEFAULT NULL,
+  `body` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_internal` tinyint(1) NOT NULL DEFAULT '1',
+  `is_pinned` tinyint(1) NOT NULL DEFAULT '0',
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at` datetime(3) DEFAULT NULL,
+  `edited_at` datetime(3) DEFAULT NULL,
+  `edited_by_staff_profile_id` bigint unsigned DEFAULT NULL,
+  `edited_by_user_id` int DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_case_created_at` (`case_id`,`created_at`),
+  KEY `idx_case_pinned_created` (`case_id`,`is_pinned`,`created_at`),
+  KEY `idx_author_staff_profile` (`author_staff_profile_id`),
+  KEY `idx_author_user` (`author_user_id`),
+  KEY `idx_deleted_at` (`deleted_at`),
+  KEY `fk_case_note_editor_profile` (`edited_by_staff_profile_id`),
+  KEY `fk_case_note_editor_user` (`edited_by_user_id`),
+  CONSTRAINT `fk_case_note_author_profile` FOREIGN KEY (`author_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_case_note_author_user` FOREIGN KEY (`author_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_case_note_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_case_note_editor_profile` FOREIGN KEY (`edited_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_case_note_editor_user` FOREIGN KEY (`edited_by_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -779,7 +816,7 @@ CREATE TABLE `iset_event_outbox` (
   KEY `idx_event_outbox_status_next` (`status`,`next_attempt_at`),
   KEY `fk_event_outbox_entry` (`event_id`),
   CONSTRAINT `fk_event_outbox_entry` FOREIGN KEY (`event_id`) REFERENCES `iset_event_entry` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -828,7 +865,7 @@ CREATE TABLE `iset_internal_notification` (
   KEY `idx_iset_internal_notification_audience_role` (`audience_type`,`audience_role`),
   KEY `idx_iset_internal_notification_user` (`audience_type`,`audience_user_id`),
   KEY `idx_iset_internal_notification_active` (`starts_at`,`expires_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -865,7 +902,7 @@ CREATE TABLE `iset_migration` (
   `error_snippet` text,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_filename_checksum` (`filename`,`checksum`)
-) ENGINE=InnoDB AUTO_INCREMENT=26 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=30 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1085,7 +1122,7 @@ CREATE TABLE `messages` (
   KEY `recipient_id` (`recipient_id`),
   KEY `idx_messages_case_id` (`case_id`),
   KEY `idx_messages_application_id` (`application_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1109,7 +1146,7 @@ CREATE TABLE `notification_setting` (
   PRIMARY KEY (`id`),
   KEY `template_id` (`template_id`),
   CONSTRAINT `notification_setting_ibfk_1` FOREIGN KEY (`template_id`) REFERENCES `notification_template` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=27 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=33 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1478,7 +1515,7 @@ CREATE TABLE `staff_profiles` (
   KEY `idx_staff_profiles_primary_role` (`primary_role`),
   KEY `idx_staff_profiles_status` (`status`),
   KEY `idx_region` (`region_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=66879 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=164749 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1496,7 +1533,7 @@ CREATE TABLE `step` (
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=122 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=125 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1520,7 +1557,7 @@ CREATE TABLE `step_component` (
   KEY `ix_step_component_template` (`template_id`),
   CONSTRAINT `fk_step_component_step` FOREIGN KEY (`step_id`) REFERENCES `step` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_step_component_template` FOREIGN KEY (`template_id`) REFERENCES `component_template` (`id`) ON DELETE RESTRICT
-) ENGINE=InnoDB AUTO_INCREMENT=1542 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=1605 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1609,7 +1646,7 @@ CREATE TABLE `user` (
   UNIQUE KEY `cognito_sub` (`cognito_sub`),
   KEY `fk_user_ptma` (`ptma_id`),
   CONSTRAINT `fk_user_ptma` FOREIGN KEY (`ptma_id`) REFERENCES `ptma` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=46 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=49 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1648,7 +1685,7 @@ CREATE TABLE `user_session_audit` (
   PRIMARY KEY (`id`),
   KEY `idx_user` (`user_id`),
   KEY `idx_session` (`session_key`)
-) ENGINE=InnoDB AUTO_INCREMENT=21325 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=24040 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1684,7 +1721,7 @@ CREATE TABLE `workflow` (
   `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_workflow_name` (`name`)
-) ENGINE=InnoDB AUTO_INCREMENT=38 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=39 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1750,216 +1787,6 @@ CREATE TABLE `workflow_step` (
   CONSTRAINT `fk_wfstep_workflow` FOREIGN KEY (`workflow_id`) REFERENCES `workflow` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping routines for database 'iset_intake'
---
-/*!50003 DROP PROCEDURE IF EXISTS `CheckBILUsage` */;
-/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
-/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
-/*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8mb4 */ ;
-/*!50003 SET character_set_results = utf8mb4 */ ;
-/*!50003 SET collation_connection  = utf8mb4_0900_ai_ci */ ;
-/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
-/*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
-DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `CheckBILUsage`(
-    IN input_bilReference VARCHAR(50)
-)
-BEGIN
-    DECLARE bil_count INT;
-
-    
-    SELECT COUNT(*) INTO bil_count
-    FROM (
-        SELECT bilReference FROM appointment WHERE bilReference = input_bilReference
-        UNION ALL
-        SELECT bilReference FROM booking WHERE bilReference = input_bilReference
-    ) AS combined;
-
-    
-    IF bil_count > 0 THEN
-        SELECT 'BIL Reference already used' AS status;
-    ELSE
-        SELECT 'BIL Reference is available' AS status;
-    END IF;
-END ;;
-DELIMITER ;
-/*!50003 SET sql_mode              = @saved_sql_mode */ ;
-/*!50003 SET character_set_client  = @saved_cs_client */ ;
-/*!50003 SET character_set_results = @saved_cs_results */ ;
-/*!50003 SET collation_connection  = @saved_col_connection */ ;
-/*!50003 DROP PROCEDURE IF EXISTS `CheckInUser` */;
-/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
-/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
-/*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8mb4 */ ;
-/*!50003 SET character_set_results = utf8mb4 */ ;
-/*!50003 SET collation_connection  = utf8mb4_0900_ai_ci */ ;
-/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
-/*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
-DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `CheckInUser`(
-    IN p_booking_id INT,
-    IN p_slot_id INT,
-    IN p_location_id INT,
-    IN p_ticket_number VARCHAR(10)
-)
-BEGIN
-    INSERT INTO queue (
-        booking_id,
-        slot_id,
-        location_id,
-        ticket_number,
-        status,
-        check_in_time
-    )
-    VALUES (
-        p_booking_id,
-        p_slot_id,
-        p_location_id,
-        p_ticket_number,
-        'waiting',
-        NOW()
-    );
-END ;;
-DELIMITER ;
-/*!50003 SET sql_mode              = @saved_sql_mode */ ;
-/*!50003 SET character_set_client  = @saved_cs_client */ ;
-/*!50003 SET character_set_results = @saved_cs_results */ ;
-/*!50003 SET collation_connection  = @saved_col_connection */ ;
-/*!50003 DROP PROCEDURE IF EXISTS `GenerateTicketNumber` */;
-/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
-/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
-/*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8mb4 */ ;
-/*!50003 SET character_set_results = utf8mb4 */ ;
-/*!50003 SET collation_connection  = utf8mb4_0900_ai_ci */ ;
-/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
-/*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
-DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `GenerateTicketNumber`(
-    IN p_service_type_id INT,
-    IN p_location_id INT
-)
-BEGIN
-    DECLARE v_prefix VARCHAR(5);
-    DECLARE v_next_number INT;
-    DECLARE v_ticket_number VARCHAR(10);
-
-    
-    SELECT prefix INTO v_prefix
-    FROM queue_ticket_config
-    WHERE service_type_id = p_service_type_id
-      AND active = TRUE
-    ORDER BY priority_level ASC
-    LIMIT 1;
-
-    
-    SELECT COALESCE(MAX(CAST(SUBSTRING(ticket_number, 2) AS UNSIGNED)), 0) + 1
-    INTO v_next_number
-    FROM queue
-    WHERE location_id = p_location_id
-      AND ticket_number LIKE CONCAT(v_prefix, '%')
-      AND DATE(check_in_time) = CURDATE();
-
-    
-    SET v_ticket_number = CONCAT(v_prefix, LPAD(v_next_number, 3, '0'));
-
-    
-    SELECT v_ticket_number AS ticketNumber;
-END ;;
-DELIMITER ;
-/*!50003 SET sql_mode              = @saved_sql_mode */ ;
-/*!50003 SET character_set_client  = @saved_cs_client */ ;
-/*!50003 SET character_set_results = @saved_cs_results */ ;
-/*!50003 SET collation_connection  = @saved_col_connection */ ;
-/*!50003 DROP PROCEDURE IF EXISTS `PurgeAppointments` */;
-/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
-/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
-/*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8mb4 */ ;
-/*!50003 SET character_set_results = utf8mb4 */ ;
-/*!50003 SET collation_connection  = utf8mb4_0900_ai_ci */ ;
-/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
-/*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
-DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `PurgeAppointments`()
-BEGIN
-    
-    SET FOREIGN_KEY_CHECKS = 0;
-
-    
-    UPDATE slot 
-    SET is_booked = 0
-    WHERE id IN (SELECT slot_id FROM booking);
-
-    
-    DELETE FROM queue;
-    DELETE FROM booking;
-
-    
-    DELETE FROM appointment;
-    DELETE FROM ticket_counter;
-
-    
-    ALTER TABLE queue AUTO_INCREMENT = 1;
-    ALTER TABLE booking AUTO_INCREMENT = 1;
-    ALTER TABLE appointment AUTO_INCREMENT = 1;
-    ALTER TABLE ticket_counter AUTO_INCREMENT = 1;
-
-    
-    SET FOREIGN_KEY_CHECKS = 1;
-END ;;
-DELIMITER ;
-/*!50003 SET sql_mode              = @saved_sql_mode */ ;
-/*!50003 SET character_set_client  = @saved_cs_client */ ;
-/*!50003 SET character_set_results = @saved_cs_results */ ;
-/*!50003 SET collation_connection  = @saved_col_connection */ ;
-/*!50003 DROP PROCEDURE IF EXISTS `PurgeSlots` */;
-/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
-/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
-/*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8mb4 */ ;
-/*!50003 SET character_set_results = utf8mb4 */ ;
-/*!50003 SET collation_connection  = utf8mb4_0900_ai_ci */ ;
-/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
-/*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
-DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `PurgeSlots`()
-BEGIN
-    
-    SET FOREIGN_KEY_CHECKS = 0;
-
-    
-    CREATE TEMPORARY TABLE temp_deleted_count (count INT);
-
-    
-    DELETE FROM queue WHERE slot_id IN (SELECT id FROM slot);
-    DELETE FROM booking WHERE slot_id IN (SELECT id FROM slot);
-
-    
-    DELETE FROM slot;
-    INSERT INTO temp_deleted_count (count) VALUES (ROW_COUNT());
-
-    
-    ALTER TABLE slot AUTO_INCREMENT = 1;
-
-    
-    SET FOREIGN_KEY_CHECKS = 1;
-
-    
-    SELECT count FROM temp_deleted_count;
-
-    
-    DROP TEMPORARY TABLE temp_deleted_count;
-END ;;
-DELIMITER ;
-/*!50003 SET sql_mode              = @saved_sql_mode */ ;
-/*!50003 SET character_set_client  = @saved_cs_client */ ;
-/*!50003 SET character_set_results = @saved_cs_results */ ;
-/*!50003 SET collation_connection  = @saved_col_connection */ ;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -1970,4 +1797,4 @@ DELIMITER ;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-04 20:40:43
+-- Dump completed on 2025-10-12  9:33:41

@@ -1,6 +1,6 @@
 // Minimal React AuthProvider skeleton for Cognito Hosted UI (OIDC Code + PKCE)
 // Note: This is a placeholder skeleton; full implementation will handle redirects, token exchange, refresh, and idle-timeout.
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useContext, useMemo, useState } from 'react';
 
 const AuthContext = createContext(null);
 

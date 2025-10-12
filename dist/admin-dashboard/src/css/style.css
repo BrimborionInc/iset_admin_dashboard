@@ -1,0 +1,311 @@
+@font-face {
+    font-family: 'GDS Transport';
+    src: url('../assets/fonts/light-94a07e06a1-v2.woff2') format('woff2'),
+         url('../assets/fonts/light-f591b13f7d-v2.woff') format('woff');
+    font-weight: 300;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'GDS Transport';
+    src: url('../assets/fonts/bold-b542beb274-v2.woff2') format('woff2'),
+         url('../assets/fonts/bold-affa96571d-v2.woff') format('woff');
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+.member-table th, .member-table td {
+    padding: 10px;
+    border-bottom: 1px solid #b1b4b6;
+}
+
+.member-table th {
+    text-align: left;
+    font-weight: bold;
+}
+
+.member-table td {
+    vertical-align: top;
+}
+
+body {
+    font-family: 'GDS Transport', Arial, sans-serif;
+    margin: 0;
+    line-height: 1;
+    color: var(--awsui-color-text-body-default); /* Uses Cloudscape's default text color */
+    background-color: var(--awsui-color-background-layout-main); /* Uses Cloudscape's adaptive background */
+    overflow-x: hidden;
+}
+
+.calendar-table {
+    width: 100%; /* Ensure it fits within the screen */
+    table-layout: fixed; /* Makes all columns equal width */
+}
+
+.govuk-table__header {
+    padding: 5px; /* Reduce padding for a compact look */
+    font-size: 12px; /* Smaller font size for mobile */
+    text-align: center; /* Center text for clarity */
+}
+
+.govuk-table__cell {
+    padding: 5px; /* Reduce padding to save space */
+    text-align: center; /* Center content for uniformity */
+}
+
+@media print {
+    body * {
+        display: none;
+    }
+    #print-section {
+        display: block;
+    }
+}
+
+/* Responsive Design for small screens */
+@media (max-width: 768px) {
+    .govuk-input, .govuk-button {
+        width: 100%; /* Ensure full width on narrow screens */
+    }
+    .govuk-button--secondary {
+        background-color: #d3d3d3; /* Grey button */
+        color: #0b0c0c;
+        margin-left: 0px;
+    }
+    /* Make sure the button stacks below the input fields on mobile */
+    .govuk-form-group button {
+        display: block;
+        margin-top: 10px;
+    }
+    .govuk-header__navigation {
+        display: none;
+    }
+    .govuk-header__menu-icon {
+        display: block !important; /* Use only if necessary */
+    }
+    .govuk-header__navigation.open {
+        display: block;
+        background-color: #0b0c0c; /* Match header background */
+        position: absolute;
+        top: 38px; /* Adjust based on header height */
+        right: 0;
+        width: 100%;
+        z-index: 1000; /* Ensure it's above other elements */
+    }
+    .govuk-footer {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .govuk-footer__meta {
+        flex-direction: column-reverse; /* Stacks items vertically on smaller screens */
+        align-items: center; /* Centers items for smaller screens */
+    }
+    .govuk-footer__meta-item--logo {
+        margin-left: 0; /* Removes margin for small screens */
+        margin-top: 10px; /* Adds spacing above the logo */
+    }
+
+}
+
+
+.govuk-radios__item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px; /* Adjust as needed */
+}
+
+.govuk-radios__label {
+    margin-left: 10px; /* Add spacing between the radio button and the label */
+    vertical-align: middle;
+}
+
+
+header, footer {
+    background-color: #f3f2f1;
+    //padding: 1em;
+    margin: 0; /* Ensure no margin */
+}
+
+
+a {
+    text-decoration: none;
+    color: #005ea5;
+}
+
+
+
+button {
+    background-color: #005ea5;
+    color: white;
+    border: none;
+    padding: 0.5em 1em;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #004080;
+}
+
+.horizontal-line {
+    border-top: 1px solid #b1b4b6;
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+
+.govuk-grid-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px; /* Adjust spacing as needed */
+}
+.govuk-grid-column-one-half {
+    flex: 1;
+    min-width: 0; /* Ensure items don't overflow */
+}
+
+.tooltip {
+    position: relative;
+    display: inline-block;
+    cursor: pointer; /* Optional: change the cursor to indicate a tooltip */
+}
+
+.tooltiptext {
+    visibility: hidden;
+    width: 220px; /* Adjust width as needed */
+    background-color: #555; /* Dark background */
+    color: #fff; /* White text */
+    text-align: center;
+    border-radius: 5px;
+    padding: 5px;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%; /* Position it above the tooltip trigger */
+    left: 50%;
+    margin-left: -110px; /* Center the tooltip */
+    opacity: 0;
+    transition: opacity 0.3s; /* Smooth transition */
+}
+
+.tooltip:hover .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+}
+
+input[type="radio"] {
+    vertical-align: middle;
+    margin-top: -1px; /* Adjust as needed for perfect centering */
+}
+
+input[type="radio"] + label {
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: 5px;
+}
+
+#bil-reference-section {
+    display: block;
+    background-color: lightyellow;
+}
+
+.govuk-form-group {
+    display: block;
+    margin-bottom: 1.5em; /* Add spacing between form elements */
+}
+
+.govuk-header__menu-icon {
+    display: none; /* Ensures it only shows on mobile when required */
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: white;
+    position: absolute;
+    right: -23px; /* Adjust this value for further right alignment */
+    top: -20px; /* Adjust this value for finer vertical alignment */
+    z-index: 10; /* Ensure it stays on top */
+}
+
+.govuk-footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1em;
+    background-color: #f3f2f1;
+}
+
+.govuk-footer__meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.govuk-footer__meta-item--links {
+    flex: 1; /* Takes up available space */
+}
+
+.govuk-footer__meta-item--logo {
+    flex: 0; /* Prevents the logo from stretching */
+    margin-left: 20px; /* Adds spacing between the links and the logo */
+}
+
+.hover-info {
+    color: blue;
+    position: relative;
+  }
+  
+.hover-info:hover::after {
+content: attr(data-hover);
+position: absolute;
+background-color: #f0f0f0;
+border: 1px solid #ccc;
+padding: 8px;
+top: 100%;
+left: 0;
+width: 250px;
+z-index: 100;
+box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+.govuk-radios .govuk-radios__item {
+    display: block;
+}
+
+.available-day {
+  background-color: #dff0d8; /* Light green for available days */
+  cursor: pointer;
+}
+
+.unavailable-day {
+  background-color: #f2dede; /* Light red for unavailable days */
+  color: #a94442;
+}
+
+.selected-day {
+  border: 3px solid #000000; /* Heavy black border */
+  background-color: #b8daff; /* Light blue color for the selected cell */
+}
+
+.available-time {
+  padding: 10px;
+  text-align: center;
+  cursor: pointer;
+  border: 1px solid #ddd;
+  background-color: #f3f4f6;
+}
+
+.available-time:hover {
+  background-color: #e0e0e0;
+}
+
+.selected-time {
+  border: 3px solid #000000; /* Heavy black border */
+  background-color: #b8daff; /* Light blue color for selected cell */
+}
+
+.some-class {
+    /* ...existing code... */
+    fontFamily: 'Arial, sans-serif'; /* Corrected property name */
+    /* ...existing code... */
+}

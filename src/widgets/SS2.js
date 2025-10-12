@@ -34,7 +34,7 @@ const getColor = (value, threshold) => {
   }
 };
 
-const ServiceStandard1 = ({ actions, toggleHelpPanel }) => {
+export const ServiceStandard1 = ({ actions, toggleHelpPanel }) => {
   const helpPanelContent = (
     <div>
       <h2>Service Standard SS1 Help</h2>

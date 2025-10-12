@@ -1,0 +1,29 @@
+{
+  "template_key": "warning-text",
+  "type": "warning-text",
+  "label": "Warning Text",
+  "description": "GOV.UK styled warning callout box with icon.",
+  "status": "active",
+  "default_props": {
+    "id": "",
+    "name": "warning-text",
+    "text": { "en": "Important: action required.", "fr": "Important : action requise." },
+    "iconFallbackText": { "en": "Warning", "fr": "Avertissement" },
+    "classes": "",
+    "role": "alert"
+  },
+  "prop_schema": [
+    { "key": "name", "path": "name", "type": "text", "label": "Data Key" },
+    { "key": "text", "path": "text", "type": "text", "label": "Body Text" },
+    { "key": "iconFallbackText", "path": "iconFallbackText", "type": "text", "label": "Icon Fallback Text" },
+    { "key": "classes", "path": "classes", "type": "text", "label": "CSS Classes" },
+    { "key": "role", "path": "role", "type": "select", "label": "ARIA Role", "options": [
+      { "label": "Alert", "value": "alert" },
+      { "label": "Status", "value": "status" },
+      { "label": "None", "value": "" }
+    ] }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "<div class=\"govuk-warning-text {{ props.classes }}\"{% if props.role %} role=\"{{ props.role }}\"{% endif %}>\n  <span class=\"govuk-warning-text__icon\" aria-hidden=\"true\">!\n  </span>\n  <strong class=\"govuk-warning-text__text\">\n    <span class=\"govuk-warning-text__assistive\">{{ props.iconFallbackText }} </span>{{ props.text }}\n  </strong>\n</div>"
+}
