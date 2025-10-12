@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import '../css/govuk-frontend.min.css';
 import '../css/style.css';
 
 function BookAppointmentQ6() {
   const [additionalServices, setAdditionalServices] = useState([]);
-  const [appointmentData, setAppointmentData] = useState({});
 
 
   const handleServiceChange = (event) => {
@@ -17,7 +16,7 @@ function BookAppointmentQ6() {
 
   const handleContinue = () => {
     // Simulate saving data
-    console.log('Slot search criteria saved:', { ...appointmentData, additionalServices });
+    console.log('Slot search criteria saved:', { additionalServices });
   };
 
   const text = {

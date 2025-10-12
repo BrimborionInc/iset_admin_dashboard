@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/checkbox.schema.json",
+  "title": "Checkboxes Component",
+  "description": "Schema validating the default_props for the checkboxes component.",
+  "type": "object",
+  "required": ["name", "items", "fieldset"],
+  "additionalProperties": true,
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "fieldset": {
+      "type": "object",
+      "required": ["legend"],
+      "properties": {
+        "legend": {
+          "type": "object",
+          "required": ["text", "isPageHeading", "classes"],
+          "properties": {
+            "text": { "type": "string", "minLength": 1 },
+            "isPageHeading": { "type": "boolean" },
+            "classes": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "hint": {
+      "type": "object",
+      "properties": { "text": { "type": ["string", "object"], "description": "May be bilingual object or simple string." } },
+      "required": ["text"],
+      "additionalProperties": true
+    },
+    "classes": { "type": "string" },
+    "formGroup": { "type": "object", "properties": { "classes": { "type": "string" } }, "additionalProperties": true },
+    "disabled": { "type": "boolean" },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["text", "value"],
+        "properties": {
+          "text": { "type": ["string", "object"], "minLength": 1 },
+          "value": { "type": ["string", "number", "boolean"] },
+          "hint": { "type": ["string", "object", "null"], "maxLength": 300 },
+          "conditional": { "type": ["object", "null"] },
+          "attributes": { "type": ["object", "null"] },
+          "checked": { "type": ["boolean", "null"] },
+          "disabled": { "type": ["boolean", "null"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

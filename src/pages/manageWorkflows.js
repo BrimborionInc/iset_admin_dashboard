@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Button, SpaceBetween } from '@cloudscape-design/components';
+import { Button } from '@cloudscape-design/components';
 import WorkflowLibraryWidgetHelp from '../helpPanelContents/workflowLibraryWidgetHelp';
 import WorkflowPropertiesWidgetHelp from '../helpPanelContents/workflowPropertiesWidgetHelp';
 import WorkflowPreviewWidgetHelp from '../helpPanelContents/workflowPreviewWidgetHelp';

@@ -116,7 +116,7 @@ const AdminDashboard = () => {
         return () => window.removeEventListener('auth:session-changed', handler);
     }, []);
 
-    const simulatedRole = useMemo(() => {
+    const simulatedRole = (() => {
         try {
             const raw = sessionStorage.getItem('currentRole');
             if (raw) {
@@ -128,7 +128,7 @@ const AdminDashboard = () => {
             }
         } catch (_) {}
         return null;
-    }, [authVersion]);
+    })();
 
     const role = useMemo(() => {
         if (iamOn) {
@@ -137,13 +137,13 @@ const AdminDashboard = () => {
         return simulatedRole || tokenRole || 'Guest';
     }, [iamOn, tokenRole, simulatedRole]);
 
-    const simulateSignedOut = useMemo(() => {
+    const simulateSignedOut = (() => {
         try {
             return sessionStorage.getItem('simulateSignedOut') === 'true';
         } catch (_) {
             return false;
         }
-    }, [authVersion]);
+    })();
 
     const defaultItems = useMemo(() => cloneBoardItems(buildDefaultBoardItems(role)), [role]);
     const storageKey = useMemo(() => `${BOARD_STORAGE_PREFIX}.${role || 'guest'}`, [role]);

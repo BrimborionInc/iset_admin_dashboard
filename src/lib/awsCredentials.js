@@ -1,5 +1,3 @@
-﻿"use strict";
-
 let logged = false;
 
 function resolveAwsCredentials() {

@@ -1,11 +1,9 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect } from 'react';
 import { Multiselect, Select, Box } from '@cloudscape-design/components';
 import { LocationContext } from '../context/LocationContext';
 
 const LocationSelector = () => {
   const { selectedLocations, setSelectedLocations, dateRange, setDateRange, locations, setLocations } = useContext(LocationContext);
-  const defaultOption = { label: 'All Region', value: 'all' };
-
   useEffect(() => {
     const fetchLocations = async () => {
       try {
@@ -24,7 +22,7 @@ const LocationSelector = () => {
         }, {});
 
         const options = [
-          defaultOption,
+          { label: 'All Region', value: 'all' },
           ...Object.keys(groupedLocations).map(country => ({
             label: country,
             options: groupedLocations[country],

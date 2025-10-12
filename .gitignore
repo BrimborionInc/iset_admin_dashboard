@@ -23,13 +23,14 @@ yarn-debug.log*
 yarn-error.log*
 
 # Infrastructure / Terraform (exclude provider binaries, state, local caches)
-infra/terraform/.terraform/
 infra/terraform/.tfbin/
-infra/terraform/*.tfstate
-infra/terraform/*.tfstate.backup
-infra/terraform/*.zip
-infra/terraform/terraform.tfstate*
-infra/terraform/*.tfvars
+infra/terraform/**/.terraform/
+infra/terraform/**/*.tfstate
+infra/terraform/**/*.tfstate.*
+infra/terraform/**/*.zip
+infra/terraform/**/*.tfvars
+infra/terraform/**/*.tfvars.json
+infra/terraform/**/*.tfplan
 
 # Local environment & secrets (stop tracking if previously added)
 .env

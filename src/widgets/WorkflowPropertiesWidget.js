@@ -16,8 +16,6 @@ import {
 import { apiFetch } from '../auth/apiClient';
 import WorkflowPropertiesWidgetHelp from '../helpPanelContents/workflowPropertiesWidgetHelp';
 
-const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, ''); // retained for any absolute path needs
-
 // No key/value component needed; using FormField with disabled inputs for read-only fields.
 
 export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated, actions, toggleHelpPanel }) {
@@ -37,9 +35,6 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated, 
       setAlert(null);
     }
   }, [workflow]);
-
-  const statusColor =
-    statusValue === 'active' ? 'success' : statusValue === 'inactive' ? 'stopped' : 'info';
 
   const statusOptions = useMemo(
     () => [

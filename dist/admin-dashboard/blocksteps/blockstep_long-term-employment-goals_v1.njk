@@ -1,0 +1,35 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Employment Goals",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/textarea/macro.njk" import govukTextarea %}
+
+{{ govukTextarea({
+  id: "more-detail",
+  name: "more-detail",
+  label: {
+    text: "What are your long-term employment goals?",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "Tell us what kind of work or career you would like to pursue. Be as specific as you can — for example, “heavy equipment operator,” “early childhood educator,” or “self-employed graphic designe"
+  },
+  errorMessage: {
+    text: "You must provide more detail."
+  },
+  classes: "govuk-textarea",
+  rows: "5"
+}) }}

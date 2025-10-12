@@ -6,7 +6,6 @@ import {
   SpaceBetween,
   Box,
   Spinner,
-  Tabs,
   StatusIndicator,
   Button,
   Link
@@ -15,8 +14,6 @@ import WorkflowRuntimeSchemaWidgetHelp from '../helpPanelContents/workflowRuntim
 import CodeView from '@cloudscape-design/code-view/code-view';
 import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
 import { apiFetch } from '../auth/apiClient';
-
-const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
 
 export default function WorkflowRuntimeSchemaWidget({ selectedWorkflow, actions, toggleHelpPanel }) {
   const [loading, setLoading] = useState(false);
@@ -47,9 +44,9 @@ export default function WorkflowRuntimeSchemaWidget({ selectedWorkflow, actions,
     }
     load();
     return () => { cancelled = true; };
-  }, [selectedWorkflow?.id]);
+  }, [selectedWorkflow]);
 
-  const steps = preview?.steps || [];
+  const steps = useMemo(() => (Array.isArray(preview?.steps) ? preview.steps : []), [preview]);
   const meta = preview?.meta || null;
 
   const componentsCount = useMemo(() => steps.reduce((a, s) => a + (s.components?.length || 0), 0), [steps]);

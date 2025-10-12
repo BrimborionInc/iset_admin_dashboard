@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { BoardItem } from '@cloudscape-design/board-components';
 
@@ -19,6 +19,8 @@ import {
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
 import ApplicationOverviewHelp from '../helpPanelContents/applicationOverviewHelp';
+import useCurrentUser from '../hooks/useCurrentUser';
+import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 
 function formatDateTime(value) {
   if (!value) return '';
@@ -73,45 +75,80 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   const [savingStatus, setSavingStatus] = useState(false);
   const [statusFeedback, setStatusFeedback] = useState(null);
   const manualStatusRef = useRef(null);
-  const [userRole, setUserRole] = useState(null);
+  const {
+    userId: currentUserId,
+    displayName: currentUserName,
+    role: currentUserRole
+  } = useCurrentUser();
+  const userRole = currentUserRole || '';
   const [confirmStatusChange, setConfirmStatusChange] = useState(null);
+  const {
+    lockState,
+    acquireLock,
+    releaseLock,
+    refreshLock: refreshLockHeartbeat,
+    isLockedByMe
+  } = useApplicationLock(application_id);
+  const activeLock = useMemo(() => {
+    if (lockState.owned && lockState.lock) {
+      return lockState.lock;
+    }
+    if (application?.lock_owner_id || application?.lock_owner_name || application?.lock_owner_email) {
+      return {
+        applicationId: application_id || null,
+        ownerUserId: application?.lock_owner_id ? String(application.lock_owner_id) : null,
+        ownerDisplayName: application?.lock_owner_name || null,
+        ownerEmail: application?.lock_owner_email || null,
+        expiresAt: application?.lock_expires_at || null,
+        acquiredAt: null,
+        ttlMinutes: null,
+        heartbeatMinutes: null,
+        reused: false
+      };
+    }
+    return null;
+  }, [
+    application?.lock_expires_at,
+    application?.lock_owner_email,
+    application?.lock_owner_id,
+    application?.lock_owner_name,
+    application_id,
+    lockState.lock,
+    lockState.owned
+  ]);
+  const lockOwnerId = activeLock?.ownerUserId ? String(activeLock.ownerUserId) : null;
+  const lockHeldByCurrentUser = Boolean(isLockedByMe || (currentUserId && lockOwnerId && String(currentUserId) === lockOwnerId));
+  const lockedByAnotherUser = Boolean(lockOwnerId && !lockHeldByCurrentUser);
+  const lockAlertMessage = useMemo(() => {
+    const lockExpiresAt = activeLock?.expiresAt ? new Date(activeLock.expiresAt) : null;
+    if (lockedByAnotherUser) {
+      return buildLockConflictMessage({ reason: 'owned_by_other', lock: activeLock });
+    }
+    if (lockHeldByCurrentUser) {
+      const ownerLabel = currentUserName || activeLock?.ownerDisplayName || 'you';
+      const expiresFragment = lockExpiresAt ? ` (expires ${lockExpiresAt.toLocaleTimeString()})` : '';
+      return `You (${ownerLabel}) currently hold an edit lock${expiresFragment}. Save or cancel to release it for other users.`;
+    }
+    return null;
+  }, [activeLock, currentUserName, lockHeldByCurrentUser, lockedByAnotherUser]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await apiFetch('/api/auth/me');
-        if (res.ok) {
-          const data = await res.json();
-          const role = data?.auth?.role || data?.auth?.primary_role || null;
-          if (!cancelled && role) {
-            setUserRole(role);
-            return;
-          }
-        }
-      } catch (_) {
-        // ignore and attempt fallback
+  const fetchLatestApplication = useCallback(async () => {
+    if (!application_id) return null;
+    try {
+      const res = await apiFetch(`/api/applications/${application_id}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      let payload = data.payload_json;
+      if (payload && typeof payload === 'string') {
+        try { payload = JSON.parse(payload); } catch { payload = {}; }
       }
-      if (cancelled) return;
-      if (typeof window !== 'undefined') {
-        const keys = ['demoRole','simRole','simulatedRole','isetRole','role','currentRole','userRole'];
-        for (const key of keys) {
-          try {
-            const value = window.localStorage.getItem(key);
-            if (value) {
-              setUserRole(value);
-              break;
-            }
-          } catch (_) {
-            // ignore storage errors
-          }
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+      data.__payload = payload || {};
+      setApplication(data);
+      return data;
+    } catch (_) {
+      return null;
+    }
+  }, [application_id]);
 
 
   useEffect(() => {
@@ -229,7 +266,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   const selectedStatusOption = statusOption || (fallbackStatus ? { label: fallbackStatus, value: fallbackStatus } : null);
   const badgeLabel = statusOption?.label || (fallbackStatus ? fallbackStatus : 'Unknown');
   const badgeColor = statusColor(statusOption?.value || fallbackStatus || 'unknown');
-  const statusSelectDisabled = !canEditStatus || savingStatus;
+  const statusSelectDisabled = !canEditStatus || savingStatus || lockedByAnotherUser;
 
   const handleConfirmDismiss = () => setConfirmStatusChange(null);
 
@@ -255,22 +292,74 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     manualStatusRef.current = { pending: nextStatus, previous: previousStatus || '' };
     setStatusValue(nextStatus);
     setSavingStatus(true);
+    let releaseAfter = false;
     try {
-      const res = await apiFetch(`/api/cases/${caseData.id}`, {
+      if (!lockState.owned) {
+        const lockResult = await acquireLock();
+        if (!lockResult?.ok) {
+          const message = buildLockConflictMessage(lockResult);
+          manualStatusRef.current = null;
+          setStatusValue(previousStatus);
+          setStatusFeedback({ type: 'warning', content: message });
+          return;
+        }
+        releaseAfter = Boolean(lockResult.localOwner);
+      } else if (lockHeldByCurrentUser) {
+        releaseAfter = true;
+        refreshLockHeartbeat().catch(() => {});
+      }
+
+      const expectedRowVersion = Number(application?.row_version || 0);
+      const payload = { status: nextStatus };
+      if (expectedRowVersion > 0) {
+        payload.expectedRowVersion = expectedRowVersion;
+      }
+      const response = await apiFetch(`/api/cases/${caseData.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: nextStatus }),
+        body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        let message = 'Failed to update status.';
-        try {
-          const body = await res.json();
-          if (body?.error) message = body.error;
-        } catch (_) {
-          // ignore body parse issues
+      let body = null;
+      try {
+        body = await response.json();
+      } catch (_) {
+        body = null;
+      }
+
+      if (response.status === 423) {
+        const message = buildLockConflictMessage({ reason: body?.reason || body?.error, lock: body?.lock });
+        manualStatusRef.current = null;
+        setStatusValue(previousStatus);
+        setStatusFeedback({ type: 'warning', content: message });
+        if (releaseAfter) {
+          releaseLock({ silent: true }).catch(() => {});
         }
+        return;
+      }
+
+      if (response.status === 409) {
+        manualStatusRef.current = null;
+        setStatusValue(previousStatus);
+        const currentRowVersion = Number(body?.currentRowVersion ?? body?.application_row_version);
+        if (currentRowVersion) {
+          setApplication(prev => (prev ? { ...prev, row_version: currentRowVersion } : prev));
+        }
+        await fetchLatestApplication();
+        if (typeof actions?.refreshCaseData === 'function') {
+          try { await actions.refreshCaseData(); } catch (_) {}
+        }
+        setStatusFeedback({ type: 'warning', content: 'Another user updated this application first. The latest status has been reloaded.' });
+        if (releaseAfter) {
+          releaseLock({ silent: true }).catch(() => {});
+        }
+        return;
+      }
+      if (!response.ok) {
+        const message = body?.error || 'Failed to update status.';
         throw new Error(message);
       }
+
+      await fetchLatestApplication();
       if (typeof actions?.refreshCaseData === 'function') {
         try {
           await actions.refreshCaseData();
@@ -285,6 +374,9 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
       setStatusFeedback({ type: 'error', content: err?.message || 'Failed to update status.' });
     } finally {
       setSavingStatus(false);
+      if (releaseAfter) {
+        releaseLock({ silent: true }).catch(() => {});
+      }
     }
   };
 
@@ -292,6 +384,13 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     const nextOption = detail.selectedOption;
     const nextStatus = nextOption?.value;
     if (!nextStatus || nextStatus === statusValue) return;
+    if (lockedByAnotherUser) {
+      setStatusFeedback({
+        type: 'warning',
+        content: lockAlertMessage || 'This case is currently locked by another user.'
+      });
+      return;
+    }
 
     const canonicalNextStatus = canonicalizeStatus(nextStatus);
 
@@ -420,6 +519,11 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
       }
     >
       <SpaceBetween size="l">
+        {lockAlertMessage && (
+          <Alert type={lockedByAnotherUser ? 'warning' : 'info'}>
+            {lockAlertMessage}
+          </Alert>
+        )}
         {statusFeedback && (
           <Alert
             type={statusFeedback.type}

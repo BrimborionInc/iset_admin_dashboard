@@ -11,17 +11,6 @@ import SecureMessagingWidget from '../widgets/SecureMessagingWidget';
 import CaseNotesWidget from '../widgets/CaseNotesWidget';
 import ApplicationEvents from '../widgets/applicationEvents';
 
-// All widgets available for this dashboard (for palette)
-const ALL_WIDGETS = [
-  { id: 'application-overview', title: 'Application Overview', rowSpan: 2, columnSpan: 4 },
-  { id: 'iset-application-form', title: 'ISET Application Form', rowSpan: 5, columnSpan: 2 },
-  { id: 'coordinator-assessment', title: 'Application Assessment', rowSpan: 5, columnSpan: 2 },
-  { id: 'supporting-documents', title: 'Supporting Documents', rowSpan: 5, columnSpan: 2 },
-  { id: 'secure-messaging', title: 'Secure Messaging', rowSpan: 5, columnSpan: 2 },
-  { id: 'case-notes', title: 'Case Notes', rowSpan: 5, columnSpan: 2 },
-  { id: 'application-events', title: 'Application Events', rowSpan: 5, columnSpan: 2 }
-];
-
 const DEFAULT_ITEMS = [
   { id: 'application-overview', rowSpan: 2, columnSpan: 4 },
   { id: 'iset-application-form', rowSpan: 5, columnSpan: 2 },

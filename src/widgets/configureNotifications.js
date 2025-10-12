@@ -26,8 +26,13 @@ const ConfigureNotifications = ({ actions, dragHandleAriaLabel, i18nStrings }) =
   ];
 
   useEffect(() => {
-    const newIntervals = Array(reminderCount).fill('').map((_, index) => intervals[index] || '');
-    setIntervals(newIntervals);
+    setIntervals(prev => {
+      const next = Array(reminderCount).fill('').map((_, index) => prev[index] || '');
+      if (next.length === prev.length && next.every((val, idx) => val === prev[idx])) {
+        return prev;
+      }
+      return next;
+    });
   }, [reminderCount]);
 
   return (

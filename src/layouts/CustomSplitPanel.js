@@ -1,5 +1,5 @@
 import React from 'react';
-import { SplitPanel, Box, Header, Button } from '@cloudscape-design/components';
+import { SplitPanel, Box, Header } from '@cloudscape-design/components';
 import { ItemsPalette, BoardItem } from '@cloudscape-design/board-components';
 import ChartImage from '../assets/images/chart-placeholder.png'; // Import a generic chart image
 

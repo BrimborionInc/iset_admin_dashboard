@@ -1,5 +1,3 @@
-import nunjucks from "nunjucks";
-
 export function generateNunjucksFromComponents(components) {
   return components
     .map((component) => {

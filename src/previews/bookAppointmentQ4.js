@@ -5,15 +5,12 @@ import '../css/style.css';
 
 function BookAppointmentQ4() {
   const [extraTime, setExtraTime] = useState('');
-  const [appointmentData, setAppointmentData] = useState({});
-
   useEffect(() => {
     // Simulate fetching appointment data
     const fetchedData = {
       extraTime: 'no',
       // ...other data
     };
-    setAppointmentData(fetchedData);
     setExtraTime(fetchedData.extraTime);
   }, []);
 

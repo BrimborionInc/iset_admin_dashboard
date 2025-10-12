@@ -1,4 +1,4 @@
-﻿const registry = new Map();
+const registry = new Map();
 
 function register(keys, entry) {
   const list = Array.isArray(keys) ? keys : [keys];

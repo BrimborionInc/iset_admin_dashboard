@@ -1,0 +1,37 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Applicant Details",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+
+{% from "govuk/components/input/macro.njk" import govukInput %}
+
+{{ govukInput({
+  name: "first-name",
+  type: "text",
+  label: {
+    text: "What is your home community?",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "This could be the name of your First Nation, Inuit community, or Métis organization, or the Indigenous community you are affiliated with. It helps us understand your regional or cultural connection and ensure proper service support."
+  },
+  classes: "govuk-input",
+  autocomplete: "given-name",
+  formGroup: {
+    classes: props.formGroup.classes
+  },
+  disabled: false
+}) }}

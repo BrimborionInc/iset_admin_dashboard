@@ -1,0 +1,27 @@
+{
+  "template_key": "panel",
+  "type": "panel",
+  "label": "Panel",
+  "description": "Confirmation / summary panel with prominent title and optional HTML body.",
+  "status": "active",
+  "default_props": {
+    "titleText": "Application complete",
+    "html": "",
+    "headingLevel": 1,
+    "classes": ""
+  },
+  "prop_schema": [
+    { "key": "titleText", "path": "titleText", "type": "text", "label": "Title Text" },
+    { "key": "html", "path": "html", "type": "textarea", "label": "HTML Content" },
+    { "key": "headingLevel", "path": "headingLevel", "type": "select", "label": "Heading Level", "options": [
+      { "label": "1 (h1)", "value": 1 },
+      { "label": "2 (h2)", "value": 2 },
+      { "label": "3 (h3)", "value": 3 },
+      { "label": "4 (h4)", "value": 4 }
+    ] },
+    { "key": "classes", "path": "classes", "type": "text", "label": "CSS Classes" }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "{% from \"govuk/components/panel/macro.njk\" import govukPanel %}\n{{ govukPanel({\n  titleText: props.titleText,\n  html: props.html,\n  headingLevel: props.headingLevel,\n  classes: props.classes\n}) }}"
+}

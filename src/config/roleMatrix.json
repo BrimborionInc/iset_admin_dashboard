@@ -17,10 +17,6 @@
       "System Administrator",
       "Program Administrator"
     ],
-    "/assessment-review": [
-      "System Administrator",
-      "Program Administrator"
-    ],
     "/audit-logs-dashboard": [
       "System Administrator"
     ],
@@ -40,16 +36,9 @@
       "Regional Coordinator",
       "PTMA Staff"
     ],
-    "/case-management": [
-      "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "PTMA Staff"
-    ],
     "/configuration/events": [
       "System Administrator"
     ],
-
     "/configuration-settings": [
       "System Administrator"
     ],
@@ -67,26 +56,10 @@
       "System Administrator",
       "Program Administrator"
     ],
-    "/manage-applications": [
-      "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "PTMA Staff"
-    ],
     "/manage-components": [
       "System Administrator"
     ],
-    "/manage-messages": [
-      "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "PTMA Staff"
-    ],
     "/manage-notifications": [
-      "System Administrator",
-      "Program Administrator"
-    ],
-    "/manage-organisations": [
       "System Administrator",
       "Program Administrator"
     ],

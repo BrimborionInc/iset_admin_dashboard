@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StatusIndicator , Hotspot, Toggle, ButtonDropdown, SpaceBetween, Header, Box, Link, Select, KeyValuePairs, Button } from '@cloudscape-design/components';
+import { StatusIndicator , Hotspot, Toggle, ButtonDropdown, SpaceBetween, Header, Link, Select, KeyValuePairs, Button } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import EncryptionSettingsHelp from '../helpPanelContents/encryptionSettingsHelp';
 

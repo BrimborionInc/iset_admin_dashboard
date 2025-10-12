@@ -190,7 +190,6 @@ export default function UploadConfigDashboard({ toggleHelpPanel }) {
     { id: 'audit', columnSpan: 2, rowSpan: 4, data: { type: 'audit' } }
   ]), []);
   const [items, setItems] = useState(defaultItems);
-  const resetLayout = () => setItems(defaultItems);
 
   function renderContent(type) {
     switch(type) {

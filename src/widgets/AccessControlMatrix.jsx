@@ -23,23 +23,17 @@ const ROUTE_LABELS = {
   '/admin/upload-config': 'File Upload Config',
   '/application-case/:id': 'Application Case',
   '/arms-reporting': 'ARMS Reporting',
-  '/assessment-review': 'Assessment Review',
   '/audit-logs-dashboard': 'Audit and Logs',
   '/capacity-planning-dashboard': 'Capacity Planning',
   '/case-assignment-dashboard': 'Manage Applications',
   '/case-assignment-dashboard?view=assignment': 'Application Assignment',
-  '/case-management': 'My Case Queue',
   '/configuration-settings': 'Configuration Settings',
   '/configuration/events': 'Event Capture',
   '/custom-dashboards-dashboard': 'Custom Dashboards',
   '/help-support-dashboard': 'Help and Support',
   '/language-settings-dashboard': 'Language Settings',
-  '/manage-applications': 'Manage Applications (legacy)',
   '/manage-components': 'Manage Intake Steps',
-  '/manage-messages': 'Secure Messaging',
-  '/manage-notifications': 'Notification Settings',
-  '/manage-organisations': 'Manage Organisations',
-  '/manage-security-options': 'Security Settings',
+  '/manage-notifications': 'Notification Settings',  '/manage-security-options': 'Security Settings',
   '/manage-workflows': 'Manage Workflows',
   '/modify-component/:id': 'Modify Intake Step',
   '/modify-workflow': 'Modify Workflow',
@@ -189,3 +183,5 @@ const AccessControlMatrix = () => {
 };
 
 export default AccessControlMatrix;
+
+

@@ -57,9 +57,10 @@
   },
   "scripts": {
     "start": "set PORT=3001 && react-scripts start",
-    "build": "react-scripts build",
-    "build:development": "env-cmd -f .env.development react-scripts build",
-    "build:production": "env-cmd -f .env.production react-scripts build",
+  "build": "react-scripts build",
+  "build:development": "env-cmd -f .env.development react-scripts build",
+  "build:test": "env-cmd -f .env.test react-scripts build",
+  "build:production": "env-cmd -f .env.production react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "server": "node isetadminserver.js",
@@ -67,7 +68,8 @@
     "audit:parity": "node scripts/parity-audit.js",
     "fixtures:workflows": "node scripts/generate-workflow-fixtures.js",
     "sync:portal-renderers": "node scripts/sync-portal-renderers.js",
-    "deploy": "powershell -ExecutionPolicy Bypass -File deploy.ps1"
+    "deploy-admin-to-test": "powershell -ExecutionPolicy Bypass -File scripts/deploy-admin-test.ps1",
+    "deploy:test-db": "powershell -ExecutionPolicy Bypass -File scripts/deploy-test-db.ps1"
   },
   "eslintConfig": {
     "extends": [

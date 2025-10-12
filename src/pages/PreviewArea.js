@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { useDrop } from 'react-dnd';
-import { Box } from '@cloudscape-design/components';
 import { generateNunjucksFromComponents } from '../utils/nunjucksBuilder';
 
 const PreviewArea = ({ components, setComponents, handleSelectComponent, selectedComponent, template }) => {
@@ -46,25 +45,6 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
       });
     },
   }));
-
-  const moveComponent = (dragIndex, hoverIndex) => {
-    setComponents((prevComponents) => {
-      if (
-        dragIndex < 0 ||
-        hoverIndex < 0 ||
-        dragIndex >= prevComponents.length ||
-        hoverIndex >= prevComponents.length
-      ) {
-        return prevComponents; // Ensure valid indices
-      }
-
-      const updatedComponents = [...prevComponents];
-      const [movedItem] = updatedComponents.splice(dragIndex, 1);
-      updatedComponents.splice(hoverIndex, 0, movedItem);
-
-      return updatedComponents;
-    });
-  };
 
   return (
     <div ref={drop} style={{ minHeight: "200px", border: "2px dashed #ccc", padding: "10px", backgroundColor: "#f5f3e5" }}>

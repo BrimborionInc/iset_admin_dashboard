@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TopNavigation } from '@cloudscape-design/components';
 import { buildLoginUrl, buildLogoutUrl, clearSession, hasValidSession, loadSession } from '../auth/cognito';
 
@@ -28,27 +28,29 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) =>
   const [signedIn, setSignedIn] = useState(() => hasValidSession());
   const [bypass, setBypass] = useState(() => isBypassEnabled());
   const [email, setEmail] = useState(() => {
-    const s = loadSession();
-    return s?.idToken && !isBypassEnabled()
-      ? (JSON.parse(atob(s.idToken.split('.')[1]))?.email || getEmailForRole(currentRole))
+    const session = loadSession();
+    return session?.idToken && !isBypassEnabled()
+      ? (JSON.parse(atob(session.idToken.split('.')[1]))?.email || getEmailForRole(currentRole))
       : getEmailForRole(currentRole);
   });
 
   useEffect(() => {
     const recompute = () => {
-      const s = loadSession();
+      const session = loadSession();
       const bypassNow = isBypassEnabled();
       setBypass(bypassNow);
       const simOut = isSimSignedOut();
       setSignedIn(bypassNow ? (!simOut && hasValidSession()) : hasValidSession());
-      const newEmail = s?.idToken && !bypassNow
-        ? (JSON.parse(atob(s.idToken.split('.')[1]))?.email || getEmailForRole(currentRole))
+      const newEmail = session?.idToken && !bypassNow
+        ? (JSON.parse(atob(session.idToken.split('.')[1]))?.email || getEmailForRole(currentRole))
         : getEmailForRole(currentRole);
       setEmail(newEmail);
     };
     const onSessionChanged = () => recompute();
-    const onStorage = (e) => {
-      if (e.key === 'authSession' || e.key === 'iamBypass' || e.key === 'currentRole' || e.key === 'simulateSignedOut') recompute();
+    const onStorage = (event) => {
+      if (event.key === 'authSession' || event.key === 'iamBypass' || event.key === 'currentRole' || event.key === 'simulateSignedOut') {
+        recompute();
+      }
     };
     window.addEventListener('auth:session-changed', onSessionChanged);
     window.addEventListener('storage', onStorage);
@@ -59,14 +61,14 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) =>
     };
   }, [currentRole]);
 
-  const utilities = [];
-  utilities.push({
+  const languageLabel = currentLanguage === 'en' ? 'English' : 'French';
+  const utilities = [{
     type: 'menu-dropdown',
-    text: currentLanguage === 'en' ? 'English' : 'FranÃ§ais',
+    text: languageLabel,
     ariaLabel: 'Select Language',
-    items: [{ id: 'en', text: 'English' }, { id: 'fr', text: 'FranÃ§ais' }],
+    items: [{ id: 'en', text: 'English' }, { id: 'fr', text: 'French' }],
     onItemClick: (event) => onLanguageChange(event.detail.id)
-  });
+  }];
 
   const roleValue = currentRole?.value || currentRole;
 
@@ -90,8 +92,8 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) =>
         text: email,
         ariaLabel: 'Account Options',
         items: [{ id: 'profile', text: 'My Profile' }, { id: 'signout', text: 'Sign Out' }],
-        onItemClick: (e) => {
-          if (e.detail.id === 'signout') {
+        onItemClick: (event) => {
+          if (event.detail.id === 'signout') {
             clearSession();
             window.location.href = buildLogoutUrl();
           }

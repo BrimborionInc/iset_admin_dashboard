@@ -1,5 +1,5 @@
 // Helpers to inject mandatory WHERE predicates for RBAC scoping
-const { scopePredicate, Roles, canAccessAll } = require('./rbac');
+const { scopePredicate, canAccessAll } = require('./rbac');
 
 // Applications don't have assigned_to_user_id; adjudicators should be scoped by region only
 function scopeApplications(auth, alias = 'a') {

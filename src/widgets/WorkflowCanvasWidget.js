@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Box, Button, Header, SpaceBetween } from '@cloudscape-design/components';
+import { Button, Header } from '@cloudscape-design/components';
 import ReactFlow, { ReactFlowProvider } from 'reactflow';
 import 'reactflow/dist/style.css';
 import ELK from 'elkjs/lib/elk.bundled.js';

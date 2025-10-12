@@ -2,8 +2,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import {
   ContentLayout,
   Header,
-  SpaceBetween,
-  Box
+  SpaceBetween
 } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import BlankTemplate from '../widgets/blankTemplate';
@@ -88,7 +87,7 @@ const ReportingAndMonitoringDashboard = ({ header, headerInfo, toggleHelpPanel, 
   const { selectedLocations, setSelectedLocations, locations } = useContext(LocationContext); // Use LocationContext
 
   const [boardItems, setBoardItems] = useState(initialBoardItems); // Widgets on the board
-  const [availableItems, setAvailableItemsState] = useState(initialPaletteItems); // Widgets in the palette
+  const [, setAvailableItemsState] = useState(initialPaletteItems); // Widgets in the palette
 
   useEffect(() => {
     updateBreadcrumbs([
@@ -109,19 +108,6 @@ const ReportingAndMonitoringDashboard = ({ header, headerInfo, toggleHelpPanel, 
     setAvailableItems(filteredAvailableItems); // Sync available items with parent state
     setAvailableItemsState(filteredAvailableItems); // Sync available items with local state
   }, [updateBreadcrumbs, selectedLocations, setSelectedLocations, locations, boardItems, setAvailableItems]);
-
-  const handleAddItemToBoard = (item) => {
-    setBoardItems((prev) => {
-      const newBoardItems = [...prev, { ...item, rowSpan: 2, columnSpan: 4 }];
-      console.log("Board Items after adding:", newBoardItems);
-      return newBoardItems;
-    });
-    setAvailableItemsState((prev) => {
-      const newAvailableItems = prev.filter((i) => i.id !== item.id);
-      console.log("Available Items after adding:", newAvailableItems);
-      return newAvailableItems;
-    });
-  };
 
   const handleRemoveBoardItem = (id) => {
     const removedItem = boardItems.find((item) => item.id === id);

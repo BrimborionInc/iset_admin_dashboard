@@ -268,6 +268,106 @@ async function insertNewVersionEntry(connection, applicationId, version, payload
   );
 }
 
+const DEFAULT_LOCK_CONFIG = Object.freeze({
+  mode: 'optimistic',
+  lockTtlMinutes: 15,
+  heartbeatMinutes: 2
+});
+
+function normaliseLockConfig(raw) {
+  const config = { ...DEFAULT_LOCK_CONFIG };
+  if (raw && typeof raw === 'object') {
+    const mode = typeof raw.mode === 'string' ? raw.mode.trim().toLowerCase() : '';
+    if (['optimistic', 'pessimistic', 'mixed'].includes(mode)) {
+      config.mode = mode === 'mixed' ? 'pessimistic' : mode; // treat mixed as pessimistic for now
+    }
+    const ttl = Number(raw.lockTtlMinutes ?? raw.ttlMinutes);
+    if (Number.isFinite(ttl) && ttl >= 1) {
+      config.lockTtlMinutes = Math.min(Math.round(ttl), 240);
+    }
+    const heartbeat = Number(raw.heartbeatMinutes ?? raw.heartbeat);
+    if (Number.isFinite(heartbeat) && heartbeat >= 1) {
+      config.heartbeatMinutes = Math.min(Math.round(heartbeat), config.lockTtlMinutes);
+    }
+  }
+  // If pessimistic requested but heartbeat exceeds ttl, clamp
+  if (config.heartbeatMinutes > config.lockTtlMinutes) {
+    config.heartbeatMinutes = config.lockTtlMinutes;
+  }
+  return config;
+}
+
+async function readLockConfig() {
+  try {
+    const [[row]] = await pool.query("SELECT v FROM iset_runtime_config WHERE scope='admin' AND k='locking' LIMIT 1");
+    if (!row) return { ...DEFAULT_LOCK_CONFIG, source: 'default' };
+    let value = row.v;
+    if (value && typeof value === 'string') {
+      try { value = JSON.parse(value); } catch { value = null; }
+    }
+    const config = normaliseLockConfig(value);
+    return { ...config, source: row ? 'stored' : 'default' };
+  } catch (err) {
+    console.warn('[locking] read config failed:', err.message);
+    return { ...DEFAULT_LOCK_CONFIG, source: 'error' };
+  }
+}
+
+async function writeLockConfig(config) {
+  const normalised = normaliseLockConfig(config);
+  await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  await pool.query(
+    "INSERT INTO iset_runtime_config (scope,k,v) VALUES ('admin','locking',CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v)",
+    [JSON.stringify(normalised)]
+  );
+  return normalised;
+}
+
+function resolveLockIdentity(req) {
+  const actor = resolveRequestActor(req) || {};
+  let userId = actor.actorId || req.auth?.sub || req.auth?.user_id || req.auth?.id || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
+  let displayName = actor.actorName || req.auth?.name || req.staffProfile?.display_name || req.staffProfile?.name || req.get('X-Dev-Username') || req.get('x-dev-username') || null;
+  let email = req.auth?.email || req.staffProfile?.email || req.get('X-Dev-Email') || req.get('x-dev-email') || null;
+  if (typeof userId === 'number') userId = String(userId);
+  return {
+    userId: userId ? String(userId) : null,
+    displayName: displayName || null,
+    email: email || null
+  };
+}
+
+function lockingModeRequiresPessimistic(config) {
+  const mode = (config?.mode || '').toLowerCase();
+  return mode && mode !== 'optimistic';
+}
+
+async function enforceApplicationLock(connection, applicationId, req, lockConfig) {
+  if (!lockingModeRequiresPessimistic(lockConfig)) {
+    return { ok: true, reason: 'not_required' };
+  }
+  const identity = resolveLockIdentity(req);
+  if (!identity.userId) {
+    return { ok: false, reason: 'identity_missing' };
+  }
+  const [[lockRow]] = await connection.query(
+    'SELECT owner_user_id, owner_display_name, owner_email, expires_at FROM application_lock WHERE application_id = ? FOR UPDATE',
+    [applicationId]
+  );
+  const now = new Date();
+  if (!lockRow) {
+    return { ok: false, reason: 'missing' };
+  }
+  const expired = !lockRow.expires_at || new Date(lockRow.expires_at) <= now;
+  if (expired) {
+    await connection.query('DELETE FROM application_lock WHERE application_id = ?', [applicationId]);
+    return { ok: false, reason: 'expired' };
+  }
+  if (lockRow.owner_user_id !== identity.userId) {
+    return { ok: false, reason: 'owned_by_other', lock: lockRow };
+  }
+  return { ok: true, lock: lockRow };
+}
+
 // Configure Nunjucks to use GOV.UK Frontend components
 nunjucks.configure([
   path.join(__dirname, 'src', 'server-macros'),
@@ -345,8 +445,19 @@ function writeIfChanged(file, content) {
 
 const app = express();
 const port = process.env.PORT || 5001; // Use port from .env
+const buildDir = path.join(__dirname, 'build');
+
+// Lightweight health check for ALB
+app.get('/healthz', (_req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
 
 app.use(bodyParser.json({ limit: '1mb' }));
+
+// Serve static admin SPA assets when the build output is present on disk
+if (fs.existsSync(buildDir)) {
+  app.use(express.static(buildDir));
+}
 
 app.use('/api/', (req, res, next) => {
   res.setHeader('Content-Type', 'application/json');
@@ -2268,6 +2379,22 @@ app.patch('/api/config/runtime/ai-fallbacks', async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'ai_fallbacks_update_failed', message: e.message }); }
 });
 
+app.get('/api/config/runtime/locking', async (_req, res) => {
+  const config = await readLockConfig();
+  res.json(config);
+});
+
+app.patch('/api/config/runtime/locking', async (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const saved = await writeLockConfig(req.body || {});
+    res.json(saved);
+  } catch (err) {
+    console.error('[locking] config update failed:', err);
+    res.status(500).json({ error: 'locking_config_update_failed', message: err.message });
+  }
+});
+
 // --- Runtime Configuration Introspection (non-secret) -----------------------
 // GET /api/config/runtime -> selected non-sensitive runtime configuration values
 // NOTE: Only exposes values safe for admin viewing; secrets go through /api/config/security
@@ -2625,6 +2752,177 @@ app.post('/api/audit/session/prune', async (req, res) => {
     const [result] = await pool.query(`DELETE FROM user_session_audit WHERE last_seen_at < DATE_SUB(NOW(), INTERVAL ? DAY)`, [days]);
     res.json({ pruned: result.affectedRows || 0, olderThanDays: days });
   } catch (e) { res.status(500).json({ error: 'session_audit_prune_failed', message: e.message }); }
+});
+
+app.post('/api/locks/application/:id', async (req, res) => {
+  try {
+    if (!req.auth || req.auth.subjectType !== 'staff') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const applicationId = Number(req.params.id);
+    if (!Number.isInteger(applicationId) || applicationId <= 0) {
+      return res.status(400).json({ error: 'invalid_application_id' });
+    }
+    const identity = resolveLockIdentity(req);
+    if (!identity.userId) {
+      return res.status(400).json({ error: 'lock_identity_missing' });
+    }
+    const lockConfig = await readLockConfig();
+    const ttlMinutesRaw = req.body?.ttlMinutes ?? req.body?.lockTtlMinutes;
+    let ttlMinutes = Number(ttlMinutesRaw);
+    if (!Number.isFinite(ttlMinutes) || ttlMinutes <= 0) {
+      ttlMinutes = lockConfig.lockTtlMinutes || DEFAULT_LOCK_CONFIG.lockTtlMinutes;
+    }
+    ttlMinutes = Math.max(1, Math.min(240, Math.round(ttlMinutes)));
+    const heartbeatMinutesRaw = Number(lockConfig.heartbeatMinutes ?? DEFAULT_LOCK_CONFIG.heartbeatMinutes);
+    if (Number.isFinite(heartbeatMinutesRaw) && heartbeatMinutesRaw > 0) {
+      const normalizedHeartbeat = Math.min(240, Math.max(1, Math.round(heartbeatMinutesRaw)));
+      ttlMinutes = Math.max(ttlMinutes, normalizedHeartbeat);
+    }
+    const expiresAt = new Date(Date.now() + ttlMinutes * 60000);
+    const allowForce = req.body?.force === true && sysAdminOnly(req);
+    const connection = await pool.getConnection();
+    let persistedLockRow = null;
+    let reusedExisting = false;
+    try {
+      await connection.beginTransaction();
+      const [[applicationRow]] = await connection.query(
+        'SELECT id FROM iset_application WHERE id = ? LIMIT 1 FOR UPDATE',
+        [applicationId]
+      );
+      if (!applicationRow) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'application_not_found', lock: null });
+      }
+      const [[existing]] = await connection.query(
+        'SELECT owner_user_id, owner_display_name, owner_email, expires_at FROM application_lock WHERE application_id = ? FOR UPDATE',
+        [applicationId]
+      );
+      const now = new Date();
+      if (existing) {
+        const expired = !existing.expires_at || new Date(existing.expires_at) <= now;
+        const sameOwner = existing.owner_user_id && existing.owner_user_id === identity.userId;
+        reusedExisting = !expired && sameOwner;
+        if (expired) {
+          await connection.query('DELETE FROM application_lock WHERE application_id = ?', [applicationId]);
+        } else if (!sameOwner) {
+          if (!allowForce) {
+            await connection.rollback();
+            return res.status(423).json({
+              error: 'locked',
+              reason: 'owned_by_other',
+              lock: {
+                owner_user_id: existing.owner_user_id,
+                owner_display_name: existing.owner_display_name,
+                owner_email: existing.owner_email,
+                expires_at: existing.expires_at
+              }
+            });
+          }
+        }
+      }
+      await connection.query(
+        `INSERT INTO application_lock (application_id, owner_user_id, owner_display_name, owner_email, acquired_at, expires_at)
+         VALUES (?, ?, ?, ?, NOW(), ?)
+         ON DUPLICATE KEY UPDATE owner_user_id = VALUES(owner_user_id), owner_display_name = VALUES(owner_display_name),
+           owner_email = VALUES(owner_email), acquired_at = NOW(), expires_at = VALUES(expires_at)`,
+        [applicationId, identity.userId, identity.displayName || identity.email || identity.userId, identity.email || null, expiresAt]
+      );
+      const [[lockRow]] = await connection.query(
+        'SELECT application_id, owner_user_id, owner_display_name, owner_email, acquired_at, expires_at FROM application_lock WHERE application_id = ? LIMIT 1',
+        [applicationId]
+      );
+      persistedLockRow = lockRow || null;
+      await connection.commit();
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+    if (!persistedLockRow) {
+      return res.status(500).json({ error: 'lock_acquire_failed', message: 'Lock persisted state unavailable', lock: null });
+    }
+    const lockPayload = {
+      application_id: applicationId,
+      owner_user_id: persistedLockRow.owner_user_id || identity.userId,
+      owner_display_name: persistedLockRow.owner_display_name || identity.displayName || identity.email || identity.userId,
+      owner_email: persistedLockRow.owner_email || identity.email || null,
+      acquired_at: persistedLockRow.acquired_at ? new Date(persistedLockRow.acquired_at).toISOString() : new Date().toISOString(),
+      expires_at: persistedLockRow.expires_at ? new Date(persistedLockRow.expires_at).toISOString() : expiresAt.toISOString(),
+      ttl_minutes: ttlMinutes,
+      heartbeat_minutes: Number(lockConfig.heartbeatMinutes ?? DEFAULT_LOCK_CONFIG.heartbeatMinutes) || null,
+      reused: reusedExisting
+    };
+    res.json({ success: true, lock: lockPayload });
+  } catch (error) {
+    console.error('[locking] acquire failed:', error);
+    res.status(500).json({ error: 'lock_acquire_failed', message: error.message, lock: null });
+  }
+});
+
+app.delete('/api/locks/application/:id', async (req, res) => {
+  try {
+    if (!req.auth || req.auth.subjectType !== 'staff') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const applicationId = Number(req.params.id);
+    if (!Number.isInteger(applicationId) || applicationId <= 0) {
+      return res.status(400).json({ error: 'invalid_application_id' });
+    }
+    const identity = resolveLockIdentity(req);
+    if (!identity.userId) {
+      return res.status(400).json({ error: 'lock_identity_missing' });
+    }
+    const allowForce = (req.query.force === 'true' || req.body?.force === true) && sysAdminOnly(req);
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[applicationRow]] = await connection.query(
+        'SELECT id FROM iset_application WHERE id = ? LIMIT 1 FOR UPDATE',
+        [applicationId]
+      );
+      if (!applicationRow) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'application_not_found', lock: null });
+      }
+      const [[existing]] = await connection.query(
+        'SELECT owner_user_id, owner_display_name, owner_email, expires_at FROM application_lock WHERE application_id = ? FOR UPDATE',
+        [applicationId]
+      );
+      const now = new Date();
+      if (!existing) {
+        await connection.commit();
+        return res.json({ released: false, lock: null });
+      }
+      const expired = !existing.expires_at || new Date(existing.expires_at) <= now;
+      const sameOwner = existing.owner_user_id && existing.owner_user_id === identity.userId;
+      if (!expired && !sameOwner && !allowForce) {
+        await connection.rollback();
+        return res.status(423).json({
+          error: 'locked',
+          reason: 'owned_by_other',
+          lock: {
+            owner_user_id: existing.owner_user_id,
+            owner_display_name: existing.owner_display_name,
+            owner_email: existing.owner_email,
+            expires_at: existing.expires_at
+          }
+        });
+      }
+      await connection.query('DELETE FROM application_lock WHERE application_id = ?', [applicationId]);
+      await connection.commit();
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+    res.json({ released: true, lock: null });
+  } catch (error) {
+    console.error('[locking] release failed:', error);
+    res.status(500).json({ error: 'lock_release_failed', message: error.message, lock: null });
+  }
 });
 
 const dbConfig = {
@@ -3159,20 +3457,41 @@ const fetchCaseNoteById = async (caseId, noteId) => {
     for (const m of pending) {
       const start = Date.now();
       let success = 0; let errorSnippet = null;
+      const connection = await pool.getConnection();
       try {
-        // Basic split: keep statements simple; allow DELIMITER not used in our scripts.
+        await connection.beginTransaction();
         const statements = m.content
-          .split(/;\s*\n+/) // split on semicolon followed by newline(s)
+          .split(/;\s*(?:\n|$)/) // split on semicolon followed by newline or EOF
           .map(s => s.trim())
           .filter(s => s.length);
         for (const stmt of statements) {
-          await pool.query(stmt);
+          try {
+            await connection.query(stmt);
+          } catch (inner) {
+            if (inner && /Duplicate column name/i.test(inner.message || '')) {
+              console.warn(`[migrations] Skipping duplicate column statement in ${m.file}`);
+              continue;
+            }
+            if (inner && /Duplicate key name/i.test(inner.message || '')) {
+              console.warn(`[migrations] Skipping duplicate index statement in ${m.file}`);
+              continue;
+            }
+            if (inner && /ER_NO_SUCH_TABLE/.test(inner.code || '') ) {
+              console.warn(`[migrations] Missing table for statement in ${m.file}: ${inner.message}`);
+              continue;
+            }
+            throw inner;
+          }
         }
+        await connection.commit();
         success = 1;
         console.log(`[migrations] Applied ${m.file} (${statements.length} statements)`);
       } catch (e) {
         errorSnippet = (e && e.message ? e.message : String(e)).slice(0, 500);
+        try { await connection.rollback(); } catch (_) {}
         console.error(`[migrations] FAILED ${m.file}:`, errorSnippet);
+      } finally {
+        connection.release();
       }
       const duration = Date.now() - start;
       await pool.query('INSERT INTO iset_migration (filename, checksum, duration_ms, success, error_snippet) VALUES (?,?,?,?,?)', [m.file, m.checksum, duration, success, errorSnippet]);
@@ -6872,7 +7191,7 @@ const generateSystemTasks = async () => {
 app.post('/api/create-dummy-draft', async (req, res) => {
   try {
     const body = req.body || {};
-    const userId = Number(body.userId) || 35;               // default test applicant
+    const userId = Number(body.userId) || 48;               // default test applicant
     const workflowId = String(body.workflowId || 'iset-v1');
     const stepCursor = String(body.stepCursor || 'summary-page');
 
@@ -7250,6 +7569,11 @@ app.get('/api/cases/:id', async (req, res) => {
         c.status,
         c.created_at,
         c.updated_at,
+        a.row_version AS application_row_version,
+        al.owner_user_id AS lock_owner_id,
+        al.owner_display_name AS lock_owner_name,
+        al.owner_email AS lock_owner_email,
+        al.expires_at AS lock_expires_at,
         COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
         COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
         s.created_at AS submitted_at,
@@ -7274,8 +7598,9 @@ app.get('/api/cases/:id', async (req, res) => {
         ca.nwac_reason AS assessment_nwac_reason
       FROM iset_case c
       LEFT JOIN iset_application a ON c.application_id = a.id
-  LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-  LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN application_lock al ON al.application_id = c.application_id AND al.expires_at > NOW()
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
       WHERE c.id = ?
     `;
@@ -8936,6 +9261,31 @@ app.get('/api/applications/:id', async (req, res) => {
       }
     }
 
+    if (application.row_version !== undefined && application.row_version !== null) {
+      application.row_version = Number(application.row_version);
+    }
+    try {
+      const [[lockRow]] = await pool.query(
+        'SELECT owner_user_id, owner_display_name, owner_email, expires_at FROM application_lock WHERE application_id = ? AND expires_at > NOW() LIMIT 1',
+        [applicationId]
+      );
+      if (lockRow) {
+        application.lock_owner_id = lockRow.owner_user_id;
+        application.lock_owner_name = lockRow.owner_display_name || null;
+        application.lock_owner_email = lockRow.owner_email || null;
+        application.lock_expires_at = lockRow.expires_at;
+      } else {
+        application.lock_owner_id = null;
+        application.lock_owner_name = null;
+        application.lock_owner_email = null;
+        application.lock_expires_at = null;
+      }
+    } catch (_) {
+      application.lock_owner_id = null;
+      application.lock_owner_name = null;
+      application.lock_owner_email = null;
+      application.lock_expires_at = null;
+    }
     res.status(200).json({ ...application, assigned_evaluator: evaluator, ptma, case: caseRow || null });
   } catch (error) {
     console.error('Error fetching application:', error);
@@ -9216,16 +9566,35 @@ app.get('/api/applications/:id/versions/:versionId', async (req, res) => {
 
 app.post('/api/applications/:id/versions', async (req, res) => {
   const applicationId = Number(req.params.id);
-  const { answers, changeSummary } = req.body || {};
+  const { answers, changeSummary, expectedRowVersion } = req.body || {};
   if (!Number.isInteger(applicationId) || applicationId <= 0) {
     return res.status(400).json({ error: 'invalid_application_id' });
   }
   if (!answers || typeof answers !== 'object' || Array.isArray(answers)) {
     return res.status(400).json({ error: 'invalid_answers' });
   }
+  const expectedRowVersionNumber = Number(expectedRowVersion);
+  if (!Number.isInteger(expectedRowVersionNumber) || expectedRowVersionNumber <= 0) {
+    return res.status(400).json({ error: 'invalid_expected_row_version' });
+  }
+  const lockConfig = await readLockConfig();
   const connection = await pool.getConnection();
+  let currentRowVersion = null;
+  let lockCheck = { ok: true, reason: 'not_checked', lock: null };
   try {
     await connection.beginTransaction();
+    lockCheck = await enforceApplicationLock(connection, applicationId, req, lockConfig);
+    if (!lockCheck.ok) {
+      await connection.rollback();
+      return res.status(423).json({
+        error: lockCheck.reason === 'missing' || lockCheck.reason === 'expired'
+          ? 'lock_required'
+          : (lockCheck.reason === 'identity_missing' ? 'lock_identity_missing' : 'locked'),
+        reason: lockCheck.reason,
+        currentRowVersion: null,
+        lock: lockCheck.lock || null
+      });
+    }
     const actor = resolveRequestActor(req);
     const summaryText = typeof changeSummary === 'string' ? changeSummary.trim() : '';
     const actorMeta = {
@@ -9233,10 +9602,15 @@ app.post('/api/applications/:id/versions', async (req, res) => {
       actorName: actor.actorName || null,
       changeSummary: summaryText ? summaryText.slice(0, 1000) : null
     };
-    const current = await readApplicationPayload(connection, applicationId, { forUpdate: true });
+    const current = await readApplicationPayload(connection, applicationId);
     if (!current) {
       await connection.rollback();
       return res.status(404).json({ error: 'Application not found' });
+    }
+    currentRowVersion = Number(current.row.row_version || 1);
+    if (currentRowVersion !== expectedRowVersionNumber) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'row_version_conflict', currentRowVersion });
     }
     const currentVersionNumber = Number(current.row.version || 1);
     const originalPayload = clonePayload(current.payload);
@@ -9251,19 +9625,41 @@ app.post('/api/applications/:id/versions', async (req, res) => {
     await ensureVersionSnapshotExists(connection, applicationId, currentVersionNumber, originalPayload, null);
     const highestVersion = await getHighestApplicationVersion(connection, applicationId, currentVersionNumber);
     const nextVersion = highestVersion + 1;
-    await insertNewVersionEntry(connection, applicationId, nextVersion, updatedPayload, actorMeta);
 
-    await connection.query(
-      'UPDATE iset_application SET payload_json = ?, version = ?, updated_at = NOW() WHERE id = ?',
-      [JSON.stringify(updatedPayload), nextVersion, applicationId]
+    const [updateResult] = await connection.query(
+      'UPDATE iset_application SET payload_json = ?, version = ?, updated_at = NOW(), row_version = row_version + 1 WHERE id = ? AND row_version = ?',
+      [JSON.stringify(updatedPayload), nextVersion, applicationId, currentRowVersion]
     );
+    if (updateResult.affectedRows === 0) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'row_version_conflict', currentRowVersion, lock: lockCheck.lock || null });
+    }
+
+    try {
+      await insertNewVersionEntry(connection, applicationId, nextVersion, updatedPayload, actorMeta);
+    } catch (insertErr) {
+      if (insertErr?.code === 'ER_DUP_ENTRY') {
+        await connection.rollback();
+        return res.status(409).json({
+          error: 'row_version_conflict',
+          currentRowVersion: currentRowVersion + 1,
+          lock: lockCheck.lock || null
+        });
+      }
+      throw insertErr;
+    }
 
     await connection.commit();
-    res.status(200).json({ applicationId, version: nextVersion });
+    res.status(200).json({
+      applicationId,
+      version: nextVersion,
+      rowVersion: currentRowVersion + 1,
+      lock: lockCheck.lock || null
+    });
   } catch (error) {
     await connection.rollback();
     console.error('Error saving application version:', error);
-    res.status(500).json({ error: 'Failed to save application version' });
+    res.status(500).json({ error: 'Failed to save application version', lock: lockCheck.lock || null });
   } finally {
     connection.release();
   }
@@ -9272,6 +9668,7 @@ app.post('/api/applications/:id/versions', async (req, res) => {
 app.post('/api/applications/:id/versions/:versionId/restore', async (req, res) => {
   const applicationId = Number(req.params.id);
   const { versionId } = req.params;
+  const { expectedRowVersion } = req.body || {};
   if (!Number.isInteger(applicationId) || applicationId <= 0) {
     return res.status(400).json({ error: 'invalid_application_id' });
   }
@@ -9279,13 +9676,36 @@ app.post('/api/applications/:id/versions/:versionId/restore', async (req, res) =
   if (!Number.isInteger(numericId) || numericId <= 0) {
     return res.status(400).json({ error: 'invalid_version_id' });
   }
+  const expectedRowVersionNumber = Number(expectedRowVersion);
+  if (!Number.isInteger(expectedRowVersionNumber) || expectedRowVersionNumber <= 0) {
+    return res.status(400).json({ error: 'invalid_expected_row_version' });
+  }
+  const lockConfig = await readLockConfig();
   const connection = await pool.getConnection();
+  let currentRowVersion = null;
+  let lockCheck = { ok: true, reason: 'not_checked', lock: null };
   try {
     await connection.beginTransaction();
-    const current = await readApplicationPayload(connection, applicationId, { forUpdate: true });
+    const current = await readApplicationPayload(connection, applicationId);
     if (!current) {
       await connection.rollback();
-      return res.status(404).json({ error: 'Application not found' });
+      return res.status(404).json({ error: 'Application not found', lock: null });
+    }
+    currentRowVersion = Number(current.row.row_version || 1);
+    lockCheck = await enforceApplicationLock(connection, applicationId, req, lockConfig);
+    if (!lockCheck.ok) {
+      await connection.rollback();
+      return res.status(423).json({
+        error: lockCheck.reason === 'missing' || lockCheck.reason === 'expired'
+          ? 'lock_required'
+          : (lockCheck.reason === 'identity_missing' ? 'lock_identity_missing' : 'locked'),
+        reason: lockCheck.reason,
+        lock: lockCheck.lock || null
+      });
+    }
+    if (currentRowVersion !== expectedRowVersionNumber) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'row_version_conflict', currentRowVersion, lock: lockCheck.lock || null });
     }
     await ensureApplicationVersionTable();
     const [[versionRow]] = await connection.query(
@@ -9311,20 +9731,42 @@ app.post('/api/applications/:id/versions/:versionId/restore', async (req, res) =
     }
     const currentPayloadClone = clonePayload(current.payload);
     await ensureVersionSnapshotExists(connection, applicationId, currentVersionNumber, currentPayloadClone, null);
-    await connection.query(
-      'UPDATE iset_application SET payload_json = ?, version = ?, updated_at = NOW() WHERE id = ?',
-      [JSON.stringify(payload || {}), targetVersionNumber, applicationId]
+    const [restoreResult] = await connection.query(
+      'UPDATE iset_application SET payload_json = ?, version = ?, updated_at = NOW(), row_version = row_version + 1 WHERE id = ? AND row_version = ?',
+      [JSON.stringify(payload || {}), targetVersionNumber, applicationId, currentRowVersion]
     );
+    if (restoreResult.affectedRows === 0) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'row_version_conflict', currentRowVersion, lock: lockCheck.lock || null });
+    }
     await connection.commit();
-    res.status(200).json({ applicationId, version: targetVersionNumber, restoredFromVersion: currentVersionNumber });
+    res.status(200).json({
+      applicationId,
+      version: targetVersionNumber,
+      restoredFromVersion: currentVersionNumber,
+      rowVersion: currentRowVersion + 1,
+      lock: lockCheck.lock || null
+    });
   } catch (error) {
     await connection.rollback();
     console.error('Error restoring application version:', error);
-    res.status(500).json({ error: 'Failed to restore application version' });
+    res.status(500).json({ error: 'Failed to restore application version', lock: lockCheck.lock || null });
   } finally {
     connection.release();
   }
 });
+
+// Fallback all non-API requests to the SPA entry point so client routing works in test/prod
+if (fs.existsSync(buildDir)) {
+  app.get('*', (req, res, next) => {
+    const pathLower = (req.path || '').toLowerCase();
+    if (pathLower.startsWith('/api') || pathLower.startsWith('/healthz') || pathLower.startsWith('/uploads')) {
+      return next();
+    }
+    res.sendFile(path.join(buildDir, 'index.html'));
+  });
+}
+
 // Serve uploaded files statically for document viewing (corrected path)
 app.use('/uploads', express.static('X:/ISET/ISET-intake/uploads'));
 
@@ -9399,12 +9841,17 @@ app.get('/api/applications', async (req, res) => {
       c.created_at AS opened_at, c.updated_at AS last_activity_at,
       sp.email AS assigned_user_email, sp.primary_role AS assigned_user_role,
       sp.id AS staff_profile_id,
+      al.owner_user_id AS lock_owner_id,
+      al.owner_display_name AS lock_owner_name,
+      al.owner_email AS lock_owner_email,
+      al.expires_at AS lock_expires_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
       a.created_at AS submitted_at,
       0 AS is_unassigned_submission
       FROM iset_case c
       JOIN iset_application a ON c.application_id = a.id
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id`;
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN application_lock al ON al.application_id = c.application_id AND al.expires_at > NOW()`;
 
     const where = [];
     const params = [];
@@ -9448,6 +9895,7 @@ app.get('/api/applications', async (req, res) => {
       finalSql = `(${baseSql})\nUNION ALL\n(
         SELECT NULL AS case_id, a.id AS application_id, 'New' AS status, NULL AS assigned_to_user_id, NULL AS opened_at, NULL AS last_activity_at,
         NULL AS assigned_user_email, NULL AS assigned_user_role, NULL AS staff_profile_id,
+        NULL AS lock_owner_id, NULL AS lock_owner_name, NULL AS lock_owner_email, NULL AS lock_expires_at,
   JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
         a.created_at AS submitted_at,
         1 AS is_unassigned_submission
@@ -9484,6 +9932,9 @@ app.get('/api/applications', async (req, res) => {
       const submittedMs = r.submitted_at ? new Date(r.submitted_at).getTime() : now;
       const ageDays = (now - submittedMs) / 86400000;
       const sla_risk = (r.status !== 'Closed' && r.status !== 'Rejected' && ageDays > 14) ? 'overdue' : 'ok';
+      const lockOwnerId = r.lock_owner_id || null;
+      const lockOwnerName = r.lock_owner_name || null;
+      const lockOwnerEmail = r.lock_owner_email || null;
       return {
         case_id: r.case_id,
         tracking_id: r.tracking_id,
@@ -9495,7 +9946,12 @@ app.get('/api/applications', async (req, res) => {
         ptma_codes: null, // legacy field removed; placeholder for future taxonomy
         region: null, // region derivation TBD (could parse from application payload or staff profile)
         is_unassigned: r.is_unassigned_submission === 1,
-        sla_risk
+        sla_risk,
+        lock_owner_id: lockOwnerId,
+        lock_owner_name: lockOwnerName,
+        lock_owner_email: lockOwnerEmail,
+        lock_expires_at: r.lock_expires_at || null,
+        is_locked: Boolean(lockOwnerId)
       };
     });
     res.json({ count, rows: rowsOut });
@@ -9959,11 +10415,20 @@ app.delete('/api/admin/messages/:id/hard-delete', async (req, res) => {
 app.put('/api/cases/:id', async (req, res) => {
   const caseId = Number(req.params.id);
   if (!Number.isInteger(caseId)) {
-    return res.status(400).json({ success: false, error: 'Invalid case id' });
+    return res.status(400).json({ success: false, error: 'Invalid case id', lock: null });
   }
 
   const body = req.body || {};
+  const expectedRowVersionRaw = body.expectedApplicationRowVersion ?? body.expectedRowVersion;
+  let expectedRowVersionNumber = null;
+  if (expectedRowVersionRaw !== undefined) {
+    expectedRowVersionNumber = Number(expectedRowVersionRaw);
+    if (!Number.isInteger(expectedRowVersionNumber) || expectedRowVersionNumber <= 0) {
+      return res.status(400).json({ success: false, error: 'invalid_expected_row_version', lock: null });
+    }
+  }
 
+  const lockConfig = await readLockConfig();
   const toNull = v => (v === undefined || v === null || v === '' ? null : v);
   const toJsonValue = (val, fallback) => {
     if (typeof val === 'undefined') return undefined;
@@ -9983,23 +10448,65 @@ app.put('/api/cases/:id', async (req, res) => {
   let beforeStatus = null;
   let normalizedStatus;
   let statusChanged = false;
+  let bumpApplicationRowVersion = false;
+  let newRowVersion = null;
+  let applicationId = null;
+  let lockCheck = { ok: true, reason: 'not_checked', lock: null };
 
   try {
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
-    const [[existingCase]] = await conn.query('SELECT status FROM iset_case WHERE id = ? LIMIT 1', [caseId]);
+    const [[existingCase]] = await conn.query(
+      `SELECT c.status, c.application_id, a.row_version,
+              al.owner_user_id AS lock_owner_user_id,
+              al.owner_display_name AS lock_owner_display_name,
+              al.owner_email AS lock_owner_email,
+              al.expires_at AS lock_expires_at
+         FROM iset_case c
+         JOIN iset_application a ON a.id = c.application_id
+         LEFT JOIN application_lock al ON al.application_id = c.application_id AND al.expires_at > NOW()
+        WHERE c.id = ?
+        LIMIT 1 FOR UPDATE`,
+      [caseId]
+    );
     if (!existingCase) {
       await conn.rollback();
-      return res.status(404).json({ success: false, error: 'Case not found' });
+      return res.status(404).json({ success: false, error: 'Case not found', lock: null });
     }
     beforeStatus = existingCase.status || null;
+    applicationId = Number(existingCase.application_id);
+    const currentApplicationRowVersion = Number(existingCase.row_version || 1);
+    newRowVersion = currentApplicationRowVersion;
+
+    lockCheck = await enforceApplicationLock(conn, applicationId, req, lockConfig);
+    if (!lockCheck.ok) {
+      await conn.rollback();
+      return res.status(423).json({
+        success: false,
+        error: lockCheck.reason === 'missing' || lockCheck.reason === 'expired'
+          ? 'lock_required'
+          : (lockCheck.reason === 'identity_missing' ? 'lock_identity_missing' : 'locked'),
+        reason: lockCheck.reason,
+        lock: lockCheck.lock || null
+      });
+    }
+    if (expectedRowVersionNumber !== null && expectedRowVersionNumber !== currentApplicationRowVersion) {
+      await conn.rollback();
+      return res.status(409).json({
+        success: false,
+        error: 'row_version_conflict',
+        currentRowVersion: currentApplicationRowVersion,
+        lock: lockCheck.lock || null
+      });
+    }
 
     if (Object.prototype.hasOwnProperty.call(body, 'status')) {
       normalizedStatus = toNull(body.status);
       if (normalizedStatus !== beforeStatus) {
         await conn.query('UPDATE iset_case SET status = ? WHERE id = ?', [normalizedStatus || beforeStatus, caseId]);
         statusChanged = true;
+        bumpApplicationRowVersion = true;
       }
     }
 
@@ -10066,7 +10573,21 @@ app.put('/api/cases/:id', async (req, res) => {
            ON DUPLICATE KEY UPDATE ${updateClause}`,
           insertValues
         );
+        bumpApplicationRowVersion = true;
       }
+    }
+
+    if (bumpApplicationRowVersion) {
+      if (!applicationId) {
+        await conn.rollback();
+        return res.status(500).json({ success: false, error: 'application_missing' });
+      }
+      const [appUpdate] = await conn.query('UPDATE iset_application SET row_version = row_version + 1 WHERE id = ?', [applicationId]);
+      if (!appUpdate.affectedRows) {
+        await conn.rollback();
+        return res.status(404).json({ success: false, error: 'Application not found' });
+      }
+      newRowVersion = currentApplicationRowVersion + 1;
     }
 
     await conn.commit();
@@ -10077,7 +10598,7 @@ app.put('/api/cases/:id', async (req, res) => {
       conn = null;
     }
     console.error('Error updating assessment:', error);
-    return res.status(500).json({ success: false, error: error.message });
+    return res.status(500).json({ success: false, error: error.message, lock: lockCheck.lock || null });
   } finally {
     if (conn) conn.release();
   }
@@ -10087,6 +10608,7 @@ app.put('/api/cases/:id', async (req, res) => {
       `SELECT c.status, c.application_id,
               COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
               COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
+              a.row_version AS application_row_version,
               ca.date_of_assessment,
               ca.overview,
               ca.employment_goals,
@@ -10144,6 +10666,11 @@ app.put('/api/cases/:id', async (req, res) => {
     } catch { caseRow.assessment_wage = { wages: '', mercs: '', nonwages: '', other: '' }; }
     if (caseRow.assessment_previous_iset !== null && caseRow.assessment_previous_iset !== undefined) {
       caseRow.assessment_previous_iset = Number(caseRow.assessment_previous_iset);
+    }
+    if (Object.prototype.hasOwnProperty.call(caseRow, 'application_row_version')) {
+      caseRow.application_row_version = caseRow.application_row_version === null || caseRow.application_row_version === undefined
+        ? null
+        : Number(caseRow.application_row_version);
     }
 
     const afterStatus = (normalizedStatus !== undefined ? normalizedStatus : caseRow.status) || caseRow.status;
@@ -10208,10 +10735,16 @@ app.put('/api/cases/:id', async (req, res) => {
       });
     }
 
-    res.json({ success: true });
+    const responseRowVersion = caseRow?.application_row_version ?? newRowVersion ?? null;
+    res.json({
+      success: true,
+      status: afterStatus,
+      application_row_version: responseRowVersion,
+      lock: lockCheck.lock || null
+    });
   } catch (error) {
     console.error('Error updating assessment:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: error.message, lock: lockCheck.lock || null });
   }
 });
 
@@ -10328,11 +10861,16 @@ app.patch('/api/events/:eventId/read', async (req, res) => {
 
 // Add API endpoint to update case stage
 app.put('/api/cases/:id/stage', async (req, res) => {
-  const caseId = req.params.id;
+  const caseId = Number(req.params.id);
   const { stage } = req.body;
-  if (!stage) {
-    return res.status(400).json({ error: 'Missing stage in request body' });
+  if (!Number.isInteger(caseId) || caseId < 1) {
+    return res.status(400).json({ success: false, error: 'invalid_case_id', lock: null });
   }
+  if (!stage) {
+    return res.status(400).json({ success: false, error: 'Missing stage in request body', lock: null });
+  }
+  const lockConfig = await readLockConfig();
+  let lockCheck = { ok: true, reason: 'not_checked', lock: null };
   try {
     if (!global.__stageColumnChecked) {
       try {
@@ -10349,25 +10887,63 @@ app.put('/api/cases/:id/stage', async (req, res) => {
 
     if (!global.__stageColumnPresent) {
       // Schema no longer includes stage; treat request as no-op for compatibility
-      return res.status(200).json({ success: true, stage, persisted: false });
+      return res.status(200).json({ success: true, stage, persisted: false, lock: lockCheck.lock || null });
     }
 
-    const [result] = await pool.query(
-      'UPDATE iset_case SET stage = ?, last_activity_at = NOW() WHERE id = ?',
-      [stage, caseId]
-    );
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Case not found' });
+    let connection;
+    try {
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      const [[caseRow]] = await connection.query(
+        'SELECT application_id FROM iset_case WHERE id = ? LIMIT 1 FOR UPDATE',
+        [caseId]
+      );
+      if (!caseRow) {
+        await connection.rollback();
+        return res.status(404).json({ success: false, error: 'Case not found', lock: null });
+      }
+      const applicationId = Number(caseRow.application_id);
+      lockCheck = await enforceApplicationLock(connection, applicationId, req, lockConfig);
+      if (!lockCheck.ok) {
+        await connection.rollback();
+        return res.status(423).json({
+          success: false,
+          error: lockCheck.reason === 'missing' || lockCheck.reason === 'expired'
+            ? 'lock_required'
+            : (lockCheck.reason === 'identity_missing' ? 'lock_identity_missing' : 'locked'),
+          reason: lockCheck.reason,
+          lock: lockCheck.lock || null
+        });
+      }
+
+      const [result] = await connection.query(
+        'UPDATE iset_case SET stage = ?, last_activity_at = NOW() WHERE id = ?',
+        [stage, caseId]
+      );
+      if (result.affectedRows === 0) {
+        await connection.rollback();
+        return res.status(404).json({ success: false, error: 'Case not found', lock: lockCheck.lock || null });
+      }
+
+      await connection.commit();
+      return res.status(200).json({ success: true, stage, persisted: true, lock: lockCheck.lock || null });
+    } catch (err) {
+      if (connection) {
+        try { await connection.rollback(); } catch (_) {}
+      }
+      throw err;
+    } finally {
+      if (connection) connection.release();
     }
-    res.status(200).json({ success: true, stage, persisted: true });
   } catch (error) {
     if (error && error.code === 'ER_BAD_FIELD_ERROR') {
       // Stage column really does not exist; remember and succeed silently
       global.__stageColumnPresent = false;
-      return res.status(200).json({ success: true, stage, persisted: false });
+      return res.status(200).json({ success: true, stage, persisted: false, lock: lockCheck.lock || null });
     }
     console.error('Error updating case stage:', error);
-    res.status(500).json({ error: 'Failed to update case stage' });
+    res.status(500).json({ error: 'Failed to update case stage', lock: lockCheck.lock || null });
   }
 });
 

@@ -1,0 +1,55 @@
+{
+  "template_key": "radio",
+  "type": "radio",
+  "label": "Radio Group",
+  "description": "A group of radio buttons letting users select one option.",
+  "status": "active",
+  "default_props": {
+    "name": "example-radio",
+    "fieldset": { "legend": { "text": "Choose an option", "isPageHeading": false, "classes": "govuk-fieldset__legend--l" } },
+    "hint": { "text": "You can only choose one" },
+  "classes": "govuk-radios",
+    "formGroup": { "classes": "" },
+  "disabled": false,
+    "items": [
+      { "text": "Option 1", "value": "1" },
+      { "text": "Option 2", "value": "2" },
+  { "text": "Option 3", "value": "3" }
+    ]
+  },
+  "prop_schema": [
+    { "key": "legendText", "path": "fieldset.legend.text", "type": "text", "label": "Legend Text" },
+    { "key": "hintText", "path": "hint.text", "type": "text", "label": "Hint Text" },
+    { "key": "legendClasses", "path": "fieldset.legend.classes", "type": "select", "label": "Legend Classes", "options": [
+      { "label": "Default (none)", "value": "" },
+      { "label": "Small (s)", "value": "govuk-fieldset__legend--s" },
+      { "label": "Medium (m)", "value": "govuk-fieldset__legend--m" },
+      { "label": "Large (l)", "value": "govuk-fieldset__legend--l" },
+      { "label": "Extra Large (xl)", "value": "govuk-fieldset__legend--xl" }
+    ] },
+    { "key": "isPageHeading", "path": "fieldset.legend.isPageHeading", "type": "select", "label": "Is Page Heading?", "options": [
+      { "label": "True", "value": true },
+      { "label": "False", "value": false }
+    ] },
+  { "key": "name", "path": "name", "type": "text", "label": "Data Key" },
+    { "key": "classes", "path": "classes", "type": "select", "label": "Container Classes", "options": [
+      { "label": "Default", "value": "govuk-radios" },
+      { "label": "Inline", "value": "govuk-radios--inline" },
+      { "label": "Small", "value": "govuk-radios--small" },
+      { "label": "Inline + Small", "value": "govuk-radios--inline govuk-radios--small" }
+    ] },
+    { "key": "formGroupClasses", "path": "formGroup.classes", "type": "select", "label": "Form Group Classes", "options": [
+      { "label": "Default (none)", "value": "" },
+      { "label": "Error State", "value": "govuk-form-group--error" }
+    ] },
+    { "key": "disabled", "path": "disabled", "type": "select", "label": "Disabled?", "options": [
+      { "label": "True", "value": true },
+      { "label": "False", "value": false }
+    ] },
+  { "key": "options", "path": "items", "type": "optionList", "label": "Options" }
+    
+  ],
+  "has_options": true,
+  "option_schema": ["text", "value", "hint"],
+  "export_njk_template": "{% from \"govuk/components/radios/macro.njk\" import govukRadios %}\n{% set cls = props.classes or 'govuk-radios' %}\n{% if 'govuk-radios' not in cls %}{% set cls = 'govuk-radios ' + cls %}{% endif %}\n{{ govukRadios({\n  name: props.name,\n  fieldset: {\n    legend: {\n      text: props.fieldset.legend.text,\n      isPageHeading: props.fieldset.legend.isPageHeading,\n      classes: props.fieldset.legend.classes\n    }\n  },\n  hint: props.hint,\n  classes: cls,\n  formGroup: { classes: props.formGroup.classes },\n  disabled: props.disabled,\n  items: props.items\n}) }}"
+}

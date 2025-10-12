@@ -93,14 +93,6 @@ function SignatureAckPreview({ comp: c, answerObj, lang, setAnswer, errorMsg }) 
   );
 }
 
-// Helper to safely extract a display string from multilingual or raw values
-const textOf = (v) => {
-  if (v == null) return '';
-  if (typeof v === 'string' || typeof v === 'number') return String(v);
-  if (typeof v === 'object') return v.en || v.fr || Object.values(v).find(x => typeof x === 'string') || '';
-  return '';
-};
-
 // Adaptor for summary-list component so admin preview uses portal SummaryList with current collected answers
 const SummaryListAdapter = ({ comp, answers, lang }) => {
   const Comp = PortalRegistry['summary-list'];
@@ -126,7 +118,6 @@ async function buildGraph(selectedWorkflow) {
 
   // Build adjacency and edges
   const adj = new Map();
-  const edgeList = [];
   for (const s of steps) adj.set(s.id, []);
   const edgeLabelMap = new Map(); // key: src->tgt => combined label
 
@@ -185,7 +176,9 @@ async function buildGraph(selectedWorkflow) {
     byLevel.get(lv).push(s);
   }
   // Sort each column by name for stability
-  for (const [lv, arr] of byLevel) arr.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  for (const arr of byLevel.values()) {
+    arr.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
 
   const nodes = [];
   for (const [lv, arr] of Array.from(byLevel.entries()).sort((a, b) => a[0] - b[0])) {
@@ -274,8 +267,6 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
   const errorSummaryRef = React.useRef(null);
   const focusErrorSummaryNext = React.useRef(false);
   const [showAnswers, setShowAnswers] = useState(false);
-  const apiBase = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
-
   // Load runtime schema only when workflow changes (retain answers & position when switching modes)
   useEffect(() => {
     if (!selectedWorkflow) { setRuntime(null); setRunner({ stepIndex: 0, answers: {}, errors: {}, history: [] }); return; }
@@ -297,7 +288,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedWorkflow?.id]);
+  }, [selectedWorkflow]);
 
   useEffect(() => {
     let cancelled = false;
@@ -327,7 +318,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
   }, []);
 
   // Interactive helpers
-  const steps = runtime?.steps || [];
+  const steps = useMemo(() => (Array.isArray(runtime?.steps) ? runtime.steps : []), [runtime]);
   const hasSummaryList = useMemo(() => {
     if (!steps.length) return false;
     return steps.some(s => Array.isArray(s.components) && s.components.some(c => c && c.type === 'summary-list'));
@@ -510,7 +501,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
           if(typeof value!=='string'||value==='') return { failed:false }; if(rule.minLength!=null && value.length<rule.minLength) return { failed:true, message: failMsg()||`Minimum ${rule.minLength} characters.`}; if(rule.maxLength!=null && value.length>rule.maxLength) return { failed:true, message: failMsg()||`Maximum ${rule.maxLength} characters.`}; return { failed:false };
         }
         case 'pattern': { if(typeof value!=='string'||value==='') return { failed:false }; if(!rule.pattern) return { failed:false }; try { const re=new RegExp(rule.pattern, rule.flags||''); if(!re.test(value)) return { failed:true, message: failMsg()||'Invalid format.' }; } catch { return { failed:false }; } return { failed:false }; }
-        case 'compare': { const resolve=o=> (typeof o==='string' && Object.prototype.hasOwnProperty.call(data,o))?data[o]:o; const l=resolve(rule.left); const r=resolve(rule.right); const op=rule.op; let ok=true; switch(op){ case '==': ok = l==r; break; case '!=': ok = l!=r; break; case '>': ok = Number(l)>Number(r); break; case '>=': ok = Number(l)>=Number(r); break; case '<': ok = Number(l)<Number(r); break; case '<=': ok = Number(l)<=Number(r); break; default: ok=true; } if(!ok) return { failed:true, message: failMsg()||'Values do not match.' }; return { failed:false }; }
+        case 'compare': { const resolve=o=> (typeof o==='string' && Object.prototype.hasOwnProperty.call(data,o))?data[o]:o; const l=resolve(rule.left); const r=resolve(rule.right); const op=rule.op; let ok=true; switch(op){ case '==': ok = l === r; break; case '!=': ok = l !== r; break; case '>': ok = Number(l)>Number(r); break; case '>=': ok = Number(l)>=Number(r); break; case '<': ok = Number(l)<Number(r); break; case '<=': ok = Number(l)<=Number(r); break; default: ok=true; } if(!ok) return { failed:true, message: failMsg()||'Values do not match.' }; return { failed:false }; }
         default: return { failed:false };
       }
     } catch { return { failed:false }; }

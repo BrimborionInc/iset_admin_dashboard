@@ -77,60 +77,6 @@ export default function ModifyWorkflowEditorWidget() {
     }
   }, []);
 
-  // Load workflow details if wfId present
-  useEffect(() => {
-    if (!wfId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-  const resp = await apiFetch(`/api/workflows/${wfId}`);
-  if (!resp.ok) throw new Error(`Load workflow HTTP ${resp.status}`);
-  const data = await resp.json();
-        if (cancelled) return;
-        setWfName(data.name || '');
-  setWfStatus(data.status || 'draft');
-  // (Removed summary heuristic; existing summary steps load like any other.)
-        // Build UI steps from DB steps, assign stable UI ids
-        const uiSteps = (data.steps || []).map((s, idx) => ({ id: `S${idx + 1}`, name: s.name, stepId: s.id, routing: { mode: 'linear' } }));
-        const byDbToUi = new Map();
-        uiSteps.forEach(u => byDbToUi.set(u.stepId, u.id));
-        // Attach routing from routes
-        for (const r of (data.routes || [])) {
-          const srcUi = byDbToUi.get(r.source_step_id);
-          if (!srcUi) continue;
-          const step = uiSteps.find(s => s.id === srcUi);
-          if (!step) continue;
-          if (r.mode === 'linear') {
-            step.routing = { mode: 'linear', next: r.default_next_step_id ? byDbToUi.get(r.default_next_step_id) : undefined };
-          } else if (r.mode === 'by_option') {
-            const opts = Array.isArray(r.options) ? r.options : [];
-            const mapping = {};
-            const values = [];
-            for (const o of opts) {
-              values.push(String(o.option_value));
-              mapping[String(o.option_value)] = byDbToUi.get(o.next_step_id);
-            }
-            step.routing = { mode: 'byOption', fieldKey: r.field_key || '', options: values, mapping, defaultNext: r.default_next_step_id ? byDbToUi.get(r.default_next_step_id) : undefined };
-          }
-        }
-        setSteps(uiSteps);
-        const start = (data.steps || []).find(s => s.is_start);
-        if (start) setStartUiId(byDbToUi.get(start.id) || null);
-        else {
-          // fallback: first node
-          setStartUiId(uiSteps[0]?.id || null);
-        }
-  // Establish baseline now that existing workflow data loaded (no setTimeout needed)
-  baselineRef.current = snapshot();
-  baselineReadyRef.current = true;
-  dirtyRef.current = false;
-  setIsDirty(false);
-      } catch (e) {
-        // If load fails, leave as-is (new)
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [wfId]);
   useEffect(() => {
     try {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(steps));
@@ -161,6 +107,54 @@ export default function ModifyWorkflowEditorWidget() {
     }));
     return { wfName: wfName || '', wfStatus: wfStatus || 'draft', startUiId: startUiId || null, steps: normSteps };
   }, [steps, wfName, wfStatus, startUiId]);
+
+  // Load workflow details if wfId present
+  useEffect(() => {
+    if (!wfId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await apiFetch(`/api/workflows/${wfId}`);
+        if (!resp.ok) throw new Error(`Load workflow HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (cancelled) return;
+        setWfName(data.name || '');
+        setWfStatus(data.status || 'draft');
+        const uiSteps = (data.steps || []).map((s, idx) => ({ id: `S${idx + 1}`, name: s.name, stepId: s.id, routing: { mode: 'linear' } }));
+        const byDbToUi = new Map();
+        uiSteps.forEach(u => byDbToUi.set(u.stepId, u.id));
+        for (const r of (data.routes || [])) {
+          const srcUi = byDbToUi.get(r.source_step_id);
+          if (!srcUi) continue;
+          const step = uiSteps.find(s => s.id === srcUi);
+          if (!step) continue;
+          if (r.mode === 'linear') {
+            step.routing = { mode: 'linear', next: r.default_next_step_id ? byDbToUi.get(r.default_next_step_id) : undefined };
+          } else if (r.mode === 'by_option') {
+            const opts = Array.isArray(r.options) ? r.options : [];
+            const mapping = {};
+            const values = [];
+            for (const o of opts) {
+              values.push(String(o.option_value));
+              mapping[String(o.option_value)] = byDbToUi.get(o.next_step_id);
+            }
+            step.routing = { mode: 'byOption', fieldKey: r.field_key || '', options: values, mapping, defaultNext: r.default_next_step_id ? byDbToUi.get(r.default_next_step_id) : undefined };
+          }
+        }
+        setSteps(uiSteps);
+        const start = (data.steps || []).find(s => s.is_start);
+        if (start) setStartUiId(byDbToUi.get(start.id) || null);
+        else setStartUiId(uiSteps[0]?.id || null);
+        baselineRef.current = snapshot();
+        baselineReadyRef.current = true;
+        dirtyRef.current = false;
+        setIsDirty(false);
+      } catch (e) {
+        // If load fails, leave as-is (new)
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [wfId, snapshot]);
 
   // Track whether any user-initiated edit has occurred to avoid premature dirty flag
   const userEditRef = useRef(false);
@@ -260,11 +254,6 @@ export default function ModifyWorkflowEditorWidget() {
       return [...copy, newStep];
     });
   }, [selectedId]);
-
-  const updateStep = useCallback((updated) => { markUserEdited(); setSteps(prev => prev.map(s => (s.id === updated.id ? updated : s))); }, []);
-  const deleteStep = useCallback((id) => { markUserEdited(); setSteps(prev => removeStepAndRewire(prev, id)); setSelectedId(curr => (curr === id ? null : curr)); }, []);
-
-  const deleteSelected = useCallback(() => { if (!selectedId) return; setShowDeleteModal(true); }, [selectedId]);
 
   // Build API payload from UI model
   const toApiPayload = useCallback(() => {

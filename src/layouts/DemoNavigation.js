@@ -288,7 +288,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
       const resp = await apiFetch('/api/create-dummy-draft', { method: 'POST', body: JSON.stringify({}) });
       let json = null; try { json = await resp.json(); } catch {}
       if (resp.ok) {
-        setDummyResult({ type: 'success', message: 'Dummy draft created / updated for user 35 (summary-page).', details: json });
+        setDummyResult({ type: 'success', message: 'Dummy draft created / updated for user 48 (summary-page).', details: json });
       } else {
         setDummyResult({ type: 'error', message: json?.message || 'Failed to create dummy draft', details: json });
       }

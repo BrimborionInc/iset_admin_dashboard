@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Header,
@@ -20,8 +20,10 @@ import {
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useHistory } from 'react-router-dom';
 import { apiFetch } from '../auth/apiClient';
+import useCurrentUser from '../hooks/useCurrentUser';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
+const DEFAULT_VISIBLE_COLUMNS = ['tracking_id','status','lock_state','sla_risk','assigned_user_email','submitted_at','actions'];
 
 const computeSlaMeta = (row) => {
   // Placeholder: assume SLA due 14 days after submitted_at until backend provides sla_due_at
@@ -33,28 +35,6 @@ const computeSlaMeta = (row) => {
   return { ageDays, due, overdue };
 };
 
-const columnDefinitions = [
-  { id: 'tracking_id', header: 'Case / Submission ID', cell: i => i.tracking_id, minWidth: 140, isRowHeader: true },
-  { id: 'status', header: 'Status', cell: i => {
-      // Normalize display: if no assignee & status 'submitted'/'open' show 'Unassigned'
-      let rawStatus = i.case_id ? (i.status || 'submitted') : 'New';
-      const unassigned = i.case_id && !i.assigned_user_id && ['open','submitted'].includes(rawStatus.toLowerCase());
-      const display = unassigned ? 'Unassigned' : (rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1));
-      const type = unassigned ? 'pending' : (!i.case_id ? 'pending' : (display === 'Closed' ? 'success' : (i.sla_risk === 'overdue' ? 'warning' : 'info')));
-      return <StatusIndicator type={type}>{display}</StatusIndicator>;
-    }, minWidth: 120 },
-  { id: 'sla_risk', header: 'SLA Health', cell: i => {
-      const meta = computeSlaMeta(i);
-      const badge = meta.overdue ? <Badge color="red">Overdue</Badge> : <Badge color="green">OK</Badge>;
-      return (
-        <span title={`Age: ${meta.ageDays}d | Due: ${meta.due.toLocaleDateString()}${meta.overdue ? ' (Overdue)' : ''}`} aria-label={`SLA ${meta.overdue ? 'Overdue' : 'OK'}; Age ${meta.ageDays} days; Due ${meta.due.toLocaleDateString()}`}>{badge}</span>
-      );
-    }, minWidth: 110 },
-  { id: 'assigned_user_email', header: 'Owner', cell: i => i.case_id ? (i.assigned_user_email || '—') : 'Unassigned', minWidth: 200 },
-  { id: 'submitted_at', header: 'Received', cell: i => new Date(i.submitted_at).toLocaleDateString(), minWidth: 140 },
-];
-const defaultVisibleColumns = ['tracking_id','status','sla_risk','assigned_user_email','submitted_at','actions'];
-
 const ApplicationsWidget = ({ actions, refreshKey }) => {
   const history = useHistory();
   const [items, setItems] = useState([]);
@@ -63,7 +43,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const [filteringText, setFilteringText] = useState('');
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
-  const [visibleColumns, setVisibleColumns] = useState(defaultVisibleColumns);
+  const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
   const [selectedItems, setSelectedItems] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [assignModalVisible, setAssignModalVisible] = useState(false);
@@ -73,38 +53,72 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const [assignError, setAssignError] = useState(null);
   const [selectedAssignee, setSelectedAssignee] = useState(null); // Cloudscape Select expects {label,value}
   const [assignSubmitting, setAssignSubmitting] = useState(false);
-  const [userRole, setUserRole] = useState(null);
   const [alerts, setAlerts] = useState([]);
+  const {
+    userId: currentUserIdRaw,
+    displayName: currentUserName,
+    role: currentUserRole,
+  } = useCurrentUser();
+  const currentUserId = currentUserIdRaw ? String(currentUserIdRaw) : null;
+  const userRole = currentUserRole || '';
+  const normalizedUserRole = userRole.trim();
 
-  // Fetch user role (supports real auth + simulated dev role via localStorage fallbacks)
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await apiFetch('/api/auth/me');
-        if (res.ok) {
-          const data = await res.json();
-          const role = data?.auth?.role || data?.auth?.primary_role || null;
-          if (!cancelled && role) setUserRole(role);
-        } else {
-          // Fallback simulation: check common localStorage keys
-          const keys = ['demoRole','simRole','simulatedRole','isetRole','role','currentRole','userRole'];
-          for (const k of keys) {
-            const v = window.localStorage.getItem(k);
-            if (v) { setUserRole(v); break; }
-          }
-        }
-      } catch (_) {
-        // Silent; attempt localStorage fallback
-        const keys = ['demoRole','simRole','simulatedRole','isetRole','role','currentRole','userRole'];
-        for (const k of keys) {
-          const v = window.localStorage.getItem(k);
-          if (v) { setUserRole(v); break; }
-        }
+  const columns = useMemo(() => {
+    const lockCell = (row) => {
+      if (row.is_unassigned) return '-';
+      const ownerId = row.lock_owner_id ? String(row.lock_owner_id) : null;
+      const ownerName = row.lock_owner_name || row.lock_owner_email || null;
+      if (!ownerId && !ownerName) {
+        return <Badge color="green">Available</Badge>;
       }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+      const isSelf = currentUserId && ownerId && currentUserId === ownerId;
+      const display = isSelf ? (currentUserName || 'You') : (ownerName || 'In use');
+      const expires = row.lock_expires_at ? new Date(row.lock_expires_at) : null;
+      const meta = expires ? ` (expires ${expires.toLocaleTimeString()})` : '';
+      const type = isSelf ? 'success' : 'warning';
+      return (
+        <StatusIndicator type={type} ariaLabel={isSelf ? 'Locked by you' : `Locked by ${display}`}>
+          {display}{meta}
+        </StatusIndicator>
+      );
+    };
+
+    return [
+      { id: 'tracking_id', header: 'Case / Submission ID', cell: i => i.tracking_id, minWidth: 140, isRowHeader: true },
+      {
+        id: 'status',
+        header: 'Status',
+        cell: i => {
+          let rawStatus = i.case_id ? (i.status || 'submitted') : 'New';
+          const unassigned = i.case_id && !i.assigned_user_id && ['open','submitted'].includes(rawStatus.toLowerCase());
+          const display = unassigned ? 'Unassigned' : (rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1));
+          const type = unassigned ? 'pending' : (!i.case_id ? 'pending' : (display === 'Closed' ? 'success' : (i.sla_risk === 'overdue' ? 'warning' : 'info')));
+          return <StatusIndicator type={type}>{display}</StatusIndicator>;
+        },
+        minWidth: 120
+      },
+      {
+        id: 'lock_state',
+        header: 'In Use',
+        cell: lockCell,
+        minWidth: 200
+      },
+      {
+        id: 'sla_risk',
+        header: 'SLA Health',
+        cell: i => {
+          const meta = computeSlaMeta(i);
+          const badge = meta.overdue ? <Badge color="red">Overdue</Badge> : <Badge color="green">OK</Badge>;
+          return (
+            <span title={`Age: ${meta.ageDays}d | Due: ${meta.due.toLocaleDateString()}${meta.overdue ? ' (Overdue)' : ''}`} aria-label={`SLA ${meta.overdue ? 'Overdue' : 'OK'}; Age ${meta.ageDays} days; Due ${meta.due.toLocaleDateString()}`}>{badge}</span>
+          );
+        },
+        minWidth: 110
+      },
+      { id: 'assigned_user_email', header: 'Owner', cell: i => i.case_id ? (i.assigned_user_email || '-') : 'Unassigned', minWidth: 200 },
+      { id: 'submitted_at', header: 'Received', cell: i => new Date(i.submitted_at).toLocaleDateString(), minWidth: 140 },
+    ];
+  }, [currentUserId, currentUserName]);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -210,15 +224,33 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   // Client filtering (post-fetch) for quick text search; can be pushed server-side later
   const filteredItems = items.filter(i => {
     const s = filteringText.toLowerCase();
-    return !s || [i.tracking_id, i.status, i.assigned_user_email, i.ptma_codes].some(v => v && v.toLowerCase().includes(s));
+    return !s || [i.tracking_id, i.status, i.assigned_user_email, i.ptma_codes, i.lock_owner_name, i.lock_owner_email].some(v => v && String(v).toLowerCase().includes(s));
   });
 
   const actionsColumn = {
     id: 'actions', header: 'Actions', minWidth: 160, cell: item => {
       const unassigned = item.case_id && !item.assigned_user_id && ['open','submitted'].includes((item.status || '').toLowerCase());
-  const reassignRoles = ['Program Administrator','Regional Coordinator','System Administrator'];
-  const canReassign = item.case_id && item.assigned_user_id && reassignRoles.includes((userRole || '').trim());
-      const openAssignModal = (caseItem, preselectId) => {
+      const reassignRoles = ['Program Administrator','Regional Coordinator','System Administrator'];
+      const canReassign = item.case_id && item.assigned_user_id && reassignRoles.includes(normalizedUserRole);
+      const lockOwnerId = item.lock_owner_id ? String(item.lock_owner_id) : null;
+      const lockOwnerName = item.lock_owner_name || item.lock_owner_email || (lockOwnerId ? `User ${lockOwnerId}` : null);
+      const lockedByMe = lockOwnerId && currentUserId && lockOwnerId === currentUserId;
+      const lockedByAnother = lockOwnerId && !lockedByMe;
+      const lockExpiresAt = item.lock_expires_at ? new Date(item.lock_expires_at) : null;
+      const lockExpiryNote = lockExpiresAt && !Number.isNaN(lockExpiresAt.getTime())
+        ? ` (expires ${lockExpiresAt.toLocaleTimeString()})`
+        : '';
+      const lockMessage = lockedByAnother ? `Locked by ${lockOwnerName || 'another user'}${lockExpiryNote}` : null;
+
+      const openAssignModal = (caseItem, preselectId, options = {}) => {
+        if (options.lockBlocked) {
+          addAlert({
+            type: 'warning',
+            header: 'Assignment blocked',
+            content: options.reason || 'This record is currently locked by another staff member. Try again once it is released.',
+          });
+          return;
+        }
         setAssignTargetCase(caseItem); setAssignModalVisible(true); setSelectedAssignee(null); setAssignError(null);
         setAssignableLoading(true);
         apiFetch('/api/staff/assignable')
@@ -243,27 +275,53 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
           .finally(() => setAssignableLoading(false));
       };
       return (
-        <SpaceBetween direction="horizontal" size="xs">
+        <SpaceBetween size="xxs">
+          <SpaceBetween direction="horizontal" size="xs">
           {item.case_id && (
-            <Button variant="inline-link" onClick={() => history.push({ pathname: `/application-case/${item.case_id}`, state: { assessorEmail: item.assigned_user_email } })}>View</Button>
+            <Button
+              variant="inline-link"
+              onClick={() => history.push({ pathname: `/application-case/${item.case_id}`, state: { assessorEmail: item.assigned_user_email } })}
+            >
+              View
+            </Button>
           )}
           {unassigned && (
-            <Button variant="inline-link" onClick={() => openAssignModal(item, null)}>Assign</Button>
+            <Button
+              variant="inline-link"
+              onClick={() => openAssignModal(item, null, { lockBlocked: lockedByAnother, reason: lockMessage })}
+              disabled={lockedByAnother}
+              ariaLabel={lockedByAnother ? `Assign disabled: ${lockMessage}` : undefined}
+            >
+              Assign
+            </Button>
           )}
           {canReassign && (
-            <Button variant="inline-link" onClick={() => openAssignModal(item, item.assigned_user_id)}>Reassign</Button>
+            <Button
+              variant="inline-link"
+              onClick={() => openAssignModal(item, item.assigned_user_id, { lockBlocked: lockedByAnother, reason: lockMessage })}
+              disabled={lockedByAnother}
+              ariaLabel={lockedByAnother ? `Reassign disabled: ${lockMessage}` : undefined}
+            >
+              Reassign
+            </Button>
           )}
-          {!item.case_id && <span style={{ color: '#888' }}>—</span>}
+          {!item.case_id && <span style={{ color: '#888' }}>-</span>}
+          </SpaceBetween>
+          {lockedByAnother && (
+            <Box fontSize="body-s" color="text-status-inactive">
+              {lockMessage}
+            </Box>
+          )}
         </SpaceBetween>
       );
     }
   };
-  const allColumns = [...columnDefinitions, actionsColumn];
+  const allColumns = [...columns, actionsColumn];
 
   const pagesCount = Math.max(1, Math.ceil(totalCount / pageSize));
   const preferences = {
     pageSize,
-    contentDisplay: columnDefinitions.map(c => ({ id: c.id, visible: visibleColumns.includes(c.id) }))
+    contentDisplay: columns.map(c => ({ id: c.id, visible: visibleColumns.includes(c.id) }))
   };
 
   return (
@@ -316,7 +374,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
               renderAriaLive={({ firstIndex, lastIndex }) => `Displaying items ${firstIndex} to ${lastIndex}`}
               filter={<TextFilter filteringPlaceholder="Search" filteringText={filteringText} onChange={({ detail }) => { setFilteringText(detail.filteringText); setCurrentPageIndex(1); }} />}
               pagination={<Pagination currentPageIndex={currentPageIndex} pagesCount={pagesCount} onChange={({ detail }) => setCurrentPageIndex(detail.currentPageIndex)} />}
-              preferences={<CollectionPreferences title="Preferences" confirmLabel="Confirm" cancelLabel="Cancel" preferences={preferences} pageSizePreference={{ title: 'Page size', options: PAGE_SIZE_OPTIONS.map(v => ({ value: v, label: `${v} rows` })) }} contentDisplayPreference={{ title: 'Select visible columns', options: columnDefinitions.map(c => ({ id: c.id, label: c.header, alwaysVisible: c.id === 'tracking_id' })).concat([{ id: 'actions', label: 'Actions', alwaysVisible: true }]) }} onConfirm={({ detail }) => { setPageSize(detail.pageSize); setVisibleColumns(detail.contentDisplay.filter(c => c.visible).map(c => c.id)); setCurrentPageIndex(1); }} />}
+              preferences={<CollectionPreferences title="Preferences" confirmLabel="Confirm" cancelLabel="Cancel" preferences={preferences} pageSizePreference={{ title: 'Page size', options: PAGE_SIZE_OPTIONS.map(v => ({ value: v, label: `${v} rows` })) }} contentDisplayPreference={{ title: 'Select visible columns', options: columns.map(c => ({ id: c.id, label: c.header, alwaysVisible: c.id === 'tracking_id' })).concat([{ id: 'actions', label: 'Actions', alwaysVisible: true }]) }} onConfirm={({ detail }) => { setPageSize(detail.pageSize); setVisibleColumns(detail.contentDisplay.filter(c => c.visible).map(c => c.id)); setCurrentPageIndex(1); }} />}
             />
           )}
         </Box>

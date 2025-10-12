@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ContentLayout, Header } from '@cloudscape-design/components';
+import { ContentLayout } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import BlankTemplate from '../widgets/blankTemplate';
 import ApplicationsWidget from '../widgets/ApplicationsWidget';
@@ -8,10 +8,7 @@ const CaseAssignmentDashboard = ({ header = 'Manage Applications', headerInfo, t
   const [boardItems, setBoardItems] = useState([
   { id: 'applications-unified', rowSpan: 6, columnSpan: 12, data: { title: 'Active Cases' } }
   ]);
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  // Handler to trigger refresh in child widgets
-  const handleRefresh = () => setRefreshKey(k => k + 1);
+  const [refreshKey] = useState(0);
 
   return (
     <ContentLayout

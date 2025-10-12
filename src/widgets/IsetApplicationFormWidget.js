@@ -18,6 +18,7 @@ import {
   ColumnLayout,
   Modal,
   FormField,
+  Alert,
   Input,
   Select,
   Multiselect,
@@ -25,6 +26,8 @@ import {
 } from '@cloudscape-design/components';
 import IsetApplicationFormHelpPanelContent from '../helpPanelContents/isetApplicationFormHelpPanelContent';
 import { apiFetch } from '../auth/apiClient';
+import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
+import useCurrentUser from '../hooks/useCurrentUser';
 
 const NOT_PROVIDED = <Box color="text-body-secondary">Not provided</Box>;
 
@@ -791,6 +794,15 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   const [versionDetails, setVersionDetails] = useState(null);
   const [versionDetailsLoading, setVersionDetailsLoading] = useState(false);
   const [restoringVersionId, setRestoringVersionId] = useState(null);
+  const {
+    lockState,
+    acquireLock,
+    releaseLock,
+    refreshLock: refreshLockHeartbeat,
+    isLockedByMe
+  } = useApplicationLock(application_id);
+  const [locking, setLocking] = useState(false);
+  const { userId: currentUserId, displayName: currentUserName } = useCurrentUser();
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -838,6 +850,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         throw err;
       }
       const data = await res.json();
+      const parsedRowVersion = Number(data?.row_version);
+      data.row_version = Number.isFinite(parsedRowVersion) && parsedRowVersion > 0 ? parsedRowVersion : 0;
       let payload = data.payload_json;
       if (payload && typeof payload === 'string') {
         try {
@@ -875,7 +889,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
     setVersions([]);
     setVersionDetails(null);
     setVersionError(null);
-  }, [application_id]);
+    releaseLock({ silent: true }).catch(() => {});
+  }, [application_id, releaseLock]);
 
   const { answers, payload } = useMemo(() => {
     if (!application) return { answers: {}, payload: {} };
@@ -886,6 +901,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
       answers: rawAnswers && typeof rawAnswers === 'object' ? rawAnswers : {}
     };
   }, [application]);
+
+  const currentRowVersion = useMemo(() => Number(application?.row_version || 0), [application?.row_version]);
 
   const schemaSnapshot = useMemo(() => {
     let snapshot = payload?.schema_snapshot || payload?.submission_snapshot?.schema_snapshot;
@@ -919,67 +936,189 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   const diff = useMemo(() => answersDiff(answers, editableAnswers), [answers, editableAnswers]);
   const hasDirtyFields = isEditing && Object.keys(diff).length > 0;
   const isDecisionFinal = ['approved', 'rejected'].includes((caseData?.status || '').toLowerCase());
+  const activeLock = useMemo(() => {
+    if (lockState.owned && lockState.lock) {
+      return lockState.lock;
+    }
+    if (application?.lock_owner_id || application?.lock_owner_name || application?.lock_owner_email) {
+      return {
+        applicationId: application_id || null,
+        ownerUserId: application?.lock_owner_id ? String(application.lock_owner_id) : null,
+        ownerDisplayName: application?.lock_owner_name || null,
+        ownerEmail: application?.lock_owner_email || null,
+        expiresAt: application?.lock_expires_at || null,
+        acquiredAt: null,
+        ttlMinutes: null,
+        heartbeatMinutes: null,
+        reused: false
+      };
+    }
+    return null;
+  }, [
+    application?.lock_expires_at,
+    application?.lock_owner_email,
+    application?.lock_owner_id,
+    application?.lock_owner_name,
+    application_id,
+    lockState.lock,
+    lockState.owned
+  ]);
+  const lockOwnerId = activeLock?.ownerUserId ? String(activeLock.ownerUserId) : null;
+  const lockHeldByCurrentUser = Boolean(isLockedByMe || (currentUserId && lockOwnerId && String(currentUserId) === lockOwnerId));
+  const lockedByAnotherUser = Boolean(lockOwnerId && !lockHeldByCurrentUser);
+  const lockAlertMessage = useMemo(() => {
+    const lockExpiresAt = activeLock?.expiresAt ? new Date(activeLock.expiresAt) : null;
+    if (lockedByAnotherUser) {
+      return buildLockConflictMessage({ reason: 'owned_by_other', lock: activeLock });
+    }
+    if (lockHeldByCurrentUser) {
+      const ownerLabel = currentUserName || activeLock?.ownerDisplayName || 'you';
+      const expiresFragment = lockExpiresAt ? ` (expires ${lockExpiresAt.toLocaleTimeString()})` : '';
+      return `You (${ownerLabel}) currently hold an edit lock${expiresFragment}. Save or cancel to release it for other users.`;
+    }
+    return null;
+  }, [activeLock, currentUserName, lockHeldByCurrentUser, lockedByAnotherUser]);
 
   useEffect(() => {
     if (isDecisionFinal) {
       setIsEditing(false);
       setShowEditConfirm(false);
+      releaseLock({ silent: true }).catch(() => {});
     }
-  }, [isDecisionFinal]);
+  }, [isDecisionFinal, releaseLock]);
 
   const handleRequestEdit = useCallback(() => {
     if (isDecisionFinal) return;
+    if (lockedByAnotherUser) {
+      pushFlash({ type: 'warning', content: buildLockConflictMessage({ reason: 'owned_by_other', lock: activeLock }) });
+      return;
+    }
     setShowEditConfirm(true);
-  }, [isDecisionFinal]);
+  }, [activeLock, isDecisionFinal, lockedByAnotherUser, pushFlash]);
 
-  const handleConfirmEdit = useCallback(() => {
-    if (isDecisionFinal) return;
+  const handleConfirmEdit = useCallback(async () => {
+    if (isDecisionFinal || locking || lockedByAnotherUser) return;
+    setLocking(true);
+    const result = await acquireLock();
+    setLocking(false);
+    if (!result?.ok) {
+      const message = buildLockConflictMessage(result);
+      pushFlash({ type: result?.status === 423 ? 'info' : 'error', content: message });
+      return;
+    }
     setShowEditConfirm(false);
     setIsEditing(true);
     setEditableAnswers(cloneAnswers(answers));
-  }, [answers, isDecisionFinal]);
+  }, [acquireLock, answers, isDecisionFinal, locking, lockedByAnotherUser, pushFlash]);
 
   const handleCancelEditing = useCallback(() => {
     setIsEditing(false);
     setEditableAnswers(cloneAnswers(answers));
-  }, [answers]);
+    releaseLock({ silent: true }).catch(() => {});
+  }, [answers, releaseLock]);
 
   const handleSave = useCallback(async () => {
     if (!application_id) return;
     const changes = answersDiff(answers, editableAnswers);
     if (!Object.keys(changes).length) {
       setIsEditing(false);
+      releaseLock({ silent: true }).catch(() => {});
       pushFlash({ type: 'info', content: 'No changes to save' });
+      return;
+    }
+    if (!currentRowVersion) {
+      pushFlash({ type: 'error', content: 'Unable to determine the current application version. Reload and try again.' });
       return;
     }
     setSaving(true);
     try {
-      const res = await apiFetch(`/api/applications/${application_id}/versions`, {
+      let releaseAfterSuccess = false;
+      if (!lockState.owned) {
+        const lockResult = await acquireLock();
+        if (!lockResult?.ok) {
+          const message = buildLockConflictMessage(lockResult);
+          pushFlash({ type: lockResult?.status === 423 ? 'warning' : 'error', content: message });
+          setIsEditing(false);
+          releaseLock({ silent: true }).catch(() => {});
+          return;
+        }
+        releaseAfterSuccess = Boolean(lockResult.localOwner);
+      } else if (lockHeldByCurrentUser) {
+        refreshLockHeartbeat().catch(() => {});
+        releaseAfterSuccess = true;
+      }
+
+      const response = await apiFetch(`/api/applications/${application_id}/versions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers: changes })
+        body: JSON.stringify({ answers: changes, expectedRowVersion: currentRowVersion })
       });
-      if (!res.ok) {
-        let message = 'Failed to save application updates';
-        try {
-          const body = await res.json();
-          if (body?.error) message = body.error;
-        } catch (_) {}
+      let body = null;
+      try {
+        body = await response.json();
+      } catch (_) {
+        body = null;
+      }
+
+      if (!response.ok) {
+        if (response.status === 423) {
+          const message = buildLockConflictMessage({ reason: body?.reason || body?.error, lock: body?.lock });
+          pushFlash({ type: 'warning', content: message });
+          setIsEditing(false);
+          setShowEditConfirm(false);
+          setVersionsLoaded(false);
+          releaseLock({ silent: true }).catch(() => {});
+          await refreshApplication();
+          return;
+        }
+        if (response.status === 409) {
+          const current = Number(body?.currentRowVersion ?? body?.application_row_version);
+          if (Number.isFinite(current) && current > 0) {
+            setApplication(prev => (prev ? { ...prev, row_version: current } : prev));
+          }
+          pushFlash({
+            type: 'warning',
+            content: 'Someone else updated this application first. We reloaded the latest data-review it and try again.'
+          });
+          setIsEditing(false);
+          setShowEditConfirm(false);
+          setVersionsLoaded(false);
+          releaseLock({ silent: true }).catch(() => {});
+          await refreshApplication();
+          return;
+        }
+        const message = body?.error || 'Failed to save application updates';
         const err = new Error(message);
-        err.status = res.status;
+        err.status = response.status;
         throw err;
       }
-      await res.json().catch(() => ({}));
+
       setIsEditing(false);
+      setShowEditConfirm(false);
       setVersionsLoaded(false);
       pushFlash({ type: 'success', content: 'Application updates saved' });
       await refreshApplication();
+      if (releaseAfterSuccess) {
+        releaseLock({ silent: true }).catch(() => {});
+      }
     } catch (error) {
       pushFlash({ type: 'error', content: error?.message || 'Failed to save changes' });
     } finally {
       setSaving(false);
     }
-  }, [application_id, answers, editableAnswers, pushFlash, refreshApplication]);
+  }, [
+    acquireLock,
+    answers,
+    application_id,
+    currentRowVersion,
+    editableAnswers,
+    lockHeldByCurrentUser,
+    lockState.owned,
+    pushFlash,
+    refreshApplication,
+    releaseLock,
+    refreshLockHeartbeat
+  ]);
   const fetchVersionsList = useCallback(async () => {
     if (!application_id) return;
     setVersionsLoading(true);
@@ -1067,35 +1206,90 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
 
   const handleRestoreVersion = useCallback(async (versionRow) => {
     if (!application_id || !versionRow?.id || !versionRow?.canRestore) return;
+    if (!currentRowVersion) {
+      pushFlash({ type: 'error', content: 'Unable to determine the current application version. Reload and try again.' });
+      return;
+    }
     setRestoringVersionId(versionRow.id);
     setVersionError(null);
     try {
-      const res = await apiFetch(`/api/applications/${application_id}/versions/${versionRow.id}/restore`, {
+      if (!lockState.owned) {
+        const lockResult = await acquireLock();
+        if (!lockResult?.ok) {
+          const message = buildLockConflictMessage(lockResult);
+          pushFlash({ type: lockResult?.status === 423 ? 'warning' : 'error', content: message });
+          setRestoringVersionId(null);
+          return;
+        }
+      } else if (lockHeldByCurrentUser) {
+        refreshLockHeartbeat().catch(() => {});
+      }
+
+      const response = await apiFetch(`/api/applications/${application_id}/versions/${versionRow.id}/restore`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify({ expectedRowVersion: currentRowVersion })
       });
-      if (!res.ok) {
-        let message = 'Failed to restore version';
-        try {
-          const body = await res.json();
-          if (body?.error) message = body.error;
-        } catch (_) {}
-        throw new Error(message);
+      let body = null;
+      try {
+        body = await response.json();
+      } catch (_) {
+        body = null;
       }
-      const result = await res.json().catch(() => ({}));
-      const restoredVersion = Number(result?.version) || versionRow.version;
+
+      if (!response.ok) {
+        if (response.status === 423) {
+          const message = buildLockConflictMessage({ reason: body?.reason || body?.error, lock: body?.lock });
+          pushFlash({ type: 'warning', content: message });
+          setIsEditing(false);
+          releaseLock({ silent: true }).catch(() => {});
+          await refreshApplication();
+          await fetchVersionsList();
+          setVersionDetails(null);
+          return;
+        }
+        if (response.status === 409) {
+          pushFlash({
+            type: 'warning',
+            content: 'Someone else updated this application while you were viewing history. We reloaded the latest data.'
+          });
+          releaseLock({ silent: true }).catch(() => {});
+          await refreshApplication();
+          await fetchVersionsList();
+          setVersionDetails(null);
+          setIsEditing(false);
+          return;
+        }
+        const message = body?.error || 'Failed to restore version';
+        const err = new Error(message);
+        err.status = response.status;
+        throw err;
+      }
+
+      const restoredVersion = Number(body?.version) || versionRow.version;
       pushFlash({ type: 'success', content: `Restored version ${restoredVersion}` });
       await refreshApplication();
       await fetchVersionsList();
       setVersionDetails(null);
       setIsEditing(false);
+      releaseLock({ silent: true }).catch(() => {});
     } catch (error) {
       pushFlash({ type: 'error', content: error?.message || 'Failed to restore version' });
     } finally {
       setRestoringVersionId(null);
     }
-  }, [application_id, fetchVersionsList, pushFlash, refreshApplication]);
+  }, [
+    acquireLock,
+    application_id,
+    currentRowVersion,
+    fetchVersionsList,
+    lockHeldByCurrentUser,
+    lockState.owned,
+    pushFlash,
+    refreshApplication,
+    releaseLock,
+    refreshLockHeartbeat
+  ]);
 
   const renderEditableField = useCallback((item) => {
     const fieldKey = item.field;
@@ -1240,8 +1434,11 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
           </Button>
         </>
       ) : (
-        <Button onClick={handleRequestEdit} disabled={loading || !application || isDecisionFinal} variant="primary">
-
+        <Button
+          onClick={handleRequestEdit}
+          disabled={loading || !application || isDecisionFinal || lockedByAnotherUser}
+          variant="primary"
+        >
           Edit
         </Button>
       )}
@@ -1288,6 +1485,18 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         <Box color="text-status-critical">{loadError}</Box>
       ) : (
         <>
+          {flashbarItems.length > 0 && (
+            <Box margin={{ bottom: 's' }}>
+              <Flashbar items={flashbarItems} />
+            </Box>
+          )}
+          {lockAlertMessage && (
+            <Box margin={{ bottom: 's' }}>
+              <Alert type={lockedByAnotherUser ? 'warning' : 'info'}>
+                {lockAlertMessage}
+              </Alert>
+            </Box>
+          )}
           <Box variant="small" margin={{ bottom: 's' }}>
             This view presents the applicant's submitted ISET application. Review each section for accuracy, capture clarifications when needed, and use edit mode to publish updates to the case file.
           </Box>
@@ -1323,7 +1532,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
               </ExpandableSection>
             )}
           </SpaceBetween>
-          {flashbarItems.length > 0 && <Flashbar items={flashbarItems} />}
         </>
       )}
       {showEditConfirm && (
@@ -1342,7 +1550,12 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
                 <Button onClick={() => setShowEditConfirm(false)} variant="link">
                   Cancel
                 </Button>
-                <Button variant="primary" onClick={handleConfirmEdit}>
+                <Button
+                  variant="primary"
+                  onClick={handleConfirmEdit}
+                  loading={locking}
+                  disabled={locking || lockedByAnotherUser}
+                >
                   Enable editing
                 </Button>
               </SpaceBetween>

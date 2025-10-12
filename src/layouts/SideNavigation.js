@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { SideNavigation as CloudscapeSideNavigation, Badge } from '@cloudscape-design/components';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '../auth/cognito';
@@ -20,7 +20,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
 
   const history = useHistory();
   const { roleMatrix } = useRoleMatrix();
-  const [tick, setTick] = useState(0);
+  const [, forceRerender] = useState(0);
   const [expandedSections, setExpandedSections] = useState(() => {
     try {
       const raw = sessionStorage.getItem('sideNavExpanded');
@@ -30,7 +30,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
   });
 
   useEffect(() => {
-    const onChange = () => setTick(t => t + 1);
+    const onChange = () => forceRerender(t => t + 1);
     window.addEventListener('auth:session-changed', onChange);
     window.addEventListener('storage', onChange);
     return () => {
@@ -58,7 +58,6 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
         { type: 'link', text: 'NWAC Hub Management', href: '/nwac-hub-management' },
         { type: 'link', text: 'PTMA Management', href: '/ptma-management' },
         { type: 'link', text: 'ARMS Reporting', href: '/arms-reporting' },
-        { type: 'link', text: 'Assessment Review', href: '/assessment-review' },
       ],
     },
     {
@@ -73,7 +72,6 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       type: 'section',
       text: 'Other Dashboards',
       items: [
-        { type: 'link', text: 'Secure Messaging', href: '/manage-messages' },
         { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },
       ],
     },

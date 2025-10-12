@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 // Switched from raw axios calls to authenticated apiFetch wrapper (adds bearer / dev bypass headers)
 import { apiFetch } from '../auth/apiClient';
-import { Box, Container, Header, Table, Input, Button, Select, SpaceBetween, FormField, Textarea, Badge, Popover, Checkbox, Toggle, ExpandableSection, Spinner, Modal, Alert } from '@cloudscape-design/components';
+import { Box, Container, Header, Table, Input, Button, Select, SpaceBetween, FormField, Textarea, Badge, Popover, Checkbox, Toggle, ExpandableSection, Modal, Alert } from '@cloudscape-design/components';
 import Avatar from '@cloudscape-design/chat-components/avatar';
 import get from 'lodash/get';
 import Ajv from 'ajv';
@@ -408,7 +408,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
         }
       }
     } catch { /* ignore */ }
-  }, [selectedComponent?.props?.autocompletePreset, selectedComponent?.props?.items, selectedComponent?.template_key, selectedComponent?.type]);
+  }, [selectedComponent?.props?.autocompletePreset, selectedComponent?.props?.items, selectedComponent?.template_key, selectedComponent?.type, updateComponentProperty]);
 
   useEffect(() => {
     if (!selectedComponent) { setValidationErrors({}); return; }
@@ -587,13 +587,6 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
     return () => { cancelled = true; };
   }, [isSummaryList]);
 
-  // Helper to extract field-like components from a workflow detail object
-  const extractFieldsFromWorkflow = (wfDetail) => {
-    if (!wfDetail || !Array.isArray(wfDetail.steps)) return [];
-    // Need each step's components; fetch individually if API exists (/api/steps/:id)
-    return []; // placeholder until we fetch steps below
-  };
-
   const loadWorkflowFields = async (workflowId) => {
     if (!workflowId) { setAvailableFields([]); return; }
     setFieldsLoading(true);
@@ -706,12 +699,6 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
       const field = availableFields.find(f => f.key === fieldKey);
       next = [...cur, { key: fieldKey, labelOverride: null, stepName: field?.stepName, labelEn: field?.labelEn, labelFr: field?.labelFr }];
     }
-    updateSummaryListConfig({ included: next });
-  };
-
-  const updateIncludedRow = (fieldKey, patch) => {
-    const cur = summaryListConfig?.included || [];
-    const next = cur.map(r => r.key === fieldKey ? { ...r, ...patch } : r);
     updateSummaryListConfig({ included: next });
   };
 
@@ -1287,6 +1274,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
 };
 
 export { ValidationEditor };
+
 export default PropertiesPanel;
 
 // --- Radio Conditional Linking Scaffold (Option C) ---
@@ -1364,8 +1352,16 @@ const ChoiceConditionalScaffold = ({ options, fieldPath, updateComponentProperty
     if (selectedOptionIdx < 0) return;
     const parentKey = selectedComponent?.id || selectedComponent?.props?.name || 'radio';
     const baseId = `${parentKey}_${optionList[selectedOptionIdx]?.value || 'opt'+selectedOptionIdx}_follow`.replace(/[^a-zA-Z0-9_-]/g,'_');
-    let newId = baseId; let i=1;
-    while (pageComponents.some(c => (c.id || c.props?.name) === newId)) { newId = baseId + '_' + (++i); }
+    const existingIds = new Set(
+      (Array.isArray(pageComponents) ? pageComponents : [])
+        .map(c => (c?.id || c?.props?.name))
+        .filter(Boolean)
+    );
+    let newId = baseId;
+    let i = 1;
+    while (existingIds.has(newId)) {
+      newId = `${baseId}_${++i}`;
+    }
     const tpl = availableTemplates.find(t => (t.template_key === newType) || (t.type === newType));
     const baseProps = JSON.parse(JSON.stringify(tpl?.props || {}));
     baseProps.name = newId;
@@ -1481,7 +1477,7 @@ const ChoiceConditionalScaffold = ({ options, fieldPath, updateComponentProperty
 };
 
 // --- Unified Validation Editor vNext ---
-const ValidationEditor = ({ selectedComponent, updateComponentProperty, allComponents = [] }) => {
+function ValidationEditor({ selectedComponent, updateComponentProperty, allComponents = [] }) {
   const misNested = selectedComponent?.props?.props?.validation;
   const topLevel = selectedComponent?.props?.validation;
   const rawValidation = topLevel || misNested || {};
@@ -1781,4 +1777,4 @@ const ValidationEditor = ({ selectedComponent, updateComponentProperty, allCompo
     </Modal>
   </SpaceBetween>
   );
-};
+}

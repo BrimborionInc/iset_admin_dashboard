@@ -1,0 +1,45 @@
+{
+  "template_key": "textarea",
+  "type": "textarea",
+  "label": "Textarea",
+  "description": "Multi-line text input supporting accessibility, spellcheck and optional default value.",
+  "status": "active",
+  "default_props": {
+    "name": "example-textarea",
+    "label": { "text": "Describe your request", "classes": "govuk-label--m" },
+    "hint": { "text": "Do not include personal information." },
+    "errorMessage": { "text": "" },
+    "classes": "govuk-textarea",
+    "formGroup": { "classes": "" },
+    "rows": 5,
+    "autocomplete": "",
+    "spellcheck": true,
+    "value": ""
+  },
+  "prop_schema": [
+    { "key": "name", "path": "name", "type": "text", "label": "Data Key" },
+  { "key": "label.text", "path": "label.text", "type": "text", "label": "Label Text" },
+  { "key": "label.classes", "path": "label.classes", "type": "select", "label": "Label Classes", "options": [
+      { "label": "Default (m)", "value": "govuk-label--m" },
+      { "label": "Small (s)", "value": "govuk-label--s" },
+      { "label": "Large (l)", "value": "govuk-label--l" },
+      { "label": "Extra Large (xl)", "value": "govuk-label--xl" },
+      { "label": "Visually Hidden", "value": "govuk-visually-hidden" }
+    ] },
+    { "key": "hint.text", "path": "hint.text", "type": "text", "label": "Hint Text" },
+  { "key": "rows", "path": "rows", "type": "number", "label": "Rows" },
+    { "key": "autocomplete", "path": "autocomplete", "type": "text", "label": "Autocomplete" },
+    { "key": "spellcheck", "path": "spellcheck", "type": "select", "label": "Spellcheck?", "options": [
+      { "label": "True", "value": true },
+      { "label": "False", "value": false }
+    ] },
+    { "key": "value", "path": "value", "type": "textarea", "label": "Default Value" },
+    { "key": "classes", "path": "classes", "type": "select", "label": "CSS Classes", "options": [
+      { "label": "Default (govuk-textarea)", "value": "govuk-textarea" },
+      { "label": "Width 20", "value": "govuk-textarea govuk-!-width-full" }
+    ] }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "{% from \"govuk/components/textarea/macro.njk\" import govukTextarea %}\n{% set cls = props.classes or 'govuk-textarea' %}\n{% if 'govuk-textarea' not in cls %}{% set cls = 'govuk-textarea ' + cls %}{% endif %}\n{{ govukTextarea({\n  name: props.name,\n  id: props.id or props.name,\n  label: props.label,\n  hint: props.hint,\n  errorMessage: props.errorMessage,\n  classes: cls,\n  rows: props.rows,\n  autocomplete: props.autocomplete,\n  spellcheck: props.spellcheck,\n  value: props.value\n}) }}"
+}

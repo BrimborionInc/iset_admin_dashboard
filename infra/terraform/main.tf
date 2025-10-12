@@ -40,12 +40,12 @@ data "archive_file" "post_confirmation_zip" {
 }
 
 resource "aws_iam_role" "lambda_role" {
-  name               = "${local.name_pref}-pre-token-gen-role"
+  name = "${local.name_pref}-pre-token-gen-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
     Statement = [{
-      Action = "sts:AssumeRole",
-      Effect = "Allow",
+      Action    = "sts:AssumeRole",
+      Effect    = "Allow",
       Principal = { Service = "lambda.amazonaws.com" }
     }]
   })
@@ -57,24 +57,24 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
 }
 
 resource "aws_lambda_function" "pre_token_gen" {
-  function_name = "${local.name_pref}-pre-token-gen"
-  role          = aws_iam_role.lambda_role.arn
-  handler       = "index.handler"
-  runtime       = "nodejs20.x"
-  filename      = data.archive_file.pre_token_zip.output_path
+  function_name    = "${local.name_pref}-pre-token-gen"
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  filename         = data.archive_file.pre_token_zip.output_path
   source_code_hash = data.archive_file.pre_token_zip.output_base64sha256
-  timeout       = 10
+  timeout          = 10
 }
 
 # Post Confirmation Lambda (stub for applicant provisioning)
 resource "aws_lambda_function" "post_confirmation" {
-  function_name = "${local.name_pref}-post-confirmation"
-  role          = aws_iam_role.lambda_role.arn
-  handler       = "index.handler"
-  runtime       = "nodejs20.x"
-  filename      = data.archive_file.post_confirmation_zip.output_path
+  function_name    = "${local.name_pref}-post-confirmation"
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  filename         = data.archive_file.post_confirmation_zip.output_path
   source_code_hash = data.archive_file.post_confirmation_zip.output_base64sha256
-  timeout       = 10
+  timeout          = 10
   environment {
     variables = {
       PROVISIONING_WEBHOOK_URL = var.provisioning_webhook_url
@@ -250,17 +250,17 @@ resource "aws_cognito_user_pool" "applicant" {
 }
 
 resource "aws_lambda_permission" "allow_cognito_invoke_post_confirmation_applicant" {
-  count        = var.applicant_app_name == "" ? 0 : 1
-  statement_id = "AllowExecutionFromCognitoPostConfirmationApplicant"
-  action       = "lambda:InvokeFunction"
+  count         = var.applicant_app_name == "" ? 0 : 1
+  statement_id  = "AllowExecutionFromCognitoPostConfirmationApplicant"
+  action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.post_confirmation.function_name
-  principal    = "cognito-idp.amazonaws.com"
-  source_arn   = aws_cognito_user_pool.applicant[0].arn
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.applicant[0].arn
 }
 
 resource "aws_cognito_user_pool_domain" "applicant" {
-  count       = length(var.applicant_cognito_domain_prefix) == 0 ? 0 : 1
-  domain      = var.applicant_cognito_domain_prefix
+  count        = length(var.applicant_cognito_domain_prefix) == 0 ? 0 : 1
+  domain       = var.applicant_cognito_domain_prefix
   user_pool_id = aws_cognito_user_pool.applicant[0].id
 }
 

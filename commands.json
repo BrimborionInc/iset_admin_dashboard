@@ -1,0 +1,1 @@
+{"commands":["curl -sS http://localhost:5001/healthz"]}

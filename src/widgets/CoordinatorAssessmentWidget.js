@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { apiFetch } from '../auth/apiClient';
+import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
+import useCurrentUser from '../hooks/useCurrentUser';
 import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup } from '@cloudscape-design/components';
 import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
@@ -55,6 +57,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const [initialAssessment, setInitialAssessment] = useState({});
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [applicationRowVersion, setApplicationRowVersion] = useState(() => Number(caseData?.application_row_version || 0));
   const [isChanged, setIsChanged] = useState(false);
   const [showNWACSection, setShowNWACSection] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
@@ -65,6 +68,18 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
   const [localAssessmentSubmitted, setLocalAssessmentSubmitted] = useState(false);
   const alertAnchorRef = useRef(null);
+  const {
+    lockState,
+    acquireLock,
+    releaseLock,
+    refreshLock: refreshLockHeartbeat,
+    isLockedByMe
+  } = useApplicationLock(application_id);
+  const [lockingAssessment, setLockingAssessment] = useState(false);
+  const {
+    userId: currentUserId,
+    displayName: currentUserName
+  } = useCurrentUser();
 
   const rawCaseStatus = caseData?.status ?? '';
   const normalizedCaseStatus = typeof rawCaseStatus === 'string'
@@ -77,6 +92,53 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const showOutcomeByStatus = OUTCOME_NOTICE_STATUSES.has(canonicalCaseStatus);
   const isPendingApprovalStatus = canonicalCaseStatus === 'pending_approval';
   const isOutcomeNoticeDisabled = isDecisionFinal;
+  const activeLock = useMemo(() => {
+    if (lockState.owned && lockState.lock) {
+      return lockState.lock;
+    }
+    if (caseData?.lock_owner_user_id || caseData?.lock_owner_display_name || caseData?.lock_owner_email) {
+      return {
+        applicationId: application_id || caseData?.application_id || null,
+        ownerUserId: caseData?.lock_owner_user_id ? String(caseData.lock_owner_user_id) : null,
+        ownerDisplayName: caseData?.lock_owner_display_name || null,
+        ownerEmail: caseData?.lock_owner_email || null,
+        expiresAt: caseData?.lock_expires_at || null,
+        acquiredAt: null,
+        ttlMinutes: null,
+        heartbeatMinutes: null,
+        reused: false
+      };
+    }
+    return null;
+  }, [
+    application_id,
+    caseData?.application_id,
+    caseData?.lock_expires_at,
+    caseData?.lock_owner_display_name,
+    caseData?.lock_owner_email,
+    caseData?.lock_owner_user_id,
+    lockState.lock,
+    lockState.owned
+  ]);
+  const lockOwnerId = activeLock?.ownerUserId ? String(activeLock.ownerUserId) : null;
+  const lockHeldByCurrentUser = Boolean(isLockedByMe || (currentUserId && lockOwnerId && String(currentUserId) === lockOwnerId));
+  const lockedByAnotherUser = Boolean(lockOwnerId && !lockHeldByCurrentUser);
+  const lockAlertMessage = useMemo(() => {
+    const lockExpiresAt = activeLock?.expiresAt ? new Date(activeLock.expiresAt) : null;
+    if (lockedByAnotherUser) {
+      return buildLockConflictMessage({ reason: 'owned_by_other', lock: activeLock });
+    }
+    if (lockHeldByCurrentUser) {
+      const ownerLabel = currentUserName || activeLock?.ownerDisplayName || 'you';
+      const expiresFragment = lockExpiresAt ? ` (expires ${lockExpiresAt.toLocaleTimeString()})` : '';
+      return `You (${ownerLabel}) currently hold an edit lock${expiresFragment}. Save or cancel to release it for other users.`;
+    }
+    return null;
+  }, [activeLock, currentUserName, lockHeldByCurrentUser, lockedByAnotherUser]);
+
+  useEffect(() => {
+    setApplicationRowVersion(Number(caseData?.application_row_version || 0));
+  }, [caseData?.application_row_version]);
 
   // Pre-populate fields from application form as placeholders
   useEffect(() => {
@@ -220,7 +282,76 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     setAssessment(initialAssessment);
     setShowCancelModal(false);
     setAlert(null);
+    setIsEditingAssessment(false);
+    releaseLock({ silent: true }).catch(() => {});
   };
+  const showLockAlert = useCallback((detail, severity = 'warning') => {
+    const message = buildLockConflictMessage(detail);
+    setAlert({
+      type: severity,
+      content: message,
+      dismissible: true,
+      statusIconAriaLabel: severity === 'warning' ? 'Warning' : 'Error'
+    });
+    setTimeout(() => {
+      alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }, []);
+  const beginEditingAssessment = useCallback(async () => {
+    if (lockingAssessment || isDecisionFinal || isLockedStatus) return;
+    if (lockedByAnotherUser) {
+      showLockAlert({ reason: 'owned_by_other', lock: activeLock }, 'warning');
+      return;
+    }
+    setLockingAssessment(true);
+    const lockResult = await acquireLock();
+    setLockingAssessment(false);
+    if (!lockResult?.ok) {
+      const message = buildLockConflictMessage(lockResult);
+      setAlert({
+        type: lockResult?.status === 423 ? 'warning' : 'error',
+        content: message,
+        dismissible: true,
+        statusIconAriaLabel: 'Lock conflict'
+      });
+      return;
+    }
+    setIsEditingAssessment(true);
+    setShowEditConfirmModal(false);
+    setShowCancelModal(false);
+    setAlert(null);
+  }, [acquireLock, activeLock, isDecisionFinal, isLockedStatus, lockedByAnotherUser, lockingAssessment, showLockAlert]);
+  const ensureLockForOperation = useCallback(async () => {
+    if (!application_id) {
+      showLockAlert({ reason: 'invalid_application_id' }, 'error');
+      return { ok: false, localOwner: false };
+    }
+    if (lockedByAnotherUser) {
+      showLockAlert({ reason: 'owned_by_other', lock: activeLock }, 'warning');
+      return { ok: false, localOwner: false };
+    }
+    if (!lockState.owned) {
+      const result = await acquireLock();
+      if (!result?.ok) {
+        showLockAlert(result, result?.status === 423 ? 'warning' : 'error');
+        return { ok: false, localOwner: false };
+      }
+      return { ok: true, localOwner: result.localOwner };
+    }
+    if (lockHeldByCurrentUser) {
+      refreshLockHeartbeat().catch(() => {});
+    }
+    return { ok: true, localOwner: false };
+  }, [
+    acquireLock,
+    activeLock,
+    application_id,
+    lockHeldByCurrentUser,
+    lockedByAnotherUser,
+    lockState.owned,
+    refreshLockHeartbeat,
+    showLockAlert
+  ]);
   const validateAssessment = (assessment) => {
     const errors = {};
     // 1. Overview
@@ -263,6 +394,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     return errors;
   };
   const handleSubmit = async () => {
+    if (lockedByAnotherUser) {
+      showLockAlert({ reason: 'owned_by_other', lock: activeLock }, 'warning');
+      return;
+    }
     setHasSubmitted(true);
     setValidationAlert(null);
     const errors = validateAssessment(assessment);
@@ -283,6 +418,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     }
     console.log('Assessment validation succeeded, proceeding to save.');
     // --- POST-VALIDATION WORKFLOW ---
+    const lockCheck = await ensureLockForOperation();
+    if (!lockCheck.ok) return;
+    const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
     // 1. If assessment_date_of_assessment is missing, set to today (2025-06-11)
     let dateOfAssessment = assessment.dateOfAssessment;
     if (!dateOfAssessment) {
@@ -291,6 +429,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     dateOfAssessment = formatDate(dateOfAssessment);
 
     // 2. Save assessment (PUT /api/cases/:id)
+    const versionToken = Number(applicationRowVersion || caseData?.application_row_version || 0);
     const payload = {
       ...assessment,
       dateOfAssessment,
@@ -318,15 +457,55 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     if (!['approved', 'rejected'].includes(normalizedExistingStatus)) {
       payload.status = 'pending_approval';
     }
+    const requestBody = { ...payload };
+    if (versionToken > 0) {
+      requestBody.expectedRowVersion = versionToken;
+    }
     try {
       // Save assessment
       const res = await apiFetch(`/api/cases/${caseData.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(requestBody)
       });
-      const result = await res.json();
-      if (!res.ok || !result.success) throw new Error(result.error || 'Failed to save assessment.');
+      let result = null;
+      try {
+        result = await res.json();
+      } catch (_) {
+        result = null;
+      }
+      if (res.status === 423) {
+        showLockAlert({ reason: result?.reason || result?.error, lock: result?.lock });
+        setIsEditingAssessment(false);
+        releaseLock({ silent: true }).catch(() => {});
+        return;
+      }
+      if (res.status === 409) {
+        const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
+        if (latestVersion) setApplicationRowVersion(latestVersion);
+        if (typeof actions?.refreshCaseData === 'function') {
+          try {
+            await actions.refreshCaseData();
+          } catch (_) {}
+        }
+        setIsEditingAssessment(false);
+        setAlert({
+          type: 'warning',
+          content: 'Another user updated this assessment. The latest data has been reloaded; review it and try again.',
+          dismissible: true,
+          statusIconAriaLabel: 'Warning'
+        });
+        setTimeout(() => {
+          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 0);
+        releaseLock({ silent: true }).catch(() => {});
+        return;
+      }
+      if (!res.ok || !result?.success) throw new Error(result?.error || 'Failed to save assessment.');
+      const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
+      if (updatedRowVersion) {
+        setApplicationRowVersion(updatedRowVersion);
+      }
 
       // 3. Update stage to 'assessment_submitted' if not already
       if (caseData.stage !== 'assessment_submitted') {
@@ -335,7 +514,19 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ stage: 'assessment_submitted' })
         });
-        if (!stageRes.ok) throw new Error('Failed to update case stage.');
+        let stageBody = null;
+        try {
+          stageBody = await stageRes.json();
+        } catch (_) {
+          stageBody = null;
+        }
+        if (stageRes.status === 423) {
+          showLockAlert({ reason: stageBody?.reason || stageBody?.error, lock: stageBody?.lock });
+          setIsEditingAssessment(false);
+          releaseLock({ silent: true }).catch(() => {});
+          return;
+        }
+        if (!stageRes.ok) throw new Error(stageBody?.error || 'Failed to update case stage.');
       }
 
       // 4. Reload caseData (to update stage, etc.)
@@ -343,6 +534,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         status: payload.status ?? caseData?.status ?? null,
         stage: 'assessment_submitted'
       };
+      if (updatedRowVersion) {
+        fallbackUpdates.application_row_version = updatedRowVersion;
+      }
       if (typeof onCaseUpdate === 'function') {
         onCaseUpdate(fallbackUpdates);
       }
@@ -366,6 +560,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         statusIconAriaLabel: 'Success'
       });
       setValidationAlert(null);
+      if (releaseAfterSuccess) {
+        releaseLock({ silent: true }).catch(() => {});
+      }
     } catch (err) {
       setAlert({ type: 'error', content: err.message || 'Failed to submit assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
       setTimeout(() => {
@@ -395,6 +592,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   };
 
   const handleSave = async () => {
+    if (lockedByAnotherUser) {
+      showLockAlert({ reason: 'owned_by_other', lock: activeLock }, 'warning');
+      return;
+    }
     setAlert(null);
     try {
       // Prepare payload for backend (map frontend fields to backend fields)
@@ -420,14 +621,57 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         case_summary: assessment.overview || null
       };
       console.log('Saving assessment. Payload:', payload);
+      const lockCheck = await ensureLockForOperation();
+      if (!lockCheck.ok) return;
+      const versionToken = Number(applicationRowVersion || caseData?.application_row_version || 0);
+      const requestBody = { ...payload };
+      if (versionToken > 0) {
+        requestBody.expectedRowVersion = versionToken;
+      }
       const res = await apiFetch(`/api/cases/${caseData.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(requestBody)
       });
-      const result = await res.json();
+      let result = null;
+      try {
+        result = await res.json();
+      } catch (_) {
+        result = null;
+      }
       console.log('Save response:', res.status, result);
-      if (res.ok && result.success) {
+      if (res.status === 423) {
+        showLockAlert({ reason: result?.reason || result?.error, lock: result?.lock });
+        setIsEditingAssessment(false);
+        releaseLock({ silent: true }).catch(() => {});
+        return;
+      }
+      if (res.status === 409) {
+        const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
+        if (latestVersion) setApplicationRowVersion(latestVersion);
+        if (typeof actions?.refreshCaseData === 'function') {
+          try {
+            await actions.refreshCaseData();
+          } catch (_) {}
+        }
+        setIsEditingAssessment(false);
+        setAlert({
+          type: 'warning',
+          content: 'Another user updated this assessment. The latest data has been reloaded; review it and try again.',
+          dismissible: true,
+          statusIconAriaLabel: 'Warning'
+        });
+        setTimeout(() => {
+          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 0);
+        releaseLock({ silent: true }).catch(() => {});
+        return;
+      }
+      if (res.ok && result?.success) {
+        const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
+        if (updatedRowVersion) {
+          setApplicationRowVersion(updatedRowVersion);
+        }
         setAlert({ type: 'success', content: 'Assessment saved successfully. All changes have been recorded.', dismissible: true, statusIconAriaLabel: 'Success' });
         setInitialAssessment(assessment);
         setIsChanged(false);
@@ -461,20 +705,21 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   // UI logic: if stage is 'assessment_submitted', make assessment fields readOnly, show NWAC review fields, change heading, and validate NWAC review on submit
   const isAssessmentSubmitted = caseData?.stage === 'assessment_submitted';
   const isReviewComplete = caseData?.stage === 'review_complete';
-  const assessmentSubmitted = localAssessmentSubmitted || isAssessmentSubmitted || isReviewComplete || isDecisionFinal || isLockedStatus;
+  const assessmentSubmitted = localAssessmentSubmitted || isAssessmentSubmitted || isReviewComplete || isDecisionFinal || isLockedStatus || lockedByAnotherUser;
   // Disable all fields (including NWAC) if review is complete, a final decision exists, or status is locked
-  const isAssessmentDisabled = isLockedStatus || isReviewComplete || isDecisionFinal || (assessmentSubmitted && !isEditingAssessment);
-  const isNWACFieldsDisabled = !showNWACSection || !isPendingApprovalStatus || isReviewComplete || isDecisionFinal;
+  const isAssessmentDisabled = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || (assessmentSubmitted && !isEditingAssessment);
+  const isNWACFieldsDisabled = lockedByAnotherUser || !showNWACSection || !isPendingApprovalStatus || isReviewComplete || isDecisionFinal;
 
   // Lock editing state if final decision has been recorded
   useEffect(() => {
-    if (isDecisionFinal || isLockedStatus) {
+    if (isDecisionFinal || isLockedStatus || lockedByAnotherUser) {
       setIsEditingAssessment(false);
       setShowEditConfirmModal(false);
       setShowCancelModal(false);
       setShowApproveConfirmModal(false);
+      releaseLock({ silent: true }).catch(() => {});
     }
-  }, [isDecisionFinal, isLockedStatus]);
+  }, [isDecisionFinal, isLockedStatus, lockedByAnotherUser, releaseLock]);
 
   // For NWAC review validation
   const validateNWACReview = (assessment) => {
@@ -513,6 +758,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       return;
     }
     // Send full assessment payload to backend
+    const lockCheck = await ensureLockForOperation();
+    if (!lockCheck.ok) return;
+    const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
+    const versionToken = Number(applicationRowVersion || caseData?.application_row_version || 0);
     const payload = {
       assessment_date_of_assessment: formatDate(assessment.dateOfAssessment) || null,
       assessment_employment_goals: assessment.employmentGoals || null,
@@ -535,15 +784,42 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       case_summary: assessment.overview || null,
       status: assessment.nwacReviewStatus === 'approve' ? 'approved' : 'rejected'
     };
+    const requestBody = { ...payload };
+    if (versionToken > 0) {
+      requestBody.expectedRowVersion = versionToken;
+    }
     try {
       // 1. Update case with NWAC review and status
       const res = await apiFetch(`/api/cases/${caseData.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(requestBody)
       });
-      const result = await res.json();
-      if (!res.ok || !result.success) throw new Error(result.error || 'Failed to save NWAC review.');
+      const result = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
+        if (latestVersion) setApplicationRowVersion(latestVersion);
+        if (typeof actions?.refreshCaseData === 'function') {
+          try {
+            await actions.refreshCaseData();
+          } catch (_) {}
+        }
+        setAlert({
+          type: 'warning',
+          content: 'Another user updated this assessment. The latest data has been reloaded; review it and try again.',
+          dismissible: true,
+          statusIconAriaLabel: 'Warning'
+        });
+        setTimeout(() => {
+          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 0);
+        return;
+      }
+      if (!res.ok || !result?.success) throw new Error(result?.error || 'Failed to save NWAC review.');
+      const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
+      if (updatedRowVersion) {
+        setApplicationRowVersion(updatedRowVersion);
+      }
       // 2. Update stage to 'review_complete'
       const stageRes = await apiFetch(`/api/cases/${caseData.id}/stage`, {
         method: 'PUT',
@@ -591,6 +867,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         assessment_nwac_review: payload.assessment_nwac_review,
         assessment_nwac_reason: payload.assessment_nwac_reason
       };
+      if (updatedRowVersion) {
+        fallbackUpdates.application_row_version = updatedRowVersion;
+      }
       if (typeof onCaseUpdate === 'function') {
         onCaseUpdate(fallbackUpdates);
       }
@@ -618,6 +897,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       setInitialAssessment(a => ({ ...a, ...payload }));
       setIsChanged(false);
       setValidationAlert(null);
+      if (releaseAfterSuccess) {
+        releaseLock({ silent: true }).catch(() => {});
+      }
     } catch (err) {
       setAlert({ type: 'error', content: err.message || 'Failed to submit outcome notice.', dismissible: true, statusIconAriaLabel: 'Error' });
       setTimeout(() => {
@@ -633,22 +915,22 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           variant="h2"
           actions={
             <SpaceBetween direction="horizontal" size="s">
-              {!isLockedStatus && !isDecisionFinal && isReviewComplete && (
+              {!lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && isReviewComplete && (
                 <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
               )}
-              {!isLockedStatus && !isDecisionFinal && !isReviewComplete && assessmentSubmitted && !isEditingAssessment && (
+              {!lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && assessmentSubmitted && !isEditingAssessment && (
                 <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
               )}
-              {!isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+              {!lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
                 <Button variant="primary" disabled={!isChanged} onClick={handleSave}>Save</Button>
               )}
-              {!isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+              {!lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
                 <Button variant="normal" disabled={!isChanged} onClick={handleCancel}>Cancel</Button>
               )}
-              {!isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+              {!lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
                 <Button variant="primary" onClick={handleSubmit}>Submit</Button>
               )}
-              {showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && (
+              {!lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && (
                 <Button variant="primary" onClick={handleComplete} disabled={!isPendingApprovalStatus}>Approve/Reject</Button>
               )}
             </SpaceBetween>
@@ -692,6 +974,11 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           This form is used by the ISET admin team to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, the final approval fields will become available.
         </Box>
         <div ref={alertAnchorRef} style={{ height: 0, margin: 0, padding: 0, border: 0 }} aria-hidden="true" />
+        {lockAlertMessage && (
+          <Alert type={lockedByAnotherUser ? 'warning' : 'info'}>
+            {lockAlertMessage}
+          </Alert>
+        )}
         {validationAlert && (
           <Alert
             type="warning"
@@ -1042,7 +1329,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
             </>
           }
         />
-        {sectionHeader('Coordinator’s Recommendation')}
+        {sectionHeader("Coordinator's Recommendation")}
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
           <FormField label="Recommendation" errorText={hasSubmitted && fieldErrors.recommendation ? fieldErrors.recommendation : undefined}
             description="Select your recommendation for this application. If not recommending funding, provide an alternative or rationale below.">
@@ -1083,7 +1370,14 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           header="Edit Submitted Assessment?"
           footer={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="primary" onClick={() => { setIsEditingAssessment(true); setShowEditConfirmModal(false); }}>Edit Assessment</Button>
+              <Button
+                variant="primary"
+                onClick={beginEditingAssessment}
+                loading={lockingAssessment}
+                disabled={lockingAssessment || lockedByAnotherUser}
+              >
+                Edit Assessment
+              </Button>
               <Button variant="normal" onClick={() => setShowEditConfirmModal(false)}>Cancel</Button>
             </SpaceBetween>
           }
@@ -1096,5 +1390,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
 };
 
 export default CoordinatorAssessmentWidget;
+
+
 
 

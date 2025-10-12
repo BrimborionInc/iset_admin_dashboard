@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ContentLayout, Header, SpaceBetween } from '@cloudscape-design/components';
+import { ContentLayout, SpaceBetween } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import AccessControlMatrix from '../widgets/AccessControlMatrix';
 

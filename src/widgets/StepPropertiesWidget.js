@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../auth/apiClient';
 import { useHistory } from 'react-router-dom';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Box, Header, Container, SpaceBetween, FormField, Input, Select, Button, Textarea, Toggle, Icon } from '@cloudscape-design/components';
+import { Box, Header, Container, SpaceBetween, FormField, Input, Select, Button } from '@cloudscape-design/components';
 
 const selectObj = (value, opts) => opts.find(o => o.value === value) || null;
 const stepOptionsFrom = (steps, excludeId) => steps.filter(s => s.id !== excludeId).map(s => ({ label: s.name, value: s.id }));
@@ -10,7 +10,13 @@ const stepOptionsFrom = (steps, excludeId) => steps.filter(s => s.id !== exclude
 const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, onDelete, workflowId }) => {
   const history = useHistory();
   const step = steps.find(s => s.id === selectedId) || null;
-  const stepOpts = useMemo(() => (step ? stepOptionsFrom(steps, step.id) : []), [steps, step?.id]);
+  const stepRef = useRef(step);
+  useEffect(() => { stepRef.current = step; }, [step]);
+  const onChangeRef = useRef(onChange);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  const stepId = step?.stepId;
+  const stepRouting = step?.routing;
+  const stepOpts = useMemo(() => (selectedId ? stepOptionsFrom(steps, selectedId) : []), [steps, selectedId]);
   const routing = step?.routing || { mode: 'linear' };
 
   const [fieldChoices, setFieldChoices] = useState([]); // [{label,value}]
@@ -24,12 +30,12 @@ const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, 
     async function load() {
       setFieldErr(null);
       setFieldChoices([]); setOptionsByField({}); setLabelByValue({});
-      if (!step?.stepId) return; // no DB backing
+      if (!stepId) return; // no DB backing
       try {
         setLoadingFields(true);
-  const res = await apiFetch(`/api/steps/${step.stepId}`, { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
+        const res = await apiFetch(`/api/steps/${stepId}`, { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
         const choices = [];
         const map = {};
         (data.components || []).forEach(c => {
@@ -45,12 +51,16 @@ const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, 
         if (cancelled) return;
         setFieldChoices(choices);
         setOptionsByField(map);
-        if (step && step.routing?.mode === 'byOption') {
-          const currentKey = step.routing.fieldKey;
+        const currentStep = stepRef.current;
+        const currentRouting = currentStep?.routing;
+        if (currentRouting?.mode === 'byOption') {
+          const currentKey = currentRouting.fieldKey;
           const useKey = (currentKey && map[currentKey]) ? currentKey : (choices[0]?.value || currentKey);
-          if (useKey && (!currentKey || !Array.isArray(step.routing.options))) {
+          if (useKey && (!currentKey || !Array.isArray(currentRouting.options))) {
             const newOpts = (map[useKey] || []).map(o => o.value);
-            onChange({ ...step, routing: { mode: 'byOption', fieldKey: useKey, options: newOpts, mapping: {}, defaultNext: undefined } });
+            if (currentStep) {
+              onChangeRef.current?.({ ...currentStep, routing: { mode: 'byOption', fieldKey: useKey, options: newOpts, mapping: {}, defaultNext: undefined } });
+            }
           }
           const forLabels = (useKey && map[useKey]) ? map[useKey] : [];
           setLabelByValue(Object.fromEntries(forLabels.map(o => [o.value, o.label])));
@@ -62,19 +72,21 @@ const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, 
     }
     load();
     return () => { cancelled = true; };
-  }, [step?.stepId]);
+  }, [stepId]);
 
   useEffect(() => {
-    if (!step || step.routing?.mode !== 'byOption') return;
-    const fk = step.routing.fieldKey;
+    const currentStep = stepRef.current;
+    const currentRouting = currentStep?.routing;
+    if (!currentRouting || currentRouting.mode !== 'byOption') return;
+    const fk = currentRouting.fieldKey;
     if (!fk) { setLabelByValue({}); return; }
     const list = optionsByField[fk] || [];
     setLabelByValue(Object.fromEntries(list.map(o => [o.value, o.label])));
     const values = list.map(o => o.value);
-    if (values.length && JSON.stringify(values) !== JSON.stringify(step.routing.options || [])) {
-      onChange({ ...step, routing: { ...step.routing, options: values, mapping: {} } });
+    if (values.length && JSON.stringify(values) !== JSON.stringify(currentRouting.options || [])) {
+      onChangeRef.current?.({ ...currentStep, routing: { ...currentRouting, options: values, mapping: {} } });
     }
-  }, [optionsByField, step?.routing?.fieldKey]);
+  }, [optionsByField, stepRouting?.fieldKey, stepRouting?.mode]);
 
   const itemI18n = {
     dragHandleAriaLabel: 'Drag handle',
