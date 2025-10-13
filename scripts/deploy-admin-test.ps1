@@ -1,4 +1,3 @@
-.SYNOPSIS
 <#
   Builds, packages, uploads, and deploys the admin dashboard to the NWAC test environment.
 
