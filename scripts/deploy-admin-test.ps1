@@ -232,7 +232,7 @@ try {
         'cp "$TMPDIR/.env.test" /opt/nwac/admin-dashboard/.env',
         'cp "$TMPDIR/.env.test" /opt/nwac/admin-dashboard/.env.test',
         'cd /opt/nwac/admin-dashboard',
-        'if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi',
+        'echo "Skipping dependency install (npm ci/npm install) per maintenance override."',
         'export NODE_ENV=production',
         'export HOME=/root',
         'export PM2_HOME=/root/.pm2',

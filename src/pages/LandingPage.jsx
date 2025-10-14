@@ -5,6 +5,8 @@ import Button from '@cloudscape-design/components/button';
 import SegmentedControl from '@cloudscape-design/components/segmented-control';
 import heroBackground from '../assets/images/awentech/hero-background.png';
 
+const portalUrl = process.env.REACT_APP_PORTAL_URL || 'http://localhost:3000/';
+
 const copy = {
   en: {
     navItems: [
@@ -253,7 +255,7 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
   const brandLogo = `${process.env.PUBLIC_URL || ''}/nwac-logo.png`;
 
   const openPublicPortal = () => {
-    window.open('http://localhost:3000/', '_blank', 'noopener,noreferrer');
+    window.open(portalUrl, '_blank', 'noopener,noreferrer');
   };
 
   const scrollToSection = id => {

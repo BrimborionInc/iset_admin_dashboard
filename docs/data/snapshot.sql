@@ -661,7 +661,7 @@ CREATE TABLE `iset_application` (
 
 LOCK TABLES `iset_application` WRITE;
 /*!40000 ALTER TABLE `iset_application` DISABLE KEYS */;
-INSERT INTO `iset_application` VALUES (1,1,'{\"source\": \"submission_auto_ingest\", \"answers\": {\"dob\": \"1971-03-10\", \"consent\": {\"name\": \"Bill Sillery\", \"signed\": true}, \"govt-id\": \"\", \"barriers\": [\"other\"], \"last-name\": \"Sillery\", \"first-name\": \"William\", \"status-card\": \"\", \"address-city\": \"Westmount\", \"income-other\": \"\", \"middle-names\": \"AWS Change\", \"spouses-name\": \"Marina Sharpe\", \"expenses-rent\": \"4500\", \"other-barrier\": \"No clients\", \"telephone-alt\": \"\", \"telephone-day\": \"(514) 975 1690\", \"top-up-amount\": \"200\", \"education-year\": \"1993\", \"has-disability\": 1, \"home-comminuty\": \"Westmount\", \"income-jordans\": \"\", \"income-spousal\": \"\", \"long-term-goal\": \"To be the charman of Awentech\", \"marital-status\": \"married\", \"preferred-name\": \"Bill\", \"target-program\": \"not_yet\", \"eligibility-age\": 1, \"example-input-5\": \"\", \"example-radio-2\": \"masters_degree\", \"uploaded-file-6\": \"\", \"address-postcode\": \"H3Z 2G9\", \"address-province\": \"qc\", \"ages-of-children\": \"11\", \"spouse-pay-stubs\": \"\", \"visible-minority\": \"false\", \"acceptance-letter\": \"\", \"income-employment\": \"100\", \"social-assistance\": 1, \"dependent-children\": 1, \"edication-location\": \"Oxford, UK\", \"eligibility-female\": 1, \"expenses-groceries\": \"\", \"expenses-utilities\": \"\", \"preferred-language\": \"en\", \"requested-supports\": [\"other\"], \"applicant-pay-stubs\": \"\", \"applicant_signature\": {\"name\": \"William Sillery\", \"signed\": true}, \"expenses-other-list\": \"\", \"income-band-funding\": \"20\", \"labour-force-status\": \"self-employed\", \"registration-number\": \"12134231\", \"eligibility-canadian\": 1, \"eligibility-training\": 1, \"expenses-transitpass\": \"\", \"income-child-benefit\": \"\", \"income-social-assist\": \"\", \"contact-email-address\": \"bill@sillery.co.uk\", \"eligibility-financial\": 1, \"address-street-address\": \"251 Avenue Kensington\", \"disability-description\": \"I am Engligh and don\'t steak French.\", \"eligibility-employment\": 1, \"eligibility-indigenous\": 1, \"emergency-contact-name\": \"Marina Sharpe\", \"indigenous_declaration\": {\"name\": \"Bill Sillery\", \"signed\": true}, \"address-mailing-address\": \"\", \"other-requested-support\": \"Contact money\", \"social-insurance-number\": \"987 987 987\", \"eligibility-disqualified\": 0, \"income-other-description\": \"\", \"legal-indigenous-identity\": \"metis\", \"emergency-contact-telephone\": \"(514) 924 5602\", \"what-is-your-gender-identity\": \"5\", \"emergency-contact-relationship\": \"Wife\"}, \"ingested_at\": \"2025-10-12T13:54:13.430Z\", \"submission_snapshot\": {\"id\": 1, \"reference_number\": \"ISET-20251012-B64803\"}}','submitted',3,'2025-10-12 13:54:13','2025-10-12 15:00:17',6);
+INSERT INTO `iset_application` VALUES (1,1,'{\"source\": \"submission_auto_ingest\", \"answers\": {\"dob\": \"1971-03-10\", \"consent\": {\"name\": \"Bill Sillery\", \"signed\": true}, \"govt-id\": \"\", \"barriers\": [\"other\"], \"last-name\": \"Sillery\", \"first-name\": \"William\", \"status-card\": \"\", \"address-city\": \"Westmount\", \"income-other\": \"\", \"middle-names\": \"AWS Change\", \"spouses-name\": \"Marina Sharpe\", \"expenses-rent\": \"4500\", \"other-barrier\": \"No clients\", \"telephone-alt\": \"\", \"telephone-day\": \"(514) 975 1690\", \"top-up-amount\": \"200\", \"education-year\": \"1993\", \"has-disability\": 1, \"home-comminuty\": \"Westmount\", \"income-jordans\": \"\", \"income-spousal\": \"\", \"long-term-goal\": \"To be the charman of Awentech\", \"marital-status\": \"married\", \"preferred-name\": \"Bill\", \"target-program\": \"not_yet\", \"eligibility-age\": 1, \"example-input-5\": \"\", \"example-radio-2\": \"masters_degree\", \"uploaded-file-6\": \"\", \"address-postcode\": \"H3Z 2G9\", \"address-province\": \"qc\", \"ages-of-children\": \"11\", \"spouse-pay-stubs\": \"\", \"visible-minority\": \"false\", \"acceptance-letter\": \"\", \"income-employment\": \"100\", \"social-assistance\": 1, \"dependent-children\": 1, \"edication-location\": \"Oxford, UK\", \"eligibility-female\": 1, \"expenses-groceries\": \"\", \"expenses-utilities\": \"\", \"preferred-language\": \"en\", \"requested-supports\": [\"other\"], \"applicant-pay-stubs\": \"\", \"applicant_signature\": {\"name\": \"William Sillery\", \"signed\": true}, \"expenses-other-list\": \"\", \"income-band-funding\": \"20\", \"labour-force-status\": \"self-employed\", \"registration-number\": \"12134231\", \"eligibility-canadian\": 1, \"eligibility-training\": 1, \"expenses-transitpass\": \"\", \"income-child-benefit\": \"\", \"income-social-assist\": \"\", \"contact-email-address\": \"bill@sillery.co.uk\", \"eligibility-financial\": 1, \"address-street-address\": \"251 Avenue Kensington\", \"disability-description\": \"I am Engligh and don\'t steak French.\", \"eligibility-employment\": 1, \"eligibility-indigenous\": 1, \"emergency-contact-name\": \"Marina Sharpe\", \"indigenous_declaration\": {\"name\": \"Bill Sillery\", \"signed\": true}, \"address-mailing-address\": \"\", \"other-requested-support\": \"Contact money\", \"social-insurance-number\": \"987 987 987\", \"eligibility-disqualified\": 0, \"income-other-description\": \"\", \"legal-indigenous-identity\": \"metis\", \"emergency-contact-telephone\": \"(514) 924 5602\", \"what-is-your-gender-identity\": \"5\", \"emergency-contact-relationship\": \"Wife\"}, \"ingested_at\": \"2025-10-12T13:54:13.430Z\", \"submission_snapshot\": {\"id\": 1, \"reference_number\": \"ISET-20251012-B64803\"}}','submitted',3,'2025-10-12 13:54:13','2025-10-14 15:15:22',9);
 /*!40000 ALTER TABLE `iset_application` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -936,7 +936,7 @@ CREATE TABLE `iset_case` (
 
 LOCK TABLES `iset_case` WRITE;
 /*!40000 ALTER TABLE `iset_case` DISABLE KEYS */;
-INSERT INTO `iset_case` VALUES (1,1,NULL,'in_review','2025-10-12 13:54:13','2025-10-12 14:45:10');
+INSERT INTO `iset_case` VALUES (1,1,165904,'docs_requested','2025-10-12 13:54:13','2025-10-14 15:15:22');
 /*!40000 ALTER TABLE `iset_case` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -1032,6 +1032,36 @@ LOCK TABLES `iset_case_note` WRITE;
 UNLOCK TABLES;
 
 --
+-- Table structure for table `iset_case_watch`
+--
+
+DROP TABLE IF EXISTS `iset_case_watch`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `iset_case_watch` (
+  `case_id` bigint unsigned NOT NULL,
+  `staff_profile_id` bigint unsigned NOT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `metadata` json DEFAULT NULL,
+  PRIMARY KEY (`case_id`,`staff_profile_id`),
+  KEY `idx_case_watch_staff` (`staff_profile_id`,`created_at`),
+  CONSTRAINT `fk_case_watch_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_case_watch_staff` FOREIGN KEY (`staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `iset_case_watch`
+--
+
+LOCK TABLES `iset_case_watch` WRITE;
+/*!40000 ALTER TABLE `iset_case_watch` DISABLE KEYS */;
+INSERT INTO `iset_case_watch` VALUES (1,164692,'2025-10-14 12:55:44.497','2025-10-14 12:55:44.497',NULL);
+/*!40000 ALTER TABLE `iset_case_watch` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
 -- Table structure for table `iset_document`
 --
 
@@ -1112,7 +1142,7 @@ CREATE TABLE `iset_event_entry` (
 
 LOCK TABLES `iset_event_entry` WRITE;
 /*!40000 ALTER TABLE `iset_event_entry` DISABLE KEYS */;
-INSERT INTO `iset_event_entry` VALUES ('3d67ea52-30da-45b4-825d-66590be1041b','case_lifecycle','status_changed','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"to\": \"in_review\", \"from\": \"submitted\", \"tracking_id\": \"ISET-20251012-B64803\"}','ISET-20251012-B64803',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-12 14:45:10.543','2025-10-12 14:45:10.543'),('85c2cea6-13cc-4948-ae8f-33e2de70f6a5','application_lifecycle','application_submitted','success','portal','case','1','applicant','48',NULL,'{\"ip\": \"::1\", \"message\": \"Application submitted.\", \"user_agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\", \"workflow_id\": \"iset-v1\", \"submission_id\": 1, \"reference_number\": \"ISET-20251012-B64803\"}','ISET-20251012-B64803',NULL,'48','2025-10-12 13:54:13.445','2025-10-12 13:54:13.445');
+INSERT INTO `iset_event_entry` VALUES ('051c6a7c-ab66-4b31-9f93-721919da7bfe','case_lifecycle','case_watch_added','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}','CASE-1',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 15:13:53.995','2025-10-14 15:13:53.995'),('0bfa707f-714e-4845-9999-d70f4fe1806c','case_lifecycle','case_watch_added','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}','CASE-1',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 15:05:50.874','2025-10-14 15:05:50.874'),('24c330cf-29b9-40db-ad53-4c64aae016f0','case_lifecycle','case_watch_added','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}','CASE-1',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 15:12:29.992','2025-10-14 15:12:29.992'),('24da104f-daee-4de6-88a0-864449f65089','case_lifecycle','status_changed','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"to\": \"in_review\", \"from\": \"submitted\", \"tracking_id\": \"ISET-20251012-B64803\"}','ISET-20251012-B64803',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 15:14:17.399','2025-10-14 15:14:17.399'),('346396dc-3d94-4312-9c56-7191240e199e','case_lifecycle','case_watch_removed','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}','CASE-1',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 15:12:19.580','2025-10-14 15:12:19.580'),('3d67ea52-30da-45b4-825d-66590be1041b','case_lifecycle','status_changed','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"to\": \"in_review\", \"from\": \"submitted\", \"tracking_id\": \"ISET-20251012-B64803\"}','ISET-20251012-B64803',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-12 14:45:10.543','2025-10-12 14:45:10.543'),('4b6dc954-2030-495b-81a1-3203be791d67','case_lifecycle','case_watch_removed','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}','CASE-1',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 16:50:32.896','2025-10-14 16:50:32.896'),('6c34ec94-cf90-4db1-91dd-41d7923fbcbb','case_lifecycle','case_watch_added','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}','CASE-1',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 16:55:44.504','2025-10-14 16:55:44.504'),('7073a36e-7002-405b-abc1-4c2984999576','case_lifecycle','status_changed','info','admin','case','1','staff','cc2d85a8-a061-7012-ad9a-d3fc653d5487',NULL,'{\"to\": \"docs_requested\", \"from\": \"in_review\", \"tracking_id\": \"ISET-20251012-B64803\"}','ISET-20251012-B64803',NULL,'cc2d85a8-a061-7012-ad9a-d3fc653d5487','2025-10-14 15:15:22.065','2025-10-14 15:15:22.065'),('7b437e9a-dbe3-49c6-a1f6-b4e5583e0af2','case_lifecycle','case_watch_added','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}','CASE-1',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 15:08:07.868','2025-10-14 15:08:07.868'),('85c2cea6-13cc-4948-ae8f-33e2de70f6a5','application_lifecycle','application_submitted','success','portal','case','1','applicant','48',NULL,'{\"ip\": \"::1\", \"message\": \"Application submitted.\", \"user_agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\", \"workflow_id\": \"iset-v1\", \"submission_id\": 1, \"reference_number\": \"ISET-20251012-B64803\"}','ISET-20251012-B64803',NULL,'48','2025-10-12 13:54:13.445','2025-10-12 13:54:13.445'),('94fc7172-0219-42bc-b761-2d25f5fdd391','case_lifecycle','case_watch_removed','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}','CASE-1',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 15:06:56.165','2025-10-14 15:06:56.165'),('a8e78d98-809c-41ed-b211-bd34a3ac9fe7','case_lifecycle','case_watch_removed','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}','CASE-1',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 15:13:29.152','2025-10-14 15:13:29.152'),('ac03ac3c-0784-425d-b5dc-84fc424efa98','case_lifecycle','case_assigned','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"message\": \"Case assigned to ontario.assessor1@awentech.ca.\", \"tracking_id\": \"ISET-20251012-B64803\", \"to_assignee_id\": 165904, \"from_assignee_id\": null, \"to_assignee_name\": null, \"to_assignee_email\": \"ontario.assessor1@awentech.ca\", \"from_assignee_name\": null, \"from_assignee_email\": null}','ISET-20251012-B64803',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 15:14:17.365','2025-10-14 15:14:17.365'),('c868157a-96ff-4596-95d2-4ea2650df4ff','case_lifecycle','status_changed','info','admin','case','1','staff','7cad7598-d0d1-708d-0d42-d2abfe7dd933',NULL,'{\"to\": \"submitted\", \"from\": \"in_review\", \"tracking_id\": \"ISET-20251012-B64803\"}','ISET-20251012-B64803',NULL,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','2025-10-14 15:11:28.801','2025-10-14 15:11:28.801');
 /*!40000 ALTER TABLE `iset_event_entry` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -1137,7 +1167,7 @@ CREATE TABLE `iset_event_outbox` (
   KEY `idx_event_outbox_status_next` (`status`,`next_attempt_at`),
   KEY `fk_event_outbox_entry` (`event_id`),
   CONSTRAINT `fk_event_outbox_entry` FOREIGN KEY (`event_id`) REFERENCES `iset_event_entry` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=16 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1146,7 +1176,7 @@ CREATE TABLE `iset_event_outbox` (
 
 LOCK TABLES `iset_event_outbox` WRITE;
 /*!40000 ALTER TABLE `iset_event_outbox` DISABLE KEYS */;
-INSERT INTO `iset_event_outbox` VALUES (1,'85c2cea6-13cc-4948-ae8f-33e2de70f6a5','{\"id\": \"85c2cea6-13cc-4948-ae8f-33e2de70f6a5\", \"type\": \"application_submitted\", \"actor\": {\"id\": \"48\", \"type\": \"applicant\", \"displayName\": null}, \"label\": \"Application submitted\", \"source\": \"portal\", \"payload\": {\"ip\": \"::1\", \"message\": \"Application submitted.\", \"user_agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\", \"workflow_id\": \"iset-v1\", \"submission_id\": 1, \"reference_number\": \"ISET-20251012-B64803\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"application_lifecycle\", \"severity\": \"success\", \"capturedAt\": \"2025-10-12T13:54:13.445Z\", \"capturedBy\": \"48\", \"trackingId\": \"ISET-20251012-B64803\", \"correlationId\": null}','pending',0,'2025-10-12 13:54:13.445',NULL,'2025-10-12 09:54:13.455','2025-10-12 09:54:13.455'),(2,'3d67ea52-30da-45b4-825d-66590be1041b','{\"id\": \"3d67ea52-30da-45b4-825d-66590be1041b\", \"type\": \"status_changed\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Status changed\", \"source\": \"admin\", \"payload\": {\"to\": \"in_review\", \"from\": \"submitted\", \"tracking_id\": \"ISET-20251012-B64803\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-12T14:45:10.543Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"ISET-20251012-B64803\", \"correlationId\": null}','pending',0,'2025-10-12 14:45:10.543',NULL,'2025-10-12 10:45:10.548','2025-10-12 10:45:10.548');
+INSERT INTO `iset_event_outbox` VALUES (1,'85c2cea6-13cc-4948-ae8f-33e2de70f6a5','{\"id\": \"85c2cea6-13cc-4948-ae8f-33e2de70f6a5\", \"type\": \"application_submitted\", \"actor\": {\"id\": \"48\", \"type\": \"applicant\", \"displayName\": null}, \"label\": \"Application submitted\", \"source\": \"portal\", \"payload\": {\"ip\": \"::1\", \"message\": \"Application submitted.\", \"user_agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36\", \"workflow_id\": \"iset-v1\", \"submission_id\": 1, \"reference_number\": \"ISET-20251012-B64803\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"application_lifecycle\", \"severity\": \"success\", \"capturedAt\": \"2025-10-12T13:54:13.445Z\", \"capturedBy\": \"48\", \"trackingId\": \"ISET-20251012-B64803\", \"correlationId\": null}','pending',0,'2025-10-12 13:54:13.445',NULL,'2025-10-12 09:54:13.455','2025-10-12 09:54:13.455'),(2,'3d67ea52-30da-45b4-825d-66590be1041b','{\"id\": \"3d67ea52-30da-45b4-825d-66590be1041b\", \"type\": \"status_changed\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Status changed\", \"source\": \"admin\", \"payload\": {\"to\": \"in_review\", \"from\": \"submitted\", \"tracking_id\": \"ISET-20251012-B64803\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-12T14:45:10.543Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"ISET-20251012-B64803\", \"correlationId\": null}','pending',0,'2025-10-12 14:45:10.543',NULL,'2025-10-12 10:45:10.548','2025-10-12 10:45:10.548'),(3,'0bfa707f-714e-4845-9999-d70f4fe1806c','{\"id\": \"0bfa707f-714e-4845-9999-d70f4fe1806c\", \"type\": \"case_watch_added\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Case watch added\", \"source\": \"admin\", \"payload\": {\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T15:05:50.874Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"CASE-1\", \"correlationId\": null}','pending',0,'2025-10-14 15:05:50.874',NULL,'2025-10-14 11:05:50.878','2025-10-14 11:05:50.878'),(4,'94fc7172-0219-42bc-b761-2d25f5fdd391','{\"id\": \"94fc7172-0219-42bc-b761-2d25f5fdd391\", \"type\": \"case_watch_removed\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Case watch removed\", \"source\": \"admin\", \"payload\": {\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T15:06:56.165Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"CASE-1\", \"correlationId\": null}','pending',0,'2025-10-14 15:06:56.165',NULL,'2025-10-14 11:06:56.172','2025-10-14 11:06:56.172'),(5,'7b437e9a-dbe3-49c6-a1f6-b4e5583e0af2','{\"id\": \"7b437e9a-dbe3-49c6-a1f6-b4e5583e0af2\", \"type\": \"case_watch_added\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Case watch added\", \"source\": \"admin\", \"payload\": {\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T15:08:07.868Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"CASE-1\", \"correlationId\": null}','pending',0,'2025-10-14 15:08:07.868',NULL,'2025-10-14 11:08:07.871','2025-10-14 11:08:07.871'),(6,'c868157a-96ff-4596-95d2-4ea2650df4ff','{\"id\": \"c868157a-96ff-4596-95d2-4ea2650df4ff\", \"type\": \"status_changed\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Status changed\", \"source\": \"admin\", \"payload\": {\"to\": \"submitted\", \"from\": \"in_review\", \"tracking_id\": \"ISET-20251012-B64803\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T15:11:28.801Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"ISET-20251012-B64803\", \"correlationId\": null}','pending',0,'2025-10-14 15:11:28.801',NULL,'2025-10-14 11:11:28.805','2025-10-14 11:11:28.805'),(7,'346396dc-3d94-4312-9c56-7191240e199e','{\"id\": \"346396dc-3d94-4312-9c56-7191240e199e\", \"type\": \"case_watch_removed\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Case watch removed\", \"source\": \"admin\", \"payload\": {\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T15:12:19.580Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"CASE-1\", \"correlationId\": null}','pending',0,'2025-10-14 15:12:19.580',NULL,'2025-10-14 11:12:19.583','2025-10-14 11:12:19.583'),(8,'24c330cf-29b9-40db-ad53-4c64aae016f0','{\"id\": \"24c330cf-29b9-40db-ad53-4c64aae016f0\", \"type\": \"case_watch_added\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Case watch added\", \"source\": \"admin\", \"payload\": {\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T15:12:29.992Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"CASE-1\", \"correlationId\": null}','pending',0,'2025-10-14 15:12:29.992',NULL,'2025-10-14 11:12:29.995','2025-10-14 11:12:29.995'),(9,'a8e78d98-809c-41ed-b211-bd34a3ac9fe7','{\"id\": \"a8e78d98-809c-41ed-b211-bd34a3ac9fe7\", \"type\": \"case_watch_removed\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Case watch removed\", \"source\": \"admin\", \"payload\": {\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T15:13:29.152Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"CASE-1\", \"correlationId\": null}','pending',0,'2025-10-14 15:13:29.152',NULL,'2025-10-14 11:13:29.155','2025-10-14 11:13:29.155'),(10,'051c6a7c-ab66-4b31-9f93-721919da7bfe','{\"id\": \"051c6a7c-ab66-4b31-9f93-721919da7bfe\", \"type\": \"case_watch_added\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Case watch added\", \"source\": \"admin\", \"payload\": {\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T15:13:53.995Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"CASE-1\", \"correlationId\": null}','pending',0,'2025-10-14 15:13:53.995',NULL,'2025-10-14 11:13:53.998','2025-10-14 11:13:53.998'),(11,'ac03ac3c-0784-425d-b5dc-84fc424efa98','{\"id\": \"ac03ac3c-0784-425d-b5dc-84fc424efa98\", \"type\": \"case_assigned\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Case assigned\", \"source\": \"admin\", \"payload\": {\"message\": \"Case assigned to ontario.assessor1@awentech.ca.\", \"tracking_id\": \"ISET-20251012-B64803\", \"to_assignee_id\": 165904, \"from_assignee_id\": null, \"to_assignee_name\": null, \"to_assignee_email\": \"ontario.assessor1@awentech.ca\", \"from_assignee_name\": null, \"from_assignee_email\": null}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T15:14:17.365Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"ISET-20251012-B64803\", \"correlationId\": null}','pending',0,'2025-10-14 15:14:17.365',NULL,'2025-10-14 11:14:17.369','2025-10-14 11:14:17.369'),(12,'24da104f-daee-4de6-88a0-864449f65089','{\"id\": \"24da104f-daee-4de6-88a0-864449f65089\", \"type\": \"status_changed\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Status changed\", \"source\": \"admin\", \"payload\": {\"to\": \"in_review\", \"from\": \"submitted\", \"tracking_id\": \"ISET-20251012-B64803\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T15:14:17.399Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"ISET-20251012-B64803\", \"correlationId\": null}','pending',0,'2025-10-14 15:14:17.399',NULL,'2025-10-14 11:14:17.402','2025-10-14 11:14:17.402'),(13,'7073a36e-7002-405b-abc1-4c2984999576','{\"id\": \"7073a36e-7002-405b-abc1-4c2984999576\", \"type\": \"status_changed\", \"actor\": {\"id\": \"cc2d85a8-a061-7012-ad9a-d3fc653d5487\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Status changed\", \"source\": \"admin\", \"payload\": {\"to\": \"docs_requested\", \"from\": \"in_review\", \"tracking_id\": \"ISET-20251012-B64803\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T15:15:22.065Z\", \"capturedBy\": \"cc2d85a8-a061-7012-ad9a-d3fc653d5487\", \"trackingId\": \"ISET-20251012-B64803\", \"correlationId\": null}','pending',0,'2025-10-14 15:15:22.065',NULL,'2025-10-14 11:15:22.068','2025-10-14 11:15:22.068'),(14,'4b6dc954-2030-495b-81a1-3203be791d67','{\"id\": \"4b6dc954-2030-495b-81a1-3203be791d67\", \"type\": \"case_watch_removed\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Case watch removed\", \"source\": \"admin\", \"payload\": {\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T16:50:32.896Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"CASE-1\", \"correlationId\": null}','pending',0,'2025-10-14 16:50:32.896',NULL,'2025-10-14 12:50:32.899','2025-10-14 12:50:32.899'),(15,'6c34ec94-cf90-4db1-91dd-41d7923fbcbb','{\"id\": \"6c34ec94-cf90-4db1-91dd-41d7923fbcbb\", \"type\": \"case_watch_added\", \"actor\": {\"id\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"type\": \"staff\", \"displayName\": null}, \"label\": \"Case watch added\", \"source\": \"admin\", \"payload\": {\"staffProfileId\": 164692, \"staffPrimaryRole\": \"System Administrator\"}, \"subject\": {\"id\": 1, \"type\": \"case\"}, \"category\": \"case_lifecycle\", \"severity\": \"info\", \"capturedAt\": \"2025-10-14T16:55:44.504Z\", \"capturedBy\": \"7cad7598-d0d1-708d-0d42-d2abfe7dd933\", \"trackingId\": \"CASE-1\", \"correlationId\": null}','pending',0,'2025-10-14 16:55:44.504',NULL,'2025-10-14 12:55:44.507','2025-10-14 12:55:44.507');
 /*!40000 ALTER TABLE `iset_event_outbox` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -1205,7 +1235,7 @@ CREATE TABLE `iset_internal_notification` (
   KEY `idx_iset_internal_notification_audience_role` (`audience_type`,`audience_role`),
   KEY `idx_iset_internal_notification_user` (`audience_type`,`audience_user_id`),
   KEY `idx_iset_internal_notification_active` (`starts_at`,`expires_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1214,7 +1244,7 @@ CREATE TABLE `iset_internal_notification` (
 
 LOCK TABLES `iset_internal_notification` WRITE;
 /*!40000 ALTER TABLE `iset_internal_notification` DISABLE KEYS */;
-INSERT INTO `iset_internal_notification` VALUES (1,'application_submitted','info','New application submitted','Application ISET-20251012-B64803 has been submitted.','role','Program Administrator',NULL,1,0,NULL,NULL,'{\"role\": \"Program Administrator\", \"caseId\": 1, \"eventId\": \"85c2cea6-13cc-4948-ae8f-33e2de70f6a5\", \"eventType\": \"application_submitted\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-12 09:54:13',NULL,NULL),(2,'application_submitted','info','New application submitted','Application ISET-20251012-B64803 has been submitted.','role','System Administrator',NULL,1,0,NULL,NULL,'{\"role\": \"System Administrator\", \"caseId\": 1, \"eventId\": \"85c2cea6-13cc-4948-ae8f-33e2de70f6a5\", \"eventType\": \"application_submitted\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-12 09:54:13',NULL,NULL);
+INSERT INTO `iset_internal_notification` VALUES (1,'application_submitted','info','New application submitted','Application ISET-20251012-B64803 has been submitted.','role','Program Administrator',NULL,1,0,NULL,NULL,'{\"role\": \"Program Administrator\", \"caseId\": 1, \"eventId\": \"85c2cea6-13cc-4948-ae8f-33e2de70f6a5\", \"eventType\": \"application_submitted\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-12 09:54:13',NULL,NULL),(2,'application_submitted','info','New application submitted','Application ISET-20251012-B64803 has been submitted.','role','System Administrator',NULL,1,0,NULL,NULL,'{\"role\": \"System Administrator\", \"caseId\": 1, \"eventId\": \"85c2cea6-13cc-4948-ae8f-33e2de70f6a5\", \"eventType\": \"application_submitted\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-12 09:54:13',NULL,NULL),(3,'case_assigned','info','Case assigned','Case assigned (ISET-20251012-B64803) to ontario.assessor1@awentech.ca.','role','System Administrator',NULL,1,0,NULL,NULL,'{\"role\": \"System Administrator\", \"caseId\": 1, \"eventId\": \"ac03ac3c-0784-425d-b5dc-84fc424efa98\", \"eventType\": \"case_assigned\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-14 11:14:17',NULL,NULL),(4,'case_assigned','info','Case assigned','Case assigned (ISET-20251012-B64803) to ontario.assessor1@awentech.ca.','role','Program Administrator',NULL,1,0,NULL,NULL,'{\"role\": \"Program Administrator\", \"caseId\": 1, \"eventId\": \"ac03ac3c-0784-425d-b5dc-84fc424efa98\", \"eventType\": \"case_assigned\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-14 11:14:17',NULL,NULL),(5,'case_assigned','info','Case assigned','Case assigned (ISET-20251012-B64803) to ontario.assessor1@awentech.ca.','user',NULL,165904,1,0,NULL,NULL,'{\"role\": \"Regional Coordinator\", \"caseId\": 1, \"eventId\": \"ac03ac3c-0784-425d-b5dc-84fc424efa98\", \"eventType\": \"case_assigned\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-14 11:14:17',NULL,NULL),(6,'case_assigned','info','Case assigned','Case assigned (ISET-20251012-B64803) to ontario.assessor1@awentech.ca.','user',NULL,164692,1,0,NULL,NULL,'{\"role\": \"Application Assessor\", \"caseId\": 1, \"eventId\": \"ac03ac3c-0784-425d-b5dc-84fc424efa98\", \"eventType\": \"case_assigned\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-14 11:14:17',NULL,NULL),(7,'case_assigned','info','Case assigned','Case assigned (ISET-20251012-B64803) to ontario.assessor1@awentech.ca.','user',NULL,48,1,0,NULL,NULL,'{\"role\": \"applicant\", \"caseId\": 1, \"eventId\": \"ac03ac3c-0784-425d-b5dc-84fc424efa98\", \"eventType\": \"case_assigned\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-14 11:14:17',NULL,NULL),(8,'status_changed','info','Status changed','Status changed - Tracking ID: ISET-20251012-B64803','user',NULL,165904,1,0,NULL,NULL,'{\"role\": \"Regional Coordinator\", \"caseId\": 1, \"eventId\": \"24da104f-daee-4de6-88a0-864449f65089\", \"eventType\": \"status_changed\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-14 11:14:17',NULL,NULL),(9,'status_changed','info','Status changed','Status changed - Tracking ID: ISET-20251012-B64803','user',NULL,164692,1,0,NULL,NULL,'{\"role\": \"Application Assessor\", \"caseId\": 1, \"eventId\": \"24da104f-daee-4de6-88a0-864449f65089\", \"eventType\": \"status_changed\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-14 11:14:17',NULL,NULL),(10,'status_changed','info','Status changed','Status changed - Tracking ID: ISET-20251012-B64803','user',NULL,165904,1,0,NULL,NULL,'{\"role\": \"Regional Coordinator\", \"caseId\": 1, \"eventId\": \"7073a36e-7002-405b-abc1-4c2984999576\", \"eventType\": \"status_changed\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-14 11:15:22',NULL,NULL),(11,'status_changed','info','Status changed','Status changed - Tracking ID: ISET-20251012-B64803','user',NULL,164692,1,0,NULL,NULL,'{\"role\": \"Application Assessor\", \"caseId\": 1, \"eventId\": \"7073a36e-7002-405b-abc1-4c2984999576\", \"eventType\": \"status_changed\", \"trackingId\": \"ISET-20251012-B64803\"}',NULL,'2025-10-14 11:15:22',NULL,NULL);
 /*!40000 ALTER TABLE `iset_internal_notification` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -1241,7 +1271,7 @@ CREATE TABLE `iset_internal_notification_dismissal` (
 
 LOCK TABLES `iset_internal_notification_dismissal` WRITE;
 /*!40000 ALTER TABLE `iset_internal_notification_dismissal` DISABLE KEYS */;
-INSERT INTO `iset_internal_notification_dismissal` VALUES (1,164772,'2025-10-12 10:02:53'),(2,164692,'2025-10-12 10:13:02');
+INSERT INTO `iset_internal_notification_dismissal` VALUES (1,164772,'2025-10-12 10:02:53'),(2,164692,'2025-10-12 10:13:02'),(3,164692,'2025-10-14 11:16:01'),(5,165904,'2025-10-14 11:14:56'),(6,164692,'2025-10-14 11:16:01'),(8,165904,'2025-10-14 11:15:00'),(9,164692,'2025-10-14 11:16:03'),(11,164692,'2025-10-14 11:15:59');
 /*!40000 ALTER TABLE `iset_internal_notification_dismissal` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -1262,7 +1292,7 @@ CREATE TABLE `iset_migration` (
   `error_snippet` text,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_filename_checksum` (`filename`,`checksum`)
-) ENGINE=InnoDB AUTO_INCREMENT=36 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=42 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1271,7 +1301,7 @@ CREATE TABLE `iset_migration` (
 
 LOCK TABLES `iset_migration` WRITE;
 /*!40000 ALTER TABLE `iset_migration` DISABLE KEYS */;
-INSERT INTO `iset_migration` VALUES (1,'20250919_create_application_versioning.sql','511542d65d12c9e3c37b6396c3921e21f310bbd91fee79164a961a8dddee74a7','2025-09-19 10:21:36',2,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'IF NOT EXISTS original_payload_hash CHAR(64) NULL AFTER updated_at,\r\n  ADD COLUM\' at line 7'),(2,'create_ircc_office_table.sql','e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855','2025-09-19 10:22:46',0,1,NULL),(3,'populate_ircc_office_table.sql','e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855','2025-09-19 10:22:46',0,1,NULL),(4,'update_locations_table.sql','e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855','2025-09-19 10:22:46',0,1,NULL),(5,'20250919_add_cognito_identity.sql','01d149505a3511474572bdec84379af24aa16b4f1162e3c77ef5a2a76fa23099','2025-09-19 10:53:19',10,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'IF NOT EXISTS applicant_cognito_sub VARCHAR(64) NULL AFTER tracking_id,\r\n  ADD C\' at line 6'),(6,'20250919_refactor_iset_application_to_json.sql','c486b1813eec2f851279bff50855617bfaa1aba5de14e4cee51104c9b0856a69','2025-09-19 12:12:12',9,0,'Cannot drop table \'iset_application\' referenced by a foreign key constraint \'iset_case_ibfk_1\' on table \'iset_case\'.'),(7,'20250919_refactor_iset_application_to_json.sql','c950b16949cb42ec53d74071510fdd114df35fbac207d49039848058e4da80a4','2025-09-19 12:16:44',18,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'EXECUTE stmt; DEALLOCATE PREPARE stmt\' at line 1'),(8,'20250919_refactor_iset_application_to_json.sql','4895854302193dfd4e79a832565b08c5c74033bc6e96ffa6cd37904bbedebce7','2025-09-19 12:18:59',78,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'DELETE FROM iset_case_event;    -- child\r\nDELETE FROM iset_case_note;     -- chi\' at line 5'),(9,'20250919_refactor_iset_application_to_json.sql','4b32a33842498681cabc200ef5af263661091a39fa462450e21d2cc93c1bee50','2025-09-19 12:19:42',7,0,'Can\'t DROP \'iset_case_ibfk_1\'; check that column/key exists'),(10,'20250919_destructive_reset_case_refactor.sql','c3130fff4c8b2dcedc025234f67ba9d34c5c23db718bc5a8b0cbce5ce29b75aa','2025-09-19 12:32:37',209,0,'Variable \'foreign_key_checks\' can\'t be set to the value of \'NULL\''),(11,'20250919_destructive_reset_case_refactor.sql','ad7812c471012e9cacbf75bff86fbc5128906c987bfea2f3de28afac7798a171','2025-09-19 12:33:32',122,1,NULL),(12,'20250919_destructive_reset_case_refactor.sql','40c3da4a4723dfbbb8b23cd18650ff7b3ddc1e490684c979b9ac251cdc4a74bd','2025-09-19 12:37:41',126,1,NULL),(13,'20250919_create_staff_profiles.sql','157d260efef6723ab2e92e2dbd1450462b21f4067f66f1b8a3c3bf942a3f6c37','2025-09-19 12:58:52',43,1,NULL),(14,'20250919_create_iset_document.sql','73b17504140e554484fde25fe524487c9f0cc110c5b438df4ebdb3a620f45c1d','2025-09-19 16:07:48',63,1,NULL),(15,'20250922_create_case_events_tables.sql','31caff3eed65e5c459b4f088d2ae38ff5eb06ce9b311d352b3609415e94972ca','2025-09-22 10:37:34',110,1,NULL),(16,'20250922_case_status_indexes.sql','c8eb49bd09af4bd89725274a37dc98f2944478ec2722d00dd37675cff0c3a583','2025-09-22 11:33:28',14,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'IF NOT EXISTS `idx_iset_case_status` (`status`),\n  ADD INDEX IF NOT EXISTS `idx_\' at line 3'),(17,'20250922_case_status_indexes.sql','d29069317a469f96601f91183397c9f126d2ba88dd17c3c5097c25415b48764b','2025-09-22 12:02:01',10,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'IF NOT EXISTS idx_iset_case_status (status),\n  ADD INDEX IF NOT EXISTS idx_iset_\' at line 3'),(18,'20250922_create_case_assessment.sql','799cea6d3aa94321a794efd5d6fb9de42e92fc8edaf5c979ec4d32aad5000c5a','2025-09-22 12:17:37',45,1,NULL),(19,'20250922_add_case_assessment_fk.sql','8a9152681a2c2bd198f49b9be674fb99a39beaf1a208c5df17e3e634b019a5a7','2025-09-22 12:23:35',18,1,NULL),(20,'20250922_create_case_assessment.sql','8a9152681a2c2bd198f49b9be674fb99a39beaf1a208c5df17e3e634b019a5a7','2025-09-22 12:23:35',12,1,NULL),(21,'20250922_case_status_indexes.sql','70116f08283e1918bf8438b393ca0c8f87f54b6caba7977cdff0c927c983828f','2025-09-22 12:30:58',14,0,'Duplicate key name \'idx_iset_case_status\''),(22,'20250922_create_case_assessment.sql','2e30876dd288ffa66a7a3425ad070b7ad1c65ee0c51860a82be001bb51563dcd','2025-09-22 12:31:29',11,1,NULL),(23,'20250925_add_case_columns_to_messages.sql','c596b405b9196c75031e4e11ec0efcc1ff4b827b4906778a8000bd42e0ecbab3','2025-09-25 08:29:57',6,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'IF NOT EXISTS case_id BIGINT UNSIGNED NULL AFTER recipient_id,\n  ADD COLUMN IF N\' at line 3'),(24,'20250926_create_event_store.sql','3942e0092814e8b483d731f27f1e340701c845055ae67866040e922444bcd50c','2025-09-25 13:16:04',123,1,NULL),(25,'20250926_create_event_store.sql','b7397ea91396f9512edbc9a32cecadd4f40425cc8d604e6d096c40d54768c20a','2025-09-30 07:24:51',34,1,NULL),(26,'20251006_create_iset_case_note.sql','42488e32706e2120dd3cf2b725a7a5a5eef7dd17e69789e410d9b4d76ed059e6','2025-10-06 11:01:48',8,0,'Referencing column \'author_user_id\' and referenced column \'id\' in foreign key constraint \'fk_case_note_author_user\' are incompatible.'),(27,'20251006_create_iset_case_note.sql','077da33ac32cc379e1b2f3d40e28e25cce781c4726a186fad29e8d5dc4e1a2b5','2025-10-06 11:04:21',66,1,NULL),(28,'20250919_refactor_iset_application_to_json.sql','4bcfb8fef8a20b3c92b1d7d12d20d779cbdbe5f5eaa3586c5dfb19946e5a487d','2025-10-12 09:22:59',11,0,'Can\'t DROP \'iset_case_ibfk_1\'; check that column/key exists'),(34,'20251011_add_application_row_version.sql','1337ace366d05500a4ce65b1bb91ab5eab82aa04e24026d69aa69a55b210379b','2025-10-12 10:20:15',0,1,NULL),(35,'20251011_create_application_lock.sql','a6faca7ae289157d5a14af07a461835ed5fbac9c4c478bb142d4f7ab109feedd','2025-10-12 11:09:06',48,1,NULL);
+INSERT INTO `iset_migration` VALUES (1,'20250919_create_application_versioning.sql','511542d65d12c9e3c37b6396c3921e21f310bbd91fee79164a961a8dddee74a7','2025-09-19 10:21:36',2,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'IF NOT EXISTS original_payload_hash CHAR(64) NULL AFTER updated_at,\r\n  ADD COLUM\' at line 7'),(2,'create_ircc_office_table.sql','e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855','2025-09-19 10:22:46',0,1,NULL),(3,'populate_ircc_office_table.sql','e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855','2025-09-19 10:22:46',0,1,NULL),(4,'update_locations_table.sql','e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855','2025-09-19 10:22:46',0,1,NULL),(5,'20250919_add_cognito_identity.sql','01d149505a3511474572bdec84379af24aa16b4f1162e3c77ef5a2a76fa23099','2025-09-19 10:53:19',10,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'IF NOT EXISTS applicant_cognito_sub VARCHAR(64) NULL AFTER tracking_id,\r\n  ADD C\' at line 6'),(6,'20250919_refactor_iset_application_to_json.sql','c486b1813eec2f851279bff50855617bfaa1aba5de14e4cee51104c9b0856a69','2025-09-19 12:12:12',9,0,'Cannot drop table \'iset_application\' referenced by a foreign key constraint \'iset_case_ibfk_1\' on table \'iset_case\'.'),(7,'20250919_refactor_iset_application_to_json.sql','c950b16949cb42ec53d74071510fdd114df35fbac207d49039848058e4da80a4','2025-09-19 12:16:44',18,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'EXECUTE stmt; DEALLOCATE PREPARE stmt\' at line 1'),(8,'20250919_refactor_iset_application_to_json.sql','4895854302193dfd4e79a832565b08c5c74033bc6e96ffa6cd37904bbedebce7','2025-09-19 12:18:59',78,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'DELETE FROM iset_case_event;    -- child\r\nDELETE FROM iset_case_note;     -- chi\' at line 5'),(9,'20250919_refactor_iset_application_to_json.sql','4b32a33842498681cabc200ef5af263661091a39fa462450e21d2cc93c1bee50','2025-09-19 12:19:42',7,0,'Can\'t DROP \'iset_case_ibfk_1\'; check that column/key exists'),(10,'20250919_destructive_reset_case_refactor.sql','c3130fff4c8b2dcedc025234f67ba9d34c5c23db718bc5a8b0cbce5ce29b75aa','2025-09-19 12:32:37',209,0,'Variable \'foreign_key_checks\' can\'t be set to the value of \'NULL\''),(11,'20250919_destructive_reset_case_refactor.sql','ad7812c471012e9cacbf75bff86fbc5128906c987bfea2f3de28afac7798a171','2025-09-19 12:33:32',122,1,NULL),(12,'20250919_destructive_reset_case_refactor.sql','40c3da4a4723dfbbb8b23cd18650ff7b3ddc1e490684c979b9ac251cdc4a74bd','2025-09-19 12:37:41',126,1,NULL),(13,'20250919_create_staff_profiles.sql','157d260efef6723ab2e92e2dbd1450462b21f4067f66f1b8a3c3bf942a3f6c37','2025-09-19 12:58:52',43,1,NULL),(14,'20250919_create_iset_document.sql','73b17504140e554484fde25fe524487c9f0cc110c5b438df4ebdb3a620f45c1d','2025-09-19 16:07:48',63,1,NULL),(15,'20250922_create_case_events_tables.sql','31caff3eed65e5c459b4f088d2ae38ff5eb06ce9b311d352b3609415e94972ca','2025-09-22 10:37:34',110,1,NULL),(16,'20250922_case_status_indexes.sql','c8eb49bd09af4bd89725274a37dc98f2944478ec2722d00dd37675cff0c3a583','2025-09-22 11:33:28',14,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'IF NOT EXISTS `idx_iset_case_status` (`status`),\n  ADD INDEX IF NOT EXISTS `idx_\' at line 3'),(17,'20250922_case_status_indexes.sql','d29069317a469f96601f91183397c9f126d2ba88dd17c3c5097c25415b48764b','2025-09-22 12:02:01',10,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'IF NOT EXISTS idx_iset_case_status (status),\n  ADD INDEX IF NOT EXISTS idx_iset_\' at line 3'),(18,'20250922_create_case_assessment.sql','799cea6d3aa94321a794efd5d6fb9de42e92fc8edaf5c979ec4d32aad5000c5a','2025-09-22 12:17:37',45,1,NULL),(19,'20250922_add_case_assessment_fk.sql','8a9152681a2c2bd198f49b9be674fb99a39beaf1a208c5df17e3e634b019a5a7','2025-09-22 12:23:35',18,1,NULL),(20,'20250922_create_case_assessment.sql','8a9152681a2c2bd198f49b9be674fb99a39beaf1a208c5df17e3e634b019a5a7','2025-09-22 12:23:35',12,1,NULL),(21,'20250922_case_status_indexes.sql','70116f08283e1918bf8438b393ca0c8f87f54b6caba7977cdff0c927c983828f','2025-09-22 12:30:58',14,0,'Duplicate key name \'idx_iset_case_status\''),(22,'20250922_create_case_assessment.sql','2e30876dd288ffa66a7a3425ad070b7ad1c65ee0c51860a82be001bb51563dcd','2025-09-22 12:31:29',11,1,NULL),(23,'20250925_add_case_columns_to_messages.sql','c596b405b9196c75031e4e11ec0efcc1ff4b827b4906778a8000bd42e0ecbab3','2025-09-25 08:29:57',6,0,'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \'IF NOT EXISTS case_id BIGINT UNSIGNED NULL AFTER recipient_id,\n  ADD COLUMN IF N\' at line 3'),(24,'20250926_create_event_store.sql','3942e0092814e8b483d731f27f1e340701c845055ae67866040e922444bcd50c','2025-09-25 13:16:04',123,1,NULL),(25,'20250926_create_event_store.sql','b7397ea91396f9512edbc9a32cecadd4f40425cc8d604e6d096c40d54768c20a','2025-09-30 07:24:51',34,1,NULL),(26,'20251006_create_iset_case_note.sql','42488e32706e2120dd3cf2b725a7a5a5eef7dd17e69789e410d9b4d76ed059e6','2025-10-06 11:01:48',8,0,'Referencing column \'author_user_id\' and referenced column \'id\' in foreign key constraint \'fk_case_note_author_user\' are incompatible.'),(27,'20251006_create_iset_case_note.sql','077da33ac32cc379e1b2f3d40e28e25cce781c4726a186fad29e8d5dc4e1a2b5','2025-10-06 11:04:21',66,1,NULL),(28,'20250919_refactor_iset_application_to_json.sql','4bcfb8fef8a20b3c92b1d7d12d20d779cbdbe5f5eaa3586c5dfb19946e5a487d','2025-10-12 09:22:59',11,0,'Can\'t DROP \'iset_case_ibfk_1\'; check that column/key exists'),(34,'20251011_add_application_row_version.sql','1337ace366d05500a4ce65b1bb91ab5eab82aa04e24026d69aa69a55b210379b','2025-10-12 10:20:15',0,1,NULL),(35,'20251011_create_application_lock.sql','a6faca7ae289157d5a14af07a461835ed5fbac9c4c478bb142d4f7ab109feedd','2025-10-12 11:09:06',48,1,NULL),(36,'20251014_create_iset_case_watch.sql','21a497ee7ef35889b8381739e2974e8e9f868b80f00e9bdc47ed662ade898cdd','2025-10-14 09:08:42',53,1,NULL),(37,'20251014_create_iset_case_watch.sql','0d571708a850052c2d90c83e2b1d3f03ff3761f0659d42796911d51dcbcbd584','2025-10-14 09:42:02',14,1,NULL),(38,'20251014_align_case_watch_staff_profile.sql','17ebd0d67c38bb2e27266a5f9df2521db3f86915820f29e36ca2dc574dbbf550','2025-10-14 10:28:20',16,0,'Illegal mix of collations (utf8mb3_tolower_ci,IMPLICIT) and (utf8mb3_general_ci,IMPLICIT) for operation \'=\''),(39,'20251014_align_case_watch_staff_profile.sql','aee5884c37a45d8cc93658695cde5b6af0a5840da85889ab07fbb2190adada87','2025-10-14 10:32:24',18,0,'COLLATION \'utf8mb3_general_ci\' is not valid for CHARACTER SET \'utf8mb4\''),(40,'20251014_align_case_watch_staff_profile.sql','c8c65eeb9b426a72fe79c795b164c8bdcd07982ca5ce3bd468c58144f1d01349','2025-10-14 10:35:15',75,0,'Referencing column \'staff_profile_id\' and referenced column \'id\' in foreign key constraint \'fk_case_watch_staff\' are incompatible.'),(41,'20251014_align_case_watch_staff_profile.sql','8b7f8901d5915de1e380b6b48b31abb13f097d52e64ebdce88251952c1d2cd3f','2025-10-14 10:39:21',131,1,NULL);
 /*!40000 ALTER TABLE `iset_migration` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -1613,7 +1643,7 @@ CREATE TABLE `notification_setting` (
   PRIMARY KEY (`id`),
   KEY `template_id` (`template_id`),
   CONSTRAINT `notification_setting_ibfk_1` FOREIGN KEY (`template_id`) REFERENCES `notification_template` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=33 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=40 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1622,7 +1652,7 @@ CREATE TABLE `notification_setting` (
 
 LOCK TABLES `notification_setting` WRITE;
 /*!40000 ALTER TABLE `notification_setting` DISABLE KEYS */;
-INSERT INTO `notification_setting` VALUES (1,'user_registered','applicant',1,'en',1,1,0,'2025-06-16 12:04:51','2025-06-17 08:15:32'),(2,'application_submitted','Program Administrator',NULL,'en',1,0,1,'2025-09-23 13:56:32','2025-09-30 21:18:13'),(12,'case_reassigned','Program Administrator',NULL,'en',1,0,1,'2025-09-29 15:37:29','2025-09-30 21:18:52'),(13,'case_reassigned','Regional Coordinator',NULL,'en',1,0,1,'2025-09-29 15:37:29','2025-09-30 21:18:52'),(14,'assessment_submitted','Application Assessor',2,'en',1,0,0,'2025-09-29 15:37:29','2025-09-29 15:37:29'),(15,'status_changed','Program Administrator',NULL,'en',0,0,0,'2025-09-29 15:37:29','2025-09-30 21:18:31'),(16,'application_approved','Program Administrator',2,'en',1,0,0,'2025-09-29 15:37:29','2025-09-29 15:37:29'),(17,'application_rejected','Program Administrator',2,'en',1,0,0,'2025-09-29 15:37:29','2025-09-29 15:37:29'),(18,'application_submitted','System Administrator',NULL,'en',1,0,1,'2025-09-30 20:47:32','2025-09-30 21:18:13'),(19,'case_assigned','System Administrator',NULL,'en',1,0,1,'2025-09-30 21:18:31','2025-09-30 21:18:31'),(20,'case_assigned','Program Administrator',NULL,'en',1,0,1,'2025-09-30 21:18:31','2025-09-30 21:18:31'),(21,'case_assigned','Regional Coordinator',NULL,'en',1,0,1,'2025-09-30 21:18:31','2025-09-30 21:18:31'),(22,'case_assigned','Application Assessor',NULL,'en',1,0,1,'2025-09-30 21:18:31','2025-09-30 21:18:31'),(23,'case_assigned','applicant',NULL,'en',1,0,1,'2025-09-30 21:18:31','2025-09-30 21:18:31'),(24,'case_reassigned','System Administrator',NULL,'en',1,0,1,'2025-09-30 21:18:52','2025-09-30 21:18:52'),(25,'case_reassigned','Application Assessor',NULL,'en',1,0,1,'2025-09-30 21:18:52','2025-09-30 21:18:52'),(26,'case_reassigned','applicant',NULL,'en',1,0,1,'2025-09-30 21:18:52','2025-09-30 21:18:52'),(27,'application_submitted','applicant',1,'en',1,1,0,'2025-10-07 17:11:30','2025-10-07 17:11:30'),(28,'message_received','System Administrator',NULL,'en',1,0,1,'2025-10-07 17:12:16','2025-10-07 17:12:16'),(29,'message_received','Program Administrator',NULL,'en',1,0,1,'2025-10-07 17:12:16','2025-10-07 17:12:16'),(30,'message_received','Regional Coordinator',NULL,'en',1,0,1,'2025-10-07 17:12:16','2025-10-07 17:12:16'),(31,'message_received','applicant',NULL,'en',1,1,1,'2025-10-07 17:12:16','2025-10-07 17:12:16'),(32,'message_received','Application Assessor',NULL,'en',1,0,1,'2025-10-07 17:12:16','2025-10-07 17:12:16');
+INSERT INTO `notification_setting` VALUES (1,'user_registered','applicant',1,'en',1,1,0,'2025-06-16 12:04:51','2025-06-17 08:15:32'),(2,'application_submitted','Program Administrator',NULL,'en',1,0,1,'2025-09-23 13:56:32','2025-09-30 21:18:13'),(12,'case_reassigned','Program Administrator',NULL,'en',1,0,1,'2025-09-29 15:37:29','2025-09-30 21:18:52'),(13,'case_reassigned','Regional Coordinator',NULL,'en',1,0,1,'2025-09-29 15:37:29','2025-09-30 21:18:52'),(14,'assessment_submitted','Application Assessor',NULL,'en',1,0,1,'2025-09-29 15:37:29','2025-10-14 08:40:02'),(15,'status_changed','Program Administrator',NULL,'en',0,0,0,'2025-09-29 15:37:29','2025-09-30 21:18:31'),(16,'application_approved','Program Administrator',2,'en',1,0,0,'2025-09-29 15:37:29','2025-09-29 15:37:29'),(17,'application_rejected','Program Administrator',2,'en',1,0,0,'2025-09-29 15:37:29','2025-09-29 15:37:29'),(18,'application_submitted','System Administrator',NULL,'en',1,0,1,'2025-09-30 20:47:32','2025-09-30 21:18:13'),(19,'case_assigned','System Administrator',NULL,'en',1,0,1,'2025-09-30 21:18:31','2025-09-30 21:18:31'),(20,'case_assigned','Program Administrator',NULL,'en',1,0,1,'2025-09-30 21:18:31','2025-09-30 21:18:31'),(21,'case_assigned','Regional Coordinator',NULL,'en',1,0,1,'2025-09-30 21:18:31','2025-09-30 21:18:31'),(22,'case_assigned','Application Assessor',NULL,'en',1,0,1,'2025-09-30 21:18:31','2025-09-30 21:18:31'),(23,'case_assigned','applicant',NULL,'en',1,0,1,'2025-09-30 21:18:31','2025-09-30 21:18:31'),(24,'case_reassigned','System Administrator',NULL,'en',1,0,1,'2025-09-30 21:18:52','2025-09-30 21:18:52'),(25,'case_reassigned','Application Assessor',NULL,'en',1,0,1,'2025-09-30 21:18:52','2025-09-30 21:18:52'),(26,'case_reassigned','applicant',NULL,'en',1,0,1,'2025-09-30 21:18:52','2025-09-30 21:18:52'),(27,'application_submitted','applicant',1,'en',1,1,0,'2025-10-07 17:11:30','2025-10-07 17:11:30'),(28,'message_received','System Administrator',NULL,'en',1,0,1,'2025-10-07 17:12:16','2025-10-07 17:12:16'),(29,'message_received','Program Administrator',NULL,'en',1,0,1,'2025-10-07 17:12:16','2025-10-07 17:12:16'),(30,'message_received','Regional Coordinator',NULL,'en',1,0,1,'2025-10-07 17:12:16','2025-10-07 17:12:16'),(31,'message_received','applicant',NULL,'en',1,1,1,'2025-10-07 17:12:16','2025-10-07 17:12:16'),(32,'message_received','Application Assessor',NULL,'en',1,0,1,'2025-10-07 17:12:16','2025-10-07 17:12:16'),(33,'status_changed','Regional Coordinator',NULL,'en',1,0,1,'2025-10-14 08:40:02','2025-10-14 08:40:02'),(34,'status_changed','Application Assessor',NULL,'en',1,0,1,'2025-10-14 08:40:02','2025-10-14 08:40:02'),(35,'nwac_review_submitted','Program Administrator',NULL,'en',1,0,1,'2025-10-14 08:40:02','2025-10-14 08:40:02'),(36,'assessment_submitted','Program Administrator',NULL,'en',1,0,1,'2025-10-14 08:40:02','2025-10-14 08:40:02'),(37,'assessment_submitted','Regional Coordinator',NULL,'en',1,0,1,'2025-10-14 08:40:02','2025-10-14 08:40:02'),(38,'nwac_review_submitted','Regional Coordinator',NULL,'en',1,0,1,'2025-10-14 08:40:02','2025-10-14 08:40:02'),(39,'nwac_review_submitted','Application Assessor',NULL,'en',1,0,1,'2025-10-14 08:40:02','2025-10-14 08:40:02');
 /*!40000 ALTER TABLE `notification_setting` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -2139,7 +2169,7 @@ CREATE TABLE `staff_profiles` (
   KEY `idx_staff_profiles_primary_role` (`primary_role`),
   KEY `idx_staff_profiles_status` (`status`),
   KEY `idx_region` (`region_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=165618 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=166187 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2148,7 +2178,7 @@ CREATE TABLE `staff_profiles` (
 
 LOCK TABLES `staff_profiles` WRITE;
 /*!40000 ALTER TABLE `staff_profiles` DISABLE KEYS */;
-INSERT INTO `staff_profiles` VALUES (164692,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','bill@sillery.co.uk',NULL,NULL,'System Administrator','active',NULL,'2025-10-11 18:44:41','2025-10-11 18:44:41',NULL),(164772,'0c7d8518-8091-700a-13fb-93cfdf5b9923','aws@sillery.co.uk',NULL,NULL,'Program Administrator','active',NULL,'2025-10-12 13:56:51','2025-10-12 13:56:51',NULL);
+INSERT INTO `staff_profiles` VALUES (164692,'7cad7598-d0d1-708d-0d42-d2abfe7dd933','bill@sillery.co.uk',NULL,NULL,'System Administrator','active',NULL,'2025-10-11 18:44:41','2025-10-11 18:44:41',NULL),(164772,'0c7d8518-8091-700a-13fb-93cfdf5b9923','aws@sillery.co.uk',NULL,NULL,'Program Administrator','active',NULL,'2025-10-12 13:56:51','2025-10-12 13:56:51',NULL),(165898,'0c7d25f8-e0a1-7074-ff1b-e1342c1c4198','quebec.coordinator@awentech.ca',NULL,NULL,'Regional Coordinator','active',NULL,'2025-10-14 15:14:08','2025-10-14 15:14:08',NULL),(165899,'4c9d7598-6071-701d-625d-37ce1909efe8','iset@awentech.ca',NULL,NULL,'Regional Coordinator','active',NULL,'2025-10-14 15:14:08','2025-10-14 15:14:08',NULL),(165900,'9ccd95e8-3031-70c5-908c-285e3598c632','ontario.coordinator@awentech.ca',NULL,NULL,'Regional Coordinator','active',NULL,'2025-10-14 15:14:08','2025-10-14 15:14:08',NULL),(165901,'7ced15f8-c061-70e7-b61c-3e45afdf056d','ontario.assessor2@awentech.ca',NULL,NULL,'Application Assessor','active',NULL,'2025-10-14 15:14:08','2025-10-14 15:14:08',NULL),(165902,'7ccd9538-b081-7026-5a0f-23950b465c24','quebec.assessor1@awentech.ca',NULL,NULL,'Application Assessor','active',NULL,'2025-10-14 15:14:08','2025-10-14 15:14:08',NULL),(165903,'4c5d35e8-b041-7072-9809-232d8f0009f4','ontario.assessor3@awentech.ca',NULL,NULL,'Application Assessor','active',NULL,'2025-10-14 15:14:08','2025-10-14 15:14:08',NULL),(165904,'cc2d85a8-a061-7012-ad9a-d3fc653d5487','ontario.assessor1@awentech.ca',NULL,NULL,'Application Assessor','active',NULL,'2025-10-14 15:14:08','2025-10-14 15:14:52',9),(165905,'6c8db548-00b1-701d-8cb7-402037328ece','quebec.assessor2@awentech.ca',NULL,NULL,'Application Assessor','active',NULL,'2025-10-14 15:14:08','2025-10-14 15:14:08',NULL);
 /*!40000 ALTER TABLE `staff_profiles` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -2551,216 +2581,6 @@ LOCK TABLES `workflow_step` WRITE;
 INSERT INTO `workflow_step` VALUES (21,77,0),(21,78,0),(21,79,0),(21,80,0),(21,81,0),(21,82,0),(21,83,0),(21,84,0),(21,85,0),(21,86,0),(21,87,0),(21,90,0),(21,91,0),(21,92,0),(21,93,0),(21,94,0),(21,95,0),(21,97,0),(21,98,0),(21,105,0),(21,121,0),(35,112,0),(35,117,0),(35,123,0),(21,76,1),(35,114,1),(38,124,1);
 /*!40000 ALTER TABLE `workflow_step` ENABLE KEYS */;
 UNLOCK TABLES;
-
---
--- Dumping routines for database 'iset_intake'
---
-/*!50003 DROP PROCEDURE IF EXISTS `CheckBILUsage` */;
-/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
-/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
-/*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8mb4 */ ;
-/*!50003 SET character_set_results = utf8mb4 */ ;
-/*!50003 SET collation_connection  = utf8mb4_0900_ai_ci */ ;
-/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
-/*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
-DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `CheckBILUsage`(
-    IN input_bilReference VARCHAR(50)
-)
-BEGIN
-    DECLARE bil_count INT;
-
-    
-    SELECT COUNT(*) INTO bil_count
-    FROM (
-        SELECT bilReference FROM appointment WHERE bilReference = input_bilReference
-        UNION ALL
-        SELECT bilReference FROM booking WHERE bilReference = input_bilReference
-    ) AS combined;
-
-    
-    IF bil_count > 0 THEN
-        SELECT 'BIL Reference already used' AS status;
-    ELSE
-        SELECT 'BIL Reference is available' AS status;
-    END IF;
-END ;;
-DELIMITER ;
-/*!50003 SET sql_mode              = @saved_sql_mode */ ;
-/*!50003 SET character_set_client  = @saved_cs_client */ ;
-/*!50003 SET character_set_results = @saved_cs_results */ ;
-/*!50003 SET collation_connection  = @saved_col_connection */ ;
-/*!50003 DROP PROCEDURE IF EXISTS `CheckInUser` */;
-/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
-/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
-/*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8mb4 */ ;
-/*!50003 SET character_set_results = utf8mb4 */ ;
-/*!50003 SET collation_connection  = utf8mb4_0900_ai_ci */ ;
-/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
-/*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
-DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `CheckInUser`(
-    IN p_booking_id INT,
-    IN p_slot_id INT,
-    IN p_location_id INT,
-    IN p_ticket_number VARCHAR(10)
-)
-BEGIN
-    INSERT INTO queue (
-        booking_id,
-        slot_id,
-        location_id,
-        ticket_number,
-        status,
-        check_in_time
-    )
-    VALUES (
-        p_booking_id,
-        p_slot_id,
-        p_location_id,
-        p_ticket_number,
-        'waiting',
-        NOW()
-    );
-END ;;
-DELIMITER ;
-/*!50003 SET sql_mode              = @saved_sql_mode */ ;
-/*!50003 SET character_set_client  = @saved_cs_client */ ;
-/*!50003 SET character_set_results = @saved_cs_results */ ;
-/*!50003 SET collation_connection  = @saved_col_connection */ ;
-/*!50003 DROP PROCEDURE IF EXISTS `GenerateTicketNumber` */;
-/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
-/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
-/*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8mb4 */ ;
-/*!50003 SET character_set_results = utf8mb4 */ ;
-/*!50003 SET collation_connection  = utf8mb4_0900_ai_ci */ ;
-/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
-/*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
-DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `GenerateTicketNumber`(
-    IN p_service_type_id INT,
-    IN p_location_id INT
-)
-BEGIN
-    DECLARE v_prefix VARCHAR(5);
-    DECLARE v_next_number INT;
-    DECLARE v_ticket_number VARCHAR(10);
-
-    
-    SELECT prefix INTO v_prefix
-    FROM queue_ticket_config
-    WHERE service_type_id = p_service_type_id
-      AND active = TRUE
-    ORDER BY priority_level ASC
-    LIMIT 1;
-
-    
-    SELECT COALESCE(MAX(CAST(SUBSTRING(ticket_number, 2) AS UNSIGNED)), 0) + 1
-    INTO v_next_number
-    FROM queue
-    WHERE location_id = p_location_id
-      AND ticket_number LIKE CONCAT(v_prefix, '%')
-      AND DATE(check_in_time) = CURDATE();
-
-    
-    SET v_ticket_number = CONCAT(v_prefix, LPAD(v_next_number, 3, '0'));
-
-    
-    SELECT v_ticket_number AS ticketNumber;
-END ;;
-DELIMITER ;
-/*!50003 SET sql_mode              = @saved_sql_mode */ ;
-/*!50003 SET character_set_client  = @saved_cs_client */ ;
-/*!50003 SET character_set_results = @saved_cs_results */ ;
-/*!50003 SET collation_connection  = @saved_col_connection */ ;
-/*!50003 DROP PROCEDURE IF EXISTS `PurgeAppointments` */;
-/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
-/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
-/*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8mb4 */ ;
-/*!50003 SET character_set_results = utf8mb4 */ ;
-/*!50003 SET collation_connection  = utf8mb4_0900_ai_ci */ ;
-/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
-/*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
-DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `PurgeAppointments`()
-BEGIN
-    
-    SET FOREIGN_KEY_CHECKS = 0;
-
-    
-    UPDATE slot 
-    SET is_booked = 0
-    WHERE id IN (SELECT slot_id FROM booking);
-
-    
-    DELETE FROM queue;
-    DELETE FROM booking;
-
-    
-    DELETE FROM appointment;
-    DELETE FROM ticket_counter;
-
-    
-    ALTER TABLE queue AUTO_INCREMENT = 1;
-    ALTER TABLE booking AUTO_INCREMENT = 1;
-    ALTER TABLE appointment AUTO_INCREMENT = 1;
-    ALTER TABLE ticket_counter AUTO_INCREMENT = 1;
-
-    
-    SET FOREIGN_KEY_CHECKS = 1;
-END ;;
-DELIMITER ;
-/*!50003 SET sql_mode              = @saved_sql_mode */ ;
-/*!50003 SET character_set_client  = @saved_cs_client */ ;
-/*!50003 SET character_set_results = @saved_cs_results */ ;
-/*!50003 SET collation_connection  = @saved_col_connection */ ;
-/*!50003 DROP PROCEDURE IF EXISTS `PurgeSlots` */;
-/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
-/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
-/*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8mb4 */ ;
-/*!50003 SET character_set_results = utf8mb4 */ ;
-/*!50003 SET collation_connection  = utf8mb4_0900_ai_ci */ ;
-/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
-/*!50003 SET sql_mode              = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' */ ;
-DELIMITER ;;
-CREATE DEFINER=`root`@`localhost` PROCEDURE `PurgeSlots`()
-BEGIN
-    
-    SET FOREIGN_KEY_CHECKS = 0;
-
-    
-    CREATE TEMPORARY TABLE temp_deleted_count (count INT);
-
-    
-    DELETE FROM queue WHERE slot_id IN (SELECT id FROM slot);
-    DELETE FROM booking WHERE slot_id IN (SELECT id FROM slot);
-
-    
-    DELETE FROM slot;
-    INSERT INTO temp_deleted_count (count) VALUES (ROW_COUNT());
-
-    
-    ALTER TABLE slot AUTO_INCREMENT = 1;
-
-    
-    SET FOREIGN_KEY_CHECKS = 1;
-
-    
-    SELECT count FROM temp_deleted_count;
-
-    
-    DROP TEMPORARY TABLE temp_deleted_count;
-END ;;
-DELIMITER ;
-/*!50003 SET sql_mode              = @saved_sql_mode */ ;
-/*!50003 SET character_set_client  = @saved_cs_client */ ;
-/*!50003 SET character_set_results = @saved_cs_results */ ;
-/*!50003 SET collation_connection  = @saved_col_connection */ ;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -2771,4 +2591,4 @@ DELIMITER ;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-13 14:05:02
+-- Dump completed on 2025-10-14 13:44:35
