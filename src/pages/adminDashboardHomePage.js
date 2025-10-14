@@ -20,6 +20,7 @@ import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLog
 import ApplicationWorkQueueWidget from '../widgets/ApplicationWorkQueueWidget';
 import RecentActivityWidget from '../widgets/RecentActivityWidget';
 import StatisticsWidget from '../widgets/StatisticsWidget';
+import MyWatchlistWidget from '../widgets/MyWatchlistWidget';
 
 const BOARD_STORAGE_PREFIX = 'admin-dashboard.board.items.v1';
 
@@ -32,6 +33,7 @@ const buildDefaultBoardItems = role => {
     const defaults = [
         { id: 'application-work-queue', rowSpan: 5, columnSpan: 2, data: { title: 'Application Work Queue' } },
         { id: 'recent-activity', rowSpan: 5, columnSpan: 2, data: { title: 'Recent Activity' } },
+        { id: 'my-watchlist', rowSpan: 5, columnSpan: 2, data: { title: 'My Watchlist' } },
         { id: 'statistics', rowSpan: 5, columnSpan: 4, data: { title: 'Statistics' } }
     ];
     if (role === 'System Administrator') {
@@ -184,6 +186,8 @@ const AdminDashboard = () => {
                 return <ApplicationWorkQueueWidget actions={actions} role={role} refreshKey={authVersion} />;
             case 'recent-activity':
                 return <RecentActivityWidget actions={actions} role={role} refreshKey={authVersion} />;
+            case 'my-watchlist':
+                return <MyWatchlistWidget actions={actions} />;
             case 'statistics':
                 return <StatisticsWidget actions={actions} role={role} refreshKey={authVersion} />;
             case 'dev-task-tracker':

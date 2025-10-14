@@ -15,15 +15,68 @@ import {
   Modal,
   FormField,
   Select,
-  Alert
+  Alert,
+  Toggle
 } from '@cloudscape-design/components';
+import Icon from '@cloudscape-design/components/icon';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useHistory } from 'react-router-dom';
 import { apiFetch } from '../auth/apiClient';
 import useCurrentUser from '../hooks/useCurrentUser';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
-const DEFAULT_VISIBLE_COLUMNS = ['tracking_id','status','lock_state','sla_risk','assigned_user_email','submitted_at','actions'];
+const DEFAULT_VISIBLE_COLUMNS = ['watch','tracking_id','status','lock_state','sla_risk','assigned_user_email','submitted_at','actions'];
+const COLUMN_WIDTHS_STORAGE_KEY = 'applications-widget-column-widths';
+
+const loadStoredColumnWidths = () => {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map(entry => {
+        if (!entry || typeof entry !== 'object') {
+          return null;
+        }
+        const id = typeof entry.id === 'string' ? entry.id : null;
+        const numericWidth = Number(entry.width);
+        if (!id || !Number.isFinite(numericWidth)) {
+          return null;
+        }
+        return { id, width: numericWidth };
+      })
+      .filter(Boolean);
+  } catch (error) {
+    console.error('[applications] failed to read stored column widths', error);
+    return [];
+  }
+};
+
+const persistColumnWidths = (widths) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (!Array.isArray(widths) || widths.length === 0) {
+      window.localStorage.removeItem(COLUMN_WIDTHS_STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
+    }
+  } catch (error) {
+    console.error('[applications] failed to persist column widths', error);
+  }
+};
 
 const computeSlaMeta = (row) => {
   // Placeholder: assume SLA due 14 days after submitted_at until backend provides sla_due_at
@@ -44,6 +97,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
+  const [columnWidths, setColumnWidths] = useState(() => loadStoredColumnWidths());
   const [selectedItems, setSelectedItems] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [assignModalVisible, setAssignModalVisible] = useState(false);
@@ -53,6 +107,10 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const [assignError, setAssignError] = useState(null);
   const [selectedAssignee, setSelectedAssignee] = useState(null); // Cloudscape Select expects {label,value}
   const [assignSubmitting, setAssignSubmitting] = useState(false);
+  const [watchMap, setWatchMap] = useState(() => new Map());
+  const [watchLoading, setWatchLoading] = useState(true);
+  const [watchPending, setWatchPending] = useState(new Set());
+  const [showWatchedOnly, setShowWatchedOnly] = useState(false);
   const [alerts, setAlerts] = useState([]);
   const {
     userId: currentUserIdRaw,
@@ -63,7 +121,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const userRole = currentUserRole || '';
   const normalizedUserRole = userRole.trim();
 
-  const columns = useMemo(() => {
+  const detailColumns = useMemo(() => {
     const lockCell = (row) => {
       if (row.is_unassigned) return '-';
       const ownerId = row.lock_owner_id ? String(row.lock_owner_id) : null;
@@ -136,12 +194,61 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     return c;
   }, [load, refreshKey]);
 
+  useEffect(() => {
+    persistColumnWidths(columnWidths);
+  }, [columnWidths]);
+
   const addAlert = useCallback((alert) => {
     setAlerts(prev => [...prev, { id: `${Date.now()}-${Math.random()}`, ...alert }]);
   }, []);
   const dismissAlert = useCallback((id) => {
     setAlerts(prev => prev.filter(a => a.id !== id));
   }, []);
+
+  const loadWatchList = useCallback(() => {
+    let cancelled = false;
+    setWatchLoading(true);
+    apiFetch('/api/me/case-watches')
+      .then((res) => {
+        if (!res.ok) {
+          const error = new Error(`HTTP ${res.status}`);
+          error.status = res.status;
+          throw error;
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const map = new Map();
+        (Array.isArray(data) ? data : []).forEach((entry) => {
+          const caseId = Number(entry?.caseId ?? entry?.case_id);
+          if (Number.isFinite(caseId) && caseId > 0) {
+            map.set(caseId, entry);
+          }
+        });
+        setWatchMap(map);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('[applications] failed to load watchlist', error);
+        addAlert({
+          type: 'error',
+          header: 'Watchlist unavailable',
+          content: 'We could not load your flagged cases. Flag indicators may be incomplete until the page is refreshed.',
+        });
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setWatchLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [addAlert]);
+
+  useEffect(() => {
+    const cleanup = loadWatchList();
+    return cleanup;
+  }, [loadWatchList, refreshKey, currentUserId]);
 
   const handleAssignSubmit = useCallback(async () => {
     if (!assignTargetCase || !selectedAssignee) return;
@@ -221,11 +328,135 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     }
   }, [assignTargetCase, selectedAssignee, assignableStaff, load, addAlert]);
 
+  const handleToggleWatch = useCallback(async (item) => {
+    const caseIdNumeric = Number(item?.case_id ?? item?.__caseIdNumeric);
+    if (!Number.isFinite(caseIdNumeric) || caseIdNumeric <= 0) {
+      addAlert({
+        type: 'info',
+        header: 'Flag not available',
+        content: 'This record does not yet have a case ID. Open the case to create one before flagging it.',
+      });
+      return;
+    }
+    const caseId = caseIdNumeric;
+    const isCurrentlyWatched = watchMap.has(caseId);
+
+    setWatchPending((prev) => {
+      const next = new Set(prev);
+      next.add(caseId);
+      return next;
+    });
+
+    try {
+      const response = await apiFetch(`/api/cases/${caseId}/watch`, {
+        method: isCurrentlyWatched ? 'DELETE' : 'POST',
+        headers: isCurrentlyWatched ? undefined : { 'Content-Type': 'application/json' },
+        body: isCurrentlyWatched ? undefined : JSON.stringify({}),
+      });
+
+      let body = null;
+      try {
+        body = await response.json();
+      } catch {
+        body = null;
+      }
+
+      if (!response.ok || (body && body.error)) {
+        const err = new Error(body?.error || 'watch_failed');
+        err.status = response.status;
+        throw err;
+      }
+
+      if (isCurrentlyWatched) {
+        setWatchMap((prev) => {
+          const next = new Map(prev);
+          next.delete(caseId);
+          return next;
+        });
+        addAlert({
+          type: 'info',
+          header: 'Case unflagged',
+          content: `${item.tracking_id || `Case ${caseId}`} removed from your watchlist.`,
+        });
+      } else {
+        const watchEntry = body?.watch || { caseId };
+        setWatchMap((prev) => {
+          const next = new Map(prev);
+          next.set(caseId, watchEntry);
+          return next;
+        });
+        addAlert({
+          type: 'success',
+          header: 'Case flagged',
+          content: `${item.tracking_id || `Case ${caseId}`} added to your watchlist.`,
+        });
+      }
+    } catch (error) {
+      console.error('[applications] watch toggle failed', error);
+      addAlert({
+        type: 'error',
+        header: 'Watch action failed',
+        content: 'We could not update your watchlist. Please try again.',
+      });
+    } finally {
+      setWatchPending((prev) => {
+        const next = new Set(prev);
+        next.delete(caseId);
+        return next;
+      });
+    }
+  }, [watchMap, addAlert]);
+
+  const decoratedItems = useMemo(() => {
+    return items.map((item) => {
+      const numericCaseId = Number(item.case_id);
+      const caseId = Number.isFinite(numericCaseId) && numericCaseId > 0 ? numericCaseId : null;
+      const watched = caseId ? watchMap.has(caseId) : false;
+      return {
+        ...item,
+        __caseIdNumeric: caseId,
+        __isWatched: watched,
+      };
+    });
+  }, [items, watchMap]);
+
   // Client filtering (post-fetch) for quick text search; can be pushed server-side later
-  const filteredItems = items.filter(i => {
-    const s = filteringText.toLowerCase();
-    return !s || [i.tracking_id, i.status, i.assigned_user_email, i.ptma_codes, i.lock_owner_name, i.lock_owner_email].some(v => v && String(v).toLowerCase().includes(s));
-  });
+  const filteredItems = decoratedItems
+    .filter(i => {
+      const s = filteringText.toLowerCase();
+      return !s || [i.tracking_id, i.status, i.assigned_user_email, i.ptma_codes, i.lock_owner_name, i.lock_owner_email]
+        .some(v => v && String(v).toLowerCase().includes(s));
+    })
+    .filter(i => !showWatchedOnly || i.__isWatched);
+
+  const watchColumn = useMemo(() => ({
+    id: 'watch',
+    header: 'Flag',
+    minWidth: 45,
+    cell: (item) => {
+      const caseId = item.__caseIdNumeric ?? Number(item.case_id);
+      const isWatchable = Number.isFinite(caseId) && caseId > 0;
+      const isWatched = Boolean(item.__isWatched);
+      const pending = isWatchable && watchPending.has(caseId);
+      const icon = (
+        <Icon
+          name="flag"
+          size="small"
+          variant={isWatched ? 'error' : 'normal'}
+        />
+      );
+      return (
+        <Button
+          variant="icon"
+          iconSvg={icon}
+          disabled={!isWatchable || pending}
+          ariaLabel={isWatched ? 'Unflag case' : 'Flag case'}
+          onClick={() => handleToggleWatch(item)}
+          title={!isWatchable ? 'Case record not yet created' : (isWatched ? 'Remove flag' : 'Flag this case')}
+        />
+      );
+    },
+  }), [handleToggleWatch, watchPending]);
 
   const actionsColumn = {
     id: 'actions', header: 'Actions', minWidth: 160, cell: item => {
@@ -316,17 +547,167 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       );
     }
   };
-  const allColumns = [...columns, actionsColumn];
+  const widthOverrides = useMemo(() => {
+    const map = new Map();
+    columnWidths.forEach(({ id, width }) => {
+      if (typeof id === 'string' && Number.isFinite(width)) {
+        map.set(id, width);
+      }
+    });
+    return map;
+  }, [columnWidths]);
 
-  const pagesCount = Math.max(1, Math.ceil(totalCount / pageSize));
+  const applyWidth = useCallback((column) => {
+    if (!column) {
+      return null;
+    }
+    const override = widthOverrides.get(column.id);
+    if (typeof override === 'number' && !Number.isNaN(override)) {
+      return { ...column, width: override };
+    }
+    return column;
+  }, [widthOverrides]);
+
+  const allColumns = useMemo(() => {
+    const base = [
+      watchColumn,
+      detailColumns.find(column => column.id === 'tracking_id'),
+      detailColumns.find(column => column.id === 'status'),
+      detailColumns.find(column => column.id === 'lock_state'),
+      detailColumns.find(column => column.id === 'sla_risk'),
+      detailColumns.find(column => column.id === 'assigned_user_email'),
+      detailColumns.find(column => column.id === 'submitted_at'),
+      actionsColumn,
+    ].filter(Boolean);
+    return base.map(applyWidth).filter(Boolean);
+  }, [watchColumn, detailColumns, actionsColumn, applyWidth]);
+
+  const columnDefinitionsForTable = useMemo(() => (
+    allColumns.filter(c => visibleColumns.includes(c.id) || c.id === 'actions' || c.id === 'watch')
+  ), [allColumns, visibleColumns]);
+
+  const allColumnIds = useMemo(() => allColumns.map(column => column.id), [allColumns]);
+
+  const baseColumnsForPreferences = useMemo(() => [watchColumn, ...detailColumns], [watchColumn, detailColumns]);
+
+  const mergeColumnWidths = useCallback((updates) => {
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return;
+    }
+
+    setColumnWidths(prev => {
+      const validIds = new Set(allColumnIds);
+      const map = new Map();
+
+      prev.forEach(({ id, width }) => {
+        if (validIds.has(id) && Number.isFinite(width)) {
+          map.set(id, width);
+        }
+      });
+
+      updates.forEach(({ id, width }) => {
+        if (!id || !validIds.has(id)) {
+          return;
+        }
+        const numericWidth = Number(width);
+        if (Number.isFinite(numericWidth)) {
+          map.set(id, numericWidth);
+        }
+      });
+
+      const ordered = [];
+      allColumnIds.forEach(id => {
+        if (map.has(id)) {
+          ordered.push({ id, width: map.get(id) });
+          map.delete(id);
+        }
+      });
+
+      map.forEach((width, id) => {
+        ordered.push({ id, width });
+      });
+
+      return ordered;
+    });
+  }, [allColumnIds]);
+
+  const handleColumnWidthsChange = useCallback(({ detail }) => {
+    if (!detail) {
+      return;
+    }
+
+    const next = [];
+
+    if (Array.isArray(detail.columnWidths)) {
+      detail.columnWidths.forEach(entry => {
+        if (!entry || typeof entry !== 'object') {
+          return;
+        }
+        const { id, width } = entry;
+        if (typeof id === 'string' && Number.isFinite(Number(width))) {
+          next.push({ id, width: Number(width) });
+        }
+      });
+    } else if (Array.isArray(detail.widths)) {
+      detail.widths.forEach((width, index) => {
+        const column = columnDefinitionsForTable[index];
+        if (column && Number.isFinite(Number(width))) {
+          next.push({ id: column.id, width: Number(width) });
+        }
+      });
+    }
+
+    if (next.length > 0) {
+      mergeColumnWidths(next);
+    }
+  }, [columnDefinitionsForTable, mergeColumnWidths]);
+
+  const effectiveTotal = showWatchedOnly ? filteredItems.length : totalCount;
+  const pagesCount = Math.max(1, Math.ceil(effectiveTotal / pageSize));
   const preferences = {
     pageSize,
-    contentDisplay: columns.map(c => ({ id: c.id, visible: visibleColumns.includes(c.id) }))
+    contentDisplay: baseColumnsForPreferences.map(c => ({ id: c.id, visible: visibleColumns.includes(c.id) })),
+    columnWidths,
   };
+  const columnPreferenceOptions = [
+    { id: 'watch', label: 'Flag', alwaysVisible: true },
+    ...detailColumns.map(c => ({
+      id: c.id,
+      label: typeof c.header === 'string' ? c.header : c.id,
+      alwaysVisible: c.id === 'tracking_id'
+    })),
+    { id: 'actions', label: 'Actions', alwaysVisible: true }
+  ];
+
+  const headerContent = (
+    <Header
+      variant="h2"
+      actions={
+        <SpaceBetween direction="horizontal" size="xs">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            <Toggle
+              checked={showWatchedOnly}
+              onChange={({ detail }) => setShowWatchedOnly(detail.checked)}
+            >
+              My watched cases
+            </Toggle>
+            {watchLoading && <Spinner size="small" />}
+          </div>
+          <Button
+            iconName="refresh"
+            onClick={() => { setCurrentPageIndex(1); load(); }}
+            ariaLabel="Refresh applications"
+          />
+        </SpaceBetween>
+      }
+    >
+      ISET Applications
+    </Header>
+  );
 
   return (
     <BoardItem
-  header={<Header variant="h2" actions={<Button iconName="refresh" onClick={() => { setCurrentPageIndex(1); load(); }} ariaLabel="Refresh applications"/>}>ISET Applications</Header>}
+      header={headerContent}
       i18nStrings={{
         dragHandleAriaLabel: 'Drag handle',
         dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
@@ -349,34 +730,83 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         ))}
         <Box variant="small">The table shows applications in your purview.  Progam Admins can see all applications. Regional Coordinators can see applications assigned to them, or to assessors in their region.  Assessors can only see applications assigned to them.</Box>
         <Box>
-          {loading ? <Box textAlign="center" padding="m"><Spinner /> Loading...</Box> : error ? <Box color="error" textAlign="center">{error}</Box> : (
-            <Table
-              columnDefinitions={allColumns.filter(c => visibleColumns.includes(c.id) || c.id === 'actions')}
-              items={filteredItems}
-              loading={false}
-              variant="embedded"
-              wrapLines
-              resizableColumns
-              stickyHeader
-              stripedRows
-              selectionType="multi"
-              selectedItems={selectedItems}
-              onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
-              empty={<Box textAlign="center">No cases</Box>}
-              ariaLabels={{
-                selectionGroupLabel: 'Cases',
-                allItemsSelectionLabel: () => 'select all',
-                itemSelectionLabel: ({ selectedItems }, item) => item.tracking_id,
-                tableLabel: 'Cases table',
-                header: 'Cases',
-                rowHeader: 'Case ID'
-              }}
-              renderAriaLive={({ firstIndex, lastIndex }) => `Displaying items ${firstIndex} to ${lastIndex}`}
-              filter={<TextFilter filteringPlaceholder="Search" filteringText={filteringText} onChange={({ detail }) => { setFilteringText(detail.filteringText); setCurrentPageIndex(1); }} />}
-              pagination={<Pagination currentPageIndex={currentPageIndex} pagesCount={pagesCount} onChange={({ detail }) => setCurrentPageIndex(detail.currentPageIndex)} />}
-              preferences={<CollectionPreferences title="Preferences" confirmLabel="Confirm" cancelLabel="Cancel" preferences={preferences} pageSizePreference={{ title: 'Page size', options: PAGE_SIZE_OPTIONS.map(v => ({ value: v, label: `${v} rows` })) }} contentDisplayPreference={{ title: 'Select visible columns', options: columns.map(c => ({ id: c.id, label: c.header, alwaysVisible: c.id === 'tracking_id' })).concat([{ id: 'actions', label: 'Actions', alwaysVisible: true }]) }} onConfirm={({ detail }) => { setPageSize(detail.pageSize); setVisibleColumns(detail.contentDisplay.filter(c => c.visible).map(c => c.id)); setCurrentPageIndex(1); }} />}
-            />
-          )}
+          <SpaceBetween direction="vertical" size="xs">
+            {loading ? (
+              <Box textAlign="center" padding="m"><Spinner /> Loading...</Box>
+            ) : error ? (
+              <Box color="error" textAlign="center">{error}</Box>
+            ) : (
+              <Table
+                columnDefinitions={columnDefinitionsForTable}
+                items={filteredItems}
+                loading={false}
+                variant="embedded"
+                wrapLines
+                resizableColumns
+                onColumnWidthsChange={handleColumnWidthsChange}
+                stickyHeader
+                stripedRows
+                selectionType="multi"
+                selectedItems={selectedItems}
+                onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
+                empty={<Box textAlign="center">No cases</Box>}
+                ariaLabels={{
+                  selectionGroupLabel: 'Cases',
+                  allItemsSelectionLabel: () => 'select all',
+                  itemSelectionLabel: ({ selectedItems }, item) => item.tracking_id,
+                  tableLabel: 'Cases table',
+                  header: 'Cases',
+                  rowHeader: 'Case ID'
+                }}
+                renderAriaLive={({ firstIndex, lastIndex }) => `Displaying items ${firstIndex} to ${lastIndex}`}
+                filter={<TextFilter filteringPlaceholder="Search" filteringText={filteringText} onChange={({ detail }) => { setFilteringText(detail.filteringText); setCurrentPageIndex(1); }} />}
+                pagination={<Pagination currentPageIndex={currentPageIndex} pagesCount={pagesCount} onChange={({ detail }) => setCurrentPageIndex(detail.currentPageIndex)} />}
+                preferences={
+                  <CollectionPreferences
+                    title="Preferences"
+                    confirmLabel="Confirm"
+                    cancelLabel="Cancel"
+                    preferences={preferences}
+                    pageSizePreference={{ title: 'Page size', options: PAGE_SIZE_OPTIONS.map(v => ({ value: v, label: `${v} rows` })) }}
+                    contentDisplayPreference={{ title: 'Select visible columns', options: columnPreferenceOptions }}
+                    onConfirm={({ detail }) => {
+                      if (detail.pageSize !== undefined) {
+                        setPageSize(detail.pageSize);
+                      }
+                      if (Array.isArray(detail.contentDisplay)) {
+                        const nextVisible = detail.contentDisplay
+                          .filter(c => c.visible)
+                          .map(c => c.id);
+                        if (!nextVisible.includes('watch')) {
+                          nextVisible.unshift('watch');
+                        }
+                        setVisibleColumns(nextVisible);
+                        setCurrentPageIndex(1);
+                      }
+                      if (Array.isArray(detail.columnWidths)) {
+                        const sanitized = detail.columnWidths
+                          .map(entry => {
+                            if (!entry || typeof entry !== 'object') {
+                              return null;
+                            }
+                            const { id, width } = entry;
+                            if (typeof id !== 'string' || !Number.isFinite(Number(width))) {
+                              return null;
+                            }
+                            return { id, width: Number(width) };
+                          })
+                          .filter(Boolean);
+
+                        if (sanitized.length > 0) {
+                          mergeColumnWidths(sanitized);
+                        }
+                      }
+                    }}
+                  />
+                }
+              />
+            )}
+          </SpaceBetween>
         </Box>
         {assignModalVisible && (
           <Modal
