@@ -171,60 +171,11 @@ try {
     }
 
     Write-Host ("Uploaded snapshot to {0}" -f $s3Uri)
-    $global:DeployTestDb_State = [ordered]@{
-        TempRoot = $tempRoot
-        S3Uri    = $s3Uri
-        S3Key    = $s3Key
-        Snapshot = $sanitizedPath
-    }
-
-    Write-Section -Message 'Import database'
-    $importInstance = $InstanceIds[0]
-    Write-Host ("Using import instance {0}" -f $importInstance)
-
-    $escapedPassword = $DbPassword.Replace('"', '\"')
-    $importCommands = @(
-        'set -euo pipefail',
-        ('export MYSQL_PWD="{0}"' -f $escapedPassword),
-        ('aws s3 cp {0} /tmp/snapshot.sql --region {1}' -f $s3Uri, $Region),
-        ('mysql -h {0} -u {1} -e "DROP DATABASE IF EXISTS `{2}`;"' -f $DbHost, $DbUser, $DbName),
-        ('mysql -h {0} -u {1} < /tmp/snapshot.sql' -f $DbHost, $DbUser),
-        'rm -f /tmp/snapshot.sql',
-        'unset MYSQL_PWD'
-    )
-
-    $importJson = $importCommands | ConvertTo-Json -Compress
-    $escapedImportJson = $importJson.Replace([char]34, '"')
-    $parameterValue = 'commands="' + $escapedImportJson + '"'
-
-    $sendArgs = @(
-        'ssm', 'send-command',
-        '--document-name', 'AWS-RunShellScript',
-        '--instance-ids', $importInstance,
-        '--region', $Region,
-        '--parameters', $parameterValue,
-        '--query', 'Command.CommandId',
-        '--output', 'text'
-    )
-
-    $commandId = (Invoke-AwsCli -Arguments $sendArgs).Trim()
-    Write-Host ("SSM command submitted: {0}" -f $commandId)
-
-    Wait-SsmCommand -CommandId $commandId -InstanceId $importInstance -Region $Region
-    Write-Host 'Database import completed successfully.' -ForegroundColor Green
+    Write-Section -Message 'Done'
+    Write-Host ("Snapshot ready at {0}. Proceed with manual import steps." -f $s3Uri)
 }
 finally {
     Write-Section -Message 'Cleanup'
-
-    if ($global:DeployTestDb_State -and $global:DeployTestDb_State.S3Uri) {
-        try {
-            $removeArgs = @('s3', 'rm', $global:DeployTestDb_State.S3Uri, '--region', $Region)
-            Invoke-AwsCli -Arguments $removeArgs | Out-Null
-            Write-Host ("Removed S3 object {0}" -f $global:DeployTestDb_State.S3Uri)
-        } catch {
-            Write-Warning ("Failed to remove S3 object {0}: {1}" -f $global:DeployTestDb_State.S3Uri, $_.Exception.Message)
-        }
-    }
 
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -232,9 +183,4 @@ finally {
     } else {
         Write-Host 'No temporary workspace to remove.'
     }
-
-    Remove-Variable -Name DeployTestDb_State -Scope Global -ErrorAction SilentlyContinue
 }
-
-Write-Section -Message 'Done'
-Write-Host 'Database snapshot uploaded and import attempted.'

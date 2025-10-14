@@ -9,7 +9,10 @@ const POOL_ID = process.env.COGNITO_USER_POOL_ID;
 const REGION = process.env.AWS_REGION || process.env.COGNITO_REGION;
 
 function getClient() {
-  return new CognitoIdentityProviderClient({ region: REGION, credentials: resolveAwsCredentials() });
+  const credentials = resolveAwsCredentials();
+  const config = { region: REGION };
+  if (credentials) config.credentials = credentials;
+  return new CognitoIdentityProviderClient(config);
 }
 
 // Guard matrix
