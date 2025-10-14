@@ -2,6 +2,11 @@ const path = require('path');
 const crypto = require('crypto');
 const { maskName } = require('./src/utils/utils');
 const { getInternalNotifications, dismissInternalNotification } = require('./src/internalNotifications');
+const {
+  createCaseWatch,
+  deleteCaseWatch,
+  listCaseWatchesForUser,
+} = require('./src/server/caseWatchRepository');
 const { dispatchInternalNotifications } = require('../shared/events/notificationDispatcher');
 const nunjucks = require("nunjucks");
 let pool; // Initialized after DB config loads
@@ -87,6 +92,41 @@ function resolveRequestActor(req) {
   const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || req.auth?.userId || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
   const actorName = req.auth?.name || req.get('X-Dev-Username') || req.get('x-dev-username') || null;
   return { actorId, actorName };
+}
+
+function resolveActiveStaffProfileId(req) {
+  const candidateValues = [];
+  if (req?.staffProfile?.id) candidateValues.push(req.staffProfile.id);
+  if (req?.auth?.staffProfileId) candidateValues.push(req.auth.staffProfileId);
+  if (typeof req?.get === 'function') {
+    candidateValues.push(req.get('X-Dev-UserId'));
+    candidateValues.push(req.get('x-dev-userid'));
+  }
+  for (const value of candidateValues) {
+    if (value === null || typeof value === 'undefined') continue;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric;
+    }
+  }
+  return null;
+}
+
+function normaliseWatchMetadata(input) {
+  if (input === null || typeof input === 'undefined') return null;
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    return trimmed ? { note: trimmed } : null;
+  }
+  if (typeof input === 'object') {
+    try {
+      const clone = JSON.parse(JSON.stringify(input));
+      return Object.keys(clone).length ? clone : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 function parseListQueryParam(raw) {
@@ -8682,6 +8722,242 @@ app.post('/api/cases/:id/messages', async (req, res) => {
   } catch (e) {
     console.error('POST /api/cases/:id/messages failed:', e.message);
     res.status(500).json({ error: 'failed_to_send_message' });
+  }
+});
+
+app.get('/api/me/case-watches', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+
+    const [[staffRow]] = await pool.query(
+      'SELECT id, primary_role FROM staff_profiles WHERE id = ? LIMIT 1',
+      [staffProfileId]
+    );
+    if (!staffRow) {
+      return res.status(404).json({ error: 'staff_profile_not_found' });
+    }
+
+    const watches = await listCaseWatchesForUser(pool, staffProfileId);
+    if (!watches.length) {
+      return res.status(200).json([]);
+    }
+
+    const caseIds = Array.from(
+      new Set(
+        watches
+          .map((entry) => Number(entry.caseId))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      )
+    );
+
+    let caseMap = new Map();
+    if (caseIds.length) {
+      const placeholders = caseIds.map(() => '?').join(',');
+      const [caseRows] = await pool.query(
+        `SELECT
+            c.id,
+            c.status,
+            c.assigned_to_user_id,
+            c.updated_at,
+            sub.reference_number AS tracking_id,
+            applicant.name AS applicant_name,
+            applicant.email AS applicant_email,
+            staff.email AS assigned_staff_email
+         FROM iset_case c
+         LEFT JOIN iset_application a ON a.id = c.application_id
+         LEFT JOIN iset_application_submission sub ON sub.id = a.submission_id
+         LEFT JOIN user applicant ON applicant.id = sub.user_id
+         LEFT JOIN staff_profiles staff ON staff.id = c.assigned_to_user_id
+        WHERE c.id IN (${placeholders})`,
+        caseIds
+      );
+      caseMap = new Map(caseRows.map((row) => [Number(row.id), row]));
+    }
+
+    const payload = watches.map((watch) => {
+      const caseId = Number(watch.caseId);
+      const match = caseMap.get(caseId) || {};
+      const assignedRaw = match.assigned_to_user_id;
+      const assignedToStaffProfileId =
+        assignedRaw === null || typeof assignedRaw === 'undefined'
+          ? null
+          : Number(assignedRaw);
+
+      return {
+        caseId,
+        metadata: watch.metadata,
+        createdAt: watch.createdAt,
+        updatedAt: watch.updatedAt,
+        status: match.status || null,
+        stage: null,
+        trackingId: match.tracking_id || null,
+        applicantName: match.applicant_name || match.applicant_email || null,
+        applicantEmail: match.applicant_email || null,
+        assignedToStaffProfileId: Number.isFinite(assignedToStaffProfileId)
+          ? assignedToStaffProfileId
+          : null,
+        assignedStaffEmail: match.assigned_staff_email || null,
+        lastActivityAt: match.updated_at || null,
+      };
+    });
+
+    res.status(200).json(payload);
+  } catch (error) {
+    console.error('[case-watch] list failed', error);
+    res.status(500).json({ error: 'failed_to_list_case_watches' });
+  }
+});
+
+app.post('/api/cases/:caseId/watch', async (req, res) => {
+  const caseId = Number(req.params.caseId);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+
+  const staffProfileId = resolveActiveStaffProfileId(req);
+  if (!staffProfileId) {
+    return res.status(401).json({ error: 'staff_profile_required' });
+  }
+
+  try {
+    const [[staffRow]] = await pool.query(
+      'SELECT id, primary_role FROM staff_profiles WHERE id = ? LIMIT 1',
+      [staffProfileId]
+    );
+    if (!staffRow) {
+      return res.status(404).json({ error: 'staff_profile_not_found' });
+    }
+
+    const [[caseRow]] = await pool.query(
+      `SELECT
+          c.id,
+          c.status,
+          c.assigned_to_user_id,
+          c.updated_at,
+          sub.reference_number AS tracking_id,
+          applicant.name AS applicant_name,
+          applicant.email AS applicant_email,
+          staff.email AS assigned_staff_email
+         FROM iset_case c
+         LEFT JOIN iset_application a ON a.id = c.application_id
+         LEFT JOIN iset_application_submission sub ON sub.id = a.submission_id
+         LEFT JOIN user applicant ON applicant.id = sub.user_id
+         LEFT JOIN staff_profiles staff ON staff.id = c.assigned_to_user_id
+        WHERE c.id = ?
+        LIMIT 1`,
+      [caseId]
+    );
+    if (!caseRow) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+
+    let metadata = null;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'metadata')) {
+      metadata = normaliseWatchMetadata(req.body.metadata);
+      if (metadata) {
+        const encoded = JSON.stringify(metadata);
+        if (encoded.length > 2048) {
+          return res.status(400).json({ error: 'metadata_too_large' });
+        }
+      }
+    }
+
+    const watch = await createCaseWatch(pool, { caseId, staffProfileId, metadata });
+    const { actorId, actorName } = resolveRequestActor(req) || {};
+
+    try {
+      await captureCaseEvent({
+        type: 'case_watch_added',
+        caseId,
+        payload: {
+          staffProfileId,
+          staffPrimaryRole: staffRow.primary_role || null,
+        },
+        actorId,
+        actorName,
+      });
+    } catch (eventErr) {
+      console.warn('[case-watch] failed to emit watch_added event', eventErr);
+    }
+
+    res.status(200).json({
+      watch,
+      case: {
+        id: Number(caseRow.id),
+        status: caseRow.status || null,
+        stage: null,
+        trackingId: caseRow.tracking_id || null,
+        applicantName: caseRow.applicant_name || caseRow.applicant_email || null,
+        applicantEmail: caseRow.applicant_email || null,
+        assignedToStaffProfileId:
+          caseRow.assigned_to_user_id == null
+            ? null
+            : Number(caseRow.assigned_to_user_id),
+        assignedStaffEmail: caseRow.assigned_staff_email || null,
+        lastActivityAt: caseRow.updated_at || null,
+      },
+    });
+  } catch (error) {
+    console.error('[case-watch] create failed', error);
+    res.status(500).json({ error: 'failed_to_create_case_watch' });
+  }
+});
+
+app.delete('/api/cases/:caseId/watch', async (req, res) => {
+  const caseId = Number(req.params.caseId);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+
+  const staffProfileId = resolveActiveStaffProfileId(req);
+  if (!staffProfileId) {
+    return res.status(401).json({ error: 'staff_profile_required' });
+  }
+
+  try {
+    const [[staffRow]] = await pool.query(
+      'SELECT id, primary_role FROM staff_profiles WHERE id = ? LIMIT 1',
+      [staffProfileId]
+    );
+    if (!staffRow) {
+      return res.status(404).json({ error: 'staff_profile_not_found' });
+    }
+
+    const [[caseRow]] = await pool.query(
+      'SELECT id FROM iset_case WHERE id = ? LIMIT 1',
+      [caseId]
+    );
+    if (!caseRow) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+
+    const removed = await deleteCaseWatch(pool, { caseId, staffProfileId });
+
+    if (removed > 0) {
+      const { actorId, actorName } = resolveRequestActor(req) || {};
+      try {
+        await captureCaseEvent({
+          type: 'case_watch_removed',
+          caseId,
+          payload: {
+            staffProfileId,
+            staffPrimaryRole: staffRow.primary_role || null,
+          },
+          actorId,
+          actorName,
+        });
+      } catch (eventErr) {
+        console.warn('[case-watch] failed to emit watch_removed event', eventErr);
+      }
+    }
+
+    res.status(200).json({ removed: removed > 0 });
+  } catch (error) {
+    console.error('[case-watch] delete failed', error);
+    res.status(500).json({ error: 'failed_to_remove_case_watch' });
   }
 });
 
