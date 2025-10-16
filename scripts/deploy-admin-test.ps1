@@ -176,6 +176,9 @@ try {
     Copy-Item -Path (Join-Path $repoRoot "package.json") -Destination (Join-Path $stagingPath "package.json") -Force
     Copy-Item -Path (Join-Path $repoRoot "package-lock.json") -Destination (Join-Path $stagingPath "package-lock.json") -Force
     Copy-Item -Path (Join-Path $repoRoot ".env.test") -Destination (Join-Path $stagingPath ".env.test") -Force
+    $configDir = Join-Path $stagingPath "src/config"
+    New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    Copy-Item -Path (Join-Path $repoRoot "src/config/roleMatrix.json") -Destination (Join-Path $configDir "roleMatrix.json") -Force
 
     $archiveName = "admin-dashboard-$timestamp.zip"
     $archivePath = Join-Path $tempRoot $archiveName
@@ -231,6 +234,8 @@ try {
         'cp "$TMPDIR/.env.test" /home/ec2-user/admin-dashboard/.env',
         'cp "$TMPDIR/.env.test" /opt/nwac/admin-dashboard/.env',
         'cp "$TMPDIR/.env.test" /opt/nwac/admin-dashboard/.env.test',
+        'mkdir -p /opt/nwac/admin-dashboard/src/config',
+        'cp "$TMPDIR/src/config/roleMatrix.json" /opt/nwac/admin-dashboard/src/config/roleMatrix.json',
         'cd /opt/nwac/admin-dashboard',
         'echo "Skipping dependency install (npm ci/npm install) per maintenance override."',
         'export NODE_ENV=production',

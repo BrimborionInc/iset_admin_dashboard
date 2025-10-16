@@ -189,7 +189,7 @@ const App = () => {
   };
 
   return (
-    <RoleMatrixProvider>
+    <RoleMatrixProvider shouldLoad={iamEnabled && isAuthenticated}>
       <DarkModeProvider>
         <I18nProvider
           locale={currentLanguage}

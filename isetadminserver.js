@@ -47,6 +47,121 @@ const SLA_STAGE_LABELS = SLA_STAGE_PLACEHOLDER.reduce((acc, item) => {
   return acc;
 }, {});
 
+const ACCESS_MATRIX_ROLE_ORDER = ['System Administrator', 'Program Administrator', 'Regional Coordinator', 'Application Assessor'];
+const ACCESS_MATRIX_ROLE_ALIASES = {
+  'Application Assessor': 'Application Assessor',
+  ApplicationAssessor: 'Application Assessor',
+  'PTMA Staff': 'Application Assessor',
+  PTMAStaff: 'Application Assessor',
+  Adjudicator: 'Application Assessor',
+  SysAdmin: 'System Administrator',
+  'System Admin': 'System Administrator',
+  'Program Admin': 'Program Administrator',
+  ProgramAdministrator: 'Program Administrator',
+};
+
+function canonicaliseAccessRole(role) {
+  if (!role) return null;
+  const mapped = ACCESS_MATRIX_ROLE_ALIASES[role] || role;
+  return String(mapped).trim() || null;
+}
+
+function sanitiseAccessRoles(roles = []) {
+  const set = new Set();
+  if (Array.isArray(roles)) {
+    roles.forEach(role => {
+      const canonical = canonicaliseAccessRole(role);
+      if (canonical) set.add(canonical);
+    });
+  }
+  set.add('System Administrator');
+  const ordered = [];
+  for (const role of ACCESS_MATRIX_ROLE_ORDER) {
+    if (set.has(role)) {
+      ordered.push(role);
+      set.delete(role);
+    }
+  }
+  if (set.size > 0) {
+    Array.from(set).sort().forEach(role => ordered.push(role));
+  }
+  return ordered;
+}
+
+function normaliseAccessControlRoutes(routes = {}) {
+  if (!routes || typeof routes !== 'object') return {};
+  const entries = Object.entries(routes)
+    .filter(([route]) => typeof route === 'string' && route.trim().length > 0)
+    .map(([route, allowed]) => {
+      const trimmedRoute = route.trim();
+      const roleList = sanitiseAccessRoles(Array.isArray(allowed) ? allowed : []);
+      return [trimmedRoute, roleList];
+    });
+  return entries
+    .sort(([a], [b]) => a.localeCompare(b))
+    .reduce((acc, [route, allowed]) => {
+      acc[route] = allowed;
+      return acc;
+    }, {});
+}
+
+function normaliseAccessControlMatrix(matrix) {
+  if (!matrix || typeof matrix !== 'object') {
+    return { default: 'deny', routes: {} };
+  }
+  const rawDefault = typeof matrix.default === 'string' ? matrix.default.trim().toLowerCase() : 'deny';
+  const defaultPolicy = rawDefault === 'allow' ? 'allow' : 'deny';
+  const routes = normaliseAccessControlRoutes(matrix.routes || {});
+  return { default: defaultPolicy, routes };
+}
+
+let DEFAULT_ACCESS_CONTROL_MATRIX = { default: 'deny', routes: {} };
+try {
+  // eslint-disable-next-line import/no-dynamic-require, global-require
+  const accessControlConfig = require('./src/config/roleMatrix.json');
+  DEFAULT_ACCESS_CONTROL_MATRIX = normaliseAccessControlMatrix(accessControlConfig);
+} catch (err) {
+  console.warn('[access-control] failed to load default role matrix configuration:', err.message);
+}
+
+async function readAccessControlMatrix() {
+  try {
+    const [rows] = await pool.query("SELECT v, updated_at FROM iset_runtime_config WHERE scope='admin' AND k='accessControlMatrix' LIMIT 1");
+    if (!rows || rows.length === 0) {
+      return { ...DEFAULT_ACCESS_CONTROL_MATRIX, source: 'default', updatedAt: null };
+    }
+    const row = rows[0];
+    let payload = row.v;
+    if (payload && typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch (err) {
+        console.warn('[access-control] invalid JSON in persisted matrix, falling back to defaults:', err.message);
+        payload = null;
+      }
+    }
+    const matrix = normaliseAccessControlMatrix(payload || DEFAULT_ACCESS_CONTROL_MATRIX);
+    const updatedAt = row.updated_at ? new Date(row.updated_at).toISOString() : null;
+    return { ...matrix, source: payload ? 'db' : 'default', updatedAt };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.error('[access-control] failed to read persisted matrix:', err.message);
+    }
+    return { ...DEFAULT_ACCESS_CONTROL_MATRIX, source: 'default', updatedAt: null };
+  }
+}
+
+async function writeAccessControlMatrix(nextMatrix) {
+  const normalised = normaliseAccessControlMatrix(nextMatrix);
+  await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  await pool.query(
+    "INSERT INTO iset_runtime_config (scope,k,v) VALUES ('admin','accessControlMatrix', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP",
+    [JSON.stringify(normalised)]
+  );
+  const saved = await readAccessControlMatrix();
+  return saved;
+}
+
 const isMissingTableErrorLocal = (err) => {
   if (!err) return false;
   if (err.code === 'ER_NO_SUCH_TABLE') return true;
@@ -2417,6 +2532,39 @@ app.patch('/api/config/runtime/ai-fallbacks', async (req, res) => {
     console.log('[audit] ai-fallbacks-change', JSON.stringify({ when: new Date().toISOString(), fallbackModels: cleaned, by: req.auth?.sub || 'dev-bypass', role }));
     res.json({ ok: true, fallbackModels: cleaned });
   } catch (e) { res.status(500).json({ error: 'ai_fallbacks_update_failed', message: e.message }); }
+});
+
+app.get('/api/access-control/matrix', async (_req, res) => {
+  try {
+    const saved = await readAccessControlMatrix();
+    res.json({
+      matrix: { default: saved.default, routes: saved.routes },
+      source: saved.source,
+      updatedAt: saved.updatedAt,
+      defaults: DEFAULT_ACCESS_CONTROL_MATRIX,
+    });
+  } catch (err) {
+    console.error('[access-control] failed to load matrix:', err);
+    res.status(500).json({ error: 'access_matrix_load_failed', message: err.message });
+  }
+});
+
+app.put('/api/access-control/matrix', async (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const body = req.body || {};
+    const payload = body.matrix && typeof body.matrix === 'object' ? body.matrix : body;
+    const saved = await writeAccessControlMatrix(payload);
+    res.json({
+      matrix: { default: saved.default, routes: saved.routes },
+      source: saved.source || 'db',
+      updatedAt: saved.updatedAt,
+      defaults: DEFAULT_ACCESS_CONTROL_MATRIX,
+    });
+  } catch (err) {
+    console.error('[access-control] failed to persist matrix:', err);
+    res.status(500).json({ error: 'access_matrix_update_failed', message: err.message });
+  }
 });
 
 app.get('/api/config/runtime/locking', async (_req, res) => {
