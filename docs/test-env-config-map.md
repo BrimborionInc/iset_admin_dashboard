@@ -30,7 +30,7 @@ This guide documents every environment variable and secret the test environment 
 | Cognito (applicant trust) | `COGNITO_STAFF_USER_POOL_ID` / `COGNITO_STAFF_CLIENT_ID` | Legacy compatibility | Same as admin pool values |
 | IAM | `DEV_AUTH_BYPASS=false`, `DEV_DISABLE_AUTH=false` | Ensure real auth in test | Static |
 | Storage | `UPLOAD_MODE=s3`, `UPLOAD_DRIVER=s3` | Force S3 driver | Static |
-| Storage | `OBJECT_BUCKET` | Document bucket | `module.data.uploads_bucket_name` |
+| Storage | `OBJECT_BUCKET` | Document bucket | `module.data.uploads_bucket_name` (must not be left blank; missing value triggers `{ error: 's3_presign_failed' }` during uploads) |
 | Storage | `OBJECT_REGION=ca-central-1` | Bucket region | Terraform var |
 | Storage | `OBJECT_KEY_PREFIX=uploads/` | Folder prefix | Static |
 | Storage | `OBJECT_ENDPOINT` | Empty in AWS (uses real S3) | Leave unset |

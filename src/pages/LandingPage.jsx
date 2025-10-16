@@ -38,6 +38,13 @@ const copy = {
         heading: 'Features',
         sections: [
           {
+            title: 'Latest Patch',
+            paragraphs: [
+              'Users can flag applications to build a personal watch list.',
+              'Watched applications now trigger the same enhanced notifications as assigned owners.'
+            ]
+          },
+          {
             title: 'Case Management',
             paragraphs: [
               'Intake submissions flow in from the public portal with notifications targeted to the responsible role.',
@@ -97,6 +104,31 @@ const copy = {
       comingNext: {
         heading: 'Coming next patch',
         sections: [
+          {
+            title: 'Payment Alerts',
+            paragraphs: [
+              'Configure automatic finance notifications whenever an ISET payment is approved.'
+            ]
+          },
+          {
+            title: 'User-based Approver Rights',
+            paragraphs: [
+              'Program Administrators can grant individual users approve/reject privileges directly from their profiles.',
+              'Trusted staff gain self-approval controls in the application assessment widget, while others continue to route decisions for review.'
+            ]
+          },
+          {
+            title: 'Case Management Dashboard',
+            paragraphs: [
+              'Launch a post-approval dashboard that centralizes follow-up work, documents, and status tracking for each case.'
+            ]
+          },
+          {
+            title: 'Financial Management Dashboard',
+            paragraphs: [
+              'Deliver integrated financial controls and reporting tied to the Case Management dashboard to track ISET program spending against ESDC requirements.'
+            ]
+          },
           { title: 'Records Retention and Archiving', paragraphs: ['Introduce configurable retention, archiving, and disposition policies, backed by warehouse storage, automated record-keeping, and legal hold controls.'] },
           { title: 'Analytics Dashboard', paragraphs: ['Deliver a dedicated analytics view with charts, reports, and metrics.'] },
           { title: 'Release Management', paragraphs: ['Add enhanced release tooling to stage and control changes to intake workflows.'] },

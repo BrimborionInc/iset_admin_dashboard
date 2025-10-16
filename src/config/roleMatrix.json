@@ -2,120 +2,115 @@
   "default": "deny",
   "routes": {
     "/access-control": [
-      "System Administrator"
+      "System Administrator",
+      "Program Administrator"
     ],
     "/admin/upload-config": [
-      "System Administrator"
+      "System Administrator",
+      "Program Administrator"
     ],
     "/application-case/:id": [
       "System Administrator",
       "Program Administrator",
       "Regional Coordinator",
-      "PTMA Staff"
+      "Application Assessor"
     ],
     "/arms-reporting": [
-      "System Administrator",
-      "Program Administrator"
+      "System Administrator"
     ],
     "/audit-logs-dashboard": [
       "System Administrator"
     ],
     "/capacity-planning-dashboard": [
-      "System Administrator",
-      "Program Administrator"
+      "System Administrator"
     ],
     "/case-assignment-dashboard": [
       "System Administrator",
       "Program Administrator",
       "Regional Coordinator",
-      "PTMA Staff"
+      "Application Assessor"
     ],
     "/case-assignment-dashboard?view=assignment": [
-      "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "PTMA Staff"
+      "System Administrator"
     ],
     "/configuration/events": [
-      "System Administrator"
-    ],
-    "/configuration-settings": [
-      "System Administrator"
-    ],
-    "/custom-dashboards-dashboard": [
       "System Administrator",
       "Program Administrator"
+    ],
+    "/configuration-settings": [
+      "System Administrator",
+      "Program Administrator"
+    ],
+    "/custom-dashboards-dashboard": [
+      "System Administrator"
     ],
     "/help-support-dashboard": [
       "System Administrator",
       "Program Administrator",
       "Regional Coordinator",
-      "PTMA Staff"
+      "Application Assessor"
     ],
     "/language-settings-dashboard": [
-      "System Administrator",
-      "Program Administrator"
+      "System Administrator"
     ],
     "/manage-components": [
-      "System Administrator"
+      "System Administrator",
+      "Program Administrator"
     ],
     "/manage-notifications": [
       "System Administrator",
       "Program Administrator"
     ],
     "/manage-security-options": [
-      "System Administrator"
+      "System Administrator",
+      "Program Administrator"
     ],
     "/manage-workflows": [
-      "System Administrator"
+      "System Administrator",
+      "Program Administrator"
     ],
     "/modify-component/:id": [
-      "System Administrator"
+      "System Administrator",
+      "Program Administrator"
     ],
     "/modify-workflow": [
-      "System Administrator"
+      "System Administrator",
+      "Program Administrator"
     ],
     "/nwac-hub-management": [
       "System Administrator"
     ],
     "/ptma-management": [
-      "System Administrator",
-      "Regional Coordinator"
+      "System Administrator"
     ],
     "/release-management-dashboard": [
       "System Administrator"
     ],
     "/reporting-and-monitoring-dashboard": [
-      "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator"
+      "System Administrator"
     ],
     "/reporting-dashboard": [
-      "System Administrator",
-      "Program Administrator"
+      "System Administrator"
     ],
     "/service-levels-dashboard": [
-      "System Administrator",
-      "Program Administrator"
+      "System Administrator"
     ],
     "/system-performance-dashboard": [
-      "System Administrator",
-      "Program Administrator"
+      "System Administrator"
     ],
     "/tutorials-dashboard": [
       "System Administrator",
       "Program Administrator",
       "Regional Coordinator",
-      "PTMA Staff"
+      "Application Assessor"
     ],
     "/user-management-dashboard": [
       "System Administrator",
+      "Program Administrator",
       "Regional Coordinator"
     ],
     "/visual-settings": [
-      "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator"
+      "System Administrator"
     ]
   }
 }

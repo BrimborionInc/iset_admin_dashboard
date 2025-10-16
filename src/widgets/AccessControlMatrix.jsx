@@ -52,7 +52,7 @@ const ROUTE_LABELS = {
 const getRouteLabel = (route) => ROUTE_LABELS[route] || route;
 
 const AccessControlMatrix = () => {
-  const { roleMatrix, isLoading, error, pendingRoutes, refreshRoleMatrix, updateRouteRoles } = useRoleMatrix();
+  const { roleMatrix, isLoading, error, pendingRoutes, reloadRoleMatrix, refreshRoleMatrix, updateRouteRoles } = useRoleMatrix();
   const [interactionError, setInteractionError] = useState(null);
 
   const rows = useMemo(() => {
@@ -141,16 +141,25 @@ const AccessControlMatrix = () => {
         <Alert
           type="info"
           header="Manage dashboard access"
-          action={<Button onClick={refreshRoleMatrix} iconName="refresh" variant="link">Restore defaults</Button>}
+          action={(
+            <Button
+              onClick={() => refreshRoleMatrix().catch(() => {})}
+              iconName="refresh"
+              variant="link"
+              disabled={isLoading}
+            >
+              Restore defaults
+            </Button>
+          )}
         >
-          Updates apply immediately and persist in this browser. Use Restore defaults to reload the baseline configuration.
+          Updates apply immediately for all administrators and persist in the shared configuration store. Use Restore defaults to reinstate the baseline configuration.
         </Alert>
         {error && (
           <Alert
             type="error"
             header="Unable to load access control settings"
             action={
-              <Button onClick={refreshRoleMatrix} variant="primary">Retry</Button>
+              <Button onClick={() => reloadRoleMatrix().catch(() => {})} variant="primary" disabled={isLoading}>Retry</Button>
             }
           >
             {error}
