@@ -4,7 +4,7 @@ import { ItemsPalette, BoardItem } from '@cloudscape-design/board-components';
 import ChartImage from '../assets/images/chart-placeholder.png'; // Import a generic chart image
 
 const CustomSplitPanel = ({ availableItems, handleItemSelect, splitPanelSize, setSplitPanelSize, splitPanelOpen, setSplitPanelOpen }) => {
-  return (
+    return (
     <SplitPanel
       header="Available Widgets"
       closeBehavior="hide"
@@ -22,10 +22,11 @@ const CustomSplitPanel = ({ availableItems, handleItemSelect, splitPanelSize, se
       <ItemsPalette
         items={availableItems}
         onItemSelect={({ detail }) => {
-          try {
+                    try {
             const id = detail && detail.item && detail.item.id;
             if (id) window.dispatchEvent(new CustomEvent('palette:add', { detail: { id } }));
-          } catch {}
+          } catch (err) {
+                      }
           if (handleItemSelect) handleItemSelect(detail.item);
         }}
         i18nStrings={{ header: "Available Widgets" }}
@@ -61,3 +62,4 @@ const CustomSplitPanel = ({ availableItems, handleItemSelect, splitPanelSize, se
 };
 
 export default CustomSplitPanel;
+

@@ -44,6 +44,38 @@
     "/custom-dashboards-dashboard": [
       "System Administrator"
     ],
+    "/finance/overview": [
+      "System Administrator",
+      "Program Administrator"
+    ],
+    "/finance/budgets": [
+      "System Administrator",
+      "Program Administrator"
+    ],
+    "/finance/allocations": [
+      "System Administrator",
+      "Program Administrator"
+    ],
+    "/finance/reconciliation": [
+      "System Administrator",
+      "Program Administrator"
+    ],
+    "/finance/reports": [
+      "System Administrator",
+      "Program Administrator"
+    ],
+    "/finance/monitoring": [
+      "System Administrator",
+      "Program Administrator"
+    ],
+    "/finance/forecasting": [
+      "System Administrator",
+      "Program Administrator"
+    ],
+    "/finance/settings": [
+      "System Administrator",
+      "Program Administrator"
+    ],
     "/help-support-dashboard": [
       "System Administrator",
       "Program Administrator",
@@ -114,3 +146,4 @@
     ]
   }
 }
+
