@@ -79,6 +79,17 @@ const normaliseMatrix = (matrix) => {
 
 const baseMatrix = normaliseMatrix(roleMatrixData);
 
+const mergeWithBaseRoutes = (matrix = baseMatrix) => {
+  const combined = {
+    default: typeof matrix?.default === 'string' ? matrix.default : baseMatrix.default,
+    routes: {
+      ...(baseMatrix.routes || {}),
+      ...(matrix?.routes || {}),
+    },
+  };
+  return normaliseMatrix(combined);
+};
+
 const extractErrorMessage = async (response, fallback) => {
   try {
     const data = await response.json();
@@ -127,7 +138,8 @@ export const RoleMatrixProvider = ({ children, shouldLoad = false }) => {
       try {
         const matrix = await fetchMatrixFromServer();
         if (!cancelled) {
-          setRoleMatrix(matrix);
+          const merged = mergeWithBaseRoutes(matrix);
+          setRoleMatrix(merged);
           setHasLoadedFromServer(true);
         }
       } catch (err) {
@@ -163,7 +175,8 @@ export const RoleMatrixProvider = ({ children, shouldLoad = false }) => {
       throw err;
     }
     const payload = await response.json();
-    return normaliseMatrix(payload?.matrix || payload);
+    const normalised = normaliseMatrix(payload?.matrix || payload);
+    return mergeWithBaseRoutes(normalised);
   }, [shouldLoad]);
 
   const updateRouteRoles = useCallback(async (route, updater) => {
@@ -171,10 +184,10 @@ export const RoleMatrixProvider = ({ children, shouldLoad = false }) => {
     if (!shouldLoad) {
       throw new Error('Access control configuration is not available while signed out.');
     }
-    const currentMatrix = roleMatrix || baseMatrix;
+    const currentMatrix = mergeWithBaseRoutes(roleMatrix || baseMatrix);
     const currentRoles = currentMatrix.routes?.[route] || [];
     const nextRoles = sortRoles(updater([...currentRoles]));
-    const nextMatrix = normaliseMatrix({
+    const nextMatrix = mergeWithBaseRoutes({
       default: currentMatrix.default || 'deny',
       routes: {
         ...(currentMatrix.routes || {}),
@@ -214,9 +227,10 @@ export const RoleMatrixProvider = ({ children, shouldLoad = false }) => {
     setError(null);
     try {
       const matrix = await fetchMatrixFromServer();
-      setRoleMatrix(matrix);
+      const merged = mergeWithBaseRoutes(matrix);
+      setRoleMatrix(merged);
       setHasLoadedFromServer(true);
-      return matrix;
+      return merged;
     } catch (err) {
       const message = err?.message || 'Failed to load access control settings.';
       setError(message);
@@ -240,7 +254,8 @@ export const RoleMatrixProvider = ({ children, shouldLoad = false }) => {
     setError(null);
     setPendingRoutes({});
     try {
-      const saved = await persistMatrixRemote(baseMatrix);
+      const defaults = mergeWithBaseRoutes(baseMatrix);
+      const saved = await persistMatrixRemote(defaults);
       setRoleMatrix(saved);
       setHasLoadedFromServer(true);
       return saved;

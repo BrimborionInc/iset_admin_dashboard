@@ -70,6 +70,20 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
     },
     {
       type: 'section',
+      text: 'Financial Management',
+      items: [
+        { type: 'link', text: 'Finance Overview', href: '/finance/overview' },
+        { type: 'link', text: 'Budgets', href: '/finance/budgets' },
+        { type: 'link', text: 'Allocations & Transfers', href: '/finance/allocations' },
+        { type: 'link', text: 'Reconciliation', href: '/finance/reconciliation' },
+        { type: 'link', text: 'Financial Reports', href: '/finance/reports' },
+        { type: 'link', text: 'Monitoring & Evidence', href: '/finance/monitoring' },
+        { type: 'link', text: 'Forecasting & Scenarios', href: '/finance/forecasting' },
+        { type: 'link', text: 'Finance Settings', href: '/finance/settings' },
+      ],
+    },
+    {
+      type: 'section',
       text: 'Other Dashboards',
       items: [
         { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },

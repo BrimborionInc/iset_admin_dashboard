@@ -50,6 +50,15 @@ import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Impor
 import AuthCallback from '../pages/AuthCallback.js';
 import UploadConfigDashboard from '../pages/uploadConfigDashboard.js';
 import EventCaptureDashboard from '../pages/configuration/EventCaptureDashboard.js';
+import FinanceOverviewPage from '../pages/finance/FinanceOverviewPage.jsx';
+import FinanceOverviewHelp from '../helpPanelContents/financeOverviewHelp.js';
+import FinanceBudgetsPage from '../pages/finance/FinanceBudgetsPage.jsx';
+import FinanceAllocationsPage from '../pages/finance/FinanceAllocationsPage.jsx';
+import FinanceReconciliationPage from '../pages/finance/FinanceReconciliationPage.jsx';
+import FinanceReportsPage from '../pages/finance/FinanceReportsPage.jsx';
+import FinanceMonitoringPage from '../pages/finance/FinanceMonitoringPage.jsx';
+import FinanceForecastingPage from '../pages/finance/FinanceForecastingPage.jsx';
+import FinanceSettingsPage from '../pages/finance/FinanceSettingsPage.jsx';
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -459,6 +468,135 @@ const AppRoutes = ({
             ],
             'NWAC Hub Management',
             'nwacHubManagement'
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/finance/overview">
+        <Guard path="/finance/overview">
+          {renderContent(
+            FinanceOverviewPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Financial Management', href: '/finance/overview' }
+            ],
+            'Finance Overview',
+            <FinanceOverviewHelp />,
+            (
+              <SpaceBetween direction="horizontal" size="s">
+                <Button iconName="add-plus" onClick={() => window.dispatchEvent(new CustomEvent("finance:openPalette"))}>
+                  Add widget
+                </Button>
+                <Button iconName="refresh" onClick={() => window.dispatchEvent(new CustomEvent("finance:resetLayout"))}>
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            )
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/finance/budgets">
+        <Guard path="/finance/budgets">
+          {renderContent(
+            FinanceBudgetsPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Budgets', href: '/finance/budgets' }
+            ],
+            'Budgets',
+            'financeBudgets'
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/finance/allocations">
+        <Guard path="/finance/allocations">
+          {renderContent(
+            FinanceAllocationsPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Allocations & Transfers', href: '/finance/allocations' }
+            ],
+            'Allocations & Transfers',
+            'financeAllocations'
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/finance/reconciliation">
+        <Guard path="/finance/reconciliation">
+          {renderContent(
+            FinanceReconciliationPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Reconciliation', href: '/finance/reconciliation' }
+            ],
+            'Reconciliation',
+            'financeReconciliation'
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/finance/reports">
+        <Guard path="/finance/reports">
+          {renderContent(
+            FinanceReportsPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Financial Reports', href: '/finance/reports' }
+            ],
+            'Financial Reports',
+            'financeReports'
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/finance/monitoring">
+        <Guard path="/finance/monitoring">
+          {renderContent(
+            FinanceMonitoringPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Monitoring & Evidence', href: '/finance/monitoring' }
+            ],
+            'Monitoring & Evidence',
+            'financeMonitoring'
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/finance/forecasting">
+        <Guard path="/finance/forecasting">
+          {renderContent(
+            FinanceForecastingPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Forecasting & Scenarios', href: '/finance/forecasting' }
+            ],
+            'Forecasting & Scenarios',
+            'financeForecasting'
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/finance/settings">
+        <Guard path="/finance/settings">
+          {renderContent(
+            FinanceSettingsPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Finance Settings', href: '/finance/settings' }
+            ],
+            'Finance Settings',
+            'financeSettings'
           )}
         </Guard>
       </Route>
