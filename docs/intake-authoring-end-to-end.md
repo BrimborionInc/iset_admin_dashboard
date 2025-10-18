@@ -11,7 +11,7 @@ Last Updated: 2025-09-16
 4. Attach validation (required flags, rule sets, custom predicate logic) and confirm inline preview behaviour.
 5. Save the step, then use Preview to exercise conditional reveals, validation, and translations.
 6. Organise steps inside a workflow, define branching and publication status, and run the workflow-level preview.
-7. Publish the workflow, which normalises the schema and writes `intakeFormSchema.json` (+ meta) to the intake portal repo.
+7. Publish the workflow, which normalises the schema and upserts it into `iset_runtime_config` (`scope='publish'`, `k='workflow.schema.intake'`) while leaving legacy file outputs for backward compatibility.
 8. Verify the published schema inside the portal (Dynamic Runner) and release through usual deployment channels.
 
 ## Step Builder Workspace
@@ -67,18 +67,17 @@ Refer to the component pattern docs in this directory (`component-*.md`) for dee
    - Validates component templates against AJV schemas where provided.
    - Produces `{ steps, meta }`, including translation and validation completeness metrics.
 3. The publish endpoint writes:
-   - `X:\ISET\ISET-intake\src\intakeFormSchema.json`
-   - `X:\ISET\ISET-intake\src\intakeFormSchema.meta.json`
-4. A publish summary appears with file paths and commit hints for developers.
+   - Runtime payload (schema + metadata) to `iset_runtime_config` (`scope='publish'`, `k='workflow.schema.intake'`)
+   - Legacy fallback files (`intakeFormSchema.json` + meta) for historical tooling
+4. A publish summary appears with storage targets and commit hints for developers.
 5. Republish whenever step or workflow changes are ready for QA/UAT; the portal repo should be committed separately.
 
 ## Testing
 - Run `npm test -- --watch=false` (Jest via `react-scripts`) after any authoring UI change. This exercises smoke suites in `src/**/*.test.js` and must stay green before publish.
 - When signature-related components change, exercise the interactive preview (drag a signature step into a test workflow) and confirm `WorkflowPreviewWidget` transitions through unsigned -> signed -> cleared states.
 - For workflow normalization or publish-pipeline updates, run the portal smoke suite (documented in `ISET-intake/docs/features/intake-form.md`).
-## Portal Consumption & QA
-- The public portal dynamic runner (`ISET-intake/src/pages/DynamicTest.js`) imports `intakeFormSchema.json` at build time. Branching, validation, conditional reveals, and storage key mapping mirror admin previews.
-- The meta file feeds smoke tests (`utils/validatePublishedSchema.js`, `__tests__/schemaValidation.test.js`) and dashboard statistics.
+- The public portal dynamic runner fetches `/api/runtime/workflow-schema` at runtime, sharing the same normalised payload as admin preview.
+- Meta data stored alongside the payload feeds smoke tests (`utils/validatePublishedSchema.js`, runtime warning states) and dashboard statistics.
 - Use the portal `SchemaPreview` route or Jest tests to confirm published changes before deployment.
 - Portal translations are driven entirely by the authored schema; missing translations surface as `key` fallbacks or empty text, so ensure authoring QA covers both languages.
 

@@ -25,12 +25,12 @@ pm run web\ with the new .env.development.local files now exercises real hosted 
 - Runtime config and event triggers are shared through the database; there is still no message bus.
 
 ## Workflow Publication Flow
-- Admin authors manage workflows in the Step Builder; publishing writes src/intakeFormSchema.json and .meta.json into X:\ISET\ISET-intake.
-- Meta data captures translation and validation checks so the rebuilt portal can block deploys when content is incomplete.
-- The public portal continues to consume the generated JSON at startup; no runtime sync exists.
+- Admin authors manage workflows in the Step Builder; publishing now normalises the schema and upserts it into `iset_runtime_config` with `scope='publish'` / `k='workflow.schema.intake'`. File writes remain for backward compatibility but are no longer the source of truth.
+- Meta data (translation/validation counts, workflow metadata) accompanies the runtime payload so the portal can verify completeness before rendering.
+- The public portal reads `/api/runtime/workflow-schema` on demand, eliminating the previous build-time JSON dependency.
 
 ## Intake Submission Lifecycle
-- Canonical intake path remains schema-driven via src/intakeFormSchema.json; Jordan/static experiments stay quarantined in packages/legacy.
+- Canonical intake path is schema-driven via the published runtime-config payload; Jordan/static experiments stay quarantined in packages/legacy.
 - /api/intake/draft now persists to iset_application_draft_dynamic, merging step payloads, history, and workflow version while logging application_saved_draft events.
 - /api/intake/submit inserts into iset_application_submission, snapshots schema metadata, auto-creates iset_application / iset_case, deletes the draft row, and records application_submitted in iset_case_event.
 - Responses surface reference numbers and timestamps; frontend clears local state and redirects to the dashboard without caching applicant data beyond the visible DOM.

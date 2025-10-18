@@ -644,18 +644,62 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
       return res.status(500).json({ error: 'normalization_failed', message: eInner.message });
     }
     if (!schema) return res.status(500).json({ error: 'schema_null' });
-  // Full normalized schema object retained for new portal; legacy portal expects array of step objects only.
-  const fullJson = JSON.stringify(schema, null, 2);
-  const legacyJson = Array.isArray(schema) ? JSON.stringify(schema, null, 2) : JSON.stringify(schema.steps || [], null, 2);
-    const meta = { workflowId, generatedAt: new Date().toISOString() };
-    const metaJson = JSON.stringify(meta, null, 2);
+    // Full normalized schema object retained for new portal; legacy portal expects array of step objects only.
+    const fullJson = JSON.stringify(schema, null, 2);
+    const legacyJson = Array.isArray(schema) ? JSON.stringify(schema, null, 2) : JSON.stringify(schema.steps || [], null, 2);
+    const publishedAt = new Date().toISOString();
+    const schemaMeta = schema && typeof schema === 'object' && schema.meta && typeof schema.meta === 'object' ? schema.meta : null;
+    const meta = { workflowId, generatedAt: publishedAt };
+    if (schemaMeta) meta.schemaMeta = schemaMeta;
     const legacyPath = path.resolve(__dirname, '../ISET-intake/src/intakeFormSchema.json');
     const legacyMeta = path.resolve(__dirname, '../ISET-intake/src/intakeFormSchema.meta.json');
     const newPortalPath = path.resolve(__dirname, '../iset-public-portal/apps/api/src/data/intakeFormSchema.json');
     const newPortalMeta = path.resolve(__dirname, '../iset-public-portal/apps/api/src/data/intakeFormSchema.meta.json');
+    const actor = resolveRequestActor(req);
+    const publishedBy = {
+      id: actor?.actorId || null,
+      name: actor?.actorName || null,
+      email: req.auth?.email || req.get?.('X-Dev-Email') || req.get?.('x-dev-email') || null
+    };
+    const schemaArray = Array.isArray(schema) ? schema : (Array.isArray(schema?.steps) ? schema.steps : []);
+    const normalizedPayload = {
+      meta,
+      schema: schemaArray,
+      version: `${publishedAt}#${workflowId}`,
+      publishedAt,
+      publishedBy
+    };
+    if (!Array.isArray(schema)) {
+      normalizedPayload.schemaEnvelope = schema;
+      if (!normalizedPayload.meta.schemaMeta && schema?.meta && typeof schema.meta === 'object') {
+        normalizedPayload.meta.schemaMeta = schema.meta;
+      }
+    }
+    const payloadPreChecksum = JSON.stringify(normalizedPayload);
+    const checksum = crypto.createHash('sha256').update(payloadPreChecksum, 'utf8').digest('hex');
+    normalizedPayload.checksum = checksum;
+    meta.checksum = checksum;
+    const payloadJson = JSON.stringify(normalizedPayload);
+    const metaJson = JSON.stringify(meta, null, 2);
     const results = [];
-  try { const changed = writeIfChanged(legacyPath, legacyJson); const metaChanged = writeIfChanged(legacyMeta, metaJson); results.push({ target: 'legacy', file: legacyPath, changed, metaChanged, shape: 'steps[]' }); } catch (eL) { results.push({ target: 'legacy', error: eL.message }); }
-  try { const changed = writeIfChanged(newPortalPath, fullJson); const metaChanged = writeIfChanged(newPortalMeta, metaJson); results.push({ target: 'new', file: newPortalPath, changed, metaChanged, shape: 'full-schema' }); } catch (eN) { results.push({ target: 'new', error: eN.message }); }
+    try { const changed = writeIfChanged(legacyPath, legacyJson); const metaChanged = writeIfChanged(legacyMeta, metaJson); results.push({ target: 'legacy', file: legacyPath, changed, metaChanged, shape: 'steps[]' }); } catch (eL) { results.push({ target: 'legacy', error: eL.message }); }
+    try { const changed = writeIfChanged(newPortalPath, fullJson); const metaChanged = writeIfChanged(newPortalMeta, metaJson); results.push({ target: 'new', file: newPortalPath, changed, metaChanged, shape: 'full-schema' }); } catch (eN) { results.push({ target: 'new', error: eN.message }); }
+    try {
+      await pool.query(
+        "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('publish', 'workflow.schema.intake', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP",
+        [payloadJson]
+      );
+      results.push({
+        target: 'runtime-config',
+        scope: 'publish',
+        key: 'workflow.schema.intake',
+        upserted: true,
+        shape: 'normalized',
+        version: normalizedPayload.version
+      });
+    } catch (dbErr) {
+      results.push({ target: 'runtime-config', error: dbErr.message });
+    }
     const hadError = results.some(r => r.error);
     res.status(hadError ? 207 : 200).json({ ok: !hadError, workflowId, results });
   } catch (err) {

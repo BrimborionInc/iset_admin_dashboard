@@ -8,7 +8,7 @@ Owner: Admin Dashboard / Public Portal teams
 
 * M0 renderers built in portal, with Schema Preview and tests.
 * Conditional reveals, Summary List (+formatters), File Upload wired to backend.
-* Admin publish writes portal schema; Dynamic Test route renders published schema via shared renderers and is auth-guarded.
+* Admin publish upserts the portal schema into `iset_runtime_config`; Dynamic Test route renders the published schema via shared renderers and is auth-guarded.
 * Dynamic Test now merges values into aggregate intake JSON; Finish preview shows entered data (not just history).
 * GOV.UK error summary/focus added to Dynamic Test for parity with Schema Preview.
 * M6 implemented: Admin publish now validates component types against the portal's supported set and blocks unsupported types with a 400 error detailing the offending step/component.
@@ -17,7 +17,7 @@ Owner: Admin Dashboard / Public Portal teams
 * M9 done: Publish pipeline audits used templates and writes meta with `schemaVersion` and template catalog (key/version/type/count); blocks on broken templates.
 
 ### What’s implemented (mapping to milestones)
-- M0 Baseline/Schema guardrails: JSON Schema of record (`src/GeneralIntakeControlSchema.json`) and Ajv test validating published schema (`src/__tests__/schemaValidation.test.js`).
+- M0 Baseline/Schema guardrails: JSON Schema of record (`src/GeneralIntakeControlSchema.json`) and runtime validation helper (`src/utils/validatePublishedSchema.js`, exercised via store/runtime tests).
 - M1 Minimal renderer: Registry-based React renderers in portal for input, textarea, select, radios, checkboxes, date, file-upload, content (label/inset/warning/details/accordion), character-count, and summary-list.
 - M2 Stateful form + nav: `SchemaPreview` manages values/errors with Next/Previous.
 - M3 Branching: json-logic evaluated per step.
@@ -30,10 +30,10 @@ Owner: Admin Dashboard / Public Portal teams
 3. Walk the flow; uploads go to `/api/upload-application-file`, remove via `/api/delete-bil`.
 4. Finish to view Intake JSON Preview; expect your entered values and the history array.
 5. Schema Preview (`/schema-preview`) is a dev harness for quick visual checks.
-- `ISET-intake/src/renderer/renderers.js` — GOV.UK-compliant components, conditional reveals, summary-list with formatters, file-upload with upload/remove.
-- `ISET-intake/src/GeneralIntakeControlSchema.json` — schema-of-record (enum includes `summary-list`).
-- `ISET-intake/src/intakeFormSchema.json` — demo schema with conditional reveal and review step.
-- `ISET-intake/src/__tests__/schemaValidation.test.js`, `ISET-intake/src/App.test.js` — tests.
+- `ISET-intake/src/renderer/renderers.js` - GOV.UK-compliant components, conditional reveals, summary-list with formatters, file-upload with upload/remove.
+- `ISET-intake/src/GeneralIntakeControlSchema.json` - schema-of-record (enum includes `summary-list`).
+- Runtime payload: `/api/runtime/workflow-schema` (backed by `iset_runtime_config`) - use to inspect published schemas during development.
+- `ISET-intake/src/__tests__/workflowSchema.store.test.js`, `ISET-intake/src/__tests__/DynamicTest.runtime.test.js` - tests covering runtime store and failure states.
 
 ### Key files (server)
 - `ISET-intake/server.js` — existing endpoints used by preview:
@@ -57,10 +57,10 @@ Owner: Admin Dashboard / Public Portal teams
 
 ## Working agreement (constraints)
 - Admin authoring/preview may use Nunjucks (server-side) for fidelity.
-- Published artifact to portal is semantic JSON (no HTML), versioned.
+- Published artifact to portal is semantic JSON (no HTML), versioned, and stored in `iset_runtime_config` (`scope='publish'`, `k='workflow.schema.intake'`).
 - Portal renders using React components styled with GOV.UK classes/JS (no Nunjucks at runtime).
 - Prefer incremental delivery with tests; add types one by one. Block or fallback for unsupported.
-- Admin endpoint today: `/api/workflows/:id/publish` writes `../ISET-intake/src/intakeFormSchema.json`.
+- Admin endpoint `/api/workflows/:id/publish` upserts the runtime payload (while retaining legacy file artefacts for compatibility).
 
 ## Milestone 0 — Baseline and guardrails
 - Add schemaVersion to published JSON (e.g., "1.0").

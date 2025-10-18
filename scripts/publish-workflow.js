@@ -21,6 +21,7 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+let mysql;
 
 // Attempt to load dotenv if present
 try { require('dotenv').config(); } catch (_) { /* ignore */ }
@@ -84,12 +85,33 @@ async function main() {
     process.exit(1);
   }
 
+  const publishedAt = new Date().toISOString();
   const outputJSON = JSON.stringify(schema, null, 2);
+  const schemaMeta = schema && typeof schema === 'object' && schema.meta && typeof schema.meta === 'object' ? schema.meta : null;
   const meta = {
     workflowId,
-    generatedAt: new Date().toISOString(),
-    checksum: sha256(outputJSON)
+    generatedAt: publishedAt
   };
+  if (schemaMeta) meta.schemaMeta = schemaMeta;
+  const schemaArray = Array.isArray(schema) ? schema : (Array.isArray(schema?.steps) ? schema.steps : []);
+  const normalizedPayload = {
+    meta,
+    schema: schemaArray,
+    version: `${publishedAt}#${workflowId}`,
+    publishedAt,
+    publishedBy: null
+  };
+  if (!Array.isArray(schema)) {
+    normalizedPayload.schemaEnvelope = schema;
+    if (!normalizedPayload.meta.schemaMeta && schema?.meta && typeof schema.meta === 'object') {
+      normalizedPayload.meta.schemaMeta = schema.meta;
+    }
+  }
+  const payloadPreChecksum = JSON.stringify(normalizedPayload);
+  const runtimeChecksum = sha256(payloadPreChecksum);
+  normalizedPayload.checksum = runtimeChecksum;
+  meta.checksum = runtimeChecksum;
+  const payloadJson = JSON.stringify(normalizedPayload);
 
   const targets = [];
   if (!newOnly) {
@@ -117,6 +139,10 @@ async function main() {
   }
 
   console.log('\nPublish complete.');
+
+  if (!legacyOnly) {
+    await upsertRuntimeConfig(payloadJson, normalizedPayload.version);
+  }
 }
 
 function writeIfChanged(file, content) {
@@ -138,6 +164,34 @@ function sha256(s) {
 
 function printHelp() {
   console.log(`Publish normalized workflow schema to legacy and new portals.\n\nUsage:\n  node scripts/publish-workflow.js --id <workflowId> [--legacy-only|--new-only]\n\nOptions:\n  --id <workflowId>   Required workflow identifier used by normalization layer\n  --legacy-only       Only write to legacy portal (ISET-intake)\n  --new-only          Only write to new portal (iset-public-portal)\n  -h, --help          Show this help\n`);
+}
+
+async function upsertRuntimeConfig(payloadJson, version) {
+  if (!process.env.DB_HOST || !process.env.DB_NAME) {
+    console.warn('[publish-workflow] DB_HOST/DB_NAME not set; skipping runtime-config update.');
+    return;
+  }
+  if (!mysql) {
+    mysql = require('mysql2/promise');
+  }
+  let pool;
+  try {
+    pool = await mysql.createPool({
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASS,
+      database: process.env.DB_NAME
+    });
+    await pool.query(
+      "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('publish', 'workflow.schema.intake', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP",
+      [payloadJson]
+    );
+    console.log(`[publish-workflow] runtime-config -> publish/workflow.schema.intake UPDATED (version ${version})`);
+  } catch (err) {
+    console.error('[publish-workflow] Failed to upsert runtime-config:', err.message);
+  } finally {
+    if (pool) await pool.end();
+  }
 }
 
 main().catch(err => {

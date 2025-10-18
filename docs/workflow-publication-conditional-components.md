@@ -12,7 +12,7 @@ However, the publication endpoint produced a separate, *flat* list of components
 
 ## Symptoms
 1. Admin Preview (Runtime Schema widget) – options show nested `children` arrays (correct).
-2. Portal `intakeFormSchema.json` (after publish) – conditional targets remained as independent top-level components; options lacked `children`.
+2. Runtime payload (`iset_runtime_config` -> `workflow.schema.intake`) – conditional targets remained as independent top-level components; options lacked `children`.
 3. Conditional UI did not appear in the public portal context.
 
 ## Root Cause
@@ -27,7 +27,7 @@ The publish path never reused the normalized output; thus enhancements to normal
    - Propagate `conditionalChildId` from `props.items[].conditionalChildId` into option objects.
    - Second pass: embed referenced components under `option.children[]` and prune them from the step’s top‑level `components` array.
 2. Refactored publish endpoint (`/api/workflows/:id/publish`) to delegate entirely to `buildWorkflowSchema({ auditTemplates: true })`.
-3. Wrote `out.steps` (normalized array) to `ISET-intake/src/intakeFormSchema.json` and `out.meta` to the meta sidecar file.
+3. Upserted the normalized payload into `iset_runtime_config` (`scope='publish'`, `k='workflow.schema.intake'`) while still producing the legacy file output for backward compatibility.
 4. Updated `WorkflowPropertiesWidget` to use authenticated `apiFetch` instead of raw axios for publish/save operations (fixing the “Missing bearer token” error when clicking Publish).
 
 ## Data Flow (Before vs After)
@@ -74,8 +74,8 @@ Checkbox example (only Option A reveals a child):
 1. In admin dashboard, open Manage Workflows → select workflow with conditional components.
 2. Check Runtime Schema widget: options contain `children` arrays; no duplicate conditional components at top-level.
 3. Click Publish (should succeed without “Missing bearer token”).
-4. Inspect `ISET-intake/src/intakeFormSchema.json`:
-   - Ensure same nested structure appears.
+4. Inspect the runtime payload (`SELECT v FROM iset_runtime_config WHERE scope='publish' AND k='workflow.schema.intake'` or call `/api/runtime/workflow-schema`):
+   - Ensure the same nested structure appears.
    - Confirm conditional target components are *not* duplicated at top-level.
 5. Run / reload public intake portal and verify conditional reveals expand/collapse correctly.
 

@@ -2,7 +2,7 @@
 
 ## Mission Snapshot
 - **Goal**: Give sys admins curated tooling to compose WCAG-compliant intake workflows, publish them, and work submitted applications through the admin console.
-- **Repos**: `admin-dashboard` (authoring UI + admin server) and `ISET-intake` (public portal + intake server). Admin publish writes `ISET-intake/src/intakeFormSchema.json`.
+- **Repos**: `admin-dashboard` (authoring UI + admin server) and `ISET-intake` (public portal + intake server). Admin publish upserts the runtime payload into `iset_runtime_config` (`scope='publish'`, `k='workflow.schema.intake'`).
 
 ## Admin Dashboard Highlights
 - **Navigation**: `SideNavigation.js` gates sections by role; keep it aligned with actual routes.
@@ -18,8 +18,8 @@
 - **Authoring Side**: `ManageIntakeSteps` and `ManageWorkflows` still rely on server `component_template` sync (AJV validated). No changes today but remember these are the authoring entry points.
 
 ## Public Portal
-- `intakeFormSchema.json` is the canonical contract. Admin widget now mirrors this specific workflow; any schema change requires code updates. Keep that in mind if a new intake (e.g., passport renewal) appears.
-- Portal dynamic runner (`src/pages/DynamicTest.js`) continues to render published schema for applicants.
+- `/api/runtime/workflow-schema` is the canonical contract (backed by `iset_runtime_config`). Admin widget now mirrors this specific workflow; any schema change requires code updates. Keep that in mind if a new intake (e.g., passport renewal) appears.
+- Portal dynamic runner (`src/pages/DynamicTest.js`) fetches and renders the published schema for applicants.
 
 ## Backends & Auth
 - Admin backend (`isetadminserver.js`) still serves `/api/cases`, `/api/applications`, `/api/applicants/...` endpoints consumed by the widgets.
