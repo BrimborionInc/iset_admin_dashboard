@@ -21,7 +21,7 @@ const FinanceDeadlinesHelp = () => (
     <Box>
       <strong>Data sources &amp; behaviour</strong>
       <ul>
-        <li>Reporting milestones sync with the finance reporting service and respect CR-0003 cadence settings.</li>
+        <li>Reporting milestones sync with the finance reporting service and follow the cadence configured in Finance Settings.</li>
         <li>Monitoring tasks originate from the evidence/monitoring workspace and reflect capacity-tier sampling rules.</li>
         <li>Compliance follow-ups pull from sub-agreement variance tracking.</li>
       </ul>

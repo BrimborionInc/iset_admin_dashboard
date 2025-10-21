@@ -32,6 +32,7 @@ const ROUTE_LABELS = {
   '/custom-dashboards-dashboard': 'Custom Dashboards',
   '/finance/allocations': 'Allocations & Transfers',
   '/finance/budgets': 'Budgets',
+  '/finance/payments': 'Finance Payments',
   '/finance/forecasting': 'Forecasting & Scenarios',
   '/finance/monitoring': 'Monitoring & Evidence',
   '/finance/overview': 'Finance Overview',

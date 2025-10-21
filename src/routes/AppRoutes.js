@@ -59,6 +59,14 @@ import FinanceReportsPage from '../pages/finance/FinanceReportsPage.jsx';
 import FinanceMonitoringPage from '../pages/finance/FinanceMonitoringPage.jsx';
 import FinanceForecastingPage from '../pages/finance/FinanceForecastingPage.jsx';
 import FinanceSettingsPage from '../pages/finance/FinanceSettingsPage.jsx';
+import FinancePaymentsPage from '../pages/finance/FinancePaymentsPage.jsx';
+import FinanceBudgetsHelp from '../helpPanelContents/financeBudgetsHelp.js';
+import FinanceAllocationsHelp from '../helpPanelContents/financeAllocationsHelp.js';
+import FinanceReconciliationHelp from '../helpPanelContents/financeReconciliationHelp.js';
+import FinanceReportsHelp from '../helpPanelContents/financeReportsHelp.js';
+import FinanceMonitoringHelp from '../helpPanelContents/financeMonitoringHelp.js';
+import FinanceForecastingHelp from '../helpPanelContents/financeForecastingHelp.js';
+import FinancePaymentsHelp from '../helpPanelContents/financePaymentsHelp.js';
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -506,7 +514,59 @@ const AppRoutes = ({
               { text: 'Budgets', href: '/finance/budgets' }
             ],
             'Budgets',
-            'financeBudgets'
+            <FinanceBudgetsHelp />,
+            (
+              <SpaceBetween direction="horizontal" size="s">
+                <Button
+                  iconName="add-plus"
+                  onClick={() => window.dispatchEvent(new CustomEvent("financeBudgets:openPalette"))}
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() => window.dispatchEvent(new CustomEvent("financeBudgets:resetLayout"))}
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            FinanceBudgetsHelp.aiContext
+          )}
+        </Guard>
+      </Route>
+      <Route path="/finance/payments">
+        <Guard path="/finance/payments">
+          {renderContent(
+            FinancePaymentsPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Payments', href: '/finance/payments' }
+            ],
+            'Payments',
+            <FinancePaymentsHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financePayments:openPalette"))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financePayments:resetLayout"))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            FinancePaymentsHelp.aiContext
           )}
         </Guard>
       </Route>
@@ -521,7 +581,28 @@ const AppRoutes = ({
               { text: 'Allocations & Transfers', href: '/finance/allocations' }
             ],
             'Allocations & Transfers',
-            'financeAllocations'
+            <FinanceAllocationsHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeAllocations:openPalette"))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeAllocations:resetLayout"))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            FinanceAllocationsHelp.aiContext
           )}
         </Guard>
       </Route>
@@ -536,7 +617,28 @@ const AppRoutes = ({
               { text: 'Reconciliation', href: '/finance/reconciliation' }
             ],
             'Reconciliation',
-            'financeReconciliation'
+            <FinanceReconciliationHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeReconciliation:openPalette"))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeReconciliation:resetLayout"))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            FinanceReconciliationHelp.aiContext
           )}
         </Guard>
       </Route>
@@ -551,7 +653,28 @@ const AppRoutes = ({
               { text: 'Financial Reports', href: '/finance/reports' }
             ],
             'Financial Reports',
-            'financeReports'
+            <FinanceReportsHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeReports:openPalette"))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeReports:resetLayout"))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            FinanceReportsHelp.aiContext
           )}
         </Guard>
       </Route>
@@ -566,7 +689,28 @@ const AppRoutes = ({
               { text: 'Monitoring & Evidence', href: '/finance/monitoring' }
             ],
             'Monitoring & Evidence',
-            'financeMonitoring'
+            <FinanceMonitoringHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeMonitoring:openPalette"))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeMonitoring:resetLayout"))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            FinanceMonitoringHelp.aiContext
           )}
         </Guard>
       </Route>
@@ -581,7 +725,28 @@ const AppRoutes = ({
               { text: 'Forecasting & Scenarios', href: '/finance/forecasting' }
             ],
             'Forecasting & Scenarios',
-            'financeForecasting'
+            <FinanceForecastingHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeForecasting:openPalette"))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeForecasting:resetLayout"))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            FinanceForecastingHelp.aiContext
           )}
         </Guard>
       </Route>

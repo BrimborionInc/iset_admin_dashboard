@@ -9,7 +9,6 @@ import {
   SpaceBetween,
   Container
 } from '@cloudscape-design/components';
-import { ItemsPalette, BoardItem } from '@cloudscape-design/board-components';
 import Avatar from "@cloudscape-design/chat-components/avatar";
 import ChatBubble from "@cloudscape-design/chat-components/chat-bubble";
 import ReactMarkdown from 'react-markdown';
@@ -470,7 +469,6 @@ const AppContent = ({ currentRole }) => {
   const [splitPanelSize, setSplitPanelSize] = useState(360); // State for SplitPanel size
   const [splitPanelPreferences, setSplitPanelPreferences] = useState({ position: 'side' }); // State for SplitPanel preferences
   const [availableItems, setAvailableItems] = useState([]); // State for available items (palette)
-  const [toolsMode, setToolsMode] = useState('help'); // 'help' | 'palette'
 
   // Notifications state (moved inside component)
   const [notifications, setNotifications] = useState([]);
@@ -590,9 +588,8 @@ const AppContent = ({ currentRole }) => {
 
   const openPaletteInTools = useCallback((items) => {
     try { setAvailableItems(items || []); } catch {}
-    setToolsMode('palette');
-    setIsHelpPanelOpen(true);
-  }, []);
+    setSplitPanelOpen(true);
+  }, [setSplitPanelOpen]);
 
   // Listen for page requests to open the tools palette (avoids prop drilling)
   useEffect(() => {
@@ -600,13 +597,12 @@ const AppContent = ({ currentRole }) => {
       try {
         const items = (e && e.detail && e.detail.items) || [];
         setAvailableItems(items);
-        setToolsMode('palette');
-        setIsHelpPanelOpen(true);
+        setSplitPanelOpen(true);
       } catch {}
     };
     window.addEventListener('tools:open-palette', onOpenPalette);
     return () => window.removeEventListener('tools:open-palette', onOpenPalette);
-  }, []);
+  }, [setSplitPanelOpen]);
 
   return (
     <LocationProvider>
@@ -635,45 +631,25 @@ const AppContent = ({ currentRole }) => {
         toolsOpen={isHelpPanelOpen}
         onToolsChange={({ detail }) => setIsHelpPanelOpen(detail.open)}
         tools={
-          toolsMode === 'palette' ? (
-            <ItemsPalette
-              items={availableItems}
-              i18nStrings={{ header: 'Available widgets' }}
-              renderItem={item => (
-                <BoardItem
-                  key={item.id}
-                  header={<Header>{item.data?.title || 'Widget'}</Header>}
-                  i18nStrings={{
-                    dragHandleAriaLabel: 'Drag handle',
-                    dragHandleAriaDescription:
-                      'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to submit, or Escape to discard.',
-                  }}
-                >
-                  <Box variant="p">{item.data?.description || ''}</Box>
-                </BoardItem>
-              )}
-            />
-          ) : (
-            <HelpPanel
-              header={
-                <Header
-                  variant="h2"
-                  actions={
-                    <Button
-                      onClick={() => setChatVisible(!chatVisible)}
-                      variant="primary"
-                    >
-                      {chatVisible ? "Close AI" : "Ask the AI"}
-                    </Button>
-                  }
-                >
-                  {helpPanelTitle}
-                </Header>
-              }
-            >
-              {currentHelpContent}
-            </HelpPanel>
-          )
+          <HelpPanel
+            header={
+              <Header
+                variant="h2"
+                actions={
+                  <Button
+                    onClick={() => setChatVisible(!chatVisible)}
+                    variant="primary"
+                  >
+                    {chatVisible ? "Close AI" : "Ask the AI"}
+                  </Button>
+                }
+              >
+                {helpPanelTitle}
+              </Header>
+            }
+          >
+            {currentHelpContent}
+          </HelpPanel>
         }
         splitPanelOpen={splitPanelOpen}
         onSplitPanelToggle={({ detail }) => setSplitPanelOpen(detail.open)}

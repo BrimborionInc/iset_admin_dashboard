@@ -10,4 +10,6 @@ This project embeds Cloudscape board components (Board, BoardItem, ItemsPalette)
 
 4. **Avoid noisy debug logging.** Excessive `console.debug` statements in render paths flood DevTools and make diagnosing real issues difficult. Log only when needed and clean up once problems are resolved.
 
+5. **Keep the palette out of the help panel.** Cloudscape’s AppLayout reserves the tools slot for the help panel, so pushing the ItemsPalette into that region causes it to replace help content while the split panel is also open. Route palette updates through the split panel instead (update the `ItemsPalette` in the split panel and toggle `setSplitPanelOpen(true)`), leaving the tools panel dedicated to contextual help.
+
 Following these guidelines keeps the board responsive, allows widgets to be added/removed via the split panel palette, and preserves the drag/resize experience Cloudscape expects.

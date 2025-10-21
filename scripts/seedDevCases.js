@@ -12,10 +12,11 @@ try {
     const pool = await mysql.createPool({
       host: process.env.DB_HOST || 'localhost',
       user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASS || process.env.DB_PASSWORD || '',
+      password: process.env.DB_PASS || process.env.DB_PASSWORD || '',
       database: process.env.DB_NAME || 'iset',
       waitForConnections: true,
       connectionLimit: 10,
+      charset: 'utf8mb4_general_ci',
     });
     const count = Number(process.argv[2] || 8);
     const [evals] = await pool.query("SELECT id, role FROM iset_evaluators WHERE role IN ('Program Administrator','Application Assessor')");

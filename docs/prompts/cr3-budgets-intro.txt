@@ -1,0 +1,7 @@
+You are continuing work on CR-0003 (Financial Administration & Reporting Module).
+Before making changes, review these key references:
+  • docs/change-requests/CR-0003-Financial Module.md (requirements)
+  • docs/change-requests/CR-0003-Implementation-Log.md (status & open tasks)
+  • docs/guides/cloudscape-table-persistence.md (table persistence patterns)
+  • src/pages/finance/FinanceBudgetsPage.jsx & widgets/Budget*.jsx (current Budgets dashboard implementation)
+Pay special attention to event wiring between Saved Views and Active View widgets, and reuse the persistence helpers described in the guide.
