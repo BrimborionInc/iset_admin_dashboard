@@ -9,8 +9,9 @@ async function main() {
     host: process.env.DB_HOST || 'localhost',
     port: Number(process.env.DB_PORT || 3306),
     user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASS || '',
-    database: process.env.DB_NAME || 'iset_intake'
+    password: process.env.DB_PASS || '',
+    database: process.env.DB_NAME || 'iset_intake',
+    charset: 'utf8mb4_general_ci',
   });
 
   const [staff] = await pool.query(`SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles ORDER BY id DESC LIMIT 20`);

@@ -36,6 +36,7 @@ const FinanceTrendHelp = () => (
   </SpaceBetween>
 );
 
-FinanceTrendHelp.aiContext = "Explain spend trend filters (timeframe, region, program) and highlight how actual, plan, and forecast lines should be interpreted for CR-0003 finance dashboards.";
+FinanceTrendHelp.aiContext =
+  "Explain the spend trend widget: selecting periods and filters, interpreting actual versus plan and forecast lines, and deciding when follow-up action is required.";
 
 export default FinanceTrendHelp;

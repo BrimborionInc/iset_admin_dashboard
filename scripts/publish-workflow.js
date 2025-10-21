@@ -180,7 +180,8 @@ async function upsertRuntimeConfig(payloadJson, version) {
       host: process.env.DB_HOST,
       user: process.env.DB_USER,
       password: process.env.DB_PASS,
-      database: process.env.DB_NAME
+      database: process.env.DB_NAME,
+      charset: 'utf8mb4_general_ci'
     });
     await pool.query(
       "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('publish', 'workflow.schema.intake', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP",

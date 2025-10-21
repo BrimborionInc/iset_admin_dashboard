@@ -11,6 +11,7 @@ import {
   Button,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
+import { FINANCE_PEOPLE } from "./financeDemoData.js";
 
 const columns = [
   { id: "milestone", header: "Milestone", cell: item => item.milestone },
@@ -43,7 +44,7 @@ const items = [
     milestone: "Q3 interim report certification",
     type: "Reporting",
     due: "2025-01-31",
-    owner: "Executive Director",
+    owner: FINANCE_PEOPLE.ceo,
     statusType: "pending",
     statusLabel: "Awaiting certification",
     ctaLabel: "Review report draft",
@@ -54,7 +55,7 @@ const items = [
     milestone: "Monitoring evidence bundle upload",
     type: "Monitoring",
     due: "2024-12-10",
-    owner: "Finance Officer",
+    owner: FINANCE_PEOPLE.seniorDirector,
     statusType: "in-progress",
     statusLabel: "Collecting documents",
     ctaLabel: "Open evidence queue",
@@ -65,7 +66,7 @@ const items = [
     milestone: "Sub-agreement variance response",
     type: "Compliance",
     due: "2024-11-18",
-    owner: "Partner Liaison",
+    owner: FINANCE_PEOPLE.programLead,
     statusType: "warning",
     statusLabel: "Overdue risk",
     ctaLabel: "Message partner lead",

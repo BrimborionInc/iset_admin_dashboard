@@ -21,7 +21,7 @@ const FinanceComplianceHelp = () => (
     <Box>
       <strong>Data sources</strong>
       <ul>
-        <li>Capacity tier and sampling rules come from the monitoring service (CR-0003 Appendix C).</li>
+        <li>Capacity tier and sampling rules are provided by the Monitoring service according to the organisation&rsquo;s risk profile.</li>
         <li>Findings list pulls from evidence reviews and variance tracking.</li>
         <li>Checklist items map to internal governance controls (update in Finance Settings when policies change).</li>
       </ul>
@@ -34,6 +34,7 @@ const FinanceComplianceHelp = () => (
   </SpaceBetween>
 );
 
-FinanceComplianceHelp.aiContext = "Explain compliance dashboard summary (capacity tier, monitoring schedule, findings) and how to resolve items via monitoring/reporting workflows within the CR-0003 finance module.";
+FinanceComplianceHelp.aiContext =
+  "Explain the compliance summary: capacity tier, monitoring cadence, outstanding findings, and how teams follow up through monitoring or reporting workflows.";
 
 export default FinanceComplianceHelp;

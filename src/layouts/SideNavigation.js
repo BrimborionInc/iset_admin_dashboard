@@ -75,6 +75,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
         { type: 'link', text: 'Finance Overview', href: '/finance/overview' },
         { type: 'link', text: 'Budgets', href: '/finance/budgets' },
         { type: 'link', text: 'Allocations & Transfers', href: '/finance/allocations' },
+        { type: 'link', text: 'Payments', href: '/finance/payments' },
         { type: 'link', text: 'Reconciliation', href: '/finance/reconciliation' },
         { type: 'link', text: 'Financial Reports', href: '/finance/reports' },
         { type: 'link', text: 'Monitoring & Evidence', href: '/finance/monitoring' },
