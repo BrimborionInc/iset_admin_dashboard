@@ -4,7 +4,7 @@ for target in /opt/nwac/admin-dashboard/.env /home/ec2-user/admin-dashboard/.env
   tmp="${target}.tmp"
   sed '/^OPENROUTER_API_KEY=/d;/^OPENROUTER_MODEL=/d' "$target" > "$tmp"
   {
-    echo "OPENROUTER_API_KEY=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"
+    echo "OPENROUTER_API_KEY=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"
     echo "OPENROUTER_MODEL=openai/gpt-4.1-mini"
   } >> "$tmp"
   mv "$tmp" "$target"

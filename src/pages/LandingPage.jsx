@@ -32,7 +32,7 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - Patch v0.1.0',
+      sectionTitle: 'Release Notes - Patch v0.1.1 (21 October 2025)',
       description: 'The latest patch updates keep administrators informed about what changed, what issues remain, and what is coming next.',
       features: {
         heading: 'Features',
@@ -40,12 +40,11 @@ const copy = {
           {
             title: 'Latest Patch',
             paragraphs: [
-              'Users can flag applications to build a personal watch list.',
-              'Watched applications now trigger the same enhanced notifications as assigned owners.'
+              'Initial provisional scaffolding for the financial management module.  No back-end integration as yet. See each dashboard (and the info help texts) for a preview of features and functionality.  The Finanical settings dashboard will permit and simplified view to be toggled'
             ]
           },
           {
-            title: 'Case Management',
+            title: 'Application Intake Management',
             paragraphs: [
               'Intake submissions flow in from the public portal with notifications targeted to the responsible role.',
               'Program Administrators and Regional Coordinators assign applications through routing controls aligned to their teams.',
