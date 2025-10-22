@@ -16,6 +16,7 @@ import {
   Modal,
   FormField,
   Alert,
+  Textarea,
 } from "@cloudscape-design/components";
 import boardItemI18nStrings from "./common";
 import { apiFetch } from "../../../auth/apiClient";
@@ -197,6 +198,43 @@ const ContactMessageQueueWidget = ({
   const [modalSaving, setModalSaving] = useState(false);
   const [modalStatus, setModalStatus] = useState("new");
   const modalMessageIdRef = useRef(null);
+  const [noteText, setNoteText] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState(null);
+
+  const formatHistoryActor = useCallback(entry => {
+    if (!entry) return "Unknown";
+    const candidates = [entry.changedByDisplay, entry.changedByName, entry.changedByEmail];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string") {
+        const trimmed = candidate.trim();
+        if (trimmed) {
+          return trimmed;
+        }
+      }
+    }
+    if (entry.changedByUserId != null) {
+      return `User #${entry.changedByUserId}`;
+    }
+    return "Unknown";
+  }, []);
+
+  const formatNoteAuthor = useCallback(note => {
+    if (!note) return "Unknown";
+    const candidates = [note.authorDisplay, note.authorName, note.authorEmail];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string") {
+        const trimmed = candidate.trim();
+        if (trimmed) {
+          return trimmed;
+        }
+      }
+    }
+    if (note.authorUserId != null) {
+      return `User #${note.authorUserId}`;
+    }
+    return "Unknown";
+  }, []);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -305,6 +343,9 @@ const ContactMessageQueueWidget = ({
     setModalDetail(null);
     setModalError(null);
     setModalLoading(true);
+  setNoteText("");
+  setNoteError(null);
+  setNoteSaving(false);
     (async () => {
       try {
         const response = await apiFetch(`/api/admin/contact-messages/${message.id}`);
@@ -335,7 +376,55 @@ const ContactMessageQueueWidget = ({
     setModalError(null);
     setModalLoading(false);
     setModalSaving(false);
+    setNoteText("");
+    setNoteSaving(false);
+    setNoteError(null);
   }, []);
+
+  const refreshNotes = useCallback(async messageId => {
+    if (!messageId) return;
+    const response = await apiFetch(`/api/admin/contact-messages/${messageId}/notes`);
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(text || `Failed to load notes (status ${response.status})`);
+    }
+    const data = await response.json();
+    if (modalMessageIdRef.current !== messageId) return;
+    const items = Array.isArray(data?.items) ? data.items : [];
+    setModalDetail(prev => {
+      if (!prev) return prev;
+      return { ...prev, notes: items };
+    });
+  }, []);
+
+  const handleNoteSubmit = useCallback(async () => {
+    if (!modalMessage?.id) return;
+    const trimmed = noteText.trim();
+    if (!trimmed) {
+      setNoteError("Note cannot be empty.");
+      return;
+    }
+    setNoteSaving(true);
+    setNoteError(null);
+    try {
+      const response = await apiFetch(`/api/admin/contact-messages/${modalMessage.id}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ noteText: trimmed }),
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(text || `Failed to add note (status ${response.status})`);
+      }
+      await refreshNotes(modalMessage.id);
+      setNoteText("");
+    } catch (error) {
+      console.error("[contact-admin] add note failed", error);
+      setNoteError(error?.message || "Failed to add note");
+    } finally {
+      setNoteSaving(false);
+    }
+  }, [modalMessage, noteText, refreshNotes]);
 
   const handleSaveStatus = useCallback(async () => {
     if (!modalMessage) return;
@@ -724,7 +813,7 @@ const ContactMessageQueueWidget = ({
                               </Box>
                             </SpaceBetween>
                             <Box color="text-body-secondary">
-                              Changed by {entry.changedByUserId ?? "Unknown"}
+                              Changed by {formatHistoryActor(entry)}
                             </Box>
                           </SpaceBetween>
                         </Box>
@@ -744,7 +833,7 @@ const ContactMessageQueueWidget = ({
                             <Box>{note.noteText}</Box>
                             <Box color="text-body-secondary">
                               {note.createdAt ? new Date(note.createdAt).toLocaleString("en-CA") : ""} —{" "}
-                              {note.authorUserId ?? "Unknown"}
+                              {formatNoteAuthor(note)}
                             </Box>
                           </SpaceBetween>
                         </Box>
@@ -753,6 +842,30 @@ const ContactMessageQueueWidget = ({
                   ) : (
                     <Box color="text-body-secondary">No notes added yet.</Box>
                   )}
+                  <SpaceBetween size="xxs">
+                    <FormField label="Add note" errorText={noteError || undefined}>
+                      <Textarea
+                        value={noteText}
+                        onChange={({ detail }) => {
+                          setNoteText(detail.value);
+                          if (noteError) {
+                            setNoteError(null);
+                          }
+                        }}
+                        rows={3}
+                        placeholder="Record triage context or follow-up actions"
+                        disabled={noteSaving}
+                      />
+                    </FormField>
+                    <Button
+                      variant="primary"
+                      onClick={handleNoteSubmit}
+                      loading={noteSaving}
+                      disabled={noteSaving || modalLoading}
+                    >
+                      Add note
+                    </Button>
+                  </SpaceBetween>
                 </SpaceBetween>
               </>
             )}

@@ -32,60 +32,19 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - Patch v0.1.1 (21 October 2025)',
-      description: 'The latest patch updates keep administrators informed about what changed, what issues remain, and what is coming next.',
+      sectionTitle: 'Release Notes - Patch v0.1.2 (22 October 2025)',
+      description: 'Patch v0.1.2 focuses on refreshing public-facing pages and tightening dashboard clarity.',
       features: {
-        heading: 'Features',
+        heading: 'Updates',
         sections: [
           {
             title: 'Latest Patch',
             paragraphs: [
-              'Initial provisional scaffolding for the financial management module.  No back-end integration as yet. See each dashboard (and the info help texts) for a preview of features and functionality.  The Finanical settings dashboard will permit and simplified view to be toggled'
-            ]
-          },
-          {
-            title: 'Application Intake Management',
-            paragraphs: [
-              'Intake submissions flow in from the public portal with notifications targeted to the responsible role.',
-              'Program Administrators and Regional Coordinators assign applications through routing controls aligned to their teams.',
-              'The dashboard holds the overview, application record, assessment form, secure messaging, supporting documents, event log, and status controls.',
-              'Overdue checks raise alerts whenever an application stalls at any stage.'
-            ]
-          },
-          {
-            title: 'Intake Workflow Studio',
-            paragraphs: [
-              'Editors assemble intake steps from reusable components.',
-              'Validation rules and controls enforce required data before submission.',
-              'AI assists with step wording, edits, and bilingual translation between French and English.',
-              'Conditional fields, summary pages, and rules-based file uploads adapt the form to applicant responses.',
-              'The workflow editor supports linear, conditional, and branching paths with testing, preview, and publication tools.'
-            ]
-          },
-          {
-            title: 'Secure Messaging',
-            paragraphs: [
-              'Secure messaging links applicants and the ISET team within each case.',
-              'Every application keeps a dedicated inbox so the full thread stays together.',
-              'Uploaded attachments store against the applicant record and remain available to staff.'
-            ]
-          },
-          {
-            title: 'Configuration',
-            paragraphs: [
-              'Configure AI defaults, parameters, and fallback providers for guidance tools.',
-              'Manage MFA mode, session timeouts, SSO providers, and federation sync.',
-              'Set SLA targets across lifecycle stages and maintain notification templates for reminders, channels, acknowledgements, and language fallbacks.',
-              'Adjust allowed origins, demo toolbar visibility, appearance preferences, and monitor required secrets.'
-            ]
-          },
-          {
-            title: 'Security',
-            paragraphs: [
-              'AWS Cognito sign-on with access control matrix enforcement covers role-based authorization.',
-              'Session auditing and event logging record system access.',
-              'Databases, document stores, and configuration secrets stay encrypted with KMS-managed keys.',
-              'CORS allowlists, TLS enforcement, and certificate management harden the perimeter.'
+              'Updated the cookies page to reflect current cookie use.',
+              'Updated the privacy page to explain how ISET program data is used.',
+              'Replaced the public portal "about" page placeholder with live content.',
+              'Enabled the public Contact page to send messages to the dashboard and added a Contact Messages dashboard.',
+              'Simplified the "ISET Application – Draft Incomplete" card to show only the count of sections completed.'
             ]
           }
         ]
@@ -101,7 +60,7 @@ const copy = {
         ]
       },
       comingNext: {
-        heading: 'Coming next patch',
+        heading: 'Coming Soon',
         sections: [
           {
             title: 'Payment Alerts',
@@ -177,54 +136,19 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - correctif v0.1.0',
-      description: 'Les dernières mises à jour informent l’équipe de ce qui a changé, des incidents connus et des prochaines étapes.',
+      sectionTitle: 'Notes de version - correctif v0.1.2 (22 octobre 2025)',
+      description: 'Le correctif v0.1.2 rafraîchit les pages publiques et clarifie les données présentées dans le tableau de bord.',
       features: {
-        heading: 'Fonctionnalités',
+        heading: 'Mises à jour',
         sections: [
           {
-            title: 'Gestion des dossiers',
+            title: 'Dernier correctif',
             paragraphs: [
-              'Les demandes transmises par le portail public arrivent directement dans le tableau de bord avec des notifications adressées au rôle responsable.',
-              'Les administrateurs de programme et les coordonnateurs régionaux assignent les demandes grâce à des contrôles d’acheminement adaptés à leurs équipes.',
-              'Le tableau de bord rassemble l’aperçu, le dossier de demande, le formulaire d’évaluation électronique, la messagerie sécurisée, les documents justificatifs, le journal d’événements et les commandes de statut.',
-              'Des contrôles d’échéance déclenchent des alertes dès qu’un dossier demeure bloqué à une étape.'
-            ]
-          },
-          {
-            title: 'Studio des parcours d’accueil',
-            paragraphs: [
-              'Les conceptrices et concepteurs assemblent les étapes d’accueil à partir de composants réutilisables.',
-              'Les règles et contrôles de validation imposent les données requises avant l’envoi.',
-              'L’IA assiste la rédaction des étapes, les révisions et la traduction bilingue FR/EN.',
-              'Les champs conditionnels, pages de résumé et dépôts de fichiers guidés par des règles adaptent le formulaire aux réponses.',
-              'L’éditeur de flux supporte les parcours linéaires, conditionnels ou ramifiés avec des outils de test, d’aperçu et de publication.'
-            ]
-          },
-          {
-            title: 'Messagerie sécurisée',
-            paragraphs: [
-              'La messagerie sécurisée relie les candidates et l’équipe ISET pour chaque dossier.',
-              'Chaque demande dispose d’une boîte dédiée pour conserver l’historique complet.',
-              'Les pièces jointes téléchargées sont conservées dans le dossier de la personne et restent accessibles au personnel.'
-            ]
-          },
-          {
-            title: 'Configuration',
-            paragraphs: [
-              'Configurer les paramètres par défaut de l’IA, les seuils et les fournisseurs de repli pour les outils d’aide.',
-              'Gérer le MFA, les délais d’expiration de session, les fournisseurs SSO et la synchronisation de fédération.',
-              'Définir les cibles SLA pour chaque étape du cycle et maintenir les modèles de notification (rappels, canaux, accusés, langues de repli).',
-              'Ajuster les origines autorisées, la visibilité de la barre de démonstration, les préférences d’apparence et surveiller les secrets requis.'
-            ]
-          },
-          {
-            title: 'Sécurité',
-            paragraphs: [
-              'L’authentification AWS Cognito applique l’autorisation basée sur les rôles via la matrice de contrôle d’accès.',
-              'L’audit des sessions et la journalisation des événements consignent les accès.',
-              'Les bases de données, dépôts de documents et secrets de configuration restent chiffrés avec des clés gérées par KMS.',
-              'Les listes d’autorisation CORS, l’application du TLS et la gestion des certificats renforcent le périmètre.'
+              'Mise à jour de la page des témoins afin de refléter l’utilisation actuelle.',
+              'Mise à jour de la page de confidentialité pour expliquer l’utilisation des données du programme ISET.',
+              'Remplacement du texte d’espace réservé de la page « À propos » du portail public par un contenu publié.',
+              'Activation de la page Contact pour transmettre les messages au tableau de bord et ajout d’un tableau de bord des messages de contact.',
+              'Réduction de la carte « Demande ISET – Brouillon incomplet » pour n’afficher que le nombre de sections complétées.'
             ]
           }
         ]
@@ -240,7 +164,7 @@ const copy = {
         ]
       },
       comingNext: {
-        heading: 'À venir au prochain correctif',
+        heading: 'À venir bientôt',
         sections: [
           { title: 'Conservation et archivage', paragraphs: ['Introduire des politiques configurables de conservation, d’archivage et de disposition, avec entrepôt de données, tenue de registres automatisée et contrôles de gel légal.'] },
           { title: 'Tableau analytique', paragraphs: ['Offrir un tableau de bord analytique dédié avec graphiques, rapports et indicateurs.'] },

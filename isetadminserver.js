@@ -2307,8 +2307,16 @@ app.get('/api/admin/contact-messages/:id', async (req, res) => {
          h.previous_status AS previousStatus,
          h.new_status      AS newStatus,
          h.changed_by_user_id AS changedByUserId,
-         h.changed_at      AS changedAt
+         h.changed_at      AS changedAt,
+         u.name            AS changedByName,
+         u.email           AS changedByEmail,
+         CASE
+           WHEN u.name IS NOT NULL AND TRIM(u.name) <> '' THEN u.name
+           WHEN u.email IS NOT NULL AND u.email <> '' THEN u.email
+           ELSE NULL
+         END AS changedByDisplay
        FROM contact_message_status_history h
+       LEFT JOIN user u ON u.id = h.changed_by_user_id
        WHERE h.contact_message_id = ?
        ORDER BY h.changed_at DESC, h.id DESC`,
       [id]
@@ -2319,8 +2327,16 @@ app.get('/api/admin/contact-messages/:id', async (req, res) => {
          n.id,
          n.note_text       AS noteText,
          n.author_user_id  AS authorUserId,
-         n.created_at      AS createdAt
+         n.created_at      AS createdAt,
+         u.name            AS authorName,
+         u.email           AS authorEmail,
+         CASE
+           WHEN u.name IS NOT NULL AND TRIM(u.name) <> '' THEN u.name
+           WHEN u.email IS NOT NULL AND u.email <> '' THEN u.email
+           ELSE NULL
+         END AS authorDisplay
        FROM contact_message_note n
+       LEFT JOIN user u ON u.id = n.author_user_id
        WHERE n.contact_message_id = ?
        ORDER BY n.created_at DESC, n.id DESC`,
       [id]
@@ -2411,7 +2427,48 @@ app.post('/api/admin/contact-messages/:id/notes', async (req, res) => {
   const noteText = typeof req.body?.noteText === 'string' ? req.body.noteText.trim() : '';
   if (!noteText) return res.status(400).json({ error: 'invalid_note' });
 
-  const authorUserId = req.staffProfile?.id || req.auth?.userId || null;
+  let authorUserId = null;
+  try {
+    const candidateIdValues = [req.auth?.userId, req.auth?.user_id, req.auth?.id]
+      .map(value => {
+        const numeric = Number.parseInt(value, 10);
+        return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+      })
+      .filter(value => value !== null);
+    if (candidateIdValues.length) {
+      const placeholders = candidateIdValues.map(() => '?').join(', ');
+      const [idRows] = await pool.query(
+        `SELECT id FROM user WHERE id IN (${placeholders}) LIMIT 1`,
+        candidateIdValues
+      );
+      if (idRows && idRows[0] && Number.isFinite(Number(idRows[0].id))) {
+        authorUserId = Number(idRows[0].id);
+      }
+    }
+    if (authorUserId === null) {
+      const candidateEmails = new Set();
+      if (typeof req.auth?.email === 'string' && req.auth.email.trim()) {
+        candidateEmails.add(req.auth.email.trim());
+      }
+      if (typeof req.staffProfile?.email === 'string' && req.staffProfile.email.trim()) {
+        candidateEmails.add(req.staffProfile.email.trim());
+      }
+      if (candidateEmails.size) {
+        const emailList = Array.from(candidateEmails);
+        const placeholders = emailList.map(() => '?').join(', ');
+        const [emailRows] = await pool.query(
+          `SELECT id FROM user WHERE email IN (${placeholders}) LIMIT 1`,
+          emailList
+        );
+        if (emailRows && emailRows[0] && Number.isFinite(Number(emailRows[0].id))) {
+          authorUserId = Number(emailRows[0].id);
+        }
+      }
+    }
+  } catch (lookupErr) {
+    console.warn('[contact-admin] unable to resolve note author user id', lookupErr.message);
+    authorUserId = null;
+  }
 
   try {
     await pool.query(
@@ -2439,8 +2496,16 @@ app.get('/api/admin/contact-messages/:id/notes', async (req, res) => {
          n.id,
          n.note_text       AS noteText,
          n.author_user_id  AS authorUserId,
-         n.created_at      AS createdAt
+         n.created_at      AS createdAt,
+         u.name            AS authorName,
+         u.email           AS authorEmail,
+         CASE
+           WHEN u.name IS NOT NULL AND TRIM(u.name) <> '' THEN u.name
+           WHEN u.email IS NOT NULL AND u.email <> '' THEN u.email
+           ELSE NULL
+         END AS authorDisplay
        FROM contact_message_note n
+       LEFT JOIN user u ON u.id = n.author_user_id
        WHERE n.contact_message_id = ?
        ORDER BY n.created_at DESC, n.id DESC`,
       [id]
