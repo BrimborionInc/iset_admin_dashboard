@@ -1,0 +1,14 @@
+set -euo pipefail
+export PM2_HOME=/root/.pm2
+for target in /opt/nwac/admin-dashboard/.env /home/ec2-user/admin-dashboard/.env; do
+  tmp="${target}.tmp"
+  sed '/^OPENROUTER_API_KEY=/d;/^OPENROUTER_MODEL=/d' "$target" > "$tmp"
+  {
+    echo "OPENROUTER_API_KEY=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"
+    echo "OPENROUTER_MODEL=openai/gpt-4.1-mini"
+  } >> "$tmp"
+  mv "$tmp" "$target"
+  chown ec2-user:ec2-user "$target"
+  chmod 600 "$target"
+done
+pm2 restart nwac-admin --update-env
