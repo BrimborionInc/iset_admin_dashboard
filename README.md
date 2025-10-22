@@ -154,7 +154,7 @@ DELIMITER ;
 `````
 
 ## Conditional Visibility (Authoring)
-See `docs/conditional-visibility.md` for details on the file-upload conditional rules model (AND semantics, supported operators, serialization, preview behavior).
+See `docs/features/file-uploads/conditional-visibility-authoring.md` for details on the file-upload conditional rules model (AND semantics, supported operators, serialization, preview behavior).
 
 ## Landing Page Redesign
 The legacy card list has been replaced by a role-aware landing page scaffold (greeting, quick actions, My Work, Recent Activity, Resources, placeholder Status). See `docs/landing-page.md` for goals, RBAC matrix, and roadmap.

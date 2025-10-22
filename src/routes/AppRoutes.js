@@ -67,6 +67,8 @@ import FinanceReportsHelp from '../helpPanelContents/financeReportsHelp.js';
 import FinanceMonitoringHelp from '../helpPanelContents/financeMonitoringHelp.js';
 import FinanceForecastingHelp from '../helpPanelContents/financeForecastingHelp.js';
 import FinancePaymentsHelp from '../helpPanelContents/financePaymentsHelp.js';
+import ContactCommunicationsDashboard from '../pages/contact/ContactCommunicationsDashboard.jsx';
+import ContactCommunicationsHelp from '../helpPanelContents/contactCommunicationsHelp.js';
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -436,6 +438,42 @@ const AppRoutes = ({
           null,
           CaseAssignmentDashboardHelp.aiContext
         )}
+      </Route>
+
+      <Route path="/contact-communications">
+        <Guard path="/contact-communications">
+          {renderContent(
+            ContactCommunicationsDashboard,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Manage ISET Applications', href: '/case-assignment-dashboard' },
+              { text: 'Contact Communications', href: '/contact-communications' }
+            ],
+            'Contact Communications',
+            <ContactCommunicationsHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("contactCommunications:openPalette"))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("contactCommunications:resetLayout"))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            ContactCommunicationsHelp.aiContext
+          )}
+        </Guard>
       </Route>
 
       <Route path="/application-case/:id">

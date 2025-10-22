@@ -93,4 +93,4 @@ Refer to the component pattern docs in this directory (`component-*.md`) for dee
 - Component pattern specs: `component-*.md`
 - Normalization design: `workflow-normalization.md`
 - Conditional embedding RCA: `workflow-publication-conditional-components.md`
-- Intake portal runtime map: `../ISET-intake/docs/project-map.md`
+- Intake portal runtime map: `../ISET-intake/docs/meta/project-map.md`

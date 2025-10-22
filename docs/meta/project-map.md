@@ -117,7 +117,7 @@ Risk Mitigations:
 ## Docs & Specs
 - `docs/landing-page.md`: Iterative change log for dashboard (v0.x versions).
 - `docs/file-upload-conditional-rules.md`: Spec for expanded conditional rule logic.
-- `docs/project-map.md`: This map.
+- `docs/meta/project-map.md`: This map.
 
 ## Cross-Cutting Events & State
 - Custom DOM event `auth:session-changed` triggers re-render for simulation or session updates.

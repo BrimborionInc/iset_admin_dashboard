@@ -2185,6 +2185,274 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Contact Messages (admin dashboard)
+// ---------------------------------------------------------------------------
+const CONTACT_MSG_PAGE_SIZE = 25;
+const CONTACT_MSG_PAGE_SIZE_MAX = 100;
+
+function resolveContactAdminRole(req) {
+  const role = inferUserRole(req);
+  if (role === 'System Administrator' || role === 'Program Administrator') {
+    return role;
+  }
+  return null;
+}
+
+app.get('/api/admin/contact-messages', async (req, res) => {
+  if (!resolveContactAdminRole(req)) return res.status(403).json({ error: 'forbidden' });
+
+  const page = Math.max(1, parseInt(req.query.page ?? '1', 10) || 1);
+  const pageSize = Math.min(
+    CONTACT_MSG_PAGE_SIZE_MAX,
+    Math.max(1, parseInt(req.query.pageSize ?? `${CONTACT_MSG_PAGE_SIZE}`, 10) || CONTACT_MSG_PAGE_SIZE)
+  );
+  const offset = (page - 1) * pageSize;
+
+  const status = typeof req.query.status === 'string' && req.query.status !== 'all'
+    ? req.query.status.trim()
+    : null;
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const submittedAfter = req.query.submittedAfter ? new Date(req.query.submittedAfter) : null;
+  const submittedBefore = req.query.submittedBefore ? new Date(req.query.submittedBefore) : null;
+
+  const where = [];
+  const params = [];
+
+  if (status) {
+    where.push('cm.status = ?');
+    params.push(status);
+  }
+  if (search) {
+    const like = `%${search}%`;
+    where.push(`(
+      cm.full_name LIKE ? OR
+      cm.email LIKE ? OR
+      cm.subject LIKE ? OR
+      cm.message LIKE ?
+    )`);
+    params.push(like, like, like, like);
+  }
+  if (submittedAfter && !Number.isNaN(submittedAfter.valueOf())) {
+    where.push('cm.submitted_at >= ?');
+    params.push(submittedAfter);
+  }
+  if (submittedBefore && !Number.isNaN(submittedBefore.valueOf())) {
+    where.push('cm.submitted_at <= ?');
+    params.push(submittedBefore);
+  }
+
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  try {
+    const [[{ total }]] = await pool.query(
+      `SELECT COUNT(*) AS total
+         FROM contact_message cm
+         ${whereClause}`,
+      params
+    );
+
+    const [items] = await pool.query(
+      `SELECT
+         cm.id,
+         cm.submitted_at   AS submittedAt,
+         cm.full_name      AS fullName,
+         cm.email,
+         cm.subject,
+         cm.status,
+         cm.user_id        AS userId
+       FROM contact_message cm
+       ${whereClause}
+       ORDER BY cm.submitted_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, pageSize, offset]
+    );
+
+    res.json({ items, page, pageSize, total });
+  } catch (err) {
+    console.error('[contact-admin] list failed', err);
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+app.get('/api/admin/contact-messages/:id', async (req, res) => {
+  if (!resolveContactAdminRole(req)) return res.status(403).json({ error: 'forbidden' });
+
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+
+  try {
+    const [[message]] = await pool.query(
+      `SELECT
+         cm.id,
+         cm.submitted_at   AS submittedAt,
+         cm.full_name      AS fullName,
+         cm.email,
+         cm.subject,
+         cm.message,
+         cm.status,
+         cm.user_id        AS userId,
+         cm.submitted_ip   AS submittedIp,
+         cm.updated_at     AS updatedAt
+       FROM contact_message cm
+       WHERE cm.id = ?
+       LIMIT 1`,
+      [id]
+    );
+    if (!message) return res.status(404).json({ error: 'not_found' });
+
+    const [history] = await pool.query(
+      `SELECT
+         h.id,
+         h.previous_status AS previousStatus,
+         h.new_status      AS newStatus,
+         h.changed_by_user_id AS changedByUserId,
+         h.changed_at      AS changedAt
+       FROM contact_message_status_history h
+       WHERE h.contact_message_id = ?
+       ORDER BY h.changed_at DESC, h.id DESC`,
+      [id]
+    );
+
+    const [notes] = await pool.query(
+      `SELECT
+         n.id,
+         n.note_text       AS noteText,
+         n.author_user_id  AS authorUserId,
+         n.created_at      AS createdAt
+       FROM contact_message_note n
+       WHERE n.contact_message_id = ?
+       ORDER BY n.created_at DESC, n.id DESC`,
+      [id]
+    );
+
+    res.json({ message, history, notes });
+  } catch (err) {
+    console.error('[contact-admin] detail failed', err);
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+app.patch('/api/admin/contact-messages/:id/status', async (req, res) => {
+  if (!resolveContactAdminRole(req)) return res.status(403).json({ error: 'forbidden' });
+
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+
+  const nextStatus = typeof req.body?.status === 'string' ? req.body.status.trim() : '';
+  if (!nextStatus) return res.status(400).json({ error: 'invalid_status' });
+
+  const actorUserId = req.staffProfile?.id || req.auth?.userId || null;
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [[current]] = await connection.query(
+      'SELECT status FROM contact_message WHERE id = ? LIMIT 1',
+      [id]
+    );
+    if (!current) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'not_found' });
+    }
+
+    if (current.status !== nextStatus) {
+      await connection.query(
+        `UPDATE contact_message
+           SET status = ?, updated_at = NOW()
+         WHERE id = ?`,
+        [nextStatus, id]
+      );
+
+      await connection.query(
+        `INSERT INTO contact_message_status_history
+           (contact_message_id, previous_status, new_status, changed_by_user_id, changed_at)
+         VALUES (?, ?, ?, ?, NOW())`,
+        [id, current.status, nextStatus, actorUserId]
+      );
+    }
+
+    await connection.commit();
+
+    try {
+      await dispatchInternalNotifications?.({
+        type: 'contact_message.updated',
+        payload: {
+          messageId: id,
+          previousStatus: current.status,
+          newStatus: nextStatus,
+          changedBy: actorUserId
+        }
+      });
+    } catch (notifyErr) {
+      console.warn('[contact-admin] status notification failed', notifyErr.message);
+    }
+
+    res.json({ success: true, status: nextStatus });
+  } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    console.error('[contact-admin] status update failed', err);
+    res.status(500).json({ error: 'internal_error' });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post('/api/admin/contact-messages/:id/notes', async (req, res) => {
+  if (!resolveContactAdminRole(req)) return res.status(403).json({ error: 'forbidden' });
+
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+
+  const noteText = typeof req.body?.noteText === 'string' ? req.body.noteText.trim() : '';
+  if (!noteText) return res.status(400).json({ error: 'invalid_note' });
+
+  const authorUserId = req.staffProfile?.id || req.auth?.userId || null;
+
+  try {
+    await pool.query(
+      `INSERT INTO contact_message_note
+         (contact_message_id, author_user_id, note_text, created_at)
+       VALUES (?, ?, ?, NOW())`,
+      [id, authorUserId, noteText]
+    );
+    res.status(201).json({ success: true });
+  } catch (err) {
+    console.error('[contact-admin] add note failed', err);
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+app.get('/api/admin/contact-messages/:id/notes', async (req, res) => {
+  if (!resolveContactAdminRole(req)) return res.status(403).json({ error: 'forbidden' });
+
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+
+  try {
+    const [notes] = await pool.query(
+      `SELECT
+         n.id,
+         n.note_text       AS noteText,
+         n.author_user_id  AS authorUserId,
+         n.created_at      AS createdAt
+       FROM contact_message_note n
+       WHERE n.contact_message_id = ?
+       ORDER BY n.created_at DESC, n.id DESC`,
+      [id]
+    );
+    res.json({ items: notes });
+  } catch (err) {
+    console.error('[contact-admin] notes fetch failed', err);
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+
 app.post('/api/clear-iset-test-data', async (_req, res) => {
   let connection;
   const report = [];

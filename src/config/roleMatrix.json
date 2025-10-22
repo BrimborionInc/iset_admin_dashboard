@@ -30,6 +30,10 @@
       "Regional Coordinator",
       "Application Assessor"
     ],
+    "/contact-communications": [
+      "System Administrator",
+      "Program Administrator"
+    ],
     "/case-assignment-dashboard?view=assignment": [
       "System Administrator"
     ],

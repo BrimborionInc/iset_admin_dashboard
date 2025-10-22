@@ -30,7 +30,7 @@
 - If schema evolves, update `IsetApplicationFormWidget` mappings (OPTION_LABELS, sections) accordingly.
 
 ## Startup Checklist
-1. Review this crib sheet and the latest `docs/project-map.md` updates.
+1. Review this crib sheet and the latest `docs/meta/project-map.md` updates.
 2. Confirm admin board layout matches expectations after any schema or styling tweaks.
 3. Keep Application Overview/Case widget sizes in sync when modifying the board.
 4. When roles or navigation change, update both `SideNavigation.js` and `AppRoutes.js`.

@@ -27,6 +27,7 @@ const ROUTE_LABELS = {
   '/capacity-planning-dashboard': 'Capacity Planning',
   '/case-assignment-dashboard': 'Manage Applications',
   '/case-assignment-dashboard?view=assignment': 'Application Assignment',
+  '/contact-communications': 'Contact Communications',
   '/configuration-settings': 'Configuration Settings',
   '/configuration/events': 'Event Capture',
   '/custom-dashboards-dashboard': 'Custom Dashboards',

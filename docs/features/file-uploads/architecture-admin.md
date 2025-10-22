@@ -4,7 +4,7 @@ Status: Draft (shared across Admin + Public)
 Owners: Admin Intake Editor + Case Management
 Scope: Admin intake authoring, preview/testing, and future case dashboards
 
-Refer to the primary spec in ISET-intake/docs/file-uploads-architecture.md. This copy highlights admin-specific needs. Terminal step mandate (pilot): all applicant uploads live only in a single `supporting-documents` step immediately before summary; omission = no uploads.
+Refer to the primary spec in `ISET-intake/docs/features/file-uploads/architecture.md`. This copy highlights admin-specific needs. Terminal step mandate (pilot): all applicant uploads live only in a single `supporting-documents` step immediately before summary; omission = no uploads.
 
 Reminder: Active TODO list
 - Shared uploads TODO lives at `ISET-intake/docs/uploads-TODO.md`.

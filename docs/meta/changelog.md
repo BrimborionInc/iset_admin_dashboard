@@ -2,6 +2,8 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2025-10-22
+- Docs: Normalized the admin library layout (meta/, components/, features/, ops/), renamed file-upload conditional notes, and introduced a docs README for quick orientation.
 
 ## 2025-09-25
 - Fix: Admin secure messages now persist case/application IDs so applicant booking references render consistently.

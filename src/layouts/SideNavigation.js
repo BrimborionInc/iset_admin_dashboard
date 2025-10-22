@@ -65,6 +65,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       text: 'ISET Assessment',
       items: [
         { type: 'link', text: 'Manage Applications', href: '/case-assignment-dashboard' },
+        { type: 'link', text: 'Contact Communications', href: '/contact-communications' },
         { type: 'link', text: 'My Case Queue', href: '/case-management' },
       ],
     },
