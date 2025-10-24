@@ -32,19 +32,29 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - Patch v0.1.2 (22 October 2025)',
-      description: 'Patch v0.1.2 focuses on refreshing public-facing pages and tightening dashboard clarity.',
+      sectionTitle: 'Release Notes - Patch v0.1.3 (23 October 2025)',
+      description: 'Patch v0.1.3 lays the groundwork for the ESDC submissions module.',
       features: {
         heading: 'Updates',
         sections: [
           {
-            title: 'Latest Patch',
+            title: 'Patch v0.1.3',
             paragraphs: [
-              'Updated the cookies page to reflect current cookie use.',
-              'Updated the privacy page to explain how ISET program data is used.',
-              'Replaced the public portal "about" page placeholder with live content.',
-              'Enabled the public Contact page to send messages to the dashboard and added a Contact Messages dashboard.',
-              'Simplified the "ISET Application – Draft Incomplete" card to show only the count of sections completed.'
+              'You can test this by moving a submitted application to the "approved" status.',
+              'Prepared the upcoming ESDC submissions module with four dashboards: Overview, Participants, Participant Submission Workspace, and Reporting.',
+              'Participants dashboard now highlights readiness status, blocking issues, and export progress so coordinators can triage real submissions first.',
+              'Overview dashboard stays scaffolded while we wire in live submission KPIs, deadline tracking, and recent submissions summaries.',
+              'Participants dashboard queues approved applications for XML generation and links into the Participant Submission Workspace.',
+              'Participant Submission Workspace validates a single participant against the ESDC 1.4 schema, including checksum checks for Social Insurance Numbers.',
+              'Participant Submission Workspace now generates ILMP XML snapshots, stores checksums, and exposes an inline preview with download and copy actions.',
+              'Reporting dashboard remains a scaffold placeholder that will ultimately cover case, intervention, NOC, and finance-integrated reporting.'
+            ]
+          },
+          {
+            title: 'Previous Patch (v0.1.2)',
+            paragraphs: [
+              'Refreshed public portal content (cookies, privacy, about, contact) and connected the Contact Messages dashboard.',
+              'Simplified the "ISET Application – Draft Incomplete" card to focus on completion counts.'
             ]
           }
         ]
@@ -136,19 +146,26 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - correctif v0.1.2 (22 octobre 2025)',
-      description: 'Le correctif v0.1.2 rafraîchit les pages publiques et clarifie les données présentées dans le tableau de bord.',
+      sectionTitle: 'Notes de version - correctif v0.1.3 (23 octobre 2025)',
+      description: 'Le correctif v0.1.3 prépare le module de soumission vers EDSC et garde le panneau des fonctionnalités ordonné.',
       features: {
         heading: 'Mises à jour',
         sections: [
           {
-            title: 'Dernier correctif',
+            title: 'Correctif v0.1.3',
             paragraphs: [
-              'Mise à jour de la page des témoins afin de refléter l’utilisation actuelle.',
-              'Mise à jour de la page de confidentialité pour expliquer l’utilisation des données du programme ISET.',
-              'Remplacement du texte d’espace réservé de la page « À propos » du portail public par un contenu publié.',
-              'Activation de la page Contact pour transmettre les messages au tableau de bord et ajout d’un tableau de bord des messages de contact.',
-              'Réduction de la carte « Demande ISET – Brouillon incomplet » pour n’afficher que le nombre de sections complétées.'
+              'Prépare le module de soumission vers EDSC avec quatre tableaux de bord : Aperçu, Participantes, Espace de soumission des participantes et Rapports.',
+              'Le tableau Aperçu reste en échafaudage pour l’instant et accueillera bientôt des indicateurs, un suivi des échéances et un tableau des dépôts récents.',
+              'Le tableau Participantes alimente la file des demandes approuvées, permet de générer des fichiers XML et redirige vers l’Espace de soumission des participantes.',
+              'L’Espace de soumission des participantes valide une participante à la fois selon le schéma EDSC 1.4, y compris la vérification du numéro d’assurance sociale.',
+              'Le tableau Rapports demeure un espace réservé avant l’arrivée des rapports par dossier, des codes CNP et de l’intégration financière.'
+            ]
+          },
+          {
+            title: 'Correctif précédent (v0.1.2)',
+            paragraphs: [
+              'Actualisation du contenu public (témoin, confidentialité, à propos, contact) et connexion du tableau des messages de contact.',
+              'Simplification de la carte « Demande ISET – Brouillon incomplet » pour mettre de l’avant le nombre de sections complétées.'
             ]
           }
         ]

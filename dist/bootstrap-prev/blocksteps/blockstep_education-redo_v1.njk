@@ -1,0 +1,44 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "About your education",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/select/macro.njk" import govukSelect %}
+
+{{ govukSelect({
+  name: "example-select",
+  label: {
+    text: "What's your highest education?",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "Please pick the option that best describes the highest level of education you completed."
+  },
+  classes: "govuk-select",
+  items: [
+  {
+    "text": "Option 1",
+    "value": "1"
+  },
+  {
+    "text": "Option 2",
+    "value": "2"
+  },
+  {
+    "text": "Option 3",
+    "value": "3"
+  }
+]
+}) }}

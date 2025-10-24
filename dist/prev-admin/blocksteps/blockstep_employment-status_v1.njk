@@ -1,0 +1,81 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Applicant Details",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/select/macro.njk" import govukSelect %}
+
+{{ govukSelect({
+  name: "example-select",
+  label: {
+    text: "What is your current employment status?",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "Select what most closely describes your current status"
+  },
+  classes: "govuk-select",
+  items: [
+  {
+    "text": "Unemployed",
+    "value": "1"
+  },
+  {
+    "text": "Under-employed",
+    "value": "2"
+  },
+  {
+    "text": "Employed full-time",
+    "value": "3"
+  },
+  {
+    "text": "Employed part-time",
+    "value": "4"
+  },
+  {
+    "text": "Self-employed",
+    "value": "5"
+  },
+  {
+    "text": "Student",
+    "value": "6"
+  },
+  {
+    "text": "Other",
+    "value": "7"
+  }
+]
+}) }}
+
+
+{% from "govuk/components/input/macro.njk" import govukInput %}
+
+{{ govukInput({
+  name: "first-name",
+  type: "text",
+  label: {
+    text: "",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "Please describe your employment status"
+  },
+  classes: "govuk-input",
+  autocomplete: "given-name",
+  formGroup: {
+    classes: props.formGroup.classes
+  },
+  disabled: false
+}) }}

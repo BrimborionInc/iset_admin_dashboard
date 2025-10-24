@@ -1,0 +1,54 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Applicant Details",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+
+{% from "govuk/components/input/macro.njk" import govukInput %}
+
+{{ govukInput({
+  name: "first-name",
+  type: "text",
+  label: {
+<<<<<<< HEAD
+    text: "What is your Stupid Insurance Number (SIN)?",
+=======
+    text: "What is your Social Insurance Number (SIN)?",
+>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "Your Social Insurance Number (SIN) is a 9-digit number issued by the Government of Canada. We require it to verify your eligibility for the ISET program. Your information will be kept confidential in accordance with Canadian privacy laws."
+  },
+  classes: "govuk-input",
+  autocomplete: "given-name",
+  formGroup: {
+    classes: props.formGroup.classes
+  },
+  disabled: false
+}) }}
+
+
+{% from "govuk/components/warning-text/macro.njk" import govukWarningText %}
+
+{{ govukWarningText({
+<<<<<<< HEAD
+  text: "Don't be an idiot!",
+=======
+  text: "We will keep your SIN Number and other personal data secure.  You have a regith to ask us to delete it any time.",
+>>>>>>> 40ade3067980858d91ef26d905a34bdb499d1399
+  iconFallbackText: "Warning",
+  classes: ""
+}) }}

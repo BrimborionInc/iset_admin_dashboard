@@ -1,0 +1,8 @@
+{
+  "name": "Email Reminder (EN)",
+  "type": "Email",
+  "status": "Draft",
+  "language": "English",
+  "subject": "Appointment Reminder",
+  "content": "Dear {applicant_name},\n\nThis is a reminder of your upcoming appointment on {appointment_date} at {VAC_address}.\n\nPlease bring your:\n- Appointment Reference Number\n- Biometric Instruction Letter (for biometric collection appointment only)\n- Other documentation requested by IRCC\n\nIf you need to cancel or reschedule please sign into your account or call us on {contact_number}.\n\nSee you soon!\nThe VAC Team"
+}

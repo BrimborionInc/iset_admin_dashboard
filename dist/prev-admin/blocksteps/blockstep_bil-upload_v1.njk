@@ -1,0 +1,39 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Book an appointment",
+    html: "",
+    classes: "govuk-label--m",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+{% from "govuk/components/file-upload/macro.njk" import govukFileUpload %}
+
+{{ govukFileUpload({
+  id: "BIL-Upload",
+  name: "uploadedFile",
+  multiple: false,
+  disabled: false,
+  classes: "",
+  label: {
+    text: "Upload your BIL",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "Please upload your Biometric Instruction Letter (BIL) as a PDF or image file. The file must be a JPG, BMP, PNG, TIF, or PDF and must not exceed 2MB."
+  },
+  errorMessage: {
+    text: ""
+  },
+  formGroup: {
+    classes: ""
+  }
+}) }}

@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/details.schema.json",
+  "title": "Details Component",
+  "type": "object",
+  "required": ["summaryText"],
+  "additionalProperties": true,
+  "properties": {
+    "id": { "type": "string" },
+    "open": { "type": "boolean" },
+    "summaryText": { "type": ["string", "object"], "minLength": 1 },
+    "text": { "type": ["string", "object"], "description": "Plain text body (alternative to html)." },
+    "html": { "type": ["string", "null"], "description": "HTML body overrides text when provided." },
+    "classes": { "type": "string" }
+  }
+}

@@ -17,10 +17,10 @@
   Name of the Auto Scaling Group hosting the admin app. Defaults to nwac-test-asg.
 
 .PARAMETER Bucket
-  S3 bucket used to stage deployment artefacts. Defaults to nwac-admin-test-deploy.
+  S3 bucket used to stage deployment artefacts. Defaults to nwac-test-artifacts.
 
 .PARAMETER KeyPrefix
-  Optional folder prefix inside the bucket. Defaults to admin-dashboard/test.
+  Optional folder prefix inside the bucket. Defaults to admin-dashboard.
 
 .PARAMETER SkipBuild
   Skips the `npm run build:test` step (useful when re-deploying an existing build artefact).
@@ -31,15 +31,33 @@ param(
     [string]$AutoScalingGroup = "nwac-test-asg",
     [string]$Bucket = "nwac-test-artifacts",
     [string]$KeyPrefix = "admin-dashboard",
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$ShowRemoteLogs
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:AWS_CLI_AUTO_PROMPT = "off"
+$env:AWS_PAGER = ""
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+try {
+    chcp.com 65001 > $null
+} catch {
+    # chcp not available (non-Windows host); ignore
+}
 
 function Write-Section([string]$Message) {
     Write-Host ""
     Write-Host ("=== {0} ===" -f $Message) -ForegroundColor Cyan
+}
+
+function Sanitize-Output([string]$Text) {
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $Text
+    }
+    return ($Text -replace '[^\u0009\u000A\u000D\u0020-\u007E]', '?')
 }
 
 function Ensure-Tool([string]$Name) {
@@ -74,8 +92,7 @@ function Start-SsmCommand {
             --cli-input-json ("file://{0}" -f $tempFile) `
             --output json
 
-        $parsed = $raw | ConvertFrom-Json
-        return $parsed.Command.CommandId
+        ($raw | ConvertFrom-Json).Command.CommandId
     }
     finally {
         Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
@@ -89,6 +106,7 @@ function Wait-SsmCommand {
         [Parameter(Mandatory = $true)][string]$InstanceId
     )
 
+    $failureCount = 0
     while ($true) {
         Start-Sleep -Seconds 5
         $raw = aws ssm get-command-invocation `
@@ -96,16 +114,23 @@ function Wait-SsmCommand {
             --command-id $CommandId `
             --instance-id $InstanceId `
             --output json `
-            --query '{Status:Status,StatusDetails:StatusDetails,Error:StandardErrorContent}'
+            --query '{Status:Status,StatusDetails:StatusDetails,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' 2>&1
 
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) {
+            $failureCount++
+            if ($failureCount -ge 10) {
+                $message = if ([string]::IsNullOrWhiteSpace($raw)) { "(no output captured)" } else { Sanitize-Output($raw) }
+                throw "Failed to poll SSM command $CommandId after $failureCount attempts. Last error: $message"
+            }
             continue
         }
 
+        $failureCount = 0
         $parsed = $raw | ConvertFrom-Json
         if (($parsed.PSObject.Properties.Match("Status")).Count -eq 0) {
             continue
         }
+
         switch ($parsed.Status) {
             "Pending" { continue }
             "InProgress" { continue }
@@ -113,18 +138,16 @@ function Wait-SsmCommand {
             "Cancelled" { throw "SSM command $CommandId was cancelled." }
             "TimedOut" { throw "SSM command $CommandId timed out." }
             "Failed" {
-                $stderr = $parsed.StandardErrorContent
-                if ([string]::IsNullOrWhiteSpace($stderr)) {
-                    $stderr = "<no stderr provided>"
+                $stderr = Sanitize-Output($parsed.Stderr)
+                if ([string]::IsNullOrWhiteSpace($stderr)) { $stderr = "<no stderr provided>" }
+                $stdout = Sanitize-Output($parsed.Stdout)
+                if (-not [string]::IsNullOrWhiteSpace($stdout)) {
+                    $stderr = "$stderr`n--- STDOUT ---`n$stdout"
                 }
                 throw "SSM command $CommandId failed on $InstanceId. Error:`n$stderr"
             }
-            "Success" {
-                return $parsed
-            }
-            default {
-                throw "Unknown SSM status '$($parsed.Status)' for command $CommandId."
-            }
+            "Success" { return $parsed }
+            default { throw "Unknown SSM status '$($parsed.Status)' for command $CommandId." }
         }
     }
 }
@@ -134,9 +157,11 @@ function Join-S3Key {
         [string]$Prefix,
         [string]$Name
     )
-    if ([string]::IsNullOrWhiteSpace($Prefix)) { return $Name }
-    $trimPrefix = $Prefix.TrimEnd('/')
-    return "$trimPrefix/$Name"
+
+    if ([string]::IsNullOrWhiteSpace($Prefix)) {
+        return $Name
+    }
+    $Prefix.TrimEnd('/') + '/' + $Name
 }
 
 $tempRoot = $null
@@ -155,8 +180,7 @@ try {
     if (-not $SkipBuild) {
         Write-Section "Building React app for test"
         npm run build:test | Out-Host
-    }
-    else {
+    } else {
         Write-Section "Skipping build step (per flag)"
     }
 
@@ -176,9 +200,16 @@ try {
     Copy-Item -Path (Join-Path $repoRoot "package.json") -Destination (Join-Path $stagingPath "package.json") -Force
     Copy-Item -Path (Join-Path $repoRoot "package-lock.json") -Destination (Join-Path $stagingPath "package-lock.json") -Force
     Copy-Item -Path (Join-Path $repoRoot ".env.test") -Destination (Join-Path $stagingPath ".env.test") -Force
-    $configDir = Join-Path $stagingPath "src/config"
-    New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-    Copy-Item -Path (Join-Path $repoRoot "src/config/roleMatrix.json") -Destination (Join-Path $configDir "roleMatrix.json") -Force
+
+    $directoriesToStage = @("src", "shared", "templates", "blocksteps")
+    $stagedDirectories = @()
+    foreach ($dir in $directoriesToStage) {
+        $sourceDir = Join-Path $repoRoot $dir
+        if (Test-Path -LiteralPath $sourceDir) {
+            Copy-Item -Path $sourceDir -Destination (Join-Path $stagingPath $dir) -Recurse -Force
+            $stagedDirectories += $dir
+        }
+    }
 
     $archiveName = "admin-dashboard-$timestamp.zip"
     $archivePath = Join-Path $tempRoot $archiveName
@@ -188,14 +219,7 @@ try {
 
     Write-Section "Uploading artefact to S3"
     $s3Key = Join-S3Key -Prefix $KeyPrefix -Name $archiveName
-    $uploadCmd = @(
-        "s3",
-        "cp",
-        "`"$archivePath`"",
-        ("s3://{0}/{1}" -f $Bucket, $s3Key),
-        "--region", $Region
-    )
-    aws @uploadCmd | Out-Host
+    aws s3 cp "`"$archivePath`"" ("s3://{0}/{1}" -f $Bucket, $s3Key) --region $Region | Out-Host
 
     Write-Section "Discovering instances in Auto Scaling Group '$AutoScalingGroup'"
     $asgJson = aws autoscaling describe-auto-scaling-groups `
@@ -208,42 +232,85 @@ try {
         throw "Auto Scaling Group '$AutoScalingGroup' not found in region $Region."
     }
 
-    $instanceIds = $asg[0].Instances | Where-Object { $_.LifecycleState -eq "InService" -and $_.HealthStatus -eq "Healthy" } | Select-Object -ExpandProperty InstanceId
+    $instanceIds = $asg[0].Instances |
+        Where-Object { $_.LifecycleState -eq "InService" -and $_.HealthStatus -eq "Healthy" } |
+        Select-Object -ExpandProperty InstanceId
+
     if (-not $instanceIds -or $instanceIds.Count -eq 0) {
         throw "No healthy, in-service instances found in Auto Scaling Group '$AutoScalingGroup'."
     }
 
     Write-Host ("Instances: {0}" -f ($instanceIds -join ", "))
 
-    $commands = @(
-        'set -euo pipefail',
-        'STAMP=$(date +%s)',
-        'TMPDIR="/tmp/admin-deploy-$STAMP"',
-        'mkdir -p "$TMPDIR"',
-        ("aws s3 cp s3://{0}/{1} /tmp/admin.zip --region {2}" -f $Bucket, $s3Key, $Region),
-        'if ! unzip -qo /tmp/admin.zip -d "$TMPDIR"; then code=$?; if [ "$code" -ne 1 ]; then exit "$code"; fi; fi',
-        'mkdir -p /home/ec2-user/admin-dashboard',
-        'mkdir -p /opt/nwac/admin-dashboard',
-        'rm -rf /home/ec2-user/admin-dashboard/build',
-        'rm -rf /opt/nwac/admin-dashboard/build',
-        'cp -r "$TMPDIR/build" /home/ec2-user/admin-dashboard/',
-        'cp -r "$TMPDIR/build" /opt/nwac/admin-dashboard/',
-        'cp "$TMPDIR/isetadminserver.js" /opt/nwac/admin-dashboard/isetadminserver.js',
-        'cp "$TMPDIR/package.json" /opt/nwac/admin-dashboard/package.json',
-        'cp "$TMPDIR/package-lock.json" /opt/nwac/admin-dashboard/package-lock.json',
-        'cp "$TMPDIR/.env.test" /home/ec2-user/admin-dashboard/.env',
-        'cp "$TMPDIR/.env.test" /opt/nwac/admin-dashboard/.env',
-        'cp "$TMPDIR/.env.test" /opt/nwac/admin-dashboard/.env.test',
-        'mkdir -p /opt/nwac/admin-dashboard/src/config',
-        'cp "$TMPDIR/src/config/roleMatrix.json" /opt/nwac/admin-dashboard/src/config/roleMatrix.json',
-        'cd /opt/nwac/admin-dashboard',
-        'echo "Skipping dependency install (npm ci/npm install) per maintenance override."',
-        'export NODE_ENV=production',
-        'export HOME=/root',
-        'export PM2_HOME=/root/.pm2',
-        'pm2 restart nwac-admin --update-env',
-        'rm -rf "$TMPDIR" /tmp/admin.zip'
-    )
+    $commandsList = [System.Collections.Generic.List[string]]::new()
+    $commandsList.Add('set -euo pipefail')
+    $commandsList.Add('STAMP=$(date +%s)')
+    $commandsList.Add('TMPDIR="/tmp/admin-deploy-$STAMP"')
+    $commandsList.Add('mkdir -p "$TMPDIR"')
+    $commandsList.Add("aws s3 cp s3://$Bucket/$s3Key /tmp/admin.zip --region $Region")
+    $commandsList.Add('if ! unzip -qo /tmp/admin.zip -d "$TMPDIR"; then code=$?; if [ "$code" -ne 1 ]; then exit "$code"; fi; fi')
+    $commandsList.Add('mkdir -p /home/ec2-user/admin-dashboard')
+    $commandsList.Add('mkdir -p /opt/nwac/admin-dashboard')
+    $commandsList.Add('rm -rf /home/ec2-user/admin-dashboard/build')
+    $commandsList.Add('rm -rf /opt/nwac/admin-dashboard/build')
+    $commandsList.Add('cp -r "$TMPDIR/build" /home/ec2-user/admin-dashboard/')
+    $commandsList.Add('cp -r "$TMPDIR/build" /opt/nwac/admin-dashboard/')
+    $commandsList.Add('cp "$TMPDIR/isetadminserver.js" /opt/nwac/admin-dashboard/isetadminserver.js')
+    $commandsList.Add('cp "$TMPDIR/package.json" /opt/nwac/admin-dashboard/package.json')
+    $commandsList.Add('cp "$TMPDIR/package-lock.json" /opt/nwac/admin-dashboard/package-lock.json')
+    $commandsList.Add('cp "$TMPDIR/.env.test" /home/ec2-user/admin-dashboard/.env')
+    $commandsList.Add('cp "$TMPDIR/.env.test" /opt/nwac/admin-dashboard/.env')
+    $commandsList.Add('cp "$TMPDIR/.env.test" /opt/nwac/admin-dashboard/.env.test')
+
+    if ($stagedDirectories -contains 'src') {
+        $commandsList.Add('rm -rf /opt/nwac/admin-dashboard/src')
+        $commandsList.Add('cp -r "$TMPDIR/src" /opt/nwac/admin-dashboard/')
+    }
+    if ($stagedDirectories -contains 'shared') {
+        $commandsList.Add('rm -rf /opt/nwac/admin-dashboard/shared')
+        $commandsList.Add('cp -r "$TMPDIR/shared" /opt/nwac/admin-dashboard/')
+    }
+    if ($stagedDirectories -contains 'templates') {
+        $commandsList.Add('rm -rf /opt/nwac/admin-dashboard/templates')
+        $commandsList.Add('cp -r "$TMPDIR/templates" /opt/nwac/admin-dashboard/')
+    }
+    if ($stagedDirectories -contains 'blocksteps') {
+        $commandsList.Add('rm -rf /opt/nwac/admin-dashboard/blocksteps')
+        $commandsList.Add('cp -r "$TMPDIR/blocksteps" /opt/nwac/admin-dashboard/')
+    }
+
+    $commandsList.Add('NPM_BIN="$(command -v npm 2>/dev/null || command -v /usr/local/bin/npm 2>/dev/null || command -v /usr/bin/npm 2>/dev/null)"')
+    $commandsList.Add('if [ -z "$NPM_BIN" ]; then')
+    $commandsList.Add('  echo "npm not found on PATH; deployment aborting"')
+    $commandsList.Add('  exit 1')
+    $commandsList.Add('fi')
+    $commandsList.Add('cd /opt/nwac/admin-dashboard')
+    $commandsList.Add('if [ -d node_modules ]; then rm -rf node_modules; fi')
+    $commandsList.Add('"$NPM_BIN" install --production')
+    $commandsList.Add('PM2_BIN="$(command -v pm2 2>/dev/null || true)"')
+    $commandsList.Add('if [ -z "$PM2_BIN" ]; then')
+    $commandsList.Add('  echo "pm2 not found on PATH; installing globally"')
+    $commandsList.Add('  "$NPM_BIN" install -g pm2')
+    $commandsList.Add('  PM2_BIN="$(command -v pm2 2>/dev/null || echo /usr/bin/pm2)"')
+    $commandsList.Add('fi')
+    $commandsList.Add('if [ ! -x "$PM2_BIN" ]; then')
+    $commandsList.Add('  echo "pm2 binary not executable at $PM2_BIN"')
+    $commandsList.Add('  exit 1')
+    $commandsList.Add('fi')
+    $commandsList.Add('export NODE_ENV=production')
+    $commandsList.Add('export HOME=/root')
+    $commandsList.Add('export PM2_HOME=/root/.pm2')
+    $commandsList.Add('"$PM2_BIN" restart nwac-admin --update-env')
+    $commandsList.Add('sleep 10')
+    $commandsList.Add('"$PM2_BIN" describe nwac-admin || true')
+    $commandsList.Add('LOG_DIR="/root/.pm2/logs"')
+    $commandsList.Add('echo "--- nwac-admin stderr (tail) ---"')
+    $commandsList.Add('tail -n 200 "$LOG_DIR/nwac-admin-error.log" || true')
+    $commandsList.Add('echo "--- nwac-admin stdout (tail) ---"')
+    $commandsList.Add('tail -n 200 "$LOG_DIR/nwac-admin-out.log" || true')
+    $commandsList.Add('rm -rf "$TMPDIR" /tmp/admin.zip')
+
+    $commands = $commandsList.ToArray()
 
     $commandResults = @()
     foreach ($instance in $instanceIds) {
@@ -253,6 +320,20 @@ try {
         $result = Wait-SsmCommand -Region $Region -CommandId $commandId -InstanceId $instance
         $commandResults += $result
         Write-Host ("Instance {0} completed with status {1}" -f $instance, $result.Status) -ForegroundColor Green
+
+        $stdoutDisplay = Sanitize-Output($result.Stdout)
+        $stderrDisplay = Sanitize-Output($result.Stderr)
+
+        if ($ShowRemoteLogs -or $result.Status -ne "Success") {
+            if ($stdoutDisplay -and -not [string]::IsNullOrWhiteSpace($stdoutDisplay)) {
+                Write-Host ("--- Output from {0} ---" -f $instance) -ForegroundColor Yellow
+                Write-Host $stdoutDisplay
+            }
+            if ($stderrDisplay -and -not [string]::IsNullOrWhiteSpace($stderrDisplay)) {
+                Write-Host ("--- STDERR from {0} ---" -f $instance) -ForegroundColor Red
+                Write-Host $stderrDisplay
+            }
+        }
     }
 
     Write-Section "Deployment complete"

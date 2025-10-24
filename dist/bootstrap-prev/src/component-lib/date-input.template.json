@@ -1,0 +1,53 @@
+{
+  "template_key": "date-input",
+  "type": "date-input",
+  "label": "Date Input",
+  "description": "Collect a date using separate day, month and year inputs.",
+  "status": "active",
+  "default_props": {
+    "name": "example-date",
+    "fieldset": { "legend": { "text": { "en": "Enter the date", "fr": "Entrez la date" }, "isPageHeading": false, "classes": "govuk-fieldset__legend--l" } },
+    "hint": { "text": { "en": "For example, 27 3 2007", "fr": "Par exemple, 27 3 2007" } },
+    "items": [
+      { "name": "day", "classes": "govuk-input--width-2" },
+      { "name": "month", "classes": "govuk-input--width-2" },
+      { "name": "year", "classes": "govuk-input--width-4" }
+    ],
+    "formGroup": { "classes": "" },
+  "classes": "",
+  "autocompletePreset": "",
+    "disabled": false
+  },
+  "prop_schema": [
+    { "key": "legendText", "path": "fieldset.legend.text", "type": "text", "label": "Legend Text" },
+    { "key": "hintText", "path": "hint.text", "type": "text", "label": "Hint Text" },
+    { "key": "legendClasses", "path": "fieldset.legend.classes", "type": "select", "label": "Legend Classes", "options": [
+      { "label": "Default (none)", "value": "" },
+      { "label": "Small (s)", "value": "govuk-fieldset__legend--s" },
+      { "label": "Medium (m)", "value": "govuk-fieldset__legend--m" },
+      { "label": "Large (l)", "value": "govuk-fieldset__legend--l" },
+      { "label": "Extra Large (xl)", "value": "govuk-fieldset__legend--xl" }
+    ] },
+    { "key": "isPageHeading", "path": "fieldset.legend.isPageHeading", "type": "select", "label": "Is Page Heading?", "options": [
+      { "label": "True", "value": true },
+      { "label": "False", "value": false }
+    ] },
+    { "key": "name", "path": "name", "type": "text", "label": "Data Key" },
+    { "key": "autocompletePreset", "path": "autocompletePreset", "type": "select", "label": "Autocomplete Preset", "options": [
+      { "label": "None", "value": "" },
+      { "label": "Date of Birth (bday-day / bday-month / bday-year)", "value": "dob" },
+      { "label": "Disable (off)", "value": "off" }
+    ] },
+    { "key": "formGroup.classes", "path": "formGroup.classes", "type": "select", "label": "Form Group Classes", "options": [
+      { "label": "Default (none)", "value": "" },
+      { "label": "Error State", "value": "govuk-form-group--error" }
+    ] },
+    { "key": "disabled", "path": "disabled", "type": "select", "label": "Disabled?", "options": [
+      { "label": "True", "value": true },
+      { "label": "False", "value": false }
+    ] }
+  ],
+  "has_options": false,
+  "option_schema": null,
+  "export_njk_template": "{% from \"govuk/components/date-input/macro.njk\" import govukDateInput %}\n{{ govukDateInput({\n  id: props.name,\n  namePrefix: props.name,\n  fieldset: {\n    legend: { text: props.fieldset.legend.text, isPageHeading: props.fieldset.legend.isPageHeading, classes: props.fieldset.legend.classes }\n  },\n  hint: props.hint,\n  formGroup: { classes: props.formGroup.classes },\n  classes: props.classes,\n  items: props.items,\n  disabled: props.disabled\n}) }}"
+}

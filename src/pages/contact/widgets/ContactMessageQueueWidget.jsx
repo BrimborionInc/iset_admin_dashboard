@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
   Header,
+  Container,
+  ColumnLayout,
   SpaceBetween,
   Table,
   Box,
@@ -165,6 +167,17 @@ const persistPreferences = prefs => {
   }
 };
 
+const formatDateTime = value => (value ? new Date(value).toLocaleString("en-CA") : "-");
+
+const DetailItem = ({ label, children }) => (
+  <div>
+    <SpaceBetween size="xxs">
+      <Box fontWeight="bold">{label}</Box>
+      {children}
+    </SpaceBetween>
+  </div>
+);
+
 const ContactMessageQueueWidget = ({
   actions = {},
   metadata = {},
@@ -201,6 +214,22 @@ const ContactMessageQueueWidget = ({
   const [noteText, setNoteText] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteError, setNoteError] = useState(null);
+
+  const fallbackStatusLabel =
+    modalStatus && typeof modalStatus === "string"
+      ? modalStatus
+          .split("-")
+          .map(part => (part ? part[0].toUpperCase() + part.slice(1) : ""))
+          .join(" ")
+          .trim() || "Unknown"
+      : "Unknown";
+
+  const currentStatusMeta = statusMeta[modalStatus] || {
+    label: fallbackStatusLabel,
+    indicator: "info",
+  };
+
+  const modalSubject = modalDetail?.message?.subject || modalMessage?.subject || "Message details";
 
   const formatHistoryActor = useCallback(entry => {
     if (!entry) return "Unknown";
@@ -736,7 +765,7 @@ const ContactMessageQueueWidget = ({
       <Modal
         visible={!!modalMessage}
         onDismiss={closeModal}
-        header={modalMessage ? modalMessage.subject : "Message details"}
+        header={modalSubject}
         size="large"
         footer={
           <SpaceBetween size="xs" direction="horizontal">
@@ -750,57 +779,64 @@ const ContactMessageQueueWidget = ({
         }
       >
         {modalMessage && (
-          <SpaceBetween size="m">
+          <SpaceBetween size="l">
             {modalError && (
               <Alert type="error" header="Unable to load message">
                 {modalError}
               </Alert>
             )}
             {modalLoading && !modalDetail ? (
-              <StatusIndicator type="loading">Loading message…</StatusIndicator>
+              <StatusIndicator type="loading">Loading message.</StatusIndicator>
             ) : (
-              <>
-                <SpaceBetween size="xs">
-                  <Box fontWeight="bold">Submitted</Box>
-                  <Box>{modalMessage.submittedAt ? new Date(modalMessage.submittedAt).toLocaleString("en-CA") : "—"}</Box>
-                </SpaceBetween>
-                <SpaceBetween size="xs">
-                  <Box fontWeight="bold">Applicant</Box>
-                  <Box>{modalMessage.applicantName || "—"}</Box>
-                  <Box color="text-body-secondary">{modalMessage.email || "—"}</Box>
-                </SpaceBetween>
-                {modalDetail?.message?.subject && modalDetail.message.subject !== modalMessage.subject && (
-                  <SpaceBetween size="xs">
-                    <Box fontWeight="bold">Subject</Box>
-                    <Box>{modalDetail.message.subject}</Box>
+              <SpaceBetween size="l">
+                <Container header={<Header variant="h2">Submission details</Header>}>
+                  <SpaceBetween size="l">
+                    <ColumnLayout columns={2} variant="text-grid">
+                      <DetailItem label="Submitted">
+                        <Box>{formatDateTime(modalMessage.submittedAt)}</Box>
+                      </DetailItem>
+                      <DetailItem label="Applicant">
+                        <SpaceBetween size="xxs">
+                          <Box>{modalMessage.applicantName || "-"}</Box>
+                          <Box color="text-body-secondary">{modalMessage.email || "-"}</Box>
+                        </SpaceBetween>
+                      </DetailItem>
+                      <DetailItem label="Subject">
+                        <Box>{modalDetail?.message?.subject || modalMessage.subject || "-"}</Box>
+                      </DetailItem>
+                      <DetailItem label="Current status">
+                        <StatusIndicator type={currentStatusMeta.indicator}>
+                          {currentStatusMeta.label}
+                        </StatusIndicator>
+                      </DetailItem>
+                    </ColumnLayout>
+                    <FormField label="Update status">
+                      <Select
+                        selectedOption={
+                          statusSelectOptions.find(option => option.value === modalStatus) || statusSelectOptions[0]
+                        }
+                        onChange={({ detail }) => setModalStatus(detail.selectedOption?.value ?? modalStatus)}
+                        options={statusSelectOptions}
+                        ariaLabel="Update status"
+                        disabled={modalSaving}
+                      />
+                    </FormField>
                   </SpaceBetween>
-                )}
-                <SpaceBetween size="xs">
-                  <Box fontWeight="bold">Message</Box>
+                </Container>
+                <Container header={<Header variant="h2">Message</Header>}>
                   <Box
                     as="pre"
-                    padding="s"
+                    padding="m"
                     background="bg-container-secondary"
+                    borderRadius="small"
                     style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
                   >
-                    {modalDetail?.message?.message || "—"}
+                    {modalDetail?.message?.message || "-"}
                   </Box>
-                </SpaceBetween>
-                <FormField label="Status">
-                  <Select
-                    selectedOption={
-                      statusSelectOptions.find(option => option.value === modalStatus) || statusSelectOptions[0]
-                    }
-                    onChange={({ detail }) => setModalStatus(detail.selectedOption?.value ?? modalStatus)}
-                    options={statusSelectOptions}
-                    ariaLabel="Update status"
-                    disabled={modalSaving}
-                  />
-                </FormField>
-                <SpaceBetween size="xs">
-                  <Box fontWeight="bold">Status history</Box>
+                </Container>
+                <Container header={<Header variant="h2">Status history</Header>}>
                   {modalDetail?.history?.length ? (
-                    <SpaceBetween size="xs">
+                    <SpaceBetween size="s">
                       {modalDetail.history.map(entry => (
                         <Box key={entry.id} padding="s" background="bg-container-secondary" borderRadius="small">
                           <SpaceBetween size="xxs">
@@ -808,13 +844,9 @@ const ContactMessageQueueWidget = ({
                               <StatusIndicator type={statusMeta[entry.newStatus]?.indicator || "info"}>
                                 {statusMeta[entry.newStatus]?.label || entry.newStatus}
                               </StatusIndicator>
-                              <Box color="text-body-secondary">
-                                {entry.changedAt ? new Date(entry.changedAt).toLocaleString("en-CA") : ""}
-                              </Box>
+                              <Box color="text-body-secondary">{formatDateTime(entry.changedAt)}</Box>
                             </SpaceBetween>
-                            <Box color="text-body-secondary">
-                              Changed by {formatHistoryActor(entry)}
-                            </Box>
+                            <Box color="text-body-secondary">Changed by {formatHistoryActor(entry)}</Box>
                           </SpaceBetween>
                         </Box>
                       ))}
@@ -822,52 +854,54 @@ const ContactMessageQueueWidget = ({
                   ) : (
                     <Box color="text-body-secondary">No history recorded.</Box>
                   )}
-                </SpaceBetween>
-                <SpaceBetween size="xs">
-                  <Box fontWeight="bold">Internal notes</Box>
-                  {modalDetail?.notes?.length ? (
-                    <SpaceBetween size="xs">
-                      {modalDetail.notes.map(note => (
-                        <Box key={note.id} padding="s" background="bg-container-secondary" borderRadius="small">
-                          <SpaceBetween size="xxs">
-                            <Box>{note.noteText}</Box>
-                            <Box color="text-body-secondary">
-                              {note.createdAt ? new Date(note.createdAt).toLocaleString("en-CA") : ""} —{" "}
-                              {formatNoteAuthor(note)}
-                            </Box>
-                          </SpaceBetween>
-                        </Box>
-                      ))}
+                </Container>
+                <Container header={<Header variant="h2">Internal notes</Header>}>
+                  <SpaceBetween size="m">
+                    {modalDetail?.notes?.length ? (
+                      <SpaceBetween size="s">
+                        {modalDetail.notes.map(note => (
+                          <Box key={note.id} padding="s" background="bg-container-secondary" borderRadius="small">
+                            <SpaceBetween size="xxs">
+                              <Box>{note.noteText}</Box>
+                              <Box color="text-body-secondary">
+                                {formatDateTime(note.createdAt)} - {formatNoteAuthor(note)}
+                              </Box>
+                            </SpaceBetween>
+                          </Box>
+                        ))}
+                      </SpaceBetween>
+                    ) : (
+                      <Box color="text-body-secondary">No notes added yet.</Box>
+                    )}
+                    <SpaceBetween size="s">
+                      <FormField label="Add note" errorText={noteError || undefined}>
+                        <Textarea
+                          value={noteText}
+                          onChange={({ detail }) => {
+                            setNoteText(detail.value);
+                            if (noteError) {
+                              setNoteError(null);
+                            }
+                          }}
+                          rows={3}
+                          placeholder="Record triage context or follow-up actions"
+                          disabled={noteSaving}
+                        />
+                      </FormField>
+                      <Box textAlign="right">
+                        <Button
+                          variant="primary"
+                          onClick={handleNoteSubmit}
+                          loading={noteSaving}
+                          disabled={noteSaving || modalLoading}
+                        >
+                          Add note
+                        </Button>
+                      </Box>
                     </SpaceBetween>
-                  ) : (
-                    <Box color="text-body-secondary">No notes added yet.</Box>
-                  )}
-                  <SpaceBetween size="xxs">
-                    <FormField label="Add note" errorText={noteError || undefined}>
-                      <Textarea
-                        value={noteText}
-                        onChange={({ detail }) => {
-                          setNoteText(detail.value);
-                          if (noteError) {
-                            setNoteError(null);
-                          }
-                        }}
-                        rows={3}
-                        placeholder="Record triage context or follow-up actions"
-                        disabled={noteSaving}
-                      />
-                    </FormField>
-                    <Button
-                      variant="primary"
-                      onClick={handleNoteSubmit}
-                      loading={noteSaving}
-                      disabled={noteSaving || modalLoading}
-                    >
-                      Add note
-                    </Button>
                   </SpaceBetween>
-                </SpaceBetween>
-              </>
+                </Container>
+              </SpaceBetween>
             )}
           </SpaceBetween>
         )}

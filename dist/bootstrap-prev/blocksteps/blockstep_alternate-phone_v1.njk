@@ -1,0 +1,37 @@
+
+{% from "govuk/components/label/macro.njk" import govukLabel %}
+
+{% if false %}
+  <h1 class="govuk-label-wrapper">
+{% endif %}
+  {{ govukLabel({
+    text: "Contact Details",
+    html: "",
+    classes: "",
+    for: ""
+  }) }}
+{% if false %}
+  </h1>
+{% endif %}
+
+
+
+{% from "govuk/components/input/macro.njk" import govukInput %}
+
+{{ govukInput({
+  name: "first-name",
+  type: "text",
+  label: {
+    text: "Do you have an alternate phone number?",
+    classes: "govuk-label--l"
+  },
+  hint: {
+    text: "This could be another mobile, landline, or a number where we can reach you if we can’t get through on your main line. You don’t need to provide one if you don’t have one or don’t want to share it.  If so leave this blank."
+  },
+  classes: "govuk-input",
+  autocomplete: "given-name",
+  formGroup: {
+    classes: props.formGroup.classes
+  },
+  disabled: false
+}) }}

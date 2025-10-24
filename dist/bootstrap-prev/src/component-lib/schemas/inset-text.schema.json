@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/inset-text.schema.json",
+  "title": "Inset Text Component",
+  "type": "object",
+  "required": ["text"],
+  "additionalProperties": true,
+  "properties": {
+    "id": { "type": "string" },
+    "text": { "type": ["string", "object"], "description": "Plain text content (bilingual object allowed)." },
+    "html": { "type": ["string", "null"], "description": "Raw HTML alternative. If provided, takes precedence over text." },
+    "classes": { "type": "string" }
+  }
+}

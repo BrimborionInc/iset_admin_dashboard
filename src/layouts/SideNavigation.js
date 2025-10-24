@@ -86,6 +86,15 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
     },
     {
       type: 'section',
+      text: 'ESDC Submissions',
+      items: [
+        { type: 'link', text: 'Overview', href: '/esdc/overview' },
+        { type: 'link', text: 'Participants', href: '/esdc/participants' },
+        { type: 'link', text: 'Reporting', href: '/esdc/reporting' },
+      ],
+    },
+    {
+      type: 'section',
       text: 'Other Dashboards',
       items: [
         { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },

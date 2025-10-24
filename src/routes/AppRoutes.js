@@ -69,6 +69,14 @@ import FinanceForecastingHelp from '../helpPanelContents/financeForecastingHelp.
 import FinancePaymentsHelp from '../helpPanelContents/financePaymentsHelp.js';
 import ContactCommunicationsDashboard from '../pages/contact/ContactCommunicationsDashboard.jsx';
 import ContactCommunicationsHelp from '../helpPanelContents/contactCommunicationsHelp.js';
+import EsdcSubmissionsOverviewPage from '../pages/esdc/EsdcSubmissionsOverviewPage.jsx';
+import EsdcParticipantSubmissionsPage from '../pages/esdc/EsdcParticipantSubmissionsPage.jsx';
+import EsdcReportingPackagesPage from '../pages/esdc/EsdcReportingPackagesPage.jsx';
+import ParticipantWorkspacePage from '../pages/esdc/ParticipantWorkspacePage.jsx';
+import EsdcOverviewHelp from '../helpPanelContents/esdcOverviewHelp.js';
+import EsdcParticipantsHelp from '../helpPanelContents/esdcParticipantsHelp.js';
+import EsdcReportingHelp from '../helpPanelContents/esdcReportingHelp.js';
+import EsdcSubmissionDashboardHelp from '../helpPanelContents/esdcSubmissionDashboardHelp.js';
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -438,6 +446,149 @@ const AppRoutes = ({
           null,
           CaseAssignmentDashboardHelp.aiContext
         )}
+      </Route>
+
+      <Route path="/esdc/overview">
+        <Guard roles={['System Administrator', 'Program Administrator']} path="/esdc/overview">
+          {renderContent(
+            EsdcSubmissionsOverviewPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'ESDC Submissions', href: '/esdc/overview' }
+            ],
+            'ESDC Submissions Overview',
+            <EsdcOverviewHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('esdcOverview:openPalette'))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('esdcOverview:resetLayout'))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            EsdcOverviewHelp.aiContext
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/esdc/participants" exact>
+        <Guard roles={['System Administrator', 'Program Administrator']} path="/esdc/participants">
+          {renderContent(
+            EsdcParticipantSubmissionsPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'ESDC Submissions', href: '/esdc/overview' },
+              { text: 'Participants', href: '/esdc/participants' }
+            ],
+            'Participant Submissions',
+            <EsdcParticipantsHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('esdcParticipants:openPalette'))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('esdcParticipants:resetLayout'))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            EsdcParticipantsHelp.aiContext
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/esdc/participants/:clientId">
+        <Guard roles={['System Administrator', 'Program Administrator']} path="/esdc/participants">
+          {renderContent(
+            ParticipantWorkspacePage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'ESDC Submissions', href: '/esdc/overview' },
+              { text: 'Participant Workspace', href: '#' }
+            ],
+            'Participant Submission Workspace',
+            <EsdcSubmissionDashboardHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('esdcParticipantWorkspace:openPalette'))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('esdcParticipantWorkspace:resetLayout'))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            EsdcSubmissionDashboardHelp.aiContext
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/esdc/reporting">
+        <Guard roles={['System Administrator', 'Program Administrator']} path="/esdc/reporting">
+          {renderContent(
+            EsdcReportingPackagesPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'ESDC Submissions', href: '/esdc/overview' },
+              { text: 'Reporting', href: '/esdc/reporting' }
+            ],
+            'Reporting Packages',
+            <EsdcReportingHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('esdcReporting:openPalette'))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('esdcReporting:resetLayout'))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            EsdcReportingHelp.aiContext
+          )}
+        </Guard>
       </Route>
 
       <Route path="/contact-communications">

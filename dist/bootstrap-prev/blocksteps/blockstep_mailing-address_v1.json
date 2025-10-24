@@ -1,0 +1,404 @@
+{
+  "name": "Mailing Address",
+  "status": "active",
+  "components": [
+    {
+      "id": 4,
+      "type": "label",
+      "label": "Label",
+      "description": "A label component used in other input components. To see an example of it in use, see the text input component.",
+      "props": {
+        "for": "",
+        "html": "",
+        "text": "Contact Details",
+        "classes": "",
+        "isPageHeading": false,
+        "items": []
+      },
+      "editable_fields": [
+        {
+          "key": "text",
+          "path": "text",
+          "type": "text",
+          "label": "Label Text"
+        },
+        {
+          "key": "html",
+          "path": "html",
+          "type": "textarea",
+          "label": "HTML (overrides text)"
+        },
+        {
+          "key": "classes",
+          "path": "classes",
+          "type": "select",
+          "label": "Label Classes",
+          "options": [
+            {
+              "label": "None",
+              "value": ""
+            },
+            {
+              "label": "S",
+              "value": "govuk-label--s"
+            },
+            {
+              "label": "M",
+              "value": "govuk-label--m"
+            },
+            {
+              "label": "L",
+              "value": "govuk-label--l"
+            },
+            {
+              "label": "XL",
+              "value": "govuk-label--xl"
+            }
+          ]
+        },
+        {
+          "key": "for",
+          "path": "for",
+          "type": "text",
+          "label": "For Attribute"
+        },
+        {
+          "key": "isPageHeading",
+          "path": "isPageHeading",
+          "type": "select",
+          "label": "Is Page Heading?",
+          "options": [
+            {
+              "label": "True",
+              "value": true
+            },
+            {
+              "label": "False",
+              "value": false
+            }
+          ]
+        }
+      ],
+      "nunjucks_template": "\n{% from \"govuk/components/label/macro.njk\" import govukLabel %}\n\n{% if props.isPageHeading %}\n  <h1 class=\"govuk-label-wrapper\">\n{% endif %}\n  {{ govukLabel({\n    text: props.text,\n    html: props.html,\n    classes: props.classes,\n    for: props.for\n  }) }}\n{% if props.isPageHeading %}\n  </h1>\n{% endif %}\n",
+      "status": "active",
+      "created_at": "2025-03-25T21:46:41.000Z",
+      "updated_at": "2025-04-02T16:35:50.000Z",
+      "has_options": 0,
+      "option_schema": null
+    },
+    {
+      "id": 1,
+      "type": "radio",
+      "label": "Radio Group",
+      "description": "A group of radio buttons to let users select one option from a list.",
+      "props": {
+        "hint": {
+          "text": ""
+        },
+        "name": "example-radio",
+        "items": [
+          {
+            "text": "Yes",
+            "value": "1"
+          },
+          {
+            "text": "No",
+            "value": "2"
+          }
+        ],
+        "classes": "govuk-radios",
+        "disabled": false,
+        "fieldset": {
+          "legend": {
+            "text": "Is your mailing address different from your home address?",
+            "classes": "govuk-fieldset__legend--l",
+            "isPageHeading": false
+          }
+        },
+        "attributes": {
+          "data-options-endpoint": "$.props.endpoint"
+        }
+      },
+      "editable_fields": [
+        {
+          "key": "legendText",
+          "path": "fieldset.legend.text",
+          "type": "text",
+          "label": "Legend Text"
+        },
+        {
+          "key": "hintText",
+          "path": "hint.text",
+          "type": "text",
+          "label": "Hint Text"
+        },
+        {
+          "key": "legendClasses",
+          "path": "fieldset.legend.classes",
+          "type": "select",
+          "label": "Legend Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Small (s)",
+              "value": "govuk-fieldset__legend--s"
+            },
+            {
+              "label": "Medium (m)",
+              "value": "govuk-fieldset__legend--m"
+            },
+            {
+              "label": "Large (l)",
+              "value": "govuk-fieldset__legend--l"
+            },
+            {
+              "label": "Extra Large (xl)",
+              "value": "govuk-fieldset__legend--xl"
+            }
+          ]
+        },
+        {
+          "key": "isPageHeading",
+          "path": "fieldset.legend.isPageHeading",
+          "type": "select",
+          "label": "Is Page Heading?",
+          "options": [
+            {
+              "label": "Yes",
+              "value": true
+            },
+            {
+              "label": "No",
+              "value": false
+            }
+          ]
+        },
+        {
+          "key": "name",
+          "path": "name",
+          "type": "text",
+          "label": "Radio Group Name"
+        },
+        {
+          "key": "classes",
+          "path": "classes",
+          "type": "select",
+          "label": "Container Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Inline",
+              "value": "govuk-radios--inline"
+            },
+            {
+              "label": "Small",
+              "value": "govuk-radios--small"
+            }
+          ]
+        },
+        {
+          "key": "formGroupClasses",
+          "path": "formGroup.classes",
+          "type": "select",
+          "label": "Form Group Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Error State",
+              "value": "govuk-form-group--error"
+            }
+          ]
+        },
+        {
+          "key": "disabled",
+          "path": "disabled",
+          "type": "select",
+          "label": "Disabled",
+          "options": [
+            {
+              "label": "Yes",
+              "value": true
+            },
+            {
+              "label": "No",
+              "value": false
+            }
+          ]
+        },
+        {
+          "key": "options",
+          "path": "items",
+          "type": "optionList",
+          "label": "Options"
+        }
+      ],
+      "nunjucks_template": "{% from \"govuk/components/radios/macro.njk\" import govukRadios %}\r \r   {{ govukRadios({\r     name: props.name,\r     fieldset: {\r       legend: {\r         text: props.fieldset.legend.text,\r         isPageHeading: props.fieldset.legend.isPageHeading,\r         classes: props.fieldset.legend.classes\r       }\r     },\r     hint: {\r       text: props.hint.text\r     },\r     classes: props.classes,\r     formGroup: {\r       classes: props.formGroup.classes\r     },\r     disabled: props.disabled,\r     items: props.items}) }}",
+      "status": "active",
+      "created_at": "2025-03-25T14:10:39.000Z",
+      "updated_at": "2025-04-02T18:19:29.000Z",
+      "has_options": 1,
+      "option_schema": [
+        "text",
+        "value"
+      ]
+    },
+    {
+      "id": 18,
+      "type": "character-count",
+      "label": "Character Count",
+      "description": "A textarea with a character or word limit and a live countdown.",
+      "props": {
+        "id": "",
+        "hint": {
+          "text": "What is you mailing address?"
+        },
+        "name": "message",
+        "rows": "5",
+        "label": {
+          "text": "",
+          "classes": "govuk-label--l"
+        },
+        "value": "",
+        "classes": "",
+        "formGroup": {
+          "classes": ""
+        },
+        "maxlength": "200",
+        "threshold": "75",
+        "spellcheck": false,
+        "autocomplete": "",
+        "errorMessage": {
+          "text": ""
+        },
+        "items": []
+      },
+      "editable_fields": [
+        {
+          "key": "labelText",
+          "path": "label.text",
+          "type": "text",
+          "label": "Label Text"
+        },
+        {
+          "key": "hintText",
+          "path": "hint.text",
+          "type": "text",
+          "label": "Hint Text"
+        },
+        {
+          "key": "labelClasses",
+          "path": "label.classes",
+          "type": "select",
+          "label": "Label Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Small (s)",
+              "value": "govuk-label--s"
+            },
+            {
+              "label": "Medium (m)",
+              "value": "govuk-label--m"
+            },
+            {
+              "label": "Large (l)",
+              "value": "govuk-label--l"
+            }
+          ]
+        },
+        {
+          "key": "name",
+          "path": "name",
+          "type": "text",
+          "label": "Textarea Name"
+        },
+        {
+          "key": "id",
+          "path": "id",
+          "type": "text",
+          "label": "Textarea ID"
+        },
+        {
+          "key": "rows",
+          "path": "rows",
+          "type": "text",
+          "label": "Rows"
+        },
+        {
+          "key": "maxlength",
+          "path": "maxlength",
+          "type": "text",
+          "label": "Max Length (characters)"
+        },
+        {
+          "key": "threshold",
+          "path": "threshold",
+          "type": "text",
+          "label": "Display Threshold (%)"
+        },
+        {
+          "key": "autocomplete",
+          "path": "autocomplete",
+          "type": "text",
+          "label": "Autocomplete"
+        },
+        {
+          "key": "spellcheck",
+          "path": "spellcheck",
+          "type": "select",
+          "label": "Spellcheck",
+          "options": [
+            {
+              "label": "Yes",
+              "value": true
+            },
+            {
+              "label": "No",
+              "value": false
+            }
+          ]
+        },
+        {
+          "key": "classes",
+          "path": "classes",
+          "type": "text",
+          "label": "CSS Classes"
+        },
+        {
+          "key": "formGroupClasses",
+          "path": "formGroup.classes",
+          "type": "select",
+          "label": "Form Group Classes",
+          "options": [
+            {
+              "label": "Default (none)",
+              "value": ""
+            },
+            {
+              "label": "Error State",
+              "value": "govuk-form-group--error"
+            }
+          ]
+        }
+      ],
+      "nunjucks_template": "{% from \"govuk/components/character-count/macro.njk\" import govukCharacterCount %}\n\n{{ govukCharacterCount({\n  id: props.id,\n  name: props.name,\n  rows: props.rows,\n  maxlength: props.maxlength,\n  threshold: props.threshold,\n  autocomplete: props.autocomplete,\n  spellcheck: props.spellcheck,\n  value: props.value,\n  classes: props.classes,\n  label: {\n    text: props.label.text,\n    classes: props.label.classes\n  },\n  hint: {\n    text: props.hint.text\n  },\n  errorMessage: {\n    text: props.errorMessage.text\n  },\n  formGroup: {\n    classes: props.formGroup.classes\n  }\n}) }}",
+      "status": "active",
+      "created_at": "2025-03-27T21:03:12.000Z",
+      "updated_at": "2025-03-27T21:03:12.000Z",
+      "has_options": 0,
+      "option_schema": null
+    }
+  ]
+}

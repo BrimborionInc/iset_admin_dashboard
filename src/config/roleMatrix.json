@@ -84,6 +84,18 @@
       "System Administrator",
       "Program Administrator"
     ],
+    "/esdc/overview": [
+      "System Administrator",
+      "Program Administrator"
+    ],
+    "/esdc/participants": [
+      "System Administrator",
+      "Program Administrator"
+    ],
+    "/esdc/reporting": [
+      "System Administrator",
+      "Program Administrator"
+    ],
     "/help-support-dashboard": [
       "System Administrator",
       "Program Administrator",

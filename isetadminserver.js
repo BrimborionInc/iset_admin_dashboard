@@ -13,6 +13,8 @@ let pool; // Initialized after DB config loads
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
 const { createEventService, EventValidationError, registerNotificationHook } = require('../shared/events');
 
+const ENSURED_HISTORY_EVENT_TYPE_ENUM = { prepared: false };
+
 const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_internal_notification_dismissal',
   'iset_internal_notification',
@@ -113,6 +115,1643 @@ function normaliseAccessControlMatrix(matrix) {
   const defaultPolicy = rawDefault === 'allow' ? 'allow' : 'deny';
   const routes = normaliseAccessControlRoutes(matrix.routes || {});
   return { default: defaultPolicy, routes };
+}
+
+async function ensureEsdcPreparedHistoryEventType(connection) {
+  if (ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared) return;
+  const executor = connection && typeof connection.query === 'function' ? connection : pool;
+  if (!executor || typeof executor.query !== 'function') return;
+  try {
+    await executor.query(`
+      ALTER TABLE esdc_participant_submission_history
+      MODIFY COLUMN event_type ENUM('validated','ready','prepared','submitted','accepted','rejected') NOT NULL
+    `);
+    ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared = true;
+  } catch (err) {
+    const code = err && err.code;
+    if (code === 'ER_NO_SUCH_TABLE') {
+      ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared = true;
+      return;
+    }
+    if (code === 'ER_TABLEACCESS_DENIED_ERROR') {
+      console.warn('[esdc] insufficient privileges to alter history event_type enum:', err.message);
+      return;
+    }
+    if (code && code.startsWith('ER_')) {
+      const message = err.message || '';
+      if (/duplicate/i.test(message) || /already exists/i.test(message)) {
+        ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared = true;
+        return;
+      }
+    }
+    if (!ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared) {
+      console.warn('[esdc] failed to ensure prepared event history enum:', err.message || err);
+    }
+  }
+}
+
+async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId) {
+  if (!caseId) return;
+  const executor = db && typeof db.query === 'function' ? db : pool;
+  if (!executor) return;
+  try {
+    await executor.query(
+      `INSERT INTO esdc_participant_submission (
+         case_id,
+         application_id,
+         readiness_status,
+         readiness_summary,
+         warnings,
+         blocking_issues,
+         last_validated_at,
+         submission_status,
+         submitted_at,
+         submitted_by_user_id,
+         payload_snapshot,
+         payload_storage_key,
+         payload_checksum,
+         rejection_reason
+       ) VALUES (?, ?, 'needs_review', NULL, NULL, NULL, NULL, 'pending', NULL, NULL, NULL, NULL, NULL, NULL)
+       ON DUPLICATE KEY UPDATE
+         application_id = VALUES(application_id),
+         readiness_status = 'needs_review',
+         readiness_summary = NULL,
+         warnings = NULL,
+         blocking_issues = NULL,
+         last_validated_at = NULL,
+         submission_status = 'pending',
+         submitted_at = NULL,
+         submitted_by_user_id = NULL,
+         payload_snapshot = NULL,
+         payload_storage_key = NULL,
+         payload_checksum = NULL,
+         rejection_reason = NULL,
+         updated_at = NOW()`,
+      [caseId, applicationId || null]
+    );
+  } catch (err) {
+    console.error('[esdc] ensure participant submission failed', err);
+  }
+}
+
+async function markEsdcParticipantSubmissionNeedsReview(db, caseId, options = {}) {
+  if (!caseId) return;
+  const executor = db && typeof db.query === 'function' ? db : pool;
+  if (!executor) return;
+  const { resetSnapshot = true, resetSubmissionStatus = true } = options;
+  const assignments = [
+    "readiness_status = 'needs_review'",
+    'readiness_summary = NULL',
+    'warnings = NULL',
+    'blocking_issues = NULL',
+    'last_validated_at = NULL',
+    'updated_at = NOW()'
+  ];
+  if (resetSnapshot) {
+    assignments.push(
+      'payload_snapshot = NULL',
+      'payload_storage_key = NULL',
+      'payload_checksum = NULL',
+      'rejection_reason = NULL'
+    );
+  }
+  if (resetSubmissionStatus) {
+    assignments.push(
+      "submission_status = 'pending'",
+      'submitted_at = NULL',
+      'submitted_by_user_id = NULL'
+    );
+  }
+  try {
+    const sql = `UPDATE esdc_participant_submission SET ${assignments.join(', ')} WHERE case_id = ?`;
+    await executor.query(sql, [caseId]);
+  } catch (err) {
+    console.error('[esdc] mark participant submission needs review failed', err);
+  }
+}
+
+const { ILMP_PARTICIPANT_RULES, PROVINCE_CODES } = require('./src/server/esdcIlmpParticipantRules');
+const GENDER_VALUE_MAP = {
+  male: 'male',
+  man: 'male',
+  m: 'male',
+  '1': 'female',
+  female: 'female',
+  woman: 'female',
+  f: 'female',
+  'two spirit': 'unspecified',
+  'transgender woman': 'unspecified',
+  'gender diverse': 'unspecified',
+  '2': 'unspecified',
+  '3': 'unspecified',
+  '4': 'unspecified',
+  '5': 'unspecified',
+  'prefer not to say': 'unspecified',
+  unspecified: 'unspecified',
+  unknown: 'unspecified',
+  other: 'unspecified'
+};
+
+const INDIGENOUS_VALUE_MAP = {
+  'first_nations_status': 'registered-indian',
+  'first nations (status)': 'registered-indian',
+  'registered indian': 'registered-indian',
+  'first_nations_non_status': 'non-status-indian',
+  'first nations (non-status)': 'non-status-indian',
+  metis: 'metis',
+  'm\u00e9tis': 'metis',
+  'métis': 'metis',
+  inuit: 'inuit'
+};
+
+const PROVINCE_CODE_MAP = {
+  ab: 'AB',
+  alberta: 'AB',
+  bc: 'BC',
+  'british columbia': 'BC',
+  mb: 'MB',
+  manitoba: 'MB',
+  nb: 'NB',
+  'new brunswick': 'NB',
+  nl: 'NL',
+  'newfoundland and labrador': 'NL',
+  ns: 'NS',
+  'nova scotia': 'NS',
+  nt: 'NT',
+  'northwest territories': 'NT',
+  nu: 'NU',
+  nunavut: 'NU',
+  on: 'ON',
+  ontario: 'ON',
+  pe: 'PE',
+  'prince edward island': 'PE',
+  qc: 'QC',
+  quebec: 'QC',
+  sk: 'SK',
+  saskatchewan: 'SK',
+  yt: 'YT',
+  'yukon territory': 'YT',
+  us: 'US',
+  usa: 'US',
+  'united states': 'US',
+  other: 'OT',
+  'other country': 'OT'
+};
+
+function normaliseString(value) {
+  if (value === null || typeof value === 'undefined') return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : null;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const candidate = normaliseString(entry);
+      if (candidate) return candidate;
+    }
+    return null;
+  }
+  if (typeof value === 'object') {
+    if (value && typeof value.value !== 'undefined') {
+      return normaliseString(value.value);
+    }
+    if (value && typeof value.text !== 'undefined') {
+      return normaliseString(value.text);
+    }
+    try {
+      return normaliseString(JSON.stringify(value));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function cleanSin(raw) {
+  const str = normaliseString(raw);
+  if (!str) return null;
+  const digits = str.replace(/\D/g, '');
+  return digits.length === 0 ? null : digits;
+}
+
+function isValidSin(digits) {
+  if (!/^\d{9}$/.test(digits)) return false;
+  let sum = 0;
+  for (let i = 0; i < digits.length; i += 1) {
+    let digit = Number(digits[i]);
+    if (i % 2 === 1) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+  }
+  return sum % 10 === 0;
+}
+
+function parseDate(value) {
+  if (!value && value !== 0) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  const str = normaliseString(value);
+  if (!str) return null;
+  // Accept YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY, ISO 8601
+  const normalized = str.replace(/\//g, '-');
+  const date = new Date(normalized);
+  if (!Number.isNaN(date.getTime())) return date;
+  // Attempt to flip DD-MM-YYYY
+  const parts = normalized.split('-');
+  if (parts.length === 3 && parts[0].length === 2 && parts[2].length === 4) {
+    const [dd, mm, yyyy] = parts;
+    const iso = `${yyyy}-${mm}-${dd}`;
+    const fallback = new Date(iso);
+    if (!Number.isNaN(fallback.getTime())) return fallback;
+  }
+  return null;
+}
+
+function calculateAge(date) {
+  if (!date) return null;
+  const today = new Date();
+  let age = today.getFullYear() - date.getFullYear();
+  const monthDiff = today.getMonth() - date.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < date.getDate())) {
+    age -= 1;
+  }
+  return age;
+}
+
+function extractSin(context) {
+  const { payload = {}, answers = {} } = context;
+  const personal = payload.personal || {};
+  const candidates = [
+    personal.sin,
+    personal.social_insurance_number,
+    personal.socialInsuranceNumber,
+    answers.sin,
+    answers['sin-number'],
+    answers['sin_number'],
+    answers['social-insurance-number'],
+    answers['social_insurance_number'],
+    answers['personal-sin'],
+    answers['personal_sin'],
+    answers['identity_sin']
+  ];
+  for (const value of candidates) {
+    const normalized = cleanSin(value);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+function extractDob(context) {
+  const { payload = {}, answers = {} } = context;
+  const personal = payload.personal || {};
+  const candidates = [
+    personal.date_of_birth,
+    personal.dateOfBirth,
+    answers['date-of-birth'],
+    answers['dob'],
+    answers['birth-date'],
+    answers['birthdate'],
+    answers['personal-date-of-birth']
+  ];
+  for (const value of candidates) {
+    const date = parseDate(value);
+    if (date) return date;
+  }
+  return null;
+}
+
+function extractGender(context) {
+  const { payload = {}, answers = {} } = context;
+  const personal = payload.personal || {};
+  const candidates = [
+    personal.gender,
+    personal.sex,
+    answers.gender,
+    answers['personal-gender'],
+    answers['sex'],
+    answers['gender-identity'],
+    answers['what-is-your-gender-identity']
+  ];
+  for (const value of candidates) {
+    const normalized = normaliseString(value);
+    if (!normalized) continue;
+    const mapped = GENDER_VALUE_MAP[normalized.toLowerCase()];
+    if (mapped) return mapped;
+    return normalized;
+  }
+  return null;
+}
+
+function extractFirstName(context) {
+  const { payload = {}, answers = {} } = context;
+  const personal = payload.personal || {};
+  const candidates = [
+    personal.first_name,
+    personal.firstName,
+    personal.given_name,
+    personal.givenName,
+    answers['first-name'],
+    answers['first_name'],
+    answers['given-name'],
+    answers['given_name'],
+    answers['personal-first-name'],
+    answers['personal_first_name'],
+    answers['personal-given-name'],
+    answers['personal_given_name']
+  ];
+  for (const value of candidates) {
+    const normalised = normaliseString(value);
+    if (normalised) return normalised;
+  }
+  return null;
+}
+
+function extractLastName(context) {
+  const { payload = {}, answers = {} } = context;
+  const personal = payload.personal || {};
+  const candidates = [
+    personal.last_name,
+    personal.lastName,
+    personal.family_name,
+    personal.familyName,
+    answers['last-name'],
+    answers['last_name'],
+    answers['family-name'],
+    answers['family_name'],
+    answers['personal-last-name'],
+    answers['personal_last_name'],
+    answers['personal-family-name'],
+    answers['personal_family_name']
+  ];
+  for (const value of candidates) {
+    const normalised = normaliseString(value);
+    if (normalised) return normalised;
+  }
+  return null;
+}
+
+function extractMiddleInitials(context) {
+  const { payload = {}, answers = {} } = context;
+  const personal = payload.personal || {};
+  const candidates = [
+    personal.middle_name,
+    personal.middleName,
+    personal.middle_initials,
+    personal.middleInitials,
+    answers['middle-name'],
+    answers['middle_name'],
+    answers['middle-initial'],
+    answers['middle_initial'],
+    answers['personal-middle-name'],
+    answers['personal_middle_name'],
+    answers['personal-middle-initials'],
+    answers['personal_middle_initials']
+  ];
+  for (const value of candidates) {
+    const normalised = normaliseString(value);
+    if (normalised) {
+      if (normalised.length === 1) return normalised.toUpperCase();
+      return normalised
+        .split(/\s+/)
+        .map(part => part[0]?.toUpperCase())
+        .filter(Boolean)
+        .join('');
+    }
+  }
+  return null;
+}
+
+function extractIndigenousIdentity(context) {
+  const { payload = {}, answers = {} } = context;
+  const personal = payload.personal || {};
+  const candidates = [
+    personal.indigenous_identity,
+    personal.indigenousIdentity,
+    personal.indigenous_group,
+    personal.indigenousGroup,
+    answers['indigenous-identity'],
+    answers['indigenous_identity'],
+    answers['indigenous-group'],
+    answers['indigenous_group'],
+    answers['identity-indigenous'],
+    answers['legal-indigenous-identity']
+  ];
+  for (const value of candidates) {
+    if (value === null || typeof value === 'undefined') continue;
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const normalized = normaliseString(entry);
+        if (normalized) {
+          const mapped = INDIGENOUS_VALUE_MAP[normalized.toLowerCase()] || normalized;
+          return mapped;
+        }
+      }
+    } else {
+      const normalized = normaliseString(value);
+      if (normalized) {
+        const mapped = INDIGENOUS_VALUE_MAP[normalized.toLowerCase()] || normalized;
+        return mapped;
+      }
+    }
+  }
+  return null;
+}
+
+function extractAddressFromStructuredObject(object) {
+  if (!object || typeof object !== 'object') return null;
+  const line1 = normaliseString(object.line1 || object.address1 || object.address_line_1 || object.street || object.street1 || object.addressLine1 || object.address);
+  const city = normaliseString(object.city || object.town || object.municipality);
+  const provinceRaw = normaliseString(object.province || object.province_code || object.region || object.state || object.territory);
+  const postalCode = normaliseString(object.postal_code || object.postalCode || object.postcode || object.zip || object.zipcode);
+  const province = provinceRaw ? (PROVINCE_CODE_MAP[provinceRaw.toLowerCase()] || provinceRaw.toUpperCase()) : null;
+  if (!line1 && !city && !province && !postalCode) return null;
+  return { line1, city, province, postalCode };
+}
+
+function extractAddress(context) {
+  const { payload = {}, answers = {} } = context;
+  const personal = payload.personal || {};
+  const contact = payload.contact || {};
+
+  const candidateObjects = [
+    personal.address,
+    personal.home_address,
+    personal.homeAddress,
+    contact.home_address,
+    contact.homeAddress,
+    contact.address,
+    answers['home-address'],
+    answers['home_address'],
+    answers['address'],
+    answers['residential-address'],
+    answers['residential_address'],
+    {
+      line1: answers['address-street-address'] || answers['address_street_address'],
+      city: answers['address-city'] || answers['address_city'],
+      province: answers['address-province'] || answers['address_province'],
+      postalCode: answers['address-postcode'] || answers['address_postcode']
+    }
+  ];
+
+  for (const candidate of candidateObjects) {
+    const structured = extractAddressFromStructuredObject(candidate);
+    if (structured) return structured;
+    if (typeof candidate === 'string') {
+      const normalized = normaliseString(candidate);
+      if (normalized) {
+        return { line1: normalized };
+      }
+    }
+  }
+
+  const derived = {
+    line1: normaliseString(answers['home-address-line-1'] || answers['home_address_line_1'] || answers['home-address-line1'] || answers['address-line-1'] || answers['street-address']),
+    line2: normaliseString(answers['home-address-line-2'] || answers['home_address_line_2'] || answers['address-line-2']),
+    city: normaliseString(answers['home-address-city'] || answers['home_address_city'] || answers['address-city'] || answers['address_city'] || answers['city']),
+    province: normaliseString(answers['home-address-province'] || answers['home_address_province'] || answers['address-province'] || answers['address_province'] || answers['province'] || answers['territory'] || answers['state']),
+    postalCode: normaliseString(answers['home-address-postal-code'] || answers['home_address_postal_code'] || answers['address-postcode'] || answers['address_postcode'] || answers['postal-code'] || answers['postal_code'] || answers['postcode'] || answers['zip'])
+  };
+
+  if (derived.line1 || derived.city || derived.province || derived.postalCode) {
+    const provinceCode = derived.province ? (PROVINCE_CODE_MAP[derived.province.toLowerCase()] || derived.province.toUpperCase()) : null;
+    return { line1: derived.line1, city: derived.city, province: provinceCode, postalCode: derived.postalCode };
+  }
+
+  if (personal.address_line_1 || personal.addressLine1 || personal.address1) {
+    return {
+      line1: normaliseString(personal.address_line_1 || personal.addressLine1 || personal.address1),
+      city: normaliseString(personal.city),
+      province: normaliseString(personal.province),
+      postalCode: normaliseString(personal.postal_code || personal.postalCode)
+    };
+  }
+
+  return null;
+}
+
+function coerceBoolean(value) {
+  if (value === null || typeof value === 'undefined') return null;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalised = value.trim().toLowerCase();
+    if (!normalised) return null;
+    if (['yes', 'y', 'true', 't', '1', 'on'].includes(normalised)) return true;
+    if (['no', 'n', 'false', 'f', '0', 'off'].includes(normalised)) return false;
+  }
+  return null;
+}
+
+function formatBooleanAsYesNo(value) {
+  if (value === null || typeof value === 'undefined') return null;
+  return value ? 'Yes' : 'No';
+}
+
+function extractPreferredName(context) {
+  const { answers = {} } = context;
+  return normaliseString(
+    answers['preferred-name'] ||
+    answers['preferred_name'] ||
+    answers['preferredName']
+  );
+}
+
+function extractMaritalStatus(context) {
+  const { answers = {} } = context;
+  const raw = normaliseString(
+    answers['marital-status'] ||
+    answers['marital_status'] ||
+    answers['maritalStatus']
+  );
+  if (!raw) return null;
+  const key = raw.toLowerCase();
+  return MARITAL_STATUS_LABELS[key] || raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function extractDependentChildrenInfo(context) {
+  const { answers = {} } = context;
+  const indicator = answers['dependent-children'] ??
+    answers['dependent_children'] ??
+    answers['dependentChildren'] ??
+    answers['dependent_children_indicator'];
+  const hasDependents = coerceBoolean(indicator);
+  const countRaw = answers['dependent-children-count'] ??
+    answers['dependent_children_count'] ??
+    answers['number-of-dependent-children'];
+  let count = null;
+  if (typeof countRaw !== 'undefined' && countRaw !== null) {
+    const numeric = Number(String(countRaw).trim());
+    if (Number.isFinite(numeric) && numeric >= 0) {
+      count = Math.round(numeric);
+    }
+  }
+  const agesRaw = normaliseString(
+    answers['ages-of-children'] ||
+    answers['ages_of_children'] ||
+    answers['dependent-children-ages']
+  );
+  let ages = [];
+  if (agesRaw) {
+    ages = agesRaw
+      .split(/[^0-9]+/)
+      .map(part => part.trim())
+      .filter(part => part.length > 0);
+    if (ages.length && (count === null || count === 0)) {
+      count = ages.length;
+    }
+  }
+  if (count === null && hasDependents === false) {
+    count = 0;
+  }
+  if (count === null && hasDependents === true) {
+    count = Math.max(1, ages.length || 1);
+  }
+  return { count, ages };
+}
+
+function extractLanguageSpoken(context) {
+  const { answers = {} } = context;
+  const languageRaw = normaliseString(
+    answers['language-spoken'] ||
+    answers['language_spoken'] ||
+    answers['preferred-language'] ||
+    answers['preferred_language']
+  );
+  if (!languageRaw) return null;
+  const key = languageRaw.toLowerCase();
+  if (LANGUAGE_SPOKEN_MAP[key]) return LANGUAGE_SPOKEN_MAP[key];
+  if (key.includes('english') && key.includes('french')) return 'English and French';
+  if (key.includes('english')) return 'English only';
+  if (key.includes('french')) return 'French only';
+  if (key.includes('aboriginal')) return 'Aboriginal language(s) only';
+  return languageRaw;
+}
+
+function extractVisibleMinority(context) {
+  const { answers = {} } = context;
+  const raw = answers['visible-minority'] || answers['visible_minority'];
+  const bool = coerceBoolean(raw);
+  return formatBooleanAsYesNo(bool);
+}
+
+function extractDisabilityInfo(context) {
+  const { answers = {} } = context;
+  const raw = answers['has-disability'] || answers['has_disability'] || answers['disability'];
+  const declared = coerceBoolean(raw);
+  const description = normaliseString(
+    answers['disability-description'] ||
+    answers['disability_description'] ||
+    answers['disabilityDetails']
+  );
+  return {
+    declared: formatBooleanAsYesNo(declared),
+    description: declared ? description || null : null
+  };
+}
+
+function extractContactDetails(context) {
+  const { answers = {} } = context;
+  const email = normaliseString(
+    answers['contact-email-address'] ||
+    answers['contact_email_address'] ||
+    answers['email']
+  );
+  const phone = normaliseString(
+    answers['telephone-day'] ||
+    answers['telephone_day'] ||
+    answers['phone']
+  );
+  const alternatePhone = normaliseString(
+    answers['telephone-alt'] ||
+    answers['telephone_alt'] ||
+    answers['alternate-phone']
+  );
+  const mailingAddress = normaliseString(
+    answers['address-mailing-address'] ||
+    answers['address_mailing_address'] ||
+    answers['mailing-address']
+  );
+  const homeCommunity = normaliseString(
+    answers['home-comminuty'] ||
+    answers['home_community'] ||
+    answers['home-community']
+  );
+  if (!email && !phone && !alternatePhone && !mailingAddress && !homeCommunity) {
+    return null;
+  }
+  return { email, phone, alternatePhone, mailingAddress, homeCommunity };
+}
+
+function extractEmergencyContactDetails(context) {
+  const { answers = {} } = context;
+  const name = normaliseString(
+    answers['emergency-contact-name'] ||
+    answers['emergency_contact_name']
+  );
+  const relationship = normaliseString(
+    answers['emergency-contact-relationship'] ||
+    answers['emergency_contact_relationship']
+  );
+  const phone = normaliseString(
+    answers['emergency-contact-telephone'] ||
+    answers['emergency_contact_telephone']
+  );
+  if (!name && !relationship && !phone) return null;
+  return { name, relationship, phone };
+}
+
+function extractAgreementNumber(context) {
+  const { answers = {}, submissionRow } = context;
+  const registration = normaliseString(
+    answers['agreement-number'] ||
+    answers['agreement_number'] ||
+    answers['registration-number'] ||
+    answers['registration_number']
+  );
+  if (registration) return registration;
+  const snapshotRef = submissionRow?.reference_number || null;
+  return snapshotRef || null;
+}
+
+function extractClientStatusDetails(context) {
+  const { answers = {} } = context;
+  const rawStatus = normaliseString(
+    answers['client-status-at-intake'] ||
+    answers['client_status_at_intake'] ||
+    answers['labour-force-status'] ||
+    answers['labour_force_status']
+  );
+  const key = rawStatus ? rawStatus.toLowerCase() : null;
+  const statusLabel = key ? (CLIENT_STATUS_MAP[key] || rawStatus) : null;
+  const scheduleKey = key || '';
+  const scheduleType = EMPLOYMENT_SCHEDULE_MAP[scheduleKey] || null;
+  const noc = normaliseString(
+    answers['employment-noc'] ||
+    answers['employment_noc'] ||
+    answers['previous-employment-noc']
+  );
+  const nocVersion = normaliseString(
+    answers['employment-noc-version'] ||
+    answers['employment_noc_version'] ||
+    answers['previous-employment-noc-version']
+  );
+  return {
+    status: statusLabel || null,
+    scheduleType: scheduleType,
+    noc: noc || null,
+    nocVersion: nocVersion || null
+  };
+}
+
+function extractEducationDetails(context) {
+  const { answers = {} } = context;
+  const levelRaw = normaliseString(
+    answers['education-level'] ||
+    answers['education_level'] ||
+    answers['example-radio-2'] ||
+    answers['highest-education']
+  );
+  let level = null;
+  if (levelRaw) {
+    const key = levelRaw.toLowerCase();
+    if (EDUCATION_LEVEL_MAP[key]) {
+      level = EDUCATION_LEVEL_MAP[key];
+    } else {
+      level = levelRaw;
+    }
+  }
+  const year = normaliseString(
+    answers['education-year'] ||
+    answers['education_year']
+  );
+  const location = normaliseString(
+    answers['education-location'] ||
+    answers['education_location'] ||
+    answers['edication-location']
+  );
+  if (!level && !year && !location) return null;
+  return {
+    level: level,
+    yearCompleted: year,
+    location: location
+  };
+}
+
+function extractSocialAssistanceStatus(context) {
+  const { answers = {} } = context;
+  const raw = answers['social-assistance'] ||
+    answers['social_assistance'] ||
+    answers['socialAssistance'];
+  return formatBooleanAsYesNo(coerceBoolean(raw));
+}
+
+function extractEiClaimant(context, clientStatus) {
+  const { answers = {} } = context;
+  const explicit = normaliseString(
+    answers['ei-claimant'] ||
+    answers['ei_claimant']
+  );
+  if (explicit) {
+    return explicit;
+  }
+  if (clientStatus?.status === 'Employed') {
+    return 'Employment insurance claimant';
+  }
+  return 'Non-insured client';
+}
+
+function extractEmploymentBarriers(context) {
+  const { answers = {} } = context;
+  const rawBarriers = answers.barriers ||
+    answers['barriers'] ||
+    answers['barrier-to-employment'] ||
+    answers['barrier_to_employment'];
+  let list = [];
+  if (Array.isArray(rawBarriers)) {
+    list = rawBarriers;
+  } else if (typeof rawBarriers === 'string') {
+    list = rawBarriers.split(',').map(item => item.trim()).filter(Boolean);
+  }
+  const mapped = [];
+  list.forEach(item => {
+    const key = String(item || '').trim().toLowerCase();
+    if (!key) return;
+    const label = BARRIER_VALUE_MAP[key] || item;
+    if (label) mapped.push(label);
+  });
+  const otherDescription = normaliseString(
+    answers['other-barrier'] ||
+    answers['other_barrier']
+  );
+  if (otherDescription) {
+    mapped.push(`Other: ${otherDescription}`);
+  }
+  return mapped;
+}
+
+function extractRequestedSupports(context) {
+  const { answers = {} } = context;
+  const rawSupports = answers['requested-supports'] ||
+    answers['requested_supports'] ||
+    answers['supports-requested'];
+  let list = [];
+  if (Array.isArray(rawSupports)) {
+    list = rawSupports;
+  } else if (typeof rawSupports === 'string') {
+    list = rawSupports.split(',').map(item => item.trim()).filter(Boolean);
+  }
+  const mapped = list
+    .map(item => {
+      const key = String(item || '').trim().toLowerCase();
+      return REQUESTED_SUPPORTS_MAP[key] || item;
+    })
+    .filter(Boolean);
+  const otherDescription = normaliseString(
+    answers['other-requested-support'] ||
+    answers['other_requested_support']
+  );
+  return {
+    list: mapped,
+    otherDescription: otherDescription || null
+  };
+}
+
+function mapInterventionOutcome(value) {
+  const normalised = normaliseString(value);
+  if (!normalised) return null;
+  const key = normalised.toLowerCase();
+  if (['completed', 'complete'].includes(key)) return 'Completed';
+  if (['in progress', 'in-progress', 'inprogress', 'ongoing'].includes(key)) return 'In progress';
+  if (['incomplete'].includes(key)) return 'Incomplete';
+  if (['failed', 'failed to report', 'failed-to-report'].includes(key)) return 'Failed to report';
+  if (['cancelled', 'canceled'].includes(key)) return 'Cancelled';
+  if (['rescheduled'].includes(key)) return 'Rescheduled';
+  return normalised;
+}
+
+function extractActionPlanDetails(context, clientStatus, requestedSupports) {
+  const { answers = {}, caseRow, applicationRow } = context;
+  const startRaw = answers['action-plan-start-date'] ||
+    answers['action_plan_start_date'];
+  const resultDateRaw = answers['action-plan-result-date'] ||
+    answers['action_plan_result_date'];
+  const resultCodeRaw = answers['action-plan-result-code'] ||
+    answers['action_plan_result_code'];
+  const childcareNeedRaw = answers['action-plan-childcare-need'] ||
+    answers['action_plan_childcare_need'];
+  const childcareFundingRaw = answers['action-plan-childcare-funding'] ||
+    answers['action_plan_childcare_funding'];
+  const targetProgramRaw = normaliseString(
+    answers['target-program'] ||
+    answers['target_program']
+  );
+  const goalDescription = normaliseString(
+    answers['long-term-goal'] ||
+    answers['long_term_goal']
+  );
+
+  const startDateSource =
+    parseDate(startRaw) ||
+    (caseRow?.created_at ? new Date(caseRow.created_at) : null) ||
+    (applicationRow?.row?.created_at ? new Date(applicationRow.row.created_at) : null);
+
+  const startDate = startDateSource ? startDateSource.toISOString().slice(0, 10) : null;
+  const resultDateParsed = parseDate(resultDateRaw);
+  const resultDate = resultDateParsed ? resultDateParsed.toISOString().slice(0, 10) : null;
+  const resultCode = normaliseString(resultCodeRaw);
+  const childcareNeed = formatBooleanAsYesNo(coerceBoolean(childcareNeedRaw));
+  const childcareFunding = normaliseString(childcareFundingRaw);
+
+  const interventions = [];
+  if (targetProgramRaw) {
+    const programKey = targetProgramRaw.toLowerCase();
+    const programMeta = INTERVENTION_PROGRAM_MAP[programKey] || null;
+    const interventionStartRaw = answers['intervention-start-date'] ||
+      answers['intervention_start_date'];
+    const interventionEndRaw = answers['intervention-end-date'] ||
+      answers['intervention_end_date'];
+    const interventionOutcomeRaw = answers['intervention-outcome'] ||
+      answers['intervention_outcome'];
+    const interventionStart = parseDate(interventionStartRaw) ||
+      (startDateSource ? startDateSource : null);
+    const interventionEnd = parseDate(interventionEndRaw);
+    const intervention = {
+      code: programMeta?.code || null,
+      description: programMeta?.description || targetProgramRaw,
+      startDate: interventionStart ? interventionStart.toISOString().slice(0, 10) : null,
+      endDate: interventionEnd ? interventionEnd.toISOString().slice(0, 10) : null,
+      outcome: mapInterventionOutcome(interventionOutcomeRaw) || 'In progress',
+      relatedNoc: clientStatus?.noc || null,
+      supports: requestedSupports?.list && requestedSupports.list.length ? requestedSupports.list : [],
+      notes: []
+    };
+    if (requestedSupports?.otherDescription) {
+      intervention.notes.push(requestedSupports.otherDescription);
+    }
+    if (goalDescription) {
+      intervention.notes.push(goalDescription);
+    }
+    interventions.push(intervention);
+  }
+
+  if (!startDate && !resultDate && !resultCode && !childcareNeed && !interventions.length && !goalDescription) {
+    return null;
+  }
+
+  return {
+    startDate,
+    resultDate,
+    resultCode,
+    childcareNeed,
+    childcareFunding,
+    goalDescription,
+    interventions
+  };
+}
+
+function isValidCanadianPostalCode(value) {
+  if (!value) return false;
+  return /^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/.test(value.trim());
+}
+
+function evaluateFieldRule(fieldKey, fieldDef, extractedValue, context) {
+  const results = [];
+  const warnings = [];
+  const blockingIssues = [];
+
+  const value = typeof fieldDef.normalise === 'function'
+    ? fieldDef.normalise(extractedValue)
+    : extractedValue;
+
+  if (fieldDef.required) {
+    const missing = value === null || typeof value === 'undefined' || (typeof value === 'string' && value.trim() === '');
+    if (missing) {
+      const msg = `${fieldDef.label} is required.`;
+      blockingIssues.push(`[${fieldKey}] ${msg}`);
+      results.push({
+        id: `${fieldKey}-required`,
+        label: fieldDef.label,
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: null
+      });
+      return { value, results, warnings, blockingIssues };
+    }
+  }
+
+  if (Array.isArray(fieldDef.allowedValues)) {
+    const allowedCodes = fieldDef.allowedValues.map(entry => (typeof entry === 'object' ? entry.code : entry));
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : value;
+    if (!allowedCodes.some(code => code.toLowerCase() === normalized)) {
+      const msg = `${fieldDef.label} must be one of the permitted values.`;
+      blockingIssues.push(`[${fieldKey}] ${msg}`);
+      results.push({
+        id: `${fieldKey}-allowed`,
+        label: fieldDef.label,
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: value
+      });
+      return { value, results, warnings, blockingIssues };
+    }
+    results.push({
+      id: `${fieldKey}-allowed`,
+      label: fieldDef.label,
+      category: 'mandatory',
+      severity: 'info',
+      passed: true,
+      message: null,
+      detail: value
+    });
+  }
+
+  if (Array.isArray(fieldDef.tests)) {
+    fieldDef.tests.forEach(test => {
+      let passed = true;
+      let message = null;
+      let detail = value;
+      try {
+        passed = test.validate(value, context);
+      } catch (err) {
+        passed = false;
+        message = err?.message || 'Validation failed.';
+      }
+      if (!passed && !message) {
+        message = test.description || `${fieldDef.label} failed validation.`;
+      }
+      results.push({
+        id: test.id,
+        label: fieldDef.label,
+        category: fieldDef.required ? 'mandatory' : 'optional',
+        severity: test.severity || 'blocking',
+        passed,
+        message: message || null,
+        detail
+      });
+      if (!passed) {
+        const formatted = `[${fieldKey}] ${message}`;
+        if ((test.severity || 'blocking') === 'blocking') {
+          blockingIssues.push(formatted);
+        } else {
+          warnings.push(formatted);
+        }
+      }
+    });
+  } else {
+    results.push({
+      id: `${fieldKey}-presence`,
+      label: fieldDef.label,
+      category: fieldDef.required ? 'mandatory' : 'optional',
+      severity: 'info',
+      passed: true,
+      message: null,
+      detail: value
+    });
+  }
+
+  return { value, results, warnings, blockingIssues };
+}
+
+function runIlmpValidation(context) {
+  const ruleResults = [];
+  const warnings = [];
+  const blockingIssues = [];
+
+  const extracted = {
+    socialInsuranceNumber: extractSin(context),
+    dateOfBirth: (() => {
+      const dob = extractDob(context);
+      return dob ? dob.toISOString().slice(0, 10) : null;
+    })(),
+    gender: extractGender(context),
+    aboriginalGroup: (extractIndigenousIdentity(context) || '').toLowerCase(),
+    addressStreet: null,
+    addressCity: null,
+    addressProvince: null,
+    postalCode: null
+  };
+
+  const address = extractAddress(context) || {};
+  extracted.addressStreet = address.line1 || null;
+  extracted.addressCity = address.city || null;
+  extracted.addressProvince = address.province ? String(address.province).toUpperCase() : null;
+  extracted.postalCode = address.postalCode || null;
+
+  const fieldKeys = Object.keys(ILMP_PARTICIPANT_RULES.fields);
+  fieldKeys.forEach(key => {
+    const fieldDef = ILMP_PARTICIPANT_RULES.fields[key];
+    const evaluation = evaluateFieldRule(key, fieldDef, extracted[key], {
+      ...extracted,
+      context
+    });
+    ruleResults.push(...evaluation.results);
+    warnings.push(...evaluation.warnings);
+    blockingIssues.push(...evaluation.blockingIssues);
+    extracted[key] = evaluation.value;
+  });
+
+  const mandatoryResults = ruleResults.filter(rule => rule.category === 'mandatory');
+  const optionalResults = ruleResults.filter(rule => rule.category === 'optional');
+
+  const mandatoryTotal = mandatoryResults.length;
+  const mandatoryComplete = mandatoryResults.filter(rule => rule.passed).length;
+  const optionalTotal = optionalResults.length;
+  const optionalComplete = optionalResults.filter(rule => rule.passed).length;
+
+  const readinessSummary = {
+    mandatory: { total: mandatoryTotal, complete: mandatoryComplete },
+    optional: { total: optionalTotal, complete: optionalComplete },
+    warnings: warnings.length,
+    blocking: blockingIssues.length,
+    rules: ruleResults
+  };
+
+  let readinessStatus = 'ready';
+  if (blockingIssues.length > 0) {
+    readinessStatus = 'blocked';
+  } else if (warnings.length > 0 || (mandatoryTotal > 0 && mandatoryComplete < mandatoryTotal)) {
+    readinessStatus = 'needs_review';
+  }
+
+  return {
+    readinessStatus,
+    readinessSummary,
+    warnings,
+    blockingIssues
+  };
+}
+
+const GENDER_LABEL_MAP = {
+  male: 'Male',
+  female: 'Female',
+  unspecified: 'Unspecified'
+};
+
+const INDIGENOUS_LABEL_MAP = {
+  'registered-indian': 'Registered Indian',
+  'non-status-indian': 'Non-status Indian',
+  metis: 'Metis',
+  inuit: 'Inuit'
+};
+
+const PROVINCE_LABEL_MAP = PROVINCE_CODES.reduce((acc, entry) => {
+  acc[entry.code] = entry.name;
+  return acc;
+}, {});
+
+const MARITAL_STATUS_LABELS = {
+  married: 'Married',
+  'married or equivalent': 'Married',
+  single: 'Single',
+  divorced: 'Divorced',
+  widowed: 'Widowed',
+  separated: 'Separated',
+  'common-law': 'Married'
+};
+
+const LANGUAGE_SPOKEN_MAP = {
+  en: 'English only',
+  eng: 'English only',
+  english: 'English only',
+  fr: 'French only',
+  fra: 'French only',
+  french: 'French only',
+  'en-fr': 'English and French',
+  'fr-en': 'English and French',
+  bilingual: 'English and French'
+};
+
+const CLIENT_STATUS_MAP = {
+  unemployed: 'Unemployed',
+  underemployed: 'Unemployed',
+  'not_employed': 'Unemployed',
+  'not-employed': 'Unemployed',
+  'not employed': 'Unemployed',
+  'employed-full-time': 'Employed',
+  'employed part-time': 'Employed',
+  'employed-part-time': 'Employed',
+  employed: 'Employed',
+  'self-employed': 'Employed',
+  'self employed': 'Employed',
+  student: 'Student',
+  'full-time student': 'Student',
+  'part-time student': 'Student'
+};
+
+const EMPLOYMENT_SCHEDULE_MAP = {
+  'employed-full-time': 'Full-time',
+  'employed part-time': 'Part-time',
+  'employed-part-time': 'Part-time',
+  'self-employed': 'Full-time'
+};
+
+const EDUCATION_LEVEL_MAP = {
+  no_formal_education: 'No formal education',
+  grade_7_8: 'Up to Grade 7-8 (Secondaire I-II)',
+  grade_9_10: 'Grade 9-10 (Secondaire III)',
+  grade_11_12: 'Grade 11-12 (Secondaire IV-V)',
+  secondary_school_diploma_or_ged: 'Secondary School Diploma or GED',
+  post_secondary_training: 'Some post-secondary training',
+  apprenticeship_trades: 'Apprenticeship or trades certificate or diploma',
+  cegep: 'College, CEGEP, or other non-university certificate or diploma',
+  college: 'College, CEGEP, or other non-university certificate or diploma',
+  university_certificate: 'University certificate or diploma',
+  bachelors_degree: 'University - Bachelor Degree',
+  masters_degree: 'University - Master\'s Degree',
+  doctorate: 'University - Doctorate'
+};
+
+const BARRIER_VALUE_MAP = {
+  education: 'Education',
+  funding: 'Economic',
+  'lack-of-job-opportunities': 'Lack of marketable skills',
+  location: 'Remoteness',
+  'lack-of-transportation': 'Lack of transportation',
+  'lack-of-work-experience': 'Lack of work experience',
+  'lack-of-labour-force-attachment': 'Lack of labour force attachment',
+  language: 'Language',
+  'dependent-care': 'Dependent care',
+  'physical-or-mental-health': 'Physical or mental health',
+  'other': 'Other barrier not listed above',
+  none: 'None'
+};
+
+const REQUESTED_SUPPORTS_MAP = {
+  tuition: 'Tuition',
+  books: 'Books or program materials',
+  living: 'Living allowance',
+  transportation: 'Transportation',
+  other: 'Other'
+};
+
+const INTERVENTION_PROGRAM_MAP = {
+  skills_development: {
+    description: 'Skills Development - Education'
+  },
+  tws: {
+    description: 'Work Experience - Wage Subsidy'
+  },
+  jcp: {
+    description: 'Work Experience - Job Creation Partnerships'
+  },
+  not_yet: {
+    description: 'Pre-Career Development'
+  }
+};
+
+function escapeXml(value) {
+  if (value === null || typeof value === 'undefined') return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function appendXmlElement(lines, level, tag, value) {
+  if (value === null || typeof value === 'undefined') return;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    const text = String(value);
+    if (!text.length) return;
+    const indent = '  '.repeat(level);
+    lines.push(`${indent}<${tag}>${escapeXml(text)}</${tag}>`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) return;
+    value.forEach(item => appendXmlElement(lines, level, tag, item));
+    return;
+  }
+  if (typeof value === 'object') {
+    const indent = '  '.repeat(level);
+    const initialLength = lines.length;
+    lines.push(`${indent}<${tag}>`);
+    Object.entries(value).forEach(([childTag, childValue]) => {
+      appendXmlElement(lines, level + 1, childTag, childValue);
+    });
+    if (lines.length === initialLength + 1) {
+      // no children were added; remove opening tag
+      lines.pop();
+      return;
+    }
+    lines.push(`${indent}</${tag}>`);
+  }
+}
+
+function buildIlmpParticipantPayload(context) {
+  const firstName = extractFirstName(context);
+  const lastName = extractLastName(context);
+  const middleInitials = extractMiddleInitials(context);
+  const sin = extractSin(context);
+  const dob = extractDob(context);
+  const gender = extractGender(context);
+  const indigenousIdentity = extractIndigenousIdentity(context);
+  const address = extractAddress(context) || {};
+  const preferredName = extractPreferredName(context);
+  const maritalStatus = extractMaritalStatus(context);
+  const dependentInfo = extractDependentChildrenInfo(context);
+  const languageSpoken = extractLanguageSpoken(context);
+  const visibleMinority = extractVisibleMinority(context);
+  const disabilityInfo = extractDisabilityInfo(context);
+  const contactDetails = extractContactDetails(context);
+  const emergencyContact = extractEmergencyContactDetails(context);
+  const agreementNumber = extractAgreementNumber(context);
+  const clientStatus = extractClientStatusDetails(context);
+  const educationDetails = extractEducationDetails(context);
+  const socialAssistanceStatus = extractSocialAssistanceStatus(context);
+  const requestedSupports = extractRequestedSupports(context);
+  const actionPlanDetails = extractActionPlanDetails(context, clientStatus, requestedSupports);
+  const barriers = extractEmploymentBarriers(context);
+  const eiClaimant = extractEiClaimant(context, clientStatus);
+
+  const formatDate = dateObj => {
+    if (!dateObj) return null;
+    const iso = dateObj instanceof Date ? dateObj.toISOString() : new Date(dateObj).toISOString();
+    if (!iso) return null;
+    return iso.slice(0, 10);
+  };
+
+  const genderLabel = gender ? (GENDER_LABEL_MAP[gender] || gender) : null;
+  const indigenousLabel = indigenousIdentity ? (INDIGENOUS_LABEL_MAP[indigenousIdentity] || indigenousIdentity) : null;
+  const provinceCode = address.province ? address.province : null;
+  const provinceName = provinceCode ? (PROVINCE_LABEL_MAP[provinceCode] || provinceCode) : null;
+
+  const dependentChildrenNode = (() => {
+    if (!dependentInfo) return null;
+    const hasCount = typeof dependentInfo.count === 'number' && dependentInfo.count >= 0;
+    const hasAges = Array.isArray(dependentInfo.ages) && dependentInfo.ages.length > 0;
+    if (!hasCount && !hasAges) return null;
+    return {
+      Count: hasCount ? String(dependentInfo.count) : null,
+      Ages: hasAges ? { Age: dependentInfo.ages } : null
+    };
+  })();
+
+  const disabilityNode = (() => {
+    if (!disabilityInfo) return null;
+    if (!disabilityInfo.declared && !disabilityInfo.description) return null;
+    return {
+      Declared: disabilityInfo.declared,
+      Description: disabilityInfo.description
+    };
+  })();
+
+  const contactNode = (() => {
+    if (!contactDetails) return null;
+    const { email, phone, alternatePhone, mailingAddress, homeCommunity } = contactDetails;
+    if (!email && !phone && !alternatePhone && !mailingAddress && !homeCommunity) return null;
+    return {
+      EmailAddress: email || null,
+      DaytimePhoneNumber: phone || null,
+      AlternatePhoneNumber: alternatePhone || null,
+      MailingAddress: mailingAddress || null,
+      HomeCommunity: homeCommunity || null
+    };
+  })();
+
+  const emergencyNode = (() => {
+    if (!emergencyContact) return null;
+    const { name, relationship, phone } = emergencyContact;
+    if (!name && !relationship && !phone) return null;
+    return {
+      Name: name || null,
+      Relationship: relationship || null,
+      PhoneNumber: phone || null
+    };
+  })();
+
+  const employmentDetailsNode = (() => {
+    if (!clientStatus) return null;
+    const { noc, nocVersion, scheduleType } = clientStatus;
+    if (!noc && !nocVersion && !scheduleType) return null;
+    return {
+      EmploymentNOC: noc || null,
+      EmploymentNOCVersion: nocVersion || null,
+      EmploymentScheduleType: scheduleType || null
+    };
+  })();
+
+  const educationNode = (() => {
+    if (!educationDetails) return null;
+    const { level, yearCompleted, location } = educationDetails;
+    if (!level && !yearCompleted && !location) return null;
+    return {
+      EducationLevel: level || null,
+      EducationYearCompleted: yearCompleted || null,
+      EducationLocation: location || null
+    };
+  })();
+
+  const barriersNode = barriers && barriers.length
+    ? { Barrier: barriers }
+    : null;
+
+  const requestedSupportsNode = (() => {
+    if (!requestedSupports) return null;
+    const hasSupports = requestedSupports.list && requestedSupports.list.length;
+    const hasOther = Boolean(requestedSupports.otherDescription);
+    if (!hasSupports && !hasOther) return null;
+    return {
+      Support: hasSupports ? requestedSupports.list : null,
+      OtherDescription: hasOther ? requestedSupports.otherDescription : null
+    };
+  })();
+
+  const actionPlanNode = (() => {
+    if (!actionPlanDetails) return null;
+    const {
+      startDate,
+      resultDate,
+      resultCode,
+      childcareNeed,
+      childcareFunding,
+      goalDescription,
+      interventions
+    } = actionPlanDetails;
+    const hasInterventions = Array.isArray(interventions) && interventions.length > 0;
+    const interventionNode = hasInterventions
+      ? {
+          Intervention: interventions.map(entry => ({
+            InterventionCode: entry.code || null,
+            InterventionDescription: entry.description || null,
+            InterventionStartDate: entry.startDate || null,
+            InterventionEndDate: entry.endDate || null,
+            InterventionOutcome: entry.outcome || null,
+            InterventionRelatedNOC: entry.relatedNoc || null,
+            RequestedSupports: entry.supports && entry.supports.length ? { Support: entry.supports } : null,
+            Notes: entry.notes && entry.notes.length ? { Note: entry.notes } : null
+          }))
+        }
+      : null;
+    if (
+      !startDate &&
+      !resultDate &&
+      !resultCode &&
+      !childcareNeed &&
+      !childcareFunding &&
+      !goalDescription &&
+      !interventionNode
+    ) {
+      return null;
+    }
+    return {
+      ActionPlanStartDate: startDate || null,
+      ActionPlanResultDate: resultDate || null,
+      ActionPlanResultCode: resultCode || null,
+      ChildcareNeed: childcareNeed || null,
+      ChildcareFunding: childcareFunding || null,
+      GoalDescription: goalDescription || null,
+      Interventions: interventionNode
+    };
+  })();
+
+  const addressNode = (() => {
+    if (!address.line1 && !address.city && !address.province && !address.postalCode) return null;
+    return {
+      StreetAddress: address.line1 || null,
+      Municipality: address.city || null,
+      Province: provinceCode || null,
+      ProvinceName: provinceName || null,
+      PostalZIPCode: address.postalCode || null
+    };
+  })();
+
+  const generatedAt = new Date().toISOString();
+
+  const canonical = {
+    GeneratedAt: generatedAt,
+    Client: {
+      SocialInsuranceNumber: sin || null,
+      FirstName: firstName || null,
+      PreferredName: preferredName || null,
+      LastName: lastName || null,
+      MiddleInitials: middleInitials || null,
+      DateOfBirth: formatDate(dob) || null,
+      Gender: genderLabel || null,
+      AboriginalGroup: indigenousLabel || null,
+      MaritalStatus: maritalStatus || null,
+      DependentChildren: dependentChildrenNode,
+      LanguageSpoken: languageSpoken || null,
+      VisibleMinority: visibleMinority || null,
+      Disability: disabilityNode,
+      Address: addressNode,
+      ContactDetails: contactNode,
+      EmergencyContact: emergencyNode,
+      AgreementNumber: agreementNumber || null,
+      ClientStatusAtIntake: clientStatus?.status || null,
+      EmploymentDetails: employmentDetailsNode,
+      Education: educationNode,
+      SocialAssistanceRecipient: socialAssistanceStatus || null,
+      EIClaimant: eiClaimant || null,
+      BarrierToEmployment: barriersNode,
+      RequestedSupports: requestedSupportsNode,
+      ActionPlan: actionPlanNode
+    }
+  };
+
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<ILMPParticipantPayload>'
+  ];
+  appendXmlElement(lines, 1, 'GeneratedAt', canonical.GeneratedAt);
+  appendXmlElement(lines, 1, 'Client', canonical.Client);
+  lines.push('</ILMPParticipantPayload>');
+
+  return {
+    xml: lines.join('\n'),
+    generatedAt,
+    canonical
+  };
+}
+
+async function loadEsdcParticipantSubmissionContext(connection, submissionId, options = {}) {
+  const numericId = Number(submissionId);
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    const err = new Error('Invalid participant submission id');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const conn = connection || await pool.getConnection();
+  const releaseConnection = !connection;
+  const useForUpdate = options.forUpdate === true;
+
+  try {
+    const submissionQuery = `
+      SELECT *
+      FROM esdc_participant_submission
+      WHERE id = ?
+      ${useForUpdate ? 'FOR UPDATE' : ''}
+    `;
+    const [[submissionRow]] = await conn.query(submissionQuery, [numericId]);
+    if (!submissionRow) {
+      const err = new Error('Participant submission not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const effectiveCaseId = options.caseId || submissionRow.case_id;
+    if (!effectiveCaseId) {
+      const err = new Error('Participant submission is not linked to a case');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const [[caseRow]] = await conn.query('SELECT * FROM iset_case WHERE id = ? LIMIT 1', [effectiveCaseId]);
+    if (!caseRow) {
+      const err = new Error('Associated case not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const applicationId = submissionRow.application_id || caseRow.application_id || null;
+    let applicationPayload = null;
+    if (applicationId) {
+      applicationPayload = await readApplicationPayload(
+        conn,
+        applicationId,
+        { forUpdate: useForUpdate }
+      );
+    }
+
+    return {
+      connection: conn,
+      releaseConnection,
+      submissionId: numericId,
+      submissionRow,
+      caseRow,
+      applicationId,
+      applicationRow: applicationPayload?.row || null,
+      payload: applicationPayload?.payload || {},
+      answers: applicationPayload?.payload?.answers || {}
+    };
+  } catch (error) {
+    if (releaseConnection) {
+      conn.release();
+    }
+    throw error;
+  }
+}
+
+async function validateEsdcParticipantSubmission({ submissionId, caseId } = {}, options = {}) {
+  const connection = options.connection || await pool.getConnection();
+  const releaseConnection = !options.connection;
+  const useTransaction = options.transaction !== false;
+
+  try {
+    if (useTransaction) await connection.beginTransaction();
+
+    const context = await loadEsdcParticipantSubmissionContext(connection, submissionId, {
+      caseId,
+      forUpdate: true
+    });
+
+    const evaluation = runIlmpValidation(context);
+
+    await connection.query(
+      `UPDATE esdc_participant_submission
+         SET readiness_status = ?,
+             readiness_summary = ?,
+             warnings = ?,
+             blocking_issues = ?,
+             last_validated_at = NOW(),
+             updated_at = NOW()
+       WHERE id = ?`,
+      [
+        evaluation.readinessStatus,
+        JSON.stringify(evaluation.readinessSummary),
+        JSON.stringify(evaluation.warnings),
+        JSON.stringify(evaluation.blockingIssues),
+        context.submissionId
+      ]
+    );
+
+    await connection.query(
+      `INSERT INTO esdc_participant_submission_history
+         (participant_submission_id, event_type, event_details, occurred_at)
+       VALUES (?, 'validated', CAST(? AS JSON), NOW())`,
+      [
+        context.submissionId,
+        JSON.stringify({
+          readiness_status: evaluation.readinessStatus,
+          mandatory: evaluation.readinessSummary.mandatory,
+          optional: evaluation.readinessSummary.optional,
+          warnings: evaluation.warnings.length,
+          blocking: evaluation.blockingIssues.length,
+          rules: evaluation.readinessSummary.rules
+        })
+      ]
+    );
+
+    if (useTransaction) await connection.commit();
+
+    return {
+      submissionId: context.submissionId,
+      caseId: context.caseRow.id,
+      readinessStatus: evaluation.readinessStatus,
+      readinessSummary: evaluation.readinessSummary,
+      warnings: evaluation.warnings,
+      blockingIssues: evaluation.blockingIssues
+    };
+  } catch (err) {
+    if (useTransaction) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    throw err;
+  } finally {
+    if (releaseConnection) connection.release();
+  }
 }
 
 let DEFAULT_ACCESS_CONTROL_MATRIX = { default: 'deny', routes: {} };
@@ -2274,6 +3913,431 @@ app.get('/api/admin/contact-messages', async (req, res) => {
     res.status(500).json({ error: 'internal_error' });
   }
 });
+
+// --- ESDC participant submissions -------------------------------------------------
+const esdcRouter = express.Router();
+
+/**
+ * GET /api/esdc/participants
+ * Query parameters (optional):
+ *   readiness (ready|needs_review|blocked)
+ *   search (tracking ID / name)
+ *   limit / offset
+ */
+esdcRouter.get('/participants', async (req, res, next) => {
+  const {
+    readiness,
+    search,
+    limit = 25,
+    offset = 0,
+  } = req.query;
+
+  const params = [];
+  const where = [];
+
+  if (readiness && ['ready', 'needs_review', 'blocked'].includes(readiness)) {
+    where.push('eps.readiness_status = ?');
+    params.push(readiness);
+  }
+
+  if (search) {
+    where.push('(COALESCE(ias.reference_number, CONCAT(\'CASE-\', eps.case_id)) LIKE ? OR ia.payload_json->>"$.personal.last_name" LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`);
+  }
+
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT
+        eps.id,
+        eps.case_id,
+        eps.readiness_status,
+        eps.submission_status,
+        eps.last_validated_at,
+        eps.submitted_at,
+        COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
+      FROM esdc_participant_submission eps
+      LEFT JOIN iset_application ia ON ia.id = eps.application_id
+      LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      ${whereClause}
+      ORDER BY eps.last_validated_at DESC, eps.id DESC
+      LIMIT ? OFFSET ?
+      `,
+      [...params, Number(limit), Number(offset)]
+    );
+
+    const [[{ total }]] = await pool.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM esdc_participant_submission eps
+      LEFT JOIN iset_application ia ON ia.id = eps.application_id
+      LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      ${whereClause}
+      `,
+      params
+    );
+
+    res.json({ total, items: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/esdc/participants/:id
+ */
+esdcRouter.get('/participants/:id', async (req, res, next) => {
+  const { id } = req.params;
+  try {
+    const [[submission]] = await pool.query(
+      `
+      SELECT eps.*, COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
+      FROM esdc_participant_submission eps
+      LEFT JOIN iset_application ia ON ia.id = eps.application_id
+      LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      WHERE eps.id = ?
+      `,
+      [id]
+    );
+    if (!submission) {
+      return res.status(404).json({ error: 'Participant submission not found' });
+    }
+
+    const [history] = await pool.query(
+      `
+      SELECT *
+      FROM esdc_participant_submission_history
+      WHERE participant_submission_id = ?
+      ORDER BY occurred_at DESC
+      `,
+      [id]
+    );
+
+    res.json({ submission, history });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/esdc/participants/:id/validate
+ * (Re-run validation logic; placeholder updates metadata right now.)
+ */
+esdcRouter.post('/participants/:id/validate', async (req, res, next) => {
+  const { id } = req.params;
+  try {
+    const numericId = Number(id);
+    if (!Number.isInteger(numericId) || numericId <= 0) {
+      return res.status(400).json({ error: 'invalid_participant_id' });
+    }
+
+    await validateEsdcParticipantSubmission({ submissionId: numericId });
+
+    const [[submission]] = await pool.query(
+      `
+      SELECT eps.*, COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
+      FROM esdc_participant_submission eps
+      LEFT JOIN iset_application ia ON ia.id = eps.application_id
+      LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      WHERE eps.id = ?
+      `,
+      [numericId]
+    );
+    if (!submission) {
+      return res.status(404).json({ error: 'Participant submission not found' });
+    }
+
+    const [history] = await pool.query(
+      `
+      SELECT *
+      FROM esdc_participant_submission_history
+      WHERE participant_submission_id = ?
+      ORDER BY occurred_at DESC, id DESC
+      `,
+      [numericId]
+    );
+
+    res.json({ ok: true, submission, history });
+  } catch (err) {
+    if (err && err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message || 'validation_failed' });
+    }
+    next(err);
+  }
+});
+
+/**
+ * POST /api/esdc/participants/:id/prepare
+ * Generates/stores payload snapshot based on latest validated data.
+ */
+esdcRouter.post('/participants/:id/prepare', async (req, res, next) => {
+  const numericId = Number(req.params.id);
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    return res.status(400).json({ error: 'invalid_participant_id' });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const context = await loadEsdcParticipantSubmissionContext(connection, numericId, {
+      forUpdate: true
+    });
+    const evaluation = runIlmpValidation(context);
+
+    await connection.query(
+      `UPDATE esdc_participant_submission
+         SET readiness_status = ?,
+             readiness_summary = ?,
+             warnings = ?,
+             blocking_issues = ?,
+             last_validated_at = NOW(),
+             updated_at = NOW()
+       WHERE id = ?`,
+      [
+        evaluation.readinessStatus,
+        JSON.stringify(evaluation.readinessSummary),
+        JSON.stringify(evaluation.warnings),
+        JSON.stringify(evaluation.blockingIssues),
+        numericId
+      ]
+    );
+
+    if (evaluation.blockingIssues.length > 0) {
+      await connection.commit();
+      return res.status(409).json({
+        error: 'blocking_validation_issues',
+        readinessStatus: evaluation.readinessStatus,
+        readinessSummary: evaluation.readinessSummary,
+        warnings: evaluation.warnings,
+        blockingIssues: evaluation.blockingIssues
+      });
+    }
+
+    const snapshot = buildIlmpParticipantPayload(context);
+    const checksum = crypto.createHash('sha256').update(snapshot.xml, 'utf8').digest('hex');
+    const storageKey = [
+      'participants',
+      context.caseRow?.id || context.submissionRow?.case_id || `submission-${numericId}`,
+      `ilmp-client-${numericId}-${Date.now()}.xml`
+    ].filter(Boolean).join('/');
+
+    const payloadSnapshot = {
+      schema: 'esdc-ilmp-client-v1',
+      generatedAt: snapshot.generatedAt,
+      submissionId: numericId,
+      caseId: context.caseRow?.id || null,
+      applicationId: context.applicationId || null,
+      readinessStatus: evaluation.readinessStatus,
+      readinessSummary: evaluation.readinessSummary,
+      warnings: evaluation.warnings,
+      blockingIssues: evaluation.blockingIssues,
+      canonical: snapshot.canonical,
+      xml: snapshot.xml
+    };
+
+    await connection.query(
+      `UPDATE esdc_participant_submission
+         SET payload_snapshot = ?, payload_storage_key = ?, payload_checksum = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [JSON.stringify(payloadSnapshot), storageKey, checksum, numericId]
+    );
+
+    await ensureEsdcPreparedHistoryEventType(connection);
+
+    await connection.query(
+      `INSERT INTO esdc_participant_submission_history
+         (participant_submission_id, event_type, event_details, payload_checksum, occurred_at)
+       VALUES (?, 'prepared', CAST(? AS JSON), ?, NOW())`,
+      [
+        numericId,
+        JSON.stringify({
+          storageKey,
+          generatedAt: snapshot.generatedAt,
+          readiness_status: evaluation.readinessStatus
+        }),
+        checksum
+      ]
+    );
+
+    const [[submission]] = await connection.query(
+      `
+      SELECT eps.*, COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
+      FROM esdc_participant_submission eps
+      LEFT JOIN iset_application ia ON ia.id = eps.application_id
+      LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      WHERE eps.id = ?
+      `,
+      [numericId]
+    );
+    const [history] = await connection.query(
+      `
+      SELECT *
+      FROM esdc_participant_submission_history
+      WHERE participant_submission_id = ?
+      ORDER BY occurred_at DESC, id DESC
+      `,
+      [numericId]
+    );
+
+    await connection.commit();
+
+    res.json({
+      ok: true,
+      submission,
+      history,
+      payload: payloadSnapshot,
+      checksum,
+      storageKey
+    });
+  } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    next(err);
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+/**
+ * GET /api/esdc/participants/:id/payload
+ * Returns the stored payload snapshot (if generated).
+ */
+esdcRouter.get('/participants/:id/payload', async (req, res, next) => {
+  const numericId = Number(req.params.id);
+  if (!Number.isInteger(numericId) || numericId <= 0) {
+    return res.status(400).json({ error: 'invalid_participant_id' });
+  }
+  try {
+    const [[row]] = await pool.query(
+      `
+      SELECT payload_snapshot, payload_checksum, payload_storage_key, updated_at
+      FROM esdc_participant_submission
+      WHERE id = ?
+      `,
+      [numericId]
+    );
+    if (!row) {
+      return res.status(404).json({ error: 'Participant submission not found' });
+    }
+    let snapshot = row.payload_snapshot;
+    if (snapshot && typeof snapshot === 'string') {
+      try {
+        snapshot = JSON.parse(snapshot);
+      } catch {
+        // leave as-is (raw string)
+      }
+    }
+    res.json({
+      payload: snapshot || null,
+      checksum: row.payload_checksum || null,
+      storageKey: row.payload_storage_key || null,
+      updatedAt: row.updated_at || null
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/esdc/participants/:id/submit
+ * Marks submission as sent and logs history. Body can include rejectionReason or success flag.
+ */
+esdcRouter.post('/participants/:id/submit', async (req, res, next) => {
+  const { id } = req.params;
+  const { status = 'submitted', rejectionReason = null } = req.body || {};
+  const actorUserId = req.user?.id || null;
+
+  if (!['submitted', 'accepted', 'rejected'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid submission status' });
+  }
+
+  try {
+    const [result] = await pool.query(
+      `
+      UPDATE esdc_participant_submission
+      SET submission_status = ?, submitted_at = NOW(), submitted_by_user_id = ?, rejection_reason = ?
+      WHERE id = ?
+      `,
+      [status, actorUserId, rejectionReason, id]
+    );
+    if (!result.affectedRows) {
+      return res.status(404).json({ error: 'Participant submission not found' });
+    }
+
+    await pool.query(
+      `
+      INSERT INTO esdc_participant_submission_history
+        (participant_submission_id, event_type, actor_user_id, event_details)
+      VALUES
+        (?, ?, ?, JSON_OBJECT('rejectionReason', ?))
+      `,
+      [id, status, actorUserId, rejectionReason]
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/esdc/participants/:id/history
+ * (Convenience endpoint if the workspace wants to fetch history separately.)
+ */
+esdcRouter.get('/participants/:id/history', async (req, res, next) => {
+  const { id } = req.params;
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT *
+      FROM esdc_participant_submission_history
+      WHERE participant_submission_id = ?
+      ORDER BY occurred_at DESC
+      `,
+      [id]
+    );
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/esdc/participants/:id/history
+ * Add manual note / event entry.
+ */
+esdcRouter.post('/participants/:id/history', async (req, res, next) => {
+  const { id } = req.params;
+  const { eventType = 'validated', details = {} } = req.body || {};
+  const actorUserId = req.user?.id || null;
+
+  if (!['validated', 'ready', 'submitted', 'accepted', 'rejected'].includes(eventType)) {
+    return res.status(400).json({ error: 'Invalid event type' });
+  }
+
+  try {
+    await pool.query(
+      `
+      INSERT INTO esdc_participant_submission_history
+        (participant_submission_id, event_type, actor_user_id, event_details)
+      VALUES (?, ?, ?, ?)
+      `,
+      [id, eventType, actorUserId, JSON.stringify(details || {})]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Mount under your existing API router:
+app.use('/api/esdc', esdcRouter);
+
 
 app.get('/api/admin/contact-messages/:id', async (req, res) => {
   if (!resolveContactAdminRole(req)) return res.status(403).json({ error: 'forbidden' });
@@ -8113,6 +10177,7 @@ app.post('/api/cases/:case_id/application/versions', async (req, res) => {
         hash
       ]
     );
+    await markEsdcParticipantSubmissionNeedsReview(null, caseId, { resetSnapshot: true, resetSubmissionStatus: true });
     return res.status(201).json({ message: 'version_created', version_number: nextVersion, hash });
   } catch (e) {
     console.error('[versions:create] error', e);
@@ -11249,6 +13314,7 @@ app.put('/api/cases/:id', async (req, res) => {
   let conn;
   let beforeStatus = null;
   let normalizedStatus;
+  let normalizedStatusLower = null;
   let statusChanged = false;
   let bumpApplicationRowVersion = false;
   let newRowVersion = null;
@@ -11277,6 +13343,7 @@ app.put('/api/cases/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Case not found', lock: null });
     }
     beforeStatus = existingCase.status || null;
+    const beforeStatusLower = beforeStatus ? String(beforeStatus).toLowerCase() : null;
     applicationId = Number(existingCase.application_id);
     const currentApplicationRowVersion = Number(existingCase.row_version || 1);
     newRowVersion = currentApplicationRowVersion;
@@ -11305,10 +13372,18 @@ app.put('/api/cases/:id', async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(body, 'status')) {
       normalizedStatus = toNull(body.status);
+      normalizedStatusLower = normalizedStatus ? String(normalizedStatus).toLowerCase() : null;
       if (normalizedStatus !== beforeStatus) {
         await conn.query('UPDATE iset_case SET status = ? WHERE id = ?', [normalizedStatus || beforeStatus, caseId]);
         statusChanged = true;
         bumpApplicationRowVersion = true;
+      }
+      if (statusChanged) {
+        if (normalizedStatusLower === 'approved') {
+          await ensureEsdcParticipantSubmissionRecord(conn, caseId, applicationId);
+        } else if (beforeStatusLower === 'approved') {
+          await markEsdcParticipantSubmissionNeedsReview(conn, caseId, { resetSnapshot: true, resetSubmissionStatus: true });
+        }
       }
     }
 
@@ -11377,6 +13452,14 @@ app.put('/api/cases/:id', async (req, res) => {
         );
         bumpApplicationRowVersion = true;
       }
+    }
+
+    const currentStatusLower = (typeof normalizedStatusLower === 'string'
+      ? normalizedStatusLower
+      : (beforeStatus ? String(beforeStatus).toLowerCase() : null)) || null;
+
+    if (hasAssessmentPayload && currentStatusLower === 'approved') {
+      await markEsdcParticipantSubmissionNeedsReview(conn, caseId, { resetSnapshot: true, resetSubmissionStatus: true });
     }
 
     if (bumpApplicationRowVersion) {

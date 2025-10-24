@@ -1,0 +1,36 @@
+.layout {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+.content {
+    display: flex;
+    flex: 1;
+}
+
+.sidebar {
+    background-color: #1f2937;
+    color: white;
+    padding: 15px;
+    width: 250px;
+    flex-shrink: 0;
+}
+
+.sidebar a {
+    display: block;
+    color: white;
+    padding: 10px;
+    text-decoration: none;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.sidebar a:hover {
+    background-color: #374151;
+}
+
+.sidebar .divider {
+    border-top: 1px solid #374151;
+    margin: 10px 0;
+}

@@ -1,0 +1,53 @@
+{
+  "template_key": "select",
+  "type": "select",
+  "label": "Select",
+  "description": "Dropdown select allowing users to choose a single option from a list.",
+  "status": "active",
+  "default_props": {
+    "name": "example-select",
+    "id": "",              
+    "label": { "text": "Choose an option", "classes": "govuk-label--m" },
+    "hint": { "text": "Select the applicable option." },
+    "errorMessage": { "text": "" },
+    "items": [
+      { "value": "", "text": "-- Select --" },
+      { "value": "opt1", "text": "Option 1" },
+      { "value": "opt2", "text": "Option 2" }
+    ],
+    "classes": "govuk-select",
+    "formGroup": { "classes": "" },
+    "disabled": false
+  },
+  "prop_schema": [
+    { "key": "name", "path": "name", "type": "text", "label": "Data Key" },
+    { "key": "label.text", "path": "label.text", "type": "text", "label": "Label Text" },
+    { "key": "label.classes", "path": "label.classes", "type": "select", "label": "Label Classes", "options": [
+      { "label": "Default (m)", "value": "govuk-label--m" },
+      { "label": "Small (s)", "value": "govuk-label--s" },
+      { "label": "Large (l)", "value": "govuk-label--l" },
+      { "label": "Extra Large (xl)", "value": "govuk-label--xl" },
+      { "label": "Visually Hidden", "value": "govuk-visually-hidden" },
+      { "label": "None (inherit)", "value": "" }
+    ] },
+    { "key": "hint.text", "path": "hint.text", "type": "text", "label": "Hint Text" },
+    { "key": "classes", "path": "classes", "type": "select", "label": "CSS Classes", "options": [
+      { "label": "Default (govuk-select)", "value": "govuk-select" },
+      { "label": "Full width (govuk-!-width-full)", "value": "govuk-select govuk-!-width-full" },
+      { "label": "One half (govuk-!-width-one-half)", "value": "govuk-select govuk-!-width-one-half" },
+      { "label": "One third (govuk-!-width-one-third)", "value": "govuk-select govuk-!-width-one-third" }
+    ] },
+    { "key": "formGroup.classes", "path": "formGroup.classes", "type": "select", "label": "Form Group Classes", "options": [
+      { "label": "Default (none)", "value": "" },
+      { "label": "Error State", "value": "govuk-form-group--error" }
+    ] },
+    { "key": "disabled", "path": "disabled", "type": "select", "label": "Disabled?", "options": [
+      { "label": "False", "value": false },
+      { "label": "True", "value": true }
+    ] },
+    { "key": "options", "path": "items", "type": "optionList", "label": "Options" }
+  ],
+  "has_options": true,
+  "option_schema": ["text", "value"],
+  "export_njk_template": "{% from \"govuk/components/select/macro.njk\" import govukSelect %}\n{% set idVal = props.id or props.name %}\n{% set items = (props.items or []) %}\n{{ govukSelect({\n  id: idVal,\n  name: props.name,\n  label: props.label,\n  hint: props.hint,\n  errorMessage: props.errorMessage,\n  items: items,\n  classes: props.classes,\n  formGroup: props.formGroup,\n  disabled: props.disabled\n}) }}"
+}
