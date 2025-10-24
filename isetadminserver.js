@@ -33,6 +33,10 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_application_file',
   'iset_application_submission',
   'iset_application_draft',
+  'esdc_participant_submission_history',
+  'esdc_participant_submission',
+  'esdc_reporting_note',
+  'esdc_reporting_package',
   'iset_case',
   'iset_application',
 ];

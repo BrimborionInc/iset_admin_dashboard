@@ -211,6 +211,19 @@ try {
         }
     }
 
+    # Manually stage the shared repo (lives outside admin-dashboard)
+    $sharedSource = Join-Path $repoRoot "..\shared"
+    if (Test-Path -LiteralPath $sharedSource) {
+        $sharedDest = Join-Path $stagingPath "shared"
+        New-Item -ItemType Directory -Path $sharedDest -Force | Out-Null
+        Copy-Item -Path (Join-Path $sharedSource "*") -Destination $sharedDest -Recurse -Force
+        if ($stagedDirectories -notcontains 'shared') {
+            $stagedDirectories += 'shared'
+        }
+    } else {
+        Write-Warning "Shared repo not found at '$sharedSource'; skipping shared staging."
+    }
+
     $archiveName = "admin-dashboard-$timestamp.zip"
     $archivePath = Join-Path $tempRoot $archiveName
     Push-Location $stagingPath
@@ -269,6 +282,9 @@ try {
     if ($stagedDirectories -contains 'shared') {
         $commandsList.Add('rm -rf /opt/nwac/admin-dashboard/shared')
         $commandsList.Add('cp -r "$TMPDIR/shared" /opt/nwac/admin-dashboard/')
+        $commandsList.Add('rm -rf /opt/nwac/shared')
+        $commandsList.Add('mkdir -p /opt/nwac')
+        $commandsList.Add('cp -r "$TMPDIR/shared" /opt/nwac/')
     }
     if ($stagedDirectories -contains 'templates') {
         $commandsList.Add('rm -rf /opt/nwac/admin-dashboard/templates')

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
+import { canCompleteOutcomeReview, getCaseStatusContext } from '../utils/rbac';
 import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup } from '@cloudscape-design/components';
 import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
@@ -78,20 +79,21 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const [lockingAssessment, setLockingAssessment] = useState(false);
   const {
     userId: currentUserId,
-    displayName: currentUserName
+    displayName: currentUserName,
+    role: currentUserRole
   } = useCurrentUser();
+  const userRole = currentUserRole || '';
 
   const rawCaseStatus = caseData?.status ?? '';
-  const normalizedCaseStatus = typeof rawCaseStatus === 'string'
-    ? rawCaseStatus.trim().toLowerCase()
-    : String(rawCaseStatus || '').trim().toLowerCase();
-  const canonicalCaseStatus = normalizedCaseStatus.replace(/[\s-]+/g, '_');
+  const caseStatusContext = getCaseStatusContext(rawCaseStatus);
+  const { canonicalStatus: canonicalCaseStatus, isPendingApprovalStatus } = caseStatusContext;
 
   const isDecisionFinal = FINAL_CASE_STATUSES.has(canonicalCaseStatus);
   const isLockedStatus = LOCKED_CASE_STATUSES.has(canonicalCaseStatus);
   const showOutcomeByStatus = OUTCOME_NOTICE_STATUSES.has(canonicalCaseStatus);
-  const isPendingApprovalStatus = canonicalCaseStatus === 'pending_approval';
   const isOutcomeNoticeDisabled = isDecisionFinal;
+  const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawCaseStatus });
+  const lacksOutcomePermission = Boolean(userRole) && isPendingApprovalStatus && !canManageOutcomeReview;
   const activeLock = useMemo(() => {
     if (lockState.owned && lockState.lock) {
       return lockState.lock;
@@ -708,7 +710,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const assessmentSubmitted = localAssessmentSubmitted || isAssessmentSubmitted || isReviewComplete || isDecisionFinal || isLockedStatus || lockedByAnotherUser;
   // Disable all fields (including NWAC) if review is complete, a final decision exists, or status is locked
   const isAssessmentDisabled = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || (assessmentSubmitted && !isEditingAssessment);
-  const isNWACFieldsDisabled = lockedByAnotherUser || !showNWACSection || !isPendingApprovalStatus || isReviewComplete || isDecisionFinal;
+  const isNWACFieldsDisabled = lockedByAnotherUser || !showNWACSection || !isPendingApprovalStatus || isReviewComplete || isDecisionFinal || !canManageOutcomeReview;
 
   // Lock editing state if final decision has been recorded
   useEffect(() => {
@@ -738,6 +740,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
 
   const handleComplete = async () => {
     if (!isPendingApprovalStatus) {
+      return;
+    }
+    if (!canManageOutcomeReview) {
+      setValidationAlert(['You do not have permission to complete the outcome notice for this case.']);
       return;
     }
     setHasSubmitted(true);
@@ -931,7 +937,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
                 <Button variant="primary" onClick={handleSubmit}>Submit</Button>
               )}
               {!lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && (
-                <Button variant="primary" onClick={handleComplete} disabled={!isPendingApprovalStatus}>Approve/Reject</Button>
+                <Button variant="primary" onClick={handleComplete} disabled={!isPendingApprovalStatus || !canManageOutcomeReview}>Approve/Reject</Button>
               )}
             </SpaceBetween>
           }
@@ -1012,12 +1018,20 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           </Box>
         )}
         {showNWACSection && (
-          <>
-            {sectionHeader('Outcome Notice')}
-            <Box
-              style={
-                isNWACFieldsDisabled || isOutcomeNoticeDisabled
-                  ? { opacity: 0.6, pointerEvents: 'none' }
+            <>
+              {sectionHeader('Outcome Notice')}
+              {lacksOutcomePermission && !lockedByAnotherUser && (
+                <Alert
+                  type="info"
+                  statusIconAriaLabel="Information"
+                >
+                  You do not have permission to complete the NWAC outcome notice. Contact an administrator if you need access.
+                </Alert>
+              )}
+              <Box
+                style={
+                  isNWACFieldsDisabled || isOutcomeNoticeDisabled
+                    ? { opacity: 0.6, pointerEvents: 'none' }
                   : undefined
               }
               aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
@@ -1028,6 +1042,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
                     <RadioGroup
                       value={assessment.nwacReviewStatus || ''}
                       onChange={({ detail }) => {
+                        if (isNWACFieldsDisabled) return;
                         if (detail.value === 'approve' && assessment.nwacReason) {
                           setShowApproveConfirmModal(true);
                         } else {
@@ -1042,13 +1057,17 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
                       ariaLabel="NWAC Review Status"
                       data-error-focus={hasSubmitted && fieldErrors.nwacReviewStatus ? 'true' : undefined}
                       disabled={isNWACFieldsDisabled}
+                      style={isNWACFieldsDisabled ? { opacity: 0.6 } : undefined}
                     />
                   </SpaceBetween>
                 </FormField>
                 <FormField label="Assessment Assurance" errorText={hasSubmitted && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}>
-                  <Select
-                    selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
-                    onChange={({ detail }) => handleField('nwacReview', detail.selectedOption.value)}
+                    <Select
+                      selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
+                      onChange={({ detail }) => {
+                        if (isNWACFieldsDisabled) return;
+                        handleField('nwacReview', detail.selectedOption.value);
+                      }}
                     options={[
                       { label: 'Agree with Coordinator Recommendation', value: 'agree' },
                       { label: 'Disagree with Coordinator Recommendation', value: 'disagree' }
@@ -1064,7 +1083,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
                 <Grid gridDefinition={[{ colspan: 12 }]}> 
                   <FormField label="Reason for Denial" stretch={true} >
                     <Box width="100%">
-                      <Textarea value={assessment.nwacReason} onChange={({ detail }) => handleField('nwacReason', detail.value)} data-error-focus={hasSubmitted && fieldErrors.nwacReason ? 'true' : undefined} disabled={isNWACFieldsDisabled} />
+                      <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
+                        if (isNWACFieldsDisabled) return;
+                        handleField('nwacReason', detail.value);
+                      }} data-error-focus={hasSubmitted && fieldErrors.nwacReason ? 'true' : undefined} disabled={isNWACFieldsDisabled} />
                     </Box>
                   </FormField>
                 </Grid>
@@ -1078,6 +1100,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
               footer={
                 <SpaceBetween direction="horizontal" size="xs">
                   <Button variant="primary" onClick={() => {
+                    if (isNWACFieldsDisabled) {
+                      setShowApproveConfirmModal(false);
+                      return;
+                    }
                     handleField('nwacReason', '');
                     handleField('nwacReviewStatus', 'approve');
                     setShowApproveConfirmModal(false);

@@ -21,6 +21,12 @@ import { apiFetch } from '../auth/apiClient';
 import ApplicationOverviewHelp from '../helpPanelContents/applicationOverviewHelp';
 import useCurrentUser from '../hooks/useCurrentUser';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
+import {
+  canEditCaseStatus,
+  getCaseStatusContext,
+  getRoleGroups,
+  isStatusTransitionAllowed,
+} from '../utils/rbac';
 
 function formatDateTime(value) {
   if (!value) return '';
@@ -55,17 +61,6 @@ const STATUS_OPTIONS = [
   { label: 'Withdrawn', value: 'withdrawn' },
   { label: 'Archived', value: 'archived' },
 ];
-
-const ADMIN_ROLES = new Set(['program administrator', 'system administrator']);
-const REGIONAL_COORDINATOR_ROLES = new Set(['regional coordinator']);
-const APPLICATION_ASSESSOR_ROLES = new Set(['application assessor']);
-const FINAL_CASE_STATUSES = new Set(['approved', 'rejected', 'withdrawn', 'archived']);
-
-const canonicalizeStatus = (status) => (status || '')
-  .toString()
-  .trim()
-  .toLowerCase()
-  .replace(/[\s-]+/g, '_');
 
 const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHelpPanel }) => {
   const [application, setApplication] = useState(null);
@@ -241,26 +236,15 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   }, [application]);
 
   const fallbackStatus = statusValue || caseData?.status || application?.status || '';
-  const canonicalStatus = canonicalizeStatus(fallbackStatus);
-  const normalizedRole = (userRole || '').trim().toLowerCase();
-  const isAdminRole = ADMIN_ROLES.has(normalizedRole);
-  const isRegionalCoordinator = REGIONAL_COORDINATOR_ROLES.has(normalizedRole);
-  const isApplicationAssessor = APPLICATION_ASSESSOR_ROLES.has(normalizedRole);
-  const isFinalStatus = FINAL_CASE_STATUSES.has(canonicalStatus);
-  const isPendingApprovalStatus = canonicalStatus === 'pending_approval';
-
-  let canEditStatus = Boolean(caseData?.id);
-  if (canEditStatus) {
-    if (isAdminRole) {
-      canEditStatus = true;
-    } else if (isApplicationAssessor) {
-      canEditStatus = !(isFinalStatus || isPendingApprovalStatus);
-    } else if (isRegionalCoordinator) {
-      canEditStatus = !isFinalStatus;
-    } else {
-      canEditStatus = !isFinalStatus;
-    }
-  }
+  const statusContext = getCaseStatusContext(fallbackStatus);
+  const roleAccess = getRoleGroups(userRole);
+  const { canonicalStatus, isFinalStatus } = statusContext;
+  const { isAdminRole } = roleAccess;
+  const canEditStatus = canEditCaseStatus({
+    role: userRole,
+    status: fallbackStatus,
+    hasCase: Boolean(caseData?.id),
+  });
 
   const statusOption = STATUS_OPTIONS.find(option => option.value === statusValue);
   const selectedStatusOption = statusOption || (fallbackStatus ? { label: fallbackStatus, value: fallbackStatus } : null);
@@ -392,15 +376,22 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
       return;
     }
 
-    const canonicalNextStatus = canonicalizeStatus(nextStatus);
-
-    if (isAdminRole && isFinalStatus && canonicalNextStatus !== canonicalStatus) {
-      setConfirmStatusChange({ nextStatus, nextOption });
+    if (statusSelectDisabled) {
+      setStatusFeedback({ type: 'info', content: 'Status changes are not permitted for your role on this case.' });
       return;
     }
 
-    if (statusSelectDisabled) {
-      setStatusFeedback({ type: 'info', content: 'Status changes are not permitted for your role on this case.' });
+    const canonicalNextStatus = getCaseStatusContext(nextStatus).canonicalStatus;
+    if (!isStatusTransitionAllowed({ role: userRole, fromStatus: canonicalStatus, toStatus: canonicalNextStatus })) {
+      setStatusFeedback({
+        type: 'info',
+        content: 'That status change is not available for your role.',
+      });
+      return;
+    }
+
+    if (isAdminRole && isFinalStatus && canonicalNextStatus !== canonicalStatus) {
+      setConfirmStatusChange({ nextStatus, nextOption });
       return;
     }
 

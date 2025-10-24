@@ -68,7 +68,7 @@ const ILMP_PARTICIPANT_RULES = {
         },
         {
           id: 'sin-mod10',
-          description: 'Must pass MOD10 checksum (ILMP Data Exchange Guide, row 101).',
+          description: 'SIN Number checksum is invalid (ILMP Data Exchange Guide, row 101).',
           severity: 'error',
           validate: value => {
             if (typeof value !== 'string' || !/^\d{9}$/.test(value)) return false;
