@@ -164,13 +164,19 @@ const EsdcParticipantQueueWidget = ({
       <Table
         columnDefinitions={[
           {
-            id: 'name',
+            id: 'participant',
             header: 'Participant',
             cell: item => (
               <Link href={`/esdc/participants/${item.id}`}>
-                {item.tracking_id || `Submission #${item.id}`}
+                {item.participant_name || item.tracking_id || `Submission #${item.id}`}
               </Link>
             ),
+            sortingField: 'participant_name'
+          },
+          {
+            id: 'referenceId',
+            header: 'Reference ID',
+            cell: item => item.tracking_id || '—',
             sortingField: 'tracking_id'
           },
           {
@@ -205,7 +211,7 @@ const EsdcParticipantQueueWidget = ({
         loading={loading}
         loadingText="Loading participant submissions"
         empty={renderEmptyState()}
-        variant="container"
+        variant="embedded"
         pagination={
           <Pagination
             currentPageIndex={currentPageIndex}

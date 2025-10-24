@@ -3961,6 +3961,8 @@ esdcRouter.get('/participants', async (req, res, next) => {
         eps.submission_status,
         eps.last_validated_at,
         eps.submitted_at,
+        JSON_EXTRACT(ia.payload_json, '$') AS application_payload,
+        ias.intake_payload AS submission_payload,
         COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
       FROM esdc_participant_submission eps
       LEFT JOIN iset_application ia ON ia.id = eps.application_id
@@ -3983,7 +3985,85 @@ esdcRouter.get('/participants', async (req, res, next) => {
       params
     );
 
-    res.json({ total, items: rows });
+    const items = rows.map(row => {
+      let payload = row.application_payload;
+      if (payload && typeof payload === 'string') {
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          payload = null;
+        }
+      }
+      let submissionPayload = row.submission_payload;
+      if (submissionPayload && typeof submissionPayload === 'string') {
+        try {
+          submissionPayload = JSON.parse(submissionPayload);
+        } catch {
+          submissionPayload = null;
+        }
+      }
+      const payloadObj = (payload && typeof payload === 'object') ? payload : {};
+      const context = {
+        payload: payloadObj,
+        answers: {}
+      };
+      if (payloadObj && typeof payloadObj === 'object') {
+        if (payloadObj.answers && typeof payloadObj.answers === 'object') {
+          Object.assign(context.answers, payloadObj.answers);
+        }
+        if (payloadObj.intake_answers && typeof payloadObj.intake_answers === 'object') {
+          Object.entries(payloadObj.intake_answers).forEach(([key, value]) => {
+            if (typeof context.answers[key] === 'undefined') {
+              context.answers[key] = value;
+            }
+          });
+        }
+        if (payloadObj.personal && typeof payloadObj.personal === 'object') {
+          context.payload.personal = payloadObj.personal;
+        }
+      }
+      if (submissionPayload && typeof submissionPayload === 'object') {
+        if (submissionPayload.answers && typeof submissionPayload.answers === 'object') {
+          Object.entries(submissionPayload.answers).forEach(([key, value]) => {
+            if (typeof context.answers[key] === 'undefined') {
+              context.answers[key] = value;
+            }
+          });
+        }
+        if (!context.payload.personal && submissionPayload.personal && typeof submissionPayload.personal === 'object') {
+          context.payload.personal = submissionPayload.personal;
+        }
+      }
+      let participantName =
+        normaliseString(payload?.personal?.full_name) ||
+        extractPreferredName(context);
+      if (!participantName) {
+        const first = extractFirstName(context);
+        const middle = normaliseString(
+          context.answers['middle-names'] ||
+          context.answers['middle_names'] ||
+          context.answers['middle-name'] ||
+          context.answers['middle_name']
+        );
+        const last = extractLastName(context);
+        participantName = [first, middle, last].filter(Boolean).join(' ');
+      }
+      if (!participantName) {
+        participantName = row.tracking_id;
+      }
+      return {
+        id: row.id,
+        case_id: row.case_id,
+        readiness_status: row.readiness_status,
+        submission_status: row.submission_status,
+        last_validated_at: row.last_validated_at,
+        submitted_at: row.submitted_at,
+        tracking_id: row.tracking_id,
+        participant_name: participantName
+      };
+    });
+
+    res.json({ total, items });
   } catch (err) {
     next(err);
   }
@@ -3997,7 +4077,17 @@ esdcRouter.get('/participants/:id', async (req, res, next) => {
   try {
     const [[submission]] = await pool.query(
       `
-      SELECT eps.*, COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
+      SELECT
+        eps.*,
+        COALESCE(
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.personal.full_name')), ''),
+          NULLIF(TRIM(CONCAT_WS(' ',
+            JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.personal.first_name')),
+            JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.personal.last_name'))
+          )), ''),
+          COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id))
+        ) AS participant_name,
+        COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
       FROM esdc_participant_submission eps
       LEFT JOIN iset_application ia ON ia.id = eps.application_id
       LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
