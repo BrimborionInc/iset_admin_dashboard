@@ -32,11 +32,40 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - Patch v0.1.3 (23 October 2025)',
-      description: 'Patch v0.1.3 lays the groundwork for the ESDC submissions module.',
+      sectionTitle: 'Release Notes - Patch v0.1.5 (25 October 2025)',
+      description: 'Patch v0.1.5 introduces the portfolio dashboard and case workspace scaffolding for ISET case management.',
       features: {
         heading: 'Updates',
         sections: [
+          {
+            title: 'Patch v0.1.5',
+            paragraphs: [
+              'New Dashboards:',
+              '- Scaffolded the Level 1 “ISET Case Portfolio” dashboard with persistent filters, finance overview, and case table widgets.',
+              '- Introduced the Level 2 “Case Workspace” dashboard, wrapping existing case widgets (supporting documents, secure messaging, application events, etc.) as configurable board items.',
+              '- Wired new API hook stubs for portfolio and case data, and updated access-control routes plus side-navigation badges.',
+              'UI Improvements:',
+              '- Added Cloudscape board controls to the case workspace header and surfaced contact message counts in the side-nav footer.',
+              '- Restyled the compliance panel into dual cards highlighting ILMP vs. finance checks.',
+              '- Ensured documents, messaging, and events widgets now share the case context scaffolding.',
+              'Notes:',
+              '- All new dashboards and widgets remain scaffolds pending live API integration, CRUD flows, and validation wiring.'
+            ]
+          },
+          {
+            title: 'Patch v0.1.4',
+            paragraphs: [
+              'Bug Fixes:',
+              '- Fixed a bug where the "Forgotten password" link was blocked in the public portal.',
+              '- Fixed a bug where "case_watch_removed" events were not being captured.',
+              '- Fixed a bug where characters with accents were rendered as question marks in the public portal messages module.',
+              '- Fixed a bug where regional coordinators could not approve or reject applications.',
+              '- Fixed a bug where assessors could sometimes approve or reject applications unexpectedly.',
+              'Minor Improvements:',
+              '- Changed the messaging for Social Insurance Numbers that fail checksum validation in the Participant Submissions dashboard.',
+              '- Extended the ESDC submission XML to cover the intervention. More work is needed in the assessment widget to collect the remaining ESDC-required information: Intervention Code (WG code 1-20), Intervention Start/End Date plus Intervention Duration (weeks/hours), Intervention Outcome, Intervention Cost as a plain number, Intervention Related NOC and NOC Version, Action Plan Result Code and Result Date, Childcare Need and related funding description, Requested Supports per intervention, and Optional Notes or goal narrative.'
+            ]
+          },
           {
             title: 'Patch v0.1.3',
             paragraphs: [
@@ -72,6 +101,13 @@ const copy = {
       comingNext: {
         heading: 'Coming Soon',
         sections: [
+          {
+            title: 'Assessor Widget & Caseworking',
+            paragraphs: [
+              'An overhaul of the assessor widget is planned to better align the Intervention section with ESDC data requirements.',
+              'The upcoming Caseworking module will build on this by allowing multiple interventions to be added to a single case.'
+            ]
+          },
           {
             title: 'Payment Alerts',
             paragraphs: [
@@ -146,11 +182,25 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - correctif v0.1.3 (23 octobre 2025)',
-      description: 'Le correctif v0.1.3 prépare le module de soumission vers EDSC et garde le panneau des fonctionnalités ordonné.',
+      sectionTitle: 'Notes de version - correctif v0.1.4 (24 octobre 2025)',
+      description: 'Le correctif v0.1.4 renforce la fiabilité des portails et poursuit la préparation des soumissions vers EDSC.',
       features: {
         heading: 'Mises à jour',
         sections: [
+          {
+            title: 'Correctif v0.1.4',
+            paragraphs: [
+              'Corrections de bogues :',
+              '- Correction d\'un bogue qui bloquait le lien « Mot de passe oublié » dans le portail public.',
+              '- Correction d\'un bogue qui empêchait la capture des événements « case_watch_removed ».',
+              '- Correction d\'un bogue qui remplaçait les caractères accentués par des points d\'interrogation dans le module de messages du portail public.',
+              '- Correction d\'un bogue qui empêchait les coordonnatrices régionales d\'approuver ou de rejeter des demandes.',
+              '- Correction d\'un bogue qui permettait parfois aux évaluatrices d\'approuver ou de rejeter des demandes sans respecter le processus.',
+              'Améliorations mineures :',
+              '- Modification du message affiché lorsque le NAS échoue la validation de somme de contrôle dans le tableau de bord des soumissions.',
+              '- Extension du fichier XML de soumission EDSC pour inclure l\'intervention. Le widget d\'évaluation devra recueillir les informations supplémentaires exigées par EDSC : code d\'intervention (codes WG 1-20), dates de début et de fin plus durée (semaines/heures), résultat d\'intervention, coût d\'intervention saisi comme nombre, CNP associé et version, code de résultat du plan d\'action et date, besoin en garde d\'enfants et description du financement, soutiens demandés par intervention, et notes ou narration d\'objectif.'
+            ]
+          },
           {
             title: 'Correctif v0.1.3',
             paragraphs: [
@@ -183,6 +233,13 @@ const copy = {
       comingNext: {
         heading: 'À venir bientôt',
         sections: [
+          {
+            title: "Widget d'évaluation et gestion des dossiers",
+            paragraphs: [
+              "Une refonte du widget d'évaluation est prévue afin d'aligner davantage la section Intervention sur les besoins d'EDSC pour consigner les bonnes données.",
+              "Le module de gestion des dossiers en préparation renforcera cette évolution en permettant d'ajouter plusieurs interventions à un même dossier."
+            ]
+          },
           { title: 'Conservation et archivage', paragraphs: ['Introduire des politiques configurables de conservation, d’archivage et de disposition, avec entrepôt de données, tenue de registres automatisée et contrôles de gel légal.'] },
           { title: 'Tableau analytique', paragraphs: ['Offrir un tableau de bord analytique dédié avec graphiques, rapports et indicateurs.'] },
           { title: 'Gestion des publications', paragraphs: ['Ajouter des outils de publication renforcés pour mettre en scène et contrôler les changements des parcours d’accueil.'] },

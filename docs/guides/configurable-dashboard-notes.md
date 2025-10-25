@@ -24,9 +24,10 @@ Following these guidelines keeps the board responsive, allows widgets to be adde
   3. Reset handlers should update both refs after calling `setLayout` so the palette effect does not run again with stale signatures.
   4. Use the canonical `boardI18nStrings` helpers from the finance dashboards—each announcement key returns a function. This keeps Cloudscape’s accessibility announcements intact and avoids runtime errors when removing widgets.
 - **Checklist before committing a dashboard.**
-  - [ ] Does `setAvailableItems` live behind a signature guard?
-  - [ ] Are layout changes persisted only when the exported layout actually changes?
-  - [ ] Do palette open/reset events reuse the shared helpers?
-  - [ ] Are the `boardI18nStrings` functions identical (or equivalent) to the proven finance implementation?
+- [ ] Does `setAvailableItems` live behind a signature guard?
+- [ ] Are layout changes persisted only when the exported layout actually changes?
+- [ ] Do palette open/reset events reuse the shared helpers?
+- [ ] Are the `boardI18nStrings` functions identical (or equivalent) to the proven finance implementation?
+- [ ] Has the new route been registered in access control with System Administrator and Program Administrator enabled by default?
 
 Following the pattern above keeps new dashboards from entering the runaway render loop and ensures widget removal, drag, and resize announcements behave consistently.

@@ -37,6 +37,7 @@ const EsdcParticipantQueueWidget = ({
   });
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
   const [items, setItems] = useState([]);
+  const [nameOverrides, setNameOverrides] = useState({});
   const [totalItems, setTotalItems] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -111,11 +112,96 @@ const EsdcParticipantQueueWidget = ({
     };
   }, [currentPageIndex, preferences.pageSize]);
 
-  const pageItems = useMemo(() => items, [items]);
+  const pageItems = useMemo(() => (
+    Array.isArray(items)
+      ? items.map(item => (
+        nameOverrides[item.id]
+          ? { ...item, participant_name: nameOverrides[item.id] }
+          : item
+      ))
+      : []
+  ), [items, nameOverrides]);
   const pagesCount = useMemo(() => {
     if (totalItems === 0) return 1;
     return Math.max(1, Math.ceil(totalItems / preferences.pageSize));
   }, [totalItems, preferences.pageSize]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const missing = items.filter(item => (
+      item
+      && !nameOverrides[item.id]
+      && (!item.participant_name || item.participant_name === item.tracking_id)
+    ));
+
+    if (missing.length === 0) {
+      return () => { cancelled = true; };
+    }
+
+    async function hydrateNames() {
+      const updates = {};
+
+      for (const item of missing) {
+        try {
+          const detailResp = await apiFetch(`/api/esdc/participants/${item.id}`);
+          if (!detailResp.ok) continue;
+          const detail = await detailResp.json();
+          const submission = detail?.submission;
+          if (!submission) continue;
+
+          const { participant_name: submissionName, tracking_id: submissionTracking } = submission;
+          if (submissionName && submissionName !== submissionTracking) {
+            updates[item.id] = submissionName;
+            continue;
+          }
+
+          const applicationId = submission.application_id;
+          if (!applicationId) continue;
+
+          const appResp = await apiFetch(`/api/applications/${applicationId}`);
+          if (!appResp.ok) continue;
+          const appData = await appResp.json();
+          let payload = appData?.payload_json;
+          if (payload && typeof payload === 'string') {
+            try {
+              payload = JSON.parse(payload);
+            } catch {
+              payload = null;
+            }
+          }
+
+          if (!payload || typeof payload !== 'object') continue;
+          const answers = payload.answers || payload.intake_answers || {};
+
+          const firstName = answers['first-name'] || answers.first_name;
+          const middleName = answers['middle-names'] || answers.middle_names;
+          const lastName = answers['last-name'] || answers.last_name;
+          const preferredName = answers['preferred-name'];
+
+          const legalNameParts = [firstName, middleName, lastName].filter(part => typeof part === 'string' && part.trim().length > 0);
+          const legalName = legalNameParts.length > 0 ? legalNameParts.join(' ').trim() : '';
+          const candidateName = legalName || (typeof preferredName === 'string' ? preferredName.trim() : '');
+
+          if (candidateName && candidateName !== submissionTracking) {
+            updates[item.id] = candidateName;
+          }
+        } catch {
+          // Ignore fetch/parse errors for this best-effort enrichment.
+        }
+      }
+
+      if (!cancelled && Object.keys(updates).length > 0) {
+        setNameOverrides(prev => ({ ...prev, ...updates }));
+      }
+    }
+
+    hydrateNames();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items, nameOverrides]);
 
   const renderEmptyState = () => {
     if (error) {

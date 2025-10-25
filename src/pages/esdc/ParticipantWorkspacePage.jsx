@@ -181,6 +181,7 @@ const ParticipantWorkspacePage = ({
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [participantName, setParticipantName] = useState(null);
 
   const loadParticipant = useCallback(async () => {
     if (!participantId) {
@@ -323,6 +324,71 @@ const ParticipantWorkspacePage = ({
     };
   }, [openPalette, resetLayout]);
 
+  useEffect(() => {
+    if (!submission) {
+      setParticipantName(null);
+      return undefined;
+    }
+
+    const tracking = submission.tracking_id || (submission.case_id ? `CASE-${submission.case_id}` : null);
+    const submissionName = submission.participant_name;
+
+    if (submissionName && submissionName !== tracking) {
+      setParticipantName(submissionName);
+      return undefined;
+    }
+
+    if (!submission.application_id) {
+      setParticipantName(tracking);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function hydrateName() {
+      try {
+        const resp = await apiFetch(`/api/applications/${submission.application_id}`);
+        if (!resp.ok) {
+          setParticipantName(tracking);
+          return;
+        }
+        const data = await resp.json();
+        let payload = data?.payload_json;
+        if (payload && typeof payload === 'string') {
+          try {
+            payload = JSON.parse(payload);
+          } catch {
+            payload = null;
+          }
+        }
+
+        const answers = payload?.answers || payload?.intake_answers || {};
+        const firstName = answers['first-name'] || answers.first_name;
+        const middleName = answers['middle-names'] || answers.middle_names;
+        const lastName = answers['last-name'] || answers.last_name;
+        const parts = [firstName, middleName, lastName]
+          .filter(part => typeof part === 'string' && part.trim().length > 0);
+        const legalName = parts.length ? parts.join(' ').trim() : '';
+        const preferredName = typeof answers['preferred-name'] === 'string' ? answers['preferred-name'].trim() : '';
+        const derived = legalName || preferredName || tracking;
+
+        if (!cancelled) {
+          setParticipantName(derived);
+        }
+      } catch {
+        if (!cancelled) {
+          setParticipantName(tracking);
+        }
+      }
+    }
+
+    hydrateName();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [submission]);
+
   return (
     <SpaceBetween size="l">
       {error && !loading && (
@@ -332,6 +398,12 @@ const ParticipantWorkspacePage = ({
         <Box>
           <Box variant="awsui-key-label">Tracking ID</Box>
           <Box variant="strong">{submission.tracking_id || `CASE-${submission.case_id}`}</Box>
+          {participantName && (
+            <Box margin={{ top: 'xs' }}>
+              <Box variant="awsui-key-label">Applicant</Box>
+              <Box>{participantName}</Box>
+            </Box>
+          )}
         </Box>
       )}
       <Board

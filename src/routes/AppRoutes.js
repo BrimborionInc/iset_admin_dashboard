@@ -69,6 +69,10 @@ import FinanceForecastingHelp from '../helpPanelContents/financeForecastingHelp.
 import FinancePaymentsHelp from '../helpPanelContents/financePaymentsHelp.js';
 import ContactCommunicationsDashboard from '../pages/contact/ContactCommunicationsDashboard.jsx';
 import ContactCommunicationsHelp from '../helpPanelContents/contactCommunicationsHelp.js';
+import PortfolioDashboardPage from '../pages/iset/PortfolioDashboardPage.jsx';
+import PortfolioDashboardHelp from '../helpPanelContents/portfolioDashboardHelp.js';
+import CaseWorkspacePage from '../pages/iset/CaseWorkspacePage.jsx';
+import CaseWorkspaceHelp from '../helpPanelContents/caseWorkspaceHelp.js';
 import EsdcSubmissionsOverviewPage from '../pages/esdc/EsdcSubmissionsOverviewPage.jsx';
 import EsdcParticipantSubmissionsPage from '../pages/esdc/EsdcParticipantSubmissionsPage.jsx';
 import EsdcReportingPackagesPage from '../pages/esdc/EsdcReportingPackagesPage.jsx';
@@ -591,6 +595,37 @@ const AppRoutes = ({
         </Guard>
       </Route>
 
+      <Route path="/iset/cases">
+        <Guard path="/iset/cases">
+          {renderContent(
+            PortfolioDashboardPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'ISET Case Portfolio', href: '/iset/cases' }
+            ],
+            'ISET Case Portfolio',
+            <PortfolioDashboardHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() => window.dispatchEvent(new CustomEvent("iset-portfolio:openPalette"))}
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() => window.dispatchEvent(new CustomEvent("iset-portfolio:resetLayout"))}
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            PortfolioDashboardHelp.aiContext
+          )}
+        </Guard>
+      </Route>
+
       <Route path="/contact-communications">
         <Guard path="/contact-communications">
           {renderContent(
@@ -623,6 +658,38 @@ const AppRoutes = ({
               </SpaceBetween>
             ),
             ContactCommunicationsHelp.aiContext
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/cases/:caseId">
+        <Guard path="/cases/:caseId">
+          {renderContent(
+            CaseWorkspacePage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'ISET Case Portfolio', href: '/iset/cases' },
+              { text: 'Case workspace' }
+            ],
+            'Case Workspace',
+            <CaseWorkspaceHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() => window.dispatchEvent(new CustomEvent("iset-case-workspace:openPalette"))}
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() => window.dispatchEvent(new CustomEvent("iset-case-workspace:resetLayout"))}
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            CaseWorkspaceHelp.aiContext
           )}
         </Guard>
       </Route>

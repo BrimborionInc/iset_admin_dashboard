@@ -3,6 +3,7 @@ import { useHistory } from 'react-router-dom';
 import { SideNavigation as CloudscapeSideNavigation, Badge } from '@cloudscape-design/components';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '../auth/cognito';
 import { useRoleMatrix, toCanonicalRole } from '../context/RoleMatrixContext';
+import { apiFetch } from '../auth/apiClient';
 
 const defaultFooterItems = [
   { type: 'divider' },
@@ -48,6 +49,43 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
   const signedIn = hasValidSession();
   const tokenRole = getRoleFromClaims(getIdTokenClaims());
   const effectiveRole = (iamOn && signedIn && tokenRole) ? { value: tokenRole } : currentRole;
+  const [contactCount, setContactCount] = useState(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+    const controller = new AbortController();
+
+    const fetchCount = async status => {
+      const params = new URLSearchParams({ pageSize: '1' });
+      if (status) params.append('status', status);
+      const response = await apiFetch(`/api/admin/contact-messages?${params.toString()}`, { method: 'GET', signal: controller.signal });
+      if (!response.ok) {
+        const error = new Error('Failed to load contact messages');
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      return Number(data?.total ?? 0);
+    };
+
+    async function loadCounts() {
+      try {
+        const [newCount, inProgressCount] = await Promise.all([fetchCount('new'), fetchCount('in-progress')]);
+        if (!isCancelled) setContactCount(newCount + inProgressCount);
+      } catch (error) {
+        if (!isCancelled) {
+          console.error('[SideNavigation] contact count fetch failed', error);
+          setContactCount(null);
+        }
+      }
+    }
+
+    loadCounts();
+    return () => {
+      isCancelled = true;
+      controller.abort();
+    };
+  }, []);
 
   const allNavItems = [
     {
@@ -64,8 +102,8 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       type: 'section',
       text: 'ISET Assessment',
       items: [
-        { type: 'link', text: 'Manage Applications', href: '/case-assignment-dashboard' },
-        { type: 'link', text: 'Contact Communications', href: '/contact-communications' },
+        { type: 'link', text: 'Application Assessment', href: '/case-assignment-dashboard' },
+        { type: 'link', text: 'Case Management', href: '/iset/cases' },
         { type: 'link', text: 'My Case Queue', href: '/case-management' },
       ],
     },
@@ -201,9 +239,31 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
     });
 
     const footerItems = [...defaultFooterItems];
+    const dividerIndex = footerItems.findIndex(item => item?.type === 'divider');
+    if (isAllowed('/contact-communications', canonicalRole)) {
+      const contactLink = {
+        type: 'link',
+        href: '/contact-communications',
+        text: 'Contact Communications',
+        id: 'footer-contact-communications',
+      };
+      if (contactCount !== null && contactCount >= 0) {
+        contactLink.info = (
+          <span style={{ display: 'inline-flex', pointerEvents: 'none' }} aria-hidden="true">
+            <Badge color={contactCount > 0 ? 'blue' : 'grey'}>
+              {contactCount}
+            </Badge>
+          </span>
+        );
+      }
+      const contactInsertAt = dividerIndex >= 0 ? dividerIndex + 1 : footerItems.length;
+      footerItems.splice(contactInsertAt, 0, contactLink);
+    }
+
     if (isAllowed('/manage-notifications', canonicalRole)) {
-      const dividerIndex = footerItems.findIndex(item => item?.type === 'divider');
-      const insertAt = dividerIndex >= 0 ? dividerIndex + 1 : 0;
+      const existingContactIndex = footerItems.findIndex(item => item?.href === '/contact-communications');
+      const baseIndex = existingContactIndex >= 0 ? existingContactIndex + 1 : (dividerIndex >= 0 ? dividerIndex + 1 : 0);
+      const insertAt = Math.min(baseIndex, footerItems.length);
       footerItems.splice(insertAt, 0, notificationsFooterItem);
     }
 

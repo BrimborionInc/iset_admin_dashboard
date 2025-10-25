@@ -980,7 +980,7 @@ function mapInterventionOutcome(value) {
 }
 
 function extractActionPlanDetails(context, clientStatus, requestedSupports) {
-  const { answers = {}, caseRow, applicationRow } = context;
+  const { answers = {}, caseRow, applicationRow, caseAssessmentRow } = context;
   const startRaw = answers['action-plan-start-date'] ||
     answers['action_plan_start_date'];
   const resultDateRaw = answers['action-plan-result-date'] ||
@@ -1011,6 +1011,7 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
   const resultCode = normaliseString(resultCodeRaw);
   const childcareNeed = formatBooleanAsYesNo(coerceBoolean(childcareNeedRaw));
   const childcareFunding = normaliseString(childcareFundingRaw);
+  const fundingSummary = caseAssessmentRow ? summariseAssessmentFunding(caseAssessmentRow) : null;
 
   const interventions = [];
   if (targetProgramRaw) {
@@ -1040,6 +1041,15 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
     }
     if (goalDescription) {
       intervention.notes.push(goalDescription);
+    }
+    if (fundingSummary) {
+      intervention.cost = fundingSummary.total.toFixed(2);
+      const breakdown = fundingSummary.breakdown
+        .map(entry => `${entry.label}: ${entry.display}`)
+        .join('; ');
+      if (breakdown.length > 0) {
+        intervention.notes.push(`Funding breakdown — ${breakdown}`);
+      }
     }
     interventions.push(intervention);
   }
@@ -1353,6 +1363,92 @@ const INTERVENTION_PROGRAM_MAP = {
   }
 };
 
+const ASSESSMENT_ITP_LABELS = {
+  tuition: 'Tuition',
+  books: 'Books',
+  materials: 'Materials',
+  living: 'Living allowance'
+};
+
+const ASSESSMENT_WAGE_LABELS = {
+  wages: 'Wages',
+  mercs: 'MERCs',
+  nonwages: 'Non-wages',
+  other: 'Other wage supports'
+};
+
+function normaliseCurrencyAmount(value) {
+  if (value === null || typeof value === 'undefined') return 0;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+  const str = String(value).trim();
+  if (!str) return 0;
+  const cleaned = str.replace(/[^0-9.+-]/g, '');
+  if (!cleaned) return 0;
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function summariseAssessmentFunding(assessmentRow) {
+  if (!assessmentRow) return null;
+
+  const categories = [];
+  let total = 0;
+
+  const addCategory = (label, rawValue) => {
+    const amount = normaliseCurrencyAmount(rawValue);
+    if (amount <= 0) return;
+    total += amount;
+    categories.push({
+      label,
+      amount,
+      display: typeof rawValue === 'string' && rawValue.trim().length ? rawValue.trim() : amount.toFixed(2)
+    });
+  };
+
+  let itpPayload = assessmentRow.itp_payload;
+  if (typeof itpPayload === 'string') {
+    try {
+      itpPayload = JSON.parse(itpPayload);
+    } catch (_) {
+      itpPayload = null;
+    }
+  }
+  if (itpPayload && typeof itpPayload === 'object') {
+    Object.entries(ASSESSMENT_ITP_LABELS).forEach(([key, label]) => {
+      if (Object.prototype.hasOwnProperty.call(itpPayload, key)) {
+        addCategory(label, itpPayload[key]);
+      }
+    });
+  }
+
+  let wagePayload = assessmentRow.wage_payload;
+  if (typeof wagePayload === 'string') {
+    try {
+      wagePayload = JSON.parse(wagePayload);
+    } catch (_) {
+      wagePayload = null;
+    }
+  }
+  if (wagePayload && typeof wagePayload === 'object') {
+    Object.entries(ASSESSMENT_WAGE_LABELS).forEach(([key, label]) => {
+      if (Object.prototype.hasOwnProperty.call(wagePayload, key)) {
+        addCategory(label, wagePayload[key]);
+      }
+    });
+  }
+
+  if (total <= 0 || categories.length === 0) {
+    return null;
+  }
+
+  return {
+    total,
+    breakdown: categories
+  };
+}
+
 function escapeXml(value) {
   if (value === null || typeof value === 'undefined') return '';
   return String(value)
@@ -1533,6 +1629,7 @@ function buildIlmpParticipantPayload(context) {
             InterventionEndDate: entry.endDate || null,
             InterventionOutcome: entry.outcome || null,
             InterventionRelatedNOC: entry.relatedNoc || null,
+            InterventionCost: entry.cost || null,
             RequestedSupports: entry.supports && entry.supports.length ? { Support: entry.supports } : null,
             Notes: entry.notes && entry.notes.length ? { Note: entry.notes } : null
           }))
@@ -1659,6 +1756,15 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       throw err;
     }
 
+    let caseAssessmentRow = null;
+    try {
+      const [[assessmentRow]] = await conn.query('SELECT * FROM iset_case_assessment WHERE case_id = ? LIMIT 1', [caseRow.id]);
+      caseAssessmentRow = assessmentRow || null;
+    } catch (err) {
+      const code = err && err.code;
+      if (code && code !== 'ER_NO_SUCH_TABLE') throw err;
+    }
+
     const applicationId = submissionRow.application_id || caseRow.application_id || null;
     let applicationPayload = null;
     if (applicationId) {
@@ -1675,6 +1781,7 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       submissionId: numericId,
       submissionRow,
       caseRow,
+      caseAssessmentRow,
       applicationId,
       applicationRow: applicationPayload?.row || null,
       payload: applicationPayload?.payload || {},
@@ -3961,8 +4068,43 @@ esdcRouter.get('/participants', async (req, res, next) => {
         eps.submission_status,
         eps.last_validated_at,
         eps.submitted_at,
-        JSON_EXTRACT(ia.payload_json, '$') AS application_payload,
-        ias.intake_payload AS submission_payload,
+        COALESCE(
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.personal.full_name')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.personal.full_name')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.answers."preferred-name"')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.answers."preferred-name"')), ''),
+          NULLIF(TRIM(CONCAT_WS(' ',
+            JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.answers."first-name"')),
+            JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.answers."middle-names"')),
+            JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.answers."last-name"'))
+          )), ''),
+          NULLIF(TRIM(CONCAT_WS(' ',
+            JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.answers.first_name')),
+            JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.answers.middle_names')),
+            JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.answers.last_name'))
+          )), ''),
+          NULLIF(TRIM(CONCAT_WS(' ',
+            JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.personal.first_name')),
+            JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.personal.middle_name')),
+            JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.personal.last_name'))
+          )), ''),
+          NULLIF(TRIM(CONCAT_WS(' ',
+            JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.answers."first-name"')),
+            JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.answers."middle-names"')),
+            JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.answers."last-name"'))
+          )), ''),
+          NULLIF(TRIM(CONCAT_WS(' ',
+            JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.answers.first_name')),
+            JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.answers.middle_names')),
+            JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.answers.last_name'))
+          )), ''),
+          NULLIF(TRIM(CONCAT_WS(' ',
+            JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.personal.first_name')),
+            JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.personal.middle_name')),
+            JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.personal.last_name'))
+          )), ''),
+          COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id))
+        ) AS participant_name,
         COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
       FROM esdc_participant_submission eps
       LEFT JOIN iset_application ia ON ia.id = eps.application_id
@@ -3985,83 +4127,16 @@ esdcRouter.get('/participants', async (req, res, next) => {
       params
     );
 
-    const items = rows.map(row => {
-      let payload = row.application_payload;
-      if (payload && typeof payload === 'string') {
-        try {
-          payload = JSON.parse(payload);
-        } catch {
-          payload = null;
-        }
-      }
-      let submissionPayload = row.submission_payload;
-      if (submissionPayload && typeof submissionPayload === 'string') {
-        try {
-          submissionPayload = JSON.parse(submissionPayload);
-        } catch {
-          submissionPayload = null;
-        }
-      }
-      const payloadObj = (payload && typeof payload === 'object') ? payload : {};
-      const context = {
-        payload: payloadObj,
-        answers: {}
-      };
-      if (payloadObj && typeof payloadObj === 'object') {
-        if (payloadObj.answers && typeof payloadObj.answers === 'object') {
-          Object.assign(context.answers, payloadObj.answers);
-        }
-        if (payloadObj.intake_answers && typeof payloadObj.intake_answers === 'object') {
-          Object.entries(payloadObj.intake_answers).forEach(([key, value]) => {
-            if (typeof context.answers[key] === 'undefined') {
-              context.answers[key] = value;
-            }
-          });
-        }
-        if (payloadObj.personal && typeof payloadObj.personal === 'object') {
-          context.payload.personal = payloadObj.personal;
-        }
-      }
-      if (submissionPayload && typeof submissionPayload === 'object') {
-        if (submissionPayload.answers && typeof submissionPayload.answers === 'object') {
-          Object.entries(submissionPayload.answers).forEach(([key, value]) => {
-            if (typeof context.answers[key] === 'undefined') {
-              context.answers[key] = value;
-            }
-          });
-        }
-        if (!context.payload.personal && submissionPayload.personal && typeof submissionPayload.personal === 'object') {
-          context.payload.personal = submissionPayload.personal;
-        }
-      }
-      let participantName =
-        normaliseString(payload?.personal?.full_name) ||
-        extractPreferredName(context);
-      if (!participantName) {
-        const first = extractFirstName(context);
-        const middle = normaliseString(
-          context.answers['middle-names'] ||
-          context.answers['middle_names'] ||
-          context.answers['middle-name'] ||
-          context.answers['middle_name']
-        );
-        const last = extractLastName(context);
-        participantName = [first, middle, last].filter(Boolean).join(' ');
-      }
-      if (!participantName) {
-        participantName = row.tracking_id;
-      }
-      return {
-        id: row.id,
-        case_id: row.case_id,
-        readiness_status: row.readiness_status,
-        submission_status: row.submission_status,
-        last_validated_at: row.last_validated_at,
-        submitted_at: row.submitted_at,
-        tracking_id: row.tracking_id,
-        participant_name: participantName
-      };
-    });
+    const items = rows.map(row => ({
+      id: row.id,
+      case_id: row.case_id,
+      readiness_status: row.readiness_status,
+      submission_status: row.submission_status,
+      last_validated_at: row.last_validated_at,
+      submitted_at: row.submitted_at,
+      tracking_id: row.tracking_id,
+      participant_name: row.participant_name || row.tracking_id
+    }));
 
     res.json({ total, items });
   } catch (err) {

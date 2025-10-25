@@ -30,6 +30,16 @@
       "Regional Coordinator",
       "Application Assessor"
     ],
+    "/iset/cases": [
+      "System Administrator",
+      "Program Administrator"
+    ],
+    "/cases/:caseId": [
+      "System Administrator",
+      "Program Administrator",
+      "Regional Coordinator",
+      "Application Assessor"
+    ],
     "/contact-communications": [
       "System Administrator",
       "Program Administrator"
