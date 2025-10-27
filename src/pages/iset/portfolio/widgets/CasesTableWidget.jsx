@@ -1,16 +1,20 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHistory } from "react-router-dom";
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
+  Alert,
   Badge,
   Box,
   Button,
   ButtonDropdown,
   CollectionPreferences,
+  FormField,
   Header,
   Icon,
   Link,
+  Modal,
   Pagination,
+  Select,
   SpaceBetween,
   StatusIndicator,
   Table,
@@ -18,7 +22,10 @@ import {
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "../../widgets/common";
 import { usePortfolioCases } from "../PortfolioCaseContext.jsx";
+import useCurrentUser from "../../../../hooks/useCurrentUser.js";
+import { apiFetch } from "../../../../auth/apiClient.js";
 
+import useCasesData from "../hooks/useCasesData.js";
 const COLUMN_WIDTHS_KEY = "iset-portfolio-cases-table-widths-v1";
 const PREFERENCES_KEY = "iset-portfolio-cases-table-preferences-v1";
 const DEFAULT_PAGE_SIZE = 10;
@@ -68,13 +75,18 @@ const baseColumns = [
   {
     id: "agreementNumber",
     header: "Agreement #",
-    cell: item => item.agreementNumber,
+    cell: item => item.agreementNumber ?? "-",
     minWidth: 140,
   },
   {
     id: "actionPlanStart",
     header: "Action Plan Start",
-    cell: item => new Date(item.actionPlanStart).toLocaleDateString(),
+    cell: item => {
+      if (!item.actionPlanStart) return "-";
+      const parsed = new Date(item.actionPlanStart);
+      if (Number.isNaN(parsed.getTime())) return "-";
+      return parsed.toLocaleDateString();
+    },
     minWidth: 150,
   },
   {
@@ -135,10 +147,9 @@ const loadColumnWidths = () => {
         if (!entry || typeof entry !== "object") return null;
         const { id, width } = entry;
         const numeric = Number(width);
-        if (typeof id === "string" && Number.isFinite(numeric)) {
-          return { id, width: numeric };
-        }
-        return null;
+        return typeof id === "string" && Number.isFinite(numeric)
+          ? { id, width: numeric }
+          : null;
       })
       .filter(Boolean);
   } catch {
@@ -208,30 +219,180 @@ const persistPreferences = preferences => {
 
 const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const history = useHistory();
+  const { role: currentRole } = useCurrentUser();
+  const isApplicationAssessor = currentRole === "Application Assessor";
+  const canManageAssignments = !isApplicationAssessor;
   const {
     filteredCases,
     searchText,
     setSearchText,
     selectedAgreements,
     clearAgreementFilters,
+    useLiveCases,
   } = usePortfolioCases();
 
   const [columnWidths, setColumnWidths] = useState(() => loadColumnWidths());
   const [preferences, setPreferences] = useState(() => loadPreferences());
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
   const preferencesRef = useRef(preferences);
-
-  const columnsToRender = useMemo(() => {
-    const visibleSet = new Set(preferences.visibleColumns);
-    return baseColumns
-      .filter(column => visibleSet.has(column.id))
-      .map(column => {
-        const storedWidth = columnWidths.find(entry => entry.id === column.id);
-        return storedWidth ? { ...column, width: storedWidth.width } : column;
-      });
-  }, [preferences.visibleColumns, columnWidths]);
-
   const pageSize = preferences.pageSize ?? DEFAULT_PAGE_SIZE;
+
+  const [assignModalVisible, setAssignModalVisible] = useState(false);
+  const [assignModalMode, setAssignModalMode] = useState("assign");
+  const [assignTargetCase, setAssignTargetCase] = useState(null);
+  const [assignableStaff, setAssignableStaff] = useState([]);
+  const [assignableLoading, setAssignableLoading] = useState(false);
+  const [assignError, setAssignError] = useState(null);
+  const [selectedAssignee, setSelectedAssignee] = useState(null);
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
+
+  const formatStaffLabel = useCallback(staff => {
+    if (!staff) return "Staff";
+    const display =
+      staff.display_name || staff.name || staff.email || `Staff #${staff.id ?? "?"}`;
+    const role = staff.primary_role || staff.role || null;
+    return role ? `${display} (${role})` : display;
+  }, []);
+
+  const {
+    items: liveItems,
+    totalCount: liveTotalCount,
+    loading: liveLoading,
+    error: liveError,
+    refresh: refreshLiveCases,
+  } = useCasesData({
+    enabled: useLiveCases,
+    searchText,
+    statusFilters: [],
+    ownerFilters: [],
+    page: currentPageIndex,
+    pageSize,
+    sort: null,
+  });
+
+  const assignableOptions = useMemo(
+    () =>
+      assignableStaff.map(staff => ({
+        value: String(staff.id),
+        label: formatStaffLabel(staff),
+      })),
+    [assignableStaff, formatStaffLabel]
+  );
+
+  const fetchAssignableStaff = useCallback(
+    async targetCase => {
+      setAssignableLoading(true);
+      setAssignError(null);
+      try {
+        const response = await apiFetch("/api/staff/assignable");
+        if (!response.ok) {
+          throw new Error(`Failed to load staff (${response.status})`);
+        }
+        const list = await response.json();
+        const normalized = Array.isArray(list)
+          ? list.filter(staff => Number.isFinite(Number(staff?.id)))
+          : [];
+        setAssignableStaff(normalized);
+        const ownerId = targetCase?.raw?.owner?.id ?? null;
+        if (ownerId) {
+          const found = normalized.find(staff => Number(staff.id) === Number(ownerId));
+          setSelectedAssignee(
+            found ? { value: String(found.id), label: formatStaffLabel(found) } : null
+          );
+        } else {
+          setSelectedAssignee(null);
+        }
+      } catch (err) {
+        setAssignError(err?.message || "Failed to load staff list");
+        setAssignableStaff([]);
+        setSelectedAssignee(null);
+      } finally {
+        setAssignableLoading(false);
+      }
+    },
+    [formatStaffLabel]
+  );
+
+  const closeAssignModal = useCallback(() => {
+    setAssignModalVisible(false);
+    setAssignTargetCase(null);
+    setSelectedAssignee(null);
+    setAssignError(null);
+  }, []);
+
+  const handleAssignSubmit = useCallback(async () => {
+    if (!assignTargetCase) {
+      setAssignError("No case selected.");
+      return;
+    }
+    const numericId = Number.parseInt(assignTargetCase.id, 10);
+    if (!Number.isFinite(numericId)) {
+      setAssignError("Assignment is available only in live mode.");
+      return;
+    }
+    const assigneeValue = selectedAssignee?.value;
+    if (!assigneeValue) {
+      setAssignError("Select a staff member.");
+      return;
+    }
+    setAssignSubmitting(true);
+    setAssignError(null);
+    try {
+      const endpoint =
+        assignModalMode === "reassign"
+          ? `/api/cases/${numericId}/reassign`
+          : `/api/cases/${numericId}/assign`;
+      const response = await apiFetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toUserId: Number(assigneeValue) }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        const message = body?.detail || body?.error || `Assignment failed (${response.status})`;
+        throw new Error(message);
+      }
+      closeAssignModal();
+      if (useLiveCases && typeof refreshLiveCases === "function") {
+        refreshLiveCases({ page: currentPageIndex });
+      }
+    } catch (err) {
+      setAssignError(err?.message || "Failed to assign case");
+    } finally {
+      setAssignSubmitting(false);
+    }
+  }, [
+    assignTargetCase,
+    selectedAssignee,
+    assignModalMode,
+    useLiveCases,
+    refreshLiveCases,
+    currentPageIndex,
+    closeAssignModal,
+  ]);
+
+  const handleCaseAction = useCallback(
+    (caseItem, actionType) => {
+      if (!useLiveCases) {
+        console.info("[portfolio] assignment actions available in live data mode only");
+        return;
+      }
+      if (!caseItem?.id) return;
+      const numericId = Number.parseInt(caseItem.id, 10);
+      if (!Number.isFinite(numericId)) {
+        console.warn("[portfolio] skipping assignment for non-numeric case id", caseItem.id);
+        return;
+      }
+      setAssignModalMode(actionType === "reassign" ? "reassign" : "assign");
+      setAssignTargetCase(caseItem);
+      setAssignModalVisible(true);
+      setAssignError(null);
+      setSelectedAssignee(null);
+      fetchAssignableStaff(caseItem);
+    },
+    [useLiveCases, fetchAssignableStaff]
+  );
+
   const pagesCount = Math.max(1, Math.ceil(filteredCases.length / pageSize));
   const pagedItems = useMemo(() => {
     const start = (currentPageIndex - 1) * pageSize;
@@ -239,11 +400,19 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   }, [filteredCases, currentPageIndex, pageSize]);
 
   useEffect(() => {
+    if (useLiveCases) return;
     setCurrentPageIndex(previous => {
       const maxPage = Math.max(1, Math.ceil(filteredCases.length / pageSize));
       return previous > maxPage ? maxPage : previous;
     });
-  }, [filteredCases, pageSize]);
+  }, [useLiveCases, filteredCases, pageSize]);
+
+  useEffect(() => {
+    if (!useLiveCases) return;
+    const liveTotal = Number.isFinite(liveTotalCount) ? liveTotalCount : 0;
+    const maxPage = Math.max(1, Math.ceil(Math.max(liveTotal, 1) / pageSize));
+    setCurrentPageIndex(previous => (previous > maxPage ? maxPage : previous));
+  }, [useLiveCases, liveTotalCount, pageSize]);
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
@@ -351,25 +520,114 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     />
   );
 
+  const itemsToRender = useLiveCases ? liveItems : pagedItems;
+  const totalCount = useLiveCases
+    ? (Number.isFinite(liveTotalCount) ? liveTotalCount : liveItems.length)
+    : filteredCases.length;
+  const pagesCountEffective = useLiveCases
+    ? Math.max(1, Math.ceil(Math.max(totalCount, 1) / pageSize))
+    : pagesCount;
   const pagination = (
     <Pagination
       currentPageIndex={currentPageIndex}
-      pagesCount={pagesCount}
+      pagesCount={pagesCountEffective}
       onChange={({ detail }) => setCurrentPageIndex(detail.currentPageIndex)}
-      disabled={pagesCount <= 1}
+      disabled={pagesCountEffective <= 1}
     />
   );
+  const totalMatchesText = useLiveCases
+    ? liveLoading
+      ? "Loading…"
+      : `${totalCount} case${totalCount === 1 ? "" : "s"}`
+    : `${filteredCases.length} match${filteredCases.length === 1 ? "" : "es"}`;
+  const emptyState = liveError ? (
+    <Box padding="m">
+      <StatusIndicator type="error">
+        Failed to load cases: {liveError.message || liveError.status || "Unknown error"}
+      </StatusIndicator>
+    </Box>
+  ) : (
+    <Box padding="m">No cases match the current filters.</Box>
+  );
 
-  const description = metadata.description ?? "Review and open ISET cases that match your filters.";
+  const actionsColumn = useMemo(
+    () => ({
+      id: "actions",
+      header: "Actions",
+      minWidth: 180,
+      cell: item => {
+        const hasOwner =
+          Boolean(item?.raw?.owner?.id) ||
+          (item?.ownerName && item.ownerName.toLowerCase() !== "unassigned");
+        return (
+          <SpaceBetween size="xs" direction="horizontal">
+            <Button
+              variant="inline-link"
+              disabled={!useLiveCases || !canManageAssignments || hasOwner}
+              onClick={event => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleCaseAction(item, "assign");
+              }}
+            >
+              Assign
+            </Button>
+            <Button
+              variant="inline-link"
+              disabled={!useLiveCases || !canManageAssignments || !hasOwner}
+              onClick={event => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleCaseAction(item, "reassign");
+              }}
+            >
+              Reassign
+            </Button>
+          </SpaceBetween>
+        );
+      },
+    }),
+    [handleCaseAction, canManageAssignments, useLiveCases]
+  );
+
+  const columnsToRender = useMemo(() => {
+    const visibleSet = new Set(preferences.visibleColumns);
+    const columns = baseColumns
+      .filter(column => visibleSet.has(column.id))
+      .map(column => {
+        const storedWidth = columnWidths.find(entry => entry.id === column.id);
+        return storedWidth ? { ...column, width: storedWidth.width } : column;
+      });
+    if (canManageAssignments) {
+      columns.push(actionsColumn);
+    }
+    return columns;
+  }, [preferences.visibleColumns, columnWidths, canManageAssignments, actionsColumn]);
+
   const selectedAgreement = selectedAgreements?.[0] || null;
-  const effectiveDescription = selectedAgreement
-    ? `${description} Filtered to agreement ${selectedAgreement}.`
-    : description;
-  const headerActions = selectedAgreement ? (
-    <Button iconName="close" onClick={clearAgreementFilters}>
-      Clear filter
-    </Button>
-  ) : undefined;
+  const headerActionItems = [];
+  if (selectedAgreement) {
+    headerActionItems.push(
+      <Button key="clear" iconName="close" onClick={clearAgreementFilters}>
+        Clear filter
+      </Button>
+    );
+  }
+  if (canManageAssignments) {
+    headerActionItems.push(
+      <Button key="new-case" variant="primary" iconName="add-plus" onClick={() => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("iset-portfolio:newCaseRequest", {
+              detail: { source: "cases-widget" },
+            })
+          );
+        }
+      }}>
+        + New Case
+      </Button>
+    );
+  }
 
   return (
     <BoardItem
@@ -377,8 +635,14 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         <Header
           variant="h2"
           info={infoLink}
-          description={effectiveDescription}
-          actions={headerActions}
+          description={metadata.description ?? "Review and open ISET cases that match your filters."}
+          actions={
+            headerActionItems.length ? (
+              <SpaceBetween direction="horizontal" size="xs">
+                {headerActionItems}
+              </SpaceBetween>
+            ) : undefined
+          }
         >
           {metadata.title ?? "Cases"}
         </Header>
@@ -403,16 +667,17 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
             setSearchText(detail.filteringText);
             setCurrentPageIndex(1);
           }}
-          countText={`${filteredCases.length} match${filteredCases.length === 1 ? "" : "es"}`}
+          countText={totalMatchesText}
         />
         <Table
           trackBy="id"
           columnDefinitions={columnsToRender}
-          items={pagedItems}
+          items={itemsToRender}
           resizableColumns
           variant="embedded"
-          header={<Header variant="h3" counter={`(${filteredCases.length})`}>ISET Cases</Header>}
-          empty={<Box padding="m">No cases match the current filters.</Box>}
+          loading={useLiveCases && liveLoading}
+          header={<Header variant="h3" counter={`(${totalCount})`}>ISET Cases</Header>}
+          empty={emptyState}
           pagination={pagination}
           preferences={preferencesComponent}
           onColumnWidthsChange={handleColumnWidthsChange}
@@ -424,6 +689,151 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           }}
         />
       </SpaceBetween>
+      {assignModalVisible && (
+        <Modal
+          visible
+          header={assignModalMode === "reassign" ? "Reassign Case" : "Assign Case"}
+          closeAriaLabel="Close assignment modal"
+          onDismiss={closeAssignModal}
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={closeAssignModal}>Cancel</Button>
+              <Button
+                variant="primary"
+                loading={assignSubmitting}
+                disabled={assignableLoading || assignSubmitting || !selectedAssignee}
+                onClick={handleAssignSubmit}
+              >
+                {assignModalMode === "reassign" ? "Reassign" : "Assign"}
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="m">
+            {assignError && (
+              <Alert type="error" statusIconAriaLabel="Error">
+                {assignError}
+              </Alert>
+            )}
+            <FormField
+              label="Staff member"
+              description="Choose who should own this case."
+            >
+              <Select
+                disabled={assignableLoading}
+                loadingText="Loading staff..."
+                placeholder={assignableLoading ? "Loading staff..." : "Select staff"}
+                options={assignableOptions}
+                selectedOption={selectedAssignee}
+                onChange={({ detail }) => setSelectedAssignee(detail.selectedOption)}
+              />
+            </FormField>
+          </SpaceBetween>
+        </Modal>
+      )}
+    </BoardItem>
+  );
+    <BoardItem
+      header={
+        <Header
+          variant="h2"
+          info={infoLink}
+          description={metadata.description ?? "Review and open ISET cases that match your filters."}
+          actions={
+            headerActionItems.length ? (
+              <SpaceBetween direction="horizontal" size="xs">
+                {headerActionItems}
+              </SpaceBetween>
+            ) : undefined
+          }
+        >
+          {metadata.title ?? "Cases"}
+        </Header>
+      }
+      settings={
+        typeof actions.removeItem === "function" ? (
+          <ButtonDropdown
+            ariaLabel="Cases table settings"
+            variant="icon"
+            items={[{ id: "remove", text: "Remove widget" }]}
+            onItemClick={handleSettingsClick}
+          />
+        ) : undefined
+      }
+      i18nStrings={boardItemI18nStrings}
+    >
+      <SpaceBetween size="m">
+        <TextFilter
+          filteringText={searchText}
+          filteringPlaceholder="Search by client, owner, or agreement"
+          onChange={({ detail }) => {
+            setSearchText(detail.filteringText);
+            setCurrentPageIndex(1);
+          }}
+          countText={totalMatchesText}
+        />
+        <Table
+          trackBy="id"
+          columnDefinitions={columnsToRender}
+          items={itemsToRender}
+          resizableColumns
+          variant="embedded"
+          loading={useLiveCases && liveLoading}
+          header={<Header variant="h3" counter={`(${totalCount})`}>ISET Cases</Header>}
+          empty={emptyState}
+          pagination={pagination}
+          preferences={preferencesComponent}
+          onColumnWidthsChange={handleColumnWidthsChange}
+          onRowClick={({ detail }) => {
+            const caseId = detail?.item?.id;
+            if (caseId) {
+              history.push(`/cases/${caseId}`);
+            }
+          }}
+        />
+      </SpaceBetween>
+      {assignModalVisible && (
+        <Modal
+          visible
+          header={assignModalMode === "reassign" ? "Reassign Case" : "Assign Case"}
+          closeAriaLabel="Close assignment modal"
+          onDismiss={closeAssignModal}
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={closeAssignModal}>Cancel</Button>
+              <Button
+                variant="primary"
+                loading={assignSubmitting}
+                disabled={assignableLoading || assignSubmitting || !selectedAssignee}
+                onClick={handleAssignSubmit}
+              >
+                {assignModalMode === "reassign" ? "Reassign" : "Assign"}
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="m">
+            {assignError && (
+              <Alert type="error" statusIconAriaLabel="Error">
+                {assignError}
+              </Alert>
+            )}
+            <FormField
+              label="Staff member"
+              description="Choose who should own this case."
+            >
+              <Select
+                disabled={assignableLoading}
+                loadingText="Loading staff..."
+                placeholder={assignableLoading ? "Loading staff..." : "Select staff"}
+                options={assignableOptions}
+                selectedOption={selectedAssignee}
+                onChange={({ detail }) => setSelectedAssignee(detail.selectedOption)}
+              />
+            </FormField>
+          </SpaceBetween>
+        </Modal>
+      )}
     </BoardItem>
   );
 };

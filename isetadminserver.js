@@ -1959,6 +1959,137 @@ function resolveRequestActor(req) {
   return { actorId, actorName };
 }
 
+const ASSIGN_ROLE_ALLOWLIST = new Set([
+  'System Administrator',
+  'Program Administrator',
+  'Regional Coordinator',
+  'SysAdmin',
+  'ProgramAdmin',
+  'RegionalCoordinator',
+]);
+
+const ASSIGN_FORBIDDEN_ROLES = new Set([
+  'Application Assessor',
+  'Adjudicator',
+  'ApplicationAssessor',
+]);
+
+function getRequesterIdentity(req) {
+  const role = inferUserRole(req);
+  const userIdRaw = req?.staffProfile?.id ?? req?.auth?.userId ?? req?.auth?.sub ?? null;
+  const regionRaw = req?.staffProfile?.region_id ?? req?.auth?.regionId ?? null;
+  const userId = Number.parseInt(userIdRaw, 10);
+  const regionId = Number.parseInt(regionRaw, 10);
+  return {
+    role: role || null,
+    userId: Number.isFinite(userId) ? userId : null,
+    regionId: Number.isFinite(regionId) ? regionId : null,
+  };
+}
+
+async function fetchCaseRow(caseId) {
+  const [[row]] = await pool.query(
+    'SELECT id, application_id, client_id, assigned_to_user_id, status FROM iset_case WHERE id = ? LIMIT 1',
+    [caseId]
+  );
+  return row || null;
+}
+
+async function fetchStaffProfileById(staffId) {
+  if (!Number.isFinite(staffId)) return null;
+  const [[row]] = await pool.query(
+    'SELECT id, display_name, name, email, primary_role, region_id FROM staff_profiles WHERE id = ? LIMIT 1',
+    [staffId]
+  );
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.display_name || row.name || null,
+    email: row.email || null,
+    role: row.primary_role || null,
+    regionId: row.region_id || null,
+  };
+}
+
+async function fetchTrackingIdForCase(applicationId, caseId) {
+  if (applicationId) {
+    const [[tracking]] = await pool.query(
+      `SELECT JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.submission_snapshot.reference_number')) AS reference_number
+         FROM iset_application
+        WHERE id = ?
+        LIMIT 1`,
+      [applicationId]
+    );
+    if (tracking && tracking.reference_number) {
+      return tracking.reference_number;
+    }
+  }
+  return caseId ? `CASE-${caseId}` : null;
+}
+
+function ensureCanAssignCase(identity, targetStaff) {
+  const { role, regionId } = identity || {};
+  if (ASSIGN_FORBIDDEN_ROLES.has(role)) {
+    return false;
+  }
+  if (ASSIGN_ROLE_ALLOWLIST.has(role || '')) {
+    if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+      if (!Number.isFinite(regionId)) return false;
+      if (targetStaff && targetStaff.regionId && Number(targetStaff.regionId) !== Number(regionId)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+async function persistCaseAssignment(caseId, toUserId) {
+  await pool.query(
+    'UPDATE iset_case SET assigned_to_user_id = ?, updated_at = NOW() WHERE id = ?',
+    [toUserId, caseId]
+  );
+}
+
+async function publishAssignmentEvent({ caseId, applicationId, previousStaff, nextStaff, actor }) {
+  const trackingId = await fetchTrackingIdForCase(applicationId, caseId);
+  const payload = {
+    tracking_id: trackingId,
+    from_assignee_id: previousStaff?.id ?? null,
+    from_assignee_email: previousStaff?.email ?? null,
+    from_assignee_name: previousStaff?.name ?? null,
+    to_assignee_id: nextStaff?.id ?? null,
+    to_assignee_email: nextStaff?.email ?? null,
+    to_assignee_name: nextStaff?.name ?? null,
+  };
+
+  let eventType = null;
+  if (previousStaff?.id && nextStaff?.id && previousStaff.id !== nextStaff.id) {
+    eventType = 'case_reassigned';
+    payload.message = `Case reassigned from ${previousStaff.name || previousStaff.email || previousStaff.id} to ${nextStaff.name || nextStaff.email || nextStaff.id}.`;
+  } else if (!previousStaff?.id && nextStaff?.id) {
+    eventType = 'case_assigned';
+    payload.message = `Case assigned to ${nextStaff.name || nextStaff.email || nextStaff.id}.`;
+  } else if (previousStaff?.id && !nextStaff?.id) {
+    eventType = 'case_unassigned';
+    payload.message = `Case unassigned from ${previousStaff.name || previousStaff.email || previousStaff.id}.`;
+  }
+
+  if (!eventType) return;
+
+  const actorId = actor?.actorId || null;
+  const actorName = actor?.actorName || null;
+
+  await captureCaseEvent({
+    type: eventType,
+    caseId,
+    payload,
+    trackingId,
+    actorId,
+    actorName,
+  });
+}
+
 function resolveActiveStaffProfileId(req) {
   const candidateValues = [];
   if (req?.staffProfile?.id) candidateValues.push(req.staffProfile.id);
@@ -9685,20 +9816,59 @@ app.get('/api/intake-officers', async (req, res) => {
  *   assigned_to_user_id?: number | null
  */
 app.post('/api/cases', async (req, res) => {
-  const { submission_id, application_id, assigned_to_user_id = null } = req.body || {};
+  const {
+    submission_id,
+    application_id,
+    client_id,
+    clientId,
+    assigned_to_user_id,
+    assignedToUserId,
+    status,
+  } = req.body || {};
+
+  const resolvedClientId = Number.parseInt(client_id ?? clientId ?? '', 10);
+  if (!Number.isInteger(resolvedClientId) || resolvedClientId < 1) {
+    return res.status(422).json({ error: 'client_id_required' });
+  }
 
   if (!application_id && !submission_id) {
     return res.status(400).json({ error: 'Provide either application_id or submission_id' });
+  }
+
+  const [[clientRow]] = await pool.query('SELECT id FROM client WHERE id = ? LIMIT 1', [
+    resolvedClientId,
+  ]);
+  if (!clientRow) {
+    return res.status(404).json({ error: 'client_not_found' });
   }
 
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
+    const assignedUserId =
+      assigned_to_user_id ?? assignedToUserId ?? null;
+    let assignTargetId = null;
+    if (assignedUserId !== null && typeof assignedUserId !== 'undefined') {
+      const parsedAssignee = Number.parseInt(assignedUserId, 10);
+      if (!Number.isInteger(parsedAssignee) || parsedAssignee < 1) {
+        await conn.rollback();
+        return res.status(422).json({ error: 'invalid_assigned_user_id' });
+      }
+      const [[assigneeRow]] = await conn.query(
+        'SELECT id, display_name, name, email, primary_role, region_id FROM staff_profiles WHERE id = ? LIMIT 1',
+        [parsedAssignee]
+      );
+      if (!assigneeRow) {
+        await conn.rollback();
+        return res.status(404).json({ error: 'assigned_user_not_found' });
+      }
+      assignTargetId = parsedAssignee;
+    }
+
     let workingApplicationId = application_id || null;
 
     if (!workingApplicationId && submission_id) {
-      // Check existing working application for submission
       const [existingApp] = await conn.query(
         'SELECT id FROM iset_application WHERE submission_id = ? LIMIT 1',
         [submission_id]
@@ -9706,7 +9876,6 @@ app.post('/api/cases', async (req, res) => {
       if (existingApp.length > 0) {
         workingApplicationId = existingApp[0].id;
       } else {
-        // Fetch submission row
         const [subRows] = await conn.query(
           'SELECT * FROM iset_application_submission WHERE id = ? LIMIT 1',
           [submission_id]
@@ -9716,8 +9885,11 @@ app.post('/api/cases', async (req, res) => {
           return res.status(404).json({ error: 'submission_not_found' });
         }
         const submission = subRows[0];
-        // Build payload snapshot
-        const payload = { source: 'submission_ingest', ingested_at: new Date().toISOString(), submission_snapshot: submission };
+        const payload = {
+          source: 'submission_ingest',
+          ingested_at: new Date().toISOString(),
+          submission_snapshot: submission,
+        };
         const [insertApp] = await conn.query(
           'INSERT INTO iset_application (submission_id, payload_json, status, version, created_at, updated_at) VALUES (?,?,?,?,NOW(),NOW())',
           [submission_id, JSON.stringify(payload), 'active', 1]
@@ -9726,23 +9898,50 @@ app.post('/api/cases', async (req, res) => {
       }
     }
 
-    // Prevent duplicate case for application
-    const [caseExists] = await conn.query(
-      'SELECT id FROM iset_case WHERE application_id = ? LIMIT 1',
-      [workingApplicationId]
-    );
-    if (caseExists.length > 0) {
-      await conn.rollback();
-      return res.status(409).json({ error: 'case_already_exists', case_id: caseExists[0].id });
+    if (workingApplicationId) {
+      const [caseExists] = await conn.query(
+        'SELECT id FROM iset_case WHERE application_id = ? LIMIT 1',
+        [workingApplicationId]
+      );
+      if (caseExists.length > 0) {
+        await conn.rollback();
+        return res.status(409).json({ error: 'case_already_exists', case_id: caseExists[0].id });
+      }
     }
 
+    const normalizedStatus = typeof status === 'string' && status.trim() ? status.trim() : 'open';
+
     const [insertCase] = await conn.query(
-      'INSERT INTO iset_case (application_id, assigned_to_user_id, status, created_at, updated_at) VALUES (?,?,?,?,?)',
-      [workingApplicationId, assigned_to_user_id, 'submitted', new Date(), new Date()]
+      'INSERT INTO iset_case (application_id, client_id, assigned_to_user_id, status, created_at, updated_at) VALUES (?,?,?,?,NOW(),NOW())',
+      [workingApplicationId, resolvedClientId, assignTargetId, normalizedStatus]
     );
 
     await conn.commit();
-    return res.status(201).json({ message: 'case_created', case_id: insertCase.insertId, application_id: workingApplicationId });
+
+    if (assignTargetId) {
+      try {
+        const actor = resolveRequestActor(req);
+        const nextStaff = await fetchStaffProfileById(assignTargetId);
+        await publishAssignmentEvent({
+          caseId: insertCase.insertId,
+          applicationId: workingApplicationId,
+          previousStaff: null,
+          nextStaff,
+          actor,
+        });
+      } catch (eventError) {
+        console.warn('[cases] assignment event emit failed after create', eventError);
+      }
+    }
+
+    return res.status(201).json({
+      message: 'case_created',
+      case_id: insertCase.insertId,
+      application_id: workingApplicationId,
+      client_id: resolvedClientId,
+      assigned_to_user_id: assignTargetId,
+      status: normalizedStatus,
+    });
   } catch (err) {
     await conn.rollback();
     console.error('Error creating case (minimal ingestion flow):', err);
@@ -10197,70 +10396,365 @@ app.get('/api/documents/:id/presign-download', async (req, res) => {
 /**
  * GET /api/cases
  *
- * Returns all ISET cases with:
- * - Full case data from iset_case
- * - Assigned evaluator's name and email (from iset_evaluators)
- * - Linked application's tracking ID and submitted_at timestamp
- * - Applicant name and email (from user)
- * - PTMA assignments for the evaluator (if any, as a comma-separated string)
+ * Returns paginated case listings with client + owner context.
+ * Response shape:
+ * {
+ *   items: CaseRow[],
+ *   page,
+ *   pageSize,
+ *   totalCount
+ * }
  */
 app.get('/api/cases', async (req, res) => {
-  try {
-    const { stage } = req.query;
-    let sql = `
-      SELECT 
-        c.id,
-        c.application_id,
-        c.assigned_to_user_id,
-        c.status,
-        c.priority,
-        c.stage,
-        c.opened_at,
-        c.closed_at,
-        c.last_activity_at,
-
-        ANY_VALUE(e.name) AS assigned_user_name,
-        ANY_VALUE(e.email) AS assigned_user_email,
-        GROUP_CONCAT(p.iset_code SEPARATOR ', ') AS assigned_user_ptmas,
-
-  ANY_VALUE(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
-        ANY_VALUE(a.created_at) AS submitted_at,
-  ANY_VALUE(applicant.name) AS applicant_name,
-  ANY_VALUE(applicant.email) AS applicant_email,
-  ANY_VALUE(applicant.id) AS applicant_user_id
-
-  FROM iset_case c
-  LEFT JOIN iset_evaluators e ON c.assigned_to_user_id = e.id
-      LEFT JOIN iset_evaluator_ptma ep ON e.id = ep.evaluator_id AND (ep.unassigned_at IS NULL OR ep.unassigned_at > CURDATE())
-      LEFT JOIN ptma p ON ep.ptma_id = p.id
-      JOIN iset_application a ON c.application_id = a.id
-      JOIN user applicant ON a.user_id = applicant.id
-    `;
-    const params = [];
-    if (stage) {
-      sql += 'WHERE c.stage = ?\n';
-      params.push(stage);
+  const firstValue = value => firstQueryValue(value);
+  const parseList = value => {
+    if (Array.isArray(value)) return value.flatMap(item => parseList(item));
+    if (typeof value === 'string') {
+      return value
+        .split(',')
+        .map(token => token.trim())
+        .filter(token => token.length);
+    }
+    if (value === null || typeof value === 'undefined') return [];
+    return [String(value).trim()].filter(Boolean);
+  };
+  const toIsoString = value => {
+    if (!value) return null;
+    if (value instanceof Date) return value.toISOString();
+    const asNumber = Number(value);
+    if (!Number.isNaN(asNumber) && String(value).trim() !== '') {
+      return new Date(asNumber).toISOString();
     }
     try {
-      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-      if (authProvider === 'cognito') {
-        const { scopeCases } = require('./src/lib/dbScope');
-        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
-        sql += (stage ? ' AND ' : 'WHERE ') + scopeSql + '\n';
-        params.push(...scopeParams);
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date.toISOString();
+    } catch {
+      return null;
+    }
+  };
+
+  try {
+    const page = Math.max(1, parseInt(firstValue(req.query.page) ?? '1', 10) || 1);
+    const rawPageSize = parseInt(firstValue(req.query.pageSize) ?? '25', 10);
+    const pageSize = Math.min(Math.max(Number.isFinite(rawPageSize) ? rawPageSize : 25, 1), 100);
+    const offset = (page - 1) * pageSize;
+
+    const whereClauses = [];
+    const params = [];
+
+    const statusFilters = parseList(req.query.status);
+    if (statusFilters.length) {
+      whereClauses.push(`c.status IN (${statusFilters.map(() => '?').join(', ')})`);
+      params.push(...statusFilters);
+    }
+
+    const ownerFilters = parseList(req.query.owner)
+      .map(token => Number.parseInt(token, 10))
+      .filter(Number.isFinite);
+    if (ownerFilters.length) {
+      whereClauses.push(`c.assigned_to_user_id IN (${ownerFilters.map(() => '?').join(', ')})`);
+      params.push(...ownerFilters);
+    }
+
+    const searchRaw = firstValue(req.query.query);
+    if (typeof searchRaw === 'string' && searchRaw.trim()) {
+      const search = `%${searchRaw.trim().toLowerCase()}%`;
+      whereClauses.push(
+        `(
+          LOWER(COALESCE(cl.first_name, '')) LIKE ?
+          OR LOWER(COALESCE(cl.last_name, '')) LIKE ?
+          OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name'))) LIKE ?
+          OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"'))) LIKE ?
+          OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) LIKE ?
+          OR LOWER(COALESCE(sp.display_name, sp.name, '')) LIKE ?
+          OR LOWER(COALESCE(sp.email, '')) LIKE ?
+        )`.replace(/\s+/g, ' ')
+      );
+      params.push(search, search, search, search, search, search, search);
+    }
+
+    if (typeof req.query.stage !== 'undefined' && req.query.stage !== null) {
+      // Placeholder: stage column not yet available; ignore but log for observability.
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('[cases] stage filter requested but stage column not available in current schema');
       }
-    } catch (_) {}
+    }
 
-    // ONLY_FULL_GROUP_BY compliance: group by primary key and aggregate/ANY_VALUE everything else.
-    sql += 'GROUP BY c.id\nORDER BY c.last_activity_at DESC';
+    const role = inferUserRole(req);
+    const requesterId = Number.parseInt(
+      req?.staffProfile?.id ?? req?.auth?.userId ?? req?.auth?.sub ?? '', 10
+    );
+    const requesterRegionId = Number.parseInt(
+      req?.staffProfile?.region_id ?? req?.auth?.regionId ?? '', 10
+    );
 
-    const [rows] = await pool.query(sql, params);
-    res.status(200).json(rows);
+    const allowAll =
+      role === 'System Administrator' ||
+      role === 'Program Administrator' ||
+      role === 'SysAdmin' ||
+      role === 'ProgramAdmin';
+
+    if (!allowAll) {
+      if (role === 'Regional Coordinator') {
+        if (!Number.isFinite(requesterRegionId)) {
+          return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
+        }
+        whereClauses.push('(sp.region_id = ? OR c.assigned_to_user_id IS NULL)');
+        params.push(requesterRegionId);
+      } else if (role === 'Application Assessor' || role === 'Adjudicator') {
+        if (!Number.isFinite(requesterId)) {
+          return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
+        }
+        whereClauses.push('c.assigned_to_user_id = ?');
+        params.push(requesterId);
+      } else {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    const sortMap = {
+      status: 'c.status',
+      createdAt: 'c.created_at',
+      updatedAt: 'c.updated_at',
+      clientName: 'client_sort_last_name',
+    };
+    const sortKey = String(firstValue(req.query.sort) || '').trim();
+    const sortColumn = sortMap[sortKey] || 'c.updated_at';
+    const direction =
+      String(firstValue(req.query.direction) || '').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    const baseFrom = `
+      FROM iset_case c
+      LEFT JOIN client cl ON c.client_id = cl.id
+      LEFT JOIN iset_application a ON c.application_id = a.id
+      LEFT JOIN staff_profiles sp ON c.assigned_to_user_id = sp.id
+    `;
+
+    const selectSql = `
+      SELECT
+        c.id,
+        c.status,
+        c.application_id,
+        c.client_id,
+        c.assigned_to_user_id,
+        c.created_at,
+        c.updated_at,
+        sp.id AS owner_id,
+        COALESCE(sp.display_name, sp.name) AS owner_name,
+        sp.email AS owner_email,
+        sp.primary_role AS owner_role,
+        sp.region_id AS owner_region_id,
+        cl.first_name AS client_first_name,
+        cl.last_name AS client_last_name,
+        cl.gender AS client_gender,
+        cl.dob AS client_dob,
+        cl.aboriginal_group AS client_aboriginal_group,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+        a.created_at AS submitted_at,
+        JSON_EXTRACT(a.payload_json, '$') AS payload_json,
+        COALESCE(
+          NULLIF(cl.last_name, ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.last_name')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."last-name"')), ''),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers.last_name')), '')
+        ) AS client_sort_last_name
+      ${baseFrom}
+    `;
+
+    const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const itemsSql = `
+      ${selectSql}
+      ${whereSql}
+      ORDER BY ${sortColumn} ${direction}
+      LIMIT ? OFFSET ?
+    `;
+
+    const countSql = `
+      SELECT COUNT(*) AS total
+      ${baseFrom}
+      ${whereSql}
+    `;
+
+    const [rows] = await pool.query(itemsSql, [...params, pageSize, offset]);
+    const [[countRow] = []] = await pool.query(countSql, params);
+    const totalCount = Number(countRow?.total ?? 0);
+
+    const mapRowToCase = row => {
+      let payload = null;
+      if (row.payload_json) {
+        try {
+          const asString =
+            typeof row.payload_json === 'string'
+              ? row.payload_json
+              : Buffer.isBuffer(row.payload_json)
+              ? row.payload_json.toString('utf8')
+              : JSON.stringify(row.payload_json);
+          payload = JSON.parse(asString);
+        } catch {
+          payload = null;
+        }
+      }
+
+      const payloadPersonal = (payload && payload.personal) || {};
+      const payloadAnswers = (payload && payload.answers) || {};
+      const payloadSubmission = (payload && payload.submission_snapshot) || {};
+
+      const fallbackFirstName =
+        row.client_first_name ||
+        payloadPersonal.first_name ||
+        payloadAnswers['first-name'] ||
+        payloadAnswers.first_name ||
+        null;
+      const fallbackLastName =
+        row.client_last_name ||
+        payloadPersonal.last_name ||
+        payloadAnswers['last-name'] ||
+        payloadAnswers.last_name ||
+        null;
+
+      const client = {
+        id: row.client_id || null,
+        firstName: fallbackFirstName || null,
+        lastName: fallbackLastName || null,
+        gender: row.client_gender || payloadPersonal.gender || null,
+        dob: toIsoString(row.client_dob) || payloadPersonal.dob || null,
+        aboriginalGroup: row.client_aboriginal_group || payloadPersonal.aboriginal_group || null,
+      };
+
+      const owner =
+        row.owner_id || row.owner_email
+          ? {
+              id: row.owner_id || null,
+              name: row.owner_name || row.owner_email || null,
+              email: row.owner_email || null,
+              role: row.owner_role || null,
+              regionId: row.owner_region_id || null,
+            }
+          : null;
+
+      return {
+        id: row.id,
+        status: row.status || null,
+        stage: null,
+        priority: null,
+        openedAt: toIsoString(row.created_at),
+        closedAt: null,
+        lastActivityAt: toIsoString(row.updated_at),
+        applicationId: row.application_id || null,
+        trackingId:
+          row.tracking_id ||
+          payloadSubmission.reference_number ||
+          (row.id ? `CASE-${row.id}` : null),
+        submittedAt: toIsoString(row.submitted_at),
+        owner,
+        client,
+        financeStatus: 'ok',
+        fyActuals: null,
+        fyVariance: null,
+        openInterventions: 0,
+        totalInterventions: 0,
+        regionId: owner?.regionId ?? null,
+      };
+    };
+
+    const items = rows.map(mapRowToCase);
+
+    res.json({
+      items,
+      page,
+      pageSize,
+      totalCount,
+    });
   } catch (error) {
-    console.error('Error fetching cases:', error);
-    res.status(500).json({ error: 'Failed to fetch cases' });
+    console.error('GET /api/cases failed:', error);
+    res.status(500).json({ error: 'cases_fetch_failed', detail: error?.message || String(error) });
   }
 });
+
+async function handleAssignmentRequest(req, res, { requireExistingAssignee = false, disallowSelfReassign = false } = {}) {
+  const caseId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId < 1) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+
+  const toUserIdRaw = req.body?.toUserId ?? req.body?.assigneeId ?? req.body?.assignedToUserId ?? null;
+  const toUserId = Number.parseInt(toUserIdRaw, 10);
+  if (!Number.isInteger(toUserId) || toUserId < 1) {
+    return res.status(422).json({ error: 'invalid_target_user' });
+  }
+
+  try {
+    const identity = getRequesterIdentity(req);
+    const caseRow = await fetchCaseRow(caseId);
+    if (!caseRow) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+
+    if (requireExistingAssignee && !caseRow.assigned_to_user_id) {
+      return res.status(409).json({ error: 'no_current_assignee' });
+    }
+
+    const requesterIsCurrentAssignee =
+      Number.isFinite(identity.userId) &&
+      Number(caseRow.assigned_to_user_id) === Number(identity.userId);
+    if (disallowSelfReassign && requesterIsCurrentAssignee) {
+      return res.status(403).json({ error: 'forbidden', detail: 'self_reassign_not_allowed' });
+    }
+
+    const targetStaff = await fetchStaffProfileById(toUserId);
+    if (!targetStaff) {
+      return res.status(404).json({ error: 'staff_not_found' });
+    }
+
+    if (!ensureCanAssignCase(identity, targetStaff)) {
+      return res.status(403).json({ error: 'forbidden', detail: 'assignment_not_permitted' });
+    }
+
+    const previousStaff =
+      caseRow.assigned_to_user_id != null
+        ? await fetchStaffProfileById(Number(caseRow.assigned_to_user_id))
+        : null;
+
+    if (previousStaff?.id && Number(previousStaff.id) === Number(toUserId)) {
+      return res.status(200).json({
+        ok: true,
+        caseId,
+        assignedToUserId: toUserId,
+        unchanged: true,
+      });
+    }
+
+    await persistCaseAssignment(caseId, toUserId);
+
+    await publishAssignmentEvent({
+      caseId,
+      applicationId: caseRow.application_id || null,
+      previousStaff,
+      nextStaff: targetStaff,
+      actor: resolveRequestActor(req),
+    });
+
+    return res.status(200).json({
+      ok: true,
+      caseId,
+      assignedToUserId: toUserId,
+    });
+  } catch (error) {
+    console.error('Assignment request failed:', error);
+    return res
+      .status(500)
+      .json({ error: 'assignment_failed', detail: error?.message || String(error) });
+  }
+}
+
+app.post('/api/cases/:id/assign', (req, res) =>
+  handleAssignmentRequest(req, res, { requireExistingAssignee: false, disallowSelfReassign: false })
+);
+
+app.post('/api/cases/:id/reassign', (req, res) =>
+  handleAssignmentRequest(req, res, { requireExistingAssignee: true, disallowSelfReassign: true })
+);
 
 // -------------------------------------------------------------
 // Application Versioning (Working Copy) Endpoints (Initial Draft)

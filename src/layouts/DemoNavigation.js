@@ -45,6 +45,8 @@ const CLEAR_TABLES = [
   'iset_application',
 ];
 
+const LIVE_CASES_STORAGE_KEY = 'iset-demo-use-live-cases';
+
 const renderResultDetails = (details) => {
   if (!details) {
     return null;
@@ -139,6 +141,37 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
   const [clearResult, setClearResult] = useState(null);
   const [isCreatingDummy, setIsCreatingDummy] = useState(false);
   const [dummyResult, setDummyResult] = useState(null);
+  const [useLiveCases, setUseLiveCases] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const stored = window.localStorage?.getItem(LIVE_CASES_STORAGE_KEY);
+      if (stored === null || typeof stored === 'undefined') {
+        return false;
+      }
+      return stored === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    try {
+      window.localStorage?.setItem(LIVE_CASES_STORAGE_KEY, useLiveCases ? 'true' : 'false');
+    } catch (_) {
+      // ignore persistence errors in demo mode
+    }
+    try {
+      window.dispatchEvent(
+        new CustomEvent('iset-portfolio:cases-data-mode', {
+          detail: { useLiveCases },
+        })
+      );
+    } catch (_) {
+      // silently ignore
+    }
+    return undefined;
+  }, [useLiveCases]);
 
   const applySimulatedStaff = (roleValue) => {
     try {
@@ -312,6 +345,14 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
           onChange={({ detail }) => setIamOn(detail.checked)}
         >
           IAM {iamOn ? '(On)' : '(Off)'}
+        </Toggle>
+        <Toggle
+          checked={useLiveCases}
+          onChange={({ detail }) => {
+            setUseLiveCases(detail.checked);
+          }}
+        >
+          Use live case data
         </Toggle>
         <Button variant="primary" onClick={handleOpenClearModal}>
           Clear ISET test data

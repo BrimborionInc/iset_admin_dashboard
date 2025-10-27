@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useMemo, useState, useContext } from "react";
+import React, { createContext, useCallback, useMemo, useState, useContext, useEffect } from "react";
 
 const dummyCases = [
   {
@@ -97,6 +97,7 @@ const PortfolioCaseContext = createContext({
   selectedAgreements: [],
   toggleAgreementFilter: () => {},
   clearAgreementFilters: () => {},
+  useLiveCases: false,
 });
 
 const normaliseAgreement = value => (typeof value === "string" ? value.trim() : "");
@@ -152,6 +153,25 @@ export const PortfolioCaseProvider = ({ children }) => {
   const [cases] = useState(dummyCases);
   const [searchText, setSearchTextState] = useState(() => loadPersistedSearch());
   const [selectedAgreements, setSelectedAgreements] = useState(() => loadPersistedArray(STORAGE_KEYS.selectedAgreements));
+  const [useLiveCases, setUseLiveCases] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const stored = window.localStorage?.getItem("iset-demo-use-live-cases");
+      return stored === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const handler = event => {
+      if (event?.detail && typeof event.detail.useLiveCases === "boolean") {
+        setUseLiveCases(event.detail.useLiveCases);
+      }
+    };
+    window.addEventListener("iset-portfolio:cases-data-mode", handler);
+    return () => window.removeEventListener("iset-portfolio:cases-data-mode", handler);
+  }, []);
 
   const setSearchText = useCallback(next => {
     const value = typeof next === "string" ? next : "";
@@ -204,7 +224,8 @@ export const PortfolioCaseProvider = ({ children }) => {
     selectedAgreements,
     toggleAgreementFilter,
     clearAgreementFilters,
-  }), [cases, searchFilteredCases, filteredCases, searchText, setSearchText, selectedAgreements, toggleAgreementFilter, clearAgreementFilters]);
+    useLiveCases,
+  }), [cases, searchFilteredCases, filteredCases, searchText, setSearchText, selectedAgreements, toggleAgreementFilter, clearAgreementFilters, useLiveCases]);
 
   return (
     <PortfolioCaseContext.Provider value={contextValue}>
