@@ -24,7 +24,6 @@ import { boardItemI18nStrings } from "../../widgets/common";
 import { usePortfolioCases } from "../PortfolioCaseContext.jsx";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import { apiFetch } from "../../../../auth/apiClient.js";
-
 import useCasesData from "../hooks/useCasesData.js";
 const COLUMN_WIDTHS_KEY = "iset-portfolio-cases-table-widths-v1";
 const PREFERENCES_KEY = "iset-portfolio-cases-table-preferences-v1";
@@ -245,6 +244,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [assignError, setAssignError] = useState(null);
   const [selectedAssignee, setSelectedAssignee] = useState(null);
   const [assignSubmitting, setAssignSubmitting] = useState(false);
+  const [assignSuccess, setAssignSuccess] = useState(null);
 
   const formatStaffLabel = useCallback(staff => {
     if (!staff) return "Staff";
@@ -263,8 +263,8 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   } = useCasesData({
     enabled: useLiveCases,
     searchText,
-    statusFilters: [],
-    ownerFilters: [],
+    statusFilters: undefined,
+    ownerFilters: undefined,
     page: currentPageIndex,
     pageSize,
     sort: null,
@@ -352,6 +352,24 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         const message = body?.detail || body?.error || `Assignment failed (${response.status})`;
         throw new Error(message);
       }
+      const staffMatch = assignableStaff.find(
+        staff => Number(staff.id) === Number(assigneeValue)
+      );
+      const assigneeLabel =
+        staffMatch?.display_name ||
+        staffMatch?.name ||
+        staffMatch?.email ||
+        selectedAssignee?.label ||
+        `Staff #${assigneeValue}`;
+      const caseLabel =
+        assignTargetCase?.raw?.trackingId ||
+        assignTargetCase?.agreementNumber ||
+        assignTargetCase?.id;
+      setAssignSuccess(
+        assignModalMode === "reassign"
+          ? `Case ${caseLabel} reassigned to ${assigneeLabel}.`
+          : `Case ${caseLabel} assigned to ${assigneeLabel}.`
+      );
       closeAssignModal();
       if (useLiveCases && typeof refreshLiveCases === "function") {
         refreshLiveCases({ page: currentPageIndex });
@@ -369,6 +387,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     refreshLiveCases,
     currentPageIndex,
     closeAssignModal,
+    assignableStaff,
   ]);
 
   const handleCaseAction = useCallback(
@@ -660,109 +679,15 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       i18nStrings={boardItemI18nStrings}
     >
       <SpaceBetween size="m">
-        <TextFilter
-          filteringText={searchText}
-          filteringPlaceholder="Search by client, owner, or agreement"
-          onChange={({ detail }) => {
-            setSearchText(detail.filteringText);
-            setCurrentPageIndex(1);
-          }}
-          countText={totalMatchesText}
-        />
-        <Table
-          trackBy="id"
-          columnDefinitions={columnsToRender}
-          items={itemsToRender}
-          resizableColumns
-          variant="embedded"
-          loading={useLiveCases && liveLoading}
-          header={<Header variant="h3" counter={`(${totalCount})`}>ISET Cases</Header>}
-          empty={emptyState}
-          pagination={pagination}
-          preferences={preferencesComponent}
-          onColumnWidthsChange={handleColumnWidthsChange}
-          onRowClick={({ detail }) => {
-            const caseId = detail?.item?.id;
-            if (caseId) {
-              history.push(`/cases/${caseId}`);
-            }
-          }}
-        />
-      </SpaceBetween>
-      {assignModalVisible && (
-        <Modal
-          visible
-          header={assignModalMode === "reassign" ? "Reassign Case" : "Assign Case"}
-          closeAriaLabel="Close assignment modal"
-          onDismiss={closeAssignModal}
-          footer={
-            <SpaceBetween size="xs" direction="horizontal">
-              <Button onClick={closeAssignModal}>Cancel</Button>
-              <Button
-                variant="primary"
-                loading={assignSubmitting}
-                disabled={assignableLoading || assignSubmitting || !selectedAssignee}
-                onClick={handleAssignSubmit}
-              >
-                {assignModalMode === "reassign" ? "Reassign" : "Assign"}
-              </Button>
-            </SpaceBetween>
-          }
-        >
-          <SpaceBetween size="m">
-            {assignError && (
-              <Alert type="error" statusIconAriaLabel="Error">
-                {assignError}
-              </Alert>
-            )}
-            <FormField
-              label="Staff member"
-              description="Choose who should own this case."
-            >
-              <Select
-                disabled={assignableLoading}
-                loadingText="Loading staff..."
-                placeholder={assignableLoading ? "Loading staff..." : "Select staff"}
-                options={assignableOptions}
-                selectedOption={selectedAssignee}
-                onChange={({ detail }) => setSelectedAssignee(detail.selectedOption)}
-              />
-            </FormField>
-          </SpaceBetween>
-        </Modal>
-      )}
-    </BoardItem>
-  );
-    <BoardItem
-      header={
-        <Header
-          variant="h2"
-          info={infoLink}
-          description={metadata.description ?? "Review and open ISET cases that match your filters."}
-          actions={
-            headerActionItems.length ? (
-              <SpaceBetween direction="horizontal" size="xs">
-                {headerActionItems}
-              </SpaceBetween>
-            ) : undefined
-          }
-        >
-          {metadata.title ?? "Cases"}
-        </Header>
-      }
-      settings={
-        typeof actions.removeItem === "function" ? (
-          <ButtonDropdown
-            ariaLabel="Cases table settings"
-            variant="icon"
-            items={[{ id: "remove", text: "Remove widget" }]}
-            onItemClick={handleSettingsClick}
-          />
-        ) : undefined
-      }
-      i18nStrings={boardItemI18nStrings}
-    >
-      <SpaceBetween size="m">
+        {assignSuccess && (
+          <Alert
+            type="success"
+            onDismiss={() => setAssignSuccess(null)}
+            statusIconAriaLabel="Success"
+          >
+            {assignSuccess}
+          </Alert>
+        )}
         <TextFilter
           filteringText={searchText}
           filteringPlaceholder="Search by client, owner, or agreement"

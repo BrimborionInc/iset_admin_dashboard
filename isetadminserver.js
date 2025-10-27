@@ -509,6 +509,8 @@ function extractMiddleInitials(context) {
     personal.middle_initials,
     personal.middleInitials,
     answers['middle-name'],
+    answers['middle-names'],
+    answers['middle_names'],
     answers['middle_name'],
     answers['middle-initial'],
     answers['middle_initial'],
@@ -2267,6 +2269,222 @@ async function readApplicationPayload(connection, applicationId, options = { for
     row,
     payload
   };
+}
+
+function toDateOnly(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function toIsoDateTime(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function safeJsonParse(value, fallback = null) {
+  if (value === null || typeof value === 'undefined') return fallback;
+  try {
+    let source = value;
+    if (Buffer.isBuffer(source)) {
+      source = source.toString('utf8');
+    }
+    if (typeof source === 'string') {
+      return JSON.parse(source);
+    }
+    if (typeof source === 'object') {
+      return source;
+    }
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function buildClientProfileFromApplication(connection, applicationId) {
+  const applicationPayload = await readApplicationPayload(connection, applicationId, { forUpdate: true });
+  if (!applicationPayload) return null;
+
+  let submissionRow = null;
+  const submissionId = applicationPayload.row?.submission_id || null;
+  if (submissionId) {
+    const [[submission]] = await connection.query(
+      'SELECT * FROM iset_application_submission WHERE id = ? LIMIT 1',
+      [submissionId]
+    );
+    submissionRow = submission || null;
+  }
+
+  const payload = applicationPayload.payload || {};
+  const answers = payload.answers || {};
+  const context = {
+    payload,
+    answers,
+    submissionRow
+  };
+
+  const clamp = (value, limit) => {
+    const normalised = normaliseString(value);
+    if (!normalised) return null;
+    return normalised.length > limit ? normalised.slice(0, limit) : normalised;
+  };
+
+  const firstName = clamp(extractFirstName(context) || extractPreferredName(context), 128) || 'Unknown';
+  const lastName = clamp(extractLastName(context), 128) || 'Client';
+  const initials = clamp(extractMiddleInitials(context), 16);
+  const preferredName = clamp(extractPreferredName(context), 128);
+  const dob = toDateOnly(extractDob(context));
+  const gender = clamp(extractGender(context), 32);
+  const aboriginalGroup = clamp(extractIndigenousIdentity(context), 64);
+
+  const addressStructure = extractAddress(context);
+  const sanitise = value => {
+    const normalised = normaliseString(value);
+    return normalised || null;
+  };
+
+  const address = addressStructure
+    ? {
+        line1: sanitise(addressStructure.line1),
+        line2: sanitise(addressStructure.line2),
+        city: sanitise(addressStructure.city),
+        province: sanitise(addressStructure.province),
+        postalCode: sanitise(addressStructure.postalCode)
+      }
+    : null;
+
+  const contactDetailsRaw = extractContactDetails(context);
+  const contactEmailNormalized = contactDetailsRaw?.email
+    ? sanitise(contactDetailsRaw.email)?.toLowerCase() || null
+    : null;
+  const contact = contactDetailsRaw
+    ? {
+        email: sanitise(contactDetailsRaw.email),
+        emailNormalized: contactEmailNormalized,
+        phone: sanitise(contactDetailsRaw.phone),
+        alternatePhone: sanitise(contactDetailsRaw.alternatePhone),
+        mailingAddress: sanitise(contactDetailsRaw.mailingAddress),
+        homeCommunity: sanitise(contactDetailsRaw.homeCommunity)
+      }
+    : null;
+
+  const referenceNumber =
+    sanitise(payload?.submission_snapshot?.reference_number) ||
+    sanitise(submissionRow?.reference_number) ||
+    null;
+
+  const addressPayload = {
+    source: 'iset_application',
+    extractedAt: new Date().toISOString(),
+    applicationId,
+    submissionId,
+    referenceNumber,
+    preferredName,
+    address,
+    contact
+  };
+
+  return {
+    firstName,
+    lastName,
+    initials,
+    dob,
+    gender,
+    aboriginalGroup,
+    emailNormalized: contactEmailNormalized,
+    addressJson: JSON.stringify(addressPayload)
+  };
+}
+
+async function ensureCaseClientLinkForApproval(connection, { caseId, applicationId, existingClientId }) {
+  if (existingClientId) return existingClientId;
+  if (!applicationId) return null;
+
+  const profile = await buildClientProfileFromApplication(connection, applicationId);
+  if (!profile) {
+    console.warn('[cases] unable to build client profile for application %s (case %s)', applicationId, caseId);
+    return null;
+  }
+
+  const lowerFirst = profile.firstName.toLowerCase();
+  const lowerLast = profile.lastName.toLowerCase();
+  let targetClientId = null;
+
+  if (profile.emailNormalized) {
+    const [[byEmail]] = await connection.query(
+      `SELECT id
+         FROM client
+        WHERE address_json IS NOT NULL
+          AND JSON_UNQUOTE(JSON_EXTRACT(address_json, '$.contact.emailNormalized')) = ?
+        LIMIT 1`,
+      [profile.emailNormalized]
+    );
+    if (byEmail) {
+      targetClientId = byEmail.id;
+    }
+  }
+
+  if (!targetClientId) {
+    if (profile.dob) {
+      const [[byNameDob]] = await connection.query(
+        `SELECT id
+           FROM client
+          WHERE LOWER(first_name) = ?
+            AND LOWER(last_name) = ?
+            AND dob = ?
+          LIMIT 1`,
+        [lowerFirst, lowerLast, profile.dob]
+      );
+      if (byNameDob) {
+        targetClientId = byNameDob.id;
+      }
+    } else {
+      const [[byNameOnly]] = await connection.query(
+        `SELECT id
+           FROM client
+          WHERE LOWER(first_name) = ?
+            AND LOWER(last_name) = ?
+            AND dob IS NULL
+          LIMIT 1`,
+        [lowerFirst, lowerLast]
+      );
+      if (byNameOnly) {
+        targetClientId = byNameOnly.id;
+      }
+    }
+  }
+
+  if (!targetClientId) {
+    const [insertResult] = await connection.query(
+      `INSERT INTO client (dob, gender, aboriginal_group, last_name, first_name, initials, address_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        profile.dob,
+        profile.gender,
+        profile.aboriginalGroup,
+        profile.lastName,
+        profile.firstName,
+        profile.initials,
+        profile.addressJson
+      ]
+    );
+    targetClientId = insertResult.insertId;
+  } else {
+    await connection.query(
+      'UPDATE client SET updated_at = NOW() WHERE id = ?',
+      [targetClientId]
+    );
+  }
+
+  await connection.query(
+    'UPDATE iset_case SET client_id = ?, updated_at = NOW() WHERE id = ?',
+    [targetClientId, caseId]
+  );
+
+  return targetClientId;
 }
 
 async function getHighestApplicationVersion(connection, applicationId, fallbackCurrentVersion) {
@@ -10201,10 +10419,10 @@ app.post('/api/create-dummy-draft', async (req, res) => {
       "last-name": "Sillery",
       "first-name": "William",
       "address-city": "Westmount",
-      "income-other": "",
+      "income-other": "0",
       "middle-names": "John",
       "spouses-name": "Marina Sharpe",
-      "expenses-rent": "4500",
+      "expenses-rent": "1800",
       "other-barrier": "No clients",
       "telephone-alt": "",
       "telephone-day": "(514) 975 1690",
@@ -10213,8 +10431,8 @@ app.post('/api/create-dummy-draft', async (req, res) => {
       "has-disability": 1,
       "home-comminuty": "Westmount",
       "income-jordans": "",
-      "income-spousal": "",
-      "long-term-goal": "To be the charman of Awentech",
+      "income-spousal": "2800",
+      "long-term-goal": "To be the chairman of Awentech",
       "marital-status": "married",
       "preferred-name": "Bill",
       "target-program": "not_yet",
@@ -10225,28 +10443,28 @@ app.post('/api/create-dummy-draft', async (req, res) => {
       "address-province": "qc",
       "ages-of-children": "11",
       "visible-minority": "false",
-      "income-employment": "100",
+      "income-employment": "4200",
       "social-assistance": 1,
       "dependent-children": 1,
       "edication-location": "Oxford, UK",
       "eligibility-female": 1,
-      "expenses-groceries": "",
-      "expenses-utilities": "",
+      "expenses-groceries": "650",
+      "expenses-utilities": "240",
       "preferred-language": "en",
       "requested-supports": ["other"],
-      "expenses-other-list": "",
-      "income-band-funding": "20",
+      "expenses-other-list": "Childcare costs 400",
+      "income-band-funding": "250",
       "labour-force-status": "self-employed",
       "registration-number": "12134231",
       "eligibility-canadian": 1,
       "eligibility-training": 1,
-      "expenses-transitpass": "",
-      "income-child-benefit": "",
-      "income-social-assist": "",
+      "expenses-transitpass": "110",
+      "income-child-benefit": "320",
+      "income-social-assist": "450",
       "contact-email-address": "bill@sillery.co.uk",
       "eligibility-financial": 1,
       "address-street-address": "251 Avenue Kensington",
-      "disability-description": "I am Engligh and don't steak French.",
+      "disability-description": "I am English and do not speak French.",
       "eligibility-employment": 1,
       "eligibility-indigenous": 1,
       "emergency-contact-name": "Marina Sharpe",
@@ -10446,6 +10664,9 @@ app.get('/api/cases', async (req, res) => {
     if (statusFilters.length) {
       whereClauses.push(`c.status IN (${statusFilters.map(() => '?').join(', ')})`);
       params.push(...statusFilters);
+    } else {
+      whereClauses.push('c.status = ?');
+      params.push('approved');
     }
 
     const ownerFilters = parseList(req.query.owner)
@@ -10850,6 +11071,636 @@ app.post('/api/cases/:case_id/application/versions', async (req, res) => {
 
 
 // Get a single case by case id
+app.get('/api/cases/:id/workspace', async (req, res) => {
+  const caseId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+
+  try {
+    const sql = `
+      SELECT
+        c.id,
+        c.application_id,
+        c.client_id,
+        c.assigned_to_user_id,
+        c.case_number,
+        c.status,
+        c.stage,
+        c.sub_stage,
+        c.priority,
+        c.risk_rating,
+        c.opened_at,
+        c.closed_at,
+        c.updated_at,
+        c.next_action_due_at,
+        c.open_task_count,
+        c.overdue_task_count,
+        c.open_intervention_count,
+        c.total_intervention_count,
+        c.portfolio_region_id,
+        cl.first_name AS client_first_name,
+        cl.last_name AS client_last_name,
+        cl.dob AS client_dob,
+        cl.gender AS client_gender,
+        cl.aboriginal_group AS client_aboriginal_group,
+        cl.address_json AS client_address_json,
+        sp.display_name AS owner_display_name,
+        sp.name AS owner_name,
+        sp.email AS owner_email,
+        sp.primary_role AS owner_role,
+        sp.region_id AS owner_region_id,
+        cr.code AS region_code,
+        cr.name_en AS region_name,
+        owner_region.code AS owner_region_code,
+        owner_region.name_en AS owner_region_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.first_name')) AS payload_personal_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.last_name')) AS payload_personal_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')) AS payload_personal_full_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"')) AS payload_answers_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."last-name"')) AS payload_answers_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers.dob')) AS payload_answers_dob,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS payload_preferred_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS payload_reference_number,
+        s.reference_number AS submission_reference_number,
+        a.created_at AS application_created_at
+      FROM iset_case c
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN canada_region cr ON cr.region_id = c.portfolio_region_id
+      LEFT JOIN canada_region owner_region ON owner_region.region_id = sp.region_id
+      LEFT JOIN iset_application a ON a.id = c.application_id
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      WHERE c.id = ?
+      LIMIT 1
+    `;
+
+    const [[row] = []] = await pool.query(sql, [caseId]);
+    if (!row) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+
+    const identity = getRequesterIdentity(req);
+    const role = inferUserRole(req);
+    const allowAll =
+      role === 'System Administrator' ||
+      role === 'Program Administrator' ||
+      role === 'SysAdmin' ||
+      role === 'ProgramAdmin';
+
+    if (!allowAll) {
+      if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+        const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : null;
+        if (!Number.isFinite(regionId)) {
+          return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
+        }
+        const isUnassigned = typeof row.assigned_to_user_id === 'undefined' || row.assigned_to_user_id === null;
+        const portfolioRegionMatch =
+          Number.isFinite(row.portfolio_region_id) && Number(row.portfolio_region_id) === regionId;
+        const ownerRegionMatch =
+          Number.isFinite(row.owner_region_id) && Number(row.owner_region_id) === regionId;
+        if (!isUnassigned && !portfolioRegionMatch && !ownerRegionMatch) {
+          return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
+        }
+      } else if (role === 'Application Assessor' || role === 'Adjudicator') {
+        const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
+        if (!Number.isFinite(requesterId)) {
+          return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
+        }
+        if (Number(row.assigned_to_user_id) !== requesterId) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+      } else {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    let clientRegionObject = null;
+    let clientRegionLabel = null;
+    const parsedAddress = safeJsonParse(row.client_address_json, null);
+    if (parsedAddress && typeof parsedAddress === 'object') {
+      const addressDetails =
+        parsedAddress.address && typeof parsedAddress.address === 'object'
+          ? parsedAddress.address
+          : parsedAddress;
+      const provinceCandidate = normaliseString(
+        addressDetails?.province ||
+          addressDetails?.province_code ||
+          addressDetails?.provinceCode ||
+          parsedAddress?.province ||
+          parsedAddress?.province_code ||
+          parsedAddress?.provinceCode
+      );
+      if (provinceCandidate) {
+        const provinceCode =
+          PROVINCE_CODE_MAP[provinceCandidate.toLowerCase()] || provinceCandidate.toUpperCase();
+        const provinceName = PROVINCE_LABEL_MAP[provinceCode] || provinceCode;
+        clientRegionObject = {
+          code: provinceCode,
+          name: provinceName,
+        };
+        clientRegionLabel = provinceName;
+      }
+    }
+
+    const [planRows] = await pool.query(
+      `SELECT
+         ap.id,
+         ap.name,
+         ap.status,
+         ap.effective_date,
+         ap.review_date,
+         ap.owner_staff_profile_id,
+         ap.owner_user_id,
+         ap.notes,
+         ap.metadata_json,
+         ap.created_at,
+         ap.updated_at,
+         (
+           SELECT COUNT(*)
+           FROM iset_case_intervention ci
+           WHERE ci.action_plan_id = ap.id
+         ) AS intervention_count
+       FROM iset_case_action_plan ap
+       WHERE ap.case_id = ?
+       ORDER BY ap.created_at ASC, ap.id ASC`,
+      [caseId]
+    );
+
+    const actionPlans = planRows.map(plan => {
+      const metadata = safeJsonParse(plan.metadata_json, null);
+      return {
+        id: plan.id,
+        name: plan.name || null,
+        status: plan.status || null,
+        effectiveDate: toIsoDateTime(plan.effective_date),
+        reviewDate: toIsoDateTime(plan.review_date),
+        ownerStaffProfileId: plan.owner_staff_profile_id || null,
+        ownerUserId: plan.owner_user_id || null,
+        summary: metadata && typeof metadata.summary !== 'undefined' ? metadata.summary : plan.notes || null,
+        interventionCount: Number.isFinite(plan.intervention_count)
+          ? Number(plan.intervention_count)
+          : 0,
+        createdAt: toIsoDateTime(plan.created_at),
+        updatedAt: toIsoDateTime(plan.updated_at),
+      };
+    });
+
+    const firstNameCandidates = [
+      row.client_first_name,
+      row.payload_personal_first_name,
+      row.payload_answers_first_name,
+      row.payload_preferred_name,
+    ];
+    const lastNameCandidates = [
+      row.client_last_name,
+      row.payload_personal_last_name,
+      row.payload_answers_last_name,
+    ];
+    const firstName =
+      firstNameCandidates.map(value => normaliseString(value)).find(Boolean) || null;
+    const lastName =
+      lastNameCandidates.map(value => normaliseString(value)).find(Boolean) || null;
+    const fullNameFallback = normaliseString(row.payload_personal_full_name);
+    const clientFullName =
+      [firstName, lastName].filter(Boolean).join(' ') ||
+      fullNameFallback ||
+      normaliseString(row.payload_preferred_name) ||
+      null;
+
+    const payloadDob = normaliseString(row.payload_answers_dob);
+    const dateOfBirth = toDateOnly(row.client_dob) || payloadDob || null;
+
+    const trackingId =
+      normaliseString(row.payload_reference_number) ||
+      normaliseString(row.submission_reference_number) ||
+      null;
+
+    const agreementNumber =
+      trackingId ||
+      normaliseString(row.case_number) ||
+      (row.id ? `CASE-${row.id}` : null);
+
+    const caseNumber =
+      normaliseString(row.case_number) ||
+      trackingId ||
+      (row.id ? `CASE-${row.id}` : null);
+
+    const ownerName =
+      normaliseString(row.owner_display_name) ||
+      normaliseString(row.owner_name) ||
+      normaliseString(row.owner_email) ||
+      null;
+
+    const caseRegion =
+      row.region_name
+        ? {
+            id: row.portfolio_region_id || null,
+            code: normaliseString(row.region_code),
+            name: normaliseString(row.region_name),
+          }
+        : null;
+    const ownerRegion =
+      row.owner_region_name
+        ? {
+            id: row.owner_region_id || null,
+            code: normaliseString(row.owner_region_code),
+            name: normaliseString(row.owner_region_name),
+          }
+        : null;
+    const counts = {
+      openTasks: Number.isFinite(row.open_task_count) ? Number(row.open_task_count) : 0,
+      overdueTasks: Number.isFinite(row.overdue_task_count) ? Number(row.overdue_task_count) : 0,
+      openInterventions: Number.isFinite(row.open_intervention_count)
+        ? Number(row.open_intervention_count)
+        : 0,
+      totalInterventions: Number.isFinite(row.total_intervention_count)
+        ? Number(row.total_intervention_count)
+        : 0,
+    };
+
+    const response = {
+      id: row.id,
+      caseNumber,
+      status: row.status || null,
+      stage: row.stage || null,
+      subStage: row.sub_stage || null,
+      priority: row.priority || null,
+      riskRating: row.risk_rating || null,
+      openedAt: toIsoDateTime(row.opened_at),
+      closedAt: toIsoDateTime(row.closed_at),
+      updatedAt: toIsoDateTime(row.updated_at),
+      nextActionDueAt: toIsoDateTime(row.next_action_due_at),
+      trackingId,
+      applicationId: row.application_id || null,
+      submittedAt: toIsoDateTime(row.application_created_at),
+      client: {
+        id: row.client_id || null,
+        firstName,
+        lastName,
+        fullName: clientFullName || (firstName || lastName ? [firstName, lastName].filter(Boolean).join(' ') : 'Unknown client'),
+        preferredName: normaliseString(row.payload_preferred_name) || null,
+        dateOfBirth,
+        gender: row.client_gender || null,
+        aboriginalGroup: row.client_aboriginal_group || null,
+        region: clientRegionObject,
+        regionLabel: clientRegionLabel,
+      },
+      owner: {
+        id: row.assigned_to_user_id || null,
+        name: ownerName,
+        email: row.owner_email || null,
+        role: row.owner_role || null,
+        regionId: row.owner_region_id || null,
+        region: ownerRegion,
+      },
+      eligibility: normaliseString(row.assessment_esdc_eligibility) || null,
+      counts,
+      actionPlans,
+    };
+
+    res.set('Cache-Control', 'no-store, max-age=0');
+    res.json(response);
+  } catch (error) {
+    console.error('GET /api/cases/:id/workspace failed:', error);
+    res.status(500).json({ error: 'workspace_fetch_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.get('/api/cases/:id/action-plan/context', async (req, res) => {
+  const caseId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+
+    const [[caseRow]] = await connection.query(
+      `SELECT
+         c.application_id,
+         c.assigned_to_user_id,
+         c.portfolio_region_id,
+         sp.region_id AS owner_region_id
+       FROM iset_case c
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE c.id = ?
+       LIMIT 1`,
+      [caseId]
+    );
+
+    if (!caseRow) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+
+    const role = inferUserRole(req);
+    const identity = getRequesterIdentity(req);
+    const allowAll =
+      role === 'System Administrator' ||
+      role === 'Program Administrator' ||
+      role === 'SysAdmin' ||
+      role === 'ProgramAdmin';
+
+    if (!allowAll) {
+      if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+        const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : null;
+        if (!Number.isFinite(regionId)) {
+          return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
+        }
+        const isUnassigned = caseRow.assigned_to_user_id === null || typeof caseRow.assigned_to_user_id === 'undefined';
+        const portfolioMatch =
+          Number.isFinite(caseRow.portfolio_region_id) && Number(caseRow.portfolio_region_id) === regionId;
+        const ownerMatch =
+          Number.isFinite(caseRow.owner_region_id) && Number(caseRow.owner_region_id) === regionId;
+        if (!isUnassigned && !portfolioMatch && !ownerMatch) {
+          return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
+        }
+      } else if (role === 'Application Assessor' || role === 'Adjudicator') {
+        const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
+        if (!Number.isFinite(requesterId)) {
+          return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
+        }
+        if (Number(caseRow.assigned_to_user_id) !== requesterId) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+      } else {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    const [[assessmentRow]] = await connection.query(
+      `SELECT
+         esdc_eligibility,
+         employment_goals,
+         previous_iset,
+         previous_iset_details,
+         employment_barriers,
+         local_area_priorities,
+         other_funding_details
+       FROM iset_case_assessment
+       WHERE case_id = ?
+       LIMIT 1`,
+      [caseId]
+    );
+
+    let answers = {};
+    if (caseRow.application_id) {
+      const applicationPayload = await readApplicationPayload(connection, caseRow.application_id, { forUpdate: false });
+      answers = applicationPayload?.payload?.answers || {};
+    }
+
+    const parseArray = value => {
+      if (!value) return [];
+      if (Array.isArray(value)) {
+        return value.map(entry => normaliseString(entry)).filter(Boolean);
+      }
+      const parsed = safeJsonParse(value, null);
+      if (Array.isArray(parsed)) {
+        return parsed.map(entry => normaliseString(entry)).filter(Boolean);
+      }
+      if (typeof value === 'string') {
+        try {
+          const attempt = JSON.parse(value);
+          if (Array.isArray(attempt)) {
+            return attempt.map(entry => normaliseString(entry)).filter(Boolean);
+          }
+        } catch (_) {
+          return value
+            .split(',')
+            .map(entry => normaliseString(entry))
+            .filter(Boolean);
+        }
+      }
+      return [];
+    };
+
+    const readAnswer = key => {
+      if (!answers || typeof answers !== 'object') return null;
+      const raw = answers[key];
+      if (raw === null || typeof raw === 'undefined') return null;
+      if (Array.isArray(raw)) {
+        return raw.map(entry => normaliseString(entry)).filter(Boolean);
+      }
+      if (typeof raw === 'object') return raw;
+      return normaliseString(raw);
+    };
+
+    const readFirstAnswer = (...keys) => {
+      for (const key of keys) {
+        if (!key) continue;
+        const value = readAnswer(key);
+        if (value !== null && typeof value !== 'undefined') {
+          return value;
+        }
+      }
+      return null;
+    };
+
+    const employmentBarriers =
+      parseArray(assessmentRow?.employment_barriers) || parseArray(readAnswer('barriers'));
+    const localAreaPriorities =
+      parseArray(assessmentRow?.local_area_priorities) || parseArray(readAnswer('local-area-priorities'));
+
+    const context = {
+      eligibility: normaliseString(assessmentRow?.esdc_eligibility) || null,
+      employmentGoals:
+        assessmentRow?.employment_goals ||
+        normaliseString(readFirstAnswer('long-term-goal', 'short-term-goal', 'employment-goals')) ||
+        null,
+      previousIset: assessmentRow?.previous_iset === 1,
+      previousIsetDetails: assessmentRow?.previous_iset_details || null,
+      employmentBarriers,
+      localAreaPriorities,
+      otherFunding: assessmentRow?.other_funding_details || null,
+      labourForceStatus: readFirstAnswer('labour-force-status', 'employment-status') || null,
+      employmentNoc: readFirstAnswer('action-plan-result-related-noc', 'current-noc') || null,
+      employmentNocVersion:
+        readFirstAnswer('action-plan-result-related-noc-version', 'current-noc-version') || null,
+      educationLevel:
+        readFirstAnswer(
+          'action-plan-result-education-level',
+          'example-radio-2',
+          'education-level',
+          'education-highest-level'
+        ) ||
+        null,
+      childcareNeed: readFirstAnswer('action-plan-childcare-need', 'childcare-need', 'childcare-required') || null,
+      childcareFunding:
+        readFirstAnswer(
+          'action-plan-childcare-funded-code',
+          'childcare-funding',
+          'childcare-funded',
+          'childcare-supported'
+        ) || null,
+      socialAssistance: readFirstAnswer('social-assistance', 'receives-social-assistance') || null,
+      employmentInsurance:
+        readFirstAnswer(
+          'employment-insurance-status',
+          'employment-insurance',
+          'ei-status',
+          'ei-benefits'
+        ) || null,
+      barriersFromApplication: Array.isArray(readAnswer('barriers'))
+        ? readAnswer('barriers')
+        : parseArray(readAnswer('barriers')),
+      longTermGoal: normaliseString(readFirstAnswer('long-term-goal')) || null,
+      shortTermGoal: normaliseString(readFirstAnswer('short-term-goal')) || null,
+      targetProgram: normaliseString(readFirstAnswer('target-program')) || null,
+    };
+
+    res.json({ context });
+  } catch (error) {
+    console.error('GET /api/cases/:id/action-plan/context failed:', error);
+    res.status(500).json({ error: 'action_plan_context_failed', detail: error?.message || String(error) });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post('/api/cases/:id/action-plans', async (req, res) => {
+  const caseId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+
+  const {
+    name,
+    summary = null,
+    startDate = null,
+    reviewDate = null,
+    ownerStaffProfileId = null,
+  } = req.body || {};
+
+  const trimmedName = typeof name === 'string' ? name.trim() : '';
+  if (!trimmedName) {
+    return res.status(422).json({ error: 'name_required', message: 'Action plan name is required.' });
+  }
+  if (!startDate) {
+    return res.status(422).json({ error: 'start_date_required', message: 'Action plan start date is required.' });
+  }
+
+  const role = inferUserRole(req);
+  const identity = getRequesterIdentity(req);
+
+  const [[caseRow]] = await pool.query(
+    `SELECT
+       c.application_id,
+       c.assigned_to_user_id,
+       c.portfolio_region_id,
+       sp.region_id AS owner_region_id
+     FROM iset_case c
+     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+     WHERE c.id = ?
+     LIMIT 1`,
+    [caseId]
+  );
+
+  if (!caseRow) {
+    return res.status(404).json({ error: 'case_not_found' });
+  }
+
+  const allowAll =
+    role === 'System Administrator' ||
+    role === 'Program Administrator' ||
+    role === 'SysAdmin' ||
+    role === 'ProgramAdmin';
+
+  if (!allowAll) {
+    if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+      const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : null;
+      if (!Number.isFinite(regionId)) {
+        return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
+      }
+      const isUnassigned = caseRow.assigned_to_user_id === null || typeof caseRow.assigned_to_user_id === 'undefined';
+      const portfolioMatch =
+        Number.isFinite(caseRow.portfolio_region_id) && Number(caseRow.portfolio_region_id) === regionId;
+      const ownerMatch =
+        Number.isFinite(caseRow.owner_region_id) && Number(caseRow.owner_region_id) === regionId;
+      if (!isUnassigned && !portfolioMatch && !ownerMatch) {
+        return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
+      }
+    } else if (role === 'Application Assessor' || role === 'Adjudicator') {
+      const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
+      if (!Number.isFinite(requesterId)) {
+        return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
+      }
+      if (Number(caseRow.assigned_to_user_id) !== requesterId) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    } else {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+  }
+
+  let resolvedOwnerStaffProfileId = null;
+  if (ownerStaffProfileId !== null && typeof ownerStaffProfileId !== 'undefined') {
+    const numericOwner = Number.parseInt(ownerStaffProfileId, 10);
+    if (Number.isInteger(numericOwner) && numericOwner > 0) {
+      const profile = await fetchStaffProfileById(numericOwner);
+      if (!profile) {
+        return res.status(404).json({ error: 'owner_not_found' });
+      }
+      resolvedOwnerStaffProfileId = numericOwner;
+    }
+  }
+
+  if (resolvedOwnerStaffProfileId === null && Number.isFinite(identity.userId)) {
+    resolvedOwnerStaffProfileId = Number(identity.userId);
+  }
+  if (resolvedOwnerStaffProfileId === null && Number.isFinite(caseRow.assigned_to_user_id)) {
+    resolvedOwnerStaffProfileId = Number(caseRow.assigned_to_user_id);
+  }
+
+  const planStatus = 'draft';
+  const metadata = summary ? { summary } : null;
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [result] = await connection.query(
+      `INSERT INTO iset_case_action_plan
+         (case_id, name, status, owner_staff_profile_id, owner_user_id, effective_date, review_date, notes, metadata_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        caseId,
+        trimmedName || null,
+        planStatus,
+        resolvedOwnerStaffProfileId || null,
+        null,
+        startDate || null,
+        reviewDate || null,
+        summary || null,
+        metadata ? JSON.stringify(metadata) : null,
+      ]
+    );
+
+    await connection.commit();
+
+    res.status(201).json({
+      id: result.insertId,
+      name: trimmedName || null,
+      status: planStatus,
+      effectiveDate: toIsoDateTime(startDate),
+      reviewDate: toIsoDateTime(reviewDate),
+      ownerStaffProfileId: resolvedOwnerStaffProfileId || null,
+      ownerUserId: null,
+      summary: summary || null,
+      interventionCount: 0,
+    });
+  } catch (error) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    console.error('POST /api/cases/:id/action-plans failed:', error);
+    res.status(500).json({ error: 'create_action_plan_failed', detail: error?.message || String(error) });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 app.get('/api/cases/:id', async (req, res) => {
   const caseId = req.params.id;
   try {
@@ -13989,7 +14840,7 @@ app.put('/api/cases/:id', async (req, res) => {
     await conn.beginTransaction();
 
     const [[existingCase]] = await conn.query(
-      `SELECT c.status, c.application_id, a.row_version,
+      `SELECT c.status, c.application_id, c.client_id, a.row_version,
               al.owner_user_id AS lock_owner_user_id,
               al.owner_display_name AS lock_owner_display_name,
               al.owner_email AS lock_owner_email,
@@ -14007,7 +14858,12 @@ app.put('/api/cases/:id', async (req, res) => {
     }
     beforeStatus = existingCase.status || null;
     const beforeStatusLower = beforeStatus ? String(beforeStatus).toLowerCase() : null;
+    const beforeClientId = existingCase.client_id || null;
+    let ensuredClientId = beforeClientId;
     applicationId = Number(existingCase.application_id);
+    if (!Number.isInteger(applicationId) || applicationId <= 0) {
+      applicationId = null;
+    }
     const currentApplicationRowVersion = Number(existingCase.row_version || 1);
     newRowVersion = currentApplicationRowVersion;
 
@@ -14041,13 +14897,22 @@ app.put('/api/cases/:id', async (req, res) => {
         statusChanged = true;
         bumpApplicationRowVersion = true;
       }
-      if (statusChanged) {
-        if (normalizedStatusLower === 'approved') {
-          await ensureEsdcParticipantSubmissionRecord(conn, caseId, applicationId);
-        } else if (beforeStatusLower === 'approved') {
-          await markEsdcParticipantSubmissionNeedsReview(conn, caseId, { resetSnapshot: true, resetSubmissionStatus: true });
-        }
+    if (statusChanged) {
+      if (normalizedStatusLower === 'approved') {
+        ensuredClientId = await ensureCaseClientLinkForApproval(conn, {
+          caseId,
+          applicationId,
+          existingClientId: beforeClientId
+        });
+        await conn.query(
+          'UPDATE iset_case SET stage = ?, sub_stage = ? WHERE id = ?',
+          ['planning', 'backlog', caseId]
+        );
+        await ensureEsdcParticipantSubmissionRecord(conn, caseId, applicationId);
+      } else if (beforeStatusLower === 'approved') {
+        await markEsdcParticipantSubmissionNeedsReview(conn, caseId, { resetSnapshot: true, resetSubmissionStatus: true });
       }
+    }
     }
 
     const assessmentKeys = [
@@ -14120,6 +14985,18 @@ app.put('/api/cases/:id', async (req, res) => {
     const currentStatusLower = (typeof normalizedStatusLower === 'string'
       ? normalizedStatusLower
       : (beforeStatus ? String(beforeStatus).toLowerCase() : null)) || null;
+
+    if (!ensuredClientId && currentStatusLower === 'approved') {
+      ensuredClientId = await ensureCaseClientLinkForApproval(conn, {
+        caseId,
+        applicationId,
+        existingClientId: ensuredClientId
+      });
+      await conn.query(
+        'UPDATE iset_case SET stage = ?, sub_stage = ? WHERE id = ?',
+        ['planning', 'backlog', caseId]
+      );
+    }
 
     if (hasAssessmentPayload && currentStatusLower === 'approved') {
       await markEsdcParticipantSubmissionNeedsReview(conn, caseId, { resetSnapshot: true, resetSubmissionStatus: true });

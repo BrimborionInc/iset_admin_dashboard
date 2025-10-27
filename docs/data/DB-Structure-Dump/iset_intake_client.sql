@@ -16,23 +16,25 @@
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
 --
--- Table structure for table `iset_migration`
+-- Table structure for table `client`
 --
 
-DROP TABLE IF EXISTS `iset_migration`;
+DROP TABLE IF EXISTS `client`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `iset_migration` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `filename` varchar(255) NOT NULL,
-  `checksum` char(64) NOT NULL,
-  `applied_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `duration_ms` int NOT NULL,
-  `success` tinyint(1) NOT NULL DEFAULT '1',
-  `error_snippet` text,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uniq_filename_checksum` (`filename`,`checksum`)
-) ENGINE=InnoDB AUTO_INCREMENT=43 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+CREATE TABLE `client` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `dob` date DEFAULT NULL,
+  `gender` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `aboriginal_group` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `last_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `first_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `initials` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `address_json` json DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -44,4 +46,4 @@ CREATE TABLE `iset_migration` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-24 12:26:41
+-- Dump completed on 2025-10-27 12:14:10

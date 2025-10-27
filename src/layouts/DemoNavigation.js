@@ -42,6 +42,7 @@ const CLEAR_TABLES = [
   'esdc_reporting_note',
   'esdc_reporting_package',
   'iset_case',
+  'client',
   'iset_application',
 ];
 

@@ -1,24 +1,29 @@
-import React from "react";
+import React, { useState } from "react";
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
+  Alert,
+  Box,
   Button,
   ButtonDropdown,
   Header,
   Link,
+  SpaceBetween,
   StatusIndicator,
   Table,
-  Box,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
+import NewActionPlanModal from "../modals/NewActionPlanModal.jsx";
 
 const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
     caseData,
     selectedActionPlanId,
     setSelectedActionPlanId,
-    updateActionPlan,
+    refresh,
   } = useCaseWorkspace();
+  const [modalVisible, setModalVisible] = useState(false);
+  const [createMessage, setCreateMessage] = useState(null);
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
@@ -41,6 +46,14 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
     }
   };
 
+  const handleCreated = plan => {
+    setCreateMessage(plan?.name || "Action plan created.");
+    if (plan?.id) {
+      setSelectedActionPlanId(plan.id);
+    }
+    refresh().catch(() => {});
+  };
+
   return (
     <BoardItem
       header={
@@ -48,7 +61,11 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
           variant="h2"
           info={infoLink}
           description={metadata.description ?? "Manage action plans and select one to edit interventions."}
-          actions={<Button iconName="add-plus">New action plan</Button>}
+          actions={
+            <Button iconName="add-plus" onClick={() => setModalVisible(true)}>
+              New action plan
+            </Button>
+          }
         >
           {metadata.title ?? "Action plans"}
         </Header>
@@ -65,50 +82,73 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
       }
       i18nStrings={boardItemI18nStrings}
     >
-      {plans.length ? (
-        <Table
-          trackBy="id"
-          variant="embedded"
-          resizableColumns
-          selectionType="single"
-          selectedItems={plans.filter(plan => plan.id === selectedActionPlanId)}
-          onSelectionChange={({ detail }) => {
-            const plan = detail?.selectedItems?.[0];
-            if (plan?.id) {
-              setSelectedActionPlanId(plan.id);
-            }
+      <SpaceBetween size="m">
+        {createMessage && (
+          <Alert type="success" onDismiss={() => setCreateMessage(null)}>
+            {createMessage}
+          </Alert>
+        )}
+        {plans.length ? (
+          <Table
+            trackBy="id"
+            variant="embedded"
+            resizableColumns
+            selectionType="single"
+            selectedItems={plans.filter(plan => plan.id === selectedActionPlanId)}
+            onSelectionChange={({ detail }) => {
+              const plan = detail?.selectedItems?.[0];
+              if (plan?.id) {
+                setSelectedActionPlanId(plan.id);
+              }
+            }}
+            columnDefinitions={[
+              { id: "title", header: "Plan", cell: item => item.title || "Untitled", isRowHeader: true },
+              {
+                id: "dates",
+                header: "Dates",
+                cell: item => {
+                  const start = item.startDate ? new Date(item.startDate).toLocaleDateString() : "-";
+                  const end = item.endDate ? new Date(item.endDate).toLocaleDateString() : "-";
+                  return `${start} - ${end}`;
+                },
+              },
+              {
+                id: "status",
+                header: "Status",
+                cell: item => (
+                  <StatusIndicator type={item.status === "open" || item.status === "draft" ? "info" : "success"}>
+                    {item.status ?? "unknown"}
+                  </StatusIndicator>
+                ),
+              },
+              {
+                id: "interventions",
+                header: "Interventions",
+                cell: item =>
+                  Number.isFinite(item.interventionCount)
+                    ? item.interventionCount
+                    : item.interventions
+                    ? item.interventions.length
+                    : 0,
+              },
+            ]}
+            items={plans}
+            empty={<Box padding="m">No action plans defined yet.</Box>}
+            header={<Header variant="h3">Action plans</Header>}
+          />
+        ) : (
+          <Box padding="m">No action plans defined yet.</Box>
+        )}
+      </SpaceBetween>
+      {modalVisible && (
+        <NewActionPlanModal
+          visible={modalVisible}
+          onDismiss={() => setModalVisible(false)}
+          onCreated={plan => {
+            setModalVisible(false);
+            handleCreated(plan);
           }}
-          columnDefinitions={[
-            { id: "title", header: "Plan", cell: item => item.title || "Untitled", isRowHeader: true },
-            {
-              id: "dates",
-              header: "Dates",
-              cell: item =>
-                `${item.startDate ? new Date(item.startDate).toLocaleDateString() : "—"} → ${
-                  item.endDate ? new Date(item.endDate).toLocaleDateString() : "—"
-                }`,
-            },
-            {
-              id: "status",
-              header: "Status",
-              cell: item => (
-                <StatusIndicator type={item.status === "open" ? "info" : "success"}>
-                  {item.status ?? "unknown"}
-                </StatusIndicator>
-              ),
-            },
-            {
-              id: "interventions",
-              header: "Interventions",
-              cell: item => (item.interventions ? item.interventions.length : 0),
-            },
-          ]}
-          items={plans}
-          empty={<Box padding="m">No action plans defined yet.</Box>}
-          header={<Header variant="h3">Action plans</Header>}
         />
-      ) : (
-        <Box padding="m">No action plans defined yet.</Box>
       )}
     </BoardItem>
   );

@@ -1,7 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../../../auth/apiClient.js";
+
+const LIVE_CASES_STORAGE_KEY = "iset-demo-use-live-cases";
 
 const buildDummyCase = caseId => ({
   id: caseId,
+  eligibility: "CRF",
   client: {
     name: "Mary Cardinal",
     dateOfBirth: "1996-08-14",
@@ -67,7 +71,108 @@ const buildDummyCase = caseId => ({
     ilmp: { status: "clean", messages: [] },
     finance: { status: "warning", messages: ["Mapping missing for childcare support", "Overspend in supports pot"] },
   },
+  counts: {
+    openTasks: 2,
+    overdueTasks: 1,
+    openInterventions: 1,
+    totalInterventions: 3,
+  },
 });
+
+const buildCaseFromWorkspaceApi = (caseId, payload) => {
+  if (!payload || typeof payload !== "object") {
+    return buildDummyCase(caseId);
+  }
+
+  const client = payload.client || {};
+  const counts = payload.counts || {};
+  const normaliseCount = value => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : 0;
+  };
+
+  const rawActionPlans = Array.isArray(payload.actionPlans) ? payload.actionPlans : [];
+  const actionPlans = rawActionPlans.map(plan => ({
+    id: plan.id,
+    title: plan.name || plan.title || "Untitled",
+    status: plan.status || null,
+    startDate: plan.effectiveDate || plan.startDate || null,
+    endDate: plan.reviewDate || plan.endDate || null,
+    summary: plan.summary || null,
+    ownerStaffProfileId: plan.ownerStaffProfileId || null,
+    ownerUserId: plan.ownerUserId || null,
+    interventionCount: Number.isFinite(plan.interventionCount) ? plan.interventionCount : 0,
+  }));
+
+  const firstName = client.firstName || null;
+  const lastName = client.lastName || null;
+  const fullName =
+    client.fullName ||
+    [firstName, lastName].filter(Boolean).join(" ") ||
+    null;
+  const dateOfBirth = client.dateOfBirth ?? client.dob ?? null;
+
+  const regionSource = client.regionLabel ?? client.region;
+  const resolvedRegionName =
+    typeof regionSource === "string"
+      ? regionSource
+      : regionSource?.name || regionSource?.code || null;
+  const displayRegion = resolvedRegionName || "Not set";
+  const regionDetails =
+    regionSource && typeof regionSource === "object" ? regionSource : (client.region && typeof client.region === "object" ? client.region : null);
+
+  return {
+    id: payload.id ?? caseId,
+    applicationId: payload.applicationId ?? payload.application_id ?? null,
+    application_id: payload.applicationId ?? payload.application_id ?? null,
+    caseNumber: payload.caseNumber ?? null,
+    status: payload.status ?? null,
+    stage: payload.stage ?? null,
+    subStage: payload.subStage ?? null,
+    riskRating: payload.riskRating ?? null,
+    openedAt: payload.openedAt ?? null,
+    closedAt: payload.closedAt ?? null,
+    updatedAt: payload.updatedAt ?? null,
+    nextActionDueAt: payload.nextActionDueAt ?? null,
+    agreementNumber: payload.agreementNumber ?? payload.trackingId ?? null,
+    client: {
+      id: client.id ?? null,
+      name: fullName || "Unknown client",
+      dateOfBirth,
+      region: displayRegion,
+      regionDetails,
+      details: client,
+    },
+    owner: {
+      id: payload.owner?.id ?? null,
+      name: payload.owner?.name ?? payload.owner?.email ?? "Unassigned",
+      email: payload.owner?.email ?? null,
+      role: payload.owner?.role ?? null,
+      regionId: payload.owner?.regionId ?? null,
+    },
+    counts: {
+      openTasks: normaliseCount(counts.openTasks),
+      overdueTasks: normaliseCount(counts.overdueTasks),
+      openInterventions: normaliseCount(counts.openInterventions),
+      totalInterventions: normaliseCount(counts.totalInterventions),
+    },
+    actionPlans,
+    documents: Array.isArray(payload.documents) ? payload.documents : [],
+    notes: Array.isArray(payload.notes) ? payload.notes : [],
+    finance: payload.finance ?? null,
+    compliance: payload.compliance ?? null,
+    eligibility: payload.eligibility ?? null,
+  };
+};
+
+const getStoredLivePreference = () => {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(LIVE_CASES_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+};
 
 const CaseWorkspaceContext = createContext({
   caseId: null,
@@ -75,9 +180,11 @@ const CaseWorkspaceContext = createContext({
   isLoading: false,
   error: null,
   refresh: () => Promise.resolve(),
+  createActionPlan: () => Promise.resolve({}),
   updateActionPlan: () => Promise.resolve(),
   updateIntervention: () => Promise.resolve(),
   runComplianceChecks: () => Promise.resolve(),
+  fetchActionPlanContext: () => Promise.resolve({}),
   selectedActionPlanId: null,
   setSelectedActionPlanId: () => {},
 });
@@ -89,25 +196,55 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     error: null,
   });
   const [selectedActionPlanId, setSelectedActionPlanId] = useState(null);
+  const [useLiveData, setUseLiveData] = useState(() => getStoredLivePreference());
 
   const loadCase = useCallback(async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     try {
-      // TODO: replace with real fetch `/api/cases/${caseId}`
-      await new Promise(resolve => setTimeout(resolve, 50));
-      const data = buildDummyCase(caseId);
+      if (!useLiveData) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const data = buildDummyCase(caseId);
+        setState({ caseData: data, isLoading: false, error: null });
+        setSelectedActionPlanId(prev => prev ?? data.actionPlans?.[0]?.id ?? null);
+        return data;
+      }
+
+      const response = await apiFetch(`/api/cases/${caseId}/workspace`, { method: "GET" });
+      if (!response.ok) {
+        const error = new Error("Failed to load case.");
+        error.status = response.status;
+        throw error;
+      }
+      const payload = await response.json();
+      const data = buildCaseFromWorkspaceApi(caseId, payload);
       setState({ caseData: data, isLoading: false, error: null });
-      setSelectedActionPlanId(prev => prev ?? data.actionPlans?.[0]?.id ?? null);
+      setSelectedActionPlanId(data.actionPlans?.[0]?.id ?? null);
       return data;
     } catch (error) {
-      setState({ caseData: null, isLoading: false, error: error?.message || "Failed to load case." });
+      setState(prev => ({ ...prev, isLoading: false, error: error?.message || "Failed to load case." }));
       throw error;
     }
-  }, [caseId]);
+  }, [caseId, useLiveData]);
 
   useEffect(() => {
     loadCase().catch(() => {});
   }, [loadCase]);
+
+  useEffect(() => {
+    const handler = event => {
+      if (event?.detail && typeof event.detail.useLiveCases === "boolean") {
+        setUseLiveData(event.detail.useLiveCases);
+      }
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("iset-portfolio:cases-data-mode", handler);
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("iset-portfolio:cases-data-mode", handler);
+      }
+    };
+  }, []);
 
   const updateActionPlan = useCallback(async (actionPlanId, updates) => {
     // TODO: call `/api/action-plans/${actionPlanId}` with payload
@@ -140,18 +277,69 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     return { ilmp: "clean", finance: "warning" };
   }, [caseId]);
 
+  const createActionPlan = useCallback(
+    async plan => {
+      const response = await apiFetch(`/api/cases/${caseId}/action-plans`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(plan),
+      });
+      if (!response.ok) {
+        let details = null;
+        try {
+          details = await response.json();
+        } catch (_) {
+          details = null;
+        }
+        const message =
+          details?.message ||
+          details?.error ||
+          `Failed to create action plan (${response.status})`;
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+      }
+      return response.json();
+    },
+    [caseId]
+  );
+
+  const fetchActionPlanContext = useCallback(async () => {
+    const response = await apiFetch(`/api/cases/${caseId}/action-plan/context`, {
+      method: "GET",
+    });
+    if (!response.ok) {
+      let details = null;
+      try {
+        details = await response.json();
+      } catch (_) {
+        details = null;
+      }
+      const message =
+        details?.message ||
+        details?.error ||
+        `Failed to load action plan context (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  }, [caseId]);
+
   const contextValue = useMemo(() => ({
     caseId,
     caseData: state.caseData,
     isLoading: state.isLoading,
     error: state.error,
     refresh: loadCase,
+    createActionPlan,
     updateActionPlan,
     updateIntervention,
     runComplianceChecks,
+    fetchActionPlanContext,
     selectedActionPlanId,
     setSelectedActionPlanId,
-  }), [caseId, state, loadCase, updateActionPlan, updateIntervention, runComplianceChecks, selectedActionPlanId]);
+  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, updateIntervention, runComplianceChecks, fetchActionPlanContext, selectedActionPlanId]);
 
   return (
     <CaseWorkspaceContext.Provider value={contextValue}>

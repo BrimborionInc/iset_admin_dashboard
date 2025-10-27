@@ -26,6 +26,15 @@
 2. **Alter `iset_case`:** add `client_id BIGINT NOT NULL`, FK `fk_iset_case_client_id` → `client(id)` ON DELETE RESTRICT; change `application_id` to nullable with FK `fk_iset_case_application_id` → `iset_application(id)` ON DELETE RESTRICT. Update indices if required (e.g., composite `(client_id, status)` for future queries).
 3. **Backfill script:** for each existing `iset_case` record, derive client payload from the latest `iset_application.payload_json` (preferred) or `iset_application_submission.intake_payload`; populate a `client` row and update `iset_case.client_id`. Log/flag rows where no payload exists (should be none in prod snapshots; fall back to placeholder data suitable for remediation).
 4. **Down migration:** drop FKs / columns in reverse order, removing `client` table only after clearing references.
+5. **Case workspace enablement:** add dedicated persistence for the Case Workspace page:
+   - Extend `iset_case` with lifecycle metadata (`case_number`, `stage`, `sub_stage`, `opened_at`, `closed_at`, `next_action_due_at`, `risk_rating`, `portfolio_region_id`) and cached counters (`open_task_count`, `overdue_task_count`, `open_intervention_count`, `total_intervention_count`) plus audit references (`created_by_staff_profile_id`, `updated_by_staff_profile_id`). All fields remain nullable/zero-default until populated.
+   - Introduce `iset_case_event` to capture timeline entries (`event_type`, `summary`, `payload_json`, `occurred_at`, `actor_*`, `source_system`) with dense indexes on `(case_id, occurred_at DESC)` and `(event_type, occurred_at DESC)`.
+   - Add `iset_case_task` for structured task tracking (title, status, category, due/completed dates, assignee + audit metadata, soft delete), keyed for both case and assignee roll-ups.
+   - Model action plans via parent `iset_case_action_plan` and child `iset_case_action_item` tables, supporting versioning, ownership, and per-step outcomes.
+   - Persist interventions through `iset_case_intervention` (type, status, dates, funding buckets, outcome metadata, optional plan linkage).
+   - Track compliance artefacts with `iset_case_compliance_check` (`requirement_code`, status, due/fulfilled timestamps, evidence document FK).
+   - Store financial snapshots in `iset_case_financial_snapshot` (per-case/per-date allocations, commitments, spend, variance, JSON detail) for the finance panel.
+   - Extend `iset_document` with `document_category`, `visibility`, `linked_task_id`, `linked_intervention_id` to support filtered document views and cross-linking within the workspace.
 
 #### Database Notes (2025-10-26)
 - Baseline `iset_case` definition (from `docs/data/DB-Structure-Dump/iset_intake_iset_case.sql`): only columns are `id`, `application_id` (NOT NULL), `assigned_to_user_id`, `status`, timestamps, with indexes on `application_id`, `assigned_to_user_id`, `status`. No existing foreign keys.
@@ -45,10 +54,55 @@
    - Accept query params: `query` (string search), `status` (enum, multi-value), `owner` (user id), `stage`, `page` (default 1), `pageSize` (default 10, max 100), `sort` (column) and `direction`.
    - Join `client`, `iset_application`, and `staff_profiles` (plus optional `iset_evaluator_ptma` metadata) as needed for owner info, returning JSON `{ items: CaseRow[], page, pageSize, totalCount }` (optional `nextPage` for cursor-style pagination).
    - Apply RBAC filters so users only see permitted cases (existing role matrix rules). Supersedes the legacy unpaginated implementation in `isetadminserver.js`.
-   - `CaseRow` (draft): `{ id, status, stage?, priority?, openedAt?, closedAt?, lastActivityAt?, applicationId, trackingId, submittedAt?, owner: { id?, name?, email? }, client: { id?, firstName?, lastName?, dob?, gender?, aboriginalGroup? }, financeStatus?, fyActuals?, fyVariance?, interventionCounts?, regionId? }`. Optional properties default to `null` when data is unavailable; finance/intervention metrics will be populated as downstream services come online.
+   - `CaseRow` (draft): `{ id, status, stage?, openedAt?, closedAt?, lastActivityAt?, applicationId, trackingId, submittedAt?, owner: { id?, name?, email? }, client: { id?, firstName?, lastName?, dob?, gender?, aboriginalGroup? }, financeStatus?, fyActuals?, fyVariance?, interventionCounts?, regionId? }`. Optional properties default to `null` when data is unavailable; finance/intervention metrics will be populated as downstream services come online.
    - During transition (until client backfill completes) fall back to extracting name/dob from `iset_application.payload_json` whenever `client_id` is `NULL`.
    - Pagination design: server accepts `page` + `pageSize`; response includes `totalCount` (via `SQL_CALC_FOUND_ROWS` alternative `COUNT(*) OVER()` window or second query) to keep Cloudscape table working. Sorting initially limited to `status`, `created_at`, `updated_at` (last activity fallback), and `client.last_name`.
    - Filtering: `query` matches on `client` names, tracking ID, assigned user name/email; `status` and `owner` filters translate to `WHERE` clauses (`IN` lists). `stage` filter remains optional until column exists; treat absent column as noop.
+2. **GET `/api/cases/:id/workspace`:**
+   - Returns the workspace summary used by the Case Header widget (case metadata, client/owner context, headline counters).
+   - Applies the same RBAC rules as the listing endpoint (system/program admins see all, regional coordinators are restricted to their region or unassigned cases, assessors/adjudicators only see cases assigned to them; all other roles receive `403`).
+   - Draft payload:
+     ```json5
+     {
+       "id": 123,
+       "caseNumber": "CRF-1234567",
+       "status": "approved",
+       "stage": "in_progress",
+       "subStage": "documents",
+       "priority": "high",
+       "riskRating": "medium",
+       "openedAt": "2025-05-01T13:22:11.000Z",
+       "closedAt": null,
+       "updatedAt": "2025-10-27T14:03:55.000Z",
+       "nextActionDueAt": "2025-11-05T00:00:00.000Z",
+       "agreementNumber": "ISET-20251027-C03D13",
+       "applicationId": 456,
+       "client": {
+         "id": 789,
+         "firstName": "William",
+         "lastName": "Sillery",
+         "fullName": "William Sillery",
+         "dateOfBirth": "1971-03-10",
+         "region": { "id": 14, "code": "PR", "name": "Prairies" }
+       },
+       "owner": {
+         "id": 21,
+         "name": "Shelley Stacey",
+         "email": "shelley@example.ca",
+         "role": "Program Administrator",
+         "regionId": 14
+       },
+       "counts": {
+         "openTasks": 2,
+         "overdueTasks": 1,
+         "openInterventions": 1,
+         "totalInterventions": 3
+       }
+     }
+     ```
+   - The response can be extended with timeline/action-plan/finance/compliance data without introducing additional endpoints; consumers should treat unknown properties as optional.
+   - Initial lifecycle handling: when a case transitions to `status = approved` via `PUT /api/cases/:id`, the server now seeds `stage = 'planning'` and `subStage = 'backlog'` so downstream widgets have a baseline value. Future case-management endpoints (action plan approval, intervention start, compliance review, closure) will be responsible for advancing these fields and recording corresponding `iset_case_event` entries.
+   - Region values derive from the client’s captured address (province -> canonical label). If no address/province is available, the response returns `null` and the UI shows “Not set”; we no longer fall back to the assessor’s region for display.
    - Current implementation ignores `stage` filter (with console warning) because `iset_case` lacks that column; will be revisited when lifecycle fields are introduced.
 2. **POST `/api/cases/:id/assign`:**
    - Body `{ toUserId }` (required). Only roles with assignment permission may invoke (System Admin, Program Admin, Regional Coordinator per current policy).
@@ -74,6 +128,8 @@
 5. **Notifications:** show success/error toasts based on API responses using existing notification infrastructure (if absent, create minimal scaffolding).
 - **Demo toggle:** surface a “Use live case data” toggle in `DemoNavigation` (persisted to sessionStorage/localStorage) so developers can switch between mock and live responses while front-end integration iterates.
 6. **Inline modal flow:** render a case assignment modal inside the portfolio widget that pulls `/api/staff/assignable` options, posts to `/api/cases/:id/assign|reassign`, and refreshes the server-backed table on success. Disable actions when live mode is off to keep scaffolds intact.
+7. **User feedback:** show dismissible success alerts after assignment/reassignment and retain error messaging within the modal.
+8. **Backfill dependency:** `client` table currently empty; existing cases still rely on application payload fallback for names (shows “Unknown client”). Need migration/service to populate clients and ensure future approvals insert into `client`.
 
 ### RBAC
 - Extend existing role matrix / middleware to expose `canAssignCases` and `canReassignCases` booleans in `/api/auth/me` response.
@@ -132,6 +188,6 @@
 | 2025-10-26 | Step 2 kickoff — reviewing existing server routes and data models to plan `/api/cases` + assignment endpoints (RBAC + pagination requirements). | Codex |
 | 2025-10-26 | Step 2 progress — implemented paginated `GET /api/cases`, new `POST /api/cases/:id/assign` & `/reassign`, and enforced `client_id` for case creation (with assignment event emission). | Codex |
 | 2025-10-26 | Step 3 setup — added “Use live case data” toggle in `DemoNavigation` to control mock vs live feeds for the portfolio dashboard. | Codex |
-| 2025-10-26 | Step 3 progress — `CasesTableWidget` now consumes the new API via `useCasesData` when the toggle is enabled, falling back to mock data otherwise, and wires inline Assign/Reassign modals to the new endpoints. | Codex |
+| 2025-10-26 | Step 3 progress — `CasesTableWidget` now consumes live data and wires inline Assign/Reassign modals with success/error alerts (client name backfill still pending). | Codex |
 
 _Maintain this log with each significant design/implementation update._

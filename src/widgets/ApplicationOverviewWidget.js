@@ -437,7 +437,6 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   if (phoneNumber) overviewItems.push({ label: 'Phone', value: phoneNumber });
 
   if (caseData?.stage) overviewItems.push({ label: 'Case Stage', value: caseData.stage });
-  if (caseData?.priority) overviewItems.push({ label: 'Priority', value: caseData.priority });
 
   if (application?.created_at) overviewItems.push({ label: 'Received At', value: formatDateTime(application.created_at) });
   if (application?.updated_at) overviewItems.push({ label: 'Last Updated', value: formatDateTime(application.updated_at) });

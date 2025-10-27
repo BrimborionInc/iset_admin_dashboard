@@ -47,7 +47,7 @@ CREATE TABLE `iset_document` (
   KEY `idx_origin_message` (`origin_message_id`),
   KEY `idx_status` (`status`),
   KEY `idx_source` (`source`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -59,4 +59,4 @@ CREATE TABLE `iset_document` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-23 11:37:45
+-- Dump completed on 2025-10-27 12:14:02
