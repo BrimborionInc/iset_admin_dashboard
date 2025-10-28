@@ -3,6 +3,100 @@ import { apiFetch } from "../../../auth/apiClient.js";
 
 const LIVE_CASES_STORAGE_KEY = "iset-demo-use-live-cases";
 
+const normaliseInterventionStatus = status => {
+  if (!status) return "planned";
+  const value = String(status).trim().toLowerCase();
+  if (["planned", "planning", "draft"].includes(value)) return "planned";
+  if (["active", "inprogress", "in-progress", "in_progress", "progress"].includes(value)) return "in_progress";
+  if (["suspended", "on-hold", "on_hold"].includes(value)) return "suspended";
+  if (["complete", "completed", "closed", "done"].includes(value)) return "completed";
+  if (["cancelled", "canceled"].includes(value)) return "cancelled";
+  return value || "planned";
+};
+
+const isOpenInterventionStatus = status => {
+  const value = normaliseInterventionStatus(status);
+  return ["planned", "in_progress", "suspended"].includes(value);
+};
+
+const toNumberOrNull = value => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const buildInterventionFromApi = (planId, payload = {}) => {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const compliance =
+    payload.compliance && typeof payload.compliance === "object"
+      ? {
+          ilmp: payload.compliance.ilmp || "pending",
+          finance: payload.compliance.finance || "pending",
+        }
+      : { ilmp: "pending", finance: "pending" };
+  const status = normaliseInterventionStatus(payload.status);
+  const durationWeeks = toNumberOrNull(payload.durationWeeks);
+  const costValue = toNumberOrNull(
+    payload.cost ?? payload.approvedAmount ?? payload.budgetAmount ?? payload.actualAmount
+  );
+  const resolvedNoc =
+    payload.noc ||
+    payload.nocCode ||
+    payload.noc_code ||
+    payload.nocCodeValue ||
+    payload.noc_code_value ||
+    null;
+  const resolvedNocVersion =
+    payload.nocVersion ||
+    payload.noc_version ||
+    payload.nocVersionCode ||
+    payload.noc_version_code ||
+    null;
+  return {
+    id: payload.id,
+    actionPlanId: payload.actionPlanId ?? planId ?? null,
+    code: payload.code || payload.interventionType || null,
+    title: payload.title || payload.description || payload.notes || "Untitled intervention",
+    description: payload.description || null,
+    status,
+    startDate: payload.startDate || null,
+    endDate: payload.endDate || null,
+    durationWeeks,
+    outcome: payload.outcome || payload.outcomeCode || null,
+    cost: costValue,
+    potId: payload.potId || payload.fundingStream || null,
+    fundingStream: payload.fundingStream || null,
+    noc: resolvedNoc,
+    nocVersion: resolvedNocVersion,
+    notes: payload.notes || null,
+    compliance,
+    approvedAmount: toNumberOrNull(payload.approvedAmount),
+    actualAmount: toNumberOrNull(payload.actualAmount),
+    budgetAmount: toNumberOrNull(payload.budgetAmount),
+    metadata: payload.metadata || null,
+    createdByStaffProfileId: payload.createdByStaffProfileId || null,
+    createdAt: payload.createdAt || null,
+    updatedAt: payload.updatedAt || null,
+    closedAt: payload.closedAt || null,
+  };
+};
+
+const recomputeInterventionCounts = plans => {
+  let open = 0;
+  let total = 0;
+  plans.forEach(plan => {
+    const list = Array.isArray(plan.interventions) ? plan.interventions : [];
+    total += list.length;
+    list.forEach(item => {
+      if (isOpenInterventionStatus(item?.status)) {
+        open += 1;
+      }
+    });
+  });
+  return { open, total };
+};
+
 const buildDummyCase = caseId => ({
   id: caseId,
   eligibility: "CRF",
@@ -92,17 +186,35 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
   };
 
   const rawActionPlans = Array.isArray(payload.actionPlans) ? payload.actionPlans : [];
-  const actionPlans = rawActionPlans.map(plan => ({
-    id: plan.id,
-    title: plan.name || plan.title || "Untitled",
-    status: plan.status || null,
-    startDate: plan.effectiveDate || plan.startDate || null,
-    endDate: plan.reviewDate || plan.endDate || null,
-    summary: plan.summary || null,
-    ownerStaffProfileId: plan.ownerStaffProfileId || null,
-    ownerUserId: plan.ownerUserId || null,
-    interventionCount: Number.isFinite(plan.interventionCount) ? plan.interventionCount : 0,
-  }));
+  const actionPlans = rawActionPlans.map(plan => {
+    const interventions = Array.isArray(plan.interventions)
+      ? plan.interventions
+          .map(item => buildInterventionFromApi(plan.id, item))
+          .filter(Boolean)
+      : [];
+    return {
+      id: plan.id,
+      caseId: plan.caseId || caseId,
+      title: plan.name || plan.title || "Untitled",
+      status: plan.status || null,
+      startDate: plan.effectiveDate || plan.startDate || null,
+      endDate: plan.reviewDate || plan.endDate || null,
+      activatedAt: plan.activatedAt || null,
+      closedAt: plan.closedAt || null,
+      archivedAt: plan.archivedAt || null,
+      resultCode: plan.resultCode || null,
+      resultDate: plan.resultDate || null,
+      outcomeSummary: plan.outcomeSummary || null,
+      closureNotes: plan.closureNotes || null,
+      summary: plan.summary || null,
+      ownerStaffProfileId: plan.ownerStaffProfileId || null,
+      ownerUserId: plan.ownerUserId || null,
+      createdAt: plan.createdAt || null,
+      updatedAt: plan.updatedAt || null,
+      interventions,
+      interventionCount: interventions.length,
+    };
+  });
 
   const firstName = client.firstName || null;
   const lastName = client.lastName || null;
@@ -182,9 +294,24 @@ const CaseWorkspaceContext = createContext({
   refresh: () => Promise.resolve(),
   createActionPlan: () => Promise.resolve({}),
   updateActionPlan: () => Promise.resolve(),
-  updateIntervention: () => Promise.resolve(),
+  createIntervention: () => Promise.resolve({}),
+  updateIntervention: () => Promise.resolve({}),
+  closeIntervention: () => Promise.resolve({}),
   runComplianceChecks: () => Promise.resolve(),
   fetchActionPlanContext: () => Promise.resolve({}),
+  interventionCodes: [],
+  interventionCodesLoading: false,
+  loadInterventionCodes: () => Promise.resolve([]),
+  interventionOutcomes: [],
+  interventionOutcomesLoading: false,
+  loadInterventionOutcomes: () => Promise.resolve([]),
+  fundingStreams: [],
+  fundingStreamsLoading: false,
+  loadFundingStreams: () => Promise.resolve([]),
+  nocVersions: [],
+  nocVersionsLoading: false,
+  loadNocVersions: () => Promise.resolve([]),
+  searchNocCodes: () => Promise.resolve([]),
   selectedActionPlanId: null,
   setSelectedActionPlanId: () => {},
 });
@@ -197,6 +324,18 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
   });
   const [selectedActionPlanId, setSelectedActionPlanId] = useState(null);
   const [useLiveData, setUseLiveData] = useState(() => getStoredLivePreference());
+  const [interventionCodes, setInterventionCodes] = useState([]);
+  const [interventionCodesLoaded, setInterventionCodesLoaded] = useState(false);
+  const [interventionCodesLoading, setInterventionCodesLoading] = useState(false);
+  const [interventionOutcomes, setInterventionOutcomes] = useState([]);
+  const [interventionOutcomesLoaded, setInterventionOutcomesLoaded] = useState(false);
+  const [interventionOutcomesLoading, setInterventionOutcomesLoading] = useState(false);
+  const [fundingStreams, setFundingStreams] = useState([]);
+  const [fundingStreamsLoaded, setFundingStreamsLoaded] = useState(false);
+  const [fundingStreamsLoading, setFundingStreamsLoading] = useState(false);
+  const [nocVersions, setNocVersions] = useState([]);
+  const [nocVersionsLoaded, setNocVersionsLoaded] = useState(false);
+  const [nocVersionsLoading, setNocVersionsLoading] = useState(false);
 
   const loadCase = useCallback(async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -246,31 +385,341 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     };
   }, []);
 
-  const updateActionPlan = useCallback(async (actionPlanId, updates) => {
-    // TODO: call `/api/action-plans/${actionPlanId}` with payload
-    setState(prev => {
-      if (!prev.caseData) return prev;
-      const nextPlans = prev.caseData.actionPlans.map(plan =>
-        plan.id === actionPlanId ? { ...plan, ...updates } : plan
-      );
-      return { ...prev, caseData: { ...prev.caseData, actionPlans: nextPlans } };
+  const loadInterventionCodes = useCallback(async () => {
+    if (interventionCodesLoaded && interventionCodes.length > 0) {
+      return interventionCodes;
+    }
+    setInterventionCodesLoading(true);
+    try {
+      const response = await apiFetch("/api/reference/intervention-codes", { method: "GET" });
+      if (!response.ok) {
+        const error = new Error(`Failed to load intervention codes (${response.status})`);
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      const list = Array.isArray(data?.codes)
+        ? data.codes
+            .map(item => ({
+              code: item?.code ? String(item.code).trim() : null,
+              label: item?.label ? String(item.label).trim() : null,
+            }))
+            .filter(item => item.code && item.label)
+        : [];
+      setInterventionCodes(list);
+      setInterventionCodesLoaded(true);
+      return list;
+    } catch (error) {
+      throw error;
+    } finally {
+      setInterventionCodesLoading(false);
+    }
+  }, [apiFetch, interventionCodes, interventionCodesLoaded]);
+
+  const loadInterventionOutcomes = useCallback(async () => {
+    if (interventionOutcomesLoaded && interventionOutcomes.length > 0) {
+      return interventionOutcomes;
+    }
+    setInterventionOutcomesLoading(true);
+    try {
+      const response = await apiFetch("/api/reference/intervention-outcomes", { method: "GET" });
+      if (!response.ok) {
+        const error = new Error(`Failed to load intervention outcomes (${response.status})`);
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      const list = Array.isArray(data?.outcomes)
+        ? data.outcomes
+            .map(item => ({
+              code: item?.code ? String(item.code).trim() : null,
+              label: item?.label ? String(item.label).trim() : null,
+            }))
+            .filter(item => item.code && item.label)
+        : [];
+      setInterventionOutcomes(list);
+      setInterventionOutcomesLoaded(true);
+      return list;
+    } catch (error) {
+      throw error;
+    } finally {
+      setInterventionOutcomesLoading(false);
+    }
+  }, [apiFetch, interventionOutcomes, interventionOutcomesLoaded]);
+
+  const loadFundingStreams = useCallback(async () => {
+    if (fundingStreamsLoaded && fundingStreams.length > 0) {
+      return fundingStreams;
+    }
+    setFundingStreamsLoading(true);
+    try {
+      const response = await apiFetch("/api/reference/funding-streams", { method: "GET" });
+      if (!response.ok) {
+        const error = new Error(`Failed to load funding streams (${response.status})`);
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      const list = Array.isArray(data?.streams)
+        ? data.streams
+            .map(item => ({
+              code: item?.code ? String(item.code).trim() : null,
+              label: item?.label ? String(item.label).trim() : null,
+              description: item?.description ? String(item.description).trim() : null,
+            }))
+            .filter(item => item.code && item.label)
+        : [];
+      setFundingStreams(list);
+      setFundingStreamsLoaded(true);
+      return list;
+    } catch (error) {
+      throw error;
+    } finally {
+      setFundingStreamsLoading(false);
+    }
+  }, [apiFetch, fundingStreams, fundingStreamsLoaded]);
+
+  const loadNocVersions = useCallback(async () => {
+    if (nocVersionsLoaded && nocVersions.length > 0) {
+      return nocVersions;
+    }
+    setNocVersionsLoading(true);
+    try {
+      const response = await apiFetch("/api/reference/noc-versions", { method: "GET" });
+      if (!response.ok) {
+        const error = new Error(`Failed to load NOC versions (${response.status})`);
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      const list = Array.isArray(data?.versions)
+        ? data.versions
+            .map(item => ({
+              code: item?.code ? String(item.code).trim() : null,
+              label: item?.label ? String(item.label).trim() : null,
+              description: item?.description ? String(item.description).trim() : null,
+            }))
+            .filter(item => item.code && item.label)
+        : [];
+      setNocVersions(list);
+      setNocVersionsLoaded(true);
+      return list;
+    } catch (error) {
+      throw error;
+    } finally {
+      setNocVersionsLoading(false);
+    }
+  }, [apiFetch, nocVersions, nocVersionsLoaded]);
+
+  const searchNocCodes = useCallback(
+    async ({ query, version }) => {
+      const params = new URLSearchParams();
+      if (version) params.set("version", version);
+      if (query) params.set("q", query);
+      params.set("limit", "25");
+      const response = await apiFetch(`/api/reference/noc-codes?${params.toString()}`, { method: "GET" });
+      if (!response.ok) {
+        const error = new Error(`Failed to load NOC codes (${response.status})`);
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      return Array.isArray(data?.codes)
+        ? data.codes.map(item => ({
+            code: item?.code ? String(item.code).trim() : null,
+            version: item?.version ? String(item.version).trim() : null,
+            title: item?.title ? String(item.title).trim() : null,
+          })).filter(item => item.code && item.version && item.title)
+        : [];
+    },
+    [apiFetch]
+  );
+
+  const updateActionPlan = useCallback(async (actionPlanId, payload) => {
+    const response = await apiFetch(`/api/action-plans/${actionPlanId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
+    if (!response.ok) {
+      let details = null;
+      try {
+        details = await response.json();
+      } catch (_) {
+        details = null;
+      }
+      const message =
+        details?.message ||
+        details?.error ||
+        `Failed to update action plan (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
   }, []);
 
-  const updateIntervention = useCallback(async (actionPlanId, interventionId, updates) => {
-    // TODO: call `/api/interventions/${interventionId}` with payload
-    setState(prev => {
-      if (!prev.caseData) return prev;
-      const nextPlans = prev.caseData.actionPlans.map(plan => {
-        if (plan.id !== actionPlanId) return plan;
-        const updatedInterventions = plan.interventions.map(intervention =>
-          intervention.id === interventionId ? { ...intervention, ...updates } : intervention
-        );
-        return { ...plan, interventions: updatedInterventions };
+  const createIntervention = useCallback(
+    async (actionPlanId, payload) => {
+      const response = await apiFetch(`/api/action-plans/${actionPlanId}/interventions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
-      return { ...prev, caseData: { ...prev.caseData, actionPlans: nextPlans } };
-    });
-  }, []);
+      if (!response.ok) {
+        let details = null;
+        try {
+          details = await response.json();
+        } catch (_) {
+          details = null;
+        }
+        const message =
+          details?.message ||
+          details?.error ||
+          `Failed to create intervention (${response.status})`;
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      const intervention = buildInterventionFromApi(actionPlanId, data);
+      if (!intervention) {
+        return null;
+      }
+      setState(prev => {
+        if (!prev.caseData) return prev;
+        const nextPlans = prev.caseData.actionPlans.map(plan => {
+          if (plan.id !== actionPlanId) return plan;
+          const current = Array.isArray(plan.interventions) ? plan.interventions : [];
+          const updated = [...current, intervention];
+          return { ...plan, interventions: updated, interventionCount: updated.length };
+        });
+        const { open, total } = recomputeInterventionCounts(nextPlans);
+        return {
+          ...prev,
+          caseData: {
+            ...prev.caseData,
+            actionPlans: nextPlans,
+            counts: {
+              ...(prev.caseData.counts || {}),
+              openInterventions: open,
+              totalInterventions: total,
+            },
+          },
+        };
+      });
+      return intervention;
+    },
+    [apiFetch]
+  );
+
+  const updateIntervention = useCallback(
+    async (actionPlanId, interventionId, payload) => {
+      const response = await apiFetch(`/api/interventions/${interventionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        let details = null;
+        try {
+          details = await response.json();
+        } catch (_) {
+          details = null;
+        }
+        const message =
+          details?.message ||
+          details?.error ||
+          `Failed to update intervention (${response.status})`;
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      const intervention = buildInterventionFromApi(actionPlanId, data);
+      if (!intervention) {
+        return null;
+      }
+      setState(prev => {
+        if (!prev.caseData) return prev;
+        const nextPlans = prev.caseData.actionPlans.map(plan => {
+          if (plan.id !== actionPlanId) return plan;
+          const current = Array.isArray(plan.interventions) ? plan.interventions : [];
+          const updated = current.map(item => (item.id === interventionId ? intervention : item));
+          return { ...plan, interventions: updated, interventionCount: updated.length };
+        });
+        const { open, total } = recomputeInterventionCounts(nextPlans);
+        return {
+          ...prev,
+          caseData: {
+            ...prev.caseData,
+            actionPlans: nextPlans,
+            counts: {
+              ...(prev.caseData.counts || {}),
+              openInterventions: open,
+              totalInterventions: total,
+            },
+          },
+        };
+      });
+      return intervention;
+    },
+    [apiFetch]
+  );
+
+  const closeIntervention = useCallback(
+    async (actionPlanId, interventionId, payload) => {
+      const response = await apiFetch(`/api/interventions/${interventionId}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        let details = null;
+        try {
+          details = await response.json();
+        } catch (_) {
+          details = null;
+        }
+        const message =
+          details?.message ||
+          details?.error ||
+          `Failed to close intervention (${response.status})`;
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+      }
+      const data = await response.json();
+      const intervention = buildInterventionFromApi(actionPlanId, data);
+      if (!intervention) {
+        return null;
+      }
+      setState(prev => {
+        if (!prev.caseData) return prev;
+        const nextPlans = prev.caseData.actionPlans.map(plan => {
+          if (plan.id !== actionPlanId) return plan;
+          const current = Array.isArray(plan.interventions) ? plan.interventions : [];
+          const updated = current.map(item => (item.id === interventionId ? intervention : item));
+          return { ...plan, interventions: updated, interventionCount: updated.length };
+        });
+        const { open, total } = recomputeInterventionCounts(nextPlans);
+        return {
+          ...prev,
+          caseData: {
+            ...prev.caseData,
+            actionPlans: nextPlans,
+            counts: {
+              ...(prev.caseData.counts || {}),
+              openInterventions: open,
+              totalInterventions: total,
+            },
+          },
+        };
+      });
+      return intervention;
+    },
+    [apiFetch]
+  );
 
   const runComplianceChecks = useCallback(async () => {
     // TODO: call `/api/compliance/${caseId}/validate`
@@ -304,6 +753,76 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     [caseId]
   );
 
+  const activateActionPlan = useCallback(async actionPlanId => {
+    const response = await apiFetch(`/api/action-plans/${actionPlanId}/activate`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      let details = null;
+      try {
+        details = await response.json();
+      } catch (_) {
+        details = null;
+      }
+      const message =
+        details?.message ||
+        details?.error ||
+        `Failed to activate action plan (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  }, []);
+
+  const closeActionPlan = useCallback(async (actionPlanId, payload) => {
+    const response = await apiFetch(`/api/action-plans/${actionPlanId}/close`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      let details = null;
+      try {
+        details = await response.json();
+      } catch (_) {
+        details = null;
+      }
+      const message =
+        details?.message ||
+        details?.error ||
+        `Failed to close action plan (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  }, []);
+
+  const archiveActionPlan = useCallback(async (actionPlanId, payload = {}) => {
+    const response = await apiFetch(`/api/action-plans/${actionPlanId}/archive`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      let details = null;
+      try {
+        details = await response.json();
+      } catch (_) {
+        details = null;
+      }
+      const message =
+        details?.message ||
+        details?.error ||
+        `Failed to archive action plan (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  }, []);
+
   const fetchActionPlanContext = useCallback(async () => {
     const response = await apiFetch(`/api/cases/${caseId}/action-plan/context`, {
       method: "GET",
@@ -334,12 +853,30 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     refresh: loadCase,
     createActionPlan,
     updateActionPlan,
+    createIntervention,
     updateIntervention,
+    closeIntervention,
     runComplianceChecks,
     fetchActionPlanContext,
+    interventionCodes,
+    interventionCodesLoading,
+    loadInterventionCodes,
+    interventionOutcomes,
+    interventionOutcomesLoading,
+    loadInterventionOutcomes,
+    fundingStreams,
+    fundingStreamsLoading,
+    loadFundingStreams,
+    nocVersions,
+    nocVersionsLoading,
+    loadNocVersions,
+    searchNocCodes,
+    activateActionPlan,
+    closeActionPlan,
+    archiveActionPlan,
     selectedActionPlanId,
     setSelectedActionPlanId,
-  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, updateIntervention, runComplianceChecks, fetchActionPlanContext, selectedActionPlanId]);
+  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, fetchActionPlanContext, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, archiveActionPlan, selectedActionPlanId]);
 
   return (
     <CaseWorkspaceContext.Provider value={contextValue}>

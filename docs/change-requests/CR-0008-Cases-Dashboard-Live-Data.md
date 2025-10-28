@@ -180,14 +180,16 @@
 | Date (UTC) | Update | Owner |
 |------------|--------|-------|
 | 2025-10-26 | Initial CR drafted; awaiting approval to begin implementation. | Codex |
-| 2025-10-26 | Kick-off Step 0 — documented starting point and prepared to draft DB migration approach. | Codex |
-| 2025-10-26 | Step 1a — created `sql/20251026_create_client_and_update_iset_case.sql` (client table + iset_case alterations; client_id currently nullable pending backfill). | Codex |
-| 2025-10-26 | Step 1a follow-up — migration runner flagged combined ALTER syntax; split MODIFY/ADD into separate statements. Ready for re-run. | Codex |
-| 2025-10-26 | Step 1a follow-up #2 — MySQL rejected `ADD COLUMN IF NOT EXISTS`; removed the guard since runner tolerates duplicate column errors. Awaiting next migration run. | Codex |
-| 2025-10-26 | Step 1a validation — migration applied successfully (client table created, iset_case altered, FKs/indexes present); ready to design backfill/seed path. | Codex |
-| 2025-10-26 | Step 2 kickoff — reviewing existing server routes and data models to plan `/api/cases` + assignment endpoints (RBAC + pagination requirements). | Codex |
-| 2025-10-26 | Step 2 progress — implemented paginated `GET /api/cases`, new `POST /api/cases/:id/assign` & `/reassign`, and enforced `client_id` for case creation (with assignment event emission). | Codex |
-| 2025-10-26 | Step 3 setup — added “Use live case data” toggle in `DemoNavigation` to control mock vs live feeds for the portfolio dashboard. | Codex |
-| 2025-10-26 | Step 3 progress — `CasesTableWidget` now consumes live data and wires inline Assign/Reassign modals with success/error alerts (client name backfill still pending). | Codex |
+| 2025-10-26 | Kick-off Step 0 - documented starting point and prepared to draft DB migration approach. | Codex |
+| 2025-10-26 | Step 1a - created `sql/20251026_create_client_and_update_iset_case.sql` (client table + iset_case alterations; client_id currently nullable pending backfill). | Codex |
+| 2025-10-26 | Step 1a follow-up - migration runner flagged combined ALTER syntax; split MODIFY/ADD into separate statements. Ready for re-run. | Codex |
+| 2025-10-26 | Step 1a follow-up #2 - MySQL rejected `ADD COLUMN IF NOT EXISTS`; removed the guard since runner tolerates duplicate column errors. Awaiting next migration run. | Codex |
+| 2025-10-26 | Step 1a validation - migration applied successfully (client table created, iset_case altered, FKs/indexes present); ready to design backfill/seed path. | Codex |
+| 2025-10-26 | Step 2 kickoff - reviewing existing server routes and data models to plan `/api/cases` + assignment endpoints (RBAC + pagination requirements). | Codex |
+| 2025-10-26 | Step 2 progress - implemented paginated `GET /api/cases`, new `POST /api/cases/:id/assign` & `/reassign`, and enforced `client_id` for case creation (with assignment event emission). | Codex |
+| 2025-10-26 | Step 3 setup - added "Use live case data" toggle in `DemoNavigation` to control mock vs live feeds for the portfolio dashboard. | Codex |
+| 2025-10-26 | Step 3 progress - `CasesTableWidget` now consumes live data and wires inline Assign/Reassign modals with success/error alerts (client name backfill still pending). | Codex |
+| 2025-10-28 | Added `sql/20251028_05_alter_case_action_plan_lifecycle.sql` to extend `iset_case_action_plan` with lifecycle fields. Runner initially failed due to MySQL lacking `ADD COLUMN IF NOT EXISTS`; migration rewritten as discrete `ADD COLUMN` statements. Avoid relying on generated columns for one-active-plan enforcement—handled in service layer. | Codex |
+| 2025-10-28 | Delivered action-plan lifecycle and view workflow: new activate/close/archive endpoints, plan details modal with inline edit support, and dropdown actions using `expandToViewport`. Documented context fetch requirements so the edit/view modal continues to display client context. | Codex |
 
 _Maintain this log with each significant design/implementation update._

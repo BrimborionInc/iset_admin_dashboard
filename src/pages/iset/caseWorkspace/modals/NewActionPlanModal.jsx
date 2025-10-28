@@ -39,6 +39,26 @@ const formatBoolean = value => {
   return value;
 };
 
+const SummaryPreview = ({ summary }) => {
+  if (!summary) return null;
+  const lines = summary.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) return null;
+  const preview = lines.slice(0, 3).join("\n");
+  return (
+    <Box padding="s" variant="highlight">
+      <div style={{ fontSize: "0.75rem", color: "var(--color-text-body-secondary)", marginBottom: "0.25rem" }}>
+        Plan summary preview
+      </div>
+      <div style={{ whiteSpace: "pre-wrap" }}>{preview}</div>
+      {lines.length > 3 && (
+        <div style={{ fontSize: "0.75rem", color: "var(--color-text-body-secondary)", marginTop: "0.25rem" }}>
+          (Showing first 3 lines)
+        </div>
+      )}
+    </Box>
+  );
+};
+
 const defaultForm = {
   name: "",
   startDate: "",
@@ -46,14 +66,22 @@ const defaultForm = {
   summary: "",
 };
 
-const NewActionPlanModal = ({ visible, onDismiss, onCreated }) => {
-  const { createActionPlan, fetchActionPlanContext, caseData } = useCaseWorkspace();
+const NewActionPlanModal = ({
+  visible,
+  mode = "create",
+  plan = null,
+  onDismiss,
+  onCreated,
+  onSaved,
+}) => {
+  const { createActionPlan, updateActionPlan, fetchActionPlanContext, caseData } = useCaseWorkspace();
   const currentUser = useCurrentUser();
   const [form, setForm] = useState(defaultForm);
   const [loading, setLoading] = useState(false);
   const [context, setContext] = useState(null);
   const [contextLoading, setContextLoading] = useState(false);
   const [error, setError] = useState(null);
+  const isEdit = mode === "edit" && plan;
 
   useEffect(() => {
     if (!visible) {
@@ -61,6 +89,20 @@ const NewActionPlanModal = ({ visible, onDismiss, onCreated }) => {
       setError(null);
       return;
     }
+    if (isEdit) {
+      setForm({
+        name: plan?.title || plan?.name || "",
+        startDate: plan?.startDate || "",
+        reviewDate: plan?.endDate || "",
+        summary: plan?.summary || "",
+      });
+    } else {
+      setForm(defaultForm);
+    }
+  }, [visible, isEdit, plan]);
+
+  useEffect(() => {
+    if (!visible || isEdit) return;
     let cancelled = false;
     setContextLoading(true);
     fetchActionPlanContext()
@@ -79,7 +121,7 @@ const NewActionPlanModal = ({ visible, onDismiss, onCreated }) => {
     return () => {
       cancelled = true;
     };
-  }, [visible, fetchActionPlanContext]);
+  }, [visible, isEdit, fetchActionPlanContext]);
 
   const eligibilityValue = useMemo(() => {
     const contextEligibility = context?.eligibility || context?.Eligibility;
@@ -92,26 +134,41 @@ const NewActionPlanModal = ({ visible, onDismiss, onCreated }) => {
       setError("Plan name is required.");
       return;
     }
-    if (!form.startDate) {
+    if (!form.startDate && !isEdit) {
       setError("Start date is required.");
+      return;
+    }
+    if (form.startDate && form.reviewDate && form.reviewDate < form.startDate) {
+      setError("Review date cannot be before start date.");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const created = await createActionPlan({
-        name: trimmedName,
-        startDate: form.startDate,
-        reviewDate: form.reviewDate || null,
-        summary: form.summary || null,
-        ownerStaffProfileId: currentUser?.userId || caseData?.owner?.id || null,
-      });
-      setLoading(false);
-      setForm(defaultForm);
-      onCreated(created);
+      if (isEdit) {
+        const updated = await updateActionPlan(plan.id, {
+          name: trimmedName,
+          startDate: form.startDate || null,
+          reviewDate: form.reviewDate || null,
+          summary: form.summary || null,
+        });
+        setLoading(false);
+        if (onSaved) onSaved(updated);
+      } else {
+        const created = await createActionPlan({
+          name: trimmedName,
+          startDate: form.startDate,
+          reviewDate: form.reviewDate || null,
+          summary: form.summary || null,
+          ownerStaffProfileId: currentUser?.userId || caseData?.owner?.id || null,
+        });
+        setLoading(false);
+        setForm(defaultForm);
+        onCreated(created);
+      }
     } catch (err) {
       setLoading(false);
-      setError(err?.message || "Failed to create action plan.");
+      setError(err?.message || (isEdit ? "Failed to update action plan." : "Failed to create action plan."));
     }
   };
 
@@ -183,16 +240,16 @@ const NewActionPlanModal = ({ visible, onDismiss, onCreated }) => {
   return (
     <Modal
       visible={visible}
-      header="New action plan"
+      header={isEdit ? "Edit action plan" : "New action plan"}
       onDismiss={handleDismiss}
-      closeAriaLabel="Close new action plan modal"
+      closeAriaLabel={isEdit ? "Close edit action plan modal" : "Close new action plan modal"}
       footer={
         <SpaceBetween size="xs" direction="horizontal">
           <Button onClick={handleDismiss} disabled={loading}>
             Cancel
           </Button>
           <Button variant="primary" onClick={handleSubmit} loading={loading}>
-            Create action plan
+            {isEdit ? "Save changes" : "Create action plan"}
           </Button>
         </SpaceBetween>
       }
@@ -236,7 +293,16 @@ const NewActionPlanModal = ({ visible, onDismiss, onCreated }) => {
         </ColumnLayout>
         <Box>
           <h4 style={{ marginBottom: "0.5rem" }}>Client context</h4>
-          {renderContext()}
+          {isEdit ? (
+            <SpaceBetween size="s">
+              <SummaryPreview summary={form.summary} />
+              <Box color="text-body-secondary">
+                Update the summary above to adjust this plan&apos;s front-matter. Additional client details remain available in the workspace.
+              </Box>
+            </SpaceBetween>
+          ) : (
+            renderContext()
+          )}
         </Box>
       </SpaceBetween>
     </Modal>

@@ -121,6 +121,7 @@ function normaliseAccessControlMatrix(matrix) {
   return { default: defaultPolicy, routes };
 }
 
+
 async function ensureEsdcPreparedHistoryEventType(connection) {
   if (ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared) return;
   const executor = connection && typeof connection.query === 'function' ? connection : pool;
@@ -1997,12 +1998,95 @@ async function fetchCaseRow(caseId) {
   return row || null;
 }
 
-async function fetchStaffProfileById(staffId) {
-  if (!Number.isFinite(staffId)) return null;
+async function fetchActionPlanWithCase(planId) {
   const [[row]] = await pool.query(
-    'SELECT id, display_name, name, email, primary_role, region_id FROM staff_profiles WHERE id = ? LIMIT 1',
-    [staffId]
+    `SELECT
+       ap.*,
+       c.assigned_to_user_id,
+       c.portfolio_region_id,
+       sp.region_id AS owner_region_id,
+       (
+         SELECT COUNT(*)
+         FROM iset_case_intervention ci
+         WHERE ci.action_plan_id = ap.id
+     ) AS intervention_count
+   FROM iset_case_action_plan ap
+   JOIN iset_case c ON c.id = ap.case_id
+   LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+   WHERE ap.id = ?
+   LIMIT 1`,
+    [planId]
   );
+  return row || null;
+}
+
+async function fetchInterventionWithCase(interventionId) {
+  const [[row]] = await pool.query(
+    `SELECT
+       ci.*,
+       ap.status AS action_plan_status,
+       ap.case_id AS action_plan_case_id,
+       ap.id AS action_plan_id,
+       c.assigned_to_user_id,
+       c.portfolio_region_id,
+       sp.region_id AS owner_region_id
+     FROM iset_case_intervention ci
+     LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+     LEFT JOIN iset_case c ON c.id = ci.case_id
+     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+     WHERE ci.id = ?
+     LIMIT 1`,
+    [interventionId]
+  );
+  return row || null;
+}
+
+function validateCaseAccessForPlan(req, planRow) {
+  const role = inferUserRole(req);
+  const identity = getRequesterIdentity(req);
+
+  const allowAll =
+    role === 'System Administrator' ||
+    role === 'Program Administrator' ||
+    role === 'SysAdmin' ||
+    role === 'ProgramAdmin';
+
+  if (allowAll) return null;
+
+  if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+    const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : Number.NaN;
+    if (!Number.isFinite(regionId)) {
+      return { status: 403, body: { error: 'forbidden', detail: 'region_scope_missing' } };
+    }
+    const isUnassigned =
+      planRow.assigned_to_user_id === null || typeof planRow.assigned_to_user_id === 'undefined';
+    const portfolioMatch =
+      Number.isFinite(planRow.portfolio_region_id) &&
+      Number(planRow.portfolio_region_id) === regionId;
+    const ownerMatch =
+      Number.isFinite(planRow.owner_region_id) &&
+      Number(planRow.owner_region_id) === regionId;
+    if (!isUnassigned && !portfolioMatch && !ownerMatch) {
+      return { status: 403, body: { error: 'forbidden', detail: 'region_scope_mismatch' } };
+    }
+    return null;
+  }
+
+  if (role === 'Application Assessor' || role === 'Adjudicator') {
+    const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : Number.NaN;
+    if (!Number.isFinite(requesterId)) {
+      return { status: 403, body: { error: 'forbidden', detail: 'assessor_scope_missing' } };
+    }
+    if (Number(planRow.assigned_to_user_id) !== requesterId) {
+      return { status: 403, body: { error: 'forbidden' } };
+    }
+    return null;
+  }
+
+  return { status: 403, body: { error: 'forbidden' } };
+}
+
+function normaliseStaffProfileRow(row) {
   if (!row) return null;
   return {
     id: row.id,
@@ -2011,6 +2095,66 @@ async function fetchStaffProfileById(staffId) {
     role: row.primary_role || null,
     regionId: row.region_id || null,
   };
+}
+
+async function fetchStaffProfileById(staffId) {
+  if (!Number.isFinite(staffId)) return null;
+  const [[row]] = await pool.query(
+    'SELECT id, display_name, name, email, primary_role, region_id FROM staff_profiles WHERE id = ? LIMIT 1',
+    [staffId]
+  );
+  return normaliseStaffProfileRow(row);
+}
+
+async function fetchStaffProfileBySub(sub) {
+  if (!sub || typeof sub !== 'string') return null;
+  const trimmed = sub.trim();
+  if (!trimmed) return null;
+  const [[row]] = await pool.query(
+    'SELECT id, display_name, name, email, primary_role, region_id FROM staff_profiles WHERE cognito_sub = ? LIMIT 1',
+    [trimmed]
+  );
+  return normaliseStaffProfileRow(row);
+}
+
+async function fetchStaffProfileByEmail(email) {
+  if (!email || typeof email !== 'string') return null;
+  const trimmed = email.trim();
+  if (!trimmed) return null;
+  const [[row]] = await pool.query(
+    'SELECT id, display_name, name, email, primary_role, region_id FROM staff_profiles WHERE LOWER(email) = LOWER(?) LIMIT 1',
+    [trimmed]
+  );
+  return normaliseStaffProfileRow(row);
+}
+
+async function resolveStaffProfileIdentifier(identifier) {
+  if (identifier === null || typeof identifier === 'undefined') return null;
+
+  if (Number.isFinite(identifier)) {
+    return fetchStaffProfileById(Number(identifier));
+  }
+
+  if (typeof identifier === 'string') {
+    const trimmed = identifier.trim();
+    if (!trimmed) return null;
+
+    if (/^\d+$/.test(trimmed)) {
+      const numericId = Number.parseInt(trimmed, 10);
+      const byId = await fetchStaffProfileById(numericId);
+      if (byId) return byId;
+    }
+
+    const bySub = await fetchStaffProfileBySub(trimmed);
+    if (bySub) return bySub;
+
+    if (trimmed.includes('@')) {
+      const byEmail = await fetchStaffProfileByEmail(trimmed);
+      if (byEmail) return byEmail;
+    }
+  }
+
+  return null;
 }
 
 async function fetchTrackingIdForCase(applicationId, caseId) {
@@ -2302,6 +2446,140 @@ function safeJsonParse(value, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+function mapActionPlanRow(plan) {
+  if (!plan) return null;
+  const metadata = safeJsonParse(plan.metadata_json, null);
+  const toNumber = value => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : 0;
+  };
+  return {
+    id: plan.id,
+    caseId: plan.case_id || plan.caseId || null,
+    name: plan.name || null,
+    status: plan.status || null,
+    effectiveDate: toIsoDateTime(plan.effective_date),
+    reviewDate: toIsoDateTime(plan.review_date),
+    activatedAt: toIsoDateTime(plan.activated_at),
+    closedAt: toIsoDateTime(plan.closed_at),
+    archivedAt: toIsoDateTime(plan.archived_at),
+    resultCode: plan.result_code || null,
+    resultDate: toDateOnly(plan.result_date),
+    outcomeSummary: plan.outcome_summary || null,
+    closureNotes: plan.closure_notes || null,
+    ownerStaffProfileId: plan.owner_staff_profile_id || null,
+    ownerUserId: plan.owner_user_id || null,
+    summary:
+      metadata && typeof metadata.summary !== 'undefined'
+        ? metadata.summary
+        : plan.notes || null,
+    interventionCount: toNumber(plan.intervention_count),
+    createdAt: toIsoDateTime(plan.created_at),
+    updatedAt: toIsoDateTime(plan.updated_at),
+    interventions: Array.isArray(plan.interventions) ? plan.interventions : undefined,
+  };
+}
+
+function normaliseInterventionStatus(status) {
+  if (!status) return 'planned';
+  const value = String(status).trim().toLowerCase();
+  if (['planned', 'planning', 'draft'].includes(value)) return 'planned';
+  if (['active', 'inprogress', 'in-progress', 'in_progress', 'progress'].includes(value)) return 'in_progress';
+  if (['complete', 'completed', 'closed', 'done', 'finished'].includes(value)) return 'completed';
+  if (['cancelled', 'canceled'].includes(value)) return 'cancelled';
+  if (['suspended', 'on-hold', 'on_hold'].includes(value)) return 'suspended';
+  return 'planned';
+}
+
+function isInterventionClosedStatus(status) {
+  const value = normaliseInterventionStatus(status);
+  return value === 'completed' || value === 'cancelled';
+}
+
+function mapInterventionRow(row) {
+  if (!row) return null;
+  const metadata = safeJsonParse(row.metadata_json, null) || {};
+  const toNumber = value => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
+  const normaliseStatus = status => (typeof status === 'string' ? status.trim().toLowerCase() : null);
+  const status = normaliseInterventionStatus(row.status);
+  const complianceMeta =
+    metadata && typeof metadata.compliance === 'object' && metadata.compliance !== null
+      ? metadata.compliance
+      : {};
+  const approvedAmount = toNumber(row.approved_amount);
+  const budgetAmount = toNumber(row.budget_amount);
+  const actualAmount = toNumber(row.actual_amount);
+  const costFromMeta = toNumber(metadata.cost);
+  const resolvedCost = approvedAmount ?? budgetAmount ?? costFromMeta;
+  const startDate = toDateOnly(row.start_date);
+  const endDate = toDateOnly(row.end_date);
+  let durationWeeks = toNumber(metadata.durationWeeks);
+  if (!Number.isFinite(durationWeeks) && startDate && endDate) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end >= start) {
+      const msPerDay = 24 * 60 * 60 * 1000;
+      const diffDays = Math.round((end.getTime() - start.getTime()) / msPerDay) + 1;
+      durationWeeks = Math.max(1, Math.round(diffDays / 7));
+    }
+  }
+
+  const notes =
+    typeof metadata.notes === 'string'
+      ? metadata.notes
+      : Array.isArray(metadata.notes)
+      ? metadata.notes.join('\n')
+      : row.notes || null;
+
+  const compliance = {
+    ilmp:
+      typeof complianceMeta.ilmp === 'string'
+        ? complianceMeta.ilmp
+        : isInterventionClosedStatus(status)
+        ? 'ok'
+        : 'pending',
+    finance:
+      typeof complianceMeta.finance === 'string'
+        ? complianceMeta.finance
+        : Number.isFinite(approvedAmount) || Number.isFinite(budgetAmount)
+        ? 'ok'
+        : 'pending',
+  };
+
+  return {
+    id: row.id,
+    caseId: row.case_id || null,
+    actionPlanId: row.action_plan_id || null,
+    code: metadata.code || row.intervention_type || null,
+    title: metadata.title || metadata.description || row.notes || null,
+    description: metadata.description || null,
+    status,
+    startDate,
+    endDate,
+    durationWeeks: Number.isFinite(durationWeeks) ? durationWeeks : null,
+    outcome: metadata.outcome || metadata.outcomeLabel || row.outcome_code || null,
+    outcomeCode: row.outcome_code || null,
+    fundingStream: row.funding_stream || metadata.fundingStream || null,
+    cost: Number.isFinite(resolvedCost) ? resolvedCost : null,
+    budgetAmount,
+    approvedAmount,
+    actualAmount,
+    potId: metadata.potId || metadata.budgetPotId || null,
+    noc: metadata.noc || null,
+    nocVersion: metadata.nocVersion || null,
+    notes,
+    compliance,
+    createdByStaffProfileId: row.created_by_staff_profile_id || null,
+    createdAt: toIsoDateTime(row.created_at),
+    updatedAt: toIsoDateTime(row.updated_at),
+    closedAt: toIsoDateTime(row.closed_at),
+    metadata: Object.keys(metadata).length ? metadata : null,
+  };
 }
 
 async function buildClientProfileFromApplication(connection, applicationId) {
@@ -11206,14 +11484,22 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     const [planRows] = await pool.query(
       `SELECT
          ap.id,
+         ap.case_id,
          ap.name,
          ap.status,
          ap.effective_date,
          ap.review_date,
+         ap.activated_at,
+         ap.closed_at,
+         ap.result_code,
+         ap.result_date,
+         ap.outcome_summary,
+         ap.closure_notes,
          ap.owner_staff_profile_id,
          ap.owner_user_id,
          ap.notes,
          ap.metadata_json,
+          ap.archived_at,
          ap.created_at,
          ap.updated_at,
          (
@@ -11227,23 +11513,32 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       [caseId]
     );
 
+    const planIds = planRows.map(plan => plan.id).filter(id => Number.isFinite(Number(id)));
+    const interventionsByPlan = new Map();
+    if (planIds.length > 0) {
+      const [interventionRows] = await pool.query(
+        `SELECT
+           ci.*
+         FROM iset_case_intervention ci
+         WHERE ci.action_plan_id IN (?)
+         ORDER BY ci.start_date IS NULL, ci.start_date ASC, ci.id ASC`,
+        [planIds]
+      );
+      interventionRows.forEach(row => {
+        const mapped = mapInterventionRow(row);
+        if (!mapped) return;
+        const key = row.action_plan_id || 0;
+        if (!interventionsByPlan.has(key)) interventionsByPlan.set(key, []);
+        interventionsByPlan.get(key).push(mapped);
+      });
+    }
+
     const actionPlans = planRows.map(plan => {
-      const metadata = safeJsonParse(plan.metadata_json, null);
-      return {
-        id: plan.id,
-        name: plan.name || null,
-        status: plan.status || null,
-        effectiveDate: toIsoDateTime(plan.effective_date),
-        reviewDate: toIsoDateTime(plan.review_date),
-        ownerStaffProfileId: plan.owner_staff_profile_id || null,
-        ownerUserId: plan.owner_user_id || null,
-        summary: metadata && typeof metadata.summary !== 'undefined' ? metadata.summary : plan.notes || null,
-        interventionCount: Number.isFinite(plan.intervention_count)
-          ? Number(plan.intervention_count)
-          : 0,
-        createdAt: toIsoDateTime(plan.created_at),
-        updatedAt: toIsoDateTime(plan.updated_at),
-      };
+      const interventions = interventionsByPlan.get(plan.id) || [];
+      const mapped = mapActionPlanRow({ ...plan, interventions });
+      mapped.interventions = interventions;
+      mapped.interventionCount = interventions.length;
+      return mapped;
     });
 
     const firstNameCandidates = [
@@ -11558,6 +11853,136 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
   }
 });
 
+app.get('/api/reference/intervention-codes', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT code, label, schema_version
+         FROM esdc_intervention_code
+        WHERE is_active = 1
+        ORDER BY display_order ASC, code ASC`
+    );
+    const codes = rows.map(row => ({
+      code: String(row.code),
+      label: row.label,
+      schemaVersion: row.schema_version || null,
+    }));
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.json({ codes });
+  } catch (error) {
+    console.error('GET /api/reference/intervention-codes failed:', error);
+    res.status(500).json({ error: 'intervention_codes_fetch_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.get('/api/reference/intervention-outcomes', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT code, label, schema_version
+         FROM esdc_intervention_outcome
+        WHERE is_active = 1
+        ORDER BY display_order ASC, code ASC`
+    );
+    const outcomes = rows.map(row => ({
+      code: String(row.code),
+      label: row.label,
+      schemaVersion: row.schema_version || null,
+    }));
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.json({ outcomes });
+  } catch (error) {
+    console.error('GET /api/reference/intervention-outcomes failed:', error);
+    res.status(500).json({ error: 'intervention_outcomes_fetch_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.get('/api/reference/funding-streams', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT code, label, description
+         FROM funding_stream
+        WHERE is_active = 1
+        ORDER BY display_order ASC, label ASC`
+    );
+    const streams = rows.map(row => ({
+      code: row.code,
+      label: row.label,
+      description: row.description || null,
+    }));
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.json({ streams });
+  } catch (error) {
+    console.error('GET /api/reference/funding-streams failed:', error);
+    res.status(500).json({ error: 'funding_streams_fetch_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.get('/api/reference/noc-versions', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT code, label, description
+         FROM noc_version
+        WHERE is_active = 1
+        ORDER BY display_order ASC, code ASC`
+    );
+    const versions = rows.map(row => ({
+      code: row.code,
+      label: row.label,
+      description: row.description || null,
+    }));
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.json({ versions });
+  } catch (error) {
+    console.error('GET /api/reference/noc-versions failed:', error);
+    res.status(500).json({ error: 'noc_versions_fetch_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.get('/api/reference/noc-codes', async (req, res) => {
+  const { version, q, limit } = req.query || {};
+  const versionCode = typeof version === 'string' ? version.trim() : null;
+  const searchTerm = typeof q === 'string' ? q.trim() : '';
+  const cappedLimit = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 100);
+
+  try {
+    const clauses = ['is_active = 1'];
+    const params = [];
+
+    if (versionCode) {
+      clauses.push('version_code = ?');
+      params.push(versionCode);
+    }
+
+    if (searchTerm) {
+      const normalised = normaliseString(searchTerm);
+      const lowered = normalised ? normalised.toLowerCase() : '';
+      clauses.push('(code LIKE ? OR search_title LIKE ?)');
+      params.push(`${normalised}%`, `%${lowered}%`);
+    }
+
+    const whereClause = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const sql = `
+      SELECT code, version_code, title
+        FROM noc_code
+        ${whereClause}
+        ORDER BY display_order ASC, code ASC
+        LIMIT ?
+    `;
+    params.push(cappedLimit);
+
+    const [rows] = await pool.query(sql, params);
+    const codes = rows.map(row => ({
+      code: row.code,
+      version: row.version_code,
+      title: row.title,
+    }));
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ codes });
+  } catch (error) {
+    console.error('GET /api/reference/noc-codes failed:', error);
+    res.status(500).json({ error: 'noc_codes_fetch_failed', detail: error?.message || String(error) });
+  }
+});
+
 app.post('/api/cases/:id/action-plans', async (req, res) => {
   const caseId = Number.parseInt(req.params.id, 10);
   if (!Number.isInteger(caseId) || caseId <= 0) {
@@ -11635,14 +12060,11 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
 
   let resolvedOwnerStaffProfileId = null;
   if (ownerStaffProfileId !== null && typeof ownerStaffProfileId !== 'undefined') {
-    const numericOwner = Number.parseInt(ownerStaffProfileId, 10);
-    if (Number.isInteger(numericOwner) && numericOwner > 0) {
-      const profile = await fetchStaffProfileById(numericOwner);
-      if (!profile) {
-        return res.status(404).json({ error: 'owner_not_found' });
-      }
-      resolvedOwnerStaffProfileId = numericOwner;
+    const ownerProfile = await resolveStaffProfileIdentifier(ownerStaffProfileId);
+    if (!ownerProfile) {
+      return res.status(404).json({ error: 'owner_not_found' });
     }
+    resolvedOwnerStaffProfileId = Number(ownerProfile.id);
   }
 
   if (resolvedOwnerStaffProfileId === null && Number.isFinite(identity.userId)) {
@@ -11679,17 +12101,22 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
 
     await connection.commit();
 
-    res.status(201).json({
-      id: result.insertId,
-      name: trimmedName || null,
-      status: planStatus,
-      effectiveDate: toIsoDateTime(startDate),
-      reviewDate: toIsoDateTime(reviewDate),
-      ownerStaffProfileId: resolvedOwnerStaffProfileId || null,
-      ownerUserId: null,
-      summary: summary || null,
-      interventionCount: 0,
-    });
+    const planRow = await fetchActionPlanWithCase(result.insertId);
+    const payload =
+      planRow ? mapActionPlanRow(planRow) : {
+        id: result.insertId,
+        caseId,
+        name: trimmedName || null,
+        status: planStatus,
+        effectiveDate: toIsoDateTime(startDate),
+        reviewDate: toIsoDateTime(reviewDate),
+        ownerStaffProfileId: resolvedOwnerStaffProfileId || null,
+        ownerUserId: null,
+        summary: summary || null,
+        interventionCount: 0,
+      };
+
+    res.status(201).json(payload);
   } catch (error) {
     if (connection) {
       try { await connection.rollback(); } catch (_) {}
@@ -11698,6 +12125,908 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     res.status(500).json({ error: 'create_action_plan_failed', detail: error?.message || String(error) });
   } finally {
     if (connection) connection.release();
+  }
+});
+
+app.get('/api/action-plans/:id/interventions', async (req, res) => {
+  const planId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(planId) || planId <= 0) {
+    return res.status(400).json({ error: 'invalid_action_plan_id' });
+  }
+
+  try {
+    const planRow = await fetchActionPlanWithCase(planId);
+    if (!planRow) {
+      return res.status(404).json({ error: 'action_plan_not_found' });
+    }
+
+    const accessError = validateCaseAccessForPlan(req, planRow);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+
+    const [rows] = await pool.query(
+      `SELECT
+         ci.*
+       FROM iset_case_intervention ci
+       WHERE ci.action_plan_id = ?
+       ORDER BY ci.start_date IS NULL, ci.start_date ASC, ci.id ASC`,
+      [planId]
+    );
+    const interventions = rows.map(mapInterventionRow).filter(Boolean);
+    res.status(200).json({ actionPlanId: planId, interventions });
+  } catch (error) {
+    console.error('GET /api/action-plans/:id/interventions failed:', error);
+    res.status(500).json({ error: 'fetch_interventions_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.post('/api/action-plans/:id/interventions', async (req, res) => {
+  const planId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(planId) || planId <= 0) {
+    return res.status(400).json({ error: 'invalid_action_plan_id' });
+  }
+
+  const {
+    code,
+    title,
+    status,
+    startDate = null,
+    endDate = null,
+    durationWeeks = null,
+    outcome = null,
+    cost = null,
+    potId = null,
+    fundingStream = null,
+    notes = null,
+    noc = null,
+    nocVersion = null,
+    approvedAmount = null,
+    actualAmount = null,
+  } = req.body || {};
+
+  const trimmedCode = typeof code === 'string' ? code.trim() : '';
+  if (!trimmedCode) {
+    return res.status(422).json({ error: 'code_required', message: 'Intervention code is required.' });
+  }
+
+  const trimmedTitle = typeof title === 'string' ? title.trim() : '';
+  if (!trimmedTitle) {
+    return res.status(422).json({ error: 'title_required', message: 'Intervention title is required.' });
+  }
+
+  const normaliseDate = value => {
+    if (!value && value !== 0) return null;
+    const str = String(value).trim();
+    if (!str) return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      return 'invalid';
+    }
+    return str;
+  };
+
+  const startDateValue = normaliseDate(startDate);
+  if (startDateValue === 'invalid') {
+    return res.status(422).json({ error: 'invalid_start_date', message: 'Start date must be in YYYY-MM-DD format.' });
+  }
+  const endDateValue = normaliseDate(endDate);
+  if (endDateValue === 'invalid') {
+    return res.status(422).json({ error: 'invalid_end_date', message: 'End date must be in YYYY-MM-DD format.' });
+  }
+
+  if (startDateValue && endDateValue && endDateValue < startDateValue) {
+    return res.status(422).json({ error: 'end_before_start', message: 'End date cannot be before start date.' });
+  }
+
+  const parseNumeric = value => {
+    if (value === null || typeof value === 'undefined' || value === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : NaN;
+  };
+
+  const durationWeeksValue = parseNumeric(durationWeeks);
+  if (Number.isNaN(durationWeeksValue)) {
+    return res.status(422).json({ error: 'invalid_duration', message: 'Duration (weeks) must be a number.' });
+  }
+  if (durationWeeksValue !== null && durationWeeksValue < 0) {
+    return res.status(422).json({ error: 'invalid_duration', message: 'Duration (weeks) cannot be negative.' });
+  }
+
+  const plannedCostValue = parseNumeric(cost);
+  if (Number.isNaN(plannedCostValue)) {
+    return res.status(422).json({ error: 'invalid_cost', message: 'Cost must be a number.' });
+  }
+
+  const approvedAmountValue = parseNumeric(approvedAmount);
+  if (Number.isNaN(approvedAmountValue)) {
+    return res.status(422).json({ error: 'invalid_approved_amount', message: 'Approved amount must be a number.' });
+  }
+
+  const actualAmountValue = parseNumeric(actualAmount);
+  if (Number.isNaN(actualAmountValue)) {
+    return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a number.' });
+  }
+
+  const statusValue = normaliseInterventionStatus(status);
+
+  try {
+    const planRow = await fetchActionPlanWithCase(planId);
+    if (!planRow) {
+      return res.status(404).json({ error: 'action_plan_not_found' });
+    }
+
+    const accessError = validateCaseAccessForPlan(req, planRow);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+
+    const planStatus = normaliseInterventionStatus(planRow.status);
+    if (planStatus === 'completed' || planStatus === 'cancelled' || planRow.status === 'archived' || planRow.status === 'closed') {
+      return res.status(409).json({ error: 'plan_not_editable', message: 'Cannot add interventions to a closed or archived plan.' });
+    }
+
+    const identity = getRequesterIdentity(req);
+    const createdBy = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
+
+    const trimmedOutcome = typeof outcome === 'string' ? outcome.trim() : '';
+    const trimmedPotId = typeof potId === 'string' ? potId.trim() : '';
+    const trimmedFundingStream = typeof fundingStream === 'string' ? fundingStream.trim() : '';
+    const trimmedNotes = typeof notes === 'string' ? notes.trim() : '';
+    const trimmedNoc = typeof noc === 'string' ? noc.trim() : '';
+    const trimmedNocVersion = typeof nocVersion === 'string' ? nocVersion.trim() : '';
+
+    const metadata = {};
+    metadata.code = trimmedCode;
+    metadata.title = trimmedTitle;
+    if (durationWeeksValue !== null) metadata.durationWeeks = durationWeeksValue;
+    if (Number.isFinite(plannedCostValue)) metadata.cost = plannedCostValue;
+    if (trimmedPotId) metadata.potId = trimmedPotId;
+    if (trimmedFundingStream) metadata.fundingStream = trimmedFundingStream;
+    if (trimmedNotes) metadata.notes = trimmedNotes;
+    if (trimmedOutcome) metadata.outcome = trimmedOutcome;
+    if (trimmedNoc) metadata.noc = trimmedNoc;
+    if (trimmedNocVersion) metadata.nocVersion = trimmedNocVersion;
+    metadata.compliance = { ilmp: 'pending', finance: 'pending' };
+
+    const [result] = await pool.query(
+      `INSERT INTO iset_case_intervention
+         (case_id,
+          action_plan_id,
+          intervention_type,
+          status,
+          start_date,
+          end_date,
+          funding_stream,
+          budget_amount,
+          approved_amount,
+          actual_amount,
+          outcome_code,
+          notes,
+          metadata_json,
+          created_by_staff_profile_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        planRow.case_id,
+        planId,
+        trimmedCode,
+        statusValue,
+        startDateValue || null,
+        endDateValue || null,
+        trimmedFundingStream || null,
+        Number.isFinite(plannedCostValue) ? plannedCostValue : null,
+        Number.isFinite(approvedAmountValue) ? approvedAmountValue : null,
+        Number.isFinite(actualAmountValue) ? actualAmountValue : null,
+        trimmedOutcome || null,
+        trimmedNotes || null,
+        Object.keys(metadata).length ? JSON.stringify(metadata) : null,
+        createdBy,
+      ]
+    );
+
+    await pool.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [planId]);
+
+    const interventionId = result.insertId;
+    const interventionRow = await fetchInterventionWithCase(interventionId);
+    const payload = mapInterventionRow(interventionRow);
+    res.status(201).json(payload);
+  } catch (error) {
+    console.error('POST /api/action-plans/:id/interventions failed:', error);
+    res.status(500).json({ error: 'create_intervention_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.patch('/api/interventions/:id', async (req, res) => {
+  const interventionId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(interventionId) || interventionId <= 0) {
+    return res.status(400).json({ error: 'invalid_intervention_id' });
+  }
+
+  const body = req.body || {};
+  if (!body || typeof body !== 'object' || Object.keys(body).length === 0) {
+    return res.status(400).json({ error: 'no_updates', message: 'No intervention fields provided for update.' });
+  }
+
+  const parseNumeric = value => {
+    if (value === null || typeof value === 'undefined' || value === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : NaN;
+  };
+  const normaliseDate = value => {
+    if (!Object.prototype.hasOwnProperty.call(body, value)) return undefined;
+    const raw = body[value];
+    if (raw === null || raw === '') return null;
+    const str = String(raw).trim();
+    if (!str) return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      return 'invalid';
+    }
+    return str;
+  };
+
+  const startDateValue = normaliseDate('startDate');
+  if (startDateValue === 'invalid') {
+    return res.status(422).json({ error: 'invalid_start_date', message: 'Start date must be in YYYY-MM-DD format.' });
+  }
+  const endDateValue = normaliseDate('endDate');
+  if (endDateValue === 'invalid') {
+    return res.status(422).json({ error: 'invalid_end_date', message: 'End date must be in YYYY-MM-DD format.' });
+  }
+  if (
+    typeof startDateValue === 'string' &&
+    typeof endDateValue === 'string' &&
+    startDateValue !== null &&
+    endDateValue !== null &&
+    endDateValue < startDateValue
+  ) {
+    return res.status(422).json({ error: 'end_before_start', message: 'End date cannot be before start date.' });
+  }
+
+  const durationProvided = Object.prototype.hasOwnProperty.call(body, 'durationWeeks');
+  const durationWeeksValue = durationProvided ? parseNumeric(body.durationWeeks) : undefined;
+  if (Number.isNaN(durationWeeksValue)) {
+    return res.status(422).json({ error: 'invalid_duration', message: 'Duration (weeks) must be a number.' });
+  }
+  if (durationWeeksValue !== undefined && durationWeeksValue !== null && durationWeeksValue < 0) {
+    return res.status(422).json({ error: 'invalid_duration', message: 'Duration (weeks) cannot be negative.' });
+  }
+
+  const costProvided = Object.prototype.hasOwnProperty.call(body, 'cost');
+  const plannedCostValue = costProvided ? parseNumeric(body.cost) : undefined;
+  if (Number.isNaN(plannedCostValue)) {
+    return res.status(422).json({ error: 'invalid_cost', message: 'Cost must be a number.' });
+  }
+
+  const approvedProvided = Object.prototype.hasOwnProperty.call(body, 'approvedAmount');
+  const approvedAmountValue = approvedProvided ? parseNumeric(body.approvedAmount) : undefined;
+  if (Number.isNaN(approvedAmountValue)) {
+    return res.status(422).json({ error: 'invalid_approved_amount', message: 'Approved amount must be a number.' });
+  }
+
+  const actualProvided = Object.prototype.hasOwnProperty.call(body, 'actualAmount');
+  const actualAmountValue = actualProvided ? parseNumeric(body.actualAmount) : undefined;
+  if (Number.isNaN(actualAmountValue)) {
+    return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a number.' });
+  }
+
+  const statusProvided = Object.prototype.hasOwnProperty.call(body, 'status');
+  const statusValue = statusProvided ? normaliseInterventionStatus(body.status) : undefined;
+  if (statusValue === 'completed' || statusValue === 'cancelled') {
+    return res.status(422).json({
+      error: 'use_close_endpoint',
+      message: 'Use POST /api/interventions/:id/close to complete or cancel an intervention.',
+    });
+  }
+
+  try {
+    const interventionRow = await fetchInterventionWithCase(interventionId);
+    if (!interventionRow) {
+      return res.status(404).json({ error: 'intervention_not_found' });
+    }
+
+    const planId = interventionRow.action_plan_id;
+    let planRow = null;
+    if (Number.isInteger(planId)) {
+      planRow = await fetchActionPlanWithCase(planId);
+      if (!planRow) {
+        return res.status(404).json({ error: 'action_plan_not_found' });
+      }
+      const accessError = validateCaseAccessForPlan(req, planRow);
+      if (accessError) {
+        return res.status(accessError.status).json(accessError.body);
+      }
+      if (['closed', 'archived'].includes((planRow.status || '').toLowerCase())) {
+        return res.status(409).json({ error: 'plan_not_editable', message: 'Cannot modify interventions on a closed or archived plan.' });
+      }
+    } else {
+      const caseRow = await fetchCaseRow(interventionRow.case_id);
+      if (!caseRow) {
+        return res.status(404).json({ error: 'case_not_found' });
+      }
+      const role = inferUserRole(req);
+      const identity = getRequesterIdentity(req);
+      const allowAll =
+        role === 'System Administrator' ||
+        role === 'Program Administrator' ||
+        role === 'SysAdmin' ||
+        role === 'ProgramAdmin';
+      if (!allowAll) {
+        if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+          const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : null;
+          if (!Number.isFinite(regionId) || Number(caseRow.assigned_to_user_id) !== regionId) {
+            return res.status(403).json({ error: 'forbidden' });
+          }
+        } else if (role === 'Application Assessor' || role === 'Adjudicator') {
+          const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
+          if (!Number.isFinite(requesterId) || Number(caseRow.assigned_to_user_id) !== requesterId) {
+            return res.status(403).json({ error: 'forbidden' });
+          }
+        } else {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+      }
+    }
+
+    const updates = [];
+    const params = [];
+    let metadataChanged = false;
+    const metadata = safeJsonParse(interventionRow.metadata_json, null) || {};
+
+    if (Object.prototype.hasOwnProperty.call(body, 'code')) {
+      const trimmedCode = typeof body.code === 'string' ? body.code.trim() : '';
+      if (!trimmedCode) {
+        return res.status(422).json({ error: 'code_required', message: 'Intervention code is required.' });
+      }
+      updates.push('intervention_type = ?');
+      params.push(trimmedCode);
+      metadata.code = trimmedCode;
+      metadataChanged = true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'title')) {
+      const trimmedTitle = typeof body.title === 'string' ? body.title.trim() : '';
+      if (!trimmedTitle) {
+        return res.status(422).json({ error: 'title_required', message: 'Intervention title is required.' });
+      }
+      metadata.title = trimmedTitle;
+      metadataChanged = true;
+    }
+
+    if (statusProvided) {
+      updates.push('status = ?');
+      params.push(statusValue);
+    }
+
+    if (typeof startDateValue !== 'undefined') {
+      updates.push('start_date = ?');
+      params.push(startDateValue || null);
+    }
+    if (typeof endDateValue !== 'undefined') {
+      updates.push('end_date = ?');
+      params.push(endDateValue || null);
+    }
+
+    if (durationProvided) {
+      if (durationWeeksValue === null) {
+        delete metadata.durationWeeks;
+      } else {
+        metadata.durationWeeks = durationWeeksValue;
+      }
+      metadataChanged = true;
+    }
+
+    if (costProvided) {
+      updates.push('budget_amount = ?');
+      params.push(plannedCostValue === null ? null : plannedCostValue);
+      if (plannedCostValue === null) {
+        delete metadata.cost;
+      } else {
+        metadata.cost = plannedCostValue;
+      }
+      metadataChanged = true;
+    }
+
+    if (approvedProvided) {
+      updates.push('approved_amount = ?');
+      params.push(approvedAmountValue === null ? null : approvedAmountValue);
+    }
+
+    if (actualProvided) {
+      updates.push('actual_amount = ?');
+      params.push(actualAmountValue === null ? null : actualAmountValue);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'outcome')) {
+      const trimmedOutcome = typeof body.outcome === 'string' ? body.outcome.trim() : '';
+      updates.push('outcome_code = ?');
+      params.push(trimmedOutcome || null);
+      if (trimmedOutcome) {
+        metadata.outcome = trimmedOutcome;
+      } else {
+        delete metadata.outcome;
+      }
+      metadataChanged = true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'potId')) {
+      const trimmedPotId = typeof body.potId === 'string' ? body.potId.trim() : '';
+      if (trimmedPotId) {
+        metadata.potId = trimmedPotId;
+      } else {
+        delete metadata.potId;
+      }
+      metadataChanged = true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'fundingStream')) {
+      const trimmedFundingStream = typeof body.fundingStream === 'string' ? body.fundingStream.trim() : '';
+      updates.push('funding_stream = ?');
+      params.push(trimmedFundingStream || null);
+      if (trimmedFundingStream) {
+        metadata.fundingStream = trimmedFundingStream;
+      } else {
+        delete metadata.fundingStream;
+      }
+      metadataChanged = true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'notes')) {
+      const trimmedNotes = typeof body.notes === 'string' ? body.notes.trim() : '';
+      updates.push('notes = ?');
+      params.push(trimmedNotes || null);
+      if (trimmedNotes) {
+        metadata.notes = trimmedNotes;
+      } else {
+        delete metadata.notes;
+      }
+      metadataChanged = true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'noc')) {
+      const trimmedNoc = typeof body.noc === 'string' ? body.noc.trim() : '';
+      if (trimmedNoc) {
+        metadata.noc = trimmedNoc;
+      } else {
+        delete metadata.noc;
+      }
+      metadataChanged = true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'nocVersion')) {
+      const trimmedNocVersion = typeof body.nocVersion === 'string' ? body.nocVersion.trim() : '';
+      if (trimmedNocVersion) {
+        metadata.nocVersion = trimmedNocVersion;
+      } else {
+        delete metadata.nocVersion;
+      }
+      metadataChanged = true;
+    }
+
+    if (!updates.length && !metadataChanged) {
+      return res.status(400).json({ error: 'no_updates', message: 'No intervention fields provided for update.' });
+    }
+
+    const metadataCopy = { ...metadata };
+    Object.keys(metadataCopy).forEach(key => {
+      if (metadataCopy[key] === undefined) {
+        delete metadataCopy[key];
+      }
+      if (metadataCopy[key] === null && key !== 'compliance') {
+        delete metadataCopy[key];
+      }
+    });
+    if (metadataCopy.compliance && typeof metadataCopy.compliance !== 'object') {
+      delete metadataCopy.compliance;
+    }
+
+    if (metadataChanged) {
+      updates.push('metadata_json = ?');
+      params.push(Object.keys(metadataCopy).length ? JSON.stringify(metadataCopy) : null);
+    }
+
+    updates.push('updated_at = NOW()');
+
+    params.push(interventionId);
+    const sql = `UPDATE iset_case_intervention SET ${updates.join(', ')} WHERE id = ?`;
+    await pool.query(sql, params);
+
+    if (planId) {
+      await pool.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [planId]);
+    }
+
+    const updatedRow = await fetchInterventionWithCase(interventionId);
+    const payload = mapInterventionRow(updatedRow);
+    res.status(200).json(payload);
+  } catch (error) {
+    console.error('PATCH /api/interventions/:id failed:', error);
+    res.status(500).json({ error: 'update_intervention_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.post('/api/interventions/:id/close', async (req, res) => {
+  const interventionId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(interventionId) || interventionId <= 0) {
+    return res.status(400).json({ error: 'invalid_intervention_id' });
+  }
+
+  const {
+    outcome,
+    status = 'completed',
+    actualAmount = null,
+    completionDate = null,
+    notes = null,
+  } = req.body || {};
+
+  const statusValue = normaliseInterventionStatus(status);
+  if (!['completed', 'cancelled'].includes(statusValue)) {
+    return res.status(422).json({ error: 'invalid_status', message: 'Status must be completed or cancelled.' });
+  }
+
+  const trimmedOutcome = typeof outcome === 'string' ? outcome.trim() : '';
+  if (!trimmedOutcome) {
+    return res.status(422).json({ error: 'outcome_required', message: 'Outcome code is required to close an intervention.' });
+  }
+
+  const parseNumeric = value => {
+    if (value === null || typeof value === 'undefined' || value === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : NaN;
+  };
+  const actualAmountValue = parseNumeric(actualAmount);
+  if (Number.isNaN(actualAmountValue)) {
+    return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a number.' });
+  }
+
+  const normaliseDate = raw => {
+    if (!raw && raw !== 0) return null;
+    const str = String(raw).trim();
+    if (!str) return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      return 'invalid';
+    }
+    return str;
+  };
+  const completionDateValue = normaliseDate(completionDate);
+  if (completionDateValue === 'invalid') {
+    return res.status(422).json({ error: 'invalid_completion_date', message: 'Completion date must be in YYYY-MM-DD format.' });
+  }
+
+  try {
+    const interventionRow = await fetchInterventionWithCase(interventionId);
+    if (!interventionRow) {
+      return res.status(404).json({ error: 'intervention_not_found' });
+    }
+
+    const planId = interventionRow.action_plan_id;
+    if (!planId) {
+      return res.status(409).json({ error: 'intervention_unlinked', message: 'Cannot close an intervention that is not linked to an action plan.' });
+    }
+
+    const planRow = await fetchActionPlanWithCase(planId);
+    if (!planRow) {
+      return res.status(404).json({ error: 'action_plan_not_found' });
+    }
+
+    const accessError = validateCaseAccessForPlan(req, planRow);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+
+    const currentStatus = normaliseInterventionStatus(interventionRow.status);
+    if (['completed', 'cancelled'].includes(currentStatus)) {
+      return res.status(200).json(mapInterventionRow(interventionRow));
+    }
+
+    const metadata = safeJsonParse(interventionRow.metadata_json, null) || {};
+    if (!metadata.compliance || typeof metadata.compliance !== 'object') {
+      metadata.compliance = { ilmp: 'pending', finance: 'pending' };
+    }
+    metadata.outcome = trimmedOutcome;
+    if (Number.isFinite(actualAmountValue)) {
+      metadata.actualAmount = actualAmountValue;
+      metadata.compliance.finance = 'ok';
+    } else {
+      delete metadata.actualAmount;
+      metadata.compliance.finance = metadata.compliance.finance || 'pending';
+    }
+    metadata.compliance.ilmp = 'ok';
+
+    const trimmedNotes = typeof notes === 'string' ? notes.trim() : '';
+    const updates = [
+      'status = ?',
+      'outcome_code = ?',
+      'actual_amount = ?',
+      'closed_at = NOW()',
+      'metadata_json = ?',
+    ];
+    const params = [
+      statusValue,
+      trimmedOutcome,
+      Number.isFinite(actualAmountValue) ? actualAmountValue : null,
+    ];
+
+    Object.keys(metadata).forEach(key => {
+      if (metadata[key] === undefined) {
+        delete metadata[key];
+      }
+    });
+
+    params.push(JSON.stringify(metadata));
+
+    if (completionDateValue !== null) {
+      updates.push('end_date = ?');
+      params.push(completionDateValue || null);
+    }
+    if (completionDateValue === null) {
+      // keep alignment with params
+    }
+
+    if (trimmedNotes) {
+      updates.push('notes = ?');
+      params.push(trimmedNotes);
+      metadata.notes = trimmedNotes;
+    } else if (notes !== undefined) {
+      updates.push('notes = NULL');
+      delete metadata.notes;
+    }
+
+    updates.push('updated_at = NOW()');
+
+    params.push(interventionId);
+    const sql = `UPDATE iset_case_intervention SET ${updates.join(', ')} WHERE id = ?`;
+    await pool.query(sql, params);
+    await pool.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [planId]);
+
+    const updatedRow = await fetchInterventionWithCase(interventionId);
+    const payload = mapInterventionRow(updatedRow);
+    res.status(200).json(payload);
+  } catch (error) {
+    console.error('POST /api/interventions/:id/close failed:', error);
+    res.status(500).json({ error: 'close_intervention_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.post('/api/action-plans/:id/activate', async (req, res) => {
+  const planId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(planId) || planId <= 0) {
+    return res.status(400).json({ error: 'invalid_action_plan_id' });
+  }
+
+  try {
+    const planRow = await fetchActionPlanWithCase(planId);
+    if (!planRow) {
+      return res.status(404).json({ error: 'action_plan_not_found' });
+    }
+
+    const accessError = validateCaseAccessForPlan(req, planRow);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+
+    if (planRow.status === 'active') {
+      return res.status(200).json(mapActionPlanRow(planRow));
+    }
+    if (planRow.status !== 'draft') {
+      return res.status(409).json({ error: 'invalid_status', detail: 'action_plan_not_draft' });
+    }
+
+    const [[existingActive]] = await pool.query(
+      `SELECT id
+         FROM iset_case_action_plan
+        WHERE case_id = ?
+          AND id <> ?
+          AND status = 'active'
+          AND archived_at IS NULL
+        LIMIT 1`,
+      [planRow.case_id, planId]
+    );
+    if (existingActive) {
+      return res.status(409).json({ error: 'active_plan_exists', detail: 'case_already_has_active_plan' });
+    }
+
+    try {
+      await pool.query(
+        `UPDATE iset_case_action_plan
+           SET status = 'active',
+               activated_at = NOW(),
+               closed_at = NULL,
+               archived_at = NULL,
+               result_code = NULL,
+               result_date = NULL,
+               outcome_summary = NULL,
+               closure_notes = NULL,
+               updated_at = NOW()
+         WHERE id = ?`,
+        [planId]
+      );
+    } catch (error) {
+      if (error && error.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ error: 'active_plan_exists', detail: 'case_already_has_active_plan' });
+      }
+      throw error;
+    }
+
+    const updatedRow = await fetchActionPlanWithCase(planId);
+    res.status(200).json(mapActionPlanRow(updatedRow));
+  } catch (error) {
+    console.error('POST /api/action-plans/:id/activate failed:', error);
+    res.status(500).json({ error: 'activate_action_plan_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.post('/api/action-plans/:id/close', async (req, res) => {
+  const planId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(planId) || planId <= 0) {
+    return res.status(400).json({ error: 'invalid_action_plan_id' });
+  }
+
+  const { resultCode, resultDate, outcomeSummary = null, closureNotes = null } = req.body || {};
+  const trimmedResultCode = typeof resultCode === 'string' ? resultCode.trim() : '';
+  if (!trimmedResultCode) {
+    return res.status(422).json({ error: 'result_code_required', message: 'Result code is required to close an action plan.' });
+  }
+  const resultDateStr = typeof resultDate === 'string' ? resultDate.trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(resultDateStr)) {
+    return res.status(422).json({ error: 'invalid_result_date', message: 'Result date must be in YYYY-MM-DD format.' });
+  }
+
+  try {
+    const planRow = await fetchActionPlanWithCase(planId);
+    if (!planRow) {
+      return res.status(404).json({ error: 'action_plan_not_found' });
+    }
+
+    const accessError = validateCaseAccessForPlan(req, planRow);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+
+    if (planRow.status === 'closed') {
+      return res.status(200).json(mapActionPlanRow(planRow));
+    }
+    if (planRow.status !== 'active') {
+      return res.status(409).json({ error: 'invalid_status', detail: 'action_plan_not_active' });
+    }
+
+    if (planRow.effective_date && resultDateStr < toDateOnly(planRow.effective_date)) {
+      return res.status(422).json({ error: 'result_date_before_start', message: 'Result date cannot be before the plan start date.' });
+    }
+
+    const summaryValue =
+      typeof outcomeSummary === 'string' ? outcomeSummary.trim() || null : null;
+    const closureNotesValue =
+      typeof closureNotes === 'string' ? closureNotes.trim() || null : null;
+
+    await pool.query(
+      `UPDATE iset_case_action_plan
+         SET status = 'closed',
+             closed_at = NOW(),
+             archived_at = NULL,
+             result_code = ?,
+             result_date = ?,
+             outcome_summary = ?,
+             closure_notes = ?,
+             updated_at = NOW()
+       WHERE id = ?`,
+      [trimmedResultCode, resultDateStr, summaryValue, closureNotesValue, planId]
+    );
+
+    const updatedRow = await fetchActionPlanWithCase(planId);
+    res.status(200).json(mapActionPlanRow(updatedRow));
+  } catch (error) {
+    console.error('POST /api/action-plans/:id/close failed:', error);
+    res.status(500).json({ error: 'close_action_plan_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.post('/api/action-plans/:id/archive', async (req, res) => {
+  const planId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(planId) || planId <= 0) {
+    return res.status(400).json({ error: 'invalid_action_plan_id' });
+  }
+
+  const { closureNotes = null } = req.body || {};
+  const closureNotesValue =
+    typeof closureNotes === 'string' ? closureNotes.trim() || null : null;
+
+  try {
+    const planRow = await fetchActionPlanWithCase(planId);
+    if (!planRow) {
+      return res.status(404).json({ error: 'action_plan_not_found' });
+    }
+
+    const accessError = validateCaseAccessForPlan(req, planRow);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+
+    if (planRow.status === 'active') {
+      return res.status(409).json({ error: 'invalid_status', detail: 'close_plan_before_archive' });
+    }
+
+    if (planRow.status === 'archived') {
+      return res.status(200).json(mapActionPlanRow(planRow));
+    }
+
+    await pool.query(
+      `UPDATE iset_case_action_plan
+         SET status = 'archived',
+             archived_at = NOW(),
+             closure_notes = COALESCE(?, closure_notes),
+             updated_at = NOW()
+       WHERE id = ?`,
+      [closureNotesValue, planId]
+    );
+
+    const updatedRow = await fetchActionPlanWithCase(planId);
+    res.status(200).json(mapActionPlanRow(updatedRow));
+  } catch (error) {
+    console.error('POST /api/action-plans/:id/archive failed:', error);
+    res.status(500).json({ error: 'archive_action_plan_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.patch('/api/action-plans/:id', async (req, res) => {
+  const planId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(planId) || planId <= 0) {
+    return res.status(400).json({ error: 'invalid_action_plan_id' });
+  }
+
+  const { name, startDate = null, reviewDate = null, summary = null } = req.body || {};
+  const trimmedName = typeof name === 'string' ? name.trim() : null;
+  if (!trimmedName) {
+    return res.status(422).json({ error: 'name_required', message: 'Action plan name is required.' });
+  }
+  if (startDate && reviewDate && reviewDate < startDate) {
+    return res.status(422).json({ error: 'invalid_dates', message: 'Review date cannot be before start date.' });
+  }
+
+  try {
+    const planRow = await fetchActionPlanWithCase(planId);
+    if (!planRow) {
+      return res.status(404).json({ error: 'action_plan_not_found' });
+    }
+
+    const accessError = validateCaseAccessForPlan(req, planRow);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+
+    const status = (planRow.status || '').toLowerCase();
+    if (status === 'archived') {
+      return res.status(409).json({ error: 'invalid_status', detail: 'archived_plan_read_only' });
+    }
+    if (status === 'closed') {
+      return res.status(409).json({ error: 'invalid_status', detail: 'closed_plan_read_only' });
+    }
+
+    const metadata = safeJsonParse(planRow.metadata_json, null) || {};
+    if (summary !== null && typeof summary !== 'undefined') {
+      metadata.summary = summary || null;
+    }
+
+    await pool.query(
+      `UPDATE iset_case_action_plan
+         SET name = ?,
+             effective_date = ?,
+             review_date = ?,
+             notes = ?,
+             metadata_json = ?
+       WHERE id = ?`,
+      [
+        trimmedName,
+        startDate || null,
+        reviewDate || null,
+        summary || null,
+        Object.keys(metadata).length ? JSON.stringify(metadata) : null,
+        planId,
+      ]
+    );
+
+    const updatedRow = await fetchActionPlanWithCase(planId);
+    res.status(200).json(mapActionPlanRow(updatedRow));
+  } catch (error) {
+    console.error('PATCH /api/action-plans/:id failed:', error);
+    res.status(500).json({ error: 'update_action_plan_failed', detail: error?.message || String(error) });
   }
 });
 

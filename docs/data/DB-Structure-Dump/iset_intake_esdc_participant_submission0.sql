@@ -1,0 +1,75 @@
+-- MySQL dump 10.13  Distrib 8.0.41, for Win64 (x86_64)
+--
+-- Host: localhost    Database: iset_intake
+-- ------------------------------------------------------
+-- Server version	8.0.40
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!50503 SET NAMES utf8 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+
+--
+-- Table structure for table `esdc_participant_submission`
+--
+
+DROP TABLE IF EXISTS `esdc_participant_submission`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `esdc_participant_submission` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `case_id` bigint unsigned NOT NULL,
+  `application_id` bigint unsigned DEFAULT NULL,
+  `readiness_status` enum('ready','needs_review','blocked') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'needs_review',
+  `readiness_summary` json DEFAULT NULL,
+  `warnings` json DEFAULT NULL,
+  `blocking_issues` json DEFAULT NULL,
+  `last_validated_at` timestamp NULL DEFAULT NULL,
+  `submission_status` enum('pending','submitted','accepted','rejected') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
+  `submitted_at` timestamp NULL DEFAULT NULL,
+  `submitted_by_user_id` int DEFAULT NULL,
+  `payload_snapshot` json DEFAULT NULL,
+  `payload_storage_key` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `payload_checksum` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `rejection_reason` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_esdc_participant_submission_case` (`case_id`),
+  KEY `idx_esdc_participant_submission_readiness` (`readiness_status`),
+  KEY `idx_esdc_participant_submission_submission_status` (`submission_status`),
+  KEY `idx_esdc_participant_submission_last_validated` (`last_validated_at`),
+  KEY `fk_esdc_participant_submission_application` (`application_id`),
+  KEY `fk_esdc_participant_submission_user` (`submitted_by_user_id`),
+  CONSTRAINT `fk_esdc_participant_submission_application` FOREIGN KEY (`application_id`) REFERENCES `iset_application` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_esdc_participant_submission_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_esdc_participant_submission_user` FOREIGN KEY (`submitted_by_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `esdc_participant_submission`
+--
+
+LOCK TABLES `esdc_participant_submission` WRITE;
+/*!40000 ALTER TABLE `esdc_participant_submission` DISABLE KEYS */;
+INSERT INTO `esdc_participant_submission` VALUES (1,1,1,'needs_review',NULL,NULL,NULL,NULL,'pending',NULL,NULL,NULL,NULL,NULL,NULL,'2025-10-27 18:35:23','2025-10-27 18:35:23'),(2,2,2,'needs_review',NULL,NULL,NULL,NULL,'pending',NULL,NULL,NULL,NULL,NULL,NULL,'2025-10-27 21:43:39','2025-10-27 21:43:39');
+/*!40000 ALTER TABLE `esdc_participant_submission` ENABLE KEYS */;
+UNLOCK TABLES;
+/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
+
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+
+-- Dump completed on 2025-10-28 13:56:20
