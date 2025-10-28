@@ -313,13 +313,22 @@ const InterventionModal = ({
     return total;
   }, [isRecurringCost, recurringAmountNumber, recurringOccurrencesNumber]);
 
-  const recurringTotalDisplay = useMemo(() => {
-    if (recurringTotal === null) return "—";
-    return recurringTotal.toLocaleString("en-CA", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+  useEffect(() => {
+    if (!isRecurringCost) return;
+    if (recurringTotal === null) return;
+    const formatted = recurringTotal.toFixed(2);
+    setForm(current => {
+      if (current.cost === formatted) return current;
+      return { ...current, cost: formatted };
     });
-  }, [recurringTotal]);
+  }, [isRecurringCost, recurringTotal]);
+
+  const costInputValue = useMemo(() => {
+    if (isRecurringCost) {
+      return recurringTotal !== null ? recurringTotal.toFixed(2) : "";
+    }
+    return form.cost;
+  }, [isRecurringCost, recurringTotal, form.cost]);
 
   const applyFieldSideEffects = (draft, field, value) => {
     const next = { ...draft, [field]: value };
@@ -705,11 +714,11 @@ const InterventionModal = ({
           <SpaceBetween size="s">
             <Header variant="h3">Financial details</Header>
             <ColumnLayout columns={3} variant="text-grid">
-              <FormField label="Cost type">
-                <RadioGroup
-                  onChange={({ detail }) => handleChange("costType", detail.value)}
-                  value={form.costType}
-                  items={[
+            <FormField label="Cost type">
+              <RadioGroup
+                onChange={({ detail }) => handleChange("costType", detail.value)}
+                value={form.costType}
+                items={[
                     { value: "one_time", label: "One-time total" },
                     { value: "recurring", label: "Recurring schedule" },
                   ]}
@@ -723,34 +732,18 @@ const InterventionModal = ({
                     : undefined
                 }
               >
-                <Input
-                  value={form.cost}
-                  onChange={({ detail }) => handleChange("cost", detail.value)}
-                  placeholder="e.g. 42000"
-                />
-              </FormField>
-              <FormField label="Budget pot">
-                <Input value={form.potId} onChange={({ detail }) => handleChange("potId", detail.value)} />
-              </FormField>
-              <FormField label="Funding stream">
-                <Select
-                  selectedOption={selectedFundingStreamOption}
-                  onChange={({ detail }) => handleChange("fundingStream", detail.selectedOption?.value || "")}
-                  options={fundingStreamSelectOptions}
-                  filteringType="auto"
-                  placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
-                  statusType={fundingStreamsLoading ? "loading" : "finished"}
-                  empty={
-                    fundingStreamsLoading ? undefined : "No funding streams available. Please try again later."
-                  }
-                  disabled={fundingStreamsLoading}
-                />
-              </FormField>
-              {isRecurringCost && (
-                <>
-                  <FormField label="Recurrence period">
-                    <Select
-                      selectedOption={selectedRecurrencePeriodOption}
+              <Input
+                value={costInputValue}
+                onChange={({ detail }) => handleChange("cost", detail.value)}
+                placeholder="e.g. 42000"
+                readOnly={isRecurringCost}
+              />
+            </FormField>
+            {isRecurringCost && (
+              <>
+                <FormField label="Recurrence period">
+                  <Select
+                    selectedOption={selectedRecurrencePeriodOption}
                       onChange={({ detail }) =>
                         handleChange("recurringPeriod", detail.selectedOption?.value || "")
                       }
@@ -771,19 +764,34 @@ const InterventionModal = ({
                   >
                     <Input
                       value={form.recurringOccurrences}
-                      onChange={({ detail }) => handleChange("recurringOccurrences", detail.value)}
-                      placeholder="e.g. 20"
-                    />
-                  </FormField>
-                  <FormField label="Calculated total">
-                    <Box variant="p" fontWeight="bold">
-                      {recurringTotalDisplay}
-                    </Box>
-                  </FormField>
-                </>
-              )}
-            </ColumnLayout>
-          </SpaceBetween>
+                    onChange={({ detail }) => handleChange("recurringOccurrences", detail.value)}
+                    placeholder="e.g. 20"
+                  />
+                </FormField>
+              </>
+            )}
+            <FormField
+              label="Budget pot"
+              description="Budget pot lookup will be enabled in an upcoming patch."
+            >
+              <Input value={form.potId} onChange={({ detail }) => handleChange("potId", detail.value)} />
+            </FormField>
+            <FormField label="Funding stream">
+              <Select
+                selectedOption={selectedFundingStreamOption}
+                onChange={({ detail }) => handleChange("fundingStream", detail.selectedOption?.value || "")}
+                options={fundingStreamSelectOptions}
+                filteringType="auto"
+                placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
+                statusType={fundingStreamsLoading ? "loading" : "finished"}
+                empty={
+                  fundingStreamsLoading ? undefined : "No funding streams available. Please try again later."
+                }
+                disabled={fundingStreamsLoading}
+              />
+            </FormField>
+          </ColumnLayout>
+        </SpaceBetween>
           <SpaceBetween size="s">
             <Header variant="h3">Notes</Header>
             <FormField label="Notes">
@@ -806,4 +814,3 @@ const InterventionModal = ({
 };
 
 export default InterventionModal;
-
