@@ -567,234 +567,243 @@ const InterventionModal = ({
             {error}
           </Alert>
         )}
-        <ColumnLayout columns={3} variant="text-grid">
-          <SpaceBetween size="m">
+        <SpaceBetween size="xl">
+          <SpaceBetween size="s">
             <Header variant="h3">Intervention details</Header>
-            <FormField label="Intervention code" stretch>
-              <Select
-                selectedOption={selectedCodeOption}
-                onChange={({ detail }) => handleChange("code", detail.selectedOption?.value || "")}
-                options={selectOptions}
-                filteringType="auto"
-                placeholder={codesLoading ? "Loading intervention codes" : "Select intervention code"}
-                statusType={codesLoading ? "loading" : "finished"}
-                empty={
-                  codesLoading
-                    ? undefined
-                    : "No intervention codes available. Please try again later."
-                }
-                disabled={codesLoading}
-                autoFocus
-              />
-            </FormField>
-            <FormField label="Title" stretch>
-              <Input value={form.title} onChange={({ detail }) => handleChange("title", detail.value)} />
-            </FormField>
-            <FormField label="Status">
-              <Select
-                selectedOption={selectedStatusOption}
-                onChange={({ detail }) => handleChange("status", detail.selectedOption?.value || "planned")}
-                options={STATUS_OPTIONS}
-              />
-            </FormField>
-            <FormField label="Outcome">
-              <Select
-                selectedOption={selectedOutcomeOption}
-                onChange={({ detail }) => handleChange("outcome", detail.selectedOption?.value || "")}
-                options={outcomeSelectOptions}
-                filteringType="auto"
-                placeholder={outcomesLoading ? "Loading outcomes" : "Select outcome"}
-                statusType={outcomesLoading ? "loading" : "finished"}
-                empty={
-                  outcomesLoading ? undefined : "No outcomes available. Please try again later."
-                }
-                disabled={outcomesLoading}
-              />
-            </FormField>
-          </SpaceBetween>
-          <SpaceBetween size="m">
-            <Header variant="h3">Schedule &amp; NOC</Header>
-            <FormField label="Start date">
-              <DatePicker
-                value={form.startDate}
-                onChange={({ detail }) => handleChange("startDate", detail.value)}
-                placeholder="YYYY-MM-DD"
-              />
-            </FormField>
-            <FormField label="End date">
-              <DatePicker
-                value={form.endDate}
-                onChange={({ detail }) => handleChange("endDate", detail.value)}
-                placeholder="YYYY-MM-DD"
-              />
-            </FormField>
-            <FormField label="Duration (weeks)">
-              <Input
-                value={form.durationWeeks}
-                onChange={({ detail }) => handleChange("durationWeeks", detail.value)}
-                placeholder="e.g. 16"
-              />
-            </FormField>
-            <FormField label="NOC version">
-              <Select
-                selectedOption={selectedNocVersionOption}
-                onChange={({ detail }) => {
-                  const value = detail.selectedOption?.value || "";
-                  setNocSuggestions([]);
-                  handleChange("nocVersion", value);
-                }}
-                options={nocVersionOptions}
-                filteringType="auto"
-                placeholder={nocVersionsLoading ? "Loading NOC versions" : "Select NOC version"}
-                statusType={nocVersionsLoading ? "loading" : "finished"}
-                empty={
-                  nocVersionsLoading ? undefined : "No NOC versions available. Please try again later."
-                }
-                disabled={!requiresNoc || nocVersionsLoading}
-              />
-            </FormField>
-            <FormField
-              label="NOC code"
-              description={
-                requiresNoc
-                  ? "Search by code or title to select the matching NOC entry."
-                  : "Not required for this intervention code."
-              }
-            >
-              <Autosuggest
-                value={form.noc}
-                onChange={({ detail }) => {
-                  const value = detail.value || "";
-                  handleChange("noc", value);
-                  if (!value) {
-                    setNocSuggestions([]);
-                    setNocSuggestionsLoading(false);
-                  } else if (value.length >= 2) {
-                    fetchNocSuggestions(value);
+            <ColumnLayout columns={3} variant="text-grid">
+              <FormField label="Intervention code" stretch>
+                <Select
+                  selectedOption={selectedCodeOption}
+                  onChange={({ detail }) => handleChange("code", detail.selectedOption?.value || "")}
+                  options={selectOptions}
+                  filteringType="auto"
+                  placeholder={codesLoading ? "Loading intervention codes" : "Select intervention code"}
+                  statusType={codesLoading ? "loading" : "finished"}
+                  empty={
+                    codesLoading
+                      ? undefined
+                      : "No intervention codes available. Please try again later."
                   }
-                }}
-                onSelect={({ detail }) => handleChange("noc", detail.value || "")}
-                options={nocSuggestions}
-                statusType={nocSuggestionsLoading ? "loading" : "finished"}
-                placeholder={
-                  requiresNoc
-                    ? nocVersionsLoading
-                      ? "Select a NOC version first"
-                      : "Type to search NOC codes"
-                    : "Not required for this intervention"
-                }
-                empty={
-                  requiresNoc
-                    ? "No NOC matches found."
-                    : "NOC search not required for this intervention code."
-                }
-                disabled={!requiresNoc || nocVersionsLoading || !form.nocVersion}
-                enteredTextLabel={value => `Use "${value}"`}
-                onLoadItems={({ detail }) => {
-                  fetchNocSuggestions(detail.filteringText);
-                }}
-              />
-            </FormField>
+                  disabled={codesLoading}
+                  autoFocus
+                />
+              </FormField>
+              <FormField label="Title" stretch>
+                <Input value={form.title} onChange={({ detail }) => handleChange("title", detail.value)} />
+              </FormField>
+              <FormField label="Status">
+                <Select
+                  selectedOption={selectedStatusOption}
+                  onChange={({ detail }) => handleChange("status", detail.selectedOption?.value || "planned")}
+                  options={STATUS_OPTIONS}
+                />
+              </FormField>
+              <FormField label="Outcome">
+                <Select
+                  selectedOption={selectedOutcomeOption}
+                  onChange={({ detail }) => handleChange("outcome", detail.selectedOption?.value || "")}
+                  options={outcomeSelectOptions}
+                  filteringType="auto"
+                  placeholder={outcomesLoading ? "Loading outcomes" : "Select outcome"}
+                  statusType={outcomesLoading ? "loading" : "finished"}
+                  empty={
+                    outcomesLoading ? undefined : "No outcomes available. Please try again later."
+                  }
+                  disabled={outcomesLoading}
+                />
+              </FormField>
+            </ColumnLayout>
           </SpaceBetween>
-          <SpaceBetween size="m">
-            <Header variant="h3">Financial details</Header>
-            <FormField label="Cost type">
-              <RadioGroup
-                onChange={({ detail }) => handleChange("costType", detail.value)}
-                value={form.costType}
-                items={[
-                  { value: "one_time", label: "One-time total" },
-                  { value: "recurring", label: "Recurring schedule" },
-                ]}
-              />
-            </FormField>
-            <FormField
-              label="Cost"
-              description={
-                isRecurringCost
-                  ? "Total submitted to ESDC. Update the recurring schedule to adjust this amount."
-                  : undefined
-              }
-            >
-              <Input
-                value={form.cost}
-                onChange={({ detail }) => handleChange("cost", detail.value)}
-                placeholder="e.g. 42000"
-              />
-            </FormField>
-            {isRecurringCost && (
-              <>
-                <FormField label="Recurrence period">
-                  <Select
-                    selectedOption={selectedRecurrencePeriodOption}
-                    onChange={({ detail }) =>
-                      handleChange("recurringPeriod", detail.selectedOption?.value || "")
+
+          <SpaceBetween size="s">
+            <Header variant="h3">Schedule &amp; NOC</Header>
+            <ColumnLayout columns={3} variant="text-grid">
+              <FormField label="Start date">
+                <DatePicker
+                  value={form.startDate}
+                  onChange={({ detail }) => handleChange("startDate", detail.value)}
+                  placeholder="YYYY-MM-DD"
+                />
+              </FormField>
+              <FormField label="End date">
+                <DatePicker
+                  value={form.endDate}
+                  onChange={({ detail }) => handleChange("endDate", detail.value)}
+                  placeholder="YYYY-MM-DD"
+                />
+              </FormField>
+              <FormField label="Duration (weeks)">
+                <Input
+                  value={form.durationWeeks}
+                  onChange={({ detail }) => handleChange("durationWeeks", detail.value)}
+                  placeholder="e.g. 16"
+                />
+              </FormField>
+              <FormField label="NOC version">
+                <Select
+                  selectedOption={selectedNocVersionOption}
+                  onChange={({ detail }) => {
+                    const value = detail.selectedOption?.value || "";
+                    setNocSuggestions([]);
+                    handleChange("nocVersion", value);
+                  }}
+                  options={nocVersionOptions}
+                  filteringType="auto"
+                  placeholder={nocVersionsLoading ? "Loading NOC versions" : "Select NOC version"}
+                  statusType={nocVersionsLoading ? "loading" : "finished"}
+                  empty={
+                    nocVersionsLoading ? undefined : "No NOC versions available. Please try again later."
+                  }
+                  disabled={!requiresNoc || nocVersionsLoading}
+                />
+              </FormField>
+              <FormField
+                label="NOC code"
+                description={
+                  requiresNoc
+                    ? "Search by code or title to select the matching NOC entry."
+                    : "Not required for this intervention code."
+                }
+              >
+                <Autosuggest
+                  value={form.noc}
+                  onChange={({ detail }) => {
+                    const value = detail.value || "";
+                    handleChange("noc", value);
+                    if (!value) {
+                      setNocSuggestions([]);
+                      setNocSuggestionsLoading(false);
+                    } else if (value.length >= 2) {
+                      fetchNocSuggestions(value);
                     }
-                    options={RECURRING_PERIOD_OPTIONS}
-                    placeholder="Select recurrence period"
-                  />
-                </FormField>
-                <FormField label="Amount per period">
-                  <Input
-                    value={form.recurringAmount}
-                    onChange={({ detail }) => handleChange("recurringAmount", detail.value)}
-                    placeholder="e.g. 150.00"
-                  />
-                </FormField>
-                <FormField
-                  label="Number of occurrences"
-                  description="Defaults will align with start/end dates in a future update."
-                >
-                  <Input
-                    value={form.recurringOccurrences}
-                    onChange={({ detail }) => handleChange("recurringOccurrences", detail.value)}
-                    placeholder="e.g. 20"
-                  />
-                </FormField>
-                <FormField label="Calculated total">
-                  <Box variant="p" fontWeight="bold">
-                    {recurringTotalDisplay}
-                  </Box>
-                </FormField>
-              </>
-            )}
-            <FormField label="Budget pot">
-              <Input value={form.potId} onChange={({ detail }) => handleChange("potId", detail.value)} />
-            </FormField>
-            <FormField label="Funding stream">
-              <Select
-                selectedOption={selectedFundingStreamOption}
-                onChange={({ detail }) => handleChange("fundingStream", detail.selectedOption?.value || "")}
-                options={fundingStreamSelectOptions}
-                filteringType="auto"
-                placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
-                statusType={fundingStreamsLoading ? "loading" : "finished"}
-                empty={
-                  fundingStreamsLoading ? undefined : "No funding streams available. Please try again later."
+                  }}
+                  onSelect={({ detail }) => handleChange("noc", detail.value || "")}
+                  options={nocSuggestions}
+                  statusType={nocSuggestionsLoading ? "loading" : "finished"}
+                  placeholder={
+                    requiresNoc
+                      ? nocVersionsLoading
+                        ? "Select a NOC version first"
+                        : "Type to search NOC codes"
+                      : "Not required for this intervention"
+                  }
+                  empty={
+                    requiresNoc
+                      ? "No NOC matches found."
+                      : "NOC search not required for this intervention code."
+                  }
+                  disabled={!requiresNoc || nocVersionsLoading || !form.nocVersion}
+                  enteredTextLabel={value => `Use "${value}"`}
+                  onLoadItems={({ detail }) => {
+                    fetchNocSuggestions(detail.filteringText);
+                  }}
+                />
+              </FormField>
+            </ColumnLayout>
+          </SpaceBetween>
+
+          <SpaceBetween size="s">
+            <Header variant="h3">Financial details</Header>
+            <ColumnLayout columns={3} variant="text-grid">
+              <FormField label="Cost type">
+                <RadioGroup
+                  onChange={({ detail }) => handleChange("costType", detail.value)}
+                  value={form.costType}
+                  items={[
+                    { value: "one_time", label: "One-time total" },
+                    { value: "recurring", label: "Recurring schedule" },
+                  ]}
+                />
+              </FormField>
+              <FormField
+                label="Cost"
+                description={
+                  isRecurringCost
+                    ? "Total submitted to ESDC. Update the recurring schedule to adjust this amount."
+                    : undefined
                 }
-                disabled={fundingStreamsLoading}
+              >
+                <Input
+                  value={form.cost}
+                  onChange={({ detail }) => handleChange("cost", detail.value)}
+                  placeholder="e.g. 42000"
+                />
+              </FormField>
+              <FormField label="Budget pot">
+                <Input value={form.potId} onChange={({ detail }) => handleChange("potId", detail.value)} />
+              </FormField>
+              <FormField label="Funding stream">
+                <Select
+                  selectedOption={selectedFundingStreamOption}
+                  onChange={({ detail }) => handleChange("fundingStream", detail.selectedOption?.value || "")}
+                  options={fundingStreamSelectOptions}
+                  filteringType="auto"
+                  placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
+                  statusType={fundingStreamsLoading ? "loading" : "finished"}
+                  empty={
+                    fundingStreamsLoading ? undefined : "No funding streams available. Please try again later."
+                  }
+                  disabled={fundingStreamsLoading}
+                />
+              </FormField>
+              {isRecurringCost && (
+                <>
+                  <FormField label="Recurrence period">
+                    <Select
+                      selectedOption={selectedRecurrencePeriodOption}
+                      onChange={({ detail }) =>
+                        handleChange("recurringPeriod", detail.selectedOption?.value || "")
+                      }
+                      options={RECURRING_PERIOD_OPTIONS}
+                      placeholder="Select recurrence period"
+                    />
+                  </FormField>
+                  <FormField label="Amount per period">
+                    <Input
+                      value={form.recurringAmount}
+                      onChange={({ detail }) => handleChange("recurringAmount", detail.value)}
+                      placeholder="e.g. 150.00"
+                    />
+                  </FormField>
+                  <FormField
+                    label="Number of occurrences"
+                    description="Defaults will align with start/end dates in a future update."
+                  >
+                    <Input
+                      value={form.recurringOccurrences}
+                      onChange={({ detail }) => handleChange("recurringOccurrences", detail.value)}
+                      placeholder="e.g. 20"
+                    />
+                  </FormField>
+                  <FormField label="Calculated total">
+                    <Box variant="p" fontWeight="bold">
+                      {recurringTotalDisplay}
+                    </Box>
+                  </FormField>
+                </>
+              )}
+            </ColumnLayout>
+          </SpaceBetween>
+          <SpaceBetween size="s">
+            <Header variant="h3">Notes</Header>
+            <FormField label="Notes">
+              <Textarea
+                value={form.notes}
+                rows={3}
+                onChange={({ detail }) => handleChange("notes", detail.value)}
+                placeholder="Optional context or reminders"
               />
             </FormField>
           </SpaceBetween>
-        </ColumnLayout>
-        <SpaceBetween size="s">
-          <Header variant="h3">Notes</Header>
-          <FormField label="Notes">
-            <Textarea
-              value={form.notes}
-              rows={3}
-              onChange={({ detail }) => handleChange("notes", detail.value)}
-              placeholder="Optional context or reminders"
-            />
-          </FormField>
+          <Box color="text-body-secondary" fontSize="body-s">
+            All fields can be updated later while the intervention remains in a planned or in-progress state. Use the
+            Close action (coming soon) once actual outcomes and costs are confirmed.
+          </Box>
         </SpaceBetween>
-        <Box color="text-body-secondary" fontSize="body-s">
-          All fields can be updated later while the intervention remains in a planned or in-progress state. Use the
-          Close action (coming soon) once actual outcomes and costs are confirmed.
-        </Box>
       </SpaceBetween>
     </Modal>
   );
 };
 
 export default InterventionModal;
+
