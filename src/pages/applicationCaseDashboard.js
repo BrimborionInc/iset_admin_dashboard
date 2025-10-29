@@ -31,6 +31,21 @@ const TITLES = {
   'application-events': 'Application Events'
 };
 
+const normaliseCasePayload = data => {
+  if (!data || typeof data !== 'object') {
+    return data;
+  }
+  const applicationStatus =
+    data.applicationStatus ??
+    data.application_status ??
+    null;
+  return {
+    ...data,
+    applicationStatus,
+    application_status: applicationStatus ?? data.application_status ?? null,
+  };
+};
+
 const buildItems = (caseData) => DEFAULT_ITEMS.map(item => ({
   ...item,
   data: {
@@ -59,7 +74,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   const handleCaseUpdate = updates => {
     setCaseData(prev => {
       if (!prev) return prev;
-      const next = { ...prev, ...updates };
+      const next = normaliseCasePayload({ ...prev, ...updates });
       const key = prev.id || id;
       if (key) {
         cacheRef.current.set(String(key), next);
@@ -77,10 +92,11 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       if (!data.assigned_user_email && location?.state?.assessorEmail) {
         data.assigned_user_email = location.state.assessorEmail;
       }
-      cacheRef.current.set(String(id), data);
-      setCaseData(data);
+      const normalised = normaliseCasePayload(data);
+      cacheRef.current.set(String(id), normalised);
+      setCaseData(normalised);
       setLoadError(null);
-      return data;
+      return normalised;
     } catch (err) {
       let message = 'Failed to refresh case';
       if (err && typeof err.json === 'function') {
@@ -119,17 +135,19 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         inflightRef.current.delete(key);
         if (!res.ok) throw res;
         const data = await res.json();
+        const hydrated = { ...data };
         if (!isMounted) return;
-        if (!data.assigned_user_email && location?.state?.assessorEmail) {
-          data.assigned_user_email = location.state.assessorEmail;
+        if (!hydrated.assigned_user_email && location?.state?.assessorEmail) {
+          hydrated.assigned_user_email = location.state.assessorEmail;
         }
-        cacheRef.current.set(key, data);
-        setCaseData(data);
+        const normalised = normaliseCasePayload(hydrated);
+        cacheRef.current.set(key, normalised);
+        setCaseData(normalised);
         setLoadError(null);
         updateBreadcrumbs && updateBreadcrumbs([
           { text: 'Home', href: '/' },
           { text: 'Application Management', href: '/case-management' },
-          { text: data.tracking_id || id }
+          { text: normalised.tracking_id || id }
         ]);
       } catch (res) {
         if (!isMounted) return;

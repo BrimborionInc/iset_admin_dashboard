@@ -147,13 +147,25 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         id: 'status',
         header: 'Status',
         cell: i => {
-          let rawStatus = i.case_id ? (i.status || 'submitted') : 'New';
-          const unassigned = i.case_id && !i.assigned_user_id && ['open','submitted'].includes(rawStatus.toLowerCase());
-          const display = unassigned ? 'Unassigned' : (rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1));
-          const type = unassigned ? 'pending' : (!i.case_id ? 'pending' : (display === 'Closed' ? 'success' : (i.sla_risk === 'overdue' ? 'warning' : 'info')));
-          return <StatusIndicator type={type}>{display}</StatusIndicator>;
+          const applicationStatusRaw = typeof i.application_status === 'string' ? i.application_status.trim() : '';
+          const caseStatusRaw = typeof i.case_status === 'string' ? i.case_status.trim() : '';
+          const fallbackStatus = i.case_id ? 'submitted' : 'new';
+          const rawStatus = (applicationStatusRaw || caseStatusRaw || fallbackStatus).toLowerCase();
+          const label = rawStatus
+            .replace(/[_-]+/g, ' ')
+            .replace(/\b\w/g, c => c.toUpperCase());
+          const isUnassignedCase = Boolean(i.case_id) && !i.assigned_user_id && rawStatus === 'submitted';
+          const statusType = (() => {
+            if (['approved', 'completed'].includes(rawStatus)) return 'success';
+            if (['rejected', 'declined'].includes(rawStatus)) return 'error';
+            if (['withdrawn', 'cancelled'].includes(rawStatus)) return 'info';
+            if (['docs_requested', 'action_required'].includes(rawStatus)) return 'warning';
+            return isUnassignedCase || rawStatus === 'new' ? 'pending' : 'info';
+          })();
+          const statusLabel = isUnassignedCase ? `${label} • Unassigned` : label;
+          return <StatusIndicator type={statusType}>{statusLabel}</StatusIndicator>;
         },
-        minWidth: 120
+        minWidth: 140
       },
       {
         id: 'lock_state',
@@ -270,7 +282,8 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       payload.assignee_id = chosen;
     }
 
-    const shouldPromoteStatus = (assignTargetCase.status || '').toLowerCase() === 'submitted';
+    const currentApplicationStatus = (assignTargetCase.application_status || assignTargetCase.status || '').toLowerCase();
+    const shouldPromoteStatus = currentApplicationStatus === 'submitted';
     const isReassign = Boolean(assignTargetCase?.assigned_user_id);
     const trackingLabel = assignTargetCase?.tracking_id || assignTargetCase?.case_id;
     const assigneeLabel = selectedAssignee?.label;
@@ -424,7 +437,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const filteredItems = decoratedItems
     .filter(i => {
       const s = filteringText.toLowerCase();
-      return !s || [i.tracking_id, i.status, i.assigned_user_email, i.ptma_codes, i.lock_owner_name, i.lock_owner_email]
+      return !s || [i.tracking_id, i.application_status, i.case_status, i.assigned_user_email, i.ptma_codes, i.lock_owner_name, i.lock_owner_email]
         .some(v => v && String(v).toLowerCase().includes(s));
     })
     .filter(i => !showWatchedOnly || i.__isWatched);
@@ -460,7 +473,8 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
 
   const actionsColumn = {
     id: 'actions', header: 'Actions', minWidth: 160, cell: item => {
-      const unassigned = item.case_id && !item.assigned_user_id && ['open','submitted'].includes((item.status || '').toLowerCase());
+      const caseStatusLower = (item.case_status || item.status || '').toLowerCase();
+      const unassigned = item.case_id && !item.assigned_user_id && ['open', 'submitted', 'pending_approval'].includes(caseStatusLower);
       const reassignRoles = ['Program Administrator','Regional Coordinator','System Administrator'];
       const canReassign = item.case_id && item.assigned_user_id && reassignRoles.includes(normalizedUserRole);
       const lockOwnerId = item.lock_owner_id ? String(item.lock_owner_id) : null;
@@ -848,5 +862,3 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
 };
 
 export default ApplicationsWidget;
-
-

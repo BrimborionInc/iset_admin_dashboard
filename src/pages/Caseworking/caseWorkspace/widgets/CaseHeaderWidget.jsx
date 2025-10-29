@@ -49,19 +49,36 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     return Number.isFinite(numeric) ? numeric.toLocaleString("en-CA") : "0";
   };
 
-  const stageLabel = [caseData?.stage, caseData?.subStage].filter(Boolean).join(" / ") || "-";
+  const rawStatus = typeof caseData?.status === "string" ? caseData.status.trim().toLowerCase() : "";
+  const normalizedStatus = rawStatus.replace(/-/g, "_");
+  const statusLabel = rawStatus
+    ? rawStatus
+        .split(/[_-]/g)
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ")
+    : "Unknown";
+  const statusType = (() => {
+    switch (normalizedStatus) {
+      case "active":
+      case "closed":
+      case "archived":
+        return "success";
+      case "ready_to_close":
+        return "warning";
+      case "pending_approval":
+      case "initiated":
+      case "dormant":
+        return "info";
+      case "cancelled":
+      case "rejected":
+      case "withdrawn":
+        return "error";
+      default:
+        return "info";
+    }
+  })();
   const caseNumber = caseData?.caseNumber || (caseData?.id ? `CASE-${caseData.id}` : "-");
-  const statusLabel = caseData?.status ?? "Unknown";
-  const normalizedStatus = statusLabel.toLowerCase();
-  const statusType =
-    normalizedStatus === "ready-to-close" ||
-    normalizedStatus === "approved" ||
-    normalizedStatus === "closed" ||
-    normalizedStatus === "completed"
-      ? "success"
-      : normalizedStatus === "at-risk" || normalizedStatus === "overdue"
-      ? "error"
-      : "info";
   const clientName = caseData?.client?.name ?? "Unknown client";
   const clientRegion = caseData?.client?.region ?? "Not set";
   const counts = caseData?.counts || {};
@@ -142,7 +159,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
             <Box>
               <h4 style={{ marginBottom: "0.5rem" }}>Case</h4>
               <DetailItem label="Case number" value={caseNumber} />
-              <DetailItem label="Stage" value={stageLabel} />
+              <DetailItem label="Status" value={statusLabel} />
               <DetailItem label="Next action due" value={formatDate(caseData?.nextActionDueAt)} />
               <DetailItem label="Last updated" value={formatDateTime(caseData?.updatedAt)} />
               <StatusIndicator type={statusType}>{statusLabel}</StatusIndicator>

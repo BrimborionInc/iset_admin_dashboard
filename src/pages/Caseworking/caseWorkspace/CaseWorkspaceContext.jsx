@@ -321,8 +321,7 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
     application_id: payload.applicationId ?? payload.application_id ?? null,
     caseNumber: payload.caseNumber ?? null,
     status: payload.status ?? null,
-    stage: payload.stage ?? null,
-    subStage: payload.subStage ?? null,
+    applicationStatus: payload.applicationStatus ?? payload.application_status ?? null,
     riskRating: payload.riskRating ?? null,
     openedAt: payload.openedAt ?? null,
     closedAt: payload.closedAt ?? null,
@@ -359,14 +358,7 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
   };
 };
 
-const getStoredLivePreference = () => {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(LIVE_CASES_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
-};
+const getStoredLivePreference = () => true;
 
 const CaseWorkspaceContext = createContext({
   caseId: null,
@@ -439,6 +431,9 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       const payload = await response.json();
       const data = buildCaseFromWorkspaceApi(caseId, payload);
       setState({ caseData: data, isLoading: false, error: null });
+      if (typeof window !== 'undefined') {
+        window.__CASE_WORKSPACE = { caseData: data };
+      }
       setSelectedActionPlanId(data.actionPlans?.[0]?.id ?? null);
       return data;
     } catch (error) {

@@ -51,22 +51,41 @@ function statusColor(status = '') {
   return 'grey';
 }
 
-const STATUS_OPTIONS = [
+const APPLICATION_STATUS_OPTIONS = [
   { label: 'Submitted', value: 'submitted' },
   { label: 'In Review', value: 'in_review' },
   { label: 'Action Required', value: 'docs_requested' },
-  { label: 'Assessed, Pending Approval', value: 'pending_approval' },
+  { label: 'Pending Approval', value: 'pending_approval' },
   { label: 'Approved', value: 'approved' },
+  { label: 'Completed', value: 'completed' },
   { label: 'Rejected', value: 'rejected' },
   { label: 'Withdrawn', value: 'withdrawn' },
   { label: 'Archived', value: 'archived' },
 ];
 
+const APPLICATION_STATUS_LABEL_MAP = APPLICATION_STATUS_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.label;
+  return acc;
+}, {});
+
+const formatStatusLabel = value => {
+  if (!value) return 'Unknown';
+  const normalised = String(value).trim().toLowerCase();
+  if (APPLICATION_STATUS_LABEL_MAP[normalised]) {
+    return APPLICATION_STATUS_LABEL_MAP[normalised];
+  }
+  return normalised
+    .split(/[_-]+/g)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
 const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHelpPanel }) => {
   const [application, setApplication] = useState(null);
   const [loading, setLoading] = useState(Boolean(application_id));
   const [error, setError] = useState(null);
-  const [statusValue, setStatusValue] = useState(caseData?.status || '');
+  const [statusValue, setStatusValue] = useState('');
   const [savingStatus, setSavingStatus] = useState(false);
   const [statusFeedback, setStatusFeedback] = useState(null);
   const manualStatusRef = useRef(null);
@@ -203,9 +222,11 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     };
   }, [application_id]);
 
+  const applicationStatusFromCase = caseData?.applicationStatus ?? caseData?.application_status ?? null;
+
   useEffect(() => {
     if (savingStatus) return;
-    const nextStatus = caseData?.status || application?.status || '';
+    const nextStatus = applicationStatusFromCase || application?.status || caseData?.status || '';
     const manual = manualStatusRef.current;
     if (manual) {
       if (nextStatus === manual.pending) {
@@ -223,7 +244,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     if ((nextStatus || '') !== (statusValue || '')) {
       setStatusValue(nextStatus || '');
     }
-  }, [caseData?.status, application?.status, savingStatus, statusValue]);
+  }, [applicationStatusFromCase, caseData?.status, application?.status, savingStatus, statusValue]);
 
   const { answers, payload } = useMemo(() => {
     if (!application) return { answers: {}, payload: {} };
@@ -235,7 +256,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     };
   }, [application]);
 
-  const fallbackStatus = statusValue || caseData?.status || application?.status || '';
+  const fallbackStatus = statusValue || applicationStatusFromCase || application?.status || caseData?.status || '';
   const statusContext = getCaseStatusContext(fallbackStatus);
   const roleAccess = getRoleGroups(userRole);
   const { canonicalStatus, isFinalStatus } = statusContext;
@@ -246,9 +267,10 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     hasCase: Boolean(caseData?.id),
   });
 
-  const statusOption = STATUS_OPTIONS.find(option => option.value === statusValue);
-  const selectedStatusOption = statusOption || (fallbackStatus ? { label: fallbackStatus, value: fallbackStatus } : null);
-  const badgeLabel = statusOption?.label || (fallbackStatus ? fallbackStatus : 'Unknown');
+  const statusOption = APPLICATION_STATUS_OPTIONS.find(option => option.value === fallbackStatus);
+  const statusLabel = statusOption?.label || formatStatusLabel(fallbackStatus);
+  const selectedStatusOption = statusOption || (fallbackStatus ? { label: statusLabel, value: fallbackStatus } : null);
+  const badgeLabel = statusLabel;
   const badgeColor = statusColor(statusOption?.value || fallbackStatus || 'unknown');
   const statusSelectDisabled = !canEditStatus || savingStatus || lockedByAnotherUser;
 
@@ -263,7 +285,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
 
   const confirmModalVisible = Boolean(confirmStatusChange);
   const confirmTargetLabel = confirmStatusChange?.nextOption?.label || confirmStatusChange?.nextStatus;
-  const confirmCurrentLabel = badgeLabel || (fallbackStatus ? fallbackStatus : canonicalStatus || 'current status');
+  const confirmCurrentLabel = badgeLabel || formatStatusLabel(canonicalStatus) || 'current status';
 
   const runStatusUpdate = async (nextStatus, nextOption) => {
     if (!caseData?.id) {
@@ -271,7 +293,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
       return;
     }
     const previousStatus = statusValue;
-    const label = nextOption?.label || nextStatus;
+    const label = nextOption?.label || formatStatusLabel(nextStatus);
     setStatusFeedback(null);
     manualStatusRef.current = { pending: nextStatus, previous: previousStatus || '' };
     setStatusValue(nextStatus);
@@ -294,7 +316,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
       }
 
       const expectedRowVersion = Number(application?.row_version || 0);
-      const payload = { status: nextStatus };
+      const payload = { status: nextStatus, applicationStatus: nextStatus };
       if (expectedRowVersion > 0) {
         payload.expectedRowVersion = expectedRowVersion;
       }
@@ -351,7 +373,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
           // ignore refresh failures, local state already updated
         }
       }
-      setStatusFeedback({ type: 'success', content: `Case status updated to ${label}.` });
+      setStatusFeedback({ type: 'success', content: `Application status updated to ${label}.` });
     } catch (err) {
       manualStatusRef.current = null;
       setStatusValue(previousStatus);
@@ -402,7 +424,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     <FormField stretch={true} label="" description="">
       <Select
         selectedOption={selectedStatusOption}
-        options={STATUS_OPTIONS}
+        options={APPLICATION_STATUS_OPTIONS}
         onChange={handleStatusChange}
         placeholder={canEditStatus ? 'Select status' : 'Status unavailable'}
         disabled={statusSelectDisabled}
@@ -410,7 +432,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
         loadingText="Updating status"
         empty="No status options available"
         expandToViewport
-        ariaLabel="Case status"
+        ariaLabel="Application status"
       />
     </FormField>
   );
@@ -422,7 +444,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     overviewItems.push({ label: 'Reference #', value: referenceNumber });
   }
 
-  overviewItems.push({ label: 'Case Status', value: statusFormField });
+  overviewItems.push({ label: 'Application Status', value: statusFormField });
 
   const preferredName = answers['preferred-name'];
   if (preferredName) overviewItems.push({ label: 'Preferred Name', value: preferredName });
@@ -436,7 +458,6 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   const phoneNumber = caseData?.applicant_phone || answers['telephone-day'] || answers['telephone-alt'];
   if (phoneNumber) overviewItems.push({ label: 'Phone', value: phoneNumber });
 
-  if (caseData?.stage) overviewItems.push({ label: 'Case Stage', value: caseData.stage });
 
   if (application?.created_at) overviewItems.push({ label: 'Received At', value: formatDateTime(application.created_at) });
   if (application?.updated_at) overviewItems.push({ label: 'Last Updated', value: formatDateTime(application.updated_at) });

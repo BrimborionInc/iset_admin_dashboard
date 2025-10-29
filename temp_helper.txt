@@ -1,1 +1,1 @@
-Client, agreement, owner, and quick actions.
+before adjust outcome cell

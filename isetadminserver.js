@@ -2498,6 +2498,164 @@ function isInterventionClosedStatus(status) {
   return value === 'completed' || value === 'cancelled';
 }
 
+function normaliseRecurringCostType(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed === 'recurring') return 'recurring';
+  if (['one_time', 'one-time', 'one time', 'single', 'fixed'].includes(trimmed)) return 'one_time';
+  return null;
+}
+
+function normaliseRecurringNumber(value) {
+  if (value === null || typeof value === 'undefined' || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function mergeRecurringCostMetadata(target, source, fallbackTotal) {
+  if (!target || typeof target !== 'object' || !source || typeof source !== 'object') {
+    return false;
+  }
+
+  const before = JSON.stringify(target);
+  const costTypeProvided = Object.prototype.hasOwnProperty.call(source, 'costType');
+  const costSettingsProvided = Object.prototype.hasOwnProperty.call(source, 'costSettings');
+  const recurrenceProvided = Object.prototype.hasOwnProperty.call(source, 'recurrence');
+
+  let resolvedCostType = costTypeProvided ? normaliseRecurringCostType(source.costType) : null;
+
+  const existingCostSettings =
+    target.costSettings && typeof target.costSettings === 'object' ? target.costSettings : null;
+  const existingRecurrence =
+    target.recurrence && typeof target.recurrence === 'object' ? target.recurrence : null;
+
+  if (costSettingsProvided) {
+    const rawSettings = source.costSettings;
+    if (rawSettings && typeof rawSettings === 'object') {
+      const settingsType = normaliseRecurringCostType(rawSettings.type);
+      if (!resolvedCostType && settingsType) {
+        resolvedCostType = settingsType;
+      }
+      const period = typeof rawSettings.period === 'string' ? rawSettings.period.trim() : '';
+      const amount = normaliseRecurringNumber(rawSettings.amountPerPeriod);
+      const occurrences = normaliseRecurringNumber(rawSettings.occurrences);
+      let total = normaliseRecurringNumber(
+        Object.prototype.hasOwnProperty.call(rawSettings, 'calculatedTotal')
+          ? rawSettings.calculatedTotal
+          : null
+      );
+      if (total === null && Number.isFinite(fallbackTotal)) {
+        total = fallbackTotal;
+      }
+      const shouldPersist =
+        resolvedCostType === 'recurring' ||
+        settingsType === 'recurring' ||
+        period.length > 0 ||
+        amount !== null ||
+        occurrences !== null;
+      if (shouldPersist) {
+        const nextSettings = {
+          type: 'recurring',
+          period: period || '',
+          amountPerPeriod: amount,
+          occurrences,
+          calculatedTotal: total,
+        };
+        const sameSettings =
+          existingCostSettings &&
+          existingCostSettings.type === 'recurring' &&
+          (existingCostSettings.period || '') === nextSettings.period &&
+          normaliseRecurringNumber(existingCostSettings.amountPerPeriod) === nextSettings.amountPerPeriod &&
+          normaliseRecurringNumber(existingCostSettings.occurrences) === nextSettings.occurrences &&
+          normaliseRecurringNumber(existingCostSettings.calculatedTotal) === nextSettings.calculatedTotal;
+        if (!sameSettings) {
+          target.costSettings = nextSettings;
+        }
+        resolvedCostType = 'recurring';
+      } else if (existingCostSettings) {
+        delete target.costSettings;
+      }
+    } else if (existingCostSettings) {
+      delete target.costSettings;
+    }
+  }
+
+  if (costTypeProvided) {
+    if (resolvedCostType === 'recurring') {
+      if (target.costType !== 'recurring') {
+        target.costType = 'recurring';
+      }
+    } else if (resolvedCostType === 'one_time') {
+      if (target.costType !== 'one_time') {
+        target.costType = 'one_time';
+      }
+      if (target.costSettings) {
+        delete target.costSettings;
+      }
+    } else if (Object.prototype.hasOwnProperty.call(target, 'costType')) {
+      delete target.costType;
+    }
+  } else if (target.costSettings && resolvedCostType === 'recurring') {
+    if (target.costType !== 'recurring') {
+      target.costType = 'recurring';
+    }
+  }
+
+  if (recurrenceProvided) {
+    const rawRecurrence = source.recurrence;
+    if (target.costType === 'recurring' && rawRecurrence && typeof rawRecurrence === 'object') {
+      const period = typeof rawRecurrence.period === 'string' ? rawRecurrence.period.trim() : '';
+      const amount = normaliseRecurringNumber(rawRecurrence.amountPerPeriod);
+      const occurrences = normaliseRecurringNumber(rawRecurrence.occurrences);
+      let total = normaliseRecurringNumber(
+        Object.prototype.hasOwnProperty.call(rawRecurrence, 'calculatedTotal')
+          ? rawRecurrence.calculatedTotal
+          : null
+      );
+      if (total === null && Number.isFinite(fallbackTotal)) {
+        total = fallbackTotal;
+      }
+      const nextRecurrence = {
+        period: period || '',
+        amountPerPeriod: amount,
+        occurrences,
+        calculatedTotal: total,
+      };
+      const sameRecurrence =
+        existingRecurrence &&
+        (existingRecurrence.period || '') === nextRecurrence.period &&
+        normaliseRecurringNumber(existingRecurrence.amountPerPeriod) === nextRecurrence.amountPerPeriod &&
+        normaliseRecurringNumber(existingRecurrence.occurrences) === nextRecurrence.occurrences &&
+        normaliseRecurringNumber(existingRecurrence.calculatedTotal) === nextRecurrence.calculatedTotal;
+      if (!sameRecurrence) {
+        target.recurrence = nextRecurrence;
+      }
+      if (target.costType !== 'recurring') {
+        target.costType = 'recurring';
+      }
+    } else if (existingRecurrence) {
+      delete target.recurrence;
+    }
+  } else if (
+    (costTypeProvided && resolvedCostType !== 'recurring') ||
+    (costSettingsProvided && !target.costSettings)
+  ) {
+    if (existingRecurrence) {
+      delete target.recurrence;
+    }
+  }
+
+  if (target.costType === 'recurring' && !target.costSettings) {
+    delete target.costType;
+  }
+  if (target.costType && target.costType !== 'recurring') {
+    target.costType = 'one_time';
+  }
+
+  const after = JSON.stringify(target);
+  return before !== after;
+}
+
 function mapInterventionRow(row) {
   if (!row) return null;
   const metadata = safeJsonParse(row.metadata_json, null) || {};
@@ -2580,6 +2738,168 @@ function mapInterventionRow(row) {
     closedAt: toIsoDateTime(row.closed_at),
     metadata: Object.keys(metadata).length ? metadata : null,
   };
+}
+
+const CASE_STATUS_DERIVED_VALUES = Object.freeze({
+  pendingApproval: 'pending_approval',
+  initiated: 'initiated',
+  active: 'active',
+  dormant: 'dormant',
+  readyToClose: 'ready_to_close',
+  closed: 'closed',
+  archived: 'archived',
+});
+
+const CASE_STATUS_TERMINAL_VALUES = [
+  CASE_STATUS_DERIVED_VALUES.closed,
+  CASE_STATUS_DERIVED_VALUES.archived,
+  CASE_STATUS_DERIVED_VALUES.readyToClose,
+  'withdrawn',
+  'cancelled',
+  'rejected',
+  'completed',
+];
+const CASE_STATUS_HOLD_VALUES = [
+  'docs_requested',
+  'docs requested',
+  'action required',
+  'action required (docs requested)',
+  'pending info',
+  'pending information',
+  'info requested',
+  'information requested',
+  'on hold',
+  'on_hold',
+];
+const CASE_STATUS_EXCLUDED_FOR_ASSESSMENT = Array.from(new Set([
+  ...CASE_STATUS_TERMINAL_VALUES,
+  ...CASE_STATUS_HOLD_VALUES,
+]));
+const CASE_STATUS_AWAITING_DECISION = [CASE_STATUS_DERIVED_VALUES.pendingApproval];
+
+const CASE_STATUS_FINAL_SET = new Set([
+  CASE_STATUS_DERIVED_VALUES.readyToClose,
+  CASE_STATUS_DERIVED_VALUES.closed,
+  CASE_STATUS_DERIVED_VALUES.archived,
+]);
+
+const CASE_STATUS_INITIATED_SEEDS = new Set([
+  CASE_STATUS_DERIVED_VALUES.initiated,
+  CASE_STATUS_DERIVED_VALUES.active,
+  CASE_STATUS_DERIVED_VALUES.dormant,
+  CASE_STATUS_DERIVED_VALUES.readyToClose,
+  CASE_STATUS_DERIVED_VALUES.closed,
+  CASE_STATUS_DERIVED_VALUES.archived,
+  'approved',
+]);
+
+const CASE_STATUS_PENDING_SEEDS = new Set([
+  CASE_STATUS_DERIVED_VALUES.pendingApproval,
+  'open',
+  'pending',
+  'pending_approval',
+  'submitted',
+  'in_review',
+  null,
+]);
+
+
+const CASE_STATUS_TERMINAL_VALUES_LOWER = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
+const CASE_STATUS_HOLD_VALUES_LOWER = CASE_STATUS_HOLD_VALUES.map(v => v.toLowerCase());
+const CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT.map(v => v.toLowerCase());
+const CASE_STATUS_AWAITING_DECISION_LOWER = CASE_STATUS_AWAITING_DECISION.map(v => v.toLowerCase());
+const DUE_SOON_THRESHOLD_HOURS = 7 * 24;
+const DUE_TODAY_THRESHOLD_HOURS = 24;
+
+
+const normaliseCaseStatusValue = value => {
+  if (value === null || typeof value === 'undefined') {
+    return null;
+  }
+  const trimmed = String(value).trim().toLowerCase();
+  return trimmed || null;
+};
+
+async function recomputeCaseStatus(caseId, connection = null) {
+  const numericCaseId = Number(caseId);
+  if (!Number.isInteger(numericCaseId) || numericCaseId <= 0) {
+    return { status: null, previousStatus: null, changed: false };
+  }
+
+  let conn = connection;
+  let shouldRelease = false;
+  if (!conn) {
+    conn = await pool.getConnection();
+    shouldRelease = true;
+  }
+
+  try {
+    const [[caseRow]] = await conn.query(
+      'SELECT id, status, application_id FROM iset_case WHERE id = ? LIMIT 1',
+      [numericCaseId]
+    );
+    if (!caseRow) {
+      return { status: null, previousStatus: null, changed: false };
+    }
+
+    const currentStatus = normaliseCaseStatusValue(caseRow.status);
+    if (currentStatus && CASE_STATUS_FINAL_SET.has(currentStatus)) {
+      return { status: currentStatus, previousStatus: currentStatus, changed: false };
+    }
+
+    const [[planSummary]] = await conn.query(
+      `SELECT
+          SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_count,
+          SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed_count,
+          SUM(CASE WHEN status = 'archived' THEN 1 ELSE 0 END) AS archived_count,
+          SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft_count,
+          COUNT(*) AS total_count
+        FROM iset_case_action_plan
+        WHERE case_id = ?`,
+      [numericCaseId]
+    );
+
+    const activePlans = Number(planSummary?.active_count || 0);
+    const closedPlans = Number(planSummary?.closed_count || 0) + Number(planSummary?.archived_count || 0);
+    const draftPlans = Number(planSummary?.draft_count || 0);
+    const totalPlans = Number(planSummary?.total_count || 0);
+
+    let nextStatus = currentStatus;
+
+    if (activePlans > 0) {
+      nextStatus = CASE_STATUS_DERIVED_VALUES.active;
+    } else if (closedPlans > 0) {
+      nextStatus = CASE_STATUS_DERIVED_VALUES.dormant;
+    } else if (draftPlans > 0) {
+      nextStatus = CASE_STATUS_DERIVED_VALUES.initiated;
+    } else if (totalPlans > 0) {
+      nextStatus = CASE_STATUS_DERIVED_VALUES.initiated;
+    } else if (CASE_STATUS_INITIATED_SEEDS.has(currentStatus)) {
+      nextStatus = CASE_STATUS_DERIVED_VALUES.initiated;
+    } else if (CASE_STATUS_PENDING_SEEDS.has(currentStatus)) {
+      nextStatus = CASE_STATUS_DERIVED_VALUES.pendingApproval;
+    } else if (!currentStatus) {
+      nextStatus = CASE_STATUS_DERIVED_VALUES.pendingApproval;
+    } else {
+      // Preserve unrecognised states to avoid accidental downgrade.
+      nextStatus = currentStatus;
+    }
+
+    if (nextStatus === currentStatus || !nextStatus) {
+      return { status: currentStatus, previousStatus: currentStatus, changed: false };
+    }
+
+    await conn.query(
+      'UPDATE iset_case SET status = ?, updated_at = NOW() WHERE id = ?',
+      [nextStatus, numericCaseId]
+    );
+
+    return { status: nextStatus, previousStatus: currentStatus, changed: true };
+  } finally {
+    if (shouldRelease && conn) {
+      conn.release();
+    }
+  }
 }
 
 async function buildClientProfileFromApplication(connection, applicationId) {
@@ -3416,32 +3736,6 @@ const WORK_QUEUE_BUCKET_META = {
     description: 'Applicants have been asked for more information.'
   }
 };
-
-const CASE_STATUS_TERMINAL_VALUES = ['closed', 'archived', 'withdrawn', 'cancelled', 'approved', 'rejected', 'completed'];
-const CASE_STATUS_HOLD_VALUES = [
-  'docs_requested',
-  'docs requested',
-  'action required',
-  'action required (docs requested)',
-  'pending info',
-  'pending information',
-  'info requested',
-  'information requested',
-  'on hold',
-  'on_hold'
-];
-const CASE_STATUS_EXCLUDED_FOR_ASSESSMENT = Array.from(new Set([...CASE_STATUS_TERMINAL_VALUES, ...CASE_STATUS_HOLD_VALUES]));
-const CASE_STAGE_AWAITING_DECISION = ['pending_approval'];
-
-
-const CASE_STATUS_TERMINAL_VALUES_LOWER = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
-const CASE_STATUS_HOLD_VALUES_LOWER = CASE_STATUS_HOLD_VALUES.map(v => v.toLowerCase());
-const CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT.map(v => v.toLowerCase());
-const CASE_STAGE_AWAITING_DECISION_LOWER = CASE_STAGE_AWAITING_DECISION.map(v => v.toLowerCase());
-const DUE_SOON_THRESHOLD_HOURS = 7 * 24;
-const DUE_TODAY_THRESHOLD_HOURS = 24;
-
-
 async function countProgramAdminNewSubmissions(pool) {
   try {
     const [[row]] = await pool.query(
@@ -3556,7 +3850,7 @@ async function countProgramAdminOverdue(pool) {
 
     const terminalValues = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
     const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT.map(v => v.toLowerCase());
-    const awaitingStatuses = CASE_STAGE_AWAITING_DECISION.map(v => v.toLowerCase());
+    const awaitingStatuses = CASE_STATUS_AWAITING_DECISION.map(v => v.toLowerCase());
     const disallowedForAssessment = Array.from(new Set([...excludedValues, ...awaitingStatuses]));
 
     let total = 0;
@@ -3990,7 +4284,7 @@ async function countRegionalDueThisWeek(pool, staffIds) {
 
   const assessmentHours = getTarget('assessment');
   const decisionHours = getTarget('program_decision');
-  const stageValues = CASE_STAGE_AWAITING_DECISION_LOWER;
+  const stageValues = CASE_STATUS_AWAITING_DECISION_LOWER;
   const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER;
   const terminalValues = CASE_STATUS_TERMINAL_VALUES_LOWER;
   const staffPlaceholders = ids.map(() => '?').join(',');
@@ -4000,10 +4294,10 @@ async function countRegionalDueThisWeek(pool, staffIds) {
 
   if (assessmentHours > 0) {
     const params = [...ids];
-    let stageCondition = 'c.stage IS NULL';
+    let statusExcludingPendingCondition = 'c.status IS NULL';
     if (stageValues.length) {
       const placeholders = stageValues.map(() => '?').join(',');
-      stageCondition = `(c.stage IS NULL OR LOWER(c.stage) NOT IN (${placeholders}))`;
+      statusExcludingPendingCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
       params.push(...stageValues);
     }
     let statusCondition = 'c.status IS NULL';
@@ -4015,12 +4309,12 @@ async function countRegionalDueThisWeek(pool, staffIds) {
     const lowerBound = Math.max(assessmentHours - DUE_SOON_THRESHOLD_HOURS, 0);
     const upperBound = assessmentHours;
     const sql = `SELECT COUNT(*) AS total
-           FROM iset_case c
-          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-            AND ${stageCondition}
-            AND ${statusCondition}
-            AND ${elapsedExpr} >= ?
-            AND ${elapsedExpr} < ?`;
+       FROM iset_case c
+      WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+        AND ${statusExcludingPendingCondition}
+        AND ${statusCondition}
+        AND ${elapsedExpr} >= ?
+        AND ${elapsedExpr} < ?`;
     params.push(lowerBound, upperBound);
     try {
       const [[row]] = await pool.query(sql, params);
@@ -4045,9 +4339,9 @@ async function countRegionalDueThisWeek(pool, staffIds) {
     const upperBound = decisionHours;
     const sql = `SELECT COUNT(*) AS total
            FROM iset_case c
-          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-            AND c.stage IS NOT NULL
-            AND LOWER(c.stage) IN (${stagePlaceholders})
+           WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+            AND c.status IS NOT NULL
+            AND LOWER(c.status) IN (${stagePlaceholders})
             AND ${statusCondition}
             AND ${elapsedExpr} >= ?
             AND ${elapsedExpr} < ?`;
@@ -4082,7 +4376,7 @@ async function countRegionalOverdue(pool, staffIds) {
 
   const assessmentHours = getTarget('assessment');
   const decisionHours = getTarget('program_decision');
-  const stageValues = CASE_STAGE_AWAITING_DECISION_LOWER;
+  const stageValues = CASE_STATUS_AWAITING_DECISION_LOWER;
   const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER;
   const terminalValues = CASE_STATUS_TERMINAL_VALUES_LOWER;
   const staffPlaceholders = ids.map(() => '?').join(',');
@@ -4092,10 +4386,10 @@ async function countRegionalOverdue(pool, staffIds) {
 
   if (assessmentHours > 0) {
     const params = [...ids];
-    let stageCondition = 'c.stage IS NULL';
+    let statusExcludingPendingCondition = 'c.status IS NULL';
     if (stageValues.length) {
       const placeholders = stageValues.map(() => '?').join(',');
-      stageCondition = `(c.stage IS NULL OR LOWER(c.stage) NOT IN (${placeholders}))`;
+      statusExcludingPendingCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
       params.push(...stageValues);
     }
     let statusCondition = 'c.status IS NULL';
@@ -4106,11 +4400,11 @@ async function countRegionalOverdue(pool, staffIds) {
     }
     params.push(assessmentHours);
     const sql = `SELECT COUNT(*) AS total
-           FROM iset_case c
-          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-            AND ${stageCondition}
-            AND ${statusCondition}
-            AND ${elapsedExpr} > ?`;
+       FROM iset_case c
+      WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+        AND ${statusExcludingPendingCondition}
+        AND ${statusCondition}
+        AND ${elapsedExpr} > ?`;
     try {
       const [[row]] = await pool.query(sql, params);
       total += Number(row?.total ?? 0);
@@ -4133,9 +4427,9 @@ async function countRegionalOverdue(pool, staffIds) {
     params.push(decisionHours);
     const sql = `SELECT COUNT(*) AS total
            FROM iset_case c
-          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-            AND c.stage IS NOT NULL
-            AND LOWER(c.stage) IN (${stagePlaceholders})
+           WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+            AND c.status IS NOT NULL
+            AND LOWER(c.status) IN (${stagePlaceholders})
             AND ${statusCondition}
             AND ${elapsedExpr} > ?`;
     try {
@@ -4201,7 +4495,7 @@ async function countAssessorDueToday(pool, staffProfileId) {
 
   const assessmentHours = getTarget('assessment');
   const decisionHours = getTarget('program_decision');
-  const awaitingStatuses = CASE_STAGE_AWAITING_DECISION_LOWER;
+  const awaitingStatuses = CASE_STATUS_AWAITING_DECISION_LOWER;
   const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER;
   const terminalValues = CASE_STATUS_TERMINAL_VALUES_LOWER;
   const disallowedForAssessment = Array.from(new Set([...excludedValues, ...awaitingStatuses]));
@@ -4253,13 +4547,13 @@ async function countAssessorDueToday(pool, staffProfileId) {
       }
       params.push(lowerBound, upperBound);
       const sql = `SELECT COUNT(*) AS total
-           FROM iset_case c
-          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-            AND c.stage IS NOT NULL
-            AND LOWER(c.stage) IN (${stagePlaceholders})
-            AND ${statusCondition}
-            AND ${elapsedExpr} >= ?
-            AND ${elapsedExpr} < ?`;
+       FROM iset_case c
+      WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+        AND c.status IS NOT NULL
+        AND LOWER(c.status) IN (${stagePlaceholders})
+        AND ${statusCondition}
+        AND ${elapsedExpr} >= ?
+        AND ${elapsedExpr} < ?`;
       try {
         const [[row]] = await pool.query(sql, params);
         total += Number(row?.total ?? 0);
@@ -10938,13 +11232,17 @@ app.get('/api/cases', async (req, res) => {
     const whereClauses = [];
     const params = [];
 
-    const statusFilters = parseList(req.query.status);
+    const statusFilters = parseList(req.query.status)
+      .map(normaliseCaseStatusValue)
+      .filter(Boolean);
     if (statusFilters.length) {
-      whereClauses.push(`c.status IN (${statusFilters.map(() => '?').join(', ')})`);
+      whereClauses.push(
+        `LOWER(COALESCE(c.status, '')) IN (${statusFilters.map(() => '?').join(', ')})`
+      );
       params.push(...statusFilters);
     } else {
-      whereClauses.push('c.status = ?');
-      params.push('approved');
+      whereClauses.push(`LOWER(COALESCE(c.status, '')) <> ?`);
+      params.push(CASE_STATUS_DERIVED_VALUES.archived);
     }
 
     const ownerFilters = parseList(req.query.owner)
@@ -10970,13 +11268,6 @@ app.get('/api/cases', async (req, res) => {
         )`.replace(/\s+/g, ' ')
       );
       params.push(search, search, search, search, search, search, search);
-    }
-
-    if (typeof req.query.stage !== 'undefined' && req.query.stage !== null) {
-      // Placeholder: stage column not yet available; ignore but log for observability.
-      if (process.env.NODE_ENV !== 'production') {
-        console.warn('[cases] stage filter requested but stage column not available in current schema');
-      }
     }
 
     const role = inferUserRole(req);
@@ -11027,12 +11318,69 @@ app.get('/api/cases', async (req, res) => {
       LEFT JOIN client cl ON c.client_id = cl.id
       LEFT JOIN iset_application a ON c.application_id = a.id
       LEFT JOIN staff_profiles sp ON c.assigned_to_user_id = sp.id
+      LEFT JOIN (
+        SELECT
+          case_id,
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(status, '')) IN ('open', 'in_progress', 'in-progress', 'inprogress')
+              THEN 1
+              ELSE 0
+            END
+          ) AS open_task_count,
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(status, '')) IN ('open', 'in_progress', 'in-progress', 'inprogress')
+                AND due_at IS NOT NULL
+                AND due_at < NOW()
+              THEN 1
+              ELSE 0
+            END
+          ) AS overdue_task_count
+        FROM iset_case_task
+        GROUP BY case_id
+      ) task_counts ON task_counts.case_id = c.id
+      LEFT JOIN (
+        SELECT
+          case_id,
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(status, '')) IN (
+                'planned',
+                'planning',
+                'draft',
+                'in_progress',
+                'in-progress',
+                'inprogress',
+                'suspended',
+                'on_hold',
+                'on-hold',
+                'active'
+              )
+              THEN 1
+              ELSE 0
+            END
+          ) AS open_intervention_count,
+          COUNT(*) AS total_intervention_count
+        FROM iset_case_intervention
+        GROUP BY case_id
+      ) intervention_counts ON intervention_counts.case_id = c.id
     `;
 
-    const selectSql = `
+  const selectSql = `
       SELECT
         c.id,
         c.status,
+        a.status AS application_status,
+        a.status AS application_status,
+        c.case_number,
+        c.priority,
+        c.risk_rating,
+        c.next_action_due_at,
+        COALESCE(task_counts.open_task_count, 0) AS open_task_count,
+        COALESCE(task_counts.overdue_task_count, 0) AS overdue_task_count,
+        COALESCE(intervention_counts.open_intervention_count, 0) AS open_intervention_count,
+        COALESCE(intervention_counts.total_intervention_count, 0) AS total_intervention_count,
         c.application_id,
         c.client_id,
         c.assigned_to_user_id,
@@ -11132,14 +11480,39 @@ app.get('/api/cases', async (req, res) => {
             }
           : null;
 
+      const statusNormalized = normaliseCaseStatusValue(row.status);
+      const resolvedStatus = statusNormalized || CASE_STATUS_DERIVED_VALUES.pendingApproval;
+
+      const openTasks = Number.isFinite(Number(row.open_task_count))
+        ? Number(row.open_task_count)
+        : 0;
+      const overdueTasks = Number.isFinite(Number(row.overdue_task_count))
+        ? Number(row.overdue_task_count)
+        : 0;
+      const openInterventions = Number.isFinite(Number(row.open_intervention_count))
+        ? Number(row.open_intervention_count)
+        : 0;
+      const totalInterventions = Number.isFinite(Number(row.total_intervention_count))
+        ? Number(row.total_intervention_count)
+        : 0;
+
+      const counts = {
+        openTasks,
+        overdueTasks,
+        openInterventions,
+        totalInterventions,
+      };
+
       return {
         id: row.id,
-        status: row.status || null,
-        stage: null,
-        priority: null,
+        status: resolvedStatus,
+        statusRaw: row.status || null,
+        priority: row.priority || null,
+        riskRating: row.risk_rating || null,
         openedAt: toIsoString(row.created_at),
         closedAt: null,
         lastActivityAt: toIsoString(row.updated_at),
+        nextActionDueAt: toIsoString(row.next_action_due_at),
         applicationId: row.application_id || null,
         trackingId:
           row.tracking_id ||
@@ -11148,12 +11521,12 @@ app.get('/api/cases', async (req, res) => {
         submittedAt: toIsoString(row.submitted_at),
         owner,
         client,
-        financeStatus: 'ok',
-        fyActuals: null,
-        fyVariance: null,
-        openInterventions: 0,
-        totalInterventions: 0,
+        openTasks,
+        overdueTasks,
+        openInterventions,
+        totalInterventions,
         regionId: owner?.regionId ?? null,
+        counts,
       };
     };
 
@@ -11364,18 +11737,16 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         c.assigned_to_user_id,
         c.case_number,
         c.status,
-        c.stage,
-        c.sub_stage,
         c.priority,
         c.risk_rating,
         c.opened_at,
         c.closed_at,
         c.updated_at,
         c.next_action_due_at,
-        c.open_task_count,
-        c.overdue_task_count,
-        c.open_intervention_count,
-        c.total_intervention_count,
+        COALESCE(task_counts.open_task_count, 0) AS open_task_count,
+        COALESCE(task_counts.overdue_task_count, 0) AS overdue_task_count,
+        COALESCE(intervention_counts.open_intervention_count, 0) AS open_intervention_count,
+        COALESCE(intervention_counts.total_intervention_count, 0) AS total_intervention_count,
         c.portfolio_region_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
@@ -11409,6 +11780,53 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       LEFT JOIN canada_region owner_region ON owner_region.region_id = sp.region_id
       LEFT JOIN iset_application a ON a.id = c.application_id
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      LEFT JOIN (
+        SELECT
+          case_id,
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(status, '')) IN ('open', 'in_progress', 'in-progress', 'inprogress')
+              THEN 1
+              ELSE 0
+            END
+          ) AS open_task_count,
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(status, '')) IN ('open', 'in_progress', 'in-progress', 'inprogress')
+                AND due_at IS NOT NULL
+                AND due_at < NOW()
+              THEN 1
+              ELSE 0
+            END
+          ) AS overdue_task_count
+        FROM iset_case_task
+        GROUP BY case_id
+      ) task_counts ON task_counts.case_id = c.id
+      LEFT JOIN (
+        SELECT
+          case_id,
+          SUM(
+            CASE
+              WHEN LOWER(COALESCE(status, '')) IN (
+                'planned',
+                'planning',
+                'draft',
+                'in_progress',
+                'in-progress',
+                'inprogress',
+                'suspended',
+                'on_hold',
+                'on-hold',
+                'active'
+              )
+              THEN 1
+              ELSE 0
+            END
+          ) AS open_intervention_count,
+          COUNT(*) AS total_intervention_count
+        FROM iset_case_intervention
+        GROUP BY case_id
+      ) intervention_counts ON intervention_counts.case_id = c.id
       WHERE c.id = ?
       LIMIT 1
     `;
@@ -11604,22 +12022,32 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
           }
         : null;
     const counts = {
-      openTasks: Number.isFinite(row.open_task_count) ? Number(row.open_task_count) : 0,
-      overdueTasks: Number.isFinite(row.overdue_task_count) ? Number(row.overdue_task_count) : 0,
-      openInterventions: Number.isFinite(row.open_intervention_count)
+      openTasks: Number.isFinite(Number(row.open_task_count)) ? Number(row.open_task_count) : 0,
+      overdueTasks: Number.isFinite(Number(row.overdue_task_count))
+        ? Number(row.overdue_task_count)
+        : 0,
+      openInterventions: Number.isFinite(Number(row.open_intervention_count))
         ? Number(row.open_intervention_count)
         : 0,
-      totalInterventions: Number.isFinite(row.total_intervention_count)
+      totalInterventions: Number.isFinite(Number(row.total_intervention_count))
         ? Number(row.total_intervention_count)
         : 0,
     };
 
+    const statusNormalized = normaliseCaseStatusValue(row.status);
+    const applicationStatusNormalised = normaliseCaseStatusValue(row.application_status);
+    console.debug('[workspace] status payload', {
+      caseId,
+      caseStatus: statusNormalized || row.status || null,
+      applicationStatus: applicationStatusNormalised || row.application_status || null,
+    });
+
     const response = {
       id: row.id,
       caseNumber,
-      status: row.status || null,
-      stage: row.stage || null,
-      subStage: row.sub_stage || null,
+      status: statusNormalized || CASE_STATUS_DERIVED_VALUES.pendingApproval,
+      statusRaw: row.status || null,
+      applicationStatus: applicationStatusNormalised || row.application_status || null,
       priority: row.priority || null,
       riskRating: row.risk_rating || null,
       openedAt: toIsoDateTime(row.opened_at),
@@ -12100,6 +12528,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     );
 
     await connection.commit();
+    await recomputeCaseStatus(caseId, connection);
 
     const planRow = await fetchActionPlanWithCase(result.insertId);
     const payload =
@@ -12183,6 +12612,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     nocVersion = null,
     approvedAmount = null,
     actualAmount = null,
+    metadata: metadataPayload = null,
   } = req.body || {};
 
   const trimmedCode = typeof code === 'string' ? code.trim() : '';
@@ -12287,6 +12717,15 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     if (trimmedNoc) metadata.noc = trimmedNoc;
     if (trimmedNocVersion) metadata.nocVersion = trimmedNocVersion;
     metadata.compliance = { ilmp: 'pending', finance: 'pending' };
+
+    const recurringFallbackTotal = Number.isFinite(plannedCostValue)
+      ? plannedCostValue
+      : normaliseRecurringNumber(metadata.cost);
+    const metadataSource =
+      metadataPayload && typeof metadataPayload === 'object' ? metadataPayload : null;
+    if (metadataSource) {
+      mergeRecurringCostMetadata(metadata, metadataSource, recurringFallbackTotal);
+    }
 
     const [result] = await pool.query(
       `INSERT INTO iset_case_intervention
@@ -12470,6 +12909,8 @@ app.patch('/api/interventions/:id', async (req, res) => {
     const params = [];
     let metadataChanged = false;
     const metadata = safeJsonParse(interventionRow.metadata_json, null) || {};
+    const metadataPayload =
+      body.metadata && typeof body.metadata === 'object' ? body.metadata : null;
 
     if (Object.prototype.hasOwnProperty.call(body, 'code')) {
       const trimmedCode = typeof body.code === 'string' ? body.code.trim() : '';
@@ -12599,6 +13040,35 @@ app.patch('/api/interventions/:id', async (req, res) => {
         delete metadata.nocVersion;
       }
       metadataChanged = true;
+    }
+
+    const recurringPayload = (() => {
+      if (metadataPayload) {
+        return metadataPayload;
+      }
+      let hasFields = false;
+      const payload = {};
+      if (Object.prototype.hasOwnProperty.call(body, 'costSettings')) {
+        payload.costSettings = body.costSettings;
+        hasFields = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'costType')) {
+        payload.costType = body.costType;
+        hasFields = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'recurrence')) {
+        payload.recurrence = body.recurrence;
+        hasFields = true;
+      }
+      return hasFields ? payload : null;
+    })();
+    if (recurringPayload) {
+      const fallbackTotal = Number.isFinite(plannedCostValue)
+        ? plannedCostValue
+        : normaliseRecurringNumber(metadata.cost);
+      if (mergeRecurringCostMetadata(metadata, recurringPayload, fallbackTotal)) {
+        metadataChanged = true;
+      }
     }
 
     if (!updates.length && !metadataChanged) {
@@ -12846,6 +13316,7 @@ app.post('/api/action-plans/:id/activate', async (req, res) => {
     }
 
     const updatedRow = await fetchActionPlanWithCase(planId);
+    await recomputeCaseStatus(planRow.case_id);
     res.status(200).json(mapActionPlanRow(updatedRow));
   } catch (error) {
     console.error('POST /api/action-plans/:id/activate failed:', error);
@@ -12911,6 +13382,7 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
     );
 
     const updatedRow = await fetchActionPlanWithCase(planId);
+    await recomputeCaseStatus(planRow.case_id);
     res.status(200).json(mapActionPlanRow(updatedRow));
   } catch (error) {
     console.error('POST /api/action-plans/:id/close failed:', error);
@@ -12958,6 +13430,7 @@ app.post('/api/action-plans/:id/archive', async (req, res) => {
     );
 
     const updatedRow = await fetchActionPlanWithCase(planId);
+    await recomputeCaseStatus(planRow.case_id);
     res.status(200).json(mapActionPlanRow(updatedRow));
   } catch (error) {
     console.error('POST /api/action-plans/:id/archive failed:', error);
@@ -13041,6 +13514,7 @@ app.get('/api/cases/:id', async (req, res) => {
         c.assigned_to_user_id,
         sp.email AS assigned_user_email,
         c.status,
+        a.status AS application_status,
         c.created_at,
         c.updated_at,
         a.row_version AS application_row_version,
@@ -13099,7 +13573,7 @@ app.get('/api/cases/:id', async (req, res) => {
           existingCols = colRows.map(r => r.column_name);
         } catch (_) { /* ignore */ }
         const preferred = [
-          'id','application_id','assigned_to_user_id','status','priority','stage','opened_at','closed_at','last_activity_at'
+          'id','application_id','assigned_to_user_id','status','priority','opened_at','closed_at','last_activity_at'
         ];
         const picked = preferred.filter(c => existingCols.includes(c));
         if (picked.length === 0) picked.push('id','application_id','status');
@@ -13155,6 +13629,7 @@ app.get('/api/cases/:id', async (req, res) => {
           : '';
 
         caseSelectParts.push(staffJoin ? 'sp.email AS assigned_user_email' : 'NULL AS assigned_user_email');
+        caseSelectParts.push(hasApp && appCols.includes('status') ? 'a.status AS application_status' : 'NULL AS application_status');
         const caseSelect = caseSelectParts.join(', ');
 
         const fallbackSql = `SELECT ${caseSelect}, ${trackingSelect}, ${coalesceSelect} ${fromClause} ${submissionJoin} ${applicantJoin} ${staffJoin} WHERE c.id = ? LIMIT 1`;
@@ -14220,13 +14695,14 @@ app.get('/api/me/case-watches', async (req, res) => {
           ? null
           : Number(assignedRaw);
 
+      const statusNormalised = normaliseCaseStatusValue(match.status);
       return {
         caseId,
         metadata: watch.metadata,
         createdAt: watch.createdAt,
         updatedAt: watch.updatedAt,
-        status: match.status || null,
-        stage: null,
+        status: statusNormalised || CASE_STATUS_DERIVED_VALUES.pendingApproval,
+        statusRaw: match.status || null,
         trackingId: match.tracking_id || null,
         applicantName: match.applicant_name || match.applicant_email || null,
         applicantEmail: match.applicant_email || null,
@@ -14321,8 +14797,8 @@ app.post('/api/cases/:caseId/watch', async (req, res) => {
       watch,
       case: {
         id: Number(caseRow.id),
-        status: caseRow.status || null,
-        stage: null,
+        status: normaliseCaseStatusValue(caseRow.status) || CASE_STATUS_DERIVED_VALUES.pendingApproval,
+        statusRaw: caseRow.status || null,
         trackingId: caseRow.tracking_id || null,
         applicantName: caseRow.applicant_name || caseRow.applicant_email || null,
         applicantEmail: caseRow.applicant_email || null,
@@ -14933,7 +15409,7 @@ app.get('/api/applications/:id', async (req, res) => {
 
     // Get case info (if exists) with defensive column detection (legacy schemas may lack some fields)
     const caseBaseCols = ['id','assigned_to_user_id','status'];
-    const optionalCols = ['priority','stage','program_type','case_summary','opened_at','closed_at','last_activity_at','ptma_id'];
+    const optionalCols = ['priority','program_type','case_summary','opened_at','closed_at','last_activity_at','ptma_id'];
     const presentOptional = [];
     for (const col of optionalCols) {
       try { await pool.query(`SELECT ${col} FROM iset_case LIMIT 0`); presentOptional.push(col); } catch(_) { /* skip missing */ }
@@ -15547,7 +16023,7 @@ app.get('/api/applications', async (req, res) => {
     // Base case + application join using new lean model.
     // Assignment user now from staff_profiles (nullable); tracking_id fallback derived from payload_json->submission_snapshot.reference_number if tracking_id column absent.
     // We'll attempt to select a.tracking_id; if schema lacks it, COALESCE will choose JSON extracted value.
-    let baseSql = `SELECT c.id AS case_id, c.application_id, c.status, c.assigned_to_user_id,
+    let baseSql = `SELECT c.id AS case_id, c.application_id, c.status AS case_status, a.status AS application_status, c.assigned_to_user_id,
       c.created_at AS opened_at, c.updated_at AS last_activity_at,
       sp.email AS assigned_user_email, sp.primary_role AS assigned_user_role,
       sp.id AS staff_profile_id,
@@ -15603,7 +16079,7 @@ app.get('/api/applications', async (req, res) => {
     // Add unassigned submissions (applications without case) for elevated roles.
     if (role === 'Program Administrator' || role === 'System Administrator') {
       finalSql = `(${baseSql})\nUNION ALL\n(
-        SELECT NULL AS case_id, a.id AS application_id, 'New' AS status, NULL AS assigned_to_user_id, NULL AS opened_at, NULL AS last_activity_at,
+        SELECT NULL AS case_id, a.id AS application_id, 'New' AS case_status, a.status AS application_status, NULL AS assigned_to_user_id, NULL AS opened_at, NULL AS last_activity_at,
         NULL AS assigned_user_email, NULL AS assigned_user_role, NULL AS staff_profile_id,
         NULL AS lock_owner_id, NULL AS lock_owner_name, NULL AS lock_owner_email, NULL AS lock_expires_at,
   JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
@@ -15641,14 +16117,19 @@ app.get('/api/applications', async (req, res) => {
     const rowsOut = rows.map(r => {
       const submittedMs = r.submitted_at ? new Date(r.submitted_at).getTime() : now;
       const ageDays = (now - submittedMs) / 86400000;
-      const sla_risk = (r.status !== 'Closed' && r.status !== 'Rejected' && ageDays > 14) ? 'overdue' : 'ok';
+      const caseStatus = r.case_status || null;
+      const appStatus = r.application_status || null;
+      const sla_risk = (caseStatus !== 'Closed' && caseStatus !== 'Rejected' && ageDays > 14) ? 'overdue' : 'ok';
       const lockOwnerId = r.lock_owner_id || null;
       const lockOwnerName = r.lock_owner_name || null;
       const lockOwnerEmail = r.lock_owner_email || null;
       return {
         case_id: r.case_id,
+        application_id: r.application_id,
         tracking_id: r.tracking_id,
-        status: r.status,
+        status: caseStatus,
+        case_status: caseStatus,
+        application_status: appStatus,
         assigned_user_id: r.assigned_to_user_id,
         assigned_user_email: r.assigned_user_email || null,
         assigned_user_role: r.assigned_user_role || null,
@@ -16163,6 +16644,11 @@ app.put('/api/cases/:id', async (req, res) => {
   let newRowVersion = null;
   let applicationId = null;
   let lockCheck = { ok: true, reason: 'not_checked', lock: null };
+  let statusToPersist = null;
+  let applicationStatusToPersist = null;
+  let shouldEnsureClientLink = false;
+  let shouldMarkSubmissionNeedsReview = false;
+  let shouldRecomputeCaseStatus = false;
 
   try {
     conn = await pool.getConnection();
@@ -16187,6 +16673,7 @@ app.put('/api/cases/:id', async (req, res) => {
     }
     beforeStatus = existingCase.status || null;
     const beforeStatusLower = beforeStatus ? String(beforeStatus).toLowerCase() : null;
+    const beforeStatusNormalised = normaliseCaseStatusValue(beforeStatus);
     const beforeClientId = existingCase.client_id || null;
     let ensuredClientId = beforeClientId;
     applicationId = Number(existingCase.application_id);
@@ -16221,27 +16708,67 @@ app.put('/api/cases/:id', async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(body, 'status')) {
       normalizedStatus = toNull(body.status);
       normalizedStatusLower = normalizedStatus ? String(normalizedStatus).toLowerCase() : null;
-      if (normalizedStatus !== beforeStatus) {
-        await conn.query('UPDATE iset_case SET status = ? WHERE id = ?', [normalizedStatus || beforeStatus, caseId]);
+      const requestedStatus = normaliseCaseStatusValue(normalizedStatus);
+
+      if (!requestedStatus) {
+        await conn.rollback();
+        return res.status(422).json({ success: false, error: 'invalid_status', lock: lockCheck.lock || null });
+      }
+
+      switch (requestedStatus) {
+        case 'approved':
+        case 'initiated':
+          statusToPersist = CASE_STATUS_DERIVED_VALUES.initiated;
+          break;
+        case 'pending':
+        case 'pending_approval':
+        case 'open':
+        case 'submitted':
+        case 'in_review':
+          statusToPersist = CASE_STATUS_DERIVED_VALUES.pendingApproval;
+          break;
+        case 'active':
+          statusToPersist = CASE_STATUS_DERIVED_VALUES.active;
+          break;
+        case 'dormant':
+          statusToPersist = CASE_STATUS_DERIVED_VALUES.dormant;
+          break;
+        case 'ready_to_close':
+          statusToPersist = CASE_STATUS_DERIVED_VALUES.readyToClose;
+          break;
+        case 'closed':
+          statusToPersist = CASE_STATUS_DERIVED_VALUES.closed;
+          break;
+        case 'archived':
+          statusToPersist = CASE_STATUS_DERIVED_VALUES.archived;
+          break;
+        default:
+          await conn.rollback();
+          return res.status(422).json({ success: false, error: 'unsupported_status', lock: lockCheck.lock || null });
+      }
+
+      if (statusToPersist !== beforeStatusNormalised) {
+        await conn.query('UPDATE iset_case SET status = ? WHERE id = ?', [statusToPersist, caseId]);
         statusChanged = true;
         bumpApplicationRowVersion = true;
-      }
-    if (statusChanged) {
-      if (normalizedStatusLower === 'approved') {
-        ensuredClientId = await ensureCaseClientLinkForApproval(conn, {
-          caseId,
-          applicationId,
-          existingClientId: beforeClientId
-        });
-        await conn.query(
-          'UPDATE iset_case SET stage = ?, sub_stage = ? WHERE id = ?',
-          ['planning', 'backlog', caseId]
-        );
-        await ensureEsdcParticipantSubmissionRecord(conn, caseId, applicationId);
-      } else if (beforeStatusLower === 'approved') {
-        await markEsdcParticipantSubmissionNeedsReview(conn, caseId, { resetSnapshot: true, resetSubmissionStatus: true });
+        shouldRecomputeCaseStatus = true;
+        if (statusToPersist === CASE_STATUS_DERIVED_VALUES.initiated) {
+          shouldEnsureClientLink = true;
+        }
+        if (beforeStatusNormalised === CASE_STATUS_DERIVED_VALUES.initiated && statusToPersist !== CASE_STATUS_DERIVED_VALUES.initiated) {
+          shouldMarkSubmissionNeedsReview = true;
+        }
       }
     }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'applicationStatus')) {
+      const rawApplicationStatus = toNull(body.applicationStatus);
+      if (rawApplicationStatus) {
+        const normalizedAppStatus = normaliseCaseStatusValue(rawApplicationStatus) || String(rawApplicationStatus).trim().toLowerCase();
+        if (normalizedAppStatus) {
+          applicationStatusToPersist = normalizedAppStatus;
+        }
+      }
     }
 
     const assessmentKeys = [
@@ -16311,24 +16838,28 @@ app.put('/api/cases/:id', async (req, res) => {
       }
     }
 
-    const currentStatusLower = (typeof normalizedStatusLower === 'string'
-      ? normalizedStatusLower
-      : (beforeStatus ? String(beforeStatus).toLowerCase() : null)) || null;
+    const targetStatus = statusToPersist || beforeStatusNormalised;
 
-    if (!ensuredClientId && currentStatusLower === 'approved') {
+    if ((shouldEnsureClientLink || (!ensuredClientId && targetStatus === CASE_STATUS_DERIVED_VALUES.initiated)) && applicationId) {
       ensuredClientId = await ensureCaseClientLinkForApproval(conn, {
         caseId,
         applicationId,
         existingClientId: ensuredClientId
       });
-      await conn.query(
-        'UPDATE iset_case SET stage = ?, sub_stage = ? WHERE id = ?',
-        ['planning', 'backlog', caseId]
-      );
+      await ensureEsdcParticipantSubmissionRecord(conn, caseId, applicationId);
     }
 
-    if (hasAssessmentPayload && currentStatusLower === 'approved') {
+    if (hasAssessmentPayload && targetStatus === CASE_STATUS_DERIVED_VALUES.initiated) {
+      shouldMarkSubmissionNeedsReview = true;
+    }
+
+    if (shouldMarkSubmissionNeedsReview) {
       await markEsdcParticipantSubmissionNeedsReview(conn, caseId, { resetSnapshot: true, resetSubmissionStatus: true });
+    }
+
+    if (applicationStatusToPersist && applicationId) {
+      await conn.query('UPDATE iset_application SET status = ? WHERE id = ?', [applicationStatusToPersist, applicationId]);
+      bumpApplicationRowVersion = true;
     }
 
     if (bumpApplicationRowVersion) {
@@ -16342,6 +16873,10 @@ app.put('/api/cases/:id', async (req, res) => {
         return res.status(404).json({ success: false, error: 'Application not found' });
       }
       newRowVersion = currentApplicationRowVersion + 1;
+    }
+
+    if (shouldRecomputeCaseStatus) {
+      await recomputeCaseStatus(caseId, conn);
     }
 
     await conn.commit();
@@ -16610,94 +17145,6 @@ app.patch('/api/events/:eventId/read', async (req, res) => {
   } catch (err) {
     console.error('[events] failed to mark read', err);
     res.status(500).json({ error: 'event_mark_read_failed' });
-  }
-});
-
-// Add API endpoint to update case stage
-app.put('/api/cases/:id/stage', async (req, res) => {
-  const caseId = Number(req.params.id);
-  const { stage } = req.body;
-  if (!Number.isInteger(caseId) || caseId < 1) {
-    return res.status(400).json({ success: false, error: 'invalid_case_id', lock: null });
-  }
-  if (!stage) {
-    return res.status(400).json({ success: false, error: 'Missing stage in request body', lock: null });
-  }
-  const lockConfig = await readLockConfig();
-  let lockCheck = { ok: true, reason: 'not_checked', lock: null };
-  try {
-    if (!global.__stageColumnChecked) {
-      try {
-        const [cols] = await pool.query(
-          "SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='iset_case' AND column_name='stage'"
-        );
-        global.__stageColumnChecked = true;
-        global.__stageColumnPresent = cols.length > 0;
-      } catch (_) {
-        global.__stageColumnChecked = true;
-        global.__stageColumnPresent = false;
-      }
-    }
-
-    if (!global.__stageColumnPresent) {
-      // Schema no longer includes stage; treat request as no-op for compatibility
-      return res.status(200).json({ success: true, stage, persisted: false, lock: lockCheck.lock || null });
-    }
-
-    let connection;
-    try {
-      connection = await pool.getConnection();
-      await connection.beginTransaction();
-
-      const [[caseRow]] = await connection.query(
-        'SELECT application_id FROM iset_case WHERE id = ? LIMIT 1 FOR UPDATE',
-        [caseId]
-      );
-      if (!caseRow) {
-        await connection.rollback();
-        return res.status(404).json({ success: false, error: 'Case not found', lock: null });
-      }
-      const applicationId = Number(caseRow.application_id);
-      lockCheck = await enforceApplicationLock(connection, applicationId, req, lockConfig);
-      if (!lockCheck.ok) {
-        await connection.rollback();
-        return res.status(423).json({
-          success: false,
-          error: lockCheck.reason === 'missing' || lockCheck.reason === 'expired'
-            ? 'lock_required'
-            : (lockCheck.reason === 'identity_missing' ? 'lock_identity_missing' : 'locked'),
-          reason: lockCheck.reason,
-          lock: lockCheck.lock || null
-        });
-      }
-
-      const [result] = await connection.query(
-        'UPDATE iset_case SET stage = ?, last_activity_at = NOW() WHERE id = ?',
-        [stage, caseId]
-      );
-      if (result.affectedRows === 0) {
-        await connection.rollback();
-        return res.status(404).json({ success: false, error: 'Case not found', lock: lockCheck.lock || null });
-      }
-
-      await connection.commit();
-      return res.status(200).json({ success: true, stage, persisted: true, lock: lockCheck.lock || null });
-    } catch (err) {
-      if (connection) {
-        try { await connection.rollback(); } catch (_) {}
-      }
-      throw err;
-    } finally {
-      if (connection) connection.release();
-    }
-  } catch (error) {
-    if (error && error.code === 'ER_BAD_FIELD_ERROR') {
-      // Stage column really does not exist; remember and succeed silently
-      global.__stageColumnPresent = false;
-      return res.status(200).json({ success: true, stage, persisted: false, lock: lockCheck.lock || null });
-    }
-    console.error('Error updating case stage:', error);
-    res.status(500).json({ error: 'Failed to update case stage', lock: lockCheck.lock || null });
   }
 });
 

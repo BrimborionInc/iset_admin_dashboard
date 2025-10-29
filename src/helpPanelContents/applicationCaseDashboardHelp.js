@@ -12,7 +12,7 @@ const ApplicationCaseDashboardHelp = () => (
     <h3>Key widgets on the page</h3>
     <ul>
       <li>
-        <strong>Application Overview</strong> – surface-level case data including tracking identifiers, status, stage,
+        <strong>Application Overview</strong> - surface-level case data including tracking identifiers, status,
         ownership, and quick links for reassignment or refresh.
       </li>
       <li>
@@ -38,7 +38,7 @@ const ApplicationCaseDashboardHelp = () => (
 
     <h3>Typical review flow</h3>
     <ol>
-      <li>Start with <em>Application Overview</em> to confirm the case owner, stage, and any outstanding alerts.</li>
+      <li>Start with <em>Application Overview</em> to confirm the case owner, status, and any outstanding alerts.</li>
       <li>Open the <em>ISET Application Form</em> to verify the data provided during intake and capture corrections if
         needed (toggle edit mode to publish updates).</li>
       <li>Work through the <em>Application Assessment</em> widget, ensuring all required sections are completed before

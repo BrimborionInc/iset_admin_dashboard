@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
-import { canCompleteOutcomeReview, getCaseStatusContext } from '../utils/rbac';
+import { canCompleteOutcomeReview, getCaseStatusContext, getApplicationStatusContext } from '../utils/rbac';
 import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup } from '@cloudscape-design/components';
 import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
@@ -24,9 +24,9 @@ const RECOMMEND_OPTIONS = [
   { label: 'Recommend alternative intervention', value: 'alternative' }
 ];
 
-const FINAL_CASE_STATUSES = new Set(['approved', 'rejected']);
-const LOCKED_CASE_STATUSES = new Set(['pending_approval', 'approved', 'rejected', 'withdrawn']);
-const OUTCOME_NOTICE_STATUSES = new Set(['pending_approval', 'approved', 'rejected']);
+const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'withdrawn', 'archived']);
+const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'withdrawn', 'archived']);
+const APPLICATION_OUTCOME_STATUSES = new Set(['pending_approval']);
 
 // Section header helper for consistent spacing
 const sectionHeader = (label) => (
@@ -84,15 +84,24 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   } = useCurrentUser();
   const userRole = currentUserRole || '';
 
-  const rawCaseStatus = caseData?.status ?? '';
-  const caseStatusContext = getCaseStatusContext(rawCaseStatus);
-  const { canonicalStatus: canonicalCaseStatus, isPendingApprovalStatus } = caseStatusContext;
+  const rawApplicationStatus = caseData?.applicationStatus ?? caseData?.application_status ?? null;
+  const rawCaseStatusSnapshot = caseData?.status ?? '';
+  const canonicalCaseStatusSnapshot = getCaseStatusContext(rawCaseStatusSnapshot).canonicalStatus;
+  const applicationStatusContext = getApplicationStatusContext(rawApplicationStatus);
+  const canonicalApplicationStatus = applicationStatusContext.canonicalStatus || canonicalCaseStatusSnapshot;
+  const isPendingApprovalStatus = canonicalApplicationStatus === 'pending_approval';
+  console.debug('[NWAC] status snapshot', {
+    rawApplicationStatus,
+    canonicalApplicationStatus,
+    rawCaseStatus: rawCaseStatusSnapshot,
+    canonicalCaseStatus: canonicalCaseStatusSnapshot,
+  });
 
-  const isDecisionFinal = FINAL_CASE_STATUSES.has(canonicalCaseStatus);
-  const isLockedStatus = LOCKED_CASE_STATUSES.has(canonicalCaseStatus);
-  const showOutcomeByStatus = OUTCOME_NOTICE_STATUSES.has(canonicalCaseStatus);
+  const isDecisionFinal = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
+  const isLockedStatus = APPLICATION_LOCKED_STATUSES.has(canonicalApplicationStatus);
+  const showOutcomeByStatus = APPLICATION_OUTCOME_STATUSES.has(canonicalApplicationStatus);
   const isOutcomeNoticeDisabled = isDecisionFinal;
-  const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawCaseStatus });
+  const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus });
   const lacksOutcomePermission = Boolean(userRole) && isPendingApprovalStatus && !canManageOutcomeReview;
   const activeLock = useMemo(() => {
     if (lockState.owned && lockState.lock) {
@@ -185,15 +194,11 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
 
   // Show NWAC section after submission, review completion, final decision, or outcome-ready status
   useEffect(() => {
-    const stage = caseData?.stage;
-    const stageSubmitted = stage === 'assessment_submitted';
-    const stageReviewed = stage === 'review_complete';
-    const shouldShowOutcome = stageSubmitted || stageReviewed || isDecisionFinal || showOutcomeByStatus;
+    const pendingApproval = canonicalApplicationStatus === 'pending_approval';
+    const shouldShowOutcome = pendingApproval || isDecisionFinal || showOutcomeByStatus;
     setShowNWACSection(shouldShowOutcome);
-
-    const consideredSubmitted = stageSubmitted || stageReviewed || isDecisionFinal || canonicalCaseStatus === 'pending_approval' || canonicalCaseStatus === 'withdrawn';
-    setLocalAssessmentSubmitted(consideredSubmitted);
-  }, [caseData?.stage, caseData?.status, canonicalCaseStatus, isDecisionFinal, showOutcomeByStatus]);
+    setLocalAssessmentSubmitted(pendingApproval || isDecisionFinal);
+  }, [canonicalApplicationStatus, isDecisionFinal, showOutcomeByStatus]);
 
   // Track changes
   useEffect(() => {
@@ -432,6 +437,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
 
     // 2. Save assessment (PUT /api/cases/:id)
     const versionToken = Number(applicationRowVersion || caseData?.application_row_version || 0);
+    let nextApplicationStatus = caseData?.applicationStatus || caseData?.status || null;
     const payload = {
       ...assessment,
       dateOfAssessment,
@@ -455,9 +461,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       assessment_nwac_reason: assessment.nwacReason || null,
       case_summary: assessment.overview || null
     };
-    const normalizedExistingStatus = (caseData?.status || '').toLowerCase();
-    if (!['approved', 'rejected'].includes(normalizedExistingStatus)) {
+    if (!APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus)) {
       payload.status = 'pending_approval';
+      payload.applicationStatus = 'pending_approval';
+      nextApplicationStatus = 'pending_approval';
     }
     const requestBody = { ...payload };
     if (versionToken > 0) {
@@ -509,32 +516,11 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         setApplicationRowVersion(updatedRowVersion);
       }
 
-      // 3. Update stage to 'assessment_submitted' if not already
-      if (caseData.stage !== 'assessment_submitted') {
-        const stageRes = await apiFetch(`/api/cases/${caseData.id}/stage`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stage: 'assessment_submitted' })
-        });
-        let stageBody = null;
-        try {
-          stageBody = await stageRes.json();
-        } catch (_) {
-          stageBody = null;
-        }
-        if (stageRes.status === 423) {
-          showLockAlert({ reason: stageBody?.reason || stageBody?.error, lock: stageBody?.lock });
-          setIsEditingAssessment(false);
-          releaseLock({ silent: true }).catch(() => {});
-          return;
-        }
-        if (!stageRes.ok) throw new Error(stageBody?.error || 'Failed to update case stage.');
-      }
-
-      // 4. Reload caseData (to update stage, etc.)
+      // 3. Reload caseData (to update status, etc.)
       const fallbackUpdates = {
         status: payload.status ?? caseData?.status ?? null,
-        stage: 'assessment_submitted'
+        statusRaw: payload.status ?? caseData?.status ?? null,
+        applicationStatus: payload.applicationStatus ?? nextApplicationStatus ?? caseData?.applicationStatus ?? null,
       };
       if (updatedRowVersion) {
         fallbackUpdates.application_row_version = updatedRowVersion;
@@ -557,7 +543,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       scrollToPageTop();
       setAlert({
         type: 'success',
-        content: 'Assessment submitted successfully. Case status moved to Pending Approval. Complete the outcome notice to finish the review.',
+        content: 'Assessment submitted successfully. Application status moved to Pending Approval. Complete the outcome notice to finish the review.',
         dismissible: true,
         statusIconAriaLabel: 'Success'
       });
@@ -704,9 +690,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     }
   };
 
-  // UI logic: if stage is 'assessment_submitted', make assessment fields readOnly, show NWAC review fields, change heading, and validate NWAC review on submit
-  const isAssessmentSubmitted = caseData?.stage === 'assessment_submitted';
-  const isReviewComplete = caseData?.stage === 'review_complete';
+  // UI logic: once status reaches pending approval or a final decision, lock assessment fields and surface NWAC review
+  const isAssessmentSubmitted = canonicalApplicationStatus === 'pending_approval';
+  const isReviewComplete = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
   const assessmentSubmitted = localAssessmentSubmitted || isAssessmentSubmitted || isReviewComplete || isDecisionFinal || isLockedStatus || lockedByAnotherUser;
   // Disable all fields (including NWAC) if review is complete, a final decision exists, or status is locked
   const isAssessmentDisabled = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || (assessmentSubmitted && !isEditingAssessment);
@@ -788,7 +774,8 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       assessment_nwac_review: assessment.nwacReview || null,
       assessment_nwac_reason: assessment.nwacReason || null,
       case_summary: assessment.overview || null,
-      status: assessment.nwacReviewStatus === 'approve' ? 'approved' : 'rejected'
+      status: assessment.nwacReviewStatus === 'approve' ? 'initiated' : 'archived',
+      applicationStatus: assessment.nwacReviewStatus === 'approve' ? 'approved' : 'rejected'
     };
     const requestBody = { ...payload };
     if (versionToken > 0) {
@@ -826,14 +813,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       if (updatedRowVersion) {
         setApplicationRowVersion(updatedRowVersion);
       }
-      // 2. Update stage to 'review_complete'
-      const stageRes = await apiFetch(`/api/cases/${caseData.id}/stage`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stage: 'review_complete' })
-      });
-      if (!stageRes.ok) throw new Error('Failed to update case stage to review_complete.');
-      // 3. Log NWAC review submitted event
+      // 2. Log NWAC review submitted event
       const userId = caseData?.user_id || caseData?.applicant_user_id || null;
       if (userId) {
         await apiFetch('/api/events', {
@@ -866,10 +846,11 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         });
 
       }
-      // 5. Refresh caseData to reflect new stage
+      // 4. Refresh caseData to reflect new status
       const fallbackUpdates = {
         status: payload.status,
-        stage: 'review_complete',
+        statusRaw: payload.status,
+        applicationStatus: payload.applicationStatus || caseData?.applicationStatus || null,
         assessment_nwac_review: payload.assessment_nwac_review,
         assessment_nwac_reason: payload.assessment_nwac_reason
       };
@@ -888,15 +869,17 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       }
       setIsEditingAssessment(false);
       setShowEditConfirmModal(false);
-    setShowApproveConfirmModal(false);
-    setShowCancelModal(false);
-    setLocalAssessmentSubmitted(true);
+      setShowApproveConfirmModal(false);
+      setShowCancelModal(false);
+      setLocalAssessmentSubmitted(true);
       setFieldErrors({});
       setHasSubmitted(false);
       scrollToPageTop();
       setAlert({
         type: 'success',
-        content: assessment.nwacReviewStatus === 'approve' ? 'Outcome notice complete. Case marked Approved.' : 'Outcome notice complete. Case marked Rejected.',
+        content: assessment.nwacReviewStatus === 'approve'
+          ? 'Outcome notice complete. Application approved.'
+          : 'Outcome notice complete. Application rejected.',
         dismissible: true,
         statusIconAriaLabel: 'Success'
       });

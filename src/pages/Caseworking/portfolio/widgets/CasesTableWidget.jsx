@@ -10,7 +10,6 @@ import {
   CollectionPreferences,
   FormField,
   Header,
-  Icon,
   Link,
   Modal,
   Pagination,
@@ -25,33 +24,32 @@ import { usePortfolioCases } from "../PortfolioCaseContext.jsx";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import { apiFetch } from "../../../../auth/apiClient.js";
 import useCasesData from "../hooks/useCasesData.js";
-const COLUMN_WIDTHS_KEY = "iset-portfolio-cases-table-widths-v1";
-const PREFERENCES_KEY = "iset-portfolio-cases-table-preferences-v1";
+const COLUMN_WIDTHS_KEY = "iset-portfolio-cases-table-widths-v2";
+const PREFERENCES_KEY = "iset-portfolio-cases-table-preferences-v2";
 const DEFAULT_PAGE_SIZE = 10;
 
-const financeStatusMeta = {
-  ok: {
-    icon: "status-positive",
-    color: "green",
-    label: "Costs mapped",
-    tooltip: "All interventions mapped to active pots",
-  },
-  "needs-mapping": {
-    icon: "status-info",
-    color: "blue",
-    label: "Needs mapping",
-    tooltip: "At least one intervention lacks a pot mapping",
-  },
-  overspend: {
-    icon: "status-negative",
-    color: "red",
-    label: "Overspend",
-    tooltip: "One or more pots exceeded allocation",
-  },
+const formatDate = value => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString();
 };
 
-const formatCurrency = value =>
-  typeof value === "number" ? `$${value.toLocaleString("en-CA")}` : "$0";
+const formatDateTime = value => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString();
+};
+
+const isDateOverdue = value => {
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date < today;
+};
 
 const baseColumns = [
   {
@@ -72,63 +70,65 @@ const baseColumns = [
     minWidth: 160,
   },
   {
-    id: "agreementNumber",
-    header: "Agreement #",
-    cell: item => item.agreementNumber ?? "-",
-    minWidth: 140,
+    id: "status",
+    header: "Status",
+    cell: item => (
+      <Badge color={item.caseStatusColor || "grey"}>
+        {item.caseStatusLabel || "-"}
+      </Badge>
+    ),
+    minWidth: 160,
   },
   {
-    id: "actionPlanStart",
-    header: "Action Plan Start",
+    id: "openTasks",
+    header: "Open tasks",
     cell: item => {
-      if (!item.actionPlanStart) return "-";
-      const parsed = new Date(item.actionPlanStart);
-      if (Number.isNaN(parsed.getTime())) return "-";
-      return parsed.toLocaleDateString();
+      const open = Number.isFinite(item.openTasks) ? item.openTasks : 0;
+      const overdue = Number.isFinite(item.overdueTasks) ? item.overdueTasks : 0;
+      const badgeColor = overdue > 0 ? "red" : open > 0 ? "blue" : "grey";
+      return (
+        <SpaceBetween size="xs">
+          <Badge color={badgeColor}>{open}</Badge>
+          {overdue > 0 ? (
+            <Box fontSize="body-s" color="text-status-error">
+              {overdue} overdue
+            </Box>
+          ) : null}
+        </SpaceBetween>
+      );
     },
     minWidth: 150,
   },
   {
-    id: "interventions",
-    header: "Interventions",
-    cell: item => `${item.openInterventions} / ${item.totalInterventions}`,
-    minWidth: 130,
-  },
-  {
-    id: "financeStatus",
-    header: "Finance Status",
+    id: "openInterventions",
+    header: "Open interventions",
     cell: item => {
-      const meta = financeStatusMeta[item.financeStatus] ?? financeStatusMeta.ok;
+      const open = Number.isFinite(item.openInterventions) ? item.openInterventions : 0;
+      const total = Number.isFinite(item.totalInterventions) ? item.totalInterventions : 0;
       return (
-        <Badge color={meta.color} title={meta.tooltip}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
-            <Icon name={meta.icon} />
-            {meta.label}
-          </span>
-        </Badge>
+        <Badge color={open > 0 ? "blue" : "green"}>{`${open} / ${total}`}</Badge>
       );
     },
-    minWidth: 190,
+    minWidth: 160,
   },
   {
-    id: "fyActuals",
-    header: "FY Actuals",
-    cell: item => formatCurrency(item.fyActuals),
-    minWidth: 140,
-  },
-  {
-    id: "fyVariance",
-    header: "FY Variance",
+    id: "nextActionDue",
+    header: "Next action due",
     cell: item => {
-      const value = Number(item.fyVariance || 0);
-      const positive = value >= 0;
+      if (!item.nextActionDueAt) return "-";
+      const formatted = formatDate(item.nextActionDueAt);
+      const overdue = isDateOverdue(item.nextActionDueAt);
       return (
-        <Badge color={positive ? "green" : "red"}>
-          {positive ? "+" : "-"}${Math.abs(value).toLocaleString("en-CA")}
-        </Badge>
+        <Box color={overdue ? "text-status-error" : undefined}>{formatted}</Box>
       );
     },
-    minWidth: 140,
+    minWidth: 160,
+  },
+  {
+    id: "lastTouch",
+    header: "Last touch",
+    cell: item => formatDateTime(item.lastTouchAt),
+    minWidth: 180,
   },
 ];
 
@@ -363,7 +363,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         `Staff #${assigneeValue}`;
       const caseLabel =
         assignTargetCase?.raw?.trackingId ||
-        assignTargetCase?.agreementNumber ||
+        assignTargetCase?.trackingId ||
         assignTargetCase?.id;
       setAssignSuccess(
         assignModalMode === "reassign"
@@ -690,7 +690,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         )}
         <TextFilter
           filteringText={searchText}
-          filteringPlaceholder="Search by client, owner, or agreement"
+          filteringPlaceholder="Search by client or owner"
           onChange={({ detail }) => {
             setSearchText(detail.filteringText);
             setCurrentPageIndex(1);

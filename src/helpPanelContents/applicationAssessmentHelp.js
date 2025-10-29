@@ -14,7 +14,7 @@ const ApplicationAssessmentHelp = () => (
       <li>Review the <strong>ISET Application Form</strong> widget to gather the applicant&apos;s background, requested
         supports, and prior funding history.</li>
       <li>Check <strong>Supporting Documents</strong> to ensure the evidence needed for eligibility has been uploaded.</li>
-      <li>Confirm the case status and stage in <strong>Application Overview</strong>; if the case is already pending
+      <li>Confirm the case status in <strong>Application Overview</strong>; if the file is already pending
         approval or closed you may have limited edit access.</li>
     </ul>
 
@@ -28,7 +28,7 @@ const ApplicationAssessmentHelp = () => (
         costs (ITP or wage subsidy breakdowns).</li>
       <li>Select a <strong>recommendation</strong> and provide a detailed justification. This text appears in the case
         record and downstream notifications.</li>
-      <li>Click <em>Save</em> to keep a draft without changing the case stage, or <em>Submit</em> to mark the
+      <li>Click <em>Save</em> to keep a draft without changing the case status, or <em>Submit</em> to mark the
         assessment as ready for NWAC review.</li>
     </ol>
 

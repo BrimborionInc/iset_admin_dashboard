@@ -5,14 +5,14 @@ const ApplicationOverviewHelp = () => (
     <h2>Application overview at a glance</h2>
     <p>
       This card summarises the most important details about the applicant and where the case sits in the
-      workflow. Use it to confirm ownership, stage, and contact information before diving into the other
+      workflow. Use it to confirm ownership, current status, and contact information before diving into the other
       widgets.
     </p>
 
     <h3>What you can do here</h3>
     <ul>
       <li>
-        <strong>Check status and stage:</strong> The coloured badge reflects the current case status. If your
+        <strong>Check status:</strong> The coloured badge reflects the current case status. If your
         permissions allow, use the status selector to move the file to the next milestone.
       </li>
       <li>

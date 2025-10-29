@@ -3,7 +3,6 @@ import { useParams } from "react-router-dom";
 import Board from "@cloudscape-design/board-components/board";
 import { Box, SpaceBetween } from "@cloudscape-design/components";
 import CaseHeaderWidget from "./caseWorkspace/widgets/CaseHeaderWidget.jsx";
-import TimelineWidget from "./caseWorkspace/widgets/TimelineWidget.jsx";
 import TasksNotesWidget from "./caseWorkspace/widgets/TasksNotesWidget.jsx";
 import DocumentsWidget from "./caseWorkspace/widgets/DocumentsWidget.jsx";
 import ActionPlansWidget from "./caseWorkspace/widgets/ActionPlansWidget.jsx";
@@ -12,7 +11,6 @@ import FinancePanelWidget from "./caseWorkspace/widgets/FinancePanelWidget.jsx";
 import CompliancePanelWidget from "./caseWorkspace/widgets/CompliancePanelWidget.jsx";
 import ExportPreviewWidget from "./caseWorkspace/widgets/ExportPreviewWidget.jsx";
 import CaseWorkspaceCaseHeaderHelp from "../../helpPanelContents/caseWorkspaceCaseHeaderHelp.js";
-import CaseWorkspaceTimelineHelp from "../../helpPanelContents/caseWorkspaceTimelineHelp.js";
 import CaseWorkspaceTasksNotesHelp from "../../helpPanelContents/caseWorkspaceTasksNotesHelp.js";
 import CaseWorkspaceDocumentsHelp from "../../helpPanelContents/caseWorkspaceDocumentsHelp.js";
 import CaseWorkspaceActionPlansHelp from "../../helpPanelContents/caseWorkspaceActionPlansHelp.js";
@@ -42,17 +40,6 @@ const widgetRegistry = {
     helpComponent: CaseWorkspaceCaseHeaderHelp,
     helpTitle: "Case header",
     aiContext: CaseWorkspaceCaseHeaderHelp.aiContext,
-  },
-  timeline: {
-    id: "timeline",
-    defaultRowSpan: 3,
-    defaultColumnSpan: 2,
-    component: TimelineWidget,
-    title: "Timeline",
-    description: "Chronology of action plans, interventions, and key updates.",
-    helpComponent: CaseWorkspaceTimelineHelp,
-    helpTitle: "Case timeline",
-    aiContext: CaseWorkspaceTimelineHelp.aiContext,
   },
   tasksNotes: {
     id: "tasksNotes",
@@ -168,7 +155,6 @@ const widgetRegistry = {
 
 const defaultLayout = [
   { id: "caseHeader", rowSpan: 2, columnSpan: 4 },
-  { id: "timeline", rowSpan: 3, columnSpan: 2 },
   { id: "supporting-documents", rowSpan: 5, columnSpan: 2 },
   { id: "secure-messaging", rowSpan: 5, columnSpan: 2 },
   { id: "tasksNotes", rowSpan: 3, columnSpan: 2 },
