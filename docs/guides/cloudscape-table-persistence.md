@@ -1,81 +1,97 @@
-# Cloudscape Table Persistence Notes
+# Cloudscape Table Implementation Standard
 
-This note captures the steps (and past gotchas) for making Cloudscape tables remember user preferences across reloads. It’s based on the fixes we applied to the Finance Budgets dashboard after several failed attempts, so following it should prevent a repeat of that debugging loop.
+Use the Finance module’s `BudgetHierarchyWidget` (`src/pages/finance/widgets/BudgetHierarchyWidget.jsx`) as the canonical pattern for every new Cloudscape table. This guide extracts the key practices from that widget so we ship consistent filtering, pagination, collection preferences, and persistence behaviour by default.
 
-## What to persist
+---
 
-Decide which parts of the table state must survive a reload. Typical items:
+## 1. Capabilities every table must ship
 
-- View mode toggles (e.g., tree vs. flat).
-- Domain filters (risk, timeframe, search text).
-- Pagination state (current page, page size).
-- Column visibility and ordering.
-- Column widths from user-resizing actions.
-- Selected saved view (if we have a saved-views widget).
+- **Filtering:** pair a `TextFilter` with any domain filters (segmented control, select, badge filters). Keep filter state controlled and reflect it in the header counter.
+- **Column management:** expose a `CollectionPreferences` component with `contentDisplayPreference`, locking mandatory columns in place by re-inserting them during `onConfirm`.
+- **Resizable columns:** enable `resizableColumns` and wire `onColumnWidthsChange` to persist widths.
+- **Pagination:** render `Pagination` with controlled `currentPageIndex` / `pagesCount`; disable when the current view mode does not support paging (e.g., tree view).
+- **Selection:** keep `selectionType` controlled and pass selection changes through to the workspace context so downstream widgets stay in sync.
+- **Accessibility:** enable `stickyHeader` and `enableKeyboardNavigation`, and use the shared `boardItemI18nStrings` when wrapping the table in a `BoardItem`.
 
-Keep all of these in a single preference object keyed off the widget, e.g.:
+---
 
-```ts
-const PREFERENCES_STORAGE_KEY = "finance-budget-hierarchy-preferences-v1";
-```
+## 2. State management & persistence
 
-Store a versioned key so we can bump the suffix when schema changes.
+### Preference storage
 
-## When to load preferences
-
-1. On initial render, synchronously read from `window.localStorage`. Guard for `typeof window === "undefined"` so server-side rendering doesn’t explode.
-2. Populate React state with the stored values; default back to our built-in initial state if the key isn’t present or the payload is malformed.
-3. Only use a saved preset (e.g., the default saved view) when no preferences were stored. Otherwise the table state should honour the stored preference. This was a key bug: our saved-view widget always broadcast its “tree” preset on mount, overwriting the persisted state every time.
-
-## Persisting changes
-
-Whenever a relevant value changes (view mode, filter, page size, visible columns, etc.), call a `persistPreferences()` helper to write the merged object back to localStorage. Centralise the logic so every state update goes through the same sanitiser.
-
-Example sanitiser:
+- Versioned key per widget, e.g. `const PREFERENCES_STORAGE_KEY = "caseworking-interventions-preferences-v1";`
+- Hydrate synchronously (`typeof window === "undefined"` guard) and merge with defaults.
+- Persist view mode, search text, domain filters, visible columns, and page size in a single object.
 
 ```ts
-const persistPreferences = prefs => {
+const persistPreferences = next => {
+  const visibleSet = new Set(next.visibleColumns ?? defaultPreferences.visibleColumns);
+  visibleSet.add("pot"); // keep mandatory identifier column
+
   const payload = {
     ...defaultPreferences,
-    ...prefs,
-    visibleColumns: Array.from(
-      new Set((prefs.visibleColumns ?? defaultPreferences.visibleColumns)
-        .filter(id => ALL_COLUMN_IDS.includes(id)))
-    ),
+    ...next,
+    visibleColumns: ALL_COLUMN_IDS.filter(id => visibleSet.has(id)),
   };
+
   window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(payload));
 };
 ```
 
-Always de-dupe `visibleColumns` and make sure required columns (e.g., the primary “pot” column) stay in the list.
+### Column widths
 
-## Column width handling
+- Dedicated key: `const COLUMN_WIDTHS_STORAGE_KEY = "caseworking-interventions-column-widths-v1";`
+- Support both `detail.columnWidths` (`[{ id, width }]`) and `detail.widths` (width array).
+- Persist only numeric widths with known IDs; remove the key if the array becomes empty.
+- Apply stored widths by mapping onto `columnDefinitions` before the table renders.
 
-Cloudscape emits column-width updates in one of two shapes:
+### Order of operations
 
-- `detail.columnWidths`: array of `{ id, width }`.
-- `detail.widths`: array of raw numbers matching the currently rendered columns.
+1. Load preferences into state.
+2. Load column widths and merge into column definitions.
+3. Render the table.
+4. On state changes (filters, page size, visible columns, widths), update React state first, then persist.
+5. Reset pagination to page 1 whenever filters, search text, or visible columns change.
 
-Handle both cases. Ignore any entries lacking numeric widths or IDs we don’t recognise. Use the column order we render (e.g., `columnDefinitionsForTable`) to map raw widths back to column IDs when necessary. Once sanitised, store them via the same preference key or a dedicated `finance-budget-hierarchy-column-widths-v1`.
+---
 
-## Order of operations
+## 3. Filtering & view modes
 
-1. **Load stored preferences** ➜ set initial React state.
-2. **Load stored column widths** ➜ merge into column definitions before rendering.
-3. **Render** the table.
-4. **Only after state is ready** should we dispatch any “apply saved view” events (if needed). Skip dispatch if preferences already existed.
-5. **On change events** (filters, column widths, page size) ➜ update state ➜ persist preferences.
+- Debounce `TextFilter` updates (200-300 ms) to avoid noisy re-renders.
+- Keep domain filters (e.g., risk segmented control) in the same preference object.
+- For dual views (tree vs. flat), compute tree data once and derive flat rows via a memoised flatten helper. Only enable pagination in flat mode.
+- Update the table header counter to show the filtered row count (`counter={`(${totalMatches})`}`).
 
-Failing to respect this order is what caused Tree view to keep winning: we broadcast the preset event before state finished initialising, thereby overwriting the stored view mode every time.
+---
 
-## Testing checklist
+## 4. Collection preferences workflow
 
-After wiring persistence:
+1. Render `CollectionPreferences` with:
+   - `pageSizePreference` tied to stored page size (`DEFAULT_PAGE_SIZE`, `PAGE_SIZE_OPTIONS`).
+   - `contentDisplayPreference` generated from the canonical column definitions.
+   - `preferences={preferencesState}` so Cloudscape reflects the current selection.
+2. In `onConfirm`:
+   - Update `pageSize`, `visibleColumns`, and column widths (call `applyColumnWidthUpdates`).
+   - Re-append mandatory columns after filtering the user’s selection.
+   - Reset `currentPageIndex` to `1`.
+3. Persist the merged preferences and column widths immediately afterwards.
 
-1. Toggle view mode (tree/flat). Reload the page. Confirm the same mode returns.
-2. Change a risk filter and the text filter. Reload. Filters should be restored.
-3. Resize a column, navigate away (or reload), and confirm the width sticks.
-4. If a saved view widget exists, hit its Info link and make sure the view mode doesn’t reset. (The Info link causing a rerender exposed our earlier bug.)
-5. Clear `localStorage` for the preference key and ensure defaults kick back in cleanly.
+---
 
-Following this recipe keeps preferences reliable and avoids the silent regressions we hit on the Budgets dashboard. Whenever we introduce a new table, copy the helpers, rename the keys, and verify with the checklist above.*** End Patch
+## 5. Testing checklist
+
+1. Toggle each filter and reload; selections should persist from `localStorage`.
+2. Resize multiple columns, reload, and confirm widths remain.
+3. Hide/show columns in the settings cog; required columns must never disappear.
+4. Change page size and confirm pagination resets to page 1; verify pagination is disabled in modes that do not page.
+5. Use keyboard navigation (arrow keys, space/enter) to change selection without breaking focus styling.
+6. Clear the preference and column-width keys in `localStorage` and ensure defaults apply cleanly without console errors.
+
+---
+
+## 6. Reference implementation
+
+- Canonical widget: `src/pages/finance/widgets/BudgetHierarchyWidget.jsx`
+- Reuse helper utilities (`loadStoredColumnWidths`, `persistColumnWidths`, filtering helpers) when building new tables; rename keys per module but keep the logic identical.
+
+If a future change requires deviating from this standard, update this guide and leave breadcrumbs in the widget comment header so the next engineer knows why the divergence exists.

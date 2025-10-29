@@ -69,9 +69,9 @@ import FinanceForecastingHelp from '../helpPanelContents/financeForecastingHelp.
 import FinancePaymentsHelp from '../helpPanelContents/financePaymentsHelp.js';
 import ContactCommunicationsDashboard from '../pages/contact/ContactCommunicationsDashboard.jsx';
 import ContactCommunicationsHelp from '../helpPanelContents/contactCommunicationsHelp.js';
-import PortfolioDashboardPage from '../pages/iset/PortfolioDashboardPage.jsx';
+import PortfolioDashboardPage from '../pages/Caseworking/PortfolioDashboardPage.jsx';
 import PortfolioDashboardHelp from '../helpPanelContents/portfolioDashboardHelp.js';
-import CaseWorkspacePage from '../pages/iset/CaseWorkspacePage.jsx';
+import CaseWorkspacePage from '../pages/Caseworking/CaseWorkspacePage.jsx';
 import CaseWorkspaceHelp from '../helpPanelContents/caseWorkspaceHelp.js';
 import EsdcSubmissionsOverviewPage from '../pages/esdc/EsdcSubmissionsOverviewPage.jsx';
 import EsdcParticipantSubmissionsPage from '../pages/esdc/EsdcParticipantSubmissionsPage.jsx';

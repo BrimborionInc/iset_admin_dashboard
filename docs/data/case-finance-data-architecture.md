@@ -1,14 +1,23 @@
 # ISET Case & Financial Management – Forward Data Architecture
 
-**Status:** Draft v0.1 (2025-10-28)  
+**Status:** Draft v0.2 (2025-10-30)  
 **Author:** Codex (LLM assistant)  
 **Scope:** Internal caseworking + financial management data domains, including ILMP/ESDC reporting alignment. All data described is dev/test only; no legacy production reconciliation is required.
 
 ---
 
+## Revision History
+
+| Date | Version | Author | Notes |
+|------|---------|--------|-------|
+| 2025-10-30 | v0.2 | Codex | Captured Oct 2025 schema migrations (contact comms, ESDC submissions, enumeration seeds) and aligned current-state summaries. |
+| 2025-10-28 | v0.1 | Codex | Initial draft outlining target data architecture for case and finance domains. |
+
+---
+
 ## 1. Executive Summary
 
-The current database supports initial case tracking (linking applications to cases, assessments, notes/tasks) and emerging action-plan scaffolding. Financial data is limited to lightweight snapshots; detailed budgeting, commitments, disbursements, and ESDC submission history are not yet modelled. This document outlines the target-state entity-relationship model (ERM) required to manage case workflows end-to-end, align interventions with budgets, and satisfy ILMP (ESDC) reporting. A gap analysis and staged transition path are provided to guide schema evolution and service/API work.
+The current database supports initial case tracking (linking applications to cases, assessments, notes/tasks) and emerging action-plan scaffolding. Financial data is limited to lightweight snapshots; detailed budgeting and commitments are still pending, while the participant submission pipeline now has dedicated persistence (`esdc_participant_submission` + history and reporting package tables) that still requires service integration. This document outlines the target-state entity-relationship model (ERM) required to manage case workflows end-to-end, align interventions with budgets, and satisfy ILMP (ESDC) reporting. A gap analysis and staged transition path are provided to guide schema evolution and service/API work.
 
 ---
 
@@ -23,9 +32,12 @@ The current database supports initial case tracking (linking applications to cas
 | `iset_case_action_plan` | Early action plan scaffold | `case_id`, `name`, `status`, `effective_date`, `review_date`, `metadata_json` | FK → `iset_case.id`, optional owner FKs |
 | `iset_case_intervention` | Intervention scaffold tied to case/action plan | `case_id`, `action_plan_id`, `intervention_type`, `status`, `funding_stream`, amounts | FK → `iset_case`, `iset_case_action_plan` |
 | `iset_case_financial_snapshot` | Rolling totals per case | `allocated_amount`, `committed_amount`, `spent_amount`, `variance_amount` | FK → `iset_case.id` |
-| `iset_case_task`, `iset_case_note`, `iset_case_event`, `iset_case_watch` | Ancillary workflow activity | Standard audit columns | FK → `iset_case.id` |
+| `iset_case_task`, `iset_case_note`, `iset_case_event`, `iset_case_watch`, `iset_case_action_item`, `iset_case_compliance_check` | Ancillary workflow activity spanning tasks, notes, timeline entries, watchers, action items, and compliance verifications | Standard audit columns + soft-delete timestamps where applicable | FK → `iset_case.id`, optional assignee FKs → `staff_profiles.id`/`user.id` |
 | `iset_application`, `iset_application_version` | Source application payloads | `payload_json` (answers, submission data) | FK from `iset_case.application_id` |
-| `iset_intake_esdc_participant_submission` | Placeholder for outbound submission log | XML payload + status columns | Not yet integrated with case record |
+| `esdc_participant_submission` | Participant readiness + payload snapshot for ILMP exports | `case_id`, `application_id`, `readiness_status`, `submission_status`, `payload_snapshot`, `payload_checksum`, `rejection_reason` | FK → `iset_case.id`, `iset_application.id`, `user.id` (submitter) |
+| `esdc_participant_submission_history` | Timeline of validation/export events | `participant_submission_id`, `event_type`, `actor_user_id`, `event_details`, `occurred_at` | FK → `esdc_participant_submission.id`, `user.id` |
+| `esdc_reporting_package`, `esdc_reporting_note` | Reporting package lifecycle + internal collaboration | `reporting_period`, `due_date`, `status`, `checklist_state`, `note_text` | FK → `user.id` (submitter/author) |
+| `esdc_intervention_code`, `esdc_intervention_outcome` | Seeded enumeration catalogs aligned with ILMP schema 1.4 | `code`, `label`, `schema_version`, `is_active`, `display_order` | Referenced by UI/API when coding interventions & outcomes |
 
 ### 2.2 Current API Payloads
 
@@ -38,6 +50,14 @@ Financial APIs are not yet exposed; finance UI widgets use mocked data or rely o
 ### 2.3 Application Payload Insights
 
 Application answers (stored in `iset_application.payload_json.answers`) contain ILMP-aligned fields: labour force status, education level, social assistance, requested supports, barriers, childcare needs, etc. These answers must flow into case management (context, assessments) and downstream ESDC submissions. Payloads also include signatures and supporting document metadata.
+
+### 2.4 Recent schema changes (Oct 2025)
+
+- `20250923_0005_add_internal_notifications.sql` introduced `iset_internal_notification` + dismissal tables, enabling in-app alerts that surface case/finance workflow changes to staff.
+- `20251002_0006_add_sla_stage_target.sql` added SLA target configuration (`iset_sla_stage_target`) supporting future case ageing dashboards.
+- `20251022_create_contact_message_tables.sql` created `contact_message`, `contact_message_note`, and `contact_message_status_history` to capture intake/portfolio communications; contact cases will eventually cross-link to case records.
+- `20251023_create_esdc_submission_tables.sql` landed the ESDC participant submission pipeline (`esdc_participant_submission`, `_history`, `esdc_reporting_package`, `esdc_reporting_note`) and seeded ILMP enumerations (`esdc_intervention_code`, `esdc_intervention_outcome`). UI/service wiring still pending.
+- `esdc_intervention_code` and `esdc_intervention_outcome` now serve as canonical lookup tables for ILMP codes. Both tables share the same structure: `code` (TINYINT UNSIGNED), `label` (VARCHAR 255), `schema_version` (defaults to `1.4`), `is_active`, `display_order`, and audit timestamps. Front-end widgets resolve user-facing labels from these tables instead of displaying numeric codes.
 
 ---
 
@@ -172,7 +192,7 @@ Establish consistent DTOs mapping to normalized tables; avoid direct JSON blobs 
 
 1. **Foundation (Q4 2025)**
    - Add missing columns to `iset_case`, `iset_case_action_plan`, `iset_case_intervention` to unblock UI features (agreement FK, result fields, ILMP codes, check constraints). Introduce partial unique index enforcing at most one plan with `status IN ('draft','active')` per case.
-   - Create reference tables for enumerations (intervention codes, outcomes, result codes, funding streams, NOC versions) and seed from ESDC specs; surface via `/api/reference/...` endpoints for UI consumption.
+   - Reference tables for intervention/outcome codes are in place (`esdc_intervention_code`, `esdc_intervention_outcome`); still need result codes, funding streams, NOC versions, and `/api/reference/...` endpoints for UI consumption.
    - Introduce versioned assessment table and migrate existing rows (straightforward copy since dev data only). Enforce export locks so historical revisions remain immutable post-submission.
    - Wire `/api/action-plans/:id` update/close endpoints and enforce validation (e.g., interventions required before closing).
 
@@ -183,7 +203,7 @@ Establish consistent DTOs mapping to normalized tables; avoid direct JSON blobs 
    - Introduce audit events for approvals and payments.
 
 3. **ESDC Integration (Q1-Q2 2026)**
-   - Extend `iset_intake_esdc_participant_submission` with case/plan/intervention FKs; create line table with required triplet + schema version + content hash.
+   - Extend `esdc_participant_submission` with case/plan/intervention FKs; create line table with required triplet + schema version + content hash.
    - Build exporter service generating ILMP XML from normalized tables, ensuring scheduling & retry capability and honoring export locks.
    - Add validation service aligning with ILMP schema (duration <= 60 months, NOC gating, costs integer, etc.).
    - Capture submission acknowledgements and store error payloads for triage.
@@ -206,9 +226,9 @@ Establish consistent DTOs mapping to normalized tables; avoid direct JSON blobs 
 
 | Catalog | Examples | Source |
 |---------|----------|--------|
-| `intervention_code` | 1–20 list from ILMP schema | `docs/data/ESDC/ILMP_Schema1_4_Intervention_Spec.md` |
+| `intervention_code` | 1-20 list from ILMP schema | Seeded table `esdc_intervention_code` (`code` TINYINT, `label`, `schema_version`, `is_active`, `display_order`, timestamps) |
 | `action_plan_result_code` | Ready for Work, Found Employment, Returned to School | ILMP Standard Data File |
-| `intervention_outcome_code` | Complete, In progress, Incomplete, Cancelled | ILMP schema |
+| `intervention_outcome_code` | Complete, In progress, Incomplete, Cancelled | Seeded table `esdc_intervention_outcome` (`code` TINYINT, `label`, `schema_version`, `is_active`, `display_order`, timestamps) |
 | `funding_stream` | EI, CRF, NWAC-Own | NWAC finance policy |
 | `budget_category` | Skills Training, Wage Subsidy, Supports, Administration | NWAC finance structure |
 | `noc_version` | 2016, 2021 | ILMP requirements |

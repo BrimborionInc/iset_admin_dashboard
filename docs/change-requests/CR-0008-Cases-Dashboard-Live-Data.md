@@ -3,7 +3,7 @@
 ## Context
 - **Business driver:** Portfolio leadership needs a reliable operational view of all ISET cases—both application-derived and legacy/admin-created—to coordinate workloads and meet SLA targets.
 - **Current state:** The `Cases` widget on `PortfolioDashboardPage` is scaffold-only, powered by mock data with no persistence, RBAC enforcement, or assignment actions wired to the backend.
-- **Reference materials:** `src/pages/iset/portfolio/widgets/CasesTableWidget.jsx`, `src/pages/iset/portfolio/PortfolioCaseContext.jsx`, `isetadminserver.js`, existing CRs `CR-0003` (financial module scaffolds) and `CR-0007` (data enrichment patterns).
+- **Reference materials:** `src/pages/Caseworking/portfolio/widgets/CasesTableWidget.jsx`, `src/pages/Caseworking/portfolio/PortfolioCaseContext.jsx`, `isetadminserver.js`, existing CRs `CR-0003` (financial module scaffolds) and `CR-0007` (data enrichment patterns).
 
 ## Problem Statement
 - Case managers cannot rely on the current dashboard listing because it omits live data and ignores permissions.
@@ -117,7 +117,7 @@
 - Update `POST /api/cases` to require `client_id` (and optional `application_id`). For admin-created cases, payload is `{ clientId, applicationId?, assignedToUserId?, status? }`. Enforce referential integrity and return 422 if `client_id` missing.
 
 ### Frontend (React / Cloudscape)
-1. **Data layer:** introduce `useCasesData` hook (e.g., in `src/pages/iset/portfolio/hooks/useCasesData.js`) handling fetch, pagination, sorting, filter state, debounced search, and Cloudscape preference persistence (still stored in `localStorage`/`sessionStorage`).
+1. **Data layer:** introduce `useCasesData` hook (e.g., in `src/pages/Caseworking/portfolio/hooks/useCasesData.js`) handling fetch, pagination, sorting, filter state, debounced search, and Cloudscape preference persistence (still stored in `localStorage`/`sessionStorage`).
 2. **Widget updates:** in `CasesTableWidget.jsx`:
    - Replace reliance on `PortfolioCaseContext` mock data; use hook results instead.
    - Support Cloudscape Table server-side pagination/sorting (update `Table` props for `sortingDisabled={false}` and handle `onSortingChange` etc.).
@@ -189,6 +189,10 @@
 | 2025-10-26 | Step 2 progress - implemented paginated `GET /api/cases`, new `POST /api/cases/:id/assign` & `/reassign`, and enforced `client_id` for case creation (with assignment event emission). | Codex |
 | 2025-10-26 | Step 3 setup - added "Use live case data" toggle in `DemoNavigation` to control mock vs live feeds for the portfolio dashboard. | Codex |
 | 2025-10-26 | Step 3 progress - `CasesTableWidget` now consumes live data and wires inline Assign/Reassign modals with success/error alerts (client name backfill still pending). | Codex |
+| 2025-10-30 | Step 5 polish - Interventions widget row click syncs the selected intervention, keeping the edit flow consistent with table interactions. | Codex |
+| 2025-10-30 | Step 5 polish - Action Plans table now follows the Cloudscape table standard (search filter, column toggles, pagination, column-width persistence). | Codex |
+| 2025-10-30 | Step 5 polish - Interventions widget adopts the Cloudscape table standard and now renders ILMP code/outcome labels instead of numeric codes. | Codex |
+| 2025-10-30 | Step 5 polish - Case workspace normalises intervention cost using metadata/budget amounts so edits display correctly in the table. | Codex |
 | 2025-10-28 | Added `sql/20251028_05_alter_case_action_plan_lifecycle.sql` to extend `iset_case_action_plan` with lifecycle fields. Runner initially failed due to MySQL lacking `ADD COLUMN IF NOT EXISTS`; migration rewritten as discrete `ADD COLUMN` statements. Avoid relying on generated columns for one-active-plan enforcement—handled in service layer. | Codex |
 | 2025-10-28 | Delivered action-plan lifecycle and view workflow: new activate/close/archive endpoints, plan details modal with inline edit support, and dropdown actions using `expandToViewport`. Documented context fetch requirements so the edit/view modal continues to display client context. | Codex |
 
