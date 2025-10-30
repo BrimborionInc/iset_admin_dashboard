@@ -14762,6 +14762,33 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
       return res.status(409).json({ error: 'invalid_status', detail: 'action_plan_not_active' });
     }
 
+    const [interventionRows] = await pool.query(
+      `SELECT ci.*
+         FROM iset_case_intervention ci
+        WHERE ci.action_plan_id = ?`,
+      [planId]
+    );
+    const mappedInterventions = interventionRows.map(mapInterventionRow).filter(Boolean);
+    const openInterventions = mappedInterventions
+      .filter(item => {
+        const status = String(item.status || '').toLowerCase();
+        return status !== 'completed' && status !== 'cancelled';
+      })
+      .map(item => ({
+        id: item.id,
+        code: item.code,
+        title: item.title,
+        status: item.status,
+      }));
+
+    if (openInterventions.length > 0) {
+      return res.status(409).json({
+        error: 'open_interventions_block_close',
+        message: 'Close or cancel the listed interventions before closing this action plan.',
+        interventions: openInterventions,
+      });
+    }
+
     if (planRow.effective_date && resultDateStr < toDateOnly(planRow.effective_date)) {
       return res.status(422).json({ error: 'result_date_before_start', message: 'Result date cannot be before the plan start date.' });
     }

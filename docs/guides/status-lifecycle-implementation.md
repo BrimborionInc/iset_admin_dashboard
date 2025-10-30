@@ -96,7 +96,7 @@ Implemented in `recomputeCaseStatus(caseId)` (see `isetadminserver.js`):
 
 ### 3.3 Action Plan & Intervention Implications
 - Activating an action plan (`POST /api/action-plans/:id/activate`) or creating an active plan forces case status to `active` via `recomputeCaseStatus`.
-- Closing or archiving the last active plan moves the case to `dormant` unless other logic upgrades it to `ready_to_close`.
+- Closing or archiving the last active plan moves the case to `dormant` unless other logic upgrades it to `ready_to_close`. A guard now blocks plan closure while any linked intervention remains in an open state; the API response lists the blocking interventions so caseworkers can jump straight to the Interventions widget to finish them.
 - Intervention status updates do not directly change case status; instead they influence plan health metrics surfaced in widgets/counts.
 
 ---

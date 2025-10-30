@@ -215,6 +215,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     nocVersionsLoading,
     loadNocVersions,
     searchNocCodes,
+    setSelectedActionPlanId,
   } = useCaseWorkspace();
   const [selectedInterventionId, setSelectedInterventionId] = useState(null);
   const [formMode, setFormMode] = useState(null);
@@ -222,6 +223,8 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [forceReadOnly, setForceReadOnly] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
+  const pendingFocusRef = useRef(null);
+  const selectedPlanRef = useRef(selectedActionPlanId);
 
   const initialPreferences = useMemo(() => loadStoredPreferences(), []);
   const [searchQuery, setSearchQuery] = useState(initialPreferences.search);
@@ -236,6 +239,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     () => caseData?.actionPlans?.find(plan => plan.id === selectedActionPlanId),
     [caseData, selectedActionPlanId]
   );
+  const activePlanRef = useRef(activePlan);
 
   const normaliseStatus = status => (status || "").toLowerCase();
   const isClosedStatus = status => ["completed", "cancelled"].includes(normaliseStatus(status));
@@ -267,6 +271,54 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   useEffect(() => {
     setCurrentPageIndex(1);
   }, [searchQuery, activePlan?.id]);
+
+  useEffect(() => {
+    selectedPlanRef.current = selectedActionPlanId;
+  }, [selectedActionPlanId]);
+
+  useEffect(() => {
+    activePlanRef.current = activePlan;
+  }, [activePlan]);
+
+  const attemptPendingInterventionFocus = useCallback(() => {
+    const pending = pendingFocusRef.current;
+    if (!pending) return;
+    const currentPlan = activePlanRef.current;
+    if (!currentPlan || currentPlan.id !== pending.planId) return;
+    const target = (currentPlan.interventions || []).find(item => item.id === pending.interventionId);
+    if (!target) return;
+    setSelectedInterventionId(target.id);
+    requestAnimationFrame(() => {
+      const container = document.getElementById("case-interventions-widget");
+      if (container?.scrollIntoView) {
+        container.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+    pendingFocusRef.current = null;
+  }, [setSelectedInterventionId]);
+
+  useEffect(() => {
+    const handler = event => {
+      const detail = event?.detail || {};
+      const planId = detail.planId;
+      const interventionId = detail.interventionId;
+      if (!planId || !interventionId) {
+        return;
+      }
+      pendingFocusRef.current = { planId, interventionId };
+      if (selectedPlanRef.current !== planId && typeof setSelectedActionPlanId === "function") {
+        setSelectedActionPlanId(planId);
+        return;
+      }
+      attemptPendingInterventionFocus();
+    };
+    window.addEventListener("iset:focus-intervention", handler);
+    return () => window.removeEventListener("iset:focus-intervention", handler);
+  }, [attemptPendingInterventionFocus, setSelectedActionPlanId]);
+
+  useEffect(() => {
+    attemptPendingInterventionFocus();
+  }, [attemptPendingInterventionFocus, interventions, activePlan?.id]);
 
   useEffect(() => {
     if (interventionCodes.length > 0) {
@@ -851,6 +903,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
 
   return (
     <BoardItem
+      id="case-interventions-widget"
       header={
         <Header
           variant="h2"

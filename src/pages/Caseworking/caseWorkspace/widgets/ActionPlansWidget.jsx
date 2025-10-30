@@ -229,6 +229,63 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
   const [closeSubmitting, setCloseSubmitting] = useState(false);
   const [closeError, setCloseError] = useState(null);
 
+  const focusIntervention = useCallback(
+    (planId, interventionId) => {
+      if (!planId || !interventionId) return;
+      if (typeof setSelectedActionPlanId === "function") {
+        setSelectedActionPlanId(planId);
+      }
+      requestAnimationFrame(() => {
+        const container = document.getElementById("case-interventions-widget");
+        if (container?.scrollIntoView) {
+          container.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        window.dispatchEvent(
+          new CustomEvent("iset:focus-intervention", {
+            detail: { planId, interventionId },
+          })
+        );
+      });
+    },
+    [setSelectedActionPlanId]
+  );
+
+  const buildOpenInterventionMessage = useCallback(
+    (items, planId) => {
+      if (!Array.isArray(items) || items.length === 0) return null;
+      return (
+        <SpaceBetween size="xs">
+          <span>Close or cancel the following interventions before closing this action plan:</span>
+          <Box as="ul" margin={{ left: "l" }}>
+            {items.map(item => {
+              const code = item.code ? String(item.code).trim() : "";
+              const labelParts = [];
+              if (code) labelParts.push(code);
+              if (item.title) labelParts.push(item.title);
+              const display = labelParts.join(" – ") || `Intervention ${item.id}`;
+              const statusLabel = formatLabel(item.status) || "Status unknown";
+              return (
+                <li key={item.id}>
+                  <Link
+                    href="#case-interventions-widget"
+                    onFollow={event => {
+                      event.preventDefault();
+                      focusIntervention(planId, item.id);
+                    }}
+                  >
+                    {display}
+                  </Link>
+                  {` (${statusLabel})`}
+                </li>
+              );
+            })}
+          </Box>
+        </SpaceBetween>
+      );
+    },
+    [focusIntervention]
+  );
+
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
       variant="info"
@@ -357,21 +414,37 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
     refresh().catch(() => {});
   };
 
-  const handlePlanAction = useCallback((actionId, plan) => {
-    if (!plan || !actionId) return;
-    setErrorMessage(null);
-    setSuccessMessage(null);
-    if (actionId === "view") {
-      setDetailsModalPlan(plan);
-    } else if (actionId === "activate") {
-      setPendingConfirm({ type: "activate", plan });
-    } else if (actionId === "close") {
-      setCloseError(null);
-      setCloseModalPlan(plan);
-    } else if (actionId === "archive") {
-      setPendingConfirm({ type: "archive", plan });
-    }
-  }, []);
+  const handlePlanAction = useCallback(
+    (actionId, plan) => {
+      if (!plan || !actionId) return;
+      setErrorMessage(null);
+      setSuccessMessage(null);
+      if (actionId === "view") {
+        setDetailsModalPlan(plan);
+      } else if (actionId === "activate") {
+        setPendingConfirm({ type: "activate", plan });
+      } else if (actionId === "close") {
+        const openInterventions = (plan.interventions || []).filter(item => {
+          const status = (item?.status || "").toLowerCase();
+          return status !== "completed" && status !== "cancelled";
+        });
+        if (openInterventions.length > 0) {
+          const message = buildOpenInterventionMessage(openInterventions, plan.id);
+          setCloseModalPlan(null);
+          setCloseError(null);
+          setErrorMessage(
+            message || "Close or cancel all interventions before closing this action plan."
+          );
+          return;
+        }
+        setCloseError(null);
+        setCloseModalPlan(plan);
+      } else if (actionId === "archive") {
+        setPendingConfirm({ type: "archive", plan });
+      }
+    },
+    [buildOpenInterventionMessage]
+  );
 
   const executePendingAction = async () => {
     if (!pendingConfirm) return;
@@ -408,7 +481,17 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
       await refresh().catch(() => {});
       setCloseModalPlan(null);
     } catch (error) {
-      setCloseError(error?.message || "Unable to close action plan.");
+      if (error?.code === "open_interventions_block_close" && Array.isArray(error.openInterventions)) {
+        const message = buildOpenInterventionMessage(
+          error.openInterventions,
+          closeModalPlan?.id || error.planId || null
+        );
+        setCloseError(
+          message || "Close or cancel all interventions before closing this action plan."
+        );
+      } else {
+        setCloseError(error?.message || "Unable to close action plan.");
+      }
     } finally {
       setCloseSubmitting(false);
     }

@@ -903,10 +903,24 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       }
       const message =
         details?.message ||
+        details?.detail ||
         details?.error ||
         `Failed to close action plan (${response.status})`;
       const error = new Error(message);
       error.status = response.status;
+      if (details) {
+        error.code = details.error || null;
+        error.details = details;
+        if (Array.isArray(details.interventions)) {
+          error.openInterventions = details.interventions.map(item => ({
+            id: item.id,
+            code: item.code,
+            title: item.title,
+            status: item.status,
+          }));
+        }
+      }
+      error.planId = actionPlanId;
       throw error;
     }
     return response.json();
