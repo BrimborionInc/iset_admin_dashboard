@@ -27,6 +27,16 @@ import useCasesData from "../hooks/useCasesData.js";
 const COLUMN_WIDTHS_KEY = "iset-portfolio-cases-table-widths-v2";
 const PREFERENCES_KEY = "iset-portfolio-cases-table-preferences-v2";
 const DEFAULT_PAGE_SIZE = 10;
+const DEFAULT_STATUS_FILTERS = [
+  "initiated",
+  "active",
+  "dormant",
+  "ready_to_close",
+  "closed",
+  "archived",
+];
+const normaliseStatusValue = value =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
 
 const formatDate = value => {
   if (!value) return "-";
@@ -263,7 +273,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   } = useCasesData({
     enabled: useLiveCases,
     searchText,
-    statusFilters: undefined,
+    statusFilters: DEFAULT_STATUS_FILTERS,
     ownerFilters: undefined,
     page: currentPageIndex,
     pageSize,
@@ -412,19 +422,33 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     [useLiveCases, fetchAssignableStaff]
   );
 
-  const pagesCount = Math.max(1, Math.ceil(filteredCases.length / pageSize));
+  const offlineStatusFilteredCases = useMemo(() => {
+    if (useLiveCases) return [];
+    return filteredCases.filter(item =>
+      DEFAULT_STATUS_FILTERS.includes(normaliseStatusValue(item?.status))
+    );
+  }, [useLiveCases, filteredCases]);
+
+  const pagesCount = Math.max(
+    1,
+    Math.ceil(offlineStatusFilteredCases.length / pageSize)
+  );
   const pagedItems = useMemo(() => {
+    if (useLiveCases) return [];
     const start = (currentPageIndex - 1) * pageSize;
-    return filteredCases.slice(start, start + pageSize);
-  }, [filteredCases, currentPageIndex, pageSize]);
+    return offlineStatusFilteredCases.slice(start, start + pageSize);
+  }, [useLiveCases, offlineStatusFilteredCases, currentPageIndex, pageSize]);
 
   useEffect(() => {
     if (useLiveCases) return;
     setCurrentPageIndex(previous => {
-      const maxPage = Math.max(1, Math.ceil(filteredCases.length / pageSize));
+      const maxPage = Math.max(
+        1,
+        Math.ceil(offlineStatusFilteredCases.length / pageSize)
+      );
       return previous > maxPage ? maxPage : previous;
     });
-  }, [useLiveCases, filteredCases, pageSize]);
+  }, [useLiveCases, offlineStatusFilteredCases, pageSize]);
 
   useEffect(() => {
     if (!useLiveCases) return;
@@ -542,7 +566,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const itemsToRender = useLiveCases ? liveItems : pagedItems;
   const totalCount = useLiveCases
     ? (Number.isFinite(liveTotalCount) ? liveTotalCount : liveItems.length)
-    : filteredCases.length;
+    : offlineStatusFilteredCases.length;
   const pagesCountEffective = useLiveCases
     ? Math.max(1, Math.ceil(Math.max(totalCount, 1) / pageSize))
     : pagesCount;
@@ -558,7 +582,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     ? liveLoading
       ? "Loading…"
       : `${totalCount} case${totalCount === 1 ? "" : "s"}`
-    : `${filteredCases.length} match${filteredCases.length === 1 ? "" : "es"}`;
+    : `${offlineStatusFilteredCases.length} match${offlineStatusFilteredCases.length === 1 ? "" : "es"}`;
   const emptyState = liveError ? (
     <Box padding="m">
       <StatusIndicator type="error">

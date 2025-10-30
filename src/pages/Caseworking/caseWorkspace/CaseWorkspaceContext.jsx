@@ -315,6 +315,39 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
   const regionDetails =
     regionSource && typeof regionSource === "object" ? regionSource : (client.region && typeof client.region === "object" ? client.region : null);
 
+  const assessmentKeys = [
+    "case_summary",
+    "assessment_employment_goals",
+    "assessment_previous_iset",
+    "assessment_previous_iset_details",
+    "assessment_employment_barriers",
+    "assessment_local_area_priorities",
+    "assessment_other_funding_details",
+    "assessment_esdc_eligibility",
+    "assessment_intervention_start_date",
+    "assessment_intervention_end_date",
+    "assessment_intervention_code",
+    "assessment_intervention_outcome_code",
+    "assessment_intervention_duration_days",
+    "assessment_intervention_cost_total",
+    "assessment_intervention_related_noc",
+    "assessment_intervention_related_noc_version",
+    "assessment_childcare_need",
+    "assessment_childcare_funding_details",
+    "assessment_institution",
+    "assessment_program_name",
+    "assessment_itp",
+    "assessment_wage",
+    "assessment_recommendation",
+    "assessment_justification",
+  ];
+  const assessmentData = {};
+  assessmentKeys.forEach(key => {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      assessmentData[key] = payload[key];
+    }
+  });
+
   return {
     id: payload.id ?? caseId,
     applicationId: payload.applicationId ?? payload.application_id ?? null,
@@ -355,6 +388,7 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
     finance: payload.finance ?? null,
     compliance: payload.compliance ?? null,
     eligibility: payload.eligibility ?? null,
+    ...assessmentData,
   };
 };
 

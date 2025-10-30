@@ -68,6 +68,8 @@ _After completing each increment, update this CR with progress details, learning
 - _2025-10-15_: Increment 4 completed – Manage Applications widget now fetches the watchlist, adds a flag column with inline toggle, provides a "My watched cases" filter, and surfaces success/error toasts for flagging actions; backend aligned with canonical schema (migration renaming `user_id` → `staff_profile_id`, simplified case payloads).
 - _2025-10-15_: Increment 5 completed – smoke-tested flag/unflag flows (UI/API/dispatcher), confirmed migrations are idempotent, and documented operational guidance plus follow-up work for the future homepage watchlist widget.
 
+- _2025-10-30_: Applications listing shows a redacted applicant column (masked first/last name) sourced via `/api/applications` joining `iset_application_submission.intake_payload`, letting staff differentiate cases without exposing full PII.
+
 ## Post-Implementation Technical Change Summary
 - **Schema**: `sql/20251014_create_iset_case_watch.sql` (initial table) and `sql/20251014_align_case_watch_staff_profile.sql` (rename `user_id` to `staff_profile_id`, add FK/index).
 - **Server**: `isetadminserver.js` watch endpoints (`GET /api/me/case-watches`, `POST/DELETE /api/cases/:id/watch`) with metadata normalisation and schema-aligned payloads.

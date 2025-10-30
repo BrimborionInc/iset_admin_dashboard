@@ -3,7 +3,7 @@ import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
 import { canCompleteOutcomeReview, getCaseStatusContext, getApplicationStatusContext } from '../utils/rbac';
-import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup } from '@cloudscape-design/components';
+import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup, Autosuggest } from '@cloudscape-design/components';
 import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
 
@@ -23,6 +23,17 @@ const RECOMMEND_OPTIONS = [
   { label: 'Do not recommend funding', value: 'no_recommend' },
   { label: 'Recommend alternative intervention', value: 'alternative' }
 ];
+
+const CHILDCARE_OPTIONS = [
+  { value: 'yes', label: 'Yes' },
+  { value: 'no', label: 'No' }
+];
+
+const requiresNocForCode = (value) => {
+  if (!value) return false;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 6 && numeric <= 13;
+};
 
 const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'withdrawn', 'archived']);
 const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'withdrawn', 'archived']);
@@ -50,6 +61,41 @@ const formatDate = (date) => {
   const d = new Date(date);
   if (isNaN(d)) return '';
   return d.toISOString().slice(0, 10);
+};
+
+const parseIsoDateToUtc = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
+  }
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split('-');
+  if (parts.length !== 3) return null;
+  const [yyyy, mm, dd] = parts.map(part => Number.parseInt(part, 10));
+  if (![yyyy, mm, dd].every(Number.isFinite)) return null;
+  return Date.UTC(yyyy, mm - 1, dd);
+};
+
+const calculateDurationDays = (start, end) => {
+  const startUtc = parseIsoDateToUtc(start);
+  const endUtc = parseIsoDateToUtc(end);
+  if (startUtc === null || endUtc === null) return null;
+  const diff = Math.round((endUtc - startUtc) / (1000 * 60 * 60 * 24));
+  if (!Number.isFinite(diff) || diff < 0) return null;
+  return diff;
+};
+
+const parseCurrencyToNumber = (value) => {
+  if (value === null || typeof value === 'undefined') return 0;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+  const cleaned = String(value).replace(/[^0-9.+-]/g, '');
+  if (!cleaned) return 0;
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate }) => {
@@ -84,18 +130,19 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   } = useCurrentUser();
   const userRole = currentUserRole || '';
 
+  const [interventionCodes, setInterventionCodes] = useState([]);
+  const [interventionCodesLoading, setInterventionCodesLoading] = useState(false);
+  const [nocVersions, setNocVersions] = useState([]);
+  const [nocVersionsLoading, setNocVersionsLoading] = useState(false);
+  const [nocSuggestions, setNocSuggestions] = useState([]);
+  const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
+
   const rawApplicationStatus = caseData?.applicationStatus ?? caseData?.application_status ?? null;
   const rawCaseStatusSnapshot = caseData?.status ?? '';
   const canonicalCaseStatusSnapshot = getCaseStatusContext(rawCaseStatusSnapshot).canonicalStatus;
   const applicationStatusContext = getApplicationStatusContext(rawApplicationStatus);
   const canonicalApplicationStatus = applicationStatusContext.canonicalStatus || canonicalCaseStatusSnapshot;
   const isPendingApprovalStatus = canonicalApplicationStatus === 'pending_approval';
-  console.debug('[NWAC] status snapshot', {
-    rawApplicationStatus,
-    canonicalApplicationStatus,
-    rawCaseStatus: rawCaseStatusSnapshot,
-    canonicalCaseStatus: canonicalCaseStatusSnapshot,
-  });
 
   const isDecisionFinal = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
   const isLockedStatus = APPLICATION_LOCKED_STATUSES.has(canonicalApplicationStatus);
@@ -103,6 +150,76 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const isOutcomeNoticeDisabled = isDecisionFinal;
   const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus });
   const lacksOutcomePermission = Boolean(userRole) && isPendingApprovalStatus && !canManageOutcomeReview;
+  const requiresNoc = useMemo(() => requiresNocForCode(assessment.interventionCode), [assessment.interventionCode]);
+  const selectedInterventionCodeOption = useMemo(
+    () => interventionCodes.find(option => option.value === assessment.interventionCode) || null,
+    [interventionCodes, assessment.interventionCode]
+  );
+  const selectedNocVersionOption = useMemo(
+    () => nocVersions.find(option => option.value === assessment.interventionNocVersion) || null,
+    [nocVersions, assessment.interventionNocVersion]
+  );
+  const selectedChildcareOption = useMemo(
+    () => CHILDCARE_OPTIONS.find(option => option.value === assessment.childcareNeed) || null,
+    [assessment.childcareNeed]
+  );
+  const calculatedDuration = useMemo(() => {
+    const diff = calculateDurationDays(assessment.startDate, assessment.endDate);
+    return diff !== null ? String(diff) : null;
+  }, [assessment.startDate, assessment.endDate]);
+  const calculatedFundingTotal = useMemo(() => {
+    const itp = assessment.itp || {};
+    const wage = assessment.wage || {};
+    const total =
+      parseCurrencyToNumber(itp.tuition) +
+      parseCurrencyToNumber(itp.books) +
+      parseCurrencyToNumber(itp.materials) +
+      parseCurrencyToNumber(itp.living) +
+      parseCurrencyToNumber(wage.wages) +
+      parseCurrencyToNumber(wage.mercs) +
+      parseCurrencyToNumber(wage.nonwages) +
+      parseCurrencyToNumber(wage.other);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    return String(Math.round(total));
+  }, [assessment.itp, assessment.wage]);
+  const fetchNocSuggestions = useCallback(
+    async (queryText) => {
+      if (!requiresNoc || !assessment.interventionNocVersion) {
+        setNocSuggestions([]);
+        return;
+      }
+      const query = typeof queryText === 'string' ? queryText.trim() : '';
+      if (query.length < 2) {
+        setNocSuggestions([]);
+        return;
+      }
+      setNocSuggestionsLoading(true);
+      try {
+        const params = new URLSearchParams();
+        params.set('limit', '25');
+        params.set('q', query);
+        params.set('version', assessment.interventionNocVersion);
+        const response = await apiFetch(`/api/reference/noc-codes?${params.toString()}`, { method: 'GET' });
+        if (!response.ok) throw new Error(`Failed to load NOC codes (${response.status})`);
+        const data = await response.json();
+        const options = Array.isArray(data?.codes)
+          ? data.codes
+              .map(item => ({
+                value: item?.code ? String(item.code).trim() : null,
+                label: item?.title ? `${item.code} – ${item.title}` : String(item.code || ''),
+                description: item?.title || null
+              }))
+              .filter(option => option.value && option.label)
+          : [];
+        setNocSuggestions(options);
+      } catch (error) {
+        setNocSuggestions([]);
+      } finally {
+        setNocSuggestionsLoading(false);
+      }
+    },
+    [assessment.interventionNocVersion, requiresNoc]
+  );
   const activeLock = useMemo(() => {
     if (lockState.owned && lockState.lock) {
       return lockState.lock;
@@ -167,8 +284,24 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       clientName: caseData.assigned_user_email || '',
       overview: caseData?.case_summary || '',
       employmentGoals: caseData?.assessment_employment_goals || caseData?.employment_goals || '',
-      previousISET: '',
-      previousISETDetails: '',
+      previousISET: (() => {
+        const raw = caseData.assessment_previous_iset;
+        if (raw === null || typeof raw === 'undefined') return '';
+        if (typeof raw === 'string') {
+          const normalized = raw.trim().toLowerCase();
+          if (normalized === 'yes' || normalized === 'no') return normalized;
+          if (['1', 'true', 'y', 'on'].includes(normalized)) return 'yes';
+          if (['0', 'false', 'n', 'off'].includes(normalized)) return 'no';
+          return '';
+        }
+        if (raw === true || raw === 1) return 'yes';
+        if (raw === false || raw === 0) return 'no';
+        if (Number.isFinite(Number(raw))) {
+          return Number(raw) === 1 ? 'yes' : Number(raw) === 0 ? 'no' : '';
+        }
+        return '';
+      })(),
+      previousISETDetails: caseData?.assessment_previous_iset_details || '',
       barriers: Array.isArray(caseData?.assessment_employment_barriers)
         ? caseData.assessment_employment_barriers
         : (Array.isArray(caseData?.employment_barriers) ? caseData.employment_barriers : []),
@@ -177,8 +310,8 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         : [],
       otherFunding: caseData?.assessment_other_funding_details || caseData?.other_funding_details || '',
       esdcEligibility: caseData.assessment_esdc_eligibility || '',
-      startDate: caseData.assessment_intervention_start_date || '',
-      endDate: caseData.assessment_intervention_end_date || '',
+      startDate: formatDate(caseData.assessment_intervention_start_date) || '',
+      endDate: formatDate(caseData.assessment_intervention_end_date) || '',
       institution: caseData?.assessment_institution || caseData?.institution || '',
       programName: caseData?.assessment_program_name || '',
       itp: parseOrDefault(caseData.assessment_itp, { tuition: '', books: '', materials: '', living: '' }),
@@ -186,7 +319,24 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       recommendation: caseData.assessment_recommendation || '',
       justification: caseData.assessment_justification || '',
       nwacReview: caseData.assessment_nwac_review || '',
-      nwacReason: caseData.assessment_nwac_reason || ''
+      nwacReason: caseData.assessment_nwac_reason || '',
+      interventionCode: caseData.assessment_intervention_code != null ? String(caseData.assessment_intervention_code) : '',
+      interventionDuration: caseData.assessment_intervention_duration_days != null ? String(caseData.assessment_intervention_duration_days) : '',
+      interventionCost: caseData.assessment_intervention_cost_total != null ? String(caseData.assessment_intervention_cost_total) : '',
+      interventionNoc: caseData.assessment_intervention_related_noc ? String(caseData.assessment_intervention_related_noc).trim() : '',
+      interventionNocVersion: caseData.assessment_intervention_related_noc_version ? String(caseData.assessment_intervention_related_noc_version).trim() : '',
+      childcareNeed: (() => {
+        const raw = caseData.assessment_childcare_need;
+        if (raw === null || typeof raw === 'undefined') return '';
+        if (typeof raw === 'string') {
+          const lowered = raw.trim().toLowerCase();
+          if (lowered === 'yes' || lowered === 'no') return lowered;
+        }
+        if (raw === true || raw === 1 || raw === '1') return 'yes';
+        if (raw === false || raw === 0 || raw === '0') return 'no';
+        return '';
+      })(),
+      childcareFunding: caseData.assessment_childcare_funding_details || ''
     };
     setAssessment(a => ({ ...placeholders, ...a }));
     setInitialAssessment(placeholders);
@@ -200,6 +350,71 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     setLocalAssessmentSubmitted(pendingApproval || isDecisionFinal);
   }, [canonicalApplicationStatus, isDecisionFinal, showOutcomeByStatus]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadInterventionCodes = async () => {
+      setInterventionCodesLoading(true);
+      try {
+        const response = await apiFetch('/api/reference/intervention-codes', { method: 'GET' });
+        if (!response.ok) throw new Error(`Failed to load intervention codes (${response.status})`);
+        const data = await response.json();
+        if (cancelled) return;
+        const options = Array.isArray(data?.codes)
+          ? data.codes
+              .map(item => ({
+                value: item?.code ? String(item.code) : null,
+                label: item?.label ? `${item.code} – ${item.label}` : String(item.code || '')
+              }))
+              .filter(option => option.value && option.label)
+          : [];
+        setInterventionCodes(options);
+      } catch (error) {
+        if (!cancelled) {
+          setInterventionCodes([]);
+        }
+      } finally {
+        if (!cancelled) setInterventionCodesLoading(false);
+      }
+    };
+
+    const loadNocVersions = async () => {
+      setNocVersionsLoading(true);
+      try {
+        const response = await apiFetch('/api/reference/noc-versions', { method: 'GET' });
+        if (!response.ok) throw new Error(`Failed to load NOC versions (${response.status})`);
+        const data = await response.json();
+        if (cancelled) return;
+        const options = Array.isArray(data?.versions)
+          ? data.versions
+              .map(item => ({
+                value: item?.code ? String(item.code).trim() : null,
+                label: item?.label ? item.label : String(item.code || '')
+              }))
+              .filter(option => option.value && option.label)
+          : [];
+        setNocVersions(options);
+      } catch (error) {
+        if (!cancelled) {
+          setNocVersions([]);
+        }
+      } finally {
+        if (!cancelled) setNocVersionsLoading(false);
+      }
+    };
+
+    loadInterventionCodes();
+    loadNocVersions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    setNocSuggestions([]);
+  }, [assessment.interventionNocVersion]);
+
   // Track changes
   useEffect(() => {
     setIsChanged(JSON.stringify(assessment) !== JSON.stringify(initialAssessment));
@@ -210,76 +425,21 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const handleField = (field, value) => {
     setAssessment(prevAssessment => {
       const nextAssessment = { ...prevAssessment, [field]: value };
+      if (field === 'previousISET' && value !== 'yes') {
+        nextAssessment.previousISETDetails = '';
+      }
+      if (field === 'nwacReviewStatus' && value !== 'reject') {
+        nextAssessment.nwacReason = '';
+      }
+      if (field === 'childcareNeed' && value !== 'yes') {
+        nextAssessment.childcareFunding = '';
+      }
+      if (field === 'interventionCode' && !requiresNocForCode(value)) {
+        nextAssessment.interventionNoc = '';
+        nextAssessment.interventionNocVersion = '';
+      }
       if (hasSubmitted) {
-        setFieldErrors(prevErrors => {
-          const nextErrors = { ...prevErrors };
-          const setError = (key, message) => {
-            if (message) {
-              nextErrors[key] = message;
-            } else {
-              delete nextErrors[key];
-            }
-          };
-
-          switch (field) {
-            case 'overview':
-              setError('overview', !value || !value.trim() ? 'Client application overview is required.' : undefined);
-              break;
-            case 'employmentGoals':
-              setError('employmentGoals', !value || !value.trim() ? 'Employment goals are required.' : undefined);
-              break;
-            case 'barriers':
-              setError('barriers', !Array.isArray(value) || value.length === 0 ? 'Select at least one barrier to employment.' : undefined);
-              break;
-            case 'esdcEligibility':
-              setError('esdcEligibility', value ? undefined : 'Eligibility is required.');
-              break;
-            case 'startDate':
-              setError('startDate', value ? undefined : 'Start date is required.');
-              break;
-            case 'endDate':
-              setError('endDate', value ? undefined : 'End date is required.');
-              break;
-            case 'institution':
-              setError('institution', !value || !value.trim() ? 'Training institution or employer is required.' : undefined);
-              break;
-            case 'programName':
-              setError('programName', !value || !value.trim() ? 'Program name is required.' : undefined);
-              break;
-            case 'recommendation':
-              setError('recommendation', value ? undefined : 'Recommendation is required.');
-              break;
-            case 'justification':
-              setError('justification', !value || !value.trim() ? 'Justification is required.' : undefined);
-              break;
-            case 'previousISET':
-              if (value !== 'yes') {
-                setError('previousISETDetails', undefined);
-              }
-              break;
-            case 'previousISETDetails':
-              setError('previousISETDetails', nextAssessment.previousISET === 'yes' && (!value || !value.trim()) ? 'Details for previous ISET funding are required.' : undefined);
-              break;
-            case 'nwacReviewStatus':
-              setError('nwacReviewStatus', value ? undefined : 'Funding decision selection is required.');
-              if (value !== 'reject') {
-                setError('nwacReason', undefined);
-              } else {
-                setError('nwacReason', !nextAssessment.nwacReason || !nextAssessment.nwacReason.trim() ? 'Reason for denial is required.' : undefined);
-              }
-              break;
-            case 'nwacReview':
-              setError('nwacReview', value ? undefined : 'Assessment assurance outcome is required.');
-              break;
-            case 'nwacReason':
-              setError('nwacReason', nextAssessment.nwacReviewStatus === 'reject' && (!value || !value.trim()) ? 'Reason for denial is required.' : undefined);
-              break;
-            default:
-              break;
-          }
-
-          return nextErrors;
-        });
+        setFieldErrors(validateAssessment(nextAssessment));
       }
       return nextAssessment;
     });
@@ -398,6 +558,27 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     if (assessment.nwacReview && !assessment.nwacReason) {
       errors.nwacReason = 'Reason for denial is required.';
     }
+    // 14. Intervention code required
+    if (!assessment.interventionCode) {
+      errors.interventionCode = 'Select an intervention code.';
+    }
+    const numericCode = Number(assessment.interventionCode);
+    const requiresNocCode = Number.isFinite(numericCode) && numericCode >= 6 && numericCode <= 13;
+    if (requiresNocCode) {
+      if (!assessment.interventionNocVersion) {
+        errors.interventionNocVersion = 'Select a NOC version for this intervention code.';
+      }
+      if (!assessment.interventionNoc) {
+        errors.interventionNoc = 'Select a NOC code for this intervention.';
+      }
+    }
+    // 15. Optional numeric fields
+    if (assessment.interventionDuration && !/^\d+$/.test(assessment.interventionDuration.trim())) {
+      errors.interventionDuration = 'Duration must be a whole number of days.';
+    }
+    if (assessment.interventionCost && !/^\d+$/.test(assessment.interventionCost.trim())) {
+      errors.interventionCost = 'Cost must be a whole number (no decimals).';
+    }
     return errors;
   };
   const handleSubmit = async () => {
@@ -423,7 +604,6 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       }, 0);
       return;
     }
-    console.log('Assessment validation succeeded, proceeding to save.');
     // --- POST-VALIDATION WORKFLOW ---
     const lockCheck = await ensureLockForOperation();
     if (!lockCheck.ok) return;
@@ -459,6 +639,13 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       assessment_justification: assessment.justification || null,
       assessment_nwac_review: assessment.nwacReview || null,
       assessment_nwac_reason: assessment.nwacReason || null,
+      assessment_intervention_code: assessment.interventionCode || null,
+      assessment_intervention_duration_days: assessment.interventionDuration || null,
+      assessment_intervention_cost_total: assessment.interventionCost || null,
+      assessment_intervention_related_noc: assessment.interventionNoc || null,
+      assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
+      assessment_childcare_need: assessment.childcareNeed || null,
+      assessment_childcare_funding_details: assessment.childcareFunding || null,
       case_summary: assessment.overview || null
     };
     if (!APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus)) {
@@ -601,14 +788,20 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         assessment_institution: assessment.institution || null,
         assessment_program_name: assessment.programName || null,
         assessment_itp: assessment.itp || [],
-        assessment_wage: assessment.wage || [],
-        assessment_recommendation: assessment.recommendation || null,
-        assessment_justification: assessment.justification || null,
-        assessment_nwac_review: assessment.nwacReview || null,
-        assessment_nwac_reason: assessment.nwacReason || null,
-        case_summary: assessment.overview || null
+      assessment_wage: assessment.wage || [],
+      assessment_recommendation: assessment.recommendation || null,
+      assessment_justification: assessment.justification || null,
+      assessment_nwac_review: assessment.nwacReview || null,
+      assessment_nwac_reason: assessment.nwacReason || null,
+      assessment_intervention_code: assessment.interventionCode || null,
+      assessment_intervention_duration_days: assessment.interventionDuration || null,
+      assessment_intervention_cost_total: assessment.interventionCost || null,
+      assessment_intervention_related_noc: assessment.interventionNoc || null,
+      assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
+      assessment_childcare_need: assessment.childcareNeed || null,
+      assessment_childcare_funding_details: assessment.childcareFunding || null,
+      case_summary: assessment.overview || null
       };
-      console.log('Saving assessment. Payload:', payload);
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return;
       const versionToken = Number(applicationRowVersion || caseData?.application_row_version || 0);
@@ -627,7 +820,6 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       } catch (_) {
         result = null;
       }
-      console.log('Save response:', res.status, result);
       if (res.status === 423) {
         showLockAlert({ reason: result?.reason || result?.error, lock: result?.lock });
         setIsEditingAssessment(false);
@@ -682,7 +874,6 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         }, 0);
       }
     } catch (err) {
-      console.error('Save error:', err);
       setAlert({ type: 'error', content: err.message || 'Failed to save assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
       setTimeout(() => {
         alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -773,6 +964,13 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       assessment_justification: assessment.justification || null,
       assessment_nwac_review: assessment.nwacReview || null,
       assessment_nwac_reason: assessment.nwacReason || null,
+      assessment_intervention_code: assessment.interventionCode || null,
+      assessment_intervention_duration_days: assessment.interventionDuration || null,
+      assessment_intervention_cost_total: assessment.interventionCost || null,
+      assessment_intervention_related_noc: assessment.interventionNoc || null,
+      assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
+      assessment_childcare_need: assessment.childcareNeed || null,
+      assessment_childcare_funding_details: assessment.childcareFunding || null,
       case_summary: assessment.overview || null,
       status: assessment.nwacReviewStatus === 'approve' ? 'initiated' : 'archived',
       applicationStatus: assessment.nwacReviewStatus === 'approve' ? 'approved' : 'rejected'
@@ -1204,7 +1402,46 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
             />
           </FormField>
         </Grid>
-        {sectionHeader('Intervention Details')}
+        {sectionHeader('Intervention Recommendation')}
+        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+          <FormField
+            label="Intervention Code"
+            description="Select the intervention type recommended for this client."
+            errorText={hasSubmitted && fieldErrors.interventionCode ? fieldErrors.interventionCode : undefined}
+          >
+            <Select
+              selectedOption={selectedInterventionCodeOption}
+              onChange={({ detail }) => handleField('interventionCode', detail.selectedOption?.value || '')}
+              options={interventionCodes}
+              placeholder={interventionCodesLoading ? 'Loading intervention codes...' : 'Select intervention code'}
+              statusType={interventionCodesLoading ? 'loading' : 'finished'}
+              filteringType="auto"
+              data-error-focus={hasSubmitted && fieldErrors.interventionCode ? 'true' : undefined}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+          <FormField label="Childcare Need" description="Indicate if childcare is required to participate in the intervention.">
+            <Select
+              selectedOption={selectedChildcareOption}
+              onChange={({ detail }) => handleField('childcareNeed', detail.selectedOption?.value || '')}
+              options={CHILDCARE_OPTIONS}
+              placeholder="Select childcare need"
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+        </Grid>
+        <Grid gridDefinition={[{ colspan: 12 }]}>
+          <FormField
+            label="Childcare Funding Details (optional)"
+            description="Provide any known childcare supports (existing or requested)."
+          >
+            <Textarea
+              value={assessment.childcareFunding || ''}
+              onChange={({ detail }) => handleField('childcareFunding', detail.value)}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+        </Grid>
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
           <FormField label="Start Date" errorText={hasSubmitted && fieldErrors.startDate ? fieldErrors.startDate : undefined}
             description="Enter the planned start date for the intervention or training.">
@@ -1217,12 +1454,112 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         </Grid>
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
           <FormField label="Training Institution/Employer" errorText={hasSubmitted && fieldErrors.institution ? fieldErrors.institution : undefined}
-            description="Provide the name of the training institution or employer for this intervention.">
+            description="Provide the training institution or employer, if applicable.">
             <Input value={assessment.institution} onChange={({ detail }) => handleField('institution', detail.value)} ariaLabel="Training Institution/Employer" data-error-focus={hasSubmitted && fieldErrors.institution ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
           </FormField>
           <FormField label="Program Name" errorText={hasSubmitted && fieldErrors.programName ? fieldErrors.programName : undefined}
-            description="Enter the name of the program or position the client will participate in.">
+            description="Enter the program or position name, if known.">
             <Input value={assessment.programName} onChange={({ detail }) => handleField('programName', detail.value)} ariaLabel="Program Name" data-error-focus={hasSubmitted && fieldErrors.programName ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
+          </FormField>
+        </Grid>
+        {sectionHeader('Optional Reporting Details')}
+        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+          <FormField
+            label="Intervention Duration (days)"
+            description={calculatedDuration ? `Optional. Calculated from start/end dates: ${calculatedDuration} day(s).` : 'Optional. Enter the number of days the intervention will run.'}
+            errorText={hasSubmitted && fieldErrors.interventionDuration ? fieldErrors.interventionDuration : undefined}
+            secondaryControl={
+              !isAssessmentDisabled && calculatedDuration && assessment.interventionDuration !== calculatedDuration ? (
+                <Button size="small" onClick={() => handleField('interventionDuration', calculatedDuration)}>
+                  Use {calculatedDuration}
+                </Button>
+              ) : null
+            }
+          >
+            <Input
+              inputMode="numeric"
+              value={assessment.interventionDuration || ''}
+              onChange={({ detail }) => handleField('interventionDuration', detail.value.replace(/[^\d]/g, ''))}
+              placeholder="e.g. 120"
+              data-error-focus={hasSubmitted && fieldErrors.interventionDuration ? 'true' : undefined}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+          <FormField
+            label="Intervention Cost (total)"
+            description={calculatedFundingTotal ? `Optional. Auto-calculated from funding tables: $${calculatedFundingTotal}. Adjust if needed.` : 'Optional. Enter the total planned cost (whole dollars).' }
+            errorText={hasSubmitted && fieldErrors.interventionCost ? fieldErrors.interventionCost : undefined}
+            secondaryControl={
+              !isAssessmentDisabled && calculatedFundingTotal && assessment.interventionCost !== calculatedFundingTotal ? (
+                <Button size="small" onClick={() => handleField('interventionCost', calculatedFundingTotal)}>
+                  Use {calculatedFundingTotal}
+                </Button>
+              ) : null
+            }
+          >
+            <Input
+              inputMode="numeric"
+              value={assessment.interventionCost || ''}
+              onChange={({ detail }) => handleField('interventionCost', detail.value.replace(/[^\d]/g, ''))}
+              placeholder="e.g. 4200"
+              data-error-focus={hasSubmitted && fieldErrors.interventionCost ? 'true' : undefined}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+        </Grid>
+        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+          <FormField
+            label="NOC Version"
+            description="Required only when the intervention code is 6–13."
+            errorText={hasSubmitted && fieldErrors.interventionNocVersion ? fieldErrors.interventionNocVersion : undefined}
+          >
+            <Select
+              selectedOption={selectedNocVersionOption}
+              onChange={({ detail }) => handleField('interventionNocVersion', detail.selectedOption?.value || '')}
+              options={nocVersions}
+              placeholder={nocVersionsLoading ? 'Loading NOC versions...' : 'Select NOC version'}
+              statusType={nocVersionsLoading ? 'loading' : 'finished'}
+              filteringType="auto"
+              data-error-focus={hasSubmitted && fieldErrors.interventionNocVersion ? 'true' : undefined}
+              disabled={isAssessmentDisabled || nocVersionsLoading}
+            />
+          </FormField>
+          <FormField
+            label="NOC Code"
+            description={requiresNoc ? 'Search by code or title to select the appropriate NOC.' : 'Optional unless the intervention code is 6–13.'}
+            errorText={hasSubmitted && fieldErrors.interventionNoc ? fieldErrors.interventionNoc : undefined}
+          >
+            <Autosuggest
+              value={assessment.interventionNoc || ''}
+              onChange={({ detail }) => {
+                const inputValue = detail.value || '';
+                handleField('interventionNoc', inputValue);
+                if (inputValue.length >= 2) {
+                  fetchNocSuggestions(inputValue);
+                } else {
+                  setNocSuggestions([]);
+                }
+              }}
+              onSelect={({ detail }) => handleField('interventionNoc', detail.value || '')}
+              onLoadItems={({ detail }) => {
+                if (detail.filteringText) {
+                  fetchNocSuggestions(detail.filteringText);
+                }
+              }}
+              options={nocSuggestions}
+              statusType={nocSuggestionsLoading ? 'loading' : 'finished'}
+              placeholder={
+                requiresNoc
+                  ? assessment.interventionNocVersion
+                    ? 'Type to search NOC code'
+                    : 'Select a NOC version first'
+                  : 'Not required'
+              }
+              empty={requiresNoc ? 'No NOC codes found.' : 'NOC selection not required.'}
+              disabled={!requiresNoc || isAssessmentDisabled || !assessment.interventionNocVersion}
+              enteredTextLabel={value => `Use "${value}"`}
+              data-error-focus={hasSubmitted && fieldErrors.interventionNoc ? 'true' : undefined}
+            />
           </FormField>
         </Grid>
         <Box margin={{ top: 'l', bottom: 's' }}>

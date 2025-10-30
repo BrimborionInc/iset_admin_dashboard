@@ -43,8 +43,8 @@ const CLEAR_TABLES = [
   'iset_event_entry',
   'iset_intake.message_attachment',
   'iset_intake.messages',
-  'iset_application_version',
   'iset_document',
+  'iset_application_version',
   'iset_application_draft_dynamic',
   'iset_application_file',
   'iset_application_submission',
@@ -339,7 +339,18 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
       const resp = await apiFetch('/api/create-dummy-draft', { method: 'POST', body: JSON.stringify({}) });
       let json = null; try { json = await resp.json(); } catch {}
       if (resp.ok) {
-        setDummyResult({ type: 'success', message: 'Dummy draft created / updated for user 48 (summary-page).', details: json });
+        const actionLabel = json?.action === 'updated' ? 'updated' : 'created';
+        const targetUserId = json?.userId ?? 48;
+        const applicantName = json?.applicant?.applicantName;
+        const stepLabel = json?.stepCursor || 'summary-page';
+        const messageParts = [`Dummy draft ${actionLabel} for user ${targetUserId}.`];
+        if (applicantName) {
+          messageParts.push(`Profile: ${applicantName}.`);
+        }
+        if (stepLabel) {
+          messageParts.push(`Step: ${stepLabel}.`);
+        }
+        setDummyResult({ type: 'success', message: messageParts.join(' '), details: json });
       } else {
         setDummyResult({ type: 'error', message: json?.message || 'Failed to create dummy draft', details: json });
       }

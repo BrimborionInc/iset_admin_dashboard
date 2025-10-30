@@ -8,15 +8,17 @@ Use this note when spinning up a fresh chat so the LLM has the context it needs 
 - The legacy `src/pages/iset` folder was renamed to `src/pages/Caseworking` and all imports were updated. Treat Case Workspace work as the canonical location; do not reintroduce `iset` paths.
 - Development servers normally run concurrently: `npm start` (React dev server) and `nodemon isetadminserver.js` (backend). Assume both are running and auto-restart after changes.
 - Docs we keep up-to-date:
-  - `docs/change-requests/CR-0008-Cases-Dashboard-Live-Data.md` – overall Case Workspace roadmap, including table behaviour.
-  - `docs/change-requests/CR-0011-Intervention-Recurrence-Persistence.md` – tracks recurring intervention cost persistence (now completed).
-  - `docs/data/case-finance-data-architecture.md` – authoritative data model reference (recently refreshed with the ESDC lookup tables).
+  - `docs/change-requests/CR-0008-Cases-Dashboard-Live-Data.md` - overall Case Workspace roadmap, including table behaviour.
+  - `docs/change-requests/CR-0011-Intervention-Recurrence-Persistence.md` - tracks recurring intervention cost persistence (now completed).
+  - `docs/data/case-finance-data-architecture.md` - authoritative data model reference (recently refreshed with the ESDC lookup tables).
+  - `docs/guides/status-lifecycle-implementation.md` - canonical reference for application/case/action-plan status logic.
   - DB snapshots + requirements live under `docs/data/` (`DB-Structure-Dump`, `ESDC/`).
 
 ## 2. Key Modules & Standards
 - **Routing**: Case Workspace routes are registered in `src/routes/AppRoutes.js`.
 - **Cloudscape table standard**: follow `docs/guides/cloudscape-table-persistence.md`. Recent widgets (Action Plans, Interventions) already apply the pattern (TextFilter + CollectionPreferences + Pagination + column width persistence).
-- **Case Header widget** (`src/pages/Caseworking/caseWorkspace/widgets/CaseHeaderWidget.jsx`): description defaults to “Participant case summary information and quick actions.”
+- **Case Header widget** (`src/pages/Caseworking/caseWorkspace/widgets/CaseHeaderWidget.jsx`): description defaults to "Participant case summary information and quick actions."
+- **Coordinator Assessment widget** (`src/widgets/CoordinatorAssessmentWidget.js`): records the recommended intervention (code, schedule, training context) and optional ILMP-ready details (duration/cost, NOC version/code when required, childcare info) via the `/api/reference/*` lookup endpoints. When NWAC approves an assessment the backend now auto-creates the initial action plan (status `active` when a start date is supplied, otherwise `draft`) and seeds a `planned` intervention from the captured recommendation.
 - **Action Plans widget**:
   - Sorted by recency (newest first) and default-selects the latest plan.
   - Uses pagination/filtering per standard.
@@ -47,6 +49,8 @@ Use this note when spinning up a fresh chat so the LLM has the context it needs 
 - Action plan table default selection: sorts by recency and picks the newest plan.
 - Interventions table cost column: picks up persisted totals even after editing, thanks to new metadata merge logic.
 - CR-0011 is complete (both persistence and hydration).
+- Assessment dashboard status flow: `/api/cases/:id` now returns `application_status`, the Application Overview widget listens for the normalised payload, and both the overview and NWAC widgets trigger `refreshCaseData` on submit/approval. Earlier we spent hours chasing front-end cache issues because the SQL query omitted `a.status`; always verify the API is projecting new fields before debugging UI state.
+- Coordinator Assessment persistence: the `Save`, `Submit`, and NWAC completion paths now serialise the same assessment payload. Intervention code/duration/cost, NOC version/code, childcare answers, and the “previously funded” toggle map straight into the new `iset_case_assessment` columns (see `sql/20251101_01_alter_case_assessment_esdc_fields.sql`). Reloading the widget after saving should recover every field without relying on ad-hoc browser state.
 
 ## 6. Handy Reminders When Picking Up Work
 - Confirm the dev servers are running before testing UI changes.

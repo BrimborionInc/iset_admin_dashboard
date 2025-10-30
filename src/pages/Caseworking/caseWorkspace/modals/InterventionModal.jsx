@@ -22,12 +22,21 @@ const STATUS_OPTIONS = [
   { value: "suspended", label: "Suspended" },
 ];
 
+const CLOSE_STATUS_OPTIONS = [
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
 const RECURRING_PERIOD_OPTIONS = [
   { value: "weekly", label: "Weekly" },
   { value: "bi_weekly", label: "Bi-weekly" },
   { value: "monthly", label: "Monthly" },
   { value: "quarterly", label: "Quarterly" },
 ];
+
+const OPEN_INTERVENTION_STATUSES = new Set(["planned", "in_progress", "suspended"]);
+const IN_PROGRESS_OUTCOME = "2";
+const DEFAULT_CLOSED_OUTCOME = "1";
 
 const calculateDurationWeeks = (start, end) => {
   if (!start || !end) return null;
@@ -115,12 +124,57 @@ const normaliseStatus = value => {
   return status;
 };
 
+const isClosedStatusValue = status => !OPEN_INTERVENTION_STATUSES.has(normaliseStatus(status));
+
+const ensureOutcomeForStatus = (status, currentOutcome) => {
+  const normalized = normaliseStatus(status);
+  if (OPEN_INTERVENTION_STATUSES.has(normalized)) {
+    return IN_PROGRESS_OUTCOME;
+  }
+  if (currentOutcome && currentOutcome !== IN_PROGRESS_OUTCOME) {
+    return String(currentOutcome).trim();
+  }
+  return DEFAULT_CLOSED_OUTCOME;
+};
+
+const buildCloseForm = intervention => {
+  const resolvedStatus =
+    normaliseStatus(intervention?.status) === "cancelled" ? "cancelled" : "completed";
+  const resolvedOutcome =
+    intervention?.outcome && intervention?.outcome !== IN_PROGRESS_OUTCOME
+      ? String(intervention.outcome).trim()
+      : DEFAULT_CLOSED_OUTCOME;
+  const actualCandidates = [
+    intervention?.actualAmount,
+    intervention?.metadata?.actualAmount,
+  ];
+  let actualAmount = "";
+  for (const candidate of actualCandidates) {
+    if (candidate === null || typeof candidate === "undefined") continue;
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric)) {
+      actualAmount = String(numeric);
+      break;
+    }
+  }
+  return {
+    status: resolvedStatus,
+    outcome: resolvedOutcome,
+    completionDate: intervention?.endDate || "",
+    actualAmount,
+  };
+};
+
 const InterventionModal = ({
   visible,
   mode = "create",
   intervention = null,
   onDismiss,
   onSubmit,
+  onClose,
+  canClose = false,
+  startInCloseMode = false,
+  readOnly = false,
   codeOptions = [],
   codesLoading = false,
   outcomeOptions = [],
@@ -137,6 +191,8 @@ const InterventionModal = ({
   const [error, setError] = useState(null);
   const [nocSuggestions, setNocSuggestions] = useState([]);
   const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+  const [closeForm, setCloseForm] = useState(buildCloseForm(intervention));
 
   useEffect(() => {
     if (!visible) {
@@ -147,6 +203,8 @@ const InterventionModal = ({
       setError(null);
       setNocSuggestions([]);
       setNocSuggestionsLoading(false);
+      setIsClosing(false);
+      setCloseForm(buildCloseForm(null));
       return;
     }
 
@@ -160,13 +218,24 @@ const InterventionModal = ({
       return draft;
     })();
 
+    prepared.status = normaliseStatus(prepared.status);
+    prepared.outcome = ensureOutcomeForStatus(prepared.status, prepared.outcome);
+
     initialFormRef.current = { ...prepared };
     setForm(prepared);
     setLoading(false);
     setError(null);
     setNocSuggestions([]);
     setNocSuggestionsLoading(false);
-  }, [visible, mode, intervention]);
+    setIsClosing(Boolean(startInCloseMode && canClose && mode === "edit"));
+    setCloseForm(buildCloseForm(intervention));
+  }, [visible, mode, intervention, startInCloseMode, canClose]);
+
+  const interventionStatus = normaliseStatus(intervention?.status);
+  const isClosedIntervention = ["completed", "cancelled"].includes(interventionStatus);
+  const isReadOnly = Boolean(readOnly || (mode === "edit" && isClosedIntervention && !canClose));
+  const modalHeader =
+    mode === "edit" ? (isReadOnly ? "View intervention" : "Edit intervention") : "Add intervention";
 
   const selectOptions = useMemo(() => {
     const formatted = (Array.isArray(codeOptions) ? codeOptions : [])
@@ -197,6 +266,11 @@ const InterventionModal = ({
     [form.status]
   );
 
+  const selectedCloseStatusOption = useMemo(
+    () => CLOSE_STATUS_OPTIONS.find(option => option.value === closeForm.status) || CLOSE_STATUS_OPTIONS[0],
+    [closeForm.status]
+  );
+
   const selectedCodeOption = useMemo(
     () => selectOptions.find(option => option.value === form.code) || null,
     [selectOptions, form.code]
@@ -217,24 +291,32 @@ const InterventionModal = ({
         const padded = value.length === 1 ? `0${value}` : value;
         return {
           value,
-          label: `${padded} – ${label}`,
+          label: `${padded} - ${label}`,
         };
       })
       .filter(Boolean);
+
     if (form.outcome && !formatted.some(option => option.value === form.outcome)) {
       formatted.push({
         value: form.outcome,
-        label: `${form.outcome} – (legacy value)`,
+        label: `${form.outcome} - (legacy value)`,
         disabled: true,
       });
     }
+
     return formatted;
   }, [outcomeOptions, form.outcome]);
 
-  const selectedOutcomeOption = useMemo(
-    () => outcomeSelectOptions.find(option => option.value === form.outcome) || null,
-    [outcomeSelectOptions, form.outcome]
+  const selectedCloseOutcomeOption = useMemo(
+    () => outcomeSelectOptions.find(option => option.value === closeForm.outcome) || null,
+    [outcomeSelectOptions, closeForm.outcome]
   );
+
+  const outcomeLabel = useMemo(() => {
+    if (!form.outcome) return "";
+    const match = outcomeSelectOptions.find(option => option.value === form.outcome);
+    return match ? match.label : form.outcome;
+  }, [form.outcome, outcomeSelectOptions]);
 
   const fundingStreamSelectOptions = useMemo(() => {
     const formatted = (Array.isArray(fundingStreamOptions) ? fundingStreamOptions : [])
@@ -317,9 +399,27 @@ const InterventionModal = ({
     if (!isRecurringCost) return;
     if (recurringTotal === null) return;
     const formatted = recurringTotal.toFixed(2);
+
     setForm(current => {
-      if (current.cost === formatted) return current;
-      return { ...current, cost: formatted };
+      const currentCost = current.cost ?? "";
+      const initialCost = initialFormRef.current.cost ?? "";
+      const hasOtherDifferences = FORM_KEYS.some(key => {
+        if (key === "cost") return false;
+        return (current[key] ?? "") !== (initialFormRef.current[key] ?? "");
+      });
+
+      if (currentCost === formatted) {
+        if (!hasOtherDifferences && initialCost !== formatted) {
+          initialFormRef.current = { ...initialFormRef.current, cost: formatted };
+        }
+        return current;
+      }
+
+      const next = { ...current, cost: formatted };
+      if (!hasOtherDifferences) {
+        initialFormRef.current = { ...initialFormRef.current, cost: formatted };
+      }
+      return next;
     });
   }, [isRecurringCost, recurringTotal]);
 
@@ -377,10 +477,14 @@ const InterventionModal = ({
       next.recurringOccurrences = "";
     }
 
+    next.status = normaliseStatus(next.status);
+    next.outcome = ensureOutcomeForStatus(next.status, next.outcome);
+
     return next;
   };
 
   const handleChange = (field, value) => {
+    if (isReadOnly) return;
     setForm(current => {
       const next = applyFieldSideEffects(current, field, value);
       if (field === "code" || field === "nocVersion") {
@@ -391,7 +495,20 @@ const InterventionModal = ({
     });
   };
 
+  const handleCloseChange = (field, value) => {
+    if (isReadOnly) return;
+    setCloseForm(current => {
+      const nextValue =
+        field === "status" ? normaliseStatus(value) : typeof value === "string" ? value.trim() : value;
+      return { ...current, [field]: nextValue };
+    });
+  };
+
   const fetchNocSuggestions = async filteringText => {
+    if (isReadOnly) {
+      setNocSuggestions([]);
+      return;
+    }
     if (!requiresNoc) {
       setNocSuggestions([]);
       return;
@@ -422,8 +539,61 @@ const InterventionModal = ({
     }
   };
 
+  const handleCloseSubmit = async () => {
+    if (!canClose || typeof onClose !== "function") {
+      setError("Closing this intervention is not available.");
+      return;
+    }
+    if (isDirty) {
+      setError("Save your changes before closing this intervention.");
+      return;
+    }
+    const outcomeValue = (closeForm.outcome || "").trim();
+    if (!outcomeValue) {
+      setError("Select an ESDC outcome before closing this intervention.");
+      return;
+    }
+    const statusValue =
+      closeForm.status === "cancelled" ? "cancelled" : "completed";
+    const actualAmountRaw = (closeForm.actualAmount || "").trim();
+    if (actualAmountRaw) {
+      const numeric = Number(actualAmountRaw);
+      if (!Number.isFinite(numeric)) {
+        setError("Actual amount must be a number.");
+        return;
+      }
+      if (numeric < 0) {
+        setError("Actual amount cannot be negative.");
+        return;
+      }
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await onClose({
+        status: statusValue,
+        outcome: outcomeValue,
+        actualAmount: actualAmountRaw ? Number(actualAmountRaw) : null,
+        completionDate: closeForm.completionDate || null,
+        notes: form.notes?.trim() ? form.notes.trim() : null,
+      });
+    } catch (closeError) {
+      setError(closeError?.message || "Unable to close intervention.");
+      setLoading(false);
+      return;
+    }
+    setLoading(false);
+  };
+
   const handleSubmit = async () => {
     if (loading) return;
+    if (isReadOnly) return;
+    if (isClosing) {
+      await handleCloseSubmit();
+      return;
+    }
+    const statusNormalized = normaliseStatus(form.status);
+    const outcomeValue = ensureOutcomeForStatus(statusNormalized, form.outcome);
     const trimmedCode = form.code.trim();
     const trimmedTitle = form.title.trim();
     if (!trimmedCode) {
@@ -500,11 +670,11 @@ const InterventionModal = ({
     const payload = {
       code: trimmedCode,
       title: trimmedTitle,
-      status: form.status,
+      status: statusNormalized,
       startDate: form.startDate || null,
       endDate: form.endDate || null,
       durationWeeks: durationValue,
-      outcome: form.outcome ? String(form.outcome).trim() : null,
+      outcome: outcomeValue,
       cost: costValue,
       potId: form.potId.trim() || null,
       fundingStream: form.fundingStream.trim() || null,
@@ -565,12 +735,15 @@ const InterventionModal = ({
     setError(null);
     setNocSuggestions([]);
     setNocSuggestionsLoading(false);
+    setIsClosing(false);
+    setCloseForm(buildCloseForm(intervention));
     if (typeof onDismiss === "function") {
       onDismiss();
     }
   };
 
   const saveDisabled =
+    isReadOnly ||
     codesLoading ||
     outcomesLoading ||
     fundingStreamsLoading ||
@@ -578,25 +751,78 @@ const InterventionModal = ({
     loading ||
     !isDirty;
 
+  const beginClosing = () => {
+    if (!canClose || isReadOnly) return;
+    if (isDirty) {
+      setError("Save your changes before closing this intervention.");
+      return;
+    }
+    setCloseForm(buildCloseForm(intervention));
+    setIsClosing(true);
+    setError(null);
+  };
+
+  const exitCloseMode = () => {
+    setIsClosing(false);
+    setError(null);
+  };
+
+  const closeDisabled =
+    !isClosing ||
+    loading ||
+    !canClose ||
+    isReadOnly ||
+    !closeForm.outcome ||
+    !closeForm.outcome.trim() ||
+    isDirty;
+
   return (
     <Modal
       visible={visible}
-      header={mode === "edit" ? "Edit intervention" : "Add intervention"}
+      header={modalHeader}
       onDismiss={handleCancel}
-      closeAriaLabel={mode === "edit" ? "Close edit intervention modal" : "Close new intervention modal"}
+      closeAriaLabel={
+        mode === "edit"
+          ? isReadOnly
+            ? "Close view intervention modal"
+            : "Close edit intervention modal"
+          : "Close new intervention modal"
+      }
       footer={
         <SpaceBetween size="xs" direction="horizontal">
           <Button onClick={handleCancel} disabled={loading}>
             Cancel
           </Button>
-          <Button
-            variant="primary"
-            onClick={handleSubmit}
-            loading={loading}
-            disabled={saveDisabled}
-          >
-            {mode === "edit" ? "Save changes" : "Create intervention"}
-          </Button>
+          {mode === "edit" && canClose && isClosing && !isReadOnly && (
+            <Button onClick={exitCloseMode} disabled={loading}>
+              Back to editing
+            </Button>
+          )}
+          {mode === "edit" && canClose && !isClosing && !isReadOnly && (
+            <Button onClick={beginClosing} disabled={loading}>
+              Close intervention
+            </Button>
+          )}
+          {!isReadOnly && (!isClosing || mode !== "edit") && (
+            <Button
+              variant="primary"
+              onClick={handleSubmit}
+              loading={loading}
+              disabled={saveDisabled}
+            >
+              {mode === "edit" ? "Save changes" : "Create intervention"}
+            </Button>
+          )}
+          {isClosing && !isReadOnly && (
+            <Button
+              variant="primary"
+              onClick={handleSubmit}
+              loading={loading}
+              disabled={closeDisabled}
+            >
+              Close intervention
+            </Button>
+          )}
         </SpaceBetween>
       }
     >
@@ -623,34 +849,31 @@ const InterventionModal = ({
                       ? undefined
                       : "No intervention codes available. Please try again later."
                   }
-                  disabled={codesLoading}
-                  autoFocus
+                  disabled={isReadOnly || codesLoading}
+                  autoFocus={!isReadOnly}
                 />
               </FormField>
               <FormField label="Title" stretch>
-                <Input value={form.title} onChange={({ detail }) => handleChange("title", detail.value)} />
+                <Input
+                  value={form.title}
+                  onChange={({ detail }) => handleChange("title", detail.value)}
+                  readOnly={isReadOnly}
+                  disabled={isReadOnly}
+                />
               </FormField>
               <FormField label="Status">
                 <Select
                   selectedOption={selectedStatusOption}
                   onChange={({ detail }) => handleChange("status", detail.selectedOption?.value || "planned")}
                   options={STATUS_OPTIONS}
+                  disabled={isReadOnly}
                 />
               </FormField>
-              <FormField label="Outcome">
-                <Select
-                  selectedOption={selectedOutcomeOption}
-                  onChange={({ detail }) => handleChange("outcome", detail.selectedOption?.value || "")}
-                  options={outcomeSelectOptions}
-                  filteringType="auto"
-                  placeholder={outcomesLoading ? "Loading outcomes" : "Select outcome"}
-                  statusType={outcomesLoading ? "loading" : "finished"}
-                  empty={
-                    outcomesLoading ? undefined : "No outcomes available. Please try again later."
-                  }
-                  disabled={outcomesLoading}
-                />
-              </FormField>
+              {isClosedStatusValue(form.status) && !isClosing && (
+                <FormField label="ESDC outcome">
+                  <Input value={outcomeLabel} readOnly disabled />
+                </FormField>
+              )}
             </ColumnLayout>
           </SpaceBetween>
 
@@ -662,6 +885,7 @@ const InterventionModal = ({
                   value={form.startDate}
                   onChange={({ detail }) => handleChange("startDate", detail.value)}
                   placeholder="YYYY-MM-DD"
+                  disabled={isReadOnly}
                 />
               </FormField>
               <FormField label="End date">
@@ -669,6 +893,7 @@ const InterventionModal = ({
                   value={form.endDate}
                   onChange={({ detail }) => handleChange("endDate", detail.value)}
                   placeholder="YYYY-MM-DD"
+                  disabled={isReadOnly}
                 />
               </FormField>
               <FormField label="Duration (weeks)">
@@ -676,6 +901,8 @@ const InterventionModal = ({
                   value={form.durationWeeks}
                   onChange={({ detail }) => handleChange("durationWeeks", detail.value)}
                   placeholder="e.g. 16"
+                  readOnly={isReadOnly}
+                  disabled={isReadOnly}
                 />
               </FormField>
               <FormField label="NOC version">
@@ -693,7 +920,7 @@ const InterventionModal = ({
                   empty={
                     nocVersionsLoading ? undefined : "No NOC versions available. Please try again later."
                   }
-                  disabled={!requiresNoc || nocVersionsLoading}
+                  disabled={isReadOnly || !requiresNoc || nocVersionsLoading}
                 />
               </FormField>
               <FormField
@@ -731,7 +958,7 @@ const InterventionModal = ({
                       ? "No NOC matches found."
                       : "NOC search not required for this intervention code."
                   }
-                  disabled={!requiresNoc || nocVersionsLoading || !form.nocVersion}
+                  disabled={isReadOnly || !requiresNoc || nocVersionsLoading || !form.nocVersion}
                   enteredTextLabel={value => `Use "${value}"`}
                   onLoadItems={({ detail }) => {
                     fetchNocSuggestions(detail.filteringText);
@@ -752,6 +979,7 @@ const InterventionModal = ({
                     { value: "one_time", label: "One-time total" },
                     { value: "recurring", label: "Recurring schedule" },
                   ]}
+                disabled={isReadOnly}
                 />
               </FormField>
               <FormField
@@ -766,7 +994,8 @@ const InterventionModal = ({
                 value={costInputValue}
                 onChange={({ detail }) => handleChange("cost", detail.value)}
                 placeholder="e.g. 42000"
-                readOnly={isRecurringCost}
+                readOnly={isReadOnly || isRecurringCost}
+                disabled={isReadOnly}
               />
             </FormField>
             {isRecurringCost && (
@@ -779,6 +1008,7 @@ const InterventionModal = ({
                       }
                       options={RECURRING_PERIOD_OPTIONS}
                       placeholder="Select recurrence period"
+                      disabled={isReadOnly}
                     />
                   </FormField>
                   <FormField label="Amount per period">
@@ -786,6 +1016,8 @@ const InterventionModal = ({
                       value={form.recurringAmount}
                       onChange={({ detail }) => handleChange("recurringAmount", detail.value)}
                       placeholder="e.g. 150.00"
+                      readOnly={isReadOnly}
+                      disabled={isReadOnly}
                     />
                   </FormField>
                   <FormField
@@ -796,6 +1028,8 @@ const InterventionModal = ({
                       value={form.recurringOccurrences}
                     onChange={({ detail }) => handleChange("recurringOccurrences", detail.value)}
                     placeholder="e.g. 20"
+                    readOnly={isReadOnly}
+                    disabled={isReadOnly}
                   />
                 </FormField>
               </>
@@ -804,7 +1038,12 @@ const InterventionModal = ({
               label="Budget pot"
               description="Budget pot lookup will be enabled in an upcoming patch."
             >
-              <Input value={form.potId} onChange={({ detail }) => handleChange("potId", detail.value)} />
+              <Input
+                value={form.potId}
+                onChange={({ detail }) => handleChange("potId", detail.value)}
+                readOnly={isReadOnly}
+                disabled={isReadOnly}
+              />
             </FormField>
             <FormField label="Funding stream">
               <Select
@@ -817,7 +1056,7 @@ const InterventionModal = ({
                 empty={
                   fundingStreamsLoading ? undefined : "No funding streams available. Please try again later."
                 }
-                disabled={fundingStreamsLoading}
+                disabled={isReadOnly || fundingStreamsLoading}
               />
             </FormField>
           </ColumnLayout>
@@ -830,12 +1069,64 @@ const InterventionModal = ({
                 rows={3}
                 onChange={({ detail }) => handleChange("notes", detail.value)}
                 placeholder="Optional context or reminders"
+                readOnly={isReadOnly}
+                disabled={isReadOnly}
               />
             </FormField>
           </SpaceBetween>
+          {mode === "edit" && canClose && isClosing && (
+            <SpaceBetween size="s">
+              <Header variant="h3">Close intervention</Header>
+              <Alert type={isDirty ? "warning" : "info"}>
+                {isDirty
+                  ? "Save your pending changes before closing this intervention."
+              : "Select an outcome above, choose the final status, and capture completion details to record this intervention."}
+            </Alert>
+            <ColumnLayout columns={3} variant="text-grid">
+              <FormField label="ESDC outcome">
+                <Select
+                  selectedOption={selectedCloseOutcomeOption}
+                  onChange={({ detail }) =>
+                    handleCloseChange("outcome", detail.selectedOption?.value || "")
+                  }
+                  options={outcomeSelectOptions}
+                  filteringType="auto"
+                />
+              </FormField>
+              <FormField label="Closure status">
+                <Select
+                  selectedOption={selectedCloseStatusOption}
+                  onChange={({ detail }) =>
+                    handleCloseChange("status", detail.selectedOption?.value || "completed")
+                    }
+                    options={CLOSE_STATUS_OPTIONS}
+                  />
+                </FormField>
+                <FormField
+                  label="Completion date"
+                  description="Defaults to the planned end date if left blank."
+                >
+                  <DatePicker
+                    value={closeForm.completionDate}
+                    onChange={({ detail }) => handleCloseChange("completionDate", detail.value)}
+                    placeholder="YYYY-MM-DD"
+                  />
+                </FormField>
+                <FormField
+                  label="Actual amount"
+                  description="Leave blank if not applicable."
+                >
+                  <Input
+                    value={closeForm.actualAmount}
+                    onChange={({ detail }) => handleCloseChange("actualAmount", detail.value)}
+                    placeholder="e.g. 4200"
+                  />
+                </FormField>
+              </ColumnLayout>
+            </SpaceBetween>
+          )}
           <Box color="text-body-secondary" fontSize="body-s">
-            All fields can be updated later while the intervention remains in a planned or in-progress state. Use the
-            Close action (coming soon) once actual outcomes and costs are confirmed.
+            All fields can be updated while the intervention remains in a planned or in-progress state. Use "Close intervention" to record the final outcome and actual spend.
           </Box>
         </SpaceBetween>
       </SpaceBetween>

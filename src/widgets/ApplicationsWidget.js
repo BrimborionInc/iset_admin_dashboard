@@ -25,8 +25,31 @@ import { apiFetch } from '../auth/apiClient';
 import useCurrentUser from '../hooks/useCurrentUser';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
-const DEFAULT_VISIBLE_COLUMNS = ['watch','tracking_id','status','lock_state','sla_risk','assigned_user_email','submitted_at','actions'];
+const DEFAULT_VISIBLE_COLUMNS = ['watch','applicant_name','tracking_id','status','lock_state','sla_risk','assigned_user_email','submitted_at','actions'];
 const COLUMN_WIDTHS_STORAGE_KEY = 'applications-widget-column-widths';
+
+const redactApplicantDisplay = (value) => {
+  if (!value) {
+    return '-';
+  }
+  const tokens = String(value)
+    .split(/\s+/)
+    .map(token => token.trim())
+    .filter(token => token.length);
+  if (!tokens.length) {
+    return '-';
+  }
+  const redactToken = (token) => {
+    if (token.length <= 2) {
+      return token;
+    }
+    const first = token[0];
+    const last = token[token.length - 1];
+    const middle = '*'.repeat(Math.max(0, token.length - 2));
+    return `${first}${middle}${last}`;
+  };
+  return tokens.map(redactToken).join(' ');
+};
 
 const loadStoredColumnWidths = () => {
   if (typeof window === 'undefined') {
@@ -98,7 +121,6 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
   const [columnWidths, setColumnWidths] = useState(() => loadStoredColumnWidths());
-  const [selectedItems, setSelectedItems] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [assignTargetCase, setAssignTargetCase] = useState(null);
@@ -141,8 +163,35 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       );
     };
 
+    const renderCaseLink = (row, label) => {
+      if (!row?.case_id) {
+        return label || '-';
+      }
+      const text = label || '-';
+      return (
+        <Button
+          variant="inline-link"
+          onClick={() => history.push({ pathname: `/application-case/${row.case_id}`, state: { assessorEmail: row.assigned_user_email } })}
+        >
+          {text}
+        </Button>
+      );
+    };
+
     return [
-      { id: 'tracking_id', header: 'Case / Submission ID', cell: i => i.tracking_id, minWidth: 140, isRowHeader: true },
+      {
+        id: 'applicant_name',
+        header: 'Applicant',
+        cell: i => renderCaseLink(i, redactApplicantDisplay(i.applicant_name)),
+        minWidth: 180
+      },
+      {
+        id: 'tracking_id',
+        header: 'Tracking ID',
+        cell: i => renderCaseLink(i, i.tracking_id),
+        minWidth: 140,
+        isRowHeader: true
+      },
       {
         id: 'status',
         header: 'Status',
@@ -169,13 +218,13 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       },
       {
         id: 'lock_state',
-        header: 'In Use',
+        header: 'Lock Status',
         cell: lockCell,
         minWidth: 200
       },
       {
         id: 'sla_risk',
-        header: 'SLA Health',
+        header: 'Overdue?',
         cell: i => {
           const meta = computeSlaMeta(i);
           const badge = meta.overdue ? <Badge color="red">Overdue</Badge> : <Badge color="green">OK</Badge>;
@@ -437,7 +486,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const filteredItems = decoratedItems
     .filter(i => {
       const s = filteringText.toLowerCase();
-      return !s || [i.tracking_id, i.application_status, i.case_status, i.assigned_user_email, i.ptma_codes, i.lock_owner_name, i.lock_owner_email]
+      return !s || [i.tracking_id, i.applicant_name, i.application_status, i.case_status, i.assigned_user_email, i.ptma_codes, i.lock_owner_name, i.lock_owner_email]
         .some(v => v && String(v).toLowerCase().includes(s));
     })
     .filter(i => !showWatchedOnly || i.__isWatched);
@@ -585,12 +634,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const allColumns = useMemo(() => {
     const base = [
       watchColumn,
-      detailColumns.find(column => column.id === 'tracking_id'),
-      detailColumns.find(column => column.id === 'status'),
-      detailColumns.find(column => column.id === 'lock_state'),
-      detailColumns.find(column => column.id === 'sla_risk'),
-      detailColumns.find(column => column.id === 'assigned_user_email'),
-      detailColumns.find(column => column.id === 'submitted_at'),
+      ...detailColumns,
       actionsColumn,
     ].filter(Boolean);
     return base.map(applyWidth).filter(Boolean);
@@ -760,14 +804,8 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
                 onColumnWidthsChange={handleColumnWidthsChange}
                 stickyHeader
                 stripedRows
-                selectionType="multi"
-                selectedItems={selectedItems}
-                onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
                 empty={<Box textAlign="center">No cases</Box>}
                 ariaLabels={{
-                  selectionGroupLabel: 'Cases',
-                  allItemsSelectionLabel: () => 'select all',
-                  itemSelectionLabel: ({ selectedItems }, item) => item.tracking_id,
                   tableLabel: 'Cases table',
                   header: 'Cases',
                   rowHeader: 'Case ID'

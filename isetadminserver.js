@@ -18,10 +18,17 @@ const ENSURED_HISTORY_EVENT_TYPE_ENUM = { prepared: false };
 const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_internal_notification_dismissal',
   'iset_internal_notification',
+  'iset_case_action_item',
+  'iset_case_action_plan',
   'iset_case_assessment',
+  'iset_case_compliance_check',
   'iset_case_document',
+  'iset_case_event',
+  'iset_case_financial_snapshot',
+  'iset_case_intervention',
   'iset_case_note',
   'iset_case_task',
+  'iset_case_watch',
   'iset_event_receipt',
   'iset_event_outbox',
   'iset_event_entry',
@@ -38,6 +45,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'esdc_reporting_note',
   'esdc_reporting_package',
   'iset_case',
+  'client',
   'iset_application',
 ];
 
@@ -984,77 +992,173 @@ function mapInterventionOutcome(value) {
 
 function extractActionPlanDetails(context, clientStatus, requestedSupports) {
   const { answers = {}, caseRow, applicationRow, caseAssessmentRow } = context;
-  const startRaw = answers['action-plan-start-date'] ||
-    answers['action_plan_start_date'];
-  const resultDateRaw = answers['action-plan-result-date'] ||
-    answers['action_plan_result_date'];
-  const resultCodeRaw = answers['action-plan-result-code'] ||
-    answers['action_plan_result_code'];
-  const childcareNeedRaw = answers['action-plan-childcare-need'] ||
-    answers['action_plan_childcare_need'];
-  const childcareFundingRaw = answers['action-plan-childcare-funding'] ||
-    answers['action_plan_childcare_funding'];
-  const targetProgramRaw = normaliseString(
-    answers['target-program'] ||
-    answers['target_program']
-  );
-  const goalDescription = normaliseString(
-    answers['long-term-goal'] ||
-    answers['long_term_goal']
-  );
+  const assessment = caseAssessmentRow || {};
+
+  const startRaw = answers['action-plan-start-date'] || answers['action_plan_start_date'];
+  const resultDateRaw = answers['action-plan-result-date'] || answers['action_plan_result_date'];
+  const resultCodeRaw = answers['action-plan-result-code'] || answers['action_plan_result_code'];
+  const childcareNeedRaw = answers['action-plan-childcare-need'] || answers['action_plan_childcare_need'];
+  const childcareFundingRaw = answers['action-plan-childcare-funding'] || answers['action_plan_childcare_funding'];
+  const targetProgramRaw = normaliseString(answers['target-program'] || answers['target_program']);
+  const goalDescription = normaliseString(answers['long-term-goal'] || answers['long_term_goal']);
+
+  const normaliseNumericString = (value, { min = null, max = null } = {}) => {
+    if (value === null || typeof value === 'undefined' || value === '') return null;
+    let candidate = null;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) return null;
+      candidate = Math.trunc(value);
+    } else if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      const cleaned = trimmed.replace(/[^\d-]/g, '');
+      if (!cleaned) return null;
+      const parsed = Number.parseInt(cleaned, 10);
+      if (!Number.isFinite(parsed)) return null;
+      candidate = parsed;
+    } else {
+      return null;
+    }
+    if (min !== null && candidate < min) return null;
+    if (max !== null && candidate > max) return null;
+    return String(candidate);
+  };
+
+  const formatDateValue = (value) => {
+    const parsed = parseDate(value);
+    return parsed ? parsed.toISOString().slice(0, 10) : null;
+  };
 
   const startDateSource =
     parseDate(startRaw) ||
     (caseRow?.created_at ? new Date(caseRow.created_at) : null) ||
     (applicationRow?.row?.created_at ? new Date(applicationRow.row.created_at) : null);
 
-  const startDate = startDateSource ? startDateSource.toISOString().slice(0, 10) : null;
-  const resultDateParsed = parseDate(resultDateRaw);
-  const resultDate = resultDateParsed ? resultDateParsed.toISOString().slice(0, 10) : null;
-  const resultCode = normaliseString(resultCodeRaw);
-  const childcareNeed = formatBooleanAsYesNo(coerceBoolean(childcareNeedRaw));
-  const childcareFunding = normaliseString(childcareFundingRaw);
-  const fundingSummary = caseAssessmentRow ? summariseAssessmentFunding(caseAssessmentRow) : null;
+  const startDate = formatDateValue(assessment.plan_start_date) ||
+    (startDateSource ? startDateSource.toISOString().slice(0, 10) : null);
 
-  const interventions = [];
-  if (targetProgramRaw) {
-    const programKey = targetProgramRaw.toLowerCase();
-    const programMeta = INTERVENTION_PROGRAM_MAP[programKey] || null;
-    const interventionStartRaw = answers['intervention-start-date'] ||
-      answers['intervention_start_date'];
-    const interventionEndRaw = answers['intervention-end-date'] ||
-      answers['intervention_end_date'];
-    const interventionOutcomeRaw = answers['intervention-outcome'] ||
-      answers['intervention_outcome'];
-    const interventionStart = parseDate(interventionStartRaw) ||
-      (startDateSource ? startDateSource : null);
-    const interventionEnd = parseDate(interventionEndRaw);
-    const intervention = {
-      code: programMeta?.code || null,
-      description: programMeta?.description || targetProgramRaw,
-      startDate: interventionStart ? interventionStart.toISOString().slice(0, 10) : null,
-      endDate: interventionEnd ? interventionEnd.toISOString().slice(0, 10) : null,
-      outcome: mapInterventionOutcome(interventionOutcomeRaw) || 'In progress',
-      relatedNoc: clientStatus?.noc || null,
-      supports: requestedSupports?.list && requestedSupports.list.length ? requestedSupports.list : [],
-      notes: []
-    };
-    if (requestedSupports?.otherDescription) {
-      intervention.notes.push(requestedSupports.otherDescription);
+  const resultDate =
+    formatDateValue(assessment.action_plan_result_date) ||
+    formatDateValue(resultDateRaw);
+
+  const resultCode =
+    normaliseString(assessment.action_plan_result_code) ||
+    normaliseString(resultCodeRaw);
+
+  const childcareNeed = (() => {
+    const assessmentNeed = coerceBoolean(
+      typeof assessment.childcare_need !== 'undefined' && assessment.childcare_need !== null
+        ? assessment.childcare_need
+        : null
+    );
+    if (assessmentNeed !== null) {
+      return formatBooleanAsYesNo(assessmentNeed);
     }
-    if (goalDescription) {
-      intervention.notes.push(goalDescription);
-    }
-    if (fundingSummary) {
-      intervention.cost = fundingSummary.total.toFixed(2);
-      const breakdown = fundingSummary.breakdown
-        .map(entry => `${entry.label}: ${entry.display}`)
-        .join('; ');
-      if (breakdown.length > 0) {
-        intervention.notes.push(`Funding breakdown — ${breakdown}`);
+    return formatBooleanAsYesNo(coerceBoolean(childcareNeedRaw));
+  })();
+
+  const childcareFunding =
+    normaliseString(assessment.childcare_funding_details) ||
+    normaliseString(childcareFundingRaw);
+
+  const fundingSummary = assessment ? summariseAssessmentFunding(assessment) : null;
+
+  const interventionStart =
+    formatDateValue(assessment.intervention_start_date) ||
+    formatDateValue(answers['intervention-start-date'] || answers['intervention_start_date']) ||
+    (startDateSource ? startDateSource.toISOString().slice(0, 10) : null);
+
+  const interventionEnd =
+    formatDateValue(assessment.intervention_end_date) ||
+    formatDateValue(answers['intervention-end-date'] || answers['intervention_end_date']);
+
+  const interventionCode = normaliseNumericString(assessment.intervention_code, { min: 1, max: 99 });
+  const interventionOutcomeCode = normaliseNumericString(assessment.intervention_outcome_code, { min: 1, max: 99 });
+  const interventionDuration = normaliseNumericString(assessment.intervention_duration_days, { min: 0, max: 999 });
+  const interventionCost = normaliseNumericString(assessment.intervention_cost_total, { min: 0, max: 999999 });
+  const interventionNoc = normaliseString(assessment.intervention_related_noc);
+  const interventionNocVersion = normaliseString(assessment.intervention_related_noc_version);
+
+  let computedDuration = interventionDuration;
+  if (!computedDuration && interventionStart && interventionEnd) {
+    const startDateObj = parseDate(interventionStart);
+    const endDateObj = parseDate(interventionEnd);
+    if (startDateObj && endDateObj) {
+      const diffDays = Math.round((endDateObj - startDateObj) / (1000 * 60 * 60 * 24));
+      if (Number.isFinite(diffDays) && diffDays >= 0 && diffDays <= 999) {
+        computedDuration = String(diffDays);
       }
     }
-    interventions.push(intervention);
+  }
+
+  const effectiveCost = (() => {
+    if (interventionCost) return interventionCost;
+    if (!fundingSummary) return null;
+    const rounded = Math.round(fundingSummary.total);
+    if (!Number.isFinite(rounded) || rounded < 0) return null;
+    return String(rounded);
+  })();
+
+  const interventionOutcome =
+    interventionOutcomeCode ||
+    mapInterventionOutcome(answers['intervention-outcome'] || answers['intervention_outcome']) ||
+    null;
+
+  const interventionDescription = (() => {
+    if (normaliseString(assessment.program_name)) return normaliseString(assessment.program_name);
+    if (targetProgramRaw) return targetProgramRaw;
+    if (normaliseString(assessment.institution)) return normaliseString(assessment.institution);
+    return null;
+  })();
+
+  const supports = requestedSupports?.list && requestedSupports.list.length
+    ? requestedSupports.list
+    : [];
+
+  const interventionNotes = [];
+  if (requestedSupports?.otherDescription) {
+    interventionNotes.push(requestedSupports.otherDescription);
+  }
+  if (goalDescription) {
+    interventionNotes.push(goalDescription);
+  }
+  if (fundingSummary && fundingSummary.breakdown.length) {
+    const breakdown = fundingSummary.breakdown
+      .map(entry => `${entry.label}: ${entry.display}`)
+      .join('; ');
+    if (breakdown) {
+      interventionNotes.push(`Funding breakdown - ${breakdown}`);
+    }
+  }
+
+  const interventions = [];
+  const shouldIncludeIntervention =
+    interventionCode ||
+    interventionDescription ||
+    interventionStart ||
+    interventionEnd ||
+    interventionOutcome ||
+    computedDuration ||
+    effectiveCost ||
+    interventionNoc ||
+    interventionNocVersion ||
+    supports.length ||
+    interventionNotes.length;
+
+  if (shouldIncludeIntervention) {
+    interventions.push({
+      code: interventionCode,
+      description: interventionDescription,
+      startDate: interventionStart,
+      endDate: interventionEnd,
+      outcome: interventionOutcome,
+      duration: computedDuration,
+      cost: effectiveCost,
+      relatedNoc: interventionNoc || clientStatus?.noc || null,
+      relatedNocVersion: interventionNocVersion || clientStatus?.nocVersion || null,
+      supports,
+      notes: interventionNotes.length ? interventionNotes : null
+    });
   }
 
   if (!startDate && !resultDate && !resultCode && !childcareNeed && !interventions.length && !goalDescription) {
@@ -1452,6 +1556,330 @@ function summariseAssessmentFunding(assessmentRow) {
   };
 }
 
+const AUTO_PLAN_METADATA_SOURCE = 'auto_assessment';
+
+function pruneNullish(value) {
+  if (Array.isArray(value)) {
+    const next = value
+      .map(pruneNullish)
+      .filter(item => item !== null && typeof item !== 'undefined' && (typeof item !== 'object' || (Array.isArray(item) ? item.length : Object.keys(item).length)));
+    return next.length ? next : undefined;
+  }
+  if (value && typeof value === 'object') {
+    const next = {};
+    Object.entries(value).forEach(([key, val]) => {
+      const pruned = pruneNullish(val);
+      if (pruned !== null && typeof pruned !== 'undefined') {
+        next[key] = pruned;
+      }
+    });
+    return Object.keys(next).length ? next : undefined;
+  }
+  if (value === null || typeof value === 'undefined') return undefined;
+  return value;
+}
+
+const toDateOnlyString = (value) => {
+  if (!value && value !== 0) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+  const str = String(value).trim();
+  if (!str) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const parsed = new Date(str);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+};
+
+const calculateDurationDaysFromDates = (startDate, endDate) => {
+  const start = startDate ? new Date(startDate) : null;
+  const end = endDate ? new Date(endDate) : null;
+  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
+  return Number.isFinite(diff) && diff >= 0 ? diff : null;
+};
+
+async function findStaffProfileIdByUserId(connection, userId) {
+  if (!Number.isFinite(userId)) return null;
+
+  const [[userRow]] = await connection.query(
+    'SELECT cognito_sub, email FROM user WHERE id = ? LIMIT 1',
+    [userId]
+  );
+  if (!userRow) return null;
+
+  if (userRow.cognito_sub) {
+    const [[bySub]] = await connection.query(
+      'SELECT id FROM staff_profiles WHERE cognito_sub = ? LIMIT 1',
+      [userRow.cognito_sub]
+    );
+    if (bySub && bySub.id) {
+      return Number(bySub.id);
+    }
+  }
+
+  if (userRow.email) {
+    const [[byEmail]] = await connection.query(
+      'SELECT id FROM staff_profiles WHERE LOWER(email) = LOWER(?) LIMIT 1',
+      [userRow.email]
+    );
+    if (byEmail && byEmail.id) {
+      return Number(byEmail.id);
+    }
+  }
+
+  return null;
+}
+
+async function ensureUserExists(connection, userId) {
+  if (!Number.isFinite(userId)) return null;
+  const [[row]] = await connection.query(
+    'SELECT id FROM user WHERE id = ? LIMIT 1',
+    [userId]
+  );
+  return row && row.id ? Number(row.id) : null;
+}
+
+async function fetchInterventionCodeLabel(connection, code) {
+  if (code === null || typeof code === 'undefined') return null;
+  const numericCode = Number.parseInt(code, 10);
+  if (!Number.isFinite(numericCode)) return null;
+  const [[row]] = await connection.query(
+    `SELECT label
+       FROM esdc_intervention_code
+      WHERE code = ?
+      ORDER BY is_active DESC, display_order ASC, code ASC
+      LIMIT 1`,
+    [numericCode]
+  );
+  return row ? row.label || null : null;
+}
+
+async function ensureAutoPlanAndInterventionFromAssessment(connection, {
+  caseId,
+  caseRow,
+  approvalUserId
+}) {
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return { createdPlan: false, createdIntervention: false };
+  }
+
+  const [[assessmentRow]] = await connection.query(
+    'SELECT * FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
+    [caseId]
+  );
+  if (!assessmentRow) {
+    return { createdPlan: false, createdIntervention: false };
+  }
+
+  const codeRaw = assessmentRow.intervention_code;
+  const code = codeRaw !== null && typeof codeRaw !== 'undefined' ? String(codeRaw).trim() : '';
+  if (!code) {
+    return { createdPlan: false, createdIntervention: false };
+  }
+
+  const startDate = toDateOnlyString(assessmentRow.intervention_start_date);
+  const endDate = toDateOnlyString(assessmentRow.intervention_end_date);
+  const storedDuration = Number.isFinite(Number(assessmentRow.intervention_duration_days))
+    ? Number(assessmentRow.intervention_duration_days)
+    : null;
+  const computedDuration = storedDuration !== null ? storedDuration : calculateDurationDaysFromDates(startDate, endDate);
+
+  const storedCost = Number.isFinite(Number(assessmentRow.intervention_cost_total))
+    ? Number(assessmentRow.intervention_cost_total)
+    : null;
+  const fundingSummary = summariseAssessmentFunding(assessmentRow);
+  const computedCost = storedCost !== null
+    ? storedCost
+    : (fundingSummary && Number.isFinite(Number(fundingSummary.total)) ? Number(fundingSummary.total) : null);
+
+  const noc = assessmentRow.intervention_related_noc
+    ? String(assessmentRow.intervention_related_noc).trim()
+    : null;
+  const nocVersion = assessmentRow.intervention_related_noc_version
+    ? String(assessmentRow.intervention_related_noc_version).trim()
+    : null;
+  const childcareNeedValue = assessmentRow.childcare_need;
+  const childcareNeed = childcareNeedValue === null || typeof childcareNeedValue === 'undefined'
+    ? null
+    : Number(childcareNeedValue) === 1
+      ? 'yes'
+      : Number(childcareNeedValue) === 0
+        ? 'no'
+        : null;
+  const childcareFunding = assessmentRow.childcare_funding_details
+    ? String(assessmentRow.childcare_funding_details).trim()
+    : null;
+
+  const programName = assessmentRow.program_name ? String(assessmentRow.program_name).trim() : null;
+  const institution = assessmentRow.institution ? String(assessmentRow.institution).trim() : null;
+  const overview = assessmentRow.overview ? String(assessmentRow.overview).trim() : null;
+  const justification = assessmentRow.justification ? String(assessmentRow.justification).trim() : null;
+  const recommendation = assessmentRow.recommendation ? String(assessmentRow.recommendation).trim() : null;
+
+  const [[existingAutoPlan]] = await connection.query(
+    `SELECT id, status FROM iset_case_action_plan
+      WHERE case_id = ?
+        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) = ?
+      LIMIT 1`,
+    [caseId, AUTO_PLAN_METADATA_SOURCE]
+  );
+  if (existingAutoPlan) {
+    return { createdPlan: false, createdIntervention: false };
+  }
+
+  const [[existingPlan]] = await connection.query(
+    `SELECT id FROM iset_case_action_plan
+      WHERE case_id = ?
+        AND status IN ('draft','active')
+      LIMIT 1`,
+    [caseId]
+  );
+  if (existingPlan) {
+    // Preserve manually created plan; do not auto-generate duplicates.
+    return { createdPlan: false, createdIntervention: false };
+  }
+
+  const interventionLabel = await fetchInterventionCodeLabel(connection, code);
+  const now = new Date();
+
+  const assignedStaffProfileId = Number.isFinite(Number(caseRow.assigned_to_user_id))
+    ? Number(caseRow.assigned_to_user_id)
+    : null;
+  let ownerStaffProfileId = assignedStaffProfileId;
+  if (!ownerStaffProfileId && Number.isFinite(Number(approvalUserId))) {
+    ownerStaffProfileId = await findStaffProfileIdByUserId(connection, Number(approvalUserId));
+  }
+
+  let ownerUserId = null;
+  if (Number.isFinite(Number(approvalUserId))) {
+    ownerUserId = await ensureUserExists(connection, Number(approvalUserId));
+  }
+
+  const planNameCandidates = [
+    programName,
+    institution,
+    interventionLabel ? `${interventionLabel} Plan` : null,
+    `Intervention ${code}`,
+    'Initial Action Plan',
+  ].filter(Boolean);
+  let planName = planNameCandidates.length ? planNameCandidates[0] : 'Action Plan';
+  if (planName.length > 255) {
+    planName = planName.slice(0, 252) + '...';
+  }
+
+  const planStatus = startDate ? 'active' : 'draft';
+  const planMetadata = pruneNullish({
+    source: AUTO_PLAN_METADATA_SOURCE,
+    generatedAt: now.toISOString(),
+    assessmentSummary: overview || null,
+    recommendation: recommendation || null,
+    programName: programName || null,
+    trainingInstitution: institution || null,
+    childcareNeed: childcareNeed || null,
+    childcareFunding: childcareFunding || null,
+    recommendedIntervention: pruneNullish({
+      code,
+      label: interventionLabel || null,
+      startDate: startDate || null,
+      endDate: endDate || null,
+      durationDays: computedDuration || null,
+      noc: noc || null,
+      nocVersion: nocVersion || null,
+      cost: computedCost || null,
+      fundingBreakdown: fundingSummary ? fundingSummary.breakdown : null,
+    }),
+  });
+
+  const [planInsert] = await connection.query(
+    `INSERT INTO iset_case_action_plan
+       (case_id, name, status, owner_staff_profile_id, owner_user_id, effective_date, review_date, activated_at, notes, metadata_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      caseId,
+      planName,
+      planStatus,
+      ownerStaffProfileId || null,
+      ownerUserId || null,
+      startDate || null,
+      endDate || null,
+      planStatus === 'active' ? now : null,
+      justification || null,
+      planMetadata ? JSON.stringify(planMetadata) : null,
+    ]
+  );
+
+  const planId = planInsert.insertId;
+  const interventionTitleCandidates = [
+    programName,
+    interventionLabel ? `${interventionLabel} Intervention` : null,
+    `Intervention ${code}`,
+    'Initial Intervention',
+  ].filter(Boolean);
+  const interventionTitle = interventionTitleCandidates.length ? interventionTitleCandidates[0] : 'Initial Intervention';
+
+  const interventionMetadata = pruneNullish({
+    source: AUTO_PLAN_METADATA_SOURCE,
+    title: interventionTitle,
+    programName: programName || null,
+    trainingInstitution: institution || null,
+    noc: noc || null,
+    nocVersion: nocVersion || null,
+    durationDays: computedDuration || null,
+    childcareNeed: childcareNeed || null,
+    childcareFunding: childcareFunding || null,
+    cost: computedCost || null,
+    compliance: { ilmp: 'pending', finance: 'pending' },
+    generatedAt: now.toISOString(),
+  });
+
+  const budgetAmount =
+    computedCost !== null && Number.isFinite(computedCost) ? Number(computedCost) : null;
+
+  await connection.query(
+    `INSERT INTO iset_case_intervention
+       (case_id,
+        action_plan_id,
+        intervention_type,
+        status,
+        start_date,
+        end_date,
+        funding_stream,
+        budget_amount,
+        approved_amount,
+        actual_amount,
+        outcome_code,
+        notes,
+        metadata_json,
+        created_by_staff_profile_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      caseId,
+      planId,
+      code,
+      'planned',
+      startDate || null,
+      endDate || null,
+      null,
+      budgetAmount,
+      null,
+      null,
+      null,
+      justification || null,
+      interventionMetadata ? JSON.stringify(interventionMetadata) : null,
+      ownerStaffProfileId || null,
+    ]
+  );
+
+  return {
+    createdPlan: true,
+    createdIntervention: true,
+    planStatus,
+    suggestedCaseStatus: planStatus === 'active' ? 'active' : 'initiated'
+  };
+}
+
 function escapeXml(value) {
   if (value === null || typeof value === 'undefined') return '';
   return String(value)
@@ -1631,7 +2059,9 @@ function buildIlmpParticipantPayload(context) {
             InterventionStartDate: entry.startDate || null,
             InterventionEndDate: entry.endDate || null,
             InterventionOutcome: entry.outcome || null,
+            InterventionDuration: entry.duration || null,
             InterventionRelatedNOC: entry.relatedNoc || null,
+            InterventionRelatedNOCVersion: entry.relatedNocVersion || null,
             InterventionCost: entry.cost || null,
             RequestedSupports: entry.supports && entry.supports.length ? { Support: entry.supports } : null,
             Notes: entry.notes && entry.notes.length ? { Note: entry.notes } : null
@@ -10972,6 +11402,792 @@ const generateSystemTasks = async () => {
   }
 };
 
+// Dummy draft data helpers ---------------------------------------------------
+const DUMMY_DRAFT_HISTORY = [
+  "consent",
+  "indigenous-declaration",
+  "eligibility",
+  "social-insurance-number",
+  "name",
+  "date-of-birth",
+  "gender",
+  "contact-information",
+  "emergency-contact",
+  "indigenous-legal-identity",
+  "registration-number",
+  "home-community",
+  "demographics",
+  "disability",
+  "summary-page"
+];
+
+const DUMMY_APPLICATION_PROFILES = [
+  {
+    id: "aiyana-bear",
+    registrationPrefix: "FN",
+    payload: {
+      "dob": "1991-06-14",
+      "consent": { "name": "Aiyana Bear", "signed": true },
+      "indigenous_declaration": { "name": "Aiyana Bear", "signed": true },
+      "barriers": ["education", "funding"],
+      "last-name": "Bear",
+      "first-name": "Aiyana",
+      "address-city": "Maskwacis",
+      "income-other": "120",
+      "middle-names": "Skye",
+      "spouses-name": "",
+      "expenses-rent": "880",
+      "other-barrier": "",
+      "telephone-alt": "",
+      "telephone-day": "(780) 555-4821",
+      "top-up-amount": "340",
+      "education-year": "2013",
+      "has-disability": "no",
+      "home-comminuty": "Maskwacis",
+      "income-jordans": "0",
+      "income-spousal": "0",
+      "long-term-goal": "Launch a Cree language mentorship program for youth in Maskwacis.",
+      "marital-status": "single",
+      "preferred-name": "Aiyana",
+      "target-program": "skills_development",
+      "eligibility-age": "yes",
+      "example-input-5": "",
+      "example-radio-2": "college",
+      "address-postcode": "T0C 1N0",
+      "address-province": "ab",
+      "ages-of-children": "",
+      "visible-minority": "true",
+      "income-employment": "2100",
+      "social-assistance": "no",
+      "dependent-children": "no",
+      "edication-location": "Blue Quills University, AB",
+      "eligibility-female": "yes",
+      "expenses-groceries": "430",
+      "expenses-utilities": "190",
+      "preferred-language": "en",
+      "requested-supports": ["tuition", "living"],
+      "expenses-other-list": "Cultural workshop supplies 55",
+      "income-band-funding": "150",
+      "labour-force-status": "underemployed",
+      "registration-number": "FN-000000",
+      "eligibility-canadian": "yes",
+      "eligibility-training": "yes",
+      "expenses-transitpass": "75",
+      "income-child-benefit": "0",
+      "income-social-assist": "0",
+      "contact-email-address": "bill@sillery.co.uk",
+      "eligibility-financial": "yes",
+      "address-street-address": "14 Buffalo Drive",
+      "disability-description": "No disability disclosed.",
+      "eligibility-employment": "yes",
+      "eligibility-indigenous": "yes",
+      "emergency-contact-name": "Evelyn Bear",
+      "address-mailing-address": "",
+      "other-requested-support": "",
+      "social-insurance-number": "000 000 000",
+      "eligibility-disqualified": "no",
+      "income-other-description": "Seasonal beading workshops.",
+      "legal-indigenous-identity": "first_nations_status",
+      "emergency-contact-telephone": "(780) 555-4820",
+      "what-is-your-gender-identity": "1",
+      "emergency-contact-relationship": "Aunt"
+    }
+  },
+  {
+    id: "noah-whitecloud",
+    registrationPrefix: "OCN",
+    payload: {
+      "dob": "1987-11-03",
+      "consent": { "name": "Noah Whitecloud", "signed": true },
+      "indigenous_declaration": { "name": "Noah Whitecloud", "signed": true },
+      "barriers": ["lack-of-job-opportunities", "other"],
+      "last-name": "Whitecloud",
+      "first-name": "Noah",
+      "address-city": "The Pas",
+      "income-other": "260",
+      "middle-names": "River",
+      "spouses-name": "Jordan Whitecloud",
+      "expenses-rent": "920",
+      "other-barrier": "Seasonal road closures limit access to training centres.",
+      "telephone-alt": "(204) 555-7746",
+      "telephone-day": "(204) 555-7742",
+      "top-up-amount": "420",
+      "education-year": "2008",
+      "has-disability": "yes",
+      "home-comminuty": "Opaskwayak Cree Nation",
+      "income-jordans": "0",
+      "income-spousal": "1850",
+      "long-term-goal": "Create a land-based skills program that employs community youth year-round.",
+      "marital-status": "married",
+      "preferred-name": "Noah",
+      "target-program": "jcp",
+      "eligibility-age": "yes",
+      "example-input-5": "",
+      "example-radio-2": "apprenticeship_trades",
+      "address-postcode": "R9A 1K8",
+      "address-province": "mb",
+      "ages-of-children": "5, 9",
+      "visible-minority": "true",
+      "income-employment": "0",
+      "social-assistance": "yes",
+      "dependent-children": "yes",
+      "edication-location": "University College of the North, MB",
+      "eligibility-female": "yes",
+      "expenses-groceries": "520",
+      "expenses-utilities": "240",
+      "preferred-language": "en",
+      "requested-supports": ["living", "transportation", "other"],
+      "expenses-other-list": "Childcare co-op fees 120",
+      "income-band-funding": "90",
+      "labour-force-status": "unemployed",
+      "registration-number": "OCN-000000",
+      "eligibility-canadian": "yes",
+      "eligibility-training": "yes",
+      "expenses-transitpass": "95",
+      "income-child-benefit": "420",
+      "income-social-assist": "540",
+      "contact-email-address": "bill@sillery.co.uk",
+      "eligibility-financial": "yes",
+      "address-street-address": "102 Cedar Trail",
+      "disability-description": "Managing chronic respiratory issues made worse by smoke season.",
+      "eligibility-employment": "yes",
+      "eligibility-indigenous": "yes",
+      "emergency-contact-name": "Marla Whitecloud",
+      "address-mailing-address": "PO Box 1027, The Pas, MB R9A 1M4",
+      "other-requested-support": "Childcare during evening classes.",
+      "social-insurance-number": "000 000 000",
+      "eligibility-disqualified": "no",
+      "income-other-description": "Traditional crafts sold at winter market.",
+      "legal-indigenous-identity": "first_nations_status",
+      "emergency-contact-telephone": "(431) 555-0145",
+      "what-is-your-gender-identity": "2",
+      "emergency-contact-relationship": "Sister"
+    }
+  },
+  {
+    id: "serenity-kalluk",
+    registrationPrefix: "IK",
+    payload: {
+      "dob": "1993-02-18",
+      "consent": { "name": "Serenity Kalluk", "signed": true },
+      "indigenous_declaration": { "name": "Serenity Kalluk", "signed": true },
+      "barriers": ["location", "funding"],
+      "last-name": "Kalluk",
+      "first-name": "Serenity",
+      "address-city": "Iqaluit",
+      "income-other": "0",
+      "middle-names": "Aurora",
+      "spouses-name": "",
+      "expenses-rent": "1320",
+      "other-barrier": "",
+      "telephone-alt": "",
+      "telephone-day": "(867) 555-1934",
+      "top-up-amount": "360",
+      "education-year": "2015",
+      "has-disability": "no",
+      "home-comminuty": "Iqaluit",
+      "income-jordans": "0",
+      "income-spousal": "0",
+      "long-term-goal": "Train as an environmental technician to support community water systems.",
+      "marital-status": "single",
+      "preferred-name": "Serenity",
+      "target-program": "skills_development",
+      "eligibility-age": "yes",
+      "example-input-5": "",
+      "example-radio-2": "college",
+      "address-postcode": "X0A 0H0",
+      "address-province": "nu",
+      "ages-of-children": "3, 7",
+      "visible-minority": "false",
+      "income-employment": "950",
+      "social-assistance": "yes",
+      "dependent-children": "yes",
+      "edication-location": "Nunavut Arctic College, NU",
+      "eligibility-female": "yes",
+      "expenses-groceries": "580",
+      "expenses-utilities": "310",
+      "preferred-language": "en",
+      "requested-supports": ["tuition", "living", "transportation"],
+      "expenses-other-list": "Community childcare co-op 140",
+      "income-band-funding": "240",
+      "labour-force-status": "student",
+      "registration-number": "IK-000000",
+      "eligibility-canadian": "yes",
+      "eligibility-training": "yes",
+      "expenses-transitpass": "85",
+      "income-child-benefit": "460",
+      "income-social-assist": "320",
+      "contact-email-address": "bill@sillery.co.uk",
+      "eligibility-financial": "yes",
+      "address-street-address": "8 Nanuq Crescent",
+      "disability-description": "No disability disclosed.",
+      "eligibility-employment": "yes",
+      "eligibility-indigenous": "yes",
+      "emergency-contact-name": "Amaruq Kalluk",
+      "address-mailing-address": "",
+      "other-requested-support": "",
+      "social-insurance-number": "000 000 000",
+      "eligibility-disqualified": "no",
+      "income-other-description": "",
+      "legal-indigenous-identity": "inuit",
+      "emergency-contact-telephone": "(867) 555-1930",
+      "what-is-your-gender-identity": "1",
+      "emergency-contact-relationship": "Uncle"
+    }
+  },
+  {
+    id: "jonah-sutherland",
+    registrationPrefix: "NT",
+    payload: {
+      "dob": "1990-04-27",
+      "consent": { "name": "Jonah Sutherland", "signed": true },
+      "indigenous_declaration": { "name": "Jonah Sutherland", "signed": true },
+      "barriers": ["education", "other"],
+      "last-name": "Sutherland",
+      "first-name": "Jonah",
+      "address-city": "Yellowknife",
+      "income-other": "0",
+      "middle-names": "Lake",
+      "spouses-name": "",
+      "expenses-rent": "1180",
+      "other-barrier": "Needs interpreter support for certain workshops.",
+      "telephone-alt": "",
+      "telephone-day": "(867) 555-7842",
+      "top-up-amount": "310",
+      "education-year": "2012",
+      "has-disability": "yes",
+      "home-comminuty": "Yellowknife",
+      "income-jordans": "0",
+      "income-spousal": "0",
+      "long-term-goal": "Develop a northern tech hub for Indigenous entrepreneurs in Yellowknife.",
+      "marital-status": "single",
+      "preferred-name": "Jonah",
+      "target-program": "tws",
+      "eligibility-age": "yes",
+      "example-input-5": "",
+      "example-radio-2": "university_certificate",
+      "address-postcode": "X1A 2P7",
+      "address-province": "nt",
+      "ages-of-children": "",
+      "visible-minority": "false",
+      "income-employment": "1950",
+      "social-assistance": "no",
+      "dependent-children": "no",
+      "edication-location": "Aurora College, NT",
+      "eligibility-female": "yes",
+      "expenses-groceries": "460",
+      "expenses-utilities": "230",
+      "preferred-language": "en",
+      "requested-supports": ["tuition", "transportation", "other"],
+      "expenses-other-list": "Interpreter services 95",
+      "income-band-funding": "180",
+      "labour-force-status": "employed-part-time",
+      "registration-number": "NT-000000",
+      "eligibility-canadian": "yes",
+      "eligibility-training": "yes",
+      "expenses-transitpass": "85",
+      "income-child-benefit": "0",
+      "income-social-assist": "0",
+      "contact-email-address": "bill@sillery.co.uk",
+      "eligibility-financial": "yes",
+      "address-street-address": "44 Willow Flats",
+      "disability-description": "Lives with partial hearing loss and uses hearing aids.",
+      "eligibility-employment": "yes",
+      "eligibility-indigenous": "yes",
+      "emergency-contact-name": "Mara Sutherland",
+      "address-mailing-address": "",
+      "other-requested-support": "Assistive technology for remote learning.",
+      "social-insurance-number": "000 000 000",
+      "eligibility-disqualified": "no",
+      "income-other-description": "",
+      "legal-indigenous-identity": "metis",
+      "emergency-contact-telephone": "(867) 555-7841",
+      "what-is-your-gender-identity": "4",
+      "emergency-contact-relationship": "Sibling"
+    }
+  },
+  {
+    id: "maya-papatie",
+    registrationPrefix: "QC",
+    payload: {
+      "dob": "1994-09-12",
+      "consent": { "name": "Maya Papatie", "signed": true },
+      "indigenous_declaration": { "name": "Maya Papatie", "signed": true },
+      "barriers": ["funding", "location"],
+      "last-name": "Papatie",
+      "first-name": "Maya",
+      "address-city": "Val-d'Or",
+      "income-other": "180",
+      "middle-names": "Laurence",
+      "spouses-name": "",
+      "expenses-rent": "710",
+      "other-barrier": "",
+      "telephone-alt": "",
+      "telephone-day": "(819) 555-4418",
+      "top-up-amount": "280",
+      "education-year": "2018",
+      "has-disability": "no",
+      "home-comminuty": "Kitcisakik",
+      "income-jordans": "0",
+      "income-spousal": "0",
+      "long-term-goal": "Create a land stewardship training program for Algonquin youth.",
+      "marital-status": "single",
+      "preferred-name": "Maya",
+      "target-program": "skills_development",
+      "eligibility-age": "yes",
+      "example-input-5": "",
+      "example-radio-2": "college",
+      "address-postcode": "J9P 0B9",
+      "address-province": "qc",
+      "ages-of-children": "",
+      "visible-minority": "false",
+      "income-employment": "1250",
+      "social-assistance": "no",
+      "dependent-children": "no",
+      "edication-location": "Cegep de l'Abitibi-Temiscamingue, QC",
+      "eligibility-female": "yes",
+      "expenses-groceries": "360",
+      "expenses-utilities": "150",
+      "preferred-language": "fr",
+      "requested-supports": ["tuition", "living", "other"],
+      "expenses-other-list": "Travel for land-based practicum 95",
+      "income-band-funding": "200",
+      "labour-force-status": "student",
+      "registration-number": "QC-000000",
+      "eligibility-canadian": "yes",
+      "eligibility-training": "yes",
+      "expenses-transitpass": "65",
+      "income-child-benefit": "0",
+      "income-social-assist": "0",
+      "contact-email-address": "bill@sillery.co.uk",
+      "eligibility-financial": "yes",
+      "address-street-address": "27 Rue des Pins",
+      "disability-description": "No disability disclosed.",
+      "eligibility-employment": "yes",
+      "eligibility-indigenous": "yes",
+      "emergency-contact-name": "Elise Papatie",
+      "address-mailing-address": "C.P. 45, Val-d'Or, QC J9P 3C3",
+      "other-requested-support": "Travel for land-based practicum.",
+      "social-insurance-number": "000 000 000",
+      "eligibility-disqualified": "no",
+      "income-other-description": "Summer guide honorarium.",
+      "legal-indigenous-identity": "first_nations_status",
+      "emergency-contact-telephone": "(819) 555-4415",
+      "what-is-your-gender-identity": "1",
+      "emergency-contact-relationship": "Sister"
+    }
+  },
+  {
+    id: "layla-doucette",
+    registrationPrefix: "NS",
+    payload: {
+      "dob": "1985-01-22",
+      "consent": { "name": "Layla Doucette", "signed": true },
+      "indigenous_declaration": { "name": "Layla Doucette", "signed": true },
+      "barriers": ["funding", "lack-of-job-opportunities"],
+      "last-name": "Doucette",
+      "first-name": "Layla",
+      "address-city": "Sydney",
+      "income-other": "0",
+      "middle-names": "Marie",
+      "spouses-name": "",
+      "expenses-rent": "940",
+      "other-barrier": "",
+      "telephone-alt": "",
+      "telephone-day": "(902) 555-6712",
+      "top-up-amount": "390",
+      "education-year": "2006",
+      "has-disability": "yes",
+      "home-comminuty": "Membertou",
+      "income-jordans": "0",
+      "income-spousal": "0",
+      "long-term-goal": "Expand a community catering business that employs youth from Membertou.",
+      "marital-status": "divorced",
+      "preferred-name": "Layla",
+      "target-program": "tws",
+      "eligibility-age": "yes",
+      "example-input-5": "",
+      "example-radio-2": "college",
+      "address-postcode": "B1P 4W6",
+      "address-province": "ns",
+      "ages-of-children": "10",
+      "visible-minority": "false",
+      "income-employment": "2400",
+      "social-assistance": "no",
+      "dependent-children": "yes",
+      "edication-location": "Nova Scotia Community College, NS",
+      "eligibility-female": "yes",
+      "expenses-groceries": "520",
+      "expenses-utilities": "240",
+      "preferred-language": "en",
+      "requested-supports": ["living", "transportation"],
+      "expenses-other-list": "Vehicle maintenance 140",
+      "income-band-funding": "0",
+      "labour-force-status": "self-employed",
+      "registration-number": "NS-000000",
+      "eligibility-canadian": "yes",
+      "eligibility-training": "yes",
+      "expenses-transitpass": "110",
+      "income-child-benefit": "320",
+      "income-social-assist": "0",
+      "contact-email-address": "bill@sillery.co.uk",
+      "eligibility-financial": "yes",
+      "address-street-address": "55 Tower Road",
+      "disability-description": "Recovering from knee surgery; uses mobility supports during long days.",
+      "eligibility-employment": "yes",
+      "eligibility-indigenous": "yes",
+      "emergency-contact-name": "June Paul",
+      "address-mailing-address": "",
+      "other-requested-support": "",
+      "social-insurance-number": "000 000 000",
+      "eligibility-disqualified": "no",
+      "income-other-description": "",
+      "legal-indigenous-identity": "first_nations_status",
+      "emergency-contact-telephone": "(902) 555-6710",
+      "what-is-your-gender-identity": "1",
+      "emergency-contact-relationship": "Mother"
+    }
+  },
+  {
+    id: "elias-redsky",
+    registrationPrefix: "MB",
+    payload: {
+      "dob": "1989-08-30",
+      "consent": { "name": "Elias Redsky", "signed": true },
+      "indigenous_declaration": { "name": "Elias Redsky", "signed": true },
+      "barriers": ["education", "other"],
+      "last-name": "Redsky",
+      "first-name": "Elias",
+      "address-city": "Winnipeg",
+      "income-other": "210",
+      "middle-names": "James",
+      "spouses-name": "",
+      "expenses-rent": "780",
+      "other-barrier": "Needs trauma-informed counselling near campus.",
+      "telephone-alt": "",
+      "telephone-day": "(204) 555-2341",
+      "top-up-amount": "380",
+      "education-year": "2010",
+      "has-disability": "yes",
+      "home-comminuty": "Lake St. Martin First Nation",
+      "income-jordans": "0",
+      "income-spousal": "0",
+      "long-term-goal": "Complete social work diploma to support evacuees from northern communities.",
+      "marital-status": "single",
+      "preferred-name": "Elias",
+      "target-program": "skills_development",
+      "eligibility-age": "yes",
+      "example-input-5": "",
+      "example-radio-2": "college",
+      "address-postcode": "R3B 0S1",
+      "address-province": "mb",
+      "ages-of-children": "",
+      "visible-minority": "true",
+      "income-employment": "0",
+      "social-assistance": "yes",
+      "dependent-children": "no",
+      "edication-location": "Red River College Polytechnic, MB",
+      "eligibility-female": "no",
+      "expenses-groceries": "470",
+      "expenses-utilities": "210",
+      "preferred-language": "en",
+      "requested-supports": ["tuition", "living", "other"],
+      "expenses-other-list": "Counselling co-pay 85",
+      "income-band-funding": "170",
+      "labour-force-status": "unemployed",
+      "registration-number": "MB-000000",
+      "eligibility-canadian": "yes",
+      "eligibility-training": "yes",
+      "expenses-transitpass": "95",
+      "income-child-benefit": "0",
+      "income-social-assist": "640",
+      "contact-email-address": "bill@sillery.co.uk",
+      "eligibility-financial": "yes",
+      "address-street-address": "219 Selkirk Avenue",
+      "disability-description": "Living with PTSD; attends regular counselling sessions.",
+      "eligibility-employment": "yes",
+      "eligibility-indigenous": "yes",
+      "emergency-contact-name": "Clara Redsky",
+      "address-mailing-address": "",
+      "other-requested-support": "Access to culturally safe counselling during studies.",
+      "social-insurance-number": "000 000 000",
+      "eligibility-disqualified": "no",
+      "income-other-description": "Seasonal wildfire crew honorarium.",
+      "legal-indigenous-identity": "first_nations_non_status",
+      "emergency-contact-telephone": "(204) 555-2340",
+      "what-is-your-gender-identity": "5",
+      "emergency-contact-relationship": "Mother"
+    }
+  },
+  {
+    id: "sasha-deer",
+    registrationPrefix: "YT",
+    payload: {
+      "dob": "1992-05-19",
+      "consent": { "name": "Sasha Deer", "signed": true },
+      "indigenous_declaration": { "name": "Sasha Deer", "signed": true },
+      "barriers": ["location", "funding"],
+      "last-name": "Deer",
+      "first-name": "Sasha",
+      "address-city": "Whitehorse",
+      "income-other": "0",
+      "middle-names": "North",
+      "spouses-name": "",
+      "expenses-rent": "1020",
+      "other-barrier": "",
+      "telephone-alt": "",
+      "telephone-day": "(867) 555-7804",
+      "top-up-amount": "300",
+      "education-year": "2016",
+      "has-disability": "no",
+      "home-comminuty": "Carcross/Tagish First Nation",
+      "income-jordans": "0",
+      "income-spousal": "0",
+      "long-term-goal": "Launch a land-based tourism co-op highlighting Tagish culture.",
+      "marital-status": "single",
+      "preferred-name": "Sasha",
+      "target-program": "skills_development",
+      "eligibility-age": "yes",
+      "example-input-5": "",
+      "example-radio-2": "college",
+      "address-postcode": "Y1A 3T7",
+      "address-province": "yt",
+      "ages-of-children": "",
+      "visible-minority": "false",
+      "income-employment": "1650",
+      "social-assistance": "no",
+      "dependent-children": "no",
+      "edication-location": "Yukon University, YT",
+      "eligibility-female": "yes",
+      "expenses-groceries": "410",
+      "expenses-utilities": "190",
+      "preferred-language": "en",
+      "requested-supports": ["tuition", "transportation"],
+      "expenses-other-list": "Land-based training gear 120",
+      "income-band-funding": "220",
+      "labour-force-status": "student",
+      "registration-number": "YT-000000",
+      "eligibility-canadian": "yes",
+      "eligibility-training": "yes",
+      "expenses-transitpass": "85",
+      "income-child-benefit": "0",
+      "income-social-assist": "0",
+      "contact-email-address": "bill@sillery.co.uk",
+      "eligibility-financial": "yes",
+      "address-street-address": "17 Birch Grove",
+      "disability-description": "No disability disclosed.",
+      "eligibility-employment": "yes",
+      "eligibility-indigenous": "yes",
+      "emergency-contact-name": "Rowan Deer",
+      "address-mailing-address": "",
+      "other-requested-support": "",
+      "social-insurance-number": "000 000 000",
+      "eligibility-disqualified": "no",
+      "income-other-description": "",
+      "legal-indigenous-identity": "first_nations_status",
+      "emergency-contact-telephone": "(867) 555-7803",
+      "what-is-your-gender-identity": "4",
+      "emergency-contact-relationship": "Sibling"
+    }
+  },
+  {
+    id: "kenzie-ashkewe",
+    registrationPrefix: "ON",
+    payload: {
+      "dob": "1988-12-05",
+      "consent": { "name": "Kenzie Ashkewe", "signed": true },
+      "indigenous_declaration": { "name": "Kenzie Ashkewe", "signed": true },
+      "barriers": ["funding", "education"],
+      "last-name": "Ashkewe",
+      "first-name": "Kenzie",
+      "address-city": "Midland",
+      "income-other": "90",
+      "middle-names": "Hope",
+      "spouses-name": "Lee Ashkewe",
+      "expenses-rent": "1240",
+      "other-barrier": "",
+      "telephone-alt": "",
+      "telephone-day": "(705) 555-6182",
+      "top-up-amount": "420",
+      "education-year": "2011",
+      "has-disability": "yes",
+      "home-comminuty": "Beausoleil First Nation",
+      "income-jordans": "0",
+      "income-spousal": "3200",
+      "long-term-goal": "Become a licensed electrician specialising in community housing projects.",
+      "marital-status": "married",
+      "preferred-name": "Kenzie",
+      "target-program": "skills_development",
+      "eligibility-age": "yes",
+      "example-input-5": "",
+      "example-radio-2": "college",
+      "address-postcode": "L4R 1K3",
+      "address-province": "on",
+      "ages-of-children": "4, 12",
+      "visible-minority": "true",
+      "income-employment": "1850",
+      "social-assistance": "no",
+      "dependent-children": "yes",
+      "edication-location": "Georgian College, ON",
+      "eligibility-female": "yes",
+      "expenses-groceries": "560",
+      "expenses-utilities": "230",
+      "preferred-language": "en",
+      "requested-supports": ["tuition", "living", "other"],
+      "expenses-other-list": "Childcare for evening classes 180",
+      "income-band-funding": "260",
+      "labour-force-status": "employed-part-time",
+      "registration-number": "ON-000000",
+      "eligibility-canadian": "yes",
+      "eligibility-training": "yes",
+      "expenses-transitpass": "110",
+      "income-child-benefit": "360",
+      "income-social-assist": "0",
+      "contact-email-address": "bill@sillery.co.uk",
+      "eligibility-financial": "yes",
+      "address-street-address": "88 Water Street",
+      "disability-description": "ADHD diagnosis; uses coaching to stay on track.",
+      "eligibility-employment": "yes",
+      "eligibility-indigenous": "yes",
+      "emergency-contact-name": "Lee Ashkewe",
+      "address-mailing-address": "",
+      "other-requested-support": "Adaptive learning coach sessions.",
+      "social-insurance-number": "000 000 000",
+      "eligibility-disqualified": "no",
+      "income-other-description": "Sales from weekend market booth.",
+      "legal-indigenous-identity": "first_nations_status",
+      "emergency-contact-telephone": "(705) 555-6181",
+      "what-is-your-gender-identity": "1",
+      "emergency-contact-relationship": "Spouse"
+    }
+  },
+  {
+    id: "tara-penashue",
+    registrationPrefix: "NL",
+    payload: {
+      "dob": "1990-07-08",
+      "consent": { "name": "Tara Penashue", "signed": true },
+      "indigenous_declaration": { "name": "Tara Penashue", "signed": true },
+      "barriers": ["location", "other"],
+      "last-name": "Penashue",
+      "first-name": "Tara",
+      "address-city": "Sheshatshiu",
+      "income-other": "150",
+      "middle-names": "Marie",
+      "spouses-name": "Mark Penashue",
+      "expenses-rent": "860",
+      "other-barrier": "Limited broadband makes online coursework difficult.",
+      "telephone-alt": "",
+      "telephone-day": "(709) 555-4412",
+      "top-up-amount": "360",
+      "education-year": "2009",
+      "has-disability": "no",
+      "home-comminuty": "Sheshatshiu Innu First Nation",
+      "income-jordans": "0",
+      "income-spousal": "0",
+      "long-term-goal": "Complete social service worker diploma to support Innu families navigating services.",
+      "marital-status": "separated",
+      "preferred-name": "Tara",
+      "target-program": "skills_development",
+      "eligibility-age": "yes",
+      "example-input-5": "",
+      "example-radio-2": "college",
+      "address-postcode": "A0P 1M0",
+      "address-province": "nl",
+      "ages-of-children": "8, 11",
+      "visible-minority": "false",
+      "income-employment": "780",
+      "social-assistance": "yes",
+      "dependent-children": "yes",
+      "edication-location": "College of the North Atlantic, NL",
+      "eligibility-female": "yes",
+      "expenses-groceries": "510",
+      "expenses-utilities": "210",
+      "preferred-language": "en",
+      "requested-supports": ["living", "transportation", "other"],
+      "expenses-other-list": "After-school program fees 130",
+      "income-band-funding": "120",
+      "labour-force-status": "student",
+      "registration-number": "NL-000000",
+      "eligibility-canadian": "yes",
+      "eligibility-training": "yes",
+      "expenses-transitpass": "95",
+      "income-child-benefit": "520",
+      "income-social-assist": "420",
+      "contact-email-address": "bill@sillery.co.uk",
+      "eligibility-financial": "yes",
+      "address-street-address": "6 Innu Road",
+      "disability-description": "No disability disclosed.",
+      "eligibility-employment": "yes",
+      "eligibility-indigenous": "yes",
+      "emergency-contact-name": "Annie Penashue",
+      "address-mailing-address": "PO Box 211, Sheshatshiu, NL A0P 1M0",
+      "other-requested-support": "Elder-led childcare support during field training.",
+      "social-insurance-number": "000 000 000",
+      "eligibility-disqualified": "no",
+      "income-other-description": "Seasonal craft sales at community events.",
+      "legal-indigenous-identity": "inuit",
+      "emergency-contact-telephone": "(709) 555-4410",
+      "what-is-your-gender-identity": "1",
+      "emergency-contact-relationship": "Mother"
+    }
+  }
+];
+const randomChoice = (items) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return null;
+  }
+  const index = Math.floor(Math.random() * items.length);
+  return items[index];
+};
+
+const randomIntInclusive = (min, max) => {
+  const lower = Math.ceil(Math.min(min, max));
+  const upper = Math.floor(Math.max(min, max));
+  if (upper <= lower) {
+    return lower;
+  }
+  return lower + Math.floor(Math.random() * (upper - lower + 1));
+};
+
+const generateRegistrationNumber = (prefix) => {
+  const safePrefix = String(prefix || 'ISET').trim().toUpperCase() || 'ISET';
+  return `${safePrefix}-${randomIntInclusive(100000, 999999)}`;
+};
+
+const generateRandomSin = () => {
+  const digits = Array.from({ length: 9 }, (_, idx) => {
+    if (idx === 0) {
+      return randomIntInclusive(1, 9);
+    }
+    return randomIntInclusive(0, 9);
+  });
+  return `${digits.slice(0, 3).join('')} ${digits.slice(3, 6).join('')} ${digits.slice(6).join('')}`;
+};
+
+const buildDummyDraft = () => {
+  const template = randomChoice(DUMMY_APPLICATION_PROFILES) || DUMMY_APPLICATION_PROFILES[0];
+  const draftPayload = JSON.parse(JSON.stringify(template.payload));
+  draftPayload['registration-number'] = generateRegistrationNumber(template.registrationPrefix);
+  draftPayload['social-insurance-number'] = generateRandomSin();
+  const history = Array.isArray(template.history) && template.history.length
+    ? [...template.history]
+    : [...DUMMY_DRAFT_HISTORY];
+  const applicantName = [
+    draftPayload['first-name'],
+    draftPayload['last-name']
+  ].filter(Boolean).join(' ').trim() || 'Demo Applicant';
+  return {
+    draftPayload,
+    history,
+    summary: {
+      applicantName,
+      profileId: template.id,
+      homeCommunity: draftPayload['home-comminuty'] || null,
+      targetProgram: draftPayload['target-program'] || null
+    }
+  };
+};
 // --- Dummy Draft Insertion (test helper) ------------------------------------
 // POST /api/create-dummy-draft
 // Body (optional): { userId?: number, stepCursor?: string, workflowId?: string }
@@ -10983,93 +12199,7 @@ app.post('/api/create-dummy-draft', async (req, res) => {
     const workflowId = String(body.workflowId || 'iset-v1');
     const stepCursor = String(body.stepCursor || 'summary-page');
 
-    // Provided draft payload (exactly as requested)
-    const draftPayload = {
-      "dob": "1971-03-10",
-      "consent": { "name": "Bill Sillery", "signed": true },
-      "barriers": ["other"],
-      "last-name": "Sillery",
-      "first-name": "William",
-      "address-city": "Westmount",
-      "income-other": "0",
-      "middle-names": "John",
-      "spouses-name": "Marina Sharpe",
-      "expenses-rent": "1800",
-      "other-barrier": "No clients",
-      "telephone-alt": "",
-      "telephone-day": "(514) 975 1690",
-      "top-up-amount": "200",
-      "education-year": "1993",
-      "has-disability": 1,
-      "home-comminuty": "Westmount",
-      "income-jordans": "",
-      "income-spousal": "2800",
-      "long-term-goal": "To be the chairman of Awentech",
-      "marital-status": "married",
-      "preferred-name": "Bill",
-      "target-program": "not_yet",
-      "eligibility-age": 1,
-      "example-input-5": "",
-      "example-radio-2": "masters_degree",
-      "address-postcode": "H3Z 2G9",
-      "address-province": "qc",
-      "ages-of-children": "11",
-      "visible-minority": "false",
-      "income-employment": "4200",
-      "social-assistance": 1,
-      "dependent-children": 1,
-      "edication-location": "Oxford, UK",
-      "eligibility-female": 1,
-      "expenses-groceries": "650",
-      "expenses-utilities": "240",
-      "preferred-language": "en",
-      "requested-supports": ["other"],
-      "expenses-other-list": "Childcare costs 400",
-      "income-band-funding": "250",
-      "labour-force-status": "self-employed",
-      "registration-number": "12134231",
-      "eligibility-canadian": 1,
-      "eligibility-training": 1,
-      "expenses-transitpass": "110",
-      "income-child-benefit": "320",
-      "income-social-assist": "450",
-      "contact-email-address": "bill@sillery.co.uk",
-      "eligibility-financial": 1,
-      "address-street-address": "251 Avenue Kensington",
-      "disability-description": "I am English and do not speak French.",
-      "eligibility-employment": 1,
-      "eligibility-indigenous": 1,
-      "emergency-contact-name": "Marina Sharpe",
-      "indigenous_declaration": { "name": "Bill Sillery", "signed": true },
-      "address-mailing-address": "",
-      "other-requested-support": "Contact money",
-      "social-insurance-number": "987 987 987",
-      "eligibility-disqualified": 0,
-      "income-other-description": "",
-      "legal-indigenous-identity": "metis",
-      "emergency-contact-telephone": "(514) 924 5602",
-      "what-is-your-gender-identity": "5",
-      "emergency-contact-relationship": "Wife"
-    };
-
-    // Simulated traversal history (pruned)
-    const history = [
-      "consent",
-      "indigenous-declaration",
-      "eligibility",
-      "social-insurance-number",
-      "name",
-      "date-of-birth",
-      "gender",
-      "contact-information",
-      "emergency-contact",
-      "indigenous-legal-identity",
-      "registration-number",
-      "home-community",
-      "demographics",
-      "disability",
-      "summary-page"
-    ];
+    const { draftPayload, history, summary } = buildDummyDraft();
 
     // Check existing row
     const [existingRows] = await pool.query(
@@ -11092,7 +12222,8 @@ app.post('/api/create-dummy-draft', async (req, res) => {
         userId,
         version: newVersion,
         stepCursor,
-        workflowId
+        workflowId,
+        applicant: summary
       });
     }
 
@@ -11110,7 +12241,8 @@ app.post('/api/create-dummy-draft', async (req, res) => {
       userId,
       version: 1,
       stepCursor,
-      workflowId
+      workflowId,
+      applicant: summary
     });
   } catch (err) {
     console.error('[dummy-draft] error:', err.message);
@@ -12042,11 +13174,11 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       applicationStatus: applicationStatusNormalised || row.application_status || null,
     });
 
-    const response = {
-      id: row.id,
-      caseNumber,
-      status: statusNormalized || CASE_STATUS_DERIVED_VALUES.pendingApproval,
-      statusRaw: row.status || null,
+  const response = {
+    id: row.id,
+    caseNumber,
+    status: statusNormalized || CASE_STATUS_DERIVED_VALUES.pendingApproval,
+    statusRaw: row.status || null,
       applicationStatus: applicationStatusNormalised || row.application_status || null,
       priority: row.priority || null,
       riskRating: row.risk_rating || null,
@@ -12075,12 +13207,198 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         email: row.owner_email || null,
         role: row.owner_role || null,
         regionId: row.owner_region_id || null,
-        region: ownerRegion,
-      },
-      eligibility: normaliseString(row.assessment_esdc_eligibility) || null,
-      counts,
-      actionPlans,
+      region: ownerRegion,
+    },
+    eligibility: normaliseString(row.assessment_esdc_eligibility) || null,
+    counts,
+    actionPlans,
+  };
+
+    const firstDefined = (...values) => {
+      for (const value of values) {
+        if (value !== undefined && value !== null) return value;
+      }
+      return null;
     };
+
+    const normaliseYesNo = value => {
+      if (value === null || typeof value === 'undefined') return null;
+      const trimmed = String(value).trim().toLowerCase();
+      if (['1', 'yes', 'true', 'y', 'on'].includes(trimmed)) return 'yes';
+      if (['0', 'no', 'false', 'n', 'off'].includes(trimmed)) return 'no';
+      return null;
+    };
+
+    const parseArrayField = value => {
+      if (value === null || typeof value === 'undefined') return [];
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return [];
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (_) {
+          return trimmed
+            .split(',')
+            .map(entry => entry.trim())
+            .filter(Boolean);
+        }
+        return [trimmed];
+      }
+      if (typeof value === 'object') {
+        return Object.values(value)
+          .map(entry => (typeof entry === 'string' ? entry.trim() : entry))
+          .filter(Boolean);
+      }
+      return [];
+    };
+
+    const parseJsonField = (value, fallback) => {
+      if (value === null || typeof value === 'undefined') return fallback;
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return fallback;
+        try {
+          const parsed = JSON.parse(trimmed);
+          return typeof parsed === 'object' && parsed !== null ? parsed : fallback;
+        } catch (_) {
+          return fallback;
+        }
+      }
+      if (typeof value === 'object') return value;
+      return fallback;
+    };
+
+    const toStringOrNull = value => (value === null || typeof value === 'undefined' ? null : String(value));
+    const toTrimmedStringOrNull = value => {
+      const result = toStringOrNull(value);
+      if (!result) return null;
+      const trimmed = result.trim();
+      return trimmed.length ? trimmed : null;
+    };
+
+    let assessmentRow = null;
+    try {
+      const [[assessmentRecord] = []] = await pool.query(
+        'SELECT * FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
+        [caseId]
+      );
+      assessmentRow = assessmentRecord || null;
+    } catch (err) {
+      console.warn('[workspace] failed to load assessment for case', caseId, err);
+    }
+
+    const DEFAULT_ITP_PAYLOAD = { tuition: '', books: '', materials: '', living: '' };
+    const DEFAULT_WAGE_PAYLOAD = { wages: '', mercs: '', nonwages: '', other: '' };
+
+    const employmentBarriers = parseArrayField(
+      firstDefined(assessmentRow?.employment_barriers, row.assessment_employment_barriers)
+    );
+    const localAreaPriorities = parseArrayField(
+      firstDefined(assessmentRow?.local_area_priorities, row.assessment_local_area_priorities)
+    );
+    const previousIsetNormalised = normaliseYesNo(
+      firstDefined(assessmentRow?.previous_iset, row.assessment_previous_iset)
+    );
+    const childcareNeedNormalised = normaliseYesNo(
+      firstDefined(assessmentRow?.childcare_need, row.assessment_childcare_need)
+    );
+
+    const interventionCodeValue = toStringOrNull(
+      firstDefined(assessmentRow?.intervention_code, row.assessment_intervention_code)
+    );
+    const interventionOutcomeValue = toStringOrNull(
+      firstDefined(assessmentRow?.intervention_outcome_code, row.assessment_intervention_outcome_code)
+    );
+    const interventionDurationValue = toStringOrNull(
+      firstDefined(assessmentRow?.intervention_duration_days, row.assessment_intervention_duration_days)
+    );
+    const interventionCostValue = toStringOrNull(
+      firstDefined(assessmentRow?.intervention_cost_total, row.assessment_intervention_cost_total)
+    );
+    const interventionNocValue = toTrimmedStringOrNull(
+      firstDefined(assessmentRow?.intervention_related_noc, row.assessment_intervention_related_noc)
+    );
+    const interventionNocVersionValue = toTrimmedStringOrNull(
+      firstDefined(assessmentRow?.intervention_related_noc_version, row.assessment_intervention_related_noc_version)
+    );
+
+    const rawAssessmentItp = parseJsonField(
+      firstDefined(assessmentRow?.itp_payload, row.assessment_itp),
+      null
+    );
+    const assessmentItp =
+      rawAssessmentItp && typeof rawAssessmentItp === 'object'
+        ? rawAssessmentItp
+        : { ...DEFAULT_ITP_PAYLOAD };
+    const rawAssessmentWage = parseJsonField(
+      firstDefined(assessmentRow?.wage_payload, row.assessment_wage),
+      null
+    );
+    const assessmentWage =
+      rawAssessmentWage && typeof rawAssessmentWage === 'object'
+        ? rawAssessmentWage
+        : { ...DEFAULT_WAGE_PAYLOAD };
+
+    const dateOfAssessmentRaw = firstDefined(
+      assessmentRow?.date_of_assessment,
+      row.assessment_date_of_assessment
+    );
+    const startDateRaw = firstDefined(
+      assessmentRow?.intervention_start_date,
+      row.assessment_intervention_start_date
+    );
+    const endDateRaw = firstDefined(
+      assessmentRow?.intervention_end_date,
+      row.assessment_intervention_end_date
+    );
+    const resultDateRaw = firstDefined(
+      assessmentRow?.action_plan_result_date,
+      row.assessment_action_plan_result_date
+    );
+
+    response.case_summary = assessmentRow?.overview ?? row.case_summary ?? null;
+    response.assessment_date_of_assessment = toDateOnlyString(dateOfAssessmentRaw);
+    response.assessment_employment_goals =
+      assessmentRow?.employment_goals ?? row.assessment_employment_goals ?? null;
+    response.assessment_previous_iset = previousIsetNormalised;
+    response.assessment_previous_iset_details =
+      assessmentRow?.previous_iset_details ?? row.assessment_previous_iset_details ?? null;
+    response.assessment_employment_barriers = employmentBarriers;
+    response.assessment_local_area_priorities = localAreaPriorities;
+    response.assessment_other_funding_details =
+      assessmentRow?.other_funding_details ?? row.assessment_other_funding_details ?? null;
+    response.assessment_esdc_eligibility =
+      normaliseString(firstDefined(assessmentRow?.esdc_eligibility, row.assessment_esdc_eligibility)) || null;
+    response.assessment_intervention_start_date = toDateOnlyString(startDateRaw);
+    response.assessment_intervention_end_date = toDateOnlyString(endDateRaw);
+    response.assessment_institution = assessmentRow?.institution ?? row.assessment_institution ?? null;
+    response.assessment_program_name = assessmentRow?.program_name ?? row.assessment_program_name ?? null;
+    response.assessment_itp = assessmentItp;
+    response.assessment_wage = assessmentWage;
+    response.assessment_recommendation =
+      assessmentRow?.recommendation ?? row.assessment_recommendation ?? null;
+    response.assessment_justification =
+      assessmentRow?.justification ?? row.assessment_justification ?? null;
+    response.assessment_nwac_review =
+      assessmentRow?.nwac_review ?? row.assessment_nwac_review ?? null;
+    response.assessment_nwac_reason =
+      assessmentRow?.nwac_reason ?? row.assessment_nwac_reason ?? null;
+    response.assessment_intervention_code = interventionCodeValue;
+    response.assessment_intervention_outcome_code = interventionOutcomeValue;
+    response.assessment_intervention_duration_days = interventionDurationValue;
+    response.assessment_intervention_cost_total = interventionCostValue;
+    response.assessment_intervention_related_noc = interventionNocValue;
+    response.assessment_intervention_related_noc_version = interventionNocVersionValue;
+    response.assessment_childcare_need = childcareNeedNormalised;
+    response.assessment_childcare_funding_details =
+      assessmentRow?.childcare_funding_details ?? row.assessment_childcare_funding_details ?? null;
+    response.assessment_action_plan_result_code =
+      assessmentRow?.action_plan_result_code ?? row.assessment_action_plan_result_code ?? null;
+    response.assessment_action_plan_result_date = toDateOnlyString(resultDateRaw);
+
+    response.eligibility = response.assessment_esdc_eligibility;
 
     res.set('Cache-Control', 'no-store, max-age=0');
     res.json(response);
@@ -12154,13 +13472,30 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
 
     const [[assessmentRow]] = await connection.query(
       `SELECT
-         esdc_eligibility,
+         overview,
          employment_goals,
          previous_iset,
          previous_iset_details,
          employment_barriers,
          local_area_priorities,
-         other_funding_details
+         other_funding_details,
+         esdc_eligibility,
+         intervention_start_date,
+         intervention_end_date,
+         intervention_code,
+         intervention_outcome_code,
+         intervention_duration_days,
+         intervention_cost_total,
+         intervention_related_noc,
+         intervention_related_noc_version,
+         childcare_need,
+         childcare_funding_details,
+         institution,
+         program_name,
+         itp_payload,
+         wage_payload,
+         recommendation,
+         justification
        FROM iset_case_assessment
        WHERE case_id = ?
        LIMIT 1`,
@@ -12225,13 +13560,50 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
     const localAreaPriorities =
       parseArray(assessmentRow?.local_area_priorities) || parseArray(readAnswer('local-area-priorities'));
 
+    const normaliseYesNo = value => {
+      if (value === null || typeof value === 'undefined') return null;
+      const trimmed = String(value).trim().toLowerCase();
+      if (['1', 'yes', 'true'].includes(trimmed)) return 'yes';
+      if (['0', 'no', 'false'].includes(trimmed)) return 'no';
+      return null;
+    };
+
+    const previousIsetNormalised = normaliseYesNo(assessmentRow?.previous_iset);
+    const previousIsetBoolean = previousIsetNormalised === null ? null : previousIsetNormalised === 'yes';
+    const childcareNeedNormalised = normaliseYesNo(assessmentRow?.childcare_need);
+
+    const interventionCodeValue =
+      assessmentRow && assessmentRow.intervention_code !== null && typeof assessmentRow.intervention_code !== 'undefined'
+        ? String(assessmentRow.intervention_code)
+        : null;
+    const interventionOutcomeValue =
+      assessmentRow && assessmentRow.intervention_outcome_code !== null && typeof assessmentRow.intervention_outcome_code !== 'undefined'
+        ? String(assessmentRow.intervention_outcome_code)
+        : null;
+    const interventionDurationValue =
+      assessmentRow && assessmentRow.intervention_duration_days !== null && typeof assessmentRow.intervention_duration_days !== 'undefined'
+        ? String(assessmentRow.intervention_duration_days)
+        : null;
+    const interventionCostValue =
+      assessmentRow && assessmentRow.intervention_cost_total !== null && typeof assessmentRow.intervention_cost_total !== 'undefined'
+        ? String(assessmentRow.intervention_cost_total)
+        : null;
+    const interventionNocValue = assessmentRow?.intervention_related_noc
+      ? String(assessmentRow.intervention_related_noc).trim()
+      : null;
+    const interventionNocVersionValue = assessmentRow?.intervention_related_noc_version
+      ? String(assessmentRow.intervention_related_noc_version).trim()
+      : null;
+    const assessmentItp = safeJsonParse(assessmentRow?.itp_payload, assessmentRow?.itp_payload ?? null);
+    const assessmentWage = safeJsonParse(assessmentRow?.wage_payload, assessmentRow?.wage_payload ?? null);
+
     const context = {
       eligibility: normaliseString(assessmentRow?.esdc_eligibility) || null,
       employmentGoals:
         assessmentRow?.employment_goals ||
         normaliseString(readFirstAnswer('long-term-goal', 'short-term-goal', 'employment-goals')) ||
         null,
-      previousIset: assessmentRow?.previous_iset === 1,
+      previousIset: previousIsetBoolean,
       previousIsetDetails: assessmentRow?.previous_iset_details || null,
       employmentBarriers,
       localAreaPriorities,
@@ -12248,14 +13620,19 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
           'education-highest-level'
         ) ||
         null,
-      childcareNeed: readFirstAnswer('action-plan-childcare-need', 'childcare-need', 'childcare-required') || null,
+      childcareNeed:
+        childcareNeedNormalised ||
+        readFirstAnswer('action-plan-childcare-need', 'childcare-need', 'childcare-required') ||
+        null,
       childcareFunding:
+        assessmentRow?.childcare_funding_details ||
         readFirstAnswer(
           'action-plan-childcare-funded-code',
           'childcare-funding',
           'childcare-funded',
           'childcare-supported'
-        ) || null,
+        ) ||
+        null,
       socialAssistance: readFirstAnswer('social-assistance', 'receives-social-assistance') || null,
       employmentInsurance:
         readFirstAnswer(
@@ -12272,7 +13649,34 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
       targetProgram: normaliseString(readFirstAnswer('target-program')) || null,
     };
 
-    res.json({ context });
+    const assessmentPayload = {
+      case_summary: assessmentRow?.overview || null,
+      assessment_employment_goals: assessmentRow?.employment_goals || null,
+      assessment_previous_iset: normaliseYesNo(assessmentRow?.previous_iset),
+      assessment_previous_iset_details: assessmentRow?.previous_iset_details || null,
+      assessment_employment_barriers: employmentBarriers,
+      assessment_local_area_priorities: localAreaPriorities,
+      assessment_other_funding_details: assessmentRow?.other_funding_details || null,
+      assessment_esdc_eligibility: normaliseString(assessmentRow?.esdc_eligibility) || null,
+      assessment_intervention_start_date: assessmentRow?.intervention_start_date ? toDateOnlyString(assessmentRow.intervention_start_date) : null,
+      assessment_intervention_end_date: assessmentRow?.intervention_end_date ? toDateOnlyString(assessmentRow.intervention_end_date) : null,
+      assessment_intervention_code: assessmentRow && assessmentRow.intervention_code !== null && typeof assessmentRow.intervention_code !== "undefined" ? String(assessmentRow.intervention_code) : null,
+      assessment_intervention_outcome_code: assessmentRow && assessmentRow.intervention_outcome_code !== null && typeof assessmentRow.intervention_outcome_code !== "undefined" ? String(assessmentRow.intervention_outcome_code) : null,
+      assessment_intervention_duration_days: assessmentRow && assessmentRow.intervention_duration_days !== null && typeof assessmentRow.intervention_duration_days !== "undefined" ? String(assessmentRow.intervention_duration_days) : null,
+      assessment_intervention_cost_total: assessmentRow && assessmentRow.intervention_cost_total !== null && typeof assessmentRow.intervention_cost_total !== "undefined" ? String(assessmentRow.intervention_cost_total) : null,
+      assessment_intervention_related_noc: assessmentRow?.intervention_related_noc ? String(assessmentRow.intervention_related_noc).trim() : null,
+      assessment_intervention_related_noc_version: assessmentRow?.intervention_related_noc_version ? String(assessmentRow.intervention_related_noc_version).trim() : null,
+      assessment_childcare_need: normaliseYesNo(assessmentRow?.childcare_need),
+      assessment_childcare_funding_details: assessmentRow?.childcare_funding_details || null,
+      assessment_institution: assessmentRow?.institution || null,
+      assessment_program_name: assessmentRow?.program_name || null,
+      assessment_itp: safeJsonParse(assessmentRow?.itp_payload, assessmentRow?.itp_payload ?? null),
+      assessment_wage: safeJsonParse(assessmentRow?.wage_payload, assessmentRow?.wage_payload ?? null),
+      assessment_recommendation: assessmentRow?.recommendation || null,
+      assessment_justification: assessmentRow?.justification || null,
+    };
+
+    res.json({ context, ...assessmentPayload });
   } catch (error) {
     console.error('GET /api/cases/:id/action-plan/context failed:', error);
     res.status(500).json({ error: 'action_plan_context_failed', detail: error?.message || String(error) });
@@ -13543,7 +14947,17 @@ app.get('/api/cases/:id', async (req, res) => {
         ca.recommendation AS assessment_recommendation,
         ca.justification AS assessment_justification,
         ca.nwac_review AS assessment_nwac_review,
-        ca.nwac_reason AS assessment_nwac_reason
+        ca.nwac_reason AS assessment_nwac_reason,
+        ca.intervention_code AS assessment_intervention_code,
+        ca.intervention_outcome_code AS assessment_intervention_outcome_code,
+        ca.intervention_duration_days AS assessment_intervention_duration_days,
+        ca.intervention_cost_total AS assessment_intervention_cost_total,
+        ca.intervention_related_noc AS assessment_intervention_related_noc,
+        ca.intervention_related_noc_version AS assessment_intervention_related_noc_version,
+        ca.childcare_need AS assessment_childcare_need,
+        ca.childcare_funding_details AS assessment_childcare_funding_details,
+        ca.action_plan_result_code AS assessment_action_plan_result_code,
+        ca.action_plan_result_date AS assessment_action_plan_result_date
       FROM iset_case c
       LEFT JOIN iset_application a ON c.application_id = a.id
       LEFT JOIN application_lock al ON al.application_id = c.application_id AND al.expires_at > NOW()
@@ -16033,9 +17447,19 @@ app.get('/api/applications', async (req, res) => {
       al.expires_at AS lock_expires_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
       a.created_at AS submitted_at,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS preferred_name,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"')) AS applicant_first_name,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."last-name"')) AS applicant_last_name,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')) AS applicant_full_name,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.first_name')) AS applicant_personal_first_name,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.last_name')) AS applicant_personal_last_name,
+      JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+      JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."first-name"')) AS submission_first_name,
+      JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."last-name"')) AS submission_last_name,
       0 AS is_unassigned_submission
       FROM iset_case c
       JOIN iset_application a ON c.application_id = a.id
+      LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
       LEFT JOIN application_lock al ON al.application_id = c.application_id AND al.expires_at > NOW()`;
 
@@ -16084,8 +17508,18 @@ app.get('/api/applications', async (req, res) => {
         NULL AS lock_owner_id, NULL AS lock_owner_name, NULL AS lock_owner_email, NULL AS lock_expires_at,
   JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
         a.created_at AS submitted_at,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS preferred_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"')) AS applicant_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."last-name"')) AS applicant_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')) AS applicant_full_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.first_name')) AS applicant_personal_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.last_name')) AS applicant_personal_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."last-name"')) AS submission_last_name,
         1 AS is_unassigned_submission
         FROM iset_application a
+        LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
         LEFT JOIN iset_case c2 ON c2.application_id = a.id
         WHERE c2.id IS NULL
       )`;
@@ -16123,6 +17557,23 @@ app.get('/api/applications', async (req, res) => {
       const lockOwnerId = r.lock_owner_id || null;
       const lockOwnerName = r.lock_owner_name || null;
       const lockOwnerEmail = r.lock_owner_email || null;
+      const preferredName = normaliseString(r.preferred_name) ||
+        normaliseString(r.submission_preferred_name);
+      const firstName = normaliseString(r.applicant_first_name) ||
+        normaliseString(r.submission_first_name) ||
+        normaliseString(r.applicant_personal_first_name);
+      const lastName = normaliseString(r.applicant_last_name) ||
+        normaliseString(r.submission_last_name) ||
+        normaliseString(r.applicant_personal_last_name);
+      const fallbackFullName = normaliseString(r.applicant_full_name);
+      const combined = [firstName, lastName].filter(Boolean).join(' ').trim();
+      let applicantName = combined.length ? combined : null;
+      if (!applicantName) {
+        applicantName = preferredName;
+      }
+      if (!applicantName) {
+        applicantName = fallbackFullName;
+      }
       return {
         case_id: r.case_id,
         application_id: r.application_id,
@@ -16142,7 +17593,8 @@ app.get('/api/applications', async (req, res) => {
         lock_owner_name: lockOwnerName,
         lock_owner_email: lockOwnerEmail,
         lock_expires_at: r.lock_expires_at || null,
-        is_locked: Boolean(lockOwnerId)
+        is_locked: Boolean(lockOwnerId),
+        applicant_name: applicantName
       };
     });
     res.json({ count, rows: rowsOut });
@@ -16610,6 +18062,7 @@ app.put('/api/cases/:id', async (req, res) => {
   }
 
   const body = req.body || {};
+  const identity = getRequesterIdentity(req);
   const expectedRowVersionRaw = body.expectedApplicationRowVersion ?? body.expectedRowVersion;
   let expectedRowVersionNumber = null;
   if (expectedRowVersionRaw !== undefined) {
@@ -16634,6 +18087,20 @@ app.put('/api/cases/:id', async (req, res) => {
     if (['0','false','no','n','off'].includes(str)) return 0;
     return null;
   };
+  const toNumericRange = (val, { min = 0, max = null, stripNonDigits = true } = {}) => {
+    if (typeof val === 'undefined') return undefined;
+    if (val === null || val === '') return null;
+    let str = String(val).trim();
+    if (stripNonDigits) {
+      str = str.replace(/[^\d-]/g, '');
+    }
+    if (!str) return null;
+    const num = Number.parseInt(str, 10);
+    if (!Number.isFinite(num)) return null;
+    if (num < min) return null;
+    if (max !== null && num > max) return null;
+    return num;
+  };
 
   let conn;
   let beforeStatus = null;
@@ -16649,13 +18116,14 @@ app.put('/api/cases/:id', async (req, res) => {
   let shouldEnsureClientLink = false;
   let shouldMarkSubmissionNeedsReview = false;
   let shouldRecomputeCaseStatus = false;
+  let autoPlanSuggestion = null;
 
   try {
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
     const [[existingCase]] = await conn.query(
-      `SELECT c.status, c.application_id, c.client_id, a.row_version,
+      `SELECT c.status, c.application_id, c.client_id, c.assigned_to_user_id, a.row_version,
               al.owner_user_id AS lock_owner_user_id,
               al.owner_display_name AS lock_owner_display_name,
               al.owner_email AS lock_owner_email,
@@ -16790,6 +18258,16 @@ app.put('/api/cases/:id', async (req, res) => {
       'assessment_justification',
       'assessment_nwac_review',
       'assessment_nwac_reason',
+      'assessment_intervention_code',
+      'assessment_intervention_outcome_code',
+      'assessment_intervention_duration_days',
+      'assessment_intervention_cost_total',
+      'assessment_intervention_related_noc',
+      'assessment_intervention_related_noc_version',
+      'assessment_childcare_need',
+      'assessment_childcare_funding_details',
+      'assessment_action_plan_result_code',
+      'assessment_action_plan_result_date',
       'case_summary'
     ];
 
@@ -16825,6 +18303,16 @@ app.put('/api/cases/:id', async (req, res) => {
       add('justification', toNull(body.assessment_justification));
       add('nwac_review', toNull(body.assessment_nwac_review));
       add('nwac_reason', toNull(body.assessment_nwac_reason));
+      add('intervention_code', toNumericRange(body.assessment_intervention_code, { min: 1, max: 99 }));
+      add('intervention_outcome_code', toNumericRange(body.assessment_intervention_outcome_code, { min: 1, max: 99 }));
+      add('intervention_duration_days', toNumericRange(body.assessment_intervention_duration_days, { min: 0, max: 999 }));
+      add('intervention_cost_total', toNumericRange(body.assessment_intervention_cost_total, { min: 0, max: 999999 }));
+      add('intervention_related_noc', toNull(body.assessment_intervention_related_noc));
+      add('intervention_related_noc_version', toNull(body.assessment_intervention_related_noc_version));
+      add('childcare_need', toTinyInt(body.assessment_childcare_need));
+      add('childcare_funding_details', toNull(body.assessment_childcare_funding_details));
+      add('action_plan_result_code', toNull(body.assessment_action_plan_result_code));
+      add('action_plan_result_date', toNull(body.assessment_action_plan_result_date));
 
       if (updateAssignments.length) {
         const placeholders = insertColumns.map(() => '?').join(', ');
@@ -16839,6 +18327,20 @@ app.put('/api/cases/:id', async (req, res) => {
     }
 
     const targetStatus = statusToPersist || beforeStatusNormalised;
+
+    if (applicationStatusToPersist === 'approved') {
+      const approvalUserId = identity && typeof identity.userId !== 'undefined'
+        ? Number(identity.userId)
+        : null;
+      autoPlanSuggestion = await ensureAutoPlanAndInterventionFromAssessment(conn, {
+        caseId,
+        caseRow: existingCase,
+        approvalUserId: Number.isFinite(approvalUserId) ? approvalUserId : null,
+      });
+      if (autoPlanSuggestion.createdPlan || autoPlanSuggestion.createdIntervention) {
+        shouldRecomputeCaseStatus = true;
+      }
+    }
 
     if ((shouldEnsureClientLink || (!ensuredClientId && targetStatus === CASE_STATUS_DERIVED_VALUES.initiated)) && applicationId) {
       ensuredClientId = await ensureCaseClientLinkForApproval(conn, {
@@ -16916,7 +18418,17 @@ app.put('/api/cases/:id', async (req, res) => {
               ca.recommendation,
               ca.justification,
               ca.nwac_review,
-              ca.nwac_reason
+              ca.nwac_reason,
+              ca.intervention_code AS assessment_intervention_code,
+              ca.intervention_outcome_code AS assessment_intervention_outcome_code,
+              ca.intervention_duration_days AS assessment_intervention_duration_days,
+              ca.intervention_cost_total AS assessment_intervention_cost_total,
+              ca.intervention_related_noc AS assessment_intervention_related_noc,
+              ca.intervention_related_noc_version AS assessment_intervention_related_noc_version,
+              ca.childcare_need AS assessment_childcare_need,
+              ca.childcare_funding_details AS assessment_childcare_funding_details,
+              ca.action_plan_result_code AS assessment_action_plan_result_code,
+              ca.action_plan_result_date AS assessment_action_plan_result_date
          FROM iset_case c
          JOIN iset_application a ON c.application_id = a.id
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
@@ -16955,6 +18467,48 @@ app.put('/api/cases/:id', async (req, res) => {
     } catch { caseRow.assessment_wage = { wages: '', mercs: '', nonwages: '', other: '' }; }
     if (caseRow.assessment_previous_iset !== null && caseRow.assessment_previous_iset !== undefined) {
       caseRow.assessment_previous_iset = Number(caseRow.assessment_previous_iset);
+    }
+    if (caseRow.assessment_intervention_code !== null && caseRow.assessment_intervention_code !== undefined) {
+      caseRow.assessment_intervention_code = String(caseRow.assessment_intervention_code);
+    }
+    if (caseRow.assessment_intervention_outcome_code !== null && caseRow.assessment_intervention_outcome_code !== undefined) {
+      caseRow.assessment_intervention_outcome_code = String(caseRow.assessment_intervention_outcome_code);
+    }
+    if (caseRow.assessment_intervention_duration_days !== null && caseRow.assessment_intervention_duration_days !== undefined) {
+      const duration = Number(caseRow.assessment_intervention_duration_days);
+      caseRow.assessment_intervention_duration_days = Number.isNaN(duration) ? null : String(duration);
+    }
+    if (caseRow.assessment_intervention_cost_total !== null && caseRow.assessment_intervention_cost_total !== undefined) {
+      const cost = Number(caseRow.assessment_intervention_cost_total);
+      caseRow.assessment_intervention_cost_total = Number.isNaN(cost) ? null : String(cost);
+    }
+    if (typeof caseRow.assessment_intervention_related_noc === 'string') {
+      caseRow.assessment_intervention_related_noc = caseRow.assessment_intervention_related_noc.trim();
+    }
+    if (typeof caseRow.assessment_intervention_related_noc_version === 'string') {
+      caseRow.assessment_intervention_related_noc_version = caseRow.assessment_intervention_related_noc_version.trim();
+    }
+    if (caseRow.assessment_childcare_need !== null && caseRow.assessment_childcare_need !== undefined) {
+      const need = Number(caseRow.assessment_childcare_need);
+      caseRow.assessment_childcare_need = Number.isNaN(need) ? null : (need === 1 ? 'yes' : need === 0 ? 'no' : null);
+    }
+    if (typeof caseRow.assessment_childcare_funding_details === 'string') {
+      caseRow.assessment_childcare_funding_details = caseRow.assessment_childcare_funding_details.trim();
+    }
+    if (typeof caseRow.assessment_action_plan_result_code === 'string') {
+      caseRow.assessment_action_plan_result_code = caseRow.assessment_action_plan_result_code.trim();
+    }
+    if (caseRow.assessment_action_plan_result_date) {
+      const dateValue = caseRow.assessment_action_plan_result_date;
+      if (dateValue instanceof Date) {
+        caseRow.assessment_action_plan_result_date = Number.isNaN(dateValue.getTime())
+          ? null
+          : dateValue.toISOString().slice(0, 10);
+      } else if (typeof dateValue === 'string') {
+        caseRow.assessment_action_plan_result_date = dateValue.slice(0, 10);
+      } else {
+        caseRow.assessment_action_plan_result_date = null;
+      }
     }
     if (Object.prototype.hasOwnProperty.call(caseRow, 'application_row_version')) {
       caseRow.application_row_version = caseRow.application_row_version === null || caseRow.application_row_version === undefined
@@ -17342,6 +18896,8 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
+
+
 
 
 
