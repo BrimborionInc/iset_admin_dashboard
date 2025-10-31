@@ -17,8 +17,8 @@ Use this note when spinning up a fresh chat so the LLM has the context it needs 
 ## 2. Key Modules & Standards
 - **Routing**: Case Workspace routes are registered in `src/routes/AppRoutes.js`.
 - **Cloudscape table standard**: follow `docs/guides/cloudscape-table-persistence.md`. Recent widgets (Action Plans, Interventions) already apply the pattern (TextFilter + CollectionPreferences + Pagination + column width persistence).
-- **Case Header widget** (`src/pages/Caseworking/caseWorkspace/widgets/CaseHeaderWidget.jsx`): description defaults to "Participant case summary information and quick actions."
-- **Coordinator Assessment widget** (`src/widgets/CoordinatorAssessmentWidget.js`): records the recommended intervention (code, schedule, training context) and optional ILMP-ready details (duration/cost, NOC version/code when required, childcare info) via the `/api/reference/*` lookup endpoints. When NWAC approves an assessment the backend now auto-creates the initial action plan (status `active` when a start date is supplied, otherwise `draft`) and seeds a `planned` intervention from the captured recommendation.
+- **Case Header widget** (`src/pages/Caseworking/caseWorkspace/widgets/CaseHeaderWidget.jsx`): renders a five-column Cloudscape `ColumnLayout` showing (in order) client name, case number, status, owner, and last-updated timestamp. The widget no longer injects a default description; titles/descriptions now come from the configurable dashboard metadata.
+- **Coordinator Assessment widget** (`src/widgets/CoordinatorAssessmentWidget.js`): records the recommended intervention (code, schedule, training context) and optional ILMP-ready details (duration/cost, NOC version/code when required, childcare info) via the `/api/reference/*` lookup endpoints. When NWAC approves an assessment the backend auto-creates the initial action plan (now always seeded as `draft`, regardless of start date) and a `planned` intervention so caseworkers must explicitly activate the plan before work begins.
 - **Action Plans widget**:
   - Sorted by recency (newest first) and default-selects the latest plan.
   - Uses pagination/filtering per standard.
@@ -50,7 +50,8 @@ Use this note when spinning up a fresh chat so the LLM has the context it needs 
 - Interventions table cost column: picks up persisted totals even after editing, thanks to new metadata merge logic.
 - CR-0011 is complete (both persistence and hydration).
 - Assessment dashboard status flow: `/api/cases/:id` now returns `application_status`, the Application Overview widget listens for the normalised payload, and both the overview and NWAC widgets trigger `refreshCaseData` on submit/approval. Earlier we spent hours chasing front-end cache issues because the SQL query omitted `a.status`; always verify the API is projecting new fields before debugging UI state.
-- Coordinator Assessment persistence: the `Save`, `Submit`, and NWAC completion paths now serialise the same assessment payload. Intervention code/duration/cost, NOC version/code, childcare answers, and the “previously funded” toggle map straight into the new `iset_case_assessment` columns (see `sql/20251101_01_alter_case_assessment_esdc_fields.sql`). Reloading the widget after saving should recover every field without relying on ad-hoc browser state.
+- Coordinator Assessment persistence: the `Save`, `Submit`, and NWAC completion paths now serialise the same assessment payload. Intervention code/duration/cost, NOC version/code, childcare answers, and the "previously funded" toggle map straight into the new `iset_case_assessment` columns (see `sql/20251101_01_alter_case_assessment_esdc_fields.sql`). Reloading the widget after saving should recover every field without relying on ad-hoc browser state.
+- Workspace alerts: all Cloudscape `Alert` instances in the action plan/intervention widgets and modals are now dismissible so users can clear success/error banners after reviewing them.
 
 ## 6. Handy Reminders When Picking Up Work
 - Confirm the dev servers are running before testing UI changes.

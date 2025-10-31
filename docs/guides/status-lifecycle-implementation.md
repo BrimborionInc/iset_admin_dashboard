@@ -78,7 +78,7 @@ The set is intentionally broad to accommodate funder reporting requirements; cas
 ### 3.1 Application → Case Interactions
 1. **Submission** (`submitted`): auto-created `iset_case` row defaults to `pending_approval`.
 2. **Assessment Submitted** (`pending_approval`): triggered in `CoordinatorAssessmentWidget.handleSubmit`, which sends `status: 'pending_approval'` via `PUT /api/cases/:id`. Backend persists the new application status and recalculates action plan-derived case status (which typically remains `pending_approval` until approval).
-3. **Outcome Decision** (`approved` / `rejected`): `handleComplete` sends final status; backend updates `iset_application.status` and recomputes the case status, usually landing on `initiated` (if no active plans) or retaining an existing derived value.
+3. **Outcome Decision** (`approved` / `rejected`): `handleComplete` sends the final status; backend updates `iset_application.status` and recomputes the case status. When the outcome is **approved** the server also seeds an initial action plan and intervention from the NWAC recommendation. As of 2026‑02 the auto-generated plan always starts in `draft` (regardless of the recommended start date) and the intervention in `planned`, keeping the case in `initiated` until a caseworker explicitly activates the plan.
 4. **Manual Overrides**: The Application Overview widget can POST/PUT `status` changes via `PUT /api/cases/:id`. Locks ensure only one user manipulates state at a time.
 
 ### 3.2 Case Status Derivation

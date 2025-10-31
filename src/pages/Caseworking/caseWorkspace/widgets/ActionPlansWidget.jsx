@@ -503,12 +503,37 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
     setCloseError(null);
   };
 
+  const viewPlan = useCallback(
+    plan => {
+      if (!plan) return;
+      if (plan.id) {
+        setSelectedActionPlanId(plan.id);
+      }
+      handlePlanAction("view", plan);
+    },
+    [handlePlanAction, setSelectedActionPlanId]
+  );
+
   const tableColumns = useMemo(() => {
     const baseColumns = [
       {
         id: "title",
         header: "Plan",
-        cell: item => item.title || "Untitled",
+        cell: item => {
+          const title = item.title || "Untitled";
+          return (
+            <Link
+              href="#"
+              ariaLabel={`View action plan ${title}`}
+              onFollow={event => {
+                event.preventDefault();
+                viewPlan(item);
+              }}
+            >
+              {title}
+            </Link>
+          );
+        },
         isRowHeader: true,
       },
       {
@@ -579,7 +604,7 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
         ? { ...column, width: columnWidthsMap.get(column.id) }
         : column
     );
-  }, [actionSubmitting, closeSubmitting, columnWidthsMap, handlePlanAction]);
+  }, [actionSubmitting, closeSubmitting, columnWidthsMap, handlePlanAction, viewPlan]);
 
   const visibleColumnDefinitions = useMemo(
     () => tableColumns.filter(column => visibleColumns.includes(column.id)),
@@ -789,12 +814,22 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
     >
       <SpaceBetween size="m">
         {successMessage && (
-          <Alert type="success" onDismiss={() => setSuccessMessage(null)}>
+          <Alert
+            type="success"
+            dismissible
+            dismissAriaLabel="Dismiss success message"
+            onDismiss={() => setSuccessMessage(null)}
+          >
             {successMessage}
           </Alert>
         )}
         {errorMessage && (
-          <Alert type="error" onDismiss={() => setErrorMessage(null)}>
+          <Alert
+            type="error"
+            dismissible
+            dismissAriaLabel="Dismiss error message"
+            onDismiss={() => setErrorMessage(null)}
+          >
             {errorMessage}
           </Alert>
         )}
@@ -812,8 +847,8 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
           }}
           onRowClick={({ detail }) => {
             const plan = detail?.item;
-            if (plan?.id) {
-              setSelectedActionPlanId(plan.id);
+            if (plan) {
+              viewPlan(plan);
             }
           }}
           columnDefinitions={visibleColumnDefinitions}

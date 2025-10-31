@@ -1,36 +1,22 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { BoardItem } from "@cloudscape-design/board-components";
-import {
-  Box,
-  Button,
-  ButtonDropdown,
-  ColumnLayout,
-  Header,
-  Link,
-  SpaceBetween,
-  StatusIndicator,
-} from "@cloudscape-design/components";
+import { Box, ButtonDropdown, ColumnLayout, Header, Link, SpaceBetween, StatusIndicator } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 
 const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
-  const { caseData, isLoading, error, refresh } = useCaseWorkspace();
+  const { caseData, isLoading, error } = useCaseWorkspace();
 
   const DetailItem = ({ label, value }) => (
-    <div style={{ marginBottom: "0.5rem" }}>
-      <div style={{ fontSize: "0.75rem", color: "var(--color-text-body-secondary)" }}>{label}</div>
-      <div>{value ?? "-"}</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+      <span style={{ fontSize: "0.75rem", color: "var(--color-text-body-secondary)" }}>{label}</span>
+      {React.isValidElement(value) ? (
+        value
+      ) : (
+        <span style={{ fontWeight: 500 }}>{value ?? "-"}</span>
+      )}
     </div>
   );
-
-  const formatDate = value => {
-    if (!value) return "-";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return value;
-    }
-    return date.toLocaleDateString();
-  };
 
   const formatDateTime = value => {
     if (!value) return "-";
@@ -39,14 +25,6 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       return value;
     }
     return date.toLocaleString();
-  };
-
-  const formatNumber = value => {
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return value.toLocaleString("en-CA");
-    }
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric.toLocaleString("en-CA") : "0";
   };
 
   const rawStatus = typeof caseData?.status === "string" ? caseData.status.trim().toLowerCase() : "";
@@ -80,8 +58,63 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   })();
   const caseNumber = caseData?.caseNumber || (caseData?.id ? `CASE-${caseData.id}` : "-");
   const clientName = caseData?.client?.name ?? "Unknown client";
-  const clientRegion = caseData?.client?.region ?? "Not set";
-  const counts = caseData?.counts || {};
+
+  const compliance = caseData?.compliance ?? {};
+  const mapValidationStatus = status => {
+    const value = typeof status === "string" ? status.toLowerCase() : "pending";
+    switch (value) {
+      case "clean":
+      case "ok":
+        return { type: "success", label: "Clean" };
+      case "warning":
+        return { type: "warning", label: "Warnings" };
+      case "blocked":
+      case "error":
+        return { type: "error", label: "Blocked" };
+      case "pending":
+      default:
+        return { type: "pending", label: "Pending" };
+    }
+  };
+
+  const ilmpStatusSummary = useMemo(() => mapValidationStatus(compliance.ilmp?.status), [compliance.ilmp?.status]);
+  const financeStatusSummary = useMemo(() => mapValidationStatus(compliance.finance?.status), [compliance.finance?.status]);
+  const ilmpLastValidated = compliance.ilmp?.lastValidatedAt ? formatDateTime(compliance.ilmp.lastValidatedAt) : "-";
+
+  const detailItems = useMemo(() => {
+    if (!caseData) {
+      return [];
+    }
+    const statusIndicator = <StatusIndicator type={statusType}>{statusLabel}</StatusIndicator>;
+    return [
+      { label: "Client name", value: clientName },
+      { label: "Case number", value: caseNumber },
+      { label: "Status", value: statusIndicator },
+      { label: "Owner", value: caseData?.owner?.name ?? "Unassigned" },
+      { label: "Last updated", value: formatDateTime(caseData?.updatedAt) },
+      {
+        label: "ILMP validation",
+        value: <StatusIndicator type={ilmpStatusSummary.type}>{ilmpStatusSummary.label}</StatusIndicator>,
+      },
+      {
+        label: "ILMP validated",
+        value: ilmpLastValidated,
+      },
+      {
+        label: "Finance validation",
+        value: <StatusIndicator type={financeStatusSummary.type}>{financeStatusSummary.label}</StatusIndicator>,
+      },
+    ];
+  }, [
+    caseData,
+    caseNumber,
+    clientName,
+    statusLabel,
+    statusType,
+    ilmpStatusSummary,
+    ilmpLastValidated,
+    financeStatusSummary,
+  ]);
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
@@ -98,7 +131,15 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
 
   const handleSettingsClick = ({ detail }) => {
     if (detail?.id === "remove" && typeof actions.removeItem === "function") {
+      if (typeof window !== "undefined" && window.console) {
+        window.console.info("[CaseHeaderWidget] remove requested");
+      }
       actions.removeItem();
+    } else if (typeof window !== "undefined" && window.console) {
+      window.console.info("[CaseHeaderWidget] remove not executed", {
+        hasRemove: typeof actions.removeItem === "function",
+        detail,
+      });
     }
   };
 
@@ -108,26 +149,18 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         <Header
           variant="h2"
           info={infoLink}
-          description={
-            metadata.description ??
-            "Participant case summary information and quick actions."
-          }
+          description={metadata.description}
           actions={
-            <SpaceBetween size="xs" direction="horizontal">
-              <Button iconName="refresh" onClick={() => refresh().catch(() => {})} loading={isLoading}>
-                Refresh
-              </Button>
-              <ButtonDropdown
-                ariaLabel="Case actions"
-                items={[
-                  { id: "assign", text: "Assign / reassign" },
-                  { id: "close", text: "Mark ready to close" },
-                  { id: "archive", text: "Archive case" },
-                ]}
-              >
-                Quick actions
-              </ButtonDropdown>
-            </SpaceBetween>
+            <ButtonDropdown
+              ariaLabel="Case actions"
+              items={[
+                { id: "assign", text: "Assign / reassign" },
+                { id: "close", text: "Mark ready to close" },
+                { id: "archive", text: "Archive case" },
+              ]}
+            >
+              Quick actions
+            </ButtonDropdown>
           }
         >
           {metadata.title ?? "Case header"}
@@ -155,31 +188,13 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           </StatusIndicator>
         ) : null}
         {caseData ? (
-          <ColumnLayout columns={3} variant="text-grid">
-            <Box>
-              <h4 style={{ marginBottom: "0.5rem" }}>Case</h4>
-              <DetailItem label="Case number" value={caseNumber} />
-              <DetailItem label="Status" value={statusLabel} />
-              <DetailItem label="Next action due" value={formatDate(caseData?.nextActionDueAt)} />
-              <DetailItem label="Last updated" value={formatDateTime(caseData?.updatedAt)} />
-              <StatusIndicator type={statusType}>{statusLabel}</StatusIndicator>
-            </Box>
-            <Box>
-              <h4 style={{ marginBottom: "0.5rem" }}>Client</h4>
-              <DetailItem label="Name" value={clientName} />
-              <DetailItem label="Date of birth" value={formatDate(caseData?.client?.dateOfBirth)} />
-              <DetailItem label="Region" value={clientRegion} />
-              <DetailItem label="Eligibility" value={caseData?.eligibility ?? "-"} />
-            </Box>
-            <Box>
-              <h4 style={{ marginBottom: "0.5rem" }}>Owner & activity</h4>
-              <DetailItem label="Owner" value={caseData?.owner?.name ?? "Unassigned"} />
-              <DetailItem label="Owner email" value={caseData?.owner?.email ?? "-"} />
-              <DetailItem label="Open tasks" value={formatNumber(counts.openTasks)} />
-              <DetailItem label="Overdue tasks" value={formatNumber(counts.overdueTasks)} />
-              <DetailItem label="Open interventions" value={formatNumber(counts.openInterventions)} />
-            </Box>
-          </ColumnLayout>
+          <Box>
+            <ColumnLayout columns={5} variant="text-grid">
+              {detailItems.map(item => (
+                <DetailItem key={item.label} label={item.label} value={item.value} />
+              ))}
+            </ColumnLayout>
+          </Box>
         ) : !isLoading && !error ? (
           <Box padding="m">
             <StatusIndicator type="info">No case data available.</StatusIndicator>

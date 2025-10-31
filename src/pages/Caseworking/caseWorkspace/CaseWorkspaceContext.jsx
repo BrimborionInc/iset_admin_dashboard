@@ -247,6 +247,14 @@ const buildDummyCase = caseId => ({
     ilmp: { status: "clean", messages: [] },
     finance: { status: "warning", messages: ["Mapping missing for childcare support", "Overspend in supports pot"] },
   },
+  exportPreview: {
+    ilmp: {
+      xml: "<ILMP>Dummy payload for preview</ILMP>",
+      generatedAt: "2025-10-25T12:34:00Z",
+      storageKey: "dummy/ilmp.xml",
+      checksum: "dummy-checksum",
+    },
+  },
   counts: {
     openTasks: 2,
     overdueTasks: 1,
@@ -261,6 +269,7 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
   }
 
   const client = payload.client || {};
+  const exportPreview = payload.exportPreview || { ilmp: null };
   const counts = payload.counts || {};
   const normaliseCount = value => {
     const numeric = Number(value);
@@ -352,6 +361,12 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
     id: payload.id ?? caseId,
     applicationId: payload.applicationId ?? payload.application_id ?? null,
     application_id: payload.applicationId ?? payload.application_id ?? null,
+    applicantUserId: payload.applicantUserId ?? payload.applicant_user_id ?? null,
+    applicant_user_id: payload.applicant_user_id ?? payload.applicantUserId ?? null,
+    applicantName: payload.applicantName ?? payload.applicant_name ?? null,
+    applicant_name: payload.applicant_name ?? payload.applicantName ?? null,
+    applicantEmail: payload.applicantEmail ?? payload.applicant_email ?? null,
+    applicant_email: payload.applicant_email ?? payload.applicantEmail ?? null,
     caseNumber: payload.caseNumber ?? null,
     status: payload.status ?? null,
     applicationStatus: payload.applicationStatus ?? payload.application_status ?? null,
@@ -388,6 +403,7 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
     finance: payload.finance ?? null,
     compliance: payload.compliance ?? null,
     eligibility: payload.eligibility ?? null,
+    exportPreview,
     ...assessmentData,
   };
 };
@@ -406,6 +422,7 @@ const CaseWorkspaceContext = createContext({
   updateIntervention: () => Promise.resolve({}),
   closeIntervention: () => Promise.resolve({}),
   runComplianceChecks: () => Promise.resolve(),
+  prepareIlmpExport: () => Promise.resolve({}),
   fetchActionPlanContext: () => Promise.resolve({}),
   interventionCodes: [],
   interventionCodesLoading: false,
@@ -835,9 +852,125 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
   );
 
   const runComplianceChecks = useCallback(async () => {
-    // TODO: call `/api/compliance/${caseId}/validate`
-    return { ilmp: "clean", finance: "warning" };
-  }, [caseId]);
+    if (!caseId) {
+      return {
+        ilmp: { status: "pending", messages: [], warnings: [], blockingIssues: [], lastValidatedAt: null },
+        finance: { status: "pending", messages: [] },
+      };
+    }
+
+    const response = await apiFetch(`/api/cases/${caseId}/validate-ilmp`, { method: "POST" });
+    if (!response.ok) {
+      let detail = null;
+      try {
+        detail = await response.json();
+      } catch {
+        detail = null;
+      }
+      const message =
+        detail?.detail || detail?.message || detail?.error || "Unable to complete ILMP validation.";
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const ilmpPayload = payload?.compliance?.ilmp ?? {};
+    const financePayload = payload?.compliance?.finance;
+    const mappedCompliance = {
+      ilmp: {
+        status: ilmpPayload.status ?? "pending",
+        messages: Array.isArray(ilmpPayload.messages) ? ilmpPayload.messages : [],
+        warnings: Array.isArray(ilmpPayload.warnings) ? ilmpPayload.warnings : [],
+        blockingIssues: Array.isArray(ilmpPayload.blockingIssues) ? ilmpPayload.blockingIssues : [],
+        lastValidatedAt: ilmpPayload.lastValidatedAt ?? null,
+        summary: ilmpPayload.summary ?? null,
+      },
+      finance: financePayload ?? { status: "pending", messages: [] },
+    };
+
+    setState(prev => {
+      if (!prev.caseData) {
+        return prev;
+      }
+      const previousFinance = prev.caseData.compliance?.finance;
+      return {
+        ...prev,
+        caseData: {
+          ...prev.caseData,
+          compliance: {
+            ilmp: mappedCompliance.ilmp,
+            finance: mappedCompliance.finance ?? previousFinance ?? { status: "pending", messages: [] },
+          },
+        },
+      };
+    });
+
+    return mappedCompliance;
+  }, [caseId, apiFetch]);
+
+  const prepareIlmpExport = useCallback(async () => {
+    if (!caseId) {
+      const error = new Error("Case not loaded.");
+      error.status = 400;
+      throw error;
+    }
+
+    const response = await apiFetch(`/api/cases/${caseId}/prepare-ilmp`, { method: "POST" });
+
+    const parseDetail = async () => {
+      try {
+        return await response.json();
+      } catch {
+        return null;
+      }
+    };
+
+    if (response.status === 409) {
+      const detail = await parseDetail();
+      const error = new Error(detail?.error || "Blocking validation issues prevent payload preparation.");
+      error.status = 409;
+      error.details = detail;
+      throw error;
+    }
+
+    if (!response.ok) {
+      const detail = await parseDetail();
+      const message =
+        detail?.detail || detail?.message || detail?.error || `Unable to prepare ILMP payload (${response.status}).`;
+      const error = new Error(message);
+      error.status = response.status;
+      error.details = detail;
+      throw error;
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const compliancePayload = payload?.compliance ?? {};
+    const exportPayload = payload?.payload ?? null;
+
+    setState(prev => {
+      if (!prev.caseData) {
+        return prev;
+      }
+      const previousFinance = prev.caseData.compliance?.finance ?? { status: "pending", messages: [] };
+      return {
+        ...prev,
+        caseData: {
+          ...prev.caseData,
+          compliance: {
+            ilmp: compliancePayload.ilmp ?? prev.caseData.compliance?.ilmp ?? { status: "pending", messages: [] },
+            finance: compliancePayload.finance ?? previousFinance,
+          },
+          exportPreview: {
+            ...(prev.caseData.exportPreview || {}),
+            ilmp: exportPayload,
+          },
+        },
+      };
+    });
+
+    return { compliance: compliancePayload, payload: exportPayload };
+  }, [caseId, apiFetch]);
 
   const createActionPlan = useCallback(
     async plan => {
@@ -984,6 +1117,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     updateIntervention,
     closeIntervention,
     runComplianceChecks,
+    prepareIlmpExport,
     fetchActionPlanContext,
     interventionCodes,
     interventionCodesLoading,
@@ -1003,7 +1137,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     archiveActionPlan,
     selectedActionPlanId,
     setSelectedActionPlanId,
-  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, fetchActionPlanContext, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, archiveActionPlan, selectedActionPlanId]);
+  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, fetchActionPlanContext, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, archiveActionPlan, selectedActionPlanId]);
 
   return (
     <CaseWorkspaceContext.Provider value={contextValue}>

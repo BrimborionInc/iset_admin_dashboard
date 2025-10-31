@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../auth/apiClient';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { Header, Table, Box, Button, ButtonDropdown, SpaceBetween, Alert, Link } from '@cloudscape-design/components';
 import SupportingDocumentsHelp from '../helpPanelContents/supportingDocumentsHelp';
+import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
 
 const API_BASE_URL = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
 
@@ -16,13 +17,26 @@ const formatDate = value => {
     : date.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
 };
 
-const SupportingDocumentsWidget = ({ actions, caseData, toggleHelpPanel }) => {
+const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) => {
+  const workspace = useCaseWorkspace();
+  const caseData = useMemo(() => {
+    if (propCaseData) return propCaseData;
+    if (workspace && typeof workspace === 'object') {
+      if (workspace.caseData) return workspace.caseData;
+    }
+    return null;
+  }, [propCaseData, workspace]);
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [pendingDownloads, setPendingDownloads] = useState({});
-  const applicantUserId = caseData?.applicant_user_id || null;
+  const applicantUserId =
+    caseData?.applicant_user_id ??
+    caseData?.applicantUserId ??
+    workspace?.applicant_user_id ??
+    workspace?.applicantUserId ??
+    null;
 
   const loadDocuments = useCallback(
     async (options = {}) => {

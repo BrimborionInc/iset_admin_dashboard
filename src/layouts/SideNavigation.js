@@ -104,6 +104,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       items: [
         { type: 'link', text: 'Application Assessment', href: '/case-assignment-dashboard' },
         { type: 'link', text: 'Case Management', href: '/iset/cases' },
+        { type: 'link', text: 'Case Management (new)', href: '/iset/cases/new' },
         { type: 'link', text: 'My Case Queue', href: '/case-management' },
       ],
     },

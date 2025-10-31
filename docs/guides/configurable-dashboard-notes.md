@@ -31,3 +31,8 @@ Following these guidelines keeps the board responsive, allows widgets to be adde
 - [ ] Has the new route been registered in access control with System Administrator and Program Administrator enabled by default?
 
 Following the pattern above keeps new dashboards from entering the runaway render loop and ensures widget removal, drag, and resize announcements behave consistently.
+6. **Match widget ids everywhere.** Use the exact same string for the widget id when registering in `widgetRegistry`, seeding `defaultLayout`, and persisting layouts. A mismatch (e.g., `supportingDocuments` vs `supporting-documents`) makes Cloudscape treat the widget as unknown, so it ends up in Available Widgets even if you meant it for the board.
+
+7. **Reset defaults with a storage-key bump.** Whenever you change the default layout (adding/removing widgets), increment the localStorage key. Without that, browsers keep hydrating the old layout and new widgets never appear by default.
+
+8. **Wrap shared widgets lightly.** When reusing a shared widget (like Supporting Documents) across dashboards, keep a thin wrapper per board that simply forwards the Cloudscape `actions`, context data, and help metadata—no custom logic that might block `actions.removeItem()` or other board callbacks.

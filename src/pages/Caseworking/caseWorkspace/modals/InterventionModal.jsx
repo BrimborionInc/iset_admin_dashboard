@@ -192,6 +192,7 @@ const InterventionModal = ({
   const [nocSuggestions, setNocSuggestions] = useState([]);
   const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [showCloseGuidance, setShowCloseGuidance] = useState(true);
   const [closeForm, setCloseForm] = useState(buildCloseForm(intervention));
 
   useEffect(() => {
@@ -230,6 +231,12 @@ const InterventionModal = ({
     setIsClosing(Boolean(startInCloseMode && canClose && mode === "edit"));
     setCloseForm(buildCloseForm(intervention));
   }, [visible, mode, intervention, startInCloseMode, canClose]);
+
+  useEffect(() => {
+    if (isClosing) {
+      setShowCloseGuidance(true);
+    }
+  }, [isClosing]);
 
   const interventionStatus = normaliseStatus(intervention?.status);
   const isClosedIntervention = ["completed", "cancelled"].includes(interventionStatus);
@@ -828,7 +835,12 @@ const InterventionModal = ({
     >
       <SpaceBetween size="l">
         {error && (
-          <Alert type="error" onDismiss={() => setError(null)}>
+          <Alert
+            type="error"
+            dismissible
+            dismissAriaLabel="Dismiss error message"
+            onDismiss={() => setError(null)}
+          >
             {error}
           </Alert>
         )}
@@ -1077,11 +1089,18 @@ const InterventionModal = ({
           {mode === "edit" && canClose && isClosing && (
             <SpaceBetween size="s">
               <Header variant="h3">Close intervention</Header>
-              <Alert type={isDirty ? "warning" : "info"}>
-                {isDirty
-                  ? "Save your pending changes before closing this intervention."
-              : "Select an outcome above, choose the final status, and capture completion details to record this intervention."}
-            </Alert>
+              {showCloseGuidance && (
+                <Alert
+                  type={isDirty ? "warning" : "info"}
+                  dismissible
+                  dismissAriaLabel="Dismiss close guidance"
+                  onDismiss={() => setShowCloseGuidance(false)}
+                >
+                  {isDirty
+                    ? "Save your pending changes before closing this intervention."
+                    : "Select an outcome above, choose the final status, and capture completion details to record this intervention."}
+                </Alert>
+              )}
             <ColumnLayout columns={3} variant="text-grid">
               <FormField label="ESDC outcome">
                 <Select

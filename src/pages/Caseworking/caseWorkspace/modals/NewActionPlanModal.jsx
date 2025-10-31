@@ -256,7 +256,12 @@ const NewActionPlanModal = ({
     >
       <SpaceBetween size="l">
         {error && (
-          <Alert type="error" onDismiss={() => setError(null)}>
+          <Alert
+            type="error"
+            dismissible
+            dismissAriaLabel="Dismiss error message"
+            onDismiss={() => setError(null)}
+          >
             {error}
           </Alert>
         )}

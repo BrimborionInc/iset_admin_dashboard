@@ -991,27 +991,44 @@ function mapInterventionOutcome(value) {
 }
 
 function extractActionPlanDetails(context, clientStatus, requestedSupports) {
-  const { answers = {}, caseRow, applicationRow, caseAssessmentRow } = context;
+  const { answers = {}, caseRow, applicationRow, caseAssessmentRow, caseActionPlans } = context;
   const assessment = caseAssessmentRow || {};
 
-  const startRaw = answers['action-plan-start-date'] || answers['action_plan_start_date'];
-  const resultDateRaw = answers['action-plan-result-date'] || answers['action_plan_result_date'];
-  const resultCodeRaw = answers['action-plan-result-code'] || answers['action_plan_result_code'];
-  const childcareNeedRaw = answers['action-plan-childcare-need'] || answers['action_plan_childcare_need'];
-  const childcareFundingRaw = answers['action-plan-childcare-funding'] || answers['action_plan_childcare_funding'];
-  const targetProgramRaw = normaliseString(answers['target-program'] || answers['target_program']);
-  const goalDescription = normaliseString(answers['long-term-goal'] || answers['long_term_goal']);
+  const selectCasePlan = plans => {
+    if (!Array.isArray(plans) || plans.length === 0) return null;
+    const priorities = {
+      active: 0,
+      draft: 1,
+      closed: 2,
+      archived: 3,
+    };
+    return [...plans]
+      .sort((a, b) => {
+        const sa = (a.status || '').toLowerCase();
+        const sb = (b.status || '').toLowerCase();
+        const pa = priorities[sa] ?? 4;
+        const pb = priorities[sb] ?? 4;
+        if (pa !== pb) return pa - pb;
+        const dateA = a.activatedAt || a.effectiveDate || a.createdAt || null;
+        const dateB = b.activatedAt || b.effectiveDate || b.createdAt || null;
+        if (dateA && dateB) {
+          const diff = new Date(dateB).getTime() - new Date(dateA).getTime();
+          if (diff !== 0 && Number.isFinite(diff)) return diff < 0 ? -1 : 1;
+        }
+        return (b.id || 0) - (a.id || 0);
+      })[0];
+  };
 
   const normaliseNumericString = (value, { min = null, max = null } = {}) => {
-    if (value === null || typeof value === 'undefined' || value === '') return null;
+    if (value === null || typeof value === "undefined" || value === "") return null;
     let candidate = null;
-    if (typeof value === 'number') {
+    if (typeof value === "number") {
       if (!Number.isFinite(value)) return null;
       candidate = Math.trunc(value);
-    } else if (typeof value === 'string') {
+    } else if (typeof value === "string") {
       const trimmed = value.trim();
       if (!trimmed) return null;
-      const cleaned = trimmed.replace(/[^\d-]/g, '');
+      const cleaned = trimmed.replace(/[^\d-]/g, "");
       if (!cleaned) return null;
       const parsed = Number.parseInt(cleaned, 10);
       if (!Number.isFinite(parsed)) return null;
@@ -1024,10 +1041,204 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
     return String(candidate);
   };
 
-  const formatDateValue = (value) => {
+  const formatDateValue = value => {
     const parsed = parseDate(value);
     return parsed ? parsed.toISOString().slice(0, 10) : null;
   };
+
+  const plannedSupports = requestedSupports?.list && requestedSupports.list.length ? requestedSupports.list : [];
+
+  const mapCaseIntervention = intervention => {
+    if (!intervention) return null;
+    const metadata = intervention.metadata || {};
+    const startDate = intervention.startDate ? formatDateValue(intervention.startDate) : null;
+    const endDate = intervention.endDate ? formatDateValue(intervention.endDate) : null;
+
+    let duration = null;
+    if (startDate && endDate) {
+      const start = parseDate(startDate);
+      const end = parseDate(endDate);
+      if (start && end) {
+        const diffDays = Math.round((end - start) / (1000 * 60 * 60 * 24));
+        if (Number.isFinite(diffDays) && diffDays >= 0 && diffDays <= 999) {
+          duration = String(diffDays);
+        }
+      }
+    }
+    if (!duration) {
+      if (Number.isFinite(metadata.durationDays)) {
+        duration = normaliseNumericString(metadata.durationDays, { min: 0, max: 999 });
+      } else if (Number.isFinite(metadata.durationWeeks)) {
+        const days = Math.round(Number(metadata.durationWeeks) * 7);
+        if (Number.isFinite(days) && days >= 0 && days <= 999) {
+          duration = String(days);
+        }
+      }
+    }
+
+    const normaliseCost = value => normaliseNumericString(value, { min: 0, max: 999999 });
+    const metadataCostSettings = metadata && typeof metadata === "object" && metadata.costSettings && typeof metadata.costSettings === "object"
+      ? metadata.costSettings
+      : null;
+    const metadataRecurrence = metadata && typeof metadata === "object" && metadata.recurrence && typeof metadata.recurrence === "object"
+      ? metadata.recurrence
+      : null;
+    const multiplyIfNumeric = (left, right) => {
+      const a = Number(left);
+      const b = Number(right);
+      return Number.isFinite(a) && Number.isFinite(b) ? a * b : null;
+    };
+    const metadataCostCandidates = [];
+    if (metadataCostSettings) {
+      metadataCostCandidates.push(
+        metadataCostSettings.calculatedTotal,
+        metadataCostSettings.total,
+        multiplyIfNumeric(metadataCostSettings.amountPerPeriod, metadataCostSettings.occurrences)
+      );
+    }
+    if (metadataRecurrence) {
+      metadataCostCandidates.push(
+        metadataRecurrence.calculatedTotal,
+        metadataRecurrence.total,
+        multiplyIfNumeric(metadataRecurrence.amountPerPeriod, metadataRecurrence.occurrences)
+      );
+    }
+    const costCandidates = [
+      intervention.actualAmount,
+      intervention.approvedAmount,
+      intervention.budgetAmount,
+      metadata.cost,
+      ...metadataCostCandidates,
+      intervention.cost
+    ];
+    let cost = null;
+    for (const candidate of costCandidates) {
+      if (typeof candidate === "undefined") continue;
+      const normalised = normaliseCost(candidate);
+      if (normalised !== null) {
+        cost = normalised;
+        break;
+      }
+    }
+
+    const codeCandidate = metadata.code ?? intervention.code ?? intervention.intervention_type ?? null;
+    const code = normaliseNumericString(codeCandidate, { min: 0, max: 99 });
+
+    const outcome = mapInterventionOutcome(intervention.outcome ?? intervention.outcomeCode ?? metadata.outcome);
+
+    const supports = Array.isArray(metadata.supports) && metadata.supports.length
+      ? metadata.supports
+      : plannedSupports;
+
+    const notes = [];
+    if (metadata.notes) {
+      if (Array.isArray(metadata.notes)) {
+        metadata.notes.forEach(note => {
+          if (note) notes.push(String(note));
+        });
+      } else if (typeof metadata.notes === "string") {
+        metadata.notes.split(/\r?\n/).forEach(line => {
+          if (line.trim()) notes.push(line.trim());
+        });
+      }
+    }
+    if (intervention.notes && typeof intervention.notes === "string") {
+      intervention.notes.split(/\r?\n/).forEach(line => {
+        if (line.trim()) notes.push(line.trim());
+      });
+    }
+
+    const relatedNoc = metadata.noc || intervention.noc || clientStatus?.noc || null;
+    const relatedNocVersion = metadata.nocVersion || intervention.nocVersion || clientStatus?.nocVersion || null;
+
+    if (!code && !startDate && !endDate && !outcome && !duration && !cost && !notes.length && !supports.length) {
+      return null;
+    }
+
+    return {
+      code,
+      description: metadata.title || intervention.title || intervention.description || null,
+      startDate,
+      endDate,
+      outcome,
+      duration,
+      cost,
+      relatedNoc,
+      relatedNocVersion,
+      supports: supports && supports.length ? supports : null,
+      notes,
+    };
+  };
+
+  const casePlan = selectCasePlan(caseActionPlans);
+  if (casePlan) {
+    const metadata = casePlan.metadata || {};
+    const planStartDate = formatDateValue(casePlan.effectiveDate) || (casePlan.interventions?.length ? formatDateValue(casePlan.interventions[0].startDate) : null);
+    const planResultDate = formatDateValue(casePlan.resultDate);
+    const planResultCode = normaliseString(casePlan.resultCode || metadata.resultCode || null);
+
+    const resolveBoolean = value => {
+      if (typeof value === "string") {
+        const trimmed = value.trim().toLowerCase();
+        if (trimmed === "yes" || trimmed === "no") {
+          return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+        }
+      }
+      const coerced = coerceBoolean(value);
+      if (coerced === null) return null;
+      return formatBooleanAsYesNo(coerced);
+    };
+
+    const planChildcareNeed = (
+      resolveBoolean(casePlan.childcareNeed) ??
+      resolveBoolean(metadata.childcareNeed ?? metadata.childcare_need) ??
+      null
+    );
+
+    const planChildcareFunding = metadata.childcareFunding ?? metadata.childcare_funding ?? casePlan.childcareFunding ?? null;
+
+    const planGoalDescription = (
+      metadata.goalDescription ??
+      metadata.goal ??
+      casePlan.goalDescription ??
+      casePlan.summary ??
+      null
+    );
+
+    const mappedInterventions = Array.isArray(casePlan.interventions)
+      ? casePlan.interventions.map(mapCaseIntervention).filter(Boolean)
+      : [];
+
+    if (
+      !planStartDate &&
+      !planResultDate &&
+      !planResultCode &&
+      !planChildcareNeed &&
+      !planChildcareFunding &&
+      !planGoalDescription &&
+      mappedInterventions.length === 0
+    ) {
+      // fall back to assessment/application data
+    } else {
+      return {
+        startDate: planStartDate,
+        resultDate: planResultDate,
+        resultCode: planResultCode,
+        childcareNeed: planChildcareNeed,
+        childcareFunding: planChildcareFunding,
+        goalDescription: planGoalDescription || normaliseString(answers['long-term-goal'] || answers['long_term_goal']) || null,
+        interventions: mappedInterventions,
+      };
+    }
+  }
+
+  const startRaw = answers['action-plan-start-date'] || answers['action_plan_start_date'];
+  const resultDateRaw = answers['action-plan-result-date'] || answers['action_plan_result_date'];
+  const resultCodeRaw = answers['action-plan-result-code'] || answers['action_plan_result_code'];
+  const childcareNeedRaw = answers['action-plan-childcare-need'] || answers['action_plan_childcare_need'];
+  const childcareFundingRaw = answers['action-plan-childcare-funding'] || answers['action_plan_childcare_funding'];
+  const targetProgramRaw = normaliseString(answers['target-program'] || answers['target_program']);
+  const goalDescription = normaliseString(answers['long-term-goal'] || answers['long_term_goal']);
 
   const startDateSource =
     parseDate(startRaw) ||
@@ -1769,7 +1980,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     planName = planName.slice(0, 252) + '...';
   }
 
-  const planStatus = startDate ? 'active' : 'draft';
+  const planStatus = 'draft';
   const planMetadata = pruneNullish({
     source: AUTO_PLAN_METADATA_SOURCE,
     generatedAt: now.toISOString(),
@@ -1804,7 +2015,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       ownerUserId || null,
       startDate || null,
       endDate || null,
-      planStatus === 'active' ? now : null,
+      null,
       justification || null,
       planMetadata ? JSON.stringify(planMetadata) : null,
     ]
@@ -1876,7 +2087,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     createdPlan: true,
     createdIntervention: true,
     planStatus,
-    suggestedCaseStatus: planStatus === 'active' ? 'active' : 'initiated'
+    suggestedCaseStatus: 'initiated'
   };
 }
 
@@ -2189,6 +2400,67 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       throw err;
     }
 
+    let caseActionPlans = [];
+    try {
+      const [planRows] = await conn.query(
+        `SELECT *
+           FROM iset_case_action_plan
+           WHERE case_id = ? AND archived_at IS NULL
+           ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 WHEN 'closed' THEN 2 ELSE 3 END,
+                    COALESCE(activated_at, effective_date, created_at) DESC,
+                    id DESC`,
+        [caseRow.id]
+      );
+      if (planRows && planRows.length) {
+        const planMap = new Map();
+        const planIds = [];
+        planRows.forEach(planRow => {
+          const metadata = safeJsonParse(planRow.metadata_json, {}) || {};
+          planIds.push(planRow.id);
+          planMap.set(planRow.id, {
+            id: planRow.id,
+            caseId: planRow.case_id,
+            name: planRow.name,
+            status: planRow.status,
+            createdAt: planRow.created_at,
+            effectiveDate: planRow.effective_date,
+            reviewDate: planRow.review_date,
+            activatedAt: planRow.activated_at,
+            closedAt: planRow.closed_at,
+            resultCode: planRow.result_code,
+            resultDate: planRow.result_date,
+            outcomeSummary: planRow.outcome_summary || null,
+            closureNotes: planRow.closure_notes || null,
+            summary: metadata.summary || planRow.notes || null,
+            childcareNeed: metadata.childcareNeed ?? metadata.childcare_need ?? null,
+            childcareFunding: metadata.childcareFunding ?? metadata.childcare_funding ?? null,
+            goalDescription: metadata.goalDescription ?? metadata.goal ?? metadata.summary ?? null,
+            metadata,
+            interventions: [],
+          });
+        });
+        if (planIds.length) {
+          const placeholders = planIds.map(() => '?').join(', ');
+          const [interventionRows] = await conn.query(
+            `SELECT *
+               FROM iset_case_intervention
+               WHERE action_plan_id IN (${placeholders})
+               ORDER BY start_date IS NULL, start_date ASC, id ASC`,
+            planIds
+          );
+          interventionRows.forEach(row => {
+            const plan = planMap.get(row.action_plan_id);
+            if (plan) {
+              plan.interventions.push(mapInterventionRow(row));
+            }
+          });
+        }
+        caseActionPlans = Array.from(planMap.values());
+      }
+    } catch (err) {
+      console.warn('[esdc] failed to load case action plans', err);
+    }
+
     let caseAssessmentRow = null;
     try {
       const [[assessmentRow]] = await conn.query('SELECT * FROM iset_case_assessment WHERE case_id = ? LIMIT 1', [caseRow.id]);
@@ -2215,6 +2487,7 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       submissionRow,
       caseRow,
       caseAssessmentRow,
+      caseActionPlans,
       applicationId,
       applicationRow: applicationPayload?.row || null,
       payload: applicationPayload?.payload || {},
@@ -2287,6 +2560,132 @@ async function validateEsdcParticipantSubmission({ submissionId, caseId } = {}, 
       readinessSummary: evaluation.readinessSummary,
       warnings: evaluation.warnings,
       blockingIssues: evaluation.blockingIssues
+    };
+  } catch (err) {
+    if (useTransaction) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    throw err;
+  } finally {
+    if (releaseConnection) connection.release();
+  }
+}
+
+async function prepareEsdcParticipantSubmission({ submissionId, caseId } = {}, options = {}) {
+  const connection = options.connection || await pool.getConnection();
+  const releaseConnection = !options.connection;
+  const useTransaction = options.transaction !== false;
+
+  try {
+    if (useTransaction) await connection.beginTransaction();
+
+    const context = await loadEsdcParticipantSubmissionContext(connection, submissionId, {
+      caseId,
+      forUpdate: true
+    });
+    const evaluation = runIlmpValidation(context);
+
+    await connection.query(
+      `UPDATE esdc_participant_submission
+         SET readiness_status = ?,
+             readiness_summary = ?,
+             warnings = ?,
+             blocking_issues = ?,
+             last_validated_at = NOW(),
+             updated_at = NOW()
+       WHERE id = ?`,
+      [
+        evaluation.readinessStatus,
+        JSON.stringify(evaluation.readinessSummary),
+        JSON.stringify(evaluation.warnings),
+        JSON.stringify(evaluation.blockingIssues),
+        context.submissionId
+      ]
+    );
+
+    if (evaluation.blockingIssues.length > 0) {
+      if (useTransaction) await connection.commit();
+      return { blocking: true, evaluation };
+    }
+
+    const snapshot = buildIlmpParticipantPayload(context);
+    const checksum = crypto.createHash('sha256').update(snapshot.xml, 'utf8').digest('hex');
+    const storageKey = [
+      'participants',
+      context.caseRow?.id || context.submissionRow?.case_id || `submission-${context.submissionId}`,
+      `ilmp-client-${context.submissionId}-${Date.now()}.xml`
+    ]
+      .filter(Boolean)
+      .join('/');
+
+    const payloadSnapshot = {
+      schema: 'esdc-ilmp-client-v1',
+      generatedAt: snapshot.generatedAt,
+      submissionId: context.submissionId,
+      caseId: context.caseRow?.id || null,
+      applicationId: context.applicationId || null,
+      readinessStatus: evaluation.readinessStatus,
+      readinessSummary: evaluation.readinessSummary,
+      warnings: evaluation.warnings,
+      blockingIssues: evaluation.blockingIssues,
+      canonical: snapshot.canonical,
+      xml: snapshot.xml
+    };
+
+    await connection.query(
+      `UPDATE esdc_participant_submission
+         SET payload_snapshot = ?, payload_storage_key = ?, payload_checksum = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [JSON.stringify(payloadSnapshot), storageKey, checksum, context.submissionId]
+    );
+
+    await ensureEsdcPreparedHistoryEventType(connection);
+
+    await connection.query(
+      `INSERT INTO esdc_participant_submission_history
+         (participant_submission_id, event_type, event_details, payload_checksum, occurred_at)
+       VALUES (?, 'prepared', CAST(? AS JSON), ?, NOW())`,
+      [
+        context.submissionId,
+        JSON.stringify({
+          storageKey,
+          generatedAt: snapshot.generatedAt,
+          readiness_status: evaluation.readinessStatus
+        }),
+        checksum
+      ]
+    );
+
+    const [[submission]] = await connection.query(
+      `
+      SELECT eps.*, COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
+      FROM esdc_participant_submission eps
+      LEFT JOIN iset_application ia ON ia.id = eps.application_id
+      LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      WHERE eps.id = ?
+      `,
+      [context.submissionId]
+    );
+    const [history] = await connection.query(
+      `
+      SELECT *
+      FROM esdc_participant_submission_history
+      WHERE participant_submission_id = ?
+      ORDER BY occurred_at DESC, id DESC
+      `,
+      [context.submissionId]
+    );
+
+    if (useTransaction) await connection.commit();
+
+    return {
+      blocking: false,
+      submission,
+      history,
+      payload: payloadSnapshot,
+      checksum,
+      storageKey,
+      evaluation
     };
   } catch (err) {
     if (useTransaction) {
@@ -2876,6 +3275,60 @@ function safeJsonParse(value, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+function mapIlmpComplianceFromSubmission(row) {
+  const defaultSummary = {
+    status: 'pending',
+    messages: [],
+    warnings: [],
+    blockingIssues: [],
+    summary: null,
+    lastValidatedAt: null,
+  };
+
+  if (!row) {
+    return defaultSummary;
+  }
+
+  const statusMap = {
+    ready: 'clean',
+    blocked: 'warning',
+    needs_review: 'pending',
+    pending: 'pending',
+    reviewing: 'pending',
+  };
+  const rawStatus = typeof row.readiness_status === 'string' ? row.readiness_status.toLowerCase() : null;
+  const status = statusMap[rawStatus] || defaultSummary.status;
+
+  const toStringArray = value => {
+    const parsed = safeJsonParse(value, value);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map(item => (typeof item === 'string' ? item.trim() : item))
+        .filter(item => typeof item === 'string' && item.length);
+    }
+    if (typeof parsed === 'string') {
+      const trimmed = parsed.trim();
+      return trimmed ? [trimmed] : [];
+    }
+    return [];
+  };
+
+  const warnings = toStringArray(row.warnings);
+  const blockingIssues = toStringArray(row.blocking_issues);
+  const messages = [...blockingIssues, ...warnings];
+  const summary = safeJsonParse(row.readiness_summary, null);
+  const lastValidatedAt = row.last_validated_at ? toIsoDateTime(row.last_validated_at) : null;
+
+  return {
+    status,
+    messages,
+    warnings,
+    blockingIssues,
+    summary,
+    lastValidatedAt,
+  };
 }
 
 function mapActionPlanRow(plan) {
@@ -5598,128 +6051,30 @@ esdcRouter.post('/participants/:id/prepare', async (req, res, next) => {
     return res.status(400).json({ error: 'invalid_participant_id' });
   }
 
-  let connection;
   try {
-    connection = await pool.getConnection();
-    await connection.beginTransaction();
-
-    const context = await loadEsdcParticipantSubmissionContext(connection, numericId, {
-      forUpdate: true
-    });
-    const evaluation = runIlmpValidation(context);
-
-    await connection.query(
-      `UPDATE esdc_participant_submission
-         SET readiness_status = ?,
-             readiness_summary = ?,
-             warnings = ?,
-             blocking_issues = ?,
-             last_validated_at = NOW(),
-             updated_at = NOW()
-       WHERE id = ?`,
-      [
-        evaluation.readinessStatus,
-        JSON.stringify(evaluation.readinessSummary),
-        JSON.stringify(evaluation.warnings),
-        JSON.stringify(evaluation.blockingIssues),
-        numericId
-      ]
-    );
-
-    if (evaluation.blockingIssues.length > 0) {
-      await connection.commit();
+    const result = await prepareEsdcParticipantSubmission({ submissionId: numericId });
+    if (result.blocking) {
       return res.status(409).json({
         error: 'blocking_validation_issues',
-        readinessStatus: evaluation.readinessStatus,
-        readinessSummary: evaluation.readinessSummary,
-        warnings: evaluation.warnings,
-        blockingIssues: evaluation.blockingIssues
+        readinessStatus: result.evaluation.readinessStatus,
+        readinessSummary: result.evaluation.readinessSummary,
+        warnings: result.evaluation.warnings,
+        blockingIssues: result.evaluation.blockingIssues
       });
     }
-
-    const snapshot = buildIlmpParticipantPayload(context);
-    const checksum = crypto.createHash('sha256').update(snapshot.xml, 'utf8').digest('hex');
-    const storageKey = [
-      'participants',
-      context.caseRow?.id || context.submissionRow?.case_id || `submission-${numericId}`,
-      `ilmp-client-${numericId}-${Date.now()}.xml`
-    ].filter(Boolean).join('/');
-
-    const payloadSnapshot = {
-      schema: 'esdc-ilmp-client-v1',
-      generatedAt: snapshot.generatedAt,
-      submissionId: numericId,
-      caseId: context.caseRow?.id || null,
-      applicationId: context.applicationId || null,
-      readinessStatus: evaluation.readinessStatus,
-      readinessSummary: evaluation.readinessSummary,
-      warnings: evaluation.warnings,
-      blockingIssues: evaluation.blockingIssues,
-      canonical: snapshot.canonical,
-      xml: snapshot.xml
-    };
-
-    await connection.query(
-      `UPDATE esdc_participant_submission
-         SET payload_snapshot = ?, payload_storage_key = ?, payload_checksum = ?, updated_at = NOW()
-       WHERE id = ?`,
-      [JSON.stringify(payloadSnapshot), storageKey, checksum, numericId]
-    );
-
-    await ensureEsdcPreparedHistoryEventType(connection);
-
-    await connection.query(
-      `INSERT INTO esdc_participant_submission_history
-         (participant_submission_id, event_type, event_details, payload_checksum, occurred_at)
-       VALUES (?, 'prepared', CAST(? AS JSON), ?, NOW())`,
-      [
-        numericId,
-        JSON.stringify({
-          storageKey,
-          generatedAt: snapshot.generatedAt,
-          readiness_status: evaluation.readinessStatus
-        }),
-        checksum
-      ]
-    );
-
-    const [[submission]] = await connection.query(
-      `
-      SELECT eps.*, COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
-      FROM esdc_participant_submission eps
-      LEFT JOIN iset_application ia ON ia.id = eps.application_id
-      LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
-      WHERE eps.id = ?
-      `,
-      [numericId]
-    );
-    const [history] = await connection.query(
-      `
-      SELECT *
-      FROM esdc_participant_submission_history
-      WHERE participant_submission_id = ?
-      ORDER BY occurred_at DESC, id DESC
-      `,
-      [numericId]
-    );
-
-    await connection.commit();
-
     res.json({
       ok: true,
-      submission,
-      history,
-      payload: payloadSnapshot,
-      checksum,
-      storageKey
+      submission: result.submission,
+      history: result.history,
+      payload: result.payload,
+      checksum: result.checksum,
+      storageKey: result.storageKey
     });
   } catch (err) {
-    if (connection) {
-      try { await connection.rollback(); } catch (_) {}
+    if (err && err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message || 'validation_failed' });
     }
     next(err);
-  } finally {
-    if (connection) connection.release();
   }
 });
 
@@ -12904,7 +13259,17 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS payload_preferred_name,
         JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS payload_reference_number,
         s.reference_number AS submission_reference_number,
-        a.created_at AS application_created_at
+        a.created_at AS application_created_at,
+        COALESCE(
+          applicant_submission.id,
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id')), '')
+        ) AS applicant_user_id,
+        COALESCE(
+          applicant_submission.name,
+          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')),
+          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"'))
+        ) AS applicant_name,
+        applicant_submission.email AS applicant_email
       FROM iset_case c
       LEFT JOIN client cl ON cl.id = c.client_id
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
@@ -12912,6 +13277,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       LEFT JOIN canada_region owner_region ON owner_region.region_id = sp.region_id
       LEFT JOIN iset_application a ON a.id = c.application_id
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      LEFT JOIN user applicant_submission ON applicant_submission.id = s.user_id
       LEFT JOIN (
         SELECT
           case_id,
@@ -13091,6 +13457,195 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       return mapped;
     });
 
+    const toCurrencyValue = value => {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        return null;
+      }
+      return Math.round(numeric * 100) / 100;
+    };
+
+    const normalisePotEntry = (entry, index = 0) => {
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+      const allocated =
+        toCurrencyValue(
+          entry.allocated ??
+            entry.allocated_amount ??
+            entry.totalAllocated ??
+            entry.budget ??
+            entry.limit ??
+            entry.allocation
+        ) ?? 0;
+      const committed =
+        toCurrencyValue(
+          entry.committed ??
+            entry.committed_amount ??
+            entry.totalCommitted ??
+            entry.encumbered ??
+            entry.commitment
+        ) ?? 0;
+      const actual =
+        toCurrencyValue(
+          entry.actual ??
+            entry.actual_amount ??
+            entry.spent ??
+            entry.spent_amount ??
+            entry.disbursed ??
+            entry.actuals
+        ) ?? 0;
+      const id = entry.id || entry.potId || entry.budgetPotId || `pot-${index}`;
+      const nameCandidate =
+        entry.name ||
+        entry.title ||
+        entry.label ||
+        entry.potName ||
+        entry.pot_label ||
+        entry.pot ||
+        entry.category ||
+        entry.fundingStream ||
+        entry.funding_stream ||
+        id;
+      const name =
+        typeof nameCandidate === 'string' && nameCandidate.trim().length
+          ? nameCandidate.trim()
+          : `Budget pot ${index + 1}`;
+      return {
+        id,
+        name,
+        allocated,
+        committed,
+        actual,
+      };
+    };
+
+    const parseSnapshotDetails = value => {
+      if (!value) return [];
+      let parsed = value;
+      if (typeof value === 'string') {
+        try {
+          parsed = JSON.parse(value);
+        } catch (_) {
+          return [];
+        }
+      }
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+      if (parsed && typeof parsed === 'object') {
+        if (Array.isArray(parsed.pots)) {
+          return parsed.pots;
+        }
+        return Object.values(parsed);
+      }
+      return [];
+    };
+
+    let financeSummary = null;
+    try {
+      const [[snapshotRow]] = await pool.query(
+        `SELECT
+           as_of_date,
+           allocated_amount,
+           committed_amount,
+           spent_amount,
+           variance_amount,
+           details_json
+         FROM iset_case_financial_snapshot
+         WHERE case_id = ?
+         ORDER BY as_of_date DESC, created_at DESC
+         LIMIT 1`,
+        [caseId]
+      );
+      if (snapshotRow) {
+        const allocated = toCurrencyValue(snapshotRow.allocated_amount);
+        const committed = toCurrencyValue(snapshotRow.committed_amount);
+        const actuals = toCurrencyValue(snapshotRow.spent_amount);
+        const variance =
+          toCurrencyValue(snapshotRow.variance_amount) ??
+          (allocated !== null && actuals !== null ? toCurrencyValue(allocated - actuals) : null);
+        const potEntries = parseSnapshotDetails(snapshotRow.details_json)
+          .map((entry, index) => normalisePotEntry(entry, index))
+          .filter(Boolean)
+          .sort((a, b) => (b.allocated || 0) - (a.allocated || 0));
+        financeSummary = {
+          allocated: allocated ?? (potEntries.length ? potEntries.reduce((sum, pot) => sum + pot.allocated, 0) : null),
+          committed:
+            committed ?? (potEntries.length ? potEntries.reduce((sum, pot) => sum + pot.committed, 0) : null),
+          actuals:
+            actuals ?? (potEntries.length ? potEntries.reduce((sum, pot) => sum + pot.actual, 0) : null),
+          variance:
+            variance ??
+            (allocated !== null && actuals !== null ? toCurrencyValue(allocated - actuals) : null),
+          asOfDate: snapshotRow.as_of_date ? toDateOnlyString(snapshotRow.as_of_date) : null,
+          pots: potEntries,
+        };
+      }
+    } catch (err) {
+      console.warn('[workspace] failed to load finance snapshot for case', caseId, err);
+    }
+
+    if (!financeSummary && actionPlans.length > 0) {
+      const potMap = new Map();
+      const addAmount = (bucket, field, value) => {
+        const numeric = toCurrencyValue(value);
+        if (numeric !== null) {
+          bucket[field] += numeric;
+        }
+      };
+      actionPlans.forEach(plan => {
+        (plan.interventions || []).forEach(intervention => {
+          const nameCandidates = [
+            intervention.metadata?.finance?.potName,
+            intervention.metadata?.finance?.potLabel,
+            intervention.metadata?.budget?.name,
+            intervention.metadata?.budget?.label,
+            intervention.metadata?.potName,
+            intervention.potId,
+            intervention.fundingStream,
+            intervention.metadata?.title,
+          ];
+          const name =
+            nameCandidates.find(value => typeof value === 'string' && value.trim().length) ||
+            'General allocation';
+          const key =
+            intervention.potId ||
+            intervention.metadata?.budget?.id ||
+            intervention.metadata?.finance?.potId ||
+            name;
+          if (!potMap.has(key)) {
+            potMap.set(key, { id: key, name, allocated: 0, committed: 0, actual: 0 });
+          }
+          const bucket = potMap.get(key);
+          addAmount(bucket, 'allocated', intervention.budgetAmount ?? intervention.metadata?.cost);
+          addAmount(
+            bucket,
+            'committed',
+            intervention.approvedAmount ??
+              intervention.metadata?.finance?.committed ??
+              intervention.metadata?.committed ??
+              intervention.budgetAmount ??
+              intervention.metadata?.cost
+          );
+          addAmount(bucket, 'actual', intervention.actualAmount ?? intervention.metadata?.finance?.actual);
+        });
+      });
+      const pots = Array.from(potMap.values()).sort((a, b) => b.allocated - a.allocated);
+      if (pots.length) {
+        const allocated = pots.reduce((sum, pot) => sum + pot.allocated, 0);
+        const committed = pots.reduce((sum, pot) => sum + pot.committed, 0);
+        const actuals = pots.reduce((sum, pot) => sum + pot.actual, 0);
+        financeSummary = {
+          allocated: toCurrencyValue(allocated),
+          committed: toCurrencyValue(committed),
+          actuals: toCurrencyValue(actuals),
+          variance: toCurrencyValue(allocated - actuals),
+          pots,
+        };
+      }
+    }
+
     const firstNameCandidates = [
       row.client_first_name,
       row.payload_personal_first_name,
@@ -13174,11 +13729,27 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       applicationStatus: applicationStatusNormalised || row.application_status || null,
     });
 
-  const response = {
-    id: row.id,
-    caseNumber,
-    status: statusNormalized || CASE_STATUS_DERIVED_VALUES.pendingApproval,
-    statusRaw: row.status || null,
+    const resolveApplicantUserId = value => {
+      if (value === null || typeof value === 'undefined') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    };
+
+    const applicantUserIdValue = resolveApplicantUserId(row.applicant_user_id);
+    const applicantNameValue = normaliseString(row.applicant_name) || null;
+    const applicantEmailValue = normaliseString(row.applicant_email) || null;
+
+    const response = {
+      id: row.id,
+      caseNumber,
+      status: statusNormalized || CASE_STATUS_DERIVED_VALUES.pendingApproval,
+      statusRaw: row.status || null,
+      applicantUserId: applicantUserIdValue,
+      applicant_user_id: applicantUserIdValue,
+      applicantName: applicantNameValue,
+      applicant_name: applicantNameValue,
+      applicantEmail: applicantEmailValue,
+      applicant_email: applicantEmailValue,
       applicationStatus: applicationStatusNormalised || row.application_status || null,
       priority: row.priority || null,
       riskRating: row.risk_rating || null,
@@ -13207,12 +13778,12 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         email: row.owner_email || null,
         role: row.owner_role || null,
         regionId: row.owner_region_id || null,
-      region: ownerRegion,
-    },
-    eligibility: normaliseString(row.assessment_esdc_eligibility) || null,
-    counts,
-    actionPlans,
-  };
+        region: ownerRegion,
+      },
+      eligibility: normaliseString(row.assessment_esdc_eligibility) || null,
+      counts,
+      actionPlans,
+    };
 
     const firstDefined = (...values) => {
       for (const value of values) {
@@ -13399,12 +13970,158 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     response.assessment_action_plan_result_date = toDateOnlyString(resultDateRaw);
 
     response.eligibility = response.assessment_esdc_eligibility;
+    response.finance = financeSummary;
+
+    const [[ilmpComplianceRow]] = await pool.query(
+      `SELECT readiness_status, readiness_summary, warnings, blocking_issues, last_validated_at, payload_snapshot, payload_checksum, payload_storage_key
+         FROM esdc_participant_submission
+         WHERE case_id = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+      [caseId]
+    );
+    response.compliance = {
+      ilmp: mapIlmpComplianceFromSubmission(ilmpComplianceRow),
+      finance: { status: 'pending', messages: [] },
+    };
+    if (ilmpComplianceRow) {
+      const snapshot = safeJsonParse(ilmpComplianceRow.payload_snapshot, null);
+      response.exportPreview = {
+        ilmp: snapshot
+          ? {
+              schema: snapshot.schema || null,
+              generatedAt: snapshot.generatedAt || null,
+              storageKey: ilmpComplianceRow.payload_storage_key || snapshot.storageKey || null,
+              checksum: ilmpComplianceRow.payload_checksum || snapshot.checksum || null,
+              canonical: snapshot.canonical || null,
+              xml: snapshot.xml || null,
+            }
+          : null,
+      };
+    } else {
+      response.exportPreview = { ilmp: null };
+    }
 
     res.set('Cache-Control', 'no-store, max-age=0');
     res.json(response);
   } catch (error) {
     console.error('GET /api/cases/:id/workspace failed:', error);
     res.status(500).json({ error: 'workspace_fetch_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.post('/api/cases/:id/validate-ilmp', async (req, res) => {
+  const caseId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+
+  try {
+    const [[caseRow]] = await pool.query(
+      'SELECT id, application_id FROM iset_case WHERE id = ? LIMIT 1',
+      [caseId]
+    );
+    if (!caseRow) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+
+    await ensureEsdcParticipantSubmissionRecord(null, caseId, caseRow.application_id || null);
+
+    const [[submissionRow]] = await pool.query(
+      'SELECT id FROM esdc_participant_submission WHERE case_id = ? ORDER BY id DESC LIMIT 1',
+      [caseId]
+    );
+    if (!submissionRow) {
+      return res.status(500).json({ error: 'submission_initialization_failed' });
+    }
+
+    await validateEsdcParticipantSubmission({ submissionId: submissionRow.id, caseId });
+
+    const [[updatedSubmission]] = await pool.query(
+      `SELECT readiness_status, readiness_summary, warnings, blocking_issues, last_validated_at
+         FROM esdc_participant_submission
+         WHERE id = ?`,
+      [submissionRow.id]
+    );
+
+    const compliance = {
+      ilmp: mapIlmpComplianceFromSubmission(updatedSubmission),
+      finance: { status: 'pending', messages: [] },
+    };
+
+    res.json({ compliance });
+  } catch (error) {
+    if (error && error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message || 'case_ilmp_validation_failed' });
+    }
+    console.error('POST /api/cases/:id/validate-ilmp failed:', error);
+    res
+      .status(500)
+      .json({ error: 'case_ilmp_validation_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.post('/api/cases/:id/prepare-ilmp', async (req, res) => {
+  const caseId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+
+  try {
+    const [[caseRow]] = await pool.query(
+      'SELECT id, application_id FROM iset_case WHERE id = ? LIMIT 1',
+      [caseId]
+    );
+    if (!caseRow) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+
+    await ensureEsdcParticipantSubmissionRecord(null, caseId, caseRow.application_id || null);
+
+    const [[submissionRow]] = await pool.query(
+      'SELECT id FROM esdc_participant_submission WHERE case_id = ? ORDER BY id DESC LIMIT 1',
+      [caseId]
+    );
+    if (!submissionRow) {
+      return res.status(500).json({ error: 'submission_initialization_failed' });
+    }
+
+    const result = await prepareEsdcParticipantSubmission({ submissionId: submissionRow.id, caseId });
+    if (result.blocking) {
+      return res.status(409).json({
+        error: 'blocking_validation_issues',
+        readinessStatus: result.evaluation.readinessStatus,
+        readinessSummary: result.evaluation.readinessSummary,
+        warnings: result.evaluation.warnings,
+        blockingIssues: result.evaluation.blockingIssues
+      });
+    }
+
+    const compliance = {
+      ilmp: mapIlmpComplianceFromSubmission(result.submission),
+      finance: { status: 'pending', messages: [] }
+    };
+
+    const payloadSnapshot = result.payload
+      ? {
+          schema: result.payload.schema || null,
+          generatedAt: result.payload.generatedAt || null,
+          storageKey: result.storageKey || result.payload.storageKey || null,
+          checksum: result.checksum || result.payload.checksum || null,
+          canonical: result.payload.canonical || null,
+          xml: result.payload.xml || null
+        }
+      : null;
+
+    res.json({ compliance, payload: payloadSnapshot });
+  } catch (error) {
+    if (error && error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message || 'case_ilmp_prepare_failed' });
+    }
+    console.error('POST /api/cases/:id/prepare-ilmp failed:', error);
+    res
+      .status(500)
+      .json({ error: 'case_ilmp_prepare_failed', detail: error?.message || String(error) });
   }
 });
 

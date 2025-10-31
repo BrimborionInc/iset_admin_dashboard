@@ -3,40 +3,45 @@ import { useParams } from "react-router-dom";
 import Board from "@cloudscape-design/board-components/board";
 import { Box, SpaceBetween } from "@cloudscape-design/components";
 import CaseHeaderWidget from "./caseWorkspace/widgets/CaseHeaderWidget.jsx";
+import SupportingDocumentsWidget from "../../widgets/SupportingDocumentsWidget";
 import TasksNotesWidget from "./caseWorkspace/widgets/TasksNotesWidget.jsx";
-import DocumentsWidget from "./caseWorkspace/widgets/DocumentsWidget.jsx";
 import ActionPlansWidget from "./caseWorkspace/widgets/ActionPlansWidget.jsx";
 import InterventionsWidget from "./caseWorkspace/widgets/InterventionsWidget.jsx";
 import FinancePanelWidget from "./caseWorkspace/widgets/FinancePanelWidget.jsx";
 import CompliancePanelWidget from "./caseWorkspace/widgets/CompliancePanelWidget.jsx";
 import ExportPreviewWidget from "./caseWorkspace/widgets/ExportPreviewWidget.jsx";
 import CaseWorkspaceCaseHeaderHelp from "../../helpPanelContents/caseWorkspaceCaseHeaderHelp.js";
+import SupportingDocumentsHelp from "../../helpPanelContents/supportingDocumentsHelp.js";
 import CaseWorkspaceTasksNotesHelp from "../../helpPanelContents/caseWorkspaceTasksNotesHelp.js";
-import CaseWorkspaceDocumentsHelp from "../../helpPanelContents/caseWorkspaceDocumentsHelp.js";
 import CaseWorkspaceActionPlansHelp from "../../helpPanelContents/caseWorkspaceActionPlansHelp.js";
 import CaseWorkspaceInterventionsHelp from "../../helpPanelContents/caseWorkspaceInterventionsHelp.js";
 import CaseWorkspaceFinancePanelHelp from "../../helpPanelContents/caseWorkspaceFinancePanelHelp.js";
 import CaseWorkspaceCompliancePanelHelp from "../../helpPanelContents/caseWorkspaceCompliancePanelHelp.js";
 import CaseWorkspaceExportPreviewHelp from "../../helpPanelContents/caseWorkspaceExportPreviewHelp.js";
-import SupportingDocumentsHelp from "../../helpPanelContents/supportingDocumentsHelp.js";
-import SecureMessagesHelpPanelContent from "../../helpPanelContents/secureMessagesHelpPanelContent.js";
-import ApplicationEventsHelp from "../../helpPanelContents/applicationEventsHelp.js";
 import CaseWorkspaceHelp from "../../helpPanelContents/caseWorkspaceHelp.js";
-import CaseSupportingDocumentsWidget from "./caseWorkspace/widgets/CaseSupportingDocumentsWidget.jsx";
-import CaseSecureMessagingWidget from "./caseWorkspace/widgets/CaseSecureMessagingWidget.jsx";
-import CaseApplicationEventsWidget from "./caseWorkspace/widgets/CaseApplicationEventsWidget.jsx";
 import { CaseWorkspaceProvider } from "./caseWorkspace/CaseWorkspaceContext.jsx";
 
-const STORAGE_KEY = "iset-case-workspace-layout-v1";
+const STORAGE_KEY = "iset-case-workspace-layout-v8";
 
 const widgetRegistry = {
+  "supporting-documents": {
+    id: "supporting-documents",
+    defaultRowSpan: 4,
+    defaultColumnSpan: 4,
+    component: SupportingDocumentsWidget,
+    title: "Supporting documents",
+    description: "Unified view of uploaded files and secure message attachments.",
+    helpComponent: SupportingDocumentsHelp,
+    helpTitle: "Supporting documents",
+    aiContext: SupportingDocumentsHelp.aiContext,
+  },
   caseHeader: {
     id: "caseHeader",
     defaultRowSpan: 2,
     defaultColumnSpan: 4,
     component: CaseHeaderWidget,
     title: "Case header",
-    description: "Participant case summary information and quick actions.",
+    description: null,
     helpComponent: CaseWorkspaceCaseHeaderHelp,
     helpTitle: "Case header",
     aiContext: CaseWorkspaceCaseHeaderHelp.aiContext,
@@ -44,62 +49,18 @@ const widgetRegistry = {
   tasksNotes: {
     id: "tasksNotes",
     defaultRowSpan: 3,
-    defaultColumnSpan: 2,
+    defaultColumnSpan: 4,
     component: TasksNotesWidget,
     title: "Tasks & notes",
     description: "Notes and follow-ups for the case.",
     helpComponent: CaseWorkspaceTasksNotesHelp,
-    helpTitle: "Tasks and notes",
+    helpTitle: "Tasks & notes",
     aiContext: CaseWorkspaceTasksNotesHelp.aiContext,
-  },
-  documents: {
-    id: "documents",
-    defaultRowSpan: 3,
-    defaultColumnSpan: 2,
-    component: DocumentsWidget,
-    title: "Documents",
-    description: "Supporting files for interventions and compliance.",
-    helpComponent: CaseWorkspaceDocumentsHelp,
-    helpTitle: "Documents",
-    aiContext: CaseWorkspaceDocumentsHelp.aiContext,
-  },
-  supportingDocuments: {
-    id: "supporting-documents",
-    defaultRowSpan: 5,
-    defaultColumnSpan: 2,
-    component: CaseSupportingDocumentsWidget,
-    title: "Supporting documents",
-    description: "Unified view of uploaded files and secure message attachments.",
-    helpComponent: SupportingDocumentsHelp,
-    helpTitle: "Supporting documents",
-    aiContext: SupportingDocumentsHelp.aiContext,
-  },
-  secureMessaging: {
-    id: "secure-messaging",
-    defaultRowSpan: 5,
-    defaultColumnSpan: 2,
-    component: CaseSecureMessagingWidget,
-    title: "Secure messaging",
-    description: "Send and review secure messages for this case.",
-    helpComponent: SecureMessagesHelpPanelContent,
-    helpTitle: "Secure messaging",
-    aiContext: SecureMessagesHelpPanelContent.aiContext,
-  },
-  applicationEvents: {
-    id: "application-events",
-    defaultRowSpan: 5,
-    defaultColumnSpan: 2,
-    component: CaseApplicationEventsWidget,
-    title: "Case events",
-    description: "Event timeline showing key actions and status changes.",
-    helpComponent: ApplicationEventsHelp,
-    helpTitle: "Case events",
-    aiContext: ApplicationEventsHelp.aiContext,
   },
   actionPlans: {
     id: "actionPlans",
     defaultRowSpan: 4,
-    defaultColumnSpan: 2,
+    defaultColumnSpan: 4,
     component: ActionPlansWidget,
     title: "Action plans",
     description: "Manage action plans and select one to edit interventions.",
@@ -110,7 +71,7 @@ const widgetRegistry = {
   interventions: {
     id: "interventions",
     defaultRowSpan: 5,
-    defaultColumnSpan: 2,
+    defaultColumnSpan: 4,
     component: InterventionsWidget,
     title: "Interventions",
     description: "Edit ILMP-compliant intervention records.",
@@ -120,19 +81,19 @@ const widgetRegistry = {
   },
   financePanel: {
     id: "financePanel",
-    defaultRowSpan: 3,
-    defaultColumnSpan: 2,
+    defaultRowSpan: 4,
+    defaultColumnSpan: 4,
     component: FinancePanelWidget,
     title: "Finance panel",
-    description: "Allocation, commitments, actuals, and variance.",
+    description: null,
     helpComponent: CaseWorkspaceFinancePanelHelp,
     helpTitle: "Finance panel",
     aiContext: CaseWorkspaceFinancePanelHelp.aiContext,
   },
   compliancePanel: {
     id: "compliancePanel",
-    defaultRowSpan: 2,
-    defaultColumnSpan: 2,
+    defaultRowSpan: 3,
+    defaultColumnSpan: 4,
     component: CompliancePanelWidget,
     title: "Compliance",
     description: "ILMP and finance validation status.",
@@ -143,7 +104,7 @@ const widgetRegistry = {
   exportPreview: {
     id: "exportPreview",
     defaultRowSpan: 3,
-    defaultColumnSpan: 2,
+    defaultColumnSpan: 4,
     component: ExportPreviewWidget,
     title: "Export preview",
     description: "Review ILMP XML and finance postings before export.",
@@ -155,16 +116,13 @@ const widgetRegistry = {
 
 const defaultLayout = [
   { id: "caseHeader", rowSpan: 2, columnSpan: 4 },
-  { id: "supporting-documents", rowSpan: 5, columnSpan: 2 },
-  { id: "secure-messaging", rowSpan: 5, columnSpan: 2 },
-  { id: "tasksNotes", rowSpan: 3, columnSpan: 2 },
-  { id: "documents", rowSpan: 3, columnSpan: 2 },
-  { id: "actionPlans", rowSpan: 4, columnSpan: 2 },
-  { id: "interventions", rowSpan: 5, columnSpan: 2 },
-  { id: "application-events", rowSpan: 5, columnSpan: 2 },
-  { id: "financePanel", rowSpan: 3, columnSpan: 2 },
-  { id: "compliancePanel", rowSpan: 2, columnSpan: 2 },
-  { id: "exportPreview", rowSpan: 3, columnSpan: 2 },
+  { id: "tasksNotes", rowSpan: 3, columnSpan: 4 },
+  { id: "actionPlans", rowSpan: 4, columnSpan: 4 },
+  { id: "interventions", rowSpan: 5, columnSpan: 4 },
+  { id: "financePanel", rowSpan: 4, columnSpan: 4 },
+  { id: "compliancePanel", rowSpan: 3, columnSpan: 4 },
+  { id: "exportPreview", rowSpan: 3, columnSpan: 4 },
+  { id: "supporting-documents", rowSpan: 4, columnSpan: 4 },
 ];
 
 const exportLayout = items =>
@@ -211,8 +169,11 @@ const loadLayoutFromStorage = () => {
   }
 };
 
+const PALETTE_EXCLUDE_IDS = new Set();
+
 const computePaletteItems = items =>
   Object.values(widgetRegistry)
+    .filter(def => !PALETTE_EXCLUDE_IDS.has(def.id))
     .filter(def => !items.some(item => item.id === def.id))
     .map(def => ({ id: def.id, data: { title: def.title, description: def.description } }));
 
@@ -282,7 +243,17 @@ const CaseWorkspacePage = ({
 }) => {
   const { caseId } = useParams();
   const [layout, setLayout] = useState(() => loadLayoutFromStorage() ?? [...defaultLayout]);
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.console) {
+      window.console.info("[CaseWorkspace] layout ids", layout.map(item => item?.id));
+    }
+  }, [layout]);
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.console) {
+      window.console.info("[CaseWorkspace] board items", boardItems.map(item => item?.id));
+    }
+  }, [boardItems]);
   const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
   const paletteSignatureRef = useRef(JSON.stringify(paletteItems.map(item => item.id)));
 
@@ -318,6 +289,9 @@ const CaseWorkspacePage = ({
   const handleItemsChange = useCallback(({ detail }) => {
     if (!detail || !Array.isArray(detail.items)) return;
     const next = exportLayout(detail.items);
+    if (typeof window !== "undefined" && window.console) {
+      window.console.info("[CaseWorkspace] onItemsChange", next);
+    }
     setLayout(current => (areLayoutsEqual(current, next) ? current : next));
   }, []);
 
@@ -327,15 +301,25 @@ const CaseWorkspacePage = ({
       const definition = widgetRegistry[item.id];
       if (!definition) return null;
       const WidgetComponent = definition.component;
+      const enhancedActions = {
+        ...actions,
+        removeItem: () => {
+          if (actions && typeof actions.removeItem === "function") {
+            actions.removeItem();
+          } else {
+            setLayout(current => current.filter(entry => entry.id !== item.id));
+          }
+        },
+      };
       return (
         <WidgetComponent
-          actions={actions}
+          actions={enhancedActions}
           metadata={item.data}
           toggleHelpPanel={toggleHelpPanel}
         />
       );
     },
-    [toggleHelpPanel]
+    [setLayout, toggleHelpPanel]
   );
 
   const resetLayout = useCallback(() => {
@@ -399,3 +383,12 @@ CaseWorkspacePage.pageHelp = CaseWorkspaceHelp;
 CaseWorkspacePage.pageHelp.aiContext = CaseWorkspaceHelp.aiContext;
 
 export default CaseWorkspacePage;
+
+
+
+
+
+
+
+
+

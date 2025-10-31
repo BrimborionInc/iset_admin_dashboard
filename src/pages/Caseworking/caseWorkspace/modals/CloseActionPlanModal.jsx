@@ -34,6 +34,7 @@ const CloseActionPlanModal = ({
   const [outcomeSummary, setOutcomeSummary] = useState("");
   const [closureNotes, setClosureNotes] = useState("");
   const [validationError, setValidationError] = useState(null);
+  const [visibleError, setVisibleError] = useState(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -53,7 +54,13 @@ const CloseActionPlanModal = ({
     setOutcomeSummary(plan?.outcomeSummary || "");
     setClosureNotes(plan?.closureNotes || "");
     setValidationError(null);
+    setVisibleError(error || null);
   }, [visible, plan]);
+
+  useEffect(() => {
+    if (!visible) return;
+    setVisibleError(error || null);
+  }, [error, visible]);
 
   const planTitle = useMemo(() => plan?.title || plan?.name || "Action plan", [plan]);
 
@@ -103,13 +110,23 @@ const CloseActionPlanModal = ({
       <SpaceBetween size="m">
         <Box fontWeight="bold">{planTitle}</Box>
         {validationError && (
-          <Alert type="error" onDismiss={() => setValidationError(null)}>
+          <Alert
+            type="error"
+            dismissible
+            dismissAriaLabel="Dismiss validation message"
+            onDismiss={() => setValidationError(null)}
+          >
             {validationError}
           </Alert>
         )}
-        {error && (
-          <Alert type="error">
-            {error}
+        {visibleError && (
+          <Alert
+            type="error"
+            dismissible
+            dismissAriaLabel="Dismiss error message"
+            onDismiss={() => setVisibleError(null)}
+          >
+            {visibleError}
           </Alert>
         )}
         <FormField label="Result">

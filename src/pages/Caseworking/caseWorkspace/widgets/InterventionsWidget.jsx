@@ -4,6 +4,7 @@ import {
   Alert,
   Badge,
   Box,
+  Button,
   ButtonDropdown,
   CollectionPreferences,
   Header,
@@ -38,6 +39,10 @@ const formatDate = value => {
   return date.toLocaleDateString();
 };
 
+const normaliseStatus = status => (status || "").toLowerCase();
+const isClosedStatus = status => ["completed", "cancelled"].includes(normaliseStatus(status));
+const isOpenStatus = status => !isClosedStatus(status);
+
 const statusIndicatorType = status => {
   const value = (status || "").toLowerCase();
   if (value === "completed") return "success";
@@ -67,8 +72,19 @@ const PAGE_SIZE_OPTIONS = [
   { label: "20 interventions", value: 20 },
   { label: "50 interventions", value: 50 },
 ];
-const ALL_COLUMN_IDS = ["code", "title", "status", "dates", "outcome", "duration", "cost", "pot", "compliance"];
-const REQUIRED_COLUMN_IDS = new Set(["code", "title"]);
+const ALL_COLUMN_IDS = [
+  "code",
+  "title",
+  "status",
+  "dates",
+  "outcome",
+  "duration",
+  "cost",
+  "pot",
+  "compliance",
+  "actions",
+];
+const REQUIRED_COLUMN_IDS = new Set(["code", "title", "actions"]);
 
 const DEFAULT_PREFERENCES = {
   search: "",
@@ -240,10 +256,6 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     [caseData, selectedActionPlanId]
   );
   const activePlanRef = useRef(activePlan);
-
-  const normaliseStatus = status => (status || "").toLowerCase();
-  const isClosedStatus = status => ["completed", "cancelled"].includes(normaliseStatus(status));
-  const isOpenStatus = status => !isClosedStatus(status);
 
   const interventions = activePlan?.interventions ?? [];
   const selectedIntervention = useMemo(
@@ -520,10 +532,19 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const planStatus = (activePlan?.status || "").toLowerCase();
   const canModify = !!activePlan && ["draft", "active"].includes(planStatus);
   const canCloseSelected =
-    canModify &&
-    !!selectedIntervention &&
-    isOpenStatus(selectedIntervention?.status);
-  const canViewSelected = !!selectedIntervention;
+    canModify && !!selectedIntervention && isOpenStatus(selectedIntervention?.status);
+
+  const getInterventionActionItems = useCallback(
+    intervention => {
+      if (!intervention) return [];
+      const items = [{ id: "view", text: "View intervention" }];
+      if (canModify && isOpenStatus(intervention.status)) {
+        items.push({ id: "close", text: "Close intervention" });
+      }
+      return items;
+    },
+    [canModify]
+  );
 
   const openCreateModal = () => {
     if (!activePlan) {
@@ -537,63 +558,79 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setFormMode("create");
   };
 
-  const openViewModal = (interventionToView = null) => {
-    if (!activePlan) {
-      setErrorMessage("Select an action plan before viewing interventions.");
-      return;
-    }
-    const target = interventionToView || selectedIntervention;
-    if (!target) {
-      setErrorMessage("Select an intervention to view.");
-      return;
-    }
-    setStartInCloseMode(false);
-    setForceReadOnly(!canModify || !isOpenStatus(target.status));
-    setSuccessMessage(null);
-    setErrorMessage(null);
-    if (!selectedIntervention || target.id !== selectedInterventionId) {
-      setSelectedInterventionId(target.id);
-    }
-    setFormMode("edit");
-  };
+  const openViewModal = useCallback(
+    (interventionToView = null) => {
+      if (!activePlan) {
+        setErrorMessage("Select an action plan before viewing interventions.");
+        return;
+      }
+      const target = interventionToView || selectedIntervention;
+      if (!target) {
+        setErrorMessage("Select an intervention to view.");
+        return;
+      }
+      setStartInCloseMode(false);
+      setForceReadOnly(!canModify || !isOpenStatus(target.status));
+      setSuccessMessage(null);
+      setErrorMessage(null);
+      if (!selectedIntervention || target.id !== selectedInterventionId) {
+        setSelectedInterventionId(target.id);
+      }
+      setFormMode("edit");
+    },
+    [
+      activePlan,
+      canModify,
+      selectedIntervention,
+      selectedInterventionId,
+      setErrorMessage,
+      setForceReadOnly,
+      setFormMode,
+      setSelectedInterventionId,
+      setStartInCloseMode,
+      setSuccessMessage,
+    ]
+  );
 
-  const openCloseModal = () => {
-    if (!activePlan) {
-      setErrorMessage("Select an action plan before closing interventions.");
-      return;
-    }
-    if (!selectedIntervention) {
-      setErrorMessage("Select an intervention to close.");
-      return;
-    }
-    if (!canCloseSelected) {
-      setErrorMessage(
-        "Interventions that are already completed or cancelled cannot be closed again."
-      );
-      return;
-    }
-    setSuccessMessage(null);
-    setErrorMessage(null);
-    setForceReadOnly(false);
-    setStartInCloseMode(true);
-    setFormMode("edit");
-  };
-
-  const handleActionDropdown = ({ detail }) => {
-    switch (detail?.id) {
-      case "add":
-        openCreateModal();
-        break;
-      case "view":
-        openViewModal();
-        break;
-      case "close":
-        openCloseModal();
-        break;
-      default:
-        break;
-    }
-  };
+  const openCloseModal = useCallback(
+    (interventionToClose = null) => {
+      if (!activePlan) {
+        setErrorMessage("Select an action plan before closing interventions.");
+        return;
+      }
+      const target = interventionToClose || selectedIntervention;
+      if (!target) {
+        setErrorMessage("Select an intervention to close.");
+        return;
+      }
+      if (!canModify || !isOpenStatus(target.status)) {
+        setErrorMessage(
+          "Interventions that are already completed or cancelled cannot be closed again."
+        );
+        return;
+      }
+      setSuccessMessage(null);
+      setErrorMessage(null);
+      setForceReadOnly(false);
+      setStartInCloseMode(true);
+      if (!selectedIntervention || target.id !== selectedInterventionId) {
+        setSelectedInterventionId(target.id);
+      }
+      setFormMode("edit");
+    },
+    [
+      activePlan,
+      canModify,
+      selectedIntervention,
+      selectedInterventionId,
+      setErrorMessage,
+      setForceReadOnly,
+      setFormMode,
+      setSelectedInterventionId,
+      setStartInCloseMode,
+      setSuccessMessage,
+    ]
+  );
 
   const handleModalDismiss = () => {
     setStartInCloseMode(false);
@@ -740,6 +777,37 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           </SpaceBetween>
         ),
       },
+      {
+        id: "actions",
+        header: "Actions",
+        cell: item => {
+          const items = getInterventionActionItems(item);
+          if (!items.length) {
+            return <span style={{ color: "var(--color-text-body-secondary)" }}>None</span>;
+          }
+          const label = item.title || codeLabelMap.get(String(item.code ?? "")) || item.code || "intervention";
+          return (
+            <ButtonDropdown
+              ariaLabel={`Actions for ${label}`}
+              items={items}
+              onItemClick={({ detail }) => {
+                if (item?.id) {
+                  setSelectedInterventionId(item.id);
+                }
+                if (detail?.id === "view") {
+                  openViewModal(item);
+                } else if (detail?.id === "close") {
+                  openCloseModal(item);
+                }
+              }}
+              disabled={formMode !== null}
+              expandToViewport
+            >
+              Actions
+            </ButtonDropdown>
+          );
+        },
+      },
     ];
 
     return baseColumns.map(column =>
@@ -747,7 +815,16 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         ? { ...column, width: columnWidthsMap.get(column.id) }
         : column
     );
-  }, [codeLabelMap, outcomeLabelMap, columnWidthsMap]);
+  }, [
+    codeLabelMap,
+    outcomeLabelMap,
+    columnWidthsMap,
+    getInterventionActionItems,
+    formMode,
+    openViewModal,
+    openCloseModal,
+    setSelectedInterventionId,
+  ]);
 
   const visibleColumnDefinitions = useMemo(
     () => tableColumns.filter(column => visibleColumns.includes(column.id)),
@@ -913,18 +990,13 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             "Manage ILMP-compliant intervention data, including budget pots and outcomes."
           }
           actions={
-            <ButtonDropdown
-              variant="primary"
-              disabled={!canModify && !canViewSelected && !canCloseSelected}
-              onItemClick={handleActionDropdown}
-              items={[
-                { id: "add", text: "Add intervention", disabled: !canModify },
-                { id: "view", text: "View intervention", disabled: !canViewSelected },
-                { id: "close", text: "Close intervention", disabled: !canCloseSelected },
-              ]}
+            <Button
+              iconName="add-plus"
+              disabled={!canModify}
+              onClick={openCreateModal}
             >
-              Actions
-            </ButtonDropdown>
+              New intervention
+            </Button>
           }
         >
           {metadata.title ?? "Interventions"}

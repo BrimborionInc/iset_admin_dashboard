@@ -173,6 +173,10 @@
     ],
     "/visual-settings": [
       "System Administrator"
+    ],
+    "/iset/cases/new": [
+      "System Administrator",
+      "Program Administrator"
     ]
   }
 }
