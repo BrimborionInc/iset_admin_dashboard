@@ -142,13 +142,10 @@ const widgetRegistry = {
 
 const defaultLayout = [
   { id: "caseHeader", rowSpan: 2, columnSpan: 4 },
-  { id: "case-notes", rowSpan: 4, columnSpan: 4 },
   { id: "actionPlans", rowSpan: 4, columnSpan: 4 },
   { id: "interventions", rowSpan: 5, columnSpan: 4 },
-  { id: "financePanel", rowSpan: 4, columnSpan: 4 },
-  { id: "compliancePanel", rowSpan: 3, columnSpan: 4 },
-  { id: "exportPreview", rowSpan: 3, columnSpan: 4 },
   { id: "case-calendar", rowSpan: 4, columnSpan: 4 },
+  { id: "case-notes", rowSpan: 4, columnSpan: 4 },
   { id: "supporting-documents", rowSpan: 4, columnSpan: 4 },
   { id: "secure-messaging", rowSpan: 5, columnSpan: 4 },
 ];
