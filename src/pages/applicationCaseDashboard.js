@@ -10,6 +10,7 @@ import SupportingDocumentsWidget from '../widgets/SupportingDocumentsWidget';
 import SecureMessagingWidget from '../widgets/SecureMessagingWidget';
 import CaseNotesWidget from '../widgets/CaseNotesWidget';
 import ApplicationEvents from '../widgets/applicationEvents';
+import CaseCalendarWidget from '../widgets/CaseCalendarWidget';
 
 const DEFAULT_ITEMS = [
   { id: 'application-overview', rowSpan: 2, columnSpan: 4 },
@@ -18,6 +19,7 @@ const DEFAULT_ITEMS = [
   { id: 'supporting-documents', rowSpan: 5, columnSpan: 2 },
   { id: 'secure-messaging', rowSpan: 5, columnSpan: 2 },
   { id: 'case-notes', rowSpan: 5, columnSpan: 2 },
+  { id: 'case-calendar', rowSpan: 5, columnSpan: 2 },
   { id: 'application-events', rowSpan: 5, columnSpan: 2 }
 ];
 
@@ -27,7 +29,8 @@ const TITLES = {
   'coordinator-assessment': 'Application Assessment',
   'supporting-documents': 'Supporting Documents',
   'secure-messaging': 'Secure Messaging',
-  'case-notes': 'Case Notes',
+  'case-notes': 'Notes and Tasks',
+  'case-calendar': 'Case Calendar',
   'application-events': 'Application Events'
 };
 
@@ -250,6 +253,15 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
             if (item.id === 'case-notes') {
               return (
                 <CaseNotesWidget
+                  actions={undefined}
+                  caseData={item.data.caseData}
+                   toggleHelpPanel={toggleHelpPanel}
+                />
+              );
+            }
+            if (item.id === 'case-calendar') {
+              return (
+                <CaseCalendarWidget
                   actions={undefined}
                   caseData={item.data.caseData}
                    toggleHelpPanel={toggleHelpPanel}

@@ -18,6 +18,7 @@ import {
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
 import SecureMessagesHelpPanelContent from '../helpPanelContents/secureMessagesHelpPanelContent';
+import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
 
 const TAB_IDS = {
   inbox: 'inbox',
@@ -67,19 +68,63 @@ const buildAttachmentUrl = filePath => {
   return `${base}${filePath.startsWith('/') ? '' : '/'}${filePath}`;
 };
 
-const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
-  const rawCaseId = caseData?.id ?? null;
+const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCaseData }) => {
+  const workspace = useCaseWorkspace();
+  const workspaceCaseData = workspace && typeof workspace === 'object' ? workspace.caseData || null : null;
+  const caseData = useMemo(() => {
+    if (propCaseData) return propCaseData;
+    if (workspaceCaseData) return workspaceCaseData;
+    return null;
+  }, [propCaseData, workspaceCaseData]);
+
+  const rawCaseId =
+    caseData?.id ??
+    caseData?.case_id ??
+    workspace?.caseId ??
+    workspaceCaseData?.id ??
+    workspaceCaseData?.case_id ??
+    null;
   const caseIdNum = Number(rawCaseId);
   const caseId = rawCaseId == null || rawCaseId === '' || Number.isNaN(caseIdNum) ? null : caseIdNum;
-  const rawApplicantUserId = caseData?.applicant_user_id ?? null;
+
+  const rawApplicantUserId =
+    caseData?.applicant_user_id ??
+    caseData?.applicantUserId ??
+    workspaceCaseData?.applicant_user_id ??
+    workspaceCaseData?.applicantUserId ??
+    workspace?.applicant_user_id ??
+    workspace?.applicantUserId ??
+    null;
   const applicantUserIdNum = Number(rawApplicantUserId);
   const applicantUserId =
     rawApplicantUserId == null || rawApplicantUserId === '' || Number.isNaN(applicantUserIdNum)
       ? null
       : applicantUserIdNum;
-  const applicantName = caseData?.applicant_name || 'Applicant';
-  const assignedToUserId = caseData?.assigned_to_user_id || null;
-  const assignedToName = caseData?.assigned_to_name || '';
+
+  const applicantName =
+    caseData?.applicant_name ??
+    caseData?.applicantName ??
+    workspaceCaseData?.applicant_name ??
+    workspaceCaseData?.applicantName ??
+    workspace?.applicant_name ??
+    workspace?.applicantName ??
+    'Applicant';
+  const assignedToUserId =
+    caseData?.assigned_to_user_id ??
+    caseData?.assignedToUserId ??
+    workspaceCaseData?.assigned_to_user_id ??
+    workspaceCaseData?.assignedToUserId ??
+    workspace?.assigned_to_user_id ??
+    workspace?.assignedToUserId ??
+    null;
+  const assignedToName =
+    caseData?.assigned_to_name ??
+    caseData?.assignedToName ??
+    workspaceCaseData?.assigned_to_name ??
+    workspaceCaseData?.assignedToName ??
+    workspace?.assigned_to_name ??
+    workspace?.assignedToName ??
+    '';
 
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);

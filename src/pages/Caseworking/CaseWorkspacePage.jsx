@@ -4,7 +4,9 @@ import Board from "@cloudscape-design/board-components/board";
 import { Box, SpaceBetween } from "@cloudscape-design/components";
 import CaseHeaderWidget from "./caseWorkspace/widgets/CaseHeaderWidget.jsx";
 import SupportingDocumentsWidget from "../../widgets/SupportingDocumentsWidget";
-import TasksNotesWidget from "./caseWorkspace/widgets/TasksNotesWidget.jsx";
+import SecureMessagingWidget from "../../widgets/SecureMessagingWidget";
+import CaseNotesWidget from "../../widgets/CaseNotesWidget";
+import CaseCalendarWidget from "../../widgets/CaseCalendarWidget";
 import ActionPlansWidget from "./caseWorkspace/widgets/ActionPlansWidget.jsx";
 import InterventionsWidget from "./caseWorkspace/widgets/InterventionsWidget.jsx";
 import FinancePanelWidget from "./caseWorkspace/widgets/FinancePanelWidget.jsx";
@@ -12,7 +14,9 @@ import CompliancePanelWidget from "./caseWorkspace/widgets/CompliancePanelWidget
 import ExportPreviewWidget from "./caseWorkspace/widgets/ExportPreviewWidget.jsx";
 import CaseWorkspaceCaseHeaderHelp from "../../helpPanelContents/caseWorkspaceCaseHeaderHelp.js";
 import SupportingDocumentsHelp from "../../helpPanelContents/supportingDocumentsHelp.js";
-import CaseWorkspaceTasksNotesHelp from "../../helpPanelContents/caseWorkspaceTasksNotesHelp.js";
+import SecureMessagesHelpPanelContent from "../../helpPanelContents/secureMessagesHelpPanelContent.js";
+import CaseNotesHelp from "../../helpPanelContents/caseNotesHelp.js";
+import CaseCalendarHelp from "../../helpPanelContents/caseCalendarHelp.js";
 import CaseWorkspaceActionPlansHelp from "../../helpPanelContents/caseWorkspaceActionPlansHelp.js";
 import CaseWorkspaceInterventionsHelp from "../../helpPanelContents/caseWorkspaceInterventionsHelp.js";
 import CaseWorkspaceFinancePanelHelp from "../../helpPanelContents/caseWorkspaceFinancePanelHelp.js";
@@ -21,7 +25,7 @@ import CaseWorkspaceExportPreviewHelp from "../../helpPanelContents/caseWorkspac
 import CaseWorkspaceHelp from "../../helpPanelContents/caseWorkspaceHelp.js";
 import { CaseWorkspaceProvider } from "./caseWorkspace/CaseWorkspaceContext.jsx";
 
-const STORAGE_KEY = "iset-case-workspace-layout-v8";
+const STORAGE_KEY = "iset-case-workspace-layout-v11";
 
 const widgetRegistry = {
   "supporting-documents": {
@@ -35,6 +39,39 @@ const widgetRegistry = {
     helpTitle: "Supporting documents",
     aiContext: SupportingDocumentsHelp.aiContext,
   },
+  "case-notes": {
+    id: "case-notes",
+    defaultRowSpan: 4,
+    defaultColumnSpan: 4,
+    component: CaseNotesWidget,
+    title: "Notes and tasks",
+    description: "Keep internal notes and follow-ups visible to the case team.",
+    helpComponent: CaseNotesHelp,
+    helpTitle: "Notes and tasks",
+    aiContext: CaseNotesHelp.aiContext,
+  },
+  "case-calendar": {
+    id: "case-calendar",
+    defaultRowSpan: 4,
+    defaultColumnSpan: 4,
+    component: CaseCalendarWidget,
+    title: "Case calendar",
+    description: "Timeline of reminders, deadlines, and milestones.",
+    helpComponent: CaseCalendarHelp,
+    helpTitle: "Case calendar",
+    aiContext: CaseCalendarHelp.aiContext,
+  },
+  "secure-messaging": {
+    id: "secure-messaging",
+    defaultRowSpan: 5,
+    defaultColumnSpan: 4,
+    component: SecureMessagingWidget,
+    title: "Secure messaging",
+    description: "Read and send case-linked messages, including attachments.",
+    helpComponent: SecureMessagesHelpPanelContent,
+    helpTitle: "Secure messaging",
+    aiContext: SecureMessagesHelpPanelContent.aiContext,
+  },
   caseHeader: {
     id: "caseHeader",
     defaultRowSpan: 2,
@@ -45,17 +82,6 @@ const widgetRegistry = {
     helpComponent: CaseWorkspaceCaseHeaderHelp,
     helpTitle: "Case header",
     aiContext: CaseWorkspaceCaseHeaderHelp.aiContext,
-  },
-  tasksNotes: {
-    id: "tasksNotes",
-    defaultRowSpan: 3,
-    defaultColumnSpan: 4,
-    component: TasksNotesWidget,
-    title: "Tasks & notes",
-    description: "Notes and follow-ups for the case.",
-    helpComponent: CaseWorkspaceTasksNotesHelp,
-    helpTitle: "Tasks & notes",
-    aiContext: CaseWorkspaceTasksNotesHelp.aiContext,
   },
   actionPlans: {
     id: "actionPlans",
@@ -116,13 +142,15 @@ const widgetRegistry = {
 
 const defaultLayout = [
   { id: "caseHeader", rowSpan: 2, columnSpan: 4 },
-  { id: "tasksNotes", rowSpan: 3, columnSpan: 4 },
+  { id: "case-notes", rowSpan: 4, columnSpan: 4 },
   { id: "actionPlans", rowSpan: 4, columnSpan: 4 },
   { id: "interventions", rowSpan: 5, columnSpan: 4 },
   { id: "financePanel", rowSpan: 4, columnSpan: 4 },
   { id: "compliancePanel", rowSpan: 3, columnSpan: 4 },
   { id: "exportPreview", rowSpan: 3, columnSpan: 4 },
+  { id: "case-calendar", rowSpan: 4, columnSpan: 4 },
   { id: "supporting-documents", rowSpan: 4, columnSpan: 4 },
+  { id: "secure-messaging", rowSpan: 5, columnSpan: 4 },
 ];
 
 const exportLayout = items =>

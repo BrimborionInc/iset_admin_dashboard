@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
   Header,
@@ -13,10 +13,12 @@ import {
   FormField,
   Textarea,
   Badge,
-  Link
+  Link,
+  DatePicker
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
 import CaseNotesHelp from '../helpPanelContents/caseNotesHelp';
+import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
 
 const NOTE_LENGTH_LIMIT = 5000;
 
@@ -32,6 +34,48 @@ const sanitize = (value) => (typeof value === 'string' ? value : '');
 const toTime = (value) => {
   const time = new Date(value).getTime();
   return Number.isNaN(time) ? 0 : time;
+};
+
+const toDatePickerValue = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().slice(0, 10);
+};
+
+const toIsoUtcFromDateInput = (value) => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return `${trimmed}T00:00:00Z`;
+};
+
+const formatFollowUpDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+};
+
+const classifyFollowUpStatus = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffMs = date.getTime() - today.getTime();
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffDays < 0) {
+    return { color: 'red', label: 'Overdue follow-up' };
+  }
+  if (diffDays <= 7) {
+    return { color: 'yellow', label: 'Follow-up due soon' };
+  }
+  return { color: 'blue', label: 'Scheduled follow-up' };
 };
 
 const sortNotesByPinned = (list = []) =>
@@ -55,10 +99,31 @@ const getErrorMessage = async (err, fallback) => {
   return fallback;
 };
 
-const CaseNotesWidget = ({ actions, caseData, toggleHelpPanel }) => {
-  const caseId = caseData?.id ?? caseData?.case_id ?? null;
+const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) => {
+  const workspace = useCaseWorkspace();
+  const workspaceCaseData = workspace && typeof workspace === 'object' ? workspace.caseData || null : null;
+  const caseData = useMemo(() => {
+    if (propCaseData) return propCaseData;
+    if (workspaceCaseData) return workspaceCaseData;
+    return null;
+  }, [propCaseData, workspaceCaseData]);
+
+  const rawCaseId =
+    caseData?.id ??
+    caseData?.case_id ??
+    workspace?.caseId ??
+    workspaceCaseData?.id ??
+    workspaceCaseData?.case_id ??
+    null;
+  const caseId = rawCaseId == null || rawCaseId === '' ? null : rawCaseId;
   const caseIdentifier =
-    caseData?.tracking_id || caseData?.trackingId || (caseId ? `#${caseId}` : null);
+    caseData?.tracking_id ??
+    caseData?.trackingId ??
+    workspaceCaseData?.tracking_id ??
+    workspaceCaseData?.trackingId ??
+    workspace?.tracking_id ??
+    workspace?.trackingId ??
+    (caseId ? `#${caseId}` : null);
 
   const [notes, setNotes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -68,6 +133,7 @@ const CaseNotesWidget = ({ actions, caseData, toggleHelpPanel }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState('create');
   const [draftText, setDraftText] = useState('');
+  const [draftFollowUpDate, setDraftFollowUpDate] = useState('');
   const [draftError, setDraftError] = useState(null);
   const [activeNoteId, setActiveNoteId] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -77,6 +143,7 @@ const CaseNotesWidget = ({ actions, caseData, toggleHelpPanel }) => {
 
   const resetModalState = () => {
     setDraftText('');
+    setDraftFollowUpDate('');
     setDraftError(null);
     setActiveNoteId(null);
     setIsSaving(false);
@@ -93,6 +160,7 @@ const CaseNotesWidget = ({ actions, caseData, toggleHelpPanel }) => {
     if (!canMutate || !note) return;
     setModalMode('edit');
     setDraftText(note.body || '');
+    setDraftFollowUpDate(toDatePickerValue(note.followUpAt));
     setDraftError(null);
     setActiveNoteId(note.id || null);
     setIsModalOpen(true);
@@ -204,18 +272,25 @@ const CaseNotesWidget = ({ actions, caseData, toggleHelpPanel }) => {
     setIsSaving(true);
     setDraftError(null);
     try {
+      const followUpAtPayload = toIsoUtcFromDateInput(draftFollowUpDate);
+      const requestBody = { body: trimmed };
+      if (followUpAtPayload) {
+        requestBody.followUpAt = followUpAtPayload;
+      } else if (modalMode === 'edit') {
+        requestBody.followUpAt = null;
+      }
       let res;
       if (modalMode === 'edit' && activeNoteId) {
         res = await apiFetch(`/api/cases/${caseId}/notes/${activeNoteId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ body: trimmed })
+          body: JSON.stringify(requestBody)
         });
       } else {
         res = await apiFetch(`/api/cases/${caseId}/notes`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ body: trimmed })
+          body: JSON.stringify(requestBody)
         });
       }
       if (!res.ok) throw res;
@@ -235,19 +310,72 @@ const CaseNotesWidget = ({ actions, caseData, toggleHelpPanel }) => {
     }
   };
 
+  const renderNoteHeader = (note, { authorName, authorRole, timestamp, editedLabel }) => (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        gap: '12px',
+        flexWrap: 'wrap'
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '160px' }}>
+        <Box fontWeight="bold">{authorName}</Box>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {authorRole ? <Badge color="blue">{authorRole}</Badge> : null}
+          {note.isPinned ? <Badge color="orange">Pinned</Badge> : null}
+        </div>
+      </div>
+      <Box color="text-body-secondary" variant="small">
+        {timestamp}
+        {editedLabel}
+      </Box>
+    </div>
+  );
+
   const renderNoteBody = (note) => {
     const text = sanitize(note.body);
     const showFull = expandedIds.has(note.id);
     const limit = 420;
-    if (text.length <= limit) {
-      return <Box>{text}</Box>;
-    }
+    const displayDate = formatFollowUpDate(note.followUpAt);
+  const followUpStatus = classifyFollowUpStatus(note.followUpAt);
+
+    const textContent =
+      text.length <= limit ? (
+        <Box>{text}</Box>
+      ) : (
+        <SpaceBetween size="xxs">
+          <Box>{showFull ? text : `${text.slice(0, limit)}...`}</Box>
+          <Button variant="inline-link" onClick={() => toggleExpanded(note.id)}>
+            {showFull ? 'Show less' : 'Show more'}
+          </Button>
+        </SpaceBetween>
+      );
+
+    const followUpSummary = displayDate ? (
+      <div
+        style={{
+          padding: '8px 12px',
+          borderRadius: '8px',
+          border: '1px solid var(--color-border-container-divider, #d5dbdb)',
+          backgroundColor: 'var(--color-background-container-content, #f8f8f8)',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '8px',
+          alignItems: 'center'
+        }}
+      >
+        <Box fontWeight="bold">Follow-up</Box>
+        {followUpStatus ? <Badge color={followUpStatus.color}>{followUpStatus.label}</Badge> : null}
+        <Box color="text-body-secondary">Due {displayDate}</Box>
+      </div>
+    ) : null;
+
     return (
-      <SpaceBetween size="xxs">
-        <Box>{showFull ? text : `${text.slice(0, limit)}...`}</Box>
-        <Button variant="inline-link" onClick={() => toggleExpanded(note.id)}>
-          {showFull ? 'Show less' : 'Show more'}
-        </Button>
+      <SpaceBetween size="s">
+        {followUpSummary}
+        {textContent}
       </SpaceBetween>
     );
   };
@@ -286,21 +414,21 @@ const CaseNotesWidget = ({ actions, caseData, toggleHelpPanel }) => {
                 <Link
                   variant="info"
                   onFollow={() =>
-                    toggleHelpPanel(
-                      <CaseNotesHelp />,
-                      'Case Notes Help',
-                      CaseNotesHelp.aiContext
-                    )
-                  }
-                >
-                  Info
-                </Link>
-              ) : undefined
-            }
-          >
-            Case Notes
-          </Header>
-        }
+                  toggleHelpPanel(
+                    <CaseNotesHelp />,
+                    'Notes and Tasks Help',
+                    CaseNotesHelp.aiContext
+                  )
+                }
+              >
+                Info
+              </Link>
+            ) : undefined
+          }
+        >
+          Notes and Tasks
+        </Header>
+      }
         i18nStrings={{
           dragHandleAriaLabel: 'Drag handle',
           dragHandleAriaDescription:
@@ -348,21 +476,7 @@ const CaseNotesWidget = ({ actions, caseData, toggleHelpPanel }) => {
                 return (
                   <Container
                     key={note.id}
-                    header={
-                      <SpaceBetween direction="horizontal" size="s">
-                        <SpaceBetween size="xxs">
-                          <Box fontWeight="bold">{authorName}</Box>
-                          <SpaceBetween direction="horizontal" size="xs">
-                            {authorRole ? <Badge color="blue">{authorRole}</Badge> : null}
-                            {note.isPinned ? <Badge color="orange">Pinned</Badge> : null}
-                          </SpaceBetween>
-                        </SpaceBetween>
-                        <Box color="text-body-secondary" variant="small">
-                          {timestamp}
-                          {editedLabel}
-                        </Box>
-                      </SpaceBetween>
-                    }
+                    header={renderNoteHeader(note, { authorName, authorRole, timestamp, editedLabel })}
                     footer={
                       <SpaceBetween direction="horizontal" size="xs">
                         <Button
@@ -409,6 +523,17 @@ const CaseNotesWidget = ({ actions, caseData, toggleHelpPanel }) => {
         }
       >
         <SpaceBetween size="m">
+          <FormField
+            label="Follow-up date"
+            description="Optional. Setting a follow-up date will create a reminder for this case."
+          >
+            <DatePicker
+              value={draftFollowUpDate}
+              onChange={({ detail }) => setDraftFollowUpDate(detail.value)}
+              placeholder="YYYY-MM-DD"
+              isClearable
+            />
+          </FormField>
           <FormField
             label="Note"
             errorText={draftError}

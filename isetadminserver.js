@@ -7844,6 +7844,8 @@ const CASE_NOTE_SELECT = `
     n.body,
     n.is_internal,
     n.is_pinned,
+    n.follow_up_at,
+    n.reminder_id,
     n.created_at,
     n.updated_at,
     n.edited_at,
@@ -7877,6 +7879,8 @@ const mapCaseNoteRow = (row = {}) => {
     body: row.body,
     isInternal: row.is_internal == null ? true : row.is_internal === 1,
     isPinned: row.is_pinned === 1,
+    followUpAt: row.follow_up_at || null,
+    reminderId: row.reminder_id || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     editedAt: row.edited_at || null,
@@ -7914,6 +7918,359 @@ const fetchCaseNoteById = async (caseId, noteId) => {
   const sql = `${CASE_NOTE_SELECT}\n WHERE n.case_id = ? AND n.id = ? AND n.deleted_at IS NULL\n LIMIT 1`;
   const [rows] = await pool.query(sql, [caseId, noteId]);
   return rows.length ? mapCaseNoteRow(rows[0]) : null;
+};
+
+const REMINDER_ALLOWED_STATUSES = new Set(['open', 'completed', 'cancelled']);
+const REMINDER_METADATA_ERROR = 'ERR_INVALID_REMINDER_METADATA';
+const REMINDER_DATE_ERROR = 'ERR_INVALID_REMINDER_DATE';
+
+const coerceOptionalPositiveInt = (value) => {
+  if (typeof value === 'undefined') return undefined;
+  if (value === null) return null;
+  const token = typeof value === 'string' ? value.trim() : value;
+  if (token === '') return null;
+  const numeric = Number(token);
+  if (!Number.isFinite(numeric)) return Number.NaN;
+  const intValue = Math.trunc(numeric);
+  if (!Number.isInteger(intValue) || intValue <= 0) return Number.NaN;
+  return intValue;
+};
+
+const coerceOptionalNonNegativeInt = (value) => {
+  if (typeof value === 'undefined') return undefined;
+  if (value === null) return null;
+  const token = typeof value === 'string' ? value.trim() : value;
+  if (token === '') return null;
+  const numeric = Number(token);
+  if (!Number.isFinite(numeric)) return Number.NaN;
+  const intValue = Math.trunc(numeric);
+  if (!Number.isInteger(intValue) || intValue < 0) return Number.NaN;
+  return intValue;
+};
+
+const parseBooleanFlag = (value, defaultValue = false) => {
+  if (typeof value === 'undefined') return defaultValue;
+  if (value === null) return false;
+  const token = String(value).trim().toLowerCase();
+  if (!token) return false;
+  if (token === '1' || token === 'true' || token === 'yes' || token === 'y' || token === 'on') return true;
+  if (token === '0' || token === 'false' || token === 'no' || token === 'n' || token === 'off') return false;
+  return defaultValue;
+};
+
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+const normaliseReminderStatus = (value, fallback = 'open', options = {}) => {
+  const { allowAll = false } = options;
+  if (value === undefined || value === null) return fallback;
+  const token = String(value).trim().toLowerCase();
+  if (!token) return fallback;
+  if (token === 'all') {
+    return allowAll ? null : undefined;
+  }
+  return REMINDER_ALLOWED_STATUSES.has(token) ? token : undefined;
+};
+
+const parseReminderDateInput = (value, fieldName = null) => {
+  if (typeof value === 'undefined') return undefined;
+  if (value === null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    const err = new Error('invalid_date');
+    err.code = REMINDER_DATE_ERROR;
+    if (fieldName) err.field = fieldName;
+    throw err;
+  }
+  return date;
+};
+
+const encodeReminderMetadataValue = (value) => {
+  if (typeof value === 'undefined') return undefined;
+  if (value === null) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    try {
+      JSON.parse(trimmed);
+      return trimmed;
+    } catch {
+      return JSON.stringify(trimmed);
+    }
+  }
+  try {
+    return JSON.stringify(value);
+  } catch (err) {
+    const metadataError = new Error('invalid_metadata');
+    metadataError.code = REMINDER_METADATA_ERROR;
+    throw metadataError;
+  }
+};
+
+const resolveReminderMetadataInput = (body = {}) => {
+  if (Object.prototype.hasOwnProperty.call(body, 'metadata')) {
+    return encodeReminderMetadataValue(body.metadata);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'metadataJson')) {
+    const value = body.metadataJson;
+    if (value === null) return null;
+    if (typeof value !== 'string') {
+      const err = new Error('invalid_metadata');
+      err.code = REMINDER_METADATA_ERROR;
+      throw err;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    try {
+      JSON.parse(trimmed);
+      return trimmed;
+    } catch {
+      const err = new Error('invalid_metadata');
+      err.code = REMINDER_METADATA_ERROR;
+      throw err;
+    }
+  }
+  return undefined;
+};
+
+const mapReminderStaffProfile = (row, prefix) => {
+  if (!row) return null;
+  const idKey = `${prefix}_staff_profile_id`;
+  const id = row[idKey] || null;
+  if (!id) return null;
+  return {
+    staffProfileId: id,
+    displayName: row[`${prefix}_display_name`] || row[`${prefix}_name`] || null,
+    name: row[`${prefix}_name`] || null,
+    role: row[`${prefix}_role`] || null,
+    email: row[`${prefix}_email`] || null
+  };
+};
+
+const REMINDER_SELECT = `
+  SELECT
+    r.id,
+    r.case_id,
+    r.application_id,
+    r.action_plan_id,
+    r.intervention_id,
+    r.title,
+    r.description,
+    r.category,
+    r.status,
+    r.due_at,
+    r.completed_at,
+    r.completed_by_staff_profile_id,
+    r.assigned_staff_profile_id,
+    r.metadata_json,
+    r.created_at,
+    r.created_by_staff_profile_id,
+    r.updated_at,
+    r.updated_by_staff_profile_id,
+    r.deleted_at,
+    assigned.display_name AS assigned_display_name,
+    assigned.name AS assigned_name,
+    assigned.primary_role AS assigned_role,
+    assigned.email AS assigned_email,
+    completed.display_name AS completed_by_display_name,
+    completed.name AS completed_by_name,
+    completed.primary_role AS completed_by_role,
+    completed.email AS completed_by_email,
+    created.display_name AS created_by_display_name,
+    created.name AS created_by_name,
+    created.primary_role AS created_by_role,
+    created.email AS created_by_email,
+    updated.display_name AS updated_by_display_name,
+    updated.name AS updated_by_name,
+    updated.primary_role AS updated_by_role,
+    updated.email AS updated_by_email
+  FROM iset_case_reminder r
+  LEFT JOIN staff_profiles assigned ON assigned.id = r.assigned_staff_profile_id
+  LEFT JOIN staff_profiles completed ON completed.id = r.completed_by_staff_profile_id
+  LEFT JOIN staff_profiles created ON created.id = r.created_by_staff_profile_id
+  LEFT JOIN staff_profiles updated ON updated.id = r.updated_by_staff_profile_id`;
+
+const mapReminderRow = (row = {}) => {
+  if (!row || Object.keys(row).length === 0) return null;
+  return {
+    id: row.id,
+    caseId: row.case_id || null,
+    applicationId: row.application_id || null,
+    actionPlanId: row.action_plan_id || null,
+    interventionId: row.intervention_id || null,
+    title: row.title,
+    description: row.description || null,
+    category: row.category || null,
+    status: row.status,
+    dueAt: row.due_at || null,
+    completedAt: row.completed_at || null,
+    completedByStaffProfileId: row.completed_by_staff_profile_id || null,
+    assignedStaffProfileId: row.assigned_staff_profile_id || null,
+    metadata: safeJsonParse(row.metadata_json, null),
+    createdAt: row.created_at || null,
+    createdByStaffProfileId: row.created_by_staff_profile_id || null,
+    updatedAt: row.updated_at || null,
+    updatedByStaffProfileId: row.updated_by_staff_profile_id || null,
+    deletedAt: row.deleted_at || null,
+    assignedTo: mapReminderStaffProfile(row, 'assigned'),
+    completedBy: mapReminderStaffProfile(row, 'completed_by'),
+    createdBy: mapReminderStaffProfile(row, 'created_by'),
+    updatedBy: mapReminderStaffProfile(row, 'updated_by')
+  };
+};
+
+const fetchReminderById = async (reminderId) => {
+  const sql = `${REMINDER_SELECT}\n WHERE r.id = ? AND r.deleted_at IS NULL\n LIMIT 1`;
+  const [rows] = await pool.query(sql, [reminderId]);
+  return rows.length ? mapReminderRow(rows[0]) : null;
+};
+
+const listReminders = async (options = {}) => {
+  const { caseId, applicationId, includeGlobal = false, statuses = [], limit, offset } = options;
+  const conditions = ['r.deleted_at IS NULL'];
+  const params = [];
+  const scopeClauses = [];
+
+  if (Number.isInteger(caseId) && caseId > 0) {
+    scopeClauses.push('r.case_id = ?');
+    params.push(caseId);
+  }
+  if (Number.isInteger(applicationId) && applicationId > 0) {
+    scopeClauses.push('r.application_id = ?');
+    params.push(applicationId);
+  }
+  if (includeGlobal) {
+    scopeClauses.push('(r.case_id IS NULL AND r.application_id IS NULL)');
+  }
+  if (scopeClauses.length) {
+    conditions.push(`(${scopeClauses.join(' OR ')})`);
+  }
+  if (Array.isArray(statuses) && statuses.length) {
+    const placeholders = statuses.map(() => '?').join(',');
+    conditions.push(`r.status IN (${placeholders})`);
+    params.push(...statuses);
+  }
+
+  let sql = `${REMINDER_SELECT}\n`;
+  if (conditions.length) {
+    sql += `WHERE ${conditions.join('\n  AND ')}\n`;
+  }
+  sql += 'ORDER BY r.due_at IS NULL ASC, r.due_at ASC, r.id DESC';
+
+  const limitIsValid = Number.isInteger(limit) && limit > 0;
+  const offsetIsValid = Number.isInteger(offset) && offset >= 0;
+  if (limitIsValid) {
+    sql += ' LIMIT ?';
+    params.push(limit);
+    if (offsetIsValid) {
+      sql += ' OFFSET ?';
+      params.push(offset);
+    }
+  }
+
+  const [rows] = await pool.query(sql, params);
+  return rows.map(mapReminderRow);
+};
+
+const NOTE_REMINDER_CATEGORY = 'Case note follow-up';
+
+const deriveReminderTitleFromNote = (body = '') => {
+  if (!body) return 'Case follow-up';
+  const text = String(body).trim();
+  if (!text) return 'Case follow-up';
+  const firstLine = text.split(/\r?\n/).find(line => line.trim());
+  const value = (firstLine || text).trim();
+  if (value.length <= 120) return value;
+  return `${value.slice(0, 117)}...`;
+};
+
+const deriveReminderDescriptionFromNote = (body = '') => {
+  if (!body) return null;
+  const text = String(body).trim();
+  if (!text) return null;
+  return text.length > 2000 ? `${text.slice(0, 2000)}...` : text;
+};
+
+const buildNoteReminderMetadata = (noteId) =>
+  JSON.stringify({
+    source: 'case_note',
+    case_note_id: noteId,
+  });
+
+const loadCaseIdentifiers = async (connection, caseId) => {
+  const [[row]] = await connection.query(
+    'SELECT id, application_id FROM iset_case WHERE id = ? LIMIT 1',
+    [caseId]
+  );
+  return row || null;
+};
+
+const createReminderForCaseNote = async (connection, { caseId, applicationId, noteId, noteBody, dueAt, staffProfileId }) => {
+  if (!dueAt) return null;
+  const title = deriveReminderTitleFromNote(noteBody);
+  const description = deriveReminderDescriptionFromNote(noteBody);
+  const metadataJson = buildNoteReminderMetadata(noteId);
+  const actorId = Number.isInteger(staffProfileId) && staffProfileId > 0 ? staffProfileId : null;
+  const assignedId = actorId;
+  const sql = `INSERT INTO iset_case_reminder
+    (case_id, application_id, title, description, category, status, due_at, assigned_staff_profile_id, metadata_json, created_by_staff_profile_id, updated_by_staff_profile_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`;
+  const params = [
+    caseId,
+    applicationId ?? null,
+    title,
+    description,
+    NOTE_REMINDER_CATEGORY,
+    'open',
+    dueAt,
+    assignedId,
+    metadataJson,
+    actorId,
+    actorId,
+  ];
+  const [result] = await connection.query(sql, params);
+  return result.insertId;
+};
+
+const updateReminderForCaseNote = async (connection, reminderId, { noteId, noteBody, dueAt, staffProfileId }) => {
+  if (!reminderId) return null;
+  const title = deriveReminderTitleFromNote(noteBody);
+  const description = deriveReminderDescriptionFromNote(noteBody);
+  const metadataJson = buildNoteReminderMetadata(noteId);
+  const actorId = Number.isInteger(staffProfileId) && staffProfileId > 0 ? staffProfileId : null;
+  const sql = `UPDATE iset_case_reminder
+    SET title = ?, description = ?, category = ?, status = 'open', due_at = ?, completed_at = NULL, completed_by_staff_profile_id = NULL,
+        assigned_staff_profile_id = ?, metadata_json = ?, updated_by_staff_profile_id = ?, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND deleted_at IS NULL`;
+  const params = [
+    title,
+    description,
+    NOTE_REMINDER_CATEGORY,
+    dueAt,
+    actorId,
+    metadataJson,
+    actorId,
+    reminderId,
+  ];
+  const [result] = await connection.query(sql, params);
+  if (!result.affectedRows) {
+    return null;
+  }
+  return reminderId;
+};
+
+const cancelReminderForCaseNote = async (connection, reminderId, staffProfileId) => {
+  if (!reminderId) return;
+  const actorId = Number.isInteger(staffProfileId) && staffProfileId > 0 ? staffProfileId : null;
+  await connection.query(
+    `UPDATE iset_case_reminder
+       SET status = 'cancelled',
+           deleted_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP,
+           updated_by_staff_profile_id = COALESCE(?, updated_by_staff_profile_id)
+     WHERE id = ? AND deleted_at IS NULL`,
+    [actorId, reminderId]
+  );
 };
 
 // --- Simple SQL Migration Runner (auto-executes .sql files in /sql once) -----------------
@@ -16493,7 +16850,7 @@ app.put('/api/admin/messages/:id/status', async (req, res) => {
   }
 });
 
-// Case notes CRUD
+// Case workspace helpers
 const ensureCaseExists = async (caseId) => {
   try {
     const [[row]] = await pool.query('SELECT id FROM iset_case WHERE id = ? LIMIT 1', [caseId]);
@@ -16505,6 +16862,607 @@ const ensureCaseExists = async (caseId) => {
     throw err;
   }
 };
+
+// Case reminders API
+app.get('/api/reminders', async (req, res) => {
+  const caseIdRaw = req.query.caseId ?? req.query.case_id;
+  const applicationIdRaw = req.query.applicationId ?? req.query.application_id;
+  const includeGlobalRaw = req.query.includeGlobal ?? req.query.include_global ?? false;
+  const statusRaw = req.query.status ?? req.query.statuses;
+  const limitRaw = req.query.limit;
+  const offsetRaw = req.query.offset;
+
+  const caseId = coerceOptionalPositiveInt(caseIdRaw);
+  if (Number.isNaN(caseId)) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+  const applicationId = coerceOptionalPositiveInt(applicationIdRaw);
+  if (Number.isNaN(applicationId)) {
+    return res.status(400).json({ error: 'invalid_application_id' });
+  }
+  const includeGlobal = parseBooleanFlag(includeGlobalRaw, false);
+
+  let statuses;
+  if (typeof statusRaw === 'undefined') {
+    statuses = ['open'];
+  } else {
+    const source = Array.isArray(statusRaw) ? statusRaw : [statusRaw];
+    const tokens = source
+      .flatMap(token => String(token).split(','))
+      .map(token => token.trim().toLowerCase())
+      .filter(Boolean);
+    if (!tokens.length) {
+      return res.status(400).json({ error: 'invalid_status', allowed: Array.from(REMINDER_ALLOWED_STATUSES) });
+    }
+    if (tokens.includes('all')) {
+      statuses = Array.from(REMINDER_ALLOWED_STATUSES);
+    } else {
+      const validTokens = tokens.filter(token => REMINDER_ALLOWED_STATUSES.has(token));
+      if (!validTokens.length) {
+        return res.status(400).json({ error: 'invalid_status', allowed: Array.from(REMINDER_ALLOWED_STATUSES) });
+      }
+      statuses = validTokens;
+    }
+  }
+
+  let limitValue = coerceOptionalPositiveInt(limitRaw);
+  if (Number.isNaN(limitValue)) {
+    return res.status(400).json({ error: 'invalid_limit' });
+  }
+  if (limitValue === undefined || limitValue === null) {
+    limitValue = 200;
+  }
+  if (limitValue > 500) {
+    limitValue = 500;
+  }
+
+  let offsetValue = coerceOptionalNonNegativeInt(offsetRaw);
+  if (Number.isNaN(offsetValue)) {
+    return res.status(400).json({ error: 'invalid_offset' });
+  }
+  if (offsetValue === undefined || offsetValue === null) {
+    offsetValue = 0;
+  }
+
+  try {
+    const reminders = await listReminders({
+      caseId,
+      applicationId,
+      includeGlobal,
+      statuses,
+      limit: limitValue,
+      offset: offsetValue
+    });
+    return res.json(reminders);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.json([]);
+    }
+    console.error('GET /api/reminders failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_load_reminders' });
+  }
+});
+
+app.get('/api/reminders/:reminderId', async (req, res) => {
+  const reminderId = Number.parseInt(req.params.reminderId, 10);
+  if (!Number.isInteger(reminderId) || reminderId <= 0) {
+    return res.status(400).json({ error: 'invalid_reminder_id' });
+  }
+  try {
+    const reminder = await fetchReminderById(reminderId);
+    if (!reminder) {
+      return res.status(404).json({ error: 'reminder_not_found' });
+    }
+    return res.json(reminder);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(404).json({ error: 'reminder_not_found' });
+    }
+    console.error(`GET /api/reminders/${reminderId} failed:`, err.message);
+    return res.status(500).json({ error: 'failed_to_load_reminder' });
+  }
+});
+
+app.post('/api/reminders', async (req, res) => {
+  const body = req.body || {};
+  const caseIdValue = coerceOptionalPositiveInt(body.caseId ?? body.case_id);
+  if (Number.isNaN(caseIdValue)) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+  const applicationIdValue = coerceOptionalPositiveInt(body.applicationId ?? body.application_id);
+  if (Number.isNaN(applicationIdValue)) {
+    return res.status(400).json({ error: 'invalid_application_id' });
+  }
+  const actionPlanIdValue = coerceOptionalPositiveInt(body.actionPlanId ?? body.action_plan_id);
+  if (Number.isNaN(actionPlanIdValue)) {
+    return res.status(400).json({ error: 'invalid_action_plan_id' });
+  }
+  const interventionIdValue = coerceOptionalPositiveInt(body.interventionId ?? body.intervention_id);
+  if (Number.isNaN(interventionIdValue)) {
+    return res.status(400).json({ error: 'invalid_intervention_id' });
+  }
+  const assignedStaffProfileIdValue = coerceOptionalPositiveInt(body.assignedStaffProfileId ?? body.assigned_staff_profile_id);
+  if (Number.isNaN(assignedStaffProfileIdValue)) {
+    return res.status(400).json({ error: 'invalid_assigned_staff_profile_id' });
+  }
+  let completedByStaffProfileIdValue = coerceOptionalPositiveInt(body.completedByStaffProfileId ?? body.completed_by_staff_profile_id);
+  if (Number.isNaN(completedByStaffProfileIdValue)) {
+    return res.status(400).json({ error: 'invalid_completed_by_staff_profile_id' });
+  }
+
+  let dueAtValue;
+  try {
+    dueAtValue = parseReminderDateInput(body.dueAt ?? body.due_at, 'due_at');
+  } catch (err) {
+    if (err.code === REMINDER_DATE_ERROR) {
+      return res.status(400).json({ error: 'invalid_due_at' });
+    }
+    throw err;
+  }
+
+  let completedAtValue;
+  try {
+    completedAtValue = parseReminderDateInput(body.completedAt ?? body.completed_at, 'completed_at');
+  } catch (err) {
+    if (err.code === REMINDER_DATE_ERROR) {
+      return res.status(400).json({ error: 'invalid_completed_at' });
+    }
+    throw err;
+  }
+
+  let metadataJsonValue;
+  try {
+    metadataJsonValue = resolveReminderMetadataInput(body);
+  } catch (err) {
+    if (err.code === REMINDER_METADATA_ERROR) {
+      return res.status(400).json({ error: 'invalid_metadata' });
+    }
+    throw err;
+  }
+
+  const title = typeof body.title === 'string' ? body.title.trim() : '';
+  if (!title) {
+    return res.status(400).json({ error: 'title_required' });
+  }
+  if (title.length > 255) {
+    return res.status(400).json({ error: 'title_too_long', max: 255 });
+  }
+
+  let descriptionValue = null;
+  if (hasOwn(body, 'description')) {
+    if (body.description === null) {
+      descriptionValue = null;
+    } else if (typeof body.description === 'string') {
+      const trimmed = body.description.trim();
+      descriptionValue = trimmed || null;
+    } else {
+      return res.status(400).json({ error: 'invalid_description' });
+    }
+  } else if (typeof body.description === 'string') {
+    const trimmed = body.description.trim();
+    descriptionValue = trimmed || null;
+  }
+
+  let categoryValue = null;
+  if (hasOwn(body, 'category')) {
+    if (body.category === null) {
+      categoryValue = null;
+    } else {
+      const token = String(body.category).trim();
+      if (!token) {
+        categoryValue = null;
+      } else {
+        if (token.length > 100) {
+          return res.status(400).json({ error: 'category_too_long', max: 100 });
+        }
+        categoryValue = token;
+      }
+    }
+  } else if (typeof body.category === 'string') {
+    const token = body.category.trim();
+    if (token) {
+      if (token.length > 100) {
+        return res.status(400).json({ error: 'category_too_long', max: 100 });
+      }
+      categoryValue = token;
+    }
+  }
+
+  let statusValue = normaliseReminderStatus(body.status, 'open');
+  if (!statusValue) {
+    return res.status(400).json({ error: 'invalid_status', allowed: Array.from(REMINDER_ALLOWED_STATUSES) });
+  }
+
+  const actingStaffProfileId = req.staffProfile?.id || null;
+  if (statusValue !== 'completed') {
+    completedAtValue = null;
+    completedByStaffProfileIdValue = null;
+  } else {
+    if (!completedAtValue) {
+      completedAtValue = new Date();
+    }
+    if (!completedByStaffProfileIdValue) {
+      completedByStaffProfileIdValue = actingStaffProfileId || null;
+    }
+  }
+
+  try {
+    if (Number.isInteger(caseIdValue) && caseIdValue > 0) {
+      const caseExists = await ensureCaseExists(caseIdValue);
+      if (!caseExists) {
+        return res.status(404).json({ error: 'case_not_found' });
+      }
+    }
+
+    const insertSql = `INSERT INTO iset_case_reminder
+      (case_id, application_id, action_plan_id, intervention_id, title, description, category, status, due_at, completed_at, completed_by_staff_profile_id, assigned_staff_profile_id, metadata_json, created_by_staff_profile_id, updated_by_staff_profile_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+    const insertParams = [
+      Number.isInteger(caseIdValue) ? caseIdValue : null,
+      Number.isInteger(applicationIdValue) ? applicationIdValue : null,
+      Number.isInteger(actionPlanIdValue) ? actionPlanIdValue : null,
+      Number.isInteger(interventionIdValue) ? interventionIdValue : null,
+      title,
+      descriptionValue,
+      categoryValue,
+      statusValue,
+      dueAtValue ?? null,
+      completedAtValue ?? null,
+      completedByStaffProfileIdValue ?? null,
+      Number.isInteger(assignedStaffProfileIdValue) ? assignedStaffProfileIdValue : null,
+      metadataJsonValue ?? null,
+      actingStaffProfileId || null,
+      actingStaffProfileId || null
+    ];
+
+    let insertResult;
+    try {
+      [insertResult] = await pool.query(insertSql, insertParams);
+    } catch (err) {
+      if (isMissingTableErrorLocal(err)) {
+        return res.status(500).json({ error: 'reminders_not_available' });
+      }
+      throw err;
+    }
+    const reminder = await fetchReminderById(insertResult.insertId);
+    return res.status(201).json(reminder);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(500).json({ error: 'reminders_not_available' });
+    }
+    console.error('POST /api/reminders failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_create_reminder' });
+  }
+});
+
+app.put('/api/reminders/:reminderId', async (req, res) => {
+  const reminderId = Number.parseInt(req.params.reminderId, 10);
+  if (!Number.isInteger(reminderId) || reminderId <= 0) {
+    return res.status(400).json({ error: 'invalid_reminder_id' });
+  }
+  const body = req.body || {};
+
+  let existing;
+  try {
+    existing = await fetchReminderById(reminderId);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(404).json({ error: 'reminder_not_found' });
+    }
+    console.error(`PUT /api/reminders/${reminderId} failed to load existing:`, err.message);
+    return res.status(500).json({ error: 'failed_to_update_reminder' });
+  }
+  if (!existing) {
+    return res.status(404).json({ error: 'reminder_not_found' });
+  }
+
+  const updates = [];
+  const params = [];
+  const actingStaffProfileId = req.staffProfile?.id || null;
+
+  const caseIdProvided = hasOwn(body, 'caseId') || hasOwn(body, 'case_id');
+  if (caseIdProvided) {
+    const caseIdValue = coerceOptionalPositiveInt(body.caseId ?? body.case_id);
+    if (Number.isNaN(caseIdValue)) {
+      return res.status(400).json({ error: 'invalid_case_id' });
+    }
+    if (Number.isInteger(caseIdValue) && caseIdValue > 0) {
+      const caseExists = await ensureCaseExists(caseIdValue);
+      if (!caseExists) {
+        return res.status(404).json({ error: 'case_not_found' });
+      }
+    }
+    updates.push('case_id = ?');
+    params.push(Number.isInteger(caseIdValue) ? caseIdValue : null);
+  }
+
+  const applicationIdProvided = hasOwn(body, 'applicationId') || hasOwn(body, 'application_id');
+  if (applicationIdProvided) {
+    const applicationIdValue = coerceOptionalPositiveInt(body.applicationId ?? body.application_id);
+    if (Number.isNaN(applicationIdValue)) {
+      return res.status(400).json({ error: 'invalid_application_id' });
+    }
+    updates.push('application_id = ?');
+    params.push(Number.isInteger(applicationIdValue) ? applicationIdValue : null);
+  }
+
+  const actionPlanProvided = hasOwn(body, 'actionPlanId') || hasOwn(body, 'action_plan_id');
+  if (actionPlanProvided) {
+    const actionPlanIdValue = coerceOptionalPositiveInt(body.actionPlanId ?? body.action_plan_id);
+    if (Number.isNaN(actionPlanIdValue)) {
+      return res.status(400).json({ error: 'invalid_action_plan_id' });
+    }
+    updates.push('action_plan_id = ?');
+    params.push(Number.isInteger(actionPlanIdValue) ? actionPlanIdValue : null);
+  }
+
+  const interventionProvided = hasOwn(body, 'interventionId') || hasOwn(body, 'intervention_id');
+  if (interventionProvided) {
+    const interventionIdValue = coerceOptionalPositiveInt(body.interventionId ?? body.intervention_id);
+    if (Number.isNaN(interventionIdValue)) {
+      return res.status(400).json({ error: 'invalid_intervention_id' });
+    }
+    updates.push('intervention_id = ?');
+    params.push(Number.isInteger(interventionIdValue) ? interventionIdValue : null);
+  }
+
+  if (hasOwn(body, 'title')) {
+    const titleValue = typeof body.title === 'string' ? body.title.trim() : '';
+    if (!titleValue) {
+      return res.status(400).json({ error: 'title_required' });
+    }
+    if (titleValue.length > 255) {
+      return res.status(400).json({ error: 'title_too_long', max: 255 });
+    }
+    updates.push('title = ?');
+    params.push(titleValue);
+  }
+
+  if (hasOwn(body, 'description')) {
+    if (body.description === null) {
+      updates.push('description = ?');
+      params.push(null);
+    } else if (typeof body.description === 'string') {
+      const trimmed = body.description.trim();
+      updates.push('description = ?');
+      params.push(trimmed || null);
+    } else {
+      return res.status(400).json({ error: 'invalid_description' });
+    }
+  }
+
+  if (hasOwn(body, 'category')) {
+    if (body.category === null) {
+      updates.push('category = ?');
+      params.push(null);
+    } else {
+      const token = String(body.category).trim();
+      if (!token) {
+        updates.push('category = ?');
+        params.push(null);
+      } else {
+        if (token.length > 100) {
+          return res.status(400).json({ error: 'category_too_long', max: 100 });
+        }
+        updates.push('category = ?');
+        params.push(token);
+      }
+    }
+  }
+
+  let dueAtProvided = hasOwn(body, 'dueAt') || hasOwn(body, 'due_at');
+  let dueAtValue;
+  if (dueAtProvided) {
+    try {
+      dueAtValue = parseReminderDateInput(body.dueAt ?? body.due_at, 'due_at');
+    } catch (err) {
+      if (err.code === REMINDER_DATE_ERROR) {
+        return res.status(400).json({ error: 'invalid_due_at' });
+      }
+      throw err;
+    }
+    updates.push('due_at = ?');
+    params.push(dueAtValue ?? null);
+  }
+
+  let completedAtProvided = hasOwn(body, 'completedAt') || hasOwn(body, 'completed_at');
+  let completedAtValue;
+  if (completedAtProvided) {
+    try {
+      completedAtValue = parseReminderDateInput(body.completedAt ?? body.completed_at, 'completed_at');
+    } catch (err) {
+      if (err.code === REMINDER_DATE_ERROR) {
+        return res.status(400).json({ error: 'invalid_completed_at' });
+      }
+      throw err;
+    }
+  }
+
+  const assignedProvided = hasOwn(body, 'assignedStaffProfileId') || hasOwn(body, 'assigned_staff_profile_id');
+  if (assignedProvided) {
+    const assignedValue = coerceOptionalPositiveInt(body.assignedStaffProfileId ?? body.assigned_staff_profile_id);
+    if (Number.isNaN(assignedValue)) {
+      return res.status(400).json({ error: 'invalid_assigned_staff_profile_id' });
+    }
+    updates.push('assigned_staff_profile_id = ?');
+    params.push(Number.isInteger(assignedValue) ? assignedValue : null);
+  }
+
+  let completedByProvided = hasOwn(body, 'completedByStaffProfileId') || hasOwn(body, 'completed_by_staff_profile_id');
+  let completedByValue;
+  if (completedByProvided) {
+    completedByValue = coerceOptionalPositiveInt(body.completedByStaffProfileId ?? body.completed_by_staff_profile_id);
+    if (Number.isNaN(completedByValue)) {
+      return res.status(400).json({ error: 'invalid_completed_by_staff_profile_id' });
+    }
+  }
+
+  if (hasOwn(body, 'metadata') || hasOwn(body, 'metadataJson')) {
+    let metadataJsonValue;
+    try {
+      metadataJsonValue = resolveReminderMetadataInput(body);
+    } catch (err) {
+      if (err.code === REMINDER_METADATA_ERROR) {
+        return res.status(400).json({ error: 'invalid_metadata' });
+      }
+      throw err;
+    }
+    updates.push('metadata_json = ?');
+    params.push(metadataJsonValue ?? null);
+  }
+
+  const statusProvided = hasOwn(body, 'status');
+  let statusValue;
+  if (statusProvided) {
+    statusValue = normaliseReminderStatus(body.status, null);
+    if (!statusValue) {
+      return res.status(400).json({ error: 'invalid_status', allowed: Array.from(REMINDER_ALLOWED_STATUSES) });
+    }
+  }
+
+  if (statusProvided) {
+    if (statusValue === 'completed') {
+      if (!completedAtProvided) {
+        if (existing.completedAt) {
+          const existingDate = new Date(existing.completedAt);
+          completedAtValue = Number.isNaN(existingDate.getTime()) ? new Date() : existingDate;
+        } else {
+          completedAtValue = new Date();
+        }
+        completedAtProvided = true;
+      }
+      if (!completedByProvided) {
+        const existingCompletedBy = coerceOptionalPositiveInt(existing.completedByStaffProfileId);
+        if (Number.isInteger(existingCompletedBy) && existingCompletedBy > 0) {
+          completedByValue = existingCompletedBy;
+        } else {
+          completedByValue = actingStaffProfileId || null;
+        }
+        completedByProvided = true;
+      }
+    } else {
+      if (!completedAtProvided) {
+        completedAtValue = null;
+        completedAtProvided = true;
+      }
+      if (!completedByProvided) {
+        completedByValue = null;
+        completedByProvided = true;
+      }
+    }
+  }
+
+  if (statusProvided) {
+    updates.push('status = ?');
+    params.push(statusValue);
+  }
+  if (completedAtProvided) {
+    updates.push('completed_at = ?');
+    params.push(completedAtValue ?? null);
+  }
+  if (completedByProvided) {
+    updates.push('completed_by_staff_profile_id = ?');
+    params.push(Number.isInteger(completedByValue) ? completedByValue : null);
+  }
+
+  if (!updates.length) {
+    return res.status(400).json({ error: 'no_fields_to_update' });
+  }
+
+  updates.push('updated_by_staff_profile_id = ?');
+  params.push(actingStaffProfileId || null);
+  updates.push('updated_at = CURRENT_TIMESTAMP');
+
+  const updateSql = `UPDATE iset_case_reminder SET ${updates.join(', ')} WHERE id = ? AND deleted_at IS NULL`;
+  params.push(reminderId);
+
+  try {
+    const [result] = await pool.query(updateSql, params);
+    if (!result.affectedRows) {
+      return res.status(404).json({ error: 'reminder_not_found' });
+    }
+    const reminder = await fetchReminderById(reminderId);
+    return res.json(reminder);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(404).json({ error: 'reminder_not_found' });
+    }
+    console.error(`PUT /api/reminders/${reminderId} failed:`, err.message);
+    return res.status(500).json({ error: 'failed_to_update_reminder' });
+  }
+});
+
+app.post('/api/reminders/:reminderId/complete', async (req, res) => {
+  const reminderId = Number.parseInt(req.params.reminderId, 10);
+  if (!Number.isInteger(reminderId) || reminderId <= 0) {
+    return res.status(400).json({ error: 'invalid_reminder_id' });
+  }
+  const body = req.body || {};
+
+  let completedAtValue;
+  try {
+    completedAtValue = parseReminderDateInput(body.completedAt ?? body.completed_at, 'completed_at');
+  } catch (err) {
+    if (err.code === REMINDER_DATE_ERROR) {
+      return res.status(400).json({ error: 'invalid_completed_at' });
+    }
+    throw err;
+  }
+  if (!completedAtValue) {
+    completedAtValue = new Date();
+  }
+
+  let completedByValue = coerceOptionalPositiveInt(body.completedByStaffProfileId ?? body.completed_by_staff_profile_id);
+  if (Number.isNaN(completedByValue)) {
+    return res.status(400).json({ error: 'invalid_completed_by_staff_profile_id' });
+  }
+
+  const actingStaffProfileId = req.staffProfile?.id || null;
+
+  let existing;
+  try {
+    existing = await fetchReminderById(reminderId);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(404).json({ error: 'reminder_not_found' });
+    }
+    console.error(`POST /api/reminders/${reminderId}/complete failed to load existing:`, err.message);
+    return res.status(500).json({ error: 'failed_to_complete_reminder' });
+  }
+  if (!existing) {
+    return res.status(404).json({ error: 'reminder_not_found' });
+  }
+
+  if (!Number.isInteger(completedByValue) || completedByValue <= 0) {
+    const existingCompletedBy = coerceOptionalPositiveInt(existing.completedByStaffProfileId);
+    if (Number.isInteger(existingCompletedBy) && existingCompletedBy > 0) {
+      completedByValue = existingCompletedBy;
+    } else {
+      completedByValue = actingStaffProfileId || null;
+    }
+  }
+
+  try {
+    const updateSql = `UPDATE iset_case_reminder
+      SET status = 'completed', completed_at = ?, completed_by_staff_profile_id = ?, updated_by_staff_profile_id = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND deleted_at IS NULL`;
+    const updateParams = [completedAtValue, Number.isInteger(completedByValue) ? completedByValue : null, actingStaffProfileId || null, reminderId];
+    const [result] = await pool.query(updateSql, updateParams);
+    if (!result.affectedRows) {
+      return res.status(404).json({ error: 'reminder_not_found' });
+    }
+    const reminder = await fetchReminderById(reminderId);
+    return res.json(reminder);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(404).json({ error: 'reminder_not_found' });
+    }
+    console.error(`POST /api/reminders/${reminderId}/complete failed:`, err.message);
+    return res.status(500).json({ error: 'failed_to_complete_reminder' });
+  }
+});
+
+// Case notes CRUD
 
 app.get('/api/cases/:caseId/notes', async (req, res) => {
   const caseId = parseInt(req.params.caseId, 10);
@@ -16545,31 +17503,82 @@ app.post('/api/cases/:caseId/notes', async (req, res) => {
   if (trimmed.length > CASE_NOTE_MAX_LENGTH) {
     return res.status(400).json({ error: 'body_too_long', max: CASE_NOTE_MAX_LENGTH });
   }
+  const followUpInput = Object.prototype.hasOwnProperty.call(req.body || {}, 'followUpAt')
+    ? req.body.followUpAt
+    : req.body?.follow_up_at;
+  let followUpDateValue;
+  try {
+    followUpDateValue = parseReminderDateInput(followUpInput, 'follow_up_at');
+  } catch (err) {
+    if (err.code === REMINDER_DATE_ERROR) {
+      return res.status(400).json({ error: 'invalid_follow_up_at' });
+    }
+    throw err;
+  }
+  const followUpDate = followUpDateValue === undefined ? null : followUpDateValue;
   const staffProfileId = req.staffProfile?.id || null;
   const authorUserId = getAuthenticatedNumericUserId(req);
+  const pinnedValue = isPinned ? 1 : 0;
+  let connection;
   try {
-    const caseExists = await ensureCaseExists(caseId);
-    if (!caseExists) {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const caseRow = await loadCaseIdentifiers(connection, caseId);
+    if (!caseRow) {
+      await connection.rollback();
       return res.status(404).json({ error: 'case_not_found' });
     }
-    const pinnedValue = isPinned ? 1 : 0;
     let insertResult;
     try {
-      [insertResult] = await pool.query(
-        'INSERT INTO iset_case_note (case_id, author_staff_profile_id, author_user_id, body, is_internal, is_pinned) VALUES (?,?,?,?,1,?)',
-        [caseId, staffProfileId, authorUserId, trimmed, pinnedValue]
+      [insertResult] = await connection.query(
+        'INSERT INTO iset_case_note (case_id, author_staff_profile_id, author_user_id, body, is_internal, is_pinned, follow_up_at) VALUES (?,?,?,?,1,?,?)',
+        [caseId, staffProfileId, authorUserId, trimmed, pinnedValue, followUpDate ?? null]
       );
     } catch (err) {
       if (isMissingTableErrorLocal(err)) {
+        await connection.rollback();
         return res.status(500).json({ error: 'case_notes_unavailable' });
       }
       throw err;
     }
-    const note = await fetchCaseNoteById(caseId, insertResult.insertId);
+    const noteId = insertResult.insertId;
+    if (followUpDate) {
+      try {
+        const reminderId = await createReminderForCaseNote(connection, {
+          caseId,
+          applicationId: caseRow.application_id || null,
+          noteId,
+          noteBody: trimmed,
+          dueAt: followUpDate,
+          staffProfileId,
+        });
+        await connection.query('UPDATE iset_case_note SET reminder_id = ? WHERE id = ?', [reminderId, noteId]);
+      } catch (err) {
+        if (isMissingTableErrorLocal(err)) {
+          await connection.rollback();
+          return res.status(500).json({ error: 'reminders_not_available' });
+        }
+        throw err;
+      }
+    }
+    await connection.commit();
+    const note = await fetchCaseNoteById(caseId, noteId);
     return res.status(201).json(note);
   } catch (err) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch {
+        // ignore rollback failure
+      }
+    }
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(500).json({ error: 'case_notes_unavailable' });
+    }
     console.error('POST /api/cases/:caseId/notes failed:', err.message);
     return res.status(500).json({ error: 'failed_to_create_note' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -16577,10 +17586,11 @@ app.put('/api/cases/:caseId/notes/:noteId', async (req, res) => {
   const caseId = parseInt(req.params.caseId, 10);
   const noteId = parseInt(req.params.noteId, 10);
   const { body: bodyInput, isPinned } = req.body || {};
+  const followUpInput = hasOwn(req.body || {}, 'followUpAt') ? req.body.followUpAt : req.body?.follow_up_at;
   if (!Number.isInteger(caseId) || caseId <= 0 || !Number.isInteger(noteId) || noteId <= 0) {
     return res.status(400).json({ error: 'invalid_identifier' });
   }
-  if (bodyInput === undefined && isPinned === undefined) {
+  if (bodyInput === undefined && isPinned === undefined && followUpInput === undefined) {
     return res.status(400).json({ error: 'no_fields_to_update' });
   }
   let trimmed;
@@ -16593,49 +17603,181 @@ app.put('/api/cases/:caseId/notes/:noteId', async (req, res) => {
       return res.status(400).json({ error: 'body_too_long', max: CASE_NOTE_MAX_LENGTH });
     }
   }
-  const updates = [];
-  const params = [];
-  if (bodyInput !== undefined) {
-    updates.push('body = ?');
-    params.push(trimmed);
-  }
-  if (isPinned !== undefined) {
-    updates.push('is_pinned = ?');
-    params.push(isPinned ? 1 : 0);
+  let parsedFollowUp;
+  if (followUpInput !== undefined) {
+    try {
+      parsedFollowUp = parseReminderDateInput(followUpInput, 'follow_up_at');
+    } catch (err) {
+      if (err.code === REMINDER_DATE_ERROR) {
+        return res.status(400).json({ error: 'invalid_follow_up_at' });
+      }
+      throw err;
+    }
+    if (parsedFollowUp === undefined) {
+      parsedFollowUp = null;
+    }
   }
   const staffProfileId = req.staffProfile?.id || null;
   const editorUserId = getAuthenticatedNumericUserId(req);
-  updates.push('updated_at = CURRENT_TIMESTAMP(3)');
-  updates.push('edited_at = CURRENT_TIMESTAMP(3)');
-  updates.push('edited_by_staff_profile_id = ?');
-  params.push(staffProfileId);
-  updates.push('edited_by_user_id = ?');
-  params.push(editorUserId);
+  let connection;
   try {
-    const caseExists = await ensureCaseExists(caseId);
-    if (!caseExists) {
-      return res.status(404).json({ error: 'case_not_found' });
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [rows] = await connection.query(
+      'SELECT id, case_id, body, is_pinned, follow_up_at, reminder_id FROM iset_case_note WHERE id = ? AND case_id = ? AND deleted_at IS NULL LIMIT 1 FOR UPDATE',
+      [noteId, caseId]
+    );
+    if (!rows.length) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'note_not_found' });
     }
-    let result;
+    const existing = rows[0];
+    const updates = [];
+    const params = [];
+    if (bodyInput !== undefined) {
+      updates.push('body = ?');
+      params.push(trimmed);
+    }
+    if (isPinned !== undefined) {
+      updates.push('is_pinned = ?');
+      params.push(isPinned ? 1 : 0);
+    }
+    const followUpProvided = followUpInput !== undefined;
+    if (followUpProvided) {
+      updates.push('follow_up_at = ?');
+      params.push(parsedFollowUp ?? null);
+    }
+    let reminderId = existing.reminder_id ? Number(existing.reminder_id) : null;
+    const noteBodyForReminder = bodyInput !== undefined ? trimmed : existing.body || '';
+    const existingFollowUpDate = existing.follow_up_at ? new Date(existing.follow_up_at) : null;
+
+    let caseIdentifiersCache = null;
+    const ensureCaseIdentifiers = async () => {
+      if (caseIdentifiersCache) return caseIdentifiersCache;
+      const identifiers = await loadCaseIdentifiers(connection, caseId);
+      caseIdentifiersCache = identifiers || { application_id: null };
+      return caseIdentifiersCache;
+    };
+
+    if (followUpProvided) {
+      if (parsedFollowUp) {
+        try {
+          if (reminderId) {
+            const updated = await updateReminderForCaseNote(connection, reminderId, {
+              noteId,
+              noteBody: noteBodyForReminder,
+              dueAt: parsedFollowUp,
+              staffProfileId,
+            });
+            if (!updated) {
+              const newReminderId = await createReminderForCaseNote(connection, {
+                caseId,
+                applicationId: (await ensureCaseIdentifiers())?.application_id || null,
+                noteId,
+                noteBody: noteBodyForReminder,
+                dueAt: parsedFollowUp,
+                staffProfileId,
+              });
+              reminderId = newReminderId;
+              updates.push('reminder_id = ?');
+              params.push(reminderId);
+            }
+          } else {
+            const newReminderId = await createReminderForCaseNote(connection, {
+              caseId,
+              applicationId: (await ensureCaseIdentifiers())?.application_id || null,
+              noteId,
+              noteBody: noteBodyForReminder,
+              dueAt: parsedFollowUp,
+              staffProfileId,
+            });
+            reminderId = newReminderId;
+            updates.push('reminder_id = ?');
+            params.push(reminderId);
+          }
+        } catch (err) {
+          if (isMissingTableErrorLocal(err)) {
+            await connection.rollback();
+            return res.status(500).json({ error: 'reminders_not_available' });
+          }
+          throw err;
+        }
+      } else {
+        if (reminderId) {
+          try {
+            await cancelReminderForCaseNote(connection, reminderId, staffProfileId);
+          } catch (err) {
+            if (isMissingTableErrorLocal(err)) {
+              await connection.rollback();
+              return res.status(500).json({ error: 'reminders_not_available' });
+            }
+            throw err;
+          }
+        }
+        updates.push('reminder_id = ?');
+        params.push(null);
+      }
+    } else if (bodyInput !== undefined && reminderId) {
+      try {
+        await updateReminderForCaseNote(connection, reminderId, {
+          noteId,
+          noteBody: noteBodyForReminder,
+          dueAt: existingFollowUpDate,
+          staffProfileId,
+        });
+      } catch (err) {
+        if (isMissingTableErrorLocal(err)) {
+          await connection.rollback();
+          return res.status(500).json({ error: 'reminders_not_available' });
+        }
+        throw err;
+      }
+    }
+
+    if (!updates.length) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'no_fields_to_update' });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP(3)');
+    updates.push('edited_at = CURRENT_TIMESTAMP(3)');
+    updates.push('edited_by_staff_profile_id = ?');
+    params.push(staffProfileId);
+    updates.push('edited_by_user_id = ?');
+    params.push(editorUserId);
+
     try {
-      [result] = await pool.query(
+      const [result] = await connection.query(
         `UPDATE iset_case_note SET ${updates.join(', ')} WHERE id = ? AND case_id = ? AND deleted_at IS NULL`,
         [...params, noteId, caseId]
       );
+      if (!result.affectedRows) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'note_not_found' });
+      }
     } catch (err) {
       if (isMissingTableErrorLocal(err)) {
+        await connection.rollback();
         return res.status(404).json({ error: 'note_not_found' });
       }
       throw err;
     }
-    if (!result.affectedRows) {
-      return res.status(404).json({ error: 'note_not_found' });
-    }
+
+    await connection.commit();
     const note = await fetchCaseNoteById(caseId, noteId);
     return res.json(note);
   } catch (err) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch {
+        // ignore rollback failure
+      }
+    }
     console.error('PUT /api/cases/:caseId/notes/:noteId failed:', err.message);
     return res.status(500).json({ error: 'failed_to_update_note' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -16647,30 +17789,60 @@ app.delete('/api/cases/:caseId/notes/:noteId', async (req, res) => {
   }
   const staffProfileId = req.staffProfile?.id || null;
   const editorUserId = getAuthenticatedNumericUserId(req);
+  let connection;
   try {
-    const caseExists = await ensureCaseExists(caseId);
-    if (!caseExists) {
-      return res.status(404).json({ error: 'case_not_found' });
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [rows] = await connection.query(
+      'SELECT reminder_id FROM iset_case_note WHERE id = ? AND case_id = ? AND deleted_at IS NULL LIMIT 1 FOR UPDATE',
+      [noteId, caseId]
+    );
+    if (!rows.length) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'note_not_found' });
     }
-    let result;
+    const reminderId = rows[0].reminder_id ? Number(rows[0].reminder_id) : null;
     try {
-      [result] = await pool.query(
-        'UPDATE iset_case_note SET deleted_at = CURRENT_TIMESTAMP(3), updated_at = CURRENT_TIMESTAMP(3), edited_at = CURRENT_TIMESTAMP(3), edited_by_staff_profile_id = ?, edited_by_user_id = ? WHERE id = ? AND case_id = ? AND deleted_at IS NULL',
+      const [result] = await connection.query(
+        'UPDATE iset_case_note SET deleted_at = CURRENT_TIMESTAMP(3), updated_at = CURRENT_TIMESTAMP(3), edited_at = CURRENT_TIMESTAMP(3), edited_by_staff_profile_id = ?, edited_by_user_id = ?, follow_up_at = NULL, reminder_id = NULL WHERE id = ? AND case_id = ? AND deleted_at IS NULL',
         [staffProfileId, editorUserId, noteId, caseId]
       );
+      if (!result.affectedRows) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'note_not_found' });
+      }
     } catch (err) {
       if (isMissingTableErrorLocal(err)) {
+        await connection.rollback();
         return res.status(404).json({ error: 'note_not_found' });
       }
       throw err;
     }
-    if (!result.affectedRows) {
-      return res.status(404).json({ error: 'note_not_found' });
+    if (reminderId) {
+      try {
+        await cancelReminderForCaseNote(connection, reminderId, staffProfileId);
+      } catch (err) {
+        if (isMissingTableErrorLocal(err)) {
+          await connection.rollback();
+          return res.status(500).json({ error: 'reminders_not_available' });
+        }
+        throw err;
+      }
     }
+    await connection.commit();
     return res.status(204).send();
   } catch (err) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch {
+        // ignore rollback failure
+      }
+    }
     console.error('DELETE /api/cases/:caseId/notes/:noteId failed:', err.message);
     return res.status(500).json({ error: 'failed_to_delete_note' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 // Secure messaging: case-scoped thread fetch
