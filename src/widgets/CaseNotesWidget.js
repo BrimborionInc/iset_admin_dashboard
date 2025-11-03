@@ -382,7 +382,7 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
 
   const emptyStateMessage = !caseId
     ? 'Case details are still loading. Notes will appear once the case data is available.'
-    : 'No notes yet. Use Add note to start the record.';
+    : 'No notes yet. Use New note to start the record.';
 
   return (
     <>
@@ -392,13 +392,8 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
             variant="h2"
             actions={
               <SpaceBetween direction="horizontal" size="xs">
-                <Button
-                  variant="primary"
-                  iconName="add-plus"
-                  onClick={openCreateModal}
-                  disabled={!canMutate || isLoading || isRefreshing}
-                >
-                  Add note
+                <Button iconName="add-plus" onClick={openCreateModal} disabled={!canMutate || isLoading || isRefreshing}>
+                  New note
                 </Button>
                 <Button
                   variant="icon"

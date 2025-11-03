@@ -3,26 +3,34 @@ import React from "react";
 const CaseWorkspaceHelp = () => (
   <div>
     <p>
-      The case workspace is where caseworkers and program admins update action plans, interventions, finances, and
-      documentation for a single ISET case.
+      The case workspace brings everything about a single case into one configurable board. Drag widgets to match
+      your workflow, resize them for more space, or remove items you do not need. The layout remembers your
+      choices and can be reset at any time from the widget menu.
     </p>
 
-    <h3>Workflow</h3>
+    <h3>Getting orientated</h3>
     <ul>
-      <li>Review the case header to confirm you&apos;re working with the correct client and agreement.</li>
-      <li>Select an action plan, edit interventions, and attach required documents.</li>
-      <li>Reconcile finance and compliance warnings before generating the ILMP and finance exports.</li>
+      <li>Start with the Case header to double-check the client, agreement, and assigned teammate.</li>
+      <li>Use the board navigation icons (⋮) to remove widgets or access additional settings.</li>
+      <li>Select <em>Add widget</em> to open the palette and drag optional panels such as Finance or Compliance into view.</li>
     </ul>
 
-    <h3>Next steps</h3>
+    <h3>Working the case</h3>
     <ul>
-      <li>Wire API hooks (`/api/cases`, `/api/action-plans`, `/api/interventions`, `/api/finance`, `/api/compliance`).</li>
-      <li>Add optimistic updates and error handling for each widget&apos;s CRUD flow.</li>
-      <li>Propagate validation results back to the portfolio dashboard so status badges stay current.</li>
+      <li>Keep plans and interventions current so ILMP data, reminders, and reports reflect the latest decisions.</li>
+      <li>Pin important notes or set follow-up dates to raise reminders on the Case calendar.</li>
+      <li>Check Supporting documents and Secure messaging for new evidence or client updates before closing tasks.</li>
+    </ul>
+
+    <h3>Tips</h3>
+    <ul>
+      <li>Use the Reset layout button if a colleague needs the default view again.</li>
+      <li>The workspace automatically refreshes after edits, but you can use individual widget refresh buttons to see team changes instantly.</li>
+      <li>Calendar events combine action-plan milestones and reminders that you (or automation) create, giving a single view of upcoming obligations.</li>
     </ul>
   </div>
 );
 
-CaseWorkspaceHelp.aiContext = `You are guiding a user through the ISET Case Dashboard. It manages a single case with action plans, interventions, finance, compliance, documents, and export previews.`;
+CaseWorkspaceHelp.aiContext = `You are guiding a caseworker through the Case Workspace board. Explain how to move widgets, add from the palette, and use the header, plans, notes, calendar, documents, and messaging panels together to progress a case.`;
 
 export default CaseWorkspaceHelp;

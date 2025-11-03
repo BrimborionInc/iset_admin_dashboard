@@ -3,22 +3,25 @@ import React from "react";
 const CaseWorkspaceCaseHeaderHelp = () => (
   <div>
     <p>
-      The case header summarises key client and agreement information and provides quick actions to assign, refresh,
-      or close the case.
+      Use the case header as your quick briefing. It highlights who the case belongs to, which agreement is in play,
+      and which teammate is currently responsible. Review it before making changes so every update lands on the right
+      record.
     </p>
 
-    <h3>Key fields</h3>
+    <h3>What to check</h3>
     <ul>
-      <li>Client name, date of birth, and region.</li>
-      <li>Current agreement number, owner, and status.</li>
-      <li>Quick actions to refresh data, reassign, or mark ready to close.</li>
+      <li><strong>Client profile:</strong> Name, identifiers, region, and primary contact information.</li>
+      <li><strong>Agreement snapshot:</strong> Funding agreement number, status, start and end dates.</li>
+      <li><strong>Ownership:</strong> Assigned staff member and escalation contacts. Reassign directly from this panel.</li>
+      <li><strong>Quick actions:</strong> Refresh data, lock the case, or mark it ready to close once all steps are complete.</li>
     </ul>
 
-    <h3>When to use</h3>
-    <p>
-      Before editing intervention details, confirm ownership and agreement context so updates are saved to the right
-      record and budget pot.
-    </p>
+    <h3>Best practice</h3>
+    <ul>
+      <li>Confirm you have the correct case before editing plans or finances.</li>
+      <li>Update ownership after hand-offs so reminders and dashboards stay accurate.</li>
+      <li>Refresh if another teammate has made changes elsewhere in the workspace.</li>
+    </ul>
   </div>
 );
 

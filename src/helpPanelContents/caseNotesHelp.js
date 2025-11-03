@@ -23,6 +23,10 @@ const CaseNotesHelp = () => (
         find.
       </li>
       <li>
+        <strong>Set follow-up dates:</strong> Adding a date will create a reminder on the Case calendar so deadlines do
+        not slip.
+      </li>
+      <li>
         <strong>Refresh anytime:</strong> Use the refresh icon after collaborating with others to see their latest
         additions.
       </li>

@@ -4,26 +4,28 @@ const CaseCalendarHelp = () => (
   <div>
     <h2>Case calendar</h2>
     <p>
-      The case calendar surfaces upcoming and historical reminders, deadlines, and milestones associated
-      with the selected case or application. Items can originate from tasks, workflow automation, or manual
-      reminders created by the case team.
+      Stay on top of deadlines, reminders, and milestones for this case. The calendar highlights dates with activity,
+      while the list view provides filtering and sorting when you need detail.
     </p>
-    <h3>How to use</h3>
+
+    <h3>What appears here?</h3>
     <ul>
-      <li>Use the view selector to switch between upcoming, past, or all events.</li>
-      <li>Filter the list to locate specific reminders by title, type, or owner.</li>
-      <li>Future iterations will allow you to add new reminders and acknowledge completed work directly.</li>
+      <li>Action-plan and intervention start / end dates.</li>
+      <li>Reminders logged from case notes (follow-up dates) or other automation.</li>
+      <li>Upcoming tasks you have been assigned, plus recent items for quick review.</li>
     </ul>
-    <p>
-      While the backend integration is in progress, the widget shows representative sample data so the team
-      can validate layout and interactions.
-    </p>
+
+    <h3>Tips</h3>
+    <ul>
+      <li>Click a date to view the events in the right-hand panel and see next steps or owners.</li>
+      <li>Use <em>List view</em> to filter by title, category, or severity when the month view gets busy.</li>
+      <li>Colour badges indicate urgency: <em>Overdue</em>, <em>Due soon</em>, and <em>On track</em>.</li>
+      <li>If the calendar looks empty, confirm the workspace toggle is set to use live case data.</li>
+    </ul>
   </div>
 );
 
 CaseCalendarHelp.aiContext = `
-You are assisting with the Case Calendar widget inside the admin Case Workspace or Application Assessment dashboard.
-The Widget lists reminders, deadlines, and timeline events for a case/applicant. It can toggle between upcoming and past
-items and will later integrate with the reminders/task engine (CR-0013).`;
+You are assisting with the Case Calendar widget inside the Case Workspace. It shows reminders and key dates from action plans, interventions, and follow-up tasks. Explain the calendar vs. list views, colour coding, and how to drill into events.`;
 
 export default CaseCalendarHelp;

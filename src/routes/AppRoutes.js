@@ -72,9 +72,7 @@ import ContactCommunicationsHelp from '../helpPanelContents/contactCommunication
 import PortfolioDashboardPage from '../pages/Caseworking/PortfolioDashboardPage.jsx';
 import PortfolioDashboardHelp from '../helpPanelContents/portfolioDashboardHelp.js';
 import CaseWorkspacePage from '../pages/Caseworking/CaseWorkspacePage.jsx';
-import CaseWorkspaceNewPage from '../pages/Caseworking/CaseWorkspaceNewPage.jsx';
 import CaseWorkspaceHelp from '../helpPanelContents/caseWorkspaceHelp.js';
-import CaseWorkspaceNewHelp from '../helpPanelContents/caseWorkspaceNewHelp.js';
 import EsdcSubmissionsOverviewPage from '../pages/esdc/EsdcSubmissionsOverviewPage.jsx';
 import EsdcParticipantSubmissionsPage from '../pages/esdc/EsdcParticipantSubmissionsPage.jsx';
 import EsdcReportingPackagesPage from '../pages/esdc/EsdcReportingPackagesPage.jsx';
@@ -593,38 +591,6 @@ const AppRoutes = ({
               </SpaceBetween>
             ),
             EsdcReportingHelp.aiContext
-          )}
-        </Guard>
-      </Route>
-
-      <Route path="/iset/cases/new">
-        <Guard path="/iset/cases/new">
-          {renderContent(
-            CaseWorkspaceNewPage,
-            [
-              { text: 'Home', href: '/' },
-              { text: 'ISET Case Portfolio', href: '/iset/cases' },
-              { text: 'Case Management (new)', href: '/iset/cases/new' }
-            ],
-            'Case Management (new)',
-            <CaseWorkspaceNewHelp />,
-            (
-              <SpaceBetween size="xs" direction="horizontal">
-                <Button
-                  iconName="add-plus"
-                  onClick={() => window.dispatchEvent(new CustomEvent('iset-case-workspace-new:openPalette'))}
-                >
-                  Add widget
-                </Button>
-                <Button
-                  iconName="refresh"
-                  onClick={() => window.dispatchEvent(new CustomEvent('iset-case-workspace-new:resetLayout'))}
-                >
-                  Reset layout
-                </Button>
-              </SpaceBetween>
-            ),
-            CaseWorkspaceNewHelp.aiContext
           )}
         </Guard>
       </Route>

@@ -25,7 +25,7 @@ import CaseWorkspaceExportPreviewHelp from "../../helpPanelContents/caseWorkspac
 import CaseWorkspaceHelp from "../../helpPanelContents/caseWorkspaceHelp.js";
 import { CaseWorkspaceProvider } from "./caseWorkspace/CaseWorkspaceContext.jsx";
 
-const STORAGE_KEY = "iset-case-workspace-layout-v11";
+const STORAGE_KEY = "iset-case-workspace-layout-v12";
 
 const widgetRegistry = {
   "supporting-documents": {
@@ -142,12 +142,12 @@ const widgetRegistry = {
 
 const defaultLayout = [
   { id: "caseHeader", rowSpan: 2, columnSpan: 4 },
-  { id: "actionPlans", rowSpan: 4, columnSpan: 4 },
-  { id: "interventions", rowSpan: 5, columnSpan: 4 },
-  { id: "case-calendar", rowSpan: 4, columnSpan: 4 },
-  { id: "case-notes", rowSpan: 4, columnSpan: 4 },
-  { id: "supporting-documents", rowSpan: 4, columnSpan: 4 },
-  { id: "secure-messaging", rowSpan: 5, columnSpan: 4 },
+  { id: "actionPlans", rowSpan: 4, columnSpan: 2 },
+  { id: "interventions", rowSpan: 4, columnSpan: 2 },
+  { id: "case-calendar", rowSpan: 4, columnSpan: 2 },
+  { id: "case-notes", rowSpan: 4, columnSpan: 2 },
+  { id: "supporting-documents", rowSpan: 4, columnSpan: 2 },
+  { id: "secure-messaging", rowSpan: 4, columnSpan: 2 },
 ];
 
 const exportLayout = items =>
