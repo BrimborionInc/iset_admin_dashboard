@@ -329,7 +329,27 @@ const AppRoutes = ({
             ConfigurationSettings,
             [{ text: 'Home', href: '/' }, { text: 'Configuration Settings', href: '/configuration-settings' }],
             'Configuration Settings',
-            'configurationSettings'
+            'configurationSettings',
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('configuration-dashboard:openPalette'))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('configuration-dashboard:resetLayout'))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            )
           )}
         </Guard>
       </Route>

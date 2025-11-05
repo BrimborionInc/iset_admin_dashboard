@@ -1,4 +1,4 @@
-# Events Tracking Overhaul
+ï»¿# Events Tracking Overhaul
 
 ## Purpose and Scope
 - Establish a refreshed, end-to-end strategy for logging and surfacing ISET application events.
@@ -45,7 +45,7 @@
 - `shared/events/index.js` returns pooled helpers (`emit`, `emitCaseEvent`, `getCaseTimeline`, `getEventFeed`, `markRead`, capture rule loaders) bound to the MySQL pool supplied by `isetadminserver.js`.
 - `shared/events/emitter.js` enforces known event types (via `getEventType`), requires case subjects for case events, ensures payloads are objects, honours capture toggles, writes to `iset_event_entry`, and enqueues serialized payloads into `iset_event_outbox` (worker pending). Missing tables trigger logging and population of an in-memory cache so early environments can continue to function.
 - `shared/events/service.js` builds the capture state by overlaying `iset_runtime_config` updates onto the catalog, tracks `updated_at`/`updated_by`, and invalidates the cache whenever capture rules change.
-- `shared/events/catalog.js` defines the current taxonomy across `application_lifecycle`, `case_lifecycle`, `assessment`, `documents`, `messaging`, `notes`, and `system` categories with severity/source metadata and draft/locked flags.
+- `shared/events/catalog.js` defines the current taxonomy across `application_submission`, `case_lifecycle`, `assessment`, `documents`, `messaging`, `notes`, and `system` categories with severity/source metadata and draft/locked flags.
 
 ### HTTP API wiring (`isetadminserver.js`)
 - Instantiates the shared service once (reusing the MySQL pool) and exposes `/api/events`, `/api/admin/event-capture-rules` (GET/PATCH for SysAdmin), `/api/cases/:case_id/events`, `/api/events/feed`, `/api/events` (POST), and `/api/events/:eventId/read`.
@@ -160,7 +160,7 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
   ```json
   {
     "scope": "events_capture",
-    "k": "public_portal.application.saved_draft",
+    "k": "application_submission.draft_saved",
     "v": {
       "enabled": true,
       "last_changed_by": 42,
@@ -176,10 +176,11 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 ### Seeded Catalogue (`iset_event_type`)
 | event_type | Label | Notes |
 | --- | --- | --- |
-| application_created | Application created | Insert-only catalogue entry; not currently emitted in admin backend |
-| application_draft_deleted | Application draft deleted | Portal-side concept; no admin emitter yet |
-| application_saved_draft | Application draft saved | Portal-side draft saves |
+| application_started | Application started | First successful intake step transition with applicant input |
+| draft_saved | Draft saved for later | Explicit â€œSave and finish laterâ€ action |
+| draft_deleted | Draft deleted | Applicant removes a saved draft from their dashboard |
 | application_submitted | Application submitted | Visible in dev data; emitted by portal submission flow |
+| submission_acknowledged | Submission acknowledged | Confirmation screen rendered with tracking details |
 | case_assigned | Case assigned | Seeded but no active emitter in current admin code |
 | case_unassigned | Case unassigned | Seeded but no active emitter |
 | document_uploaded | Document uploaded | Present in live data; emitted when files are adopted |
@@ -194,16 +195,16 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 - status_changed *(inserted by backend helper; not registered in the catalogue)*
 
 ### Backend Auto-Emitted (bypassing catalogue)
-- status_changed — added in `PUT /api/cases/:id` when coordinator status changes.
-- assessment_submitted — emitted alongside assessment submission.
-- nwac_review_submitted — emitted when NWAC review payload is present.
-- case_approved / case_rejected — sent by the coordinator widget via `/api/events`.
-- documents_overdue — referenced by reporting queries; no matching emitter located.
+- status_changed ï¿½ added in `PUT /api/cases/:id` when coordinator status changes.
+- assessment_submitted ï¿½ emitted alongside assessment submission.
+- nwac_review_submitted ï¿½ emitted when NWAC review payload is present.
+- case_approved / case_rejected ï¿½ sent by the coordinator widget via `/api/events`.
+- documents_overdue ï¿½ referenced by reporting queries; no matching emitter located.
 
 ### Frontend Expectations & Draft Event Types
-- case_reassigned — rendered in `CaseUpdates` widget, but no current emitter.
-- note_added — expected by `CaseUpdates`; relies on future notes feature.
-- followup_due — expected by `CaseUpdates`; likely tied to task SLA logic.
+- case_reassigned ï¿½ rendered in `CaseUpdates` widget, but no current emitter.
+- note_added ï¿½ expected by `CaseUpdates`; relies on future notes feature.
+- followup_due ï¿½ expected by `CaseUpdates`; likely tied to task SLA logic.
 
 ### Gaps Identified
 - Several emitted event types (`status_changed`, `assessment_submitted`, `nwac_review_submitted`, `case_approved`, `case_rejected`) are missing from `iset_event_type`, so metadata (label, alert variant) is unavailable in the UI.

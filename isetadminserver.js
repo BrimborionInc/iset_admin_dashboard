@@ -6906,6 +6906,8 @@ app.patch('/api/config/runtime/locking', async (req, res) => {
 // Persistent (filesystem JSON) multi-scope auth configuration
 // Public-only fields: maxPasswordResetsPerDay, anomalyProtection
 const authConfigPath = process.env.AUTH_CONFIG_FILE || path.resolve(__dirname, 'db', 'auth-config.json');
+const AUTH_CONFIG_SCOPE = 'admin';
+const AUTH_CONFIG_KEY = 'auth.config';
 
 function deepMerge(to, from) {
   if (!from || typeof from !== 'object') return to;
@@ -6950,30 +6952,94 @@ function defaultAuthConfig() {
 
 function loadAuthConfigFromFile() {
   try {
-    if (fs.existsSync(authConfigPath)) {
-      const raw = fs.readFileSync(authConfigPath, 'utf8');
-      const parsed = JSON.parse(raw);
-      return deepMerge(defaultAuthConfig(), parsed);
-    }
+    if (!fs.existsSync(authConfigPath)) return null;
+    const raw = fs.readFileSync(authConfigPath, 'utf8');
+    return JSON.parse(raw);
   } catch (e) {
-    console.warn('[auth-config] Failed reading persisted auth config, using defaults:', e.message);
+    console.warn('[auth-config] Failed reading fallback auth config file:', e.message);
+    return null;
   }
-  return defaultAuthConfig();
 }
 
-function persistAuthConfig(cfg) {
+async function ensureRuntimeConfigTable() {
+  if (!pool) return;
+  await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+}
+
+async function readAuthConfigFromDatabase() {
+  if (!pool) return null;
   try {
-    const dir = path.dirname(authConfigPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const tmp = authConfigPath + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8');
-    fs.renameSync(tmp, authConfigPath);
+    await ensureRuntimeConfigTable();
+    const [rows] = await pool.query("SELECT v FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1", [AUTH_CONFIG_SCOPE, AUTH_CONFIG_KEY]);
+    if (!rows || rows.length === 0) return null;
+    let payload = rows[0].v;
+    if (payload && typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch (err) {
+        console.warn('[auth-config] Invalid JSON in runtime_config, ignoring stored value:', err.message);
+        return null;
+      }
+    }
+    return payload && typeof payload === 'object' ? payload : null;
   } catch (e) {
-    console.warn('[auth-config] Persist failed:', e.message);
+    if (!isMissingTableErrorLocal(e)) {
+      console.warn('[auth-config] Failed to load config from runtime_config:', e.message);
+    }
+    return null;
   }
 }
 
-const __authConfig = global.__authConfig || (global.__authConfig = loadAuthConfigFromFile());
+function applyAuthConfigSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return;
+  const merged = deepMerge(defaultAuthConfig(), snapshot);
+  __authConfig.admin = merged.admin;
+  __authConfig.public = merged.public;
+}
+
+async function persistAuthConfig(cfg) {
+  if (!cfg) return;
+  const serialisable = {
+    admin: cfg.admin,
+    public: cfg.public,
+  };
+  let persistedToDb = false;
+  if (pool) {
+    try {
+      await ensureRuntimeConfigTable();
+      await pool.query(
+        "INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP",
+        [AUTH_CONFIG_SCOPE, AUTH_CONFIG_KEY, JSON.stringify(serialisable)]
+      );
+      persistedToDb = true;
+    } catch (e) {
+      console.warn('[auth-config] Persist to runtime_config failed, attempting filesystem fallback:', e.message);
+    }
+  }
+  if (!persistedToDb) {
+    try {
+      const dir = path.dirname(authConfigPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const tmp = authConfigPath + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(serialisable, null, 2), 'utf8');
+      fs.renameSync(tmp, authConfigPath);
+    } catch (e) {
+      console.warn('[auth-config] Filesystem persist failed:', e.message);
+    }
+  }
+}
+
+const __authConfig = global.__authConfig || (global.__authConfig = defaultAuthConfig());
+applyAuthConfigSnapshot(loadAuthConfigFromFile());
+
+async function hydrateAuthConfigFromDatabase() {
+  try {
+    const snapshot = await readAuthConfigFromDatabase();
+    if (snapshot) applyAuthConfigSnapshot(snapshot);
+  } catch (e) {
+    console.warn('[auth-config] Hydration from database failed:', e.message);
+  }
+}
 
 function sysAdminOnly(req) {
   const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
@@ -7112,27 +7178,27 @@ app.patch('/api/admin/event-capture-rules', async (req, res) => {
 
 
 // PATCH auth session TTLs (supports scope=admin|public, fallback both if none)
-app.patch('/api/config/runtime/auth-session', (req, res) => {
+app.patch('/api/config/runtime/auth-session', async (req, res) => {
   try {
     if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
     const scope = (req.query.scope || '').toLowerCase();
-    if (scope && !['admin','public'].includes(scope)) return res.status(400).json({ error: 'invalid_scope' });
+    if (scope && !['admin', 'public'].includes(scope)) return res.status(400).json({ error: 'invalid_scope' });
     const ttl = (req.body || {}).tokenTtl || {};
     const apply = target => {
-      ['access','id','refresh','frontendIdle','absolute'].forEach(k => { if (ttl[k] !== undefined) target.tokenTtl[k] = ttl[k]; });
+      ['access', 'id', 'refresh', 'frontendIdle', 'absolute'].forEach(k => { if (ttl[k] !== undefined) target.tokenTtl[k] = ttl[k]; });
     };
-  if (scope) apply(__authConfig[scope]); else { apply(__authConfig.admin); apply(__authConfig.public); }
-  persistAuthConfig(__authConfig);
-  res.json({ tokenTtl: scope ? __authConfig[scope].tokenTtl : { ...__authConfig.admin.tokenTtl } });
+    if (scope) apply(__authConfig[scope]); else { apply(__authConfig.admin); apply(__authConfig.public); }
+    await persistAuthConfig(__authConfig);
+    res.json({ tokenTtl: scope ? __authConfig[scope].tokenTtl : { ...__authConfig.admin.tokenTtl } });
   } catch (e) { res.status(500).json({ error: 'auth_session_update_failed', message: e.message }); }
 });
 
 // PATCH auth policy (scope)
-app.patch('/api/config/runtime/auth-policy', (req, res) => {
+app.patch('/api/config/runtime/auth-policy', async (req, res) => {
   try {
     if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
     const scope = (req.query.scope || '').toLowerCase();
-    if (scope && !['admin','public'].includes(scope)) return res.status(400).json({ error: 'invalid_scope' });
+    if (scope && !['admin', 'public'].includes(scope)) return res.status(400).json({ error: 'invalid_scope' });
     const body = req.body || {};
     const apply = target => {
       if (body.mfa && typeof body.mfa.mode === 'string') target.policy.mfaMode = body.mfa.mode;
@@ -7150,7 +7216,7 @@ app.patch('/api/config/runtime/auth-policy', (req, res) => {
       const target = scope ? __authConfig[scope] : __authConfig.public;
       target.policy.anomalyProtection = String(body.anomalyProtection);
     }
-    persistAuthConfig(__authConfig);
+    await persistAuthConfig(__authConfig);
     const src = scope ? __authConfig[scope] : __authConfig.admin;
     const pub = __authConfig.public;
     const base = {
@@ -7168,16 +7234,16 @@ app.patch('/api/config/runtime/auth-policy', (req, res) => {
 });
 
 // Federation sync (dummy timestamp update for now)
-app.post('/api/config/runtime/auth-federation-sync', (req, res) => {
+app.post('/api/config/runtime/auth-federation-sync', async (req, res) => {
   try {
     if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
     const scope = (req.query.scope || '').toLowerCase();
-    if (scope && !['admin','public'].includes(scope)) return res.status(400).json({ error: 'invalid_scope' });
+    if (scope && !['admin', 'public'].includes(scope)) return res.status(400).json({ error: 'invalid_scope' });
     const now = new Date().toISOString();
     const apply = target => { target.policy.federation.lastSync = now; };
-  if (scope) apply(__authConfig[scope]); else { apply(__authConfig.admin); apply(__authConfig.public); }
-  persistAuthConfig(__authConfig);
-  res.json({ lastSync: now });
+    if (scope) apply(__authConfig[scope]); else { apply(__authConfig.admin); apply(__authConfig.public); }
+    await persistAuthConfig(__authConfig);
+    res.json({ lastSync: now });
   } catch (e) { res.status(500).json({ error: 'auth_federation_sync_failed', message: e.message }); }
 });
 
@@ -7438,6 +7504,9 @@ const dbConfig = {
 };
 
 pool = mysql.createPool(dbConfig);
+hydrateAuthConfigFromDatabase().catch(err => {
+  console.warn('[auth-config] Initial hydration failed:', err.message);
+});
 
 app.get('/api/config/sla-targets', async (req, res) => {
   try {

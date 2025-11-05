@@ -1,40 +1,103 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { Button, SpaceBetween, Box, Select, FormField, StatusIndicator, Toggle, ColumnLayout, Input, Multiselect, Header, Badge, Checkbox, Modal, Tabs, Alert, Link, Table } from '@cloudscape-design/components';
-import { Board, BoardItem } from '@cloudscape-design/board-components';
-import { getIdTokenClaims, getRoleFromClaims, isIamOn, hasValidSession } from '../auth/cognito';
-import { apiFetch } from '../auth/apiClient';
-import { readDemoNavigationVisibility, writeDemoNavigationVisibility, subscribeToDemoNavigationVisibility, DEMO_NAVIGATION_ROLES } from '../utils/demoNavigationVisibility';
-import { useDarkMode as useDarkModeContext } from '../context/DarkModeContext';
 
-// Centralized JSON fetch using apiFetch (ensures correct API base + auth headers)
-async function fetchJSON(path, opts) {
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import Board from "@cloudscape-design/board-components/board";
+import {
+  Badge,
+  Box,
+  Button,
+  Input,
+  Modal,
+  SpaceBetween,
+} from "@cloudscape-design/components";
+import AiConfigWidget from "../widgets/AiConfigWidget";
+import AuthConfigWidget from "../widgets/AuthConfigWidget";
+import LockingConfigWidget from "../widgets/LockingConfigWidget";
+import SlaConfigWidget from "../widgets/SlaConfigWidget";
+import SessionAuditWidget from "../widgets/SessionAuditWidget";
+import CorsOriginsWidget from "../widgets/CorsOriginsWidget";
+import EnvironmentWidget from "../widgets/EnvironmentWidget";
+import SecretsWidget from "../widgets/SecretsWidget";
+import AppearanceWidget from "../widgets/AppearanceWidget";
+import AiConfigWidgetHelp from "../helpPanelContents/aiConfigWidgetHelp";
+import AuthWidgetHelp from "../helpPanelContents/authWidgetHelp";
+import SessionAuditWidgetHelp from "../helpPanelContents/sessionAuditWidgetHelp";
+import CorsOriginsWidgetHelp from "../helpPanelContents/corsOriginsWidgetHelp";
+import EnvironmentWidgetHelp from "../helpPanelContents/environmentWidgetHelp";
+import SlaWidgetHelp from "../helpPanelContents/slaWidgetHelp";
+import SecretsWidgetHelp from "../helpPanelContents/secretsWidgetHelp";
+import AppearanceWidgetHelp from "../helpPanelContents/appearanceWidgetHelp";
+import LockingSettingsHelp from "../helpPanelContents/lockingSettingsHelp";
+import { apiFetch } from "../auth/apiClient";
+import {
+  getIdTokenClaims,
+  getRoleFromClaims,
+  hasValidSession,
+  isIamOn,
+} from "../auth/cognito";
+import { useDarkMode as useDarkModeContext } from "../context/DarkModeContext";
+import {
+  readDemoNavigationVisibility,
+  writeDemoNavigationVisibility,
+  subscribeToDemoNavigationVisibility,
+  DEMO_NAVIGATION_ROLES,
+} from "../utils/demoNavigationVisibility";
+
+async function fetchJSON(path, opts = {}) {
   const res = await apiFetch(path, opts);
   const text = await res.text();
   if (!res.ok) {
-    // Attempt to parse json error, else include snippet
-    try { const j = JSON.parse(text); throw new Error(j.error || j.message || `Request failed ${res.status}`); } catch {
-      const snippet = text.slice(0, 120).replace(/\s+/g,' ').trim();
-      throw new Error(`Request failed ${res.status}: ${snippet || 'no body'}`);
+    try {
+      const parsed = JSON.parse(text);
+      throw new Error(parsed.error || parsed.message || `Request failed ${res.status}`);
+    } catch {
+      const snippet = text.slice(0, 120).replace(/\s+/g, " ").trim();
+      throw new Error(`Request failed ${res.status}: ${snippet || "no body"}`);
     }
-  };
-  try { return JSON.parse(text); } catch {
+  }
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
     const looksHtml = /<!doctype html/i.test(text);
-    throw new Error(looksHtml ? 'Received HTML instead of JSON (check API base/port or proxy config)' : 'Invalid JSON response');
+    throw new Error(
+      looksHtml
+        ? "Received HTML instead of JSON (check API base/port or proxy config)"
+        : "Invalid JSON response",
+    );
   }
 }
 
-// Local placeholder list until dynamic fetch resolves
-const STATIC_MODEL_PLACEHOLDERS = [
-  { label: 'OpenAI GPT-5 (default)', value: 'openai/gpt-5' },
-  { label: 'Mistral 7B Instruct (fallback)', value: 'mistralai/mistral-7b-instruct' },
-  { label: 'GPT-4.1 Mini', value: 'openai/gpt-4.1-mini' },
-];
-
 const SLA_STAGE_PLACEHOLDER = [
-  { stage_key: 'intake_triage', display_name: 'Intake triage', target_hours: 24, description: 'Time to first open and triage new application.' },
-  { stage_key: 'assignment', display_name: 'Assignment', target_hours: 72, description: 'Time to assign a coordinator or assessor after triage.' },
-  { stage_key: 'assessment', display_name: 'Assessment', target_hours: 240, description: 'Working time for assessors to complete review (10 days).' },
-  { stage_key: 'program_decision', display_name: 'Program decision', target_hours: 48, description: 'Decision turnaround once assessment is complete.' }
+  {
+    stage_key: "intake_triage",
+    display_name: "Intake triage",
+    target_hours: 24,
+    description: "Time to first open and triage new application.",
+  },
+  {
+    stage_key: "assignment",
+    display_name: "Assignment",
+    target_hours: 72,
+    description: "Time to assign a coordinator or assessor after triage.",
+  },
+  {
+    stage_key: "assessment",
+    display_name: "Assessment",
+    target_hours: 240,
+    description: "Working time for assessors to complete review (10 days).",
+  },
+  {
+    stage_key: "program_decision",
+    display_name: "Program decision",
+    target_hours: 48,
+    description: "Decision turnaround once assessment is complete.",
+  },
 ];
 
 const SLA_STAGE_LABELS = SLA_STAGE_PLACEHOLDER.reduce((acc, item) => {
@@ -43,121 +106,448 @@ const SLA_STAGE_LABELS = SLA_STAGE_PLACEHOLDER.reduce((acc, item) => {
 }, {});
 
 const DEFAULT_LOCKING_CONFIG = {
-  mode: 'optimistic',
+  mode: "optimistic",
   lockTtlMinutes: 15,
   heartbeatMinutes: 2,
 };
 
 const LOCKING_MODE_OPTIONS = [
-  { label: 'Optimistic only', value: 'optimistic' },
-  { label: 'Optimistic + Pessimistic', value: 'pessimistic' },
+  { label: "Optimistic only", value: "optimistic" },
+  { label: "Optimistic + Pessimistic", value: "pessimistic" },
 ];
 
-const LOCKING_HEADER_DESCRIPTION = 'Configure pessimistic locking for application edits. Optimistic version checks remain enabled in all modes; enabling pessimistic locking adds a database lock so only one user can edit at a time within the configured timeout.';
+const LOCKING_HEADER_DESCRIPTION =
+  "Configure pessimistic locking for application edits. Optimistic version checks remain enabled in all modes; enabling pessimistic locking adds a database lock so only one user can edit at a time within the configured timeout.";
 
-export default function ConfigurationSettings({ toggleHelpPanel }) {
+const STORAGE_KEY = "configuration-dashboard-layout-v1";
+
+const widgetRegistry = {
+  ai: {
+    id: "ai",
+    defaultRowSpan: 5,
+    defaultColumnSpan: 2,
+    component: AiConfigWidget,
+    title: "AI / LLM Configuration",
+    description: "Tune the default AI model, generation parameters, and fallback behaviour.",
+    helpComponent: AiConfigWidgetHelp,
+    helpTitle: "AI configuration",
+    aiContext: AiConfigWidgetHelp?.aiContext,
+  },
+  auth: {
+    id: "auth",
+    defaultRowSpan: 4,
+    defaultColumnSpan: 2,
+    component: AuthConfigWidget,
+    title: "Authentication",
+    description: "Manage session lifetimes and security policy for admin and applicant portals.",
+    helpComponent: AuthWidgetHelp,
+    helpTitle: "Authentication",
+    aiContext: AuthWidgetHelp?.aiContext,
+  },
+  locking: {
+    id: "locking",
+    defaultRowSpan: 4,
+    defaultColumnSpan: 2,
+    component: LockingConfigWidget,
+    title: "Record locking",
+    description: LOCKING_HEADER_DESCRIPTION,
+    helpComponent: LockingSettingsHelp,
+    helpTitle: "Record locking",
+    aiContext: LockingSettingsHelp?.aiContext,
+  },
+  slaConfig: {
+    id: "slaConfig",
+    defaultRowSpan: 3,
+    defaultColumnSpan: 2,
+    component: SlaConfigWidget,
+    title: "SLA configuration",
+    description: "Baseline SLA targets for workflow stages.",
+    helpComponent: SlaWidgetHelp,
+    helpTitle: "SLA configuration",
+    aiContext: SlaWidgetHelp?.aiContext,
+  },
+  sessionAudit: {
+    id: "sessionAudit",
+    defaultRowSpan: 3,
+    defaultColumnSpan: 2,
+    component: SessionAuditWidget,
+    title: "Session audit",
+    description: "Recent session activity and maintenance tools.",
+    helpComponent: SessionAuditWidgetHelp,
+    helpTitle: "Session audit",
+    aiContext: SessionAuditWidgetHelp?.aiContext,
+  },
+  cors: {
+    id: "cors",
+    defaultRowSpan: 2,
+    defaultColumnSpan: 2,
+    component: CorsOriginsWidget,
+    title: "CORS / Origins",
+    description: "Allowed browser origins for the public portal.",
+    helpComponent: CorsOriginsWidgetHelp,
+    helpTitle: "CORS origins",
+    aiContext: CorsOriginsWidgetHelp?.aiContext,
+  },
+  env: {
+    id: "env",
+    defaultRowSpan: 4,
+    defaultColumnSpan: 2,
+    component: EnvironmentWidget,
+    title: "Environment",
+    description: "Runtime environment flags and demo navigation visibility.",
+    helpComponent: EnvironmentWidgetHelp,
+    helpTitle: "Environment",
+    aiContext: EnvironmentWidgetHelp?.aiContext,
+  },
+  secrets: {
+    id: "secrets",
+    defaultRowSpan: 3,
+    defaultColumnSpan: 2,
+    component: SecretsWidget,
+    title: "Secrets overview",
+    description: "Presence of stored secrets and rotation status.",
+    helpComponent: SecretsWidgetHelp,
+    helpTitle: "Secrets overview",
+    aiContext: SecretsWidgetHelp?.aiContext,
+  },
+  appearance: {
+    id: "appearance",
+    defaultRowSpan: 2,
+    defaultColumnSpan: 2,
+    component: AppearanceWidget,
+    title: "Appearance & Theme",
+    description: "Dark mode and theme preferences.",
+    helpComponent: AppearanceWidgetHelp,
+    helpTitle: "Appearance settings",
+    aiContext: AppearanceWidgetHelp?.aiContext,
+  },
+};
+
+const defaultLayout = [
+  { id: "ai", rowSpan: 5, columnSpan: 2 },
+  { id: "auth", rowSpan: 4, columnSpan: 2 },
+  { id: "locking", rowSpan: 4, columnSpan: 2 },
+  { id: "slaConfig", rowSpan: 3, columnSpan: 2 },
+  { id: "sessionAudit", rowSpan: 3, columnSpan: 2 },
+  { id: "cors", rowSpan: 2, columnSpan: 2 },
+  { id: "env", rowSpan: 4, columnSpan: 2 },
+  { id: "secrets", rowSpan: 3, columnSpan: 2 },
+  { id: "appearance", rowSpan: 2, columnSpan: 2 },
+];
+
+const loadLayout = () => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const filtered = parsed.filter(entry => entry && widgetRegistry[entry.id]);
+    return filtered.length ? filtered : null;
+  } catch {
+    return null;
+  }
+};
+
+const persistLayout = layout => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const toBoardItems = layout =>
+  layout
+    .map(item => {
+      const definition = widgetRegistry[item.id];
+      if (!definition) return null;
+      return {
+        id: definition.id,
+        rowSpan: item.rowSpan ?? definition.defaultRowSpan,
+        columnSpan: item.columnSpan ?? definition.defaultColumnSpan,
+        columnOffset: item.columnOffset,
+        data: {
+          title: definition.title,
+          description: definition.description,
+          helpComponent: definition.helpComponent,
+          helpTitle: definition.helpTitle,
+          aiContext: definition.aiContext,
+        },
+      };
+    })
+    .filter(Boolean);
+
+const exportLayout = items =>
+  items.map(({ id, rowSpan, columnSpan, columnOffset }) => ({
+    id,
+    rowSpan,
+    columnSpan,
+    columnOffset,
+  }));
+
+const computePaletteItems = items =>
+  Object.values(widgetRegistry)
+    .filter(def => !items.some(item => item.id === def.id))
+    .map(def => ({
+      id: def.id,
+      data: { title: def.title, description: def.description },
+    }));
+
+const areLayoutsEqual = (a = [], b = []) => {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      !left ||
+      !right ||
+      left.id !== right.id ||
+      (left.rowSpan ?? null) !== (right.rowSpan ?? null) ||
+      (left.columnSpan ?? null) !== (right.columnSpan ?? null) ||
+      (left.columnOffset ?? null) !== (right.columnOffset ?? null)
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const toOption = (value, modelOptions) => {
+  if (!value) return null;
+  const match = modelOptions.find(option => option.value === value);
+  return match || { value, label: value };
+};
+
+const toOptionList = (values, modelOptions) =>
+  values.map(value => toOption(value, modelOptions)).filter(Boolean);
+export default function ConfigurationSettings({
+  toggleHelpPanel,
+  updateBreadcrumbs,
+  setAvailableItems,
+  setSplitPanelOpen,
+}) {
+  const [layout, setLayout] = useState(() => loadLayout() ?? [...defaultLayout]);
+  const boardItems = useMemo(() => toBoardItems(layout), [layout]);
+  const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
+  const paletteSignatureRef = useRef(JSON.stringify(paletteItems.map(item => item.id)));
+
   const [runtime, setRuntime] = useState(null);
   const [security, setSecurity] = useState(null);
-  const [aiModel, setAiModel] = useState(null);
-  const modelOptions = STATIC_MODEL_PLACEHOLDERS;
-  const modelsLoading = false;
-  const [savingModel, setSavingModel] = useState(false);
-  const [savingParams, setSavingParams] = useState(false);
-  const [savingFallbacks, setSavingFallbacks] = useState(false);
-  const [params, setParams] = useState({ temperature: 0.7, top_p: 1, max_tokens: '', presence_penalty: 0, frequency_penalty: 0 });
-  const [fallbacks, setFallbacks] = useState([]); // array of {label,value}
   const [error, setError] = useState(null);
-  const [role, setRole] = useState('');
+  const [role, setRole] = useState("");
   const { useDarkMode: isDarkMode, setUseDarkMode } = useDarkModeContext();
-  const [demoToolbarVisibility, setDemoToolbarVisibility] = useState(() => readDemoNavigationVisibility());
+  const [demoToolbarVisibility, setDemoToolbarVisibility] = useState(() =>
+    readDemoNavigationVisibility(),
+  );
+
   const [slaTargets, setSlaTargets] = useState([]);
   const [slaEdits, setSlaEdits] = useState({});
   const [slaLoading, setSlaLoading] = useState(false);
   const [slaError, setSlaError] = useState(null);
   const [savingSla, setSavingSla] = useState(false);
+
   const [lockingConfig, setLockingConfig] = useState(null);
   const [lockingEdits, setLockingEdits] = useState(null);
   const [lockingLoading, setLockingLoading] = useState(true);
   const [lockingSaving, setLockingSaving] = useState(false);
   const [lockingError, setLockingError] = useState(null);
-  // Auth Phase 4 multi-scope state: separate Admin vs Applicants ("public")
-  // Each scope gets its own session/token TTL edits and policy edits
+
   const [authSessionAdminOriginal, setAuthSessionAdminOriginal] = useState(null);
   const [authSessionAdminEdits, setAuthSessionAdminEdits] = useState(null);
   const [authSessionPublicOriginal, setAuthSessionPublicOriginal] = useState(null);
   const [authSessionPublicEdits, setAuthSessionPublicEdits] = useState(null);
-  const [savingAuthSessionScope, setSavingAuthSessionScope] = useState({}); // { admin: bool, public: bool }
   const [authPolicyAdminOriginal, setAuthPolicyAdminOriginal] = useState(null);
   const [authPolicyAdminEdits, setAuthPolicyAdminEdits] = useState(null);
   const [authPolicyPublicOriginal, setAuthPolicyPublicOriginal] = useState(null);
   const [authPolicyPublicEdits, setAuthPolicyPublicEdits] = useState(null);
-  const [savingAuthPolicyScope, setSavingAuthPolicyScope] = useState({}); // { admin: bool, public: bool }
-  const [syncingFederationScope, setSyncingFederationScope] = useState({}); // { admin: bool, public: bool }
-  const [authTab, setAuthTab] = useState('admin');
-  // Auth Phase 4 state (claims mapping viewer)
+  const [savingAuthSessionScope, setSavingAuthSessionScope] = useState({
+    admin: false,
+    public: false,
+  });
+  const [savingAuthPolicyScope, setSavingAuthPolicyScope] = useState({
+    admin: false,
+    public: false,
+  });
+  const [syncingFederationScope, setSyncingFederationScope] = useState({
+    admin: false,
+    public: false,
+  });
+  const [authTab, setAuthTab] = useState("admin");
   const [showClaimsModal, setShowClaimsModal] = useState(false);
-  const [claimsModalContent, setClaimsModalContent] = useState('');
+  const [claimsModalContent, setClaimsModalContent] = useState("");
 
-  // Derive role (lightweight; no backend enforcement here yet)
+  const [auditStats, setAuditStats] = useState(null);
+  const [auditRecent, setAuditRecent] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState(null);
+
+  const [aiModelValue, setAiModelValue] = useState(null);
+  const [modelOptions, setModelOptions] = useState([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [savingModel, setSavingModel] = useState(false);
+  const [savingParams, setSavingParams] = useState(false);
+  const [savingFallbacks, setSavingFallbacks] = useState(false);
+  const [params, setParams] = useState({
+    temperature: "",
+    top_p: "",
+    max_tokens: "",
+    presence_penalty: "",
+    frequency_penalty: "",
+  });
+  const [fallbackValues, setFallbackValues] = useState([]);
+
+  const selectedAiModel = useMemo(
+    () => toOption(aiModelValue, modelOptions),
+    [aiModelValue, modelOptions],
+  );
+  const selectedFallbackOptions = useMemo(
+    () => toOptionList(fallbackValues, modelOptions),
+    [fallbackValues, modelOptions],
+  );
+
   useEffect(() => {
-      function deriveRole() {
-        if (isIamOn() && hasValidSession()) {
-          try {
-            const claims = getIdTokenClaims();
-            const r = getRoleFromClaims(claims) || '';
-            setRole(r);
-            return;
-          } catch {/* ignore */}
-        }
-        try {
-          const signedOut = sessionStorage.getItem('simulateSignedOut') === 'true';
-          if (signedOut) { setRole('Signed Out'); return; }
-          const raw = sessionStorage.getItem('currentRole');
-          if (raw) {
-            const obj = JSON.parse(raw);
-            if (obj && obj.value) { setRole(obj.value); return; }
-          }
-        } catch {/* ignore */}
-        setRole('Program Administrator');
+    if (typeof updateBreadcrumbs === "function") {
+      updateBreadcrumbs([
+        { text: "Home", href: "/" },
+        { text: "Configuration Settings", href: "/configuration-settings" },
+      ]);
+    }
+  }, [updateBreadcrumbs]);
+
+  useEffect(() => {
+    const signature = JSON.stringify(paletteItems.map(item => item.id));
+    if (signature !== paletteSignatureRef.current) {
+      paletteSignatureRef.current = signature;
+      if (typeof setAvailableItems === "function") {
+        setAvailableItems(paletteItems);
       }
-      deriveRole();
+    }
+    persistLayout(exportLayout(boardItems));
+  }, [boardItems, paletteItems, setAvailableItems]);
+
+  const openPalette = useCallback(() => {
+    if (typeof setAvailableItems === "function") {
+      setAvailableItems(paletteItems);
+    }
+    if (typeof setSplitPanelOpen === "function") {
+      setSplitPanelOpen(true);
+    }
+  }, [paletteItems, setAvailableItems, setSplitPanelOpen]);
+
+  const resetLayout = useCallback(() => {
+    setLayout(current => (areLayoutsEqual(current, defaultLayout) ? current : [...defaultLayout]));
+    const defaultPalette = computePaletteItems(toBoardItems(defaultLayout));
+    paletteSignatureRef.current = JSON.stringify(defaultPalette.map(item => item.id));
+    if (typeof setAvailableItems === "function") {
+      setAvailableItems(defaultPalette);
+    }
+    persistLayout(defaultLayout);
+  }, [setAvailableItems]);
+
+  useEffect(() => {
+    const openHandler = () => openPalette();
+    const resetHandler = () => resetLayout();
+    window.addEventListener("configuration-dashboard:openPalette", openHandler);
+    window.addEventListener("configuration-dashboard:resetLayout", resetHandler);
+    return () => {
+      window.removeEventListener("configuration-dashboard:openPalette", openHandler);
+      window.removeEventListener("configuration-dashboard:resetLayout", resetHandler);
+    };
+  }, [openPalette, resetLayout]);
+
+  const handleItemsChange = useCallback(({ detail }) => {
+    if (!detail || !Array.isArray(detail.items)) return;
+    const next = exportLayout(detail.items);
+    setLayout(current => (areLayoutsEqual(current, next) ? current : next));
   }, []);
 
-  // Capability gates
-  const canEditAI = role === 'System Administrator';
-  const canEditAuth = role === 'System Administrator';
-  const canEditSla = role === 'System Administrator' || role === 'Program Administrator';
-  const canEditLocking = role === 'System Administrator';
-  const visibility = security?.visibility;
-  const canSeeAny = visibility === 'admin' || visibility === 'restricted';
-  const fullyAdmin = visibility === 'admin';
+  useEffect(() => {
+    const unsubscribe = subscribeToDemoNavigationVisibility(map => {
+      setDemoToolbarVisibility(map || readDemoNavigationVisibility());
+    });
+    return unsubscribe;
+  }, []);
 
-  const parseLockingMinutes = useCallback((value) => {
+  const deriveRole = useCallback(() => {
+    if (isIamOn() && hasValidSession()) {
+      try {
+        const claims = getIdTokenClaims();
+        const nextRole = getRoleFromClaims(claims) || "";
+        setRole(nextRole);
+        return;
+      } catch {
+        // fall back to storage
+      }
+    }
+    try {
+      const signedOut = sessionStorage.getItem("simulateSignedOut") === "true";
+      if (signedOut) {
+        setRole("Signed Out");
+        return;
+      }
+      const raw = sessionStorage.getItem("currentRole");
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj && obj.value) {
+          setRole(obj.value);
+          return;
+        }
+      }
+    } catch {
+      // ignore parsing/storage issues
+    }
+    setRole("Program Administrator");
+  }, []);
+
+  useEffect(() => {
+    deriveRole();
+  }, [deriveRole]);
+
+  const canEditAI = role === "System Administrator";
+  const canEditAuth = role === "System Administrator";
+  const canEditSla = role === "System Administrator" || role === "Program Administrator";
+  const canEditLocking = role === "System Administrator";
+
+  const visibility = security?.visibility;
+  const canSeeAnySecrets = visibility === "admin" || visibility === "restricted";
+  const fullyAdminSecrets = visibility === "admin";
+  const parseLockingMinutes = useCallback(value => {
     const numeric = Number(value);
     if (!Number.isFinite(numeric) || numeric <= 0) return null;
     return Math.round(numeric);
   }, []);
 
-  const normaliseLocking = useCallback((value) => {
-    const modeRaw = typeof value?.mode === 'string' ? value.mode.toLowerCase() : DEFAULT_LOCKING_CONFIG.mode;
-    const mode = LOCKING_MODE_OPTIONS.some((option) => option.value === modeRaw) ? modeRaw : DEFAULT_LOCKING_CONFIG.mode;
-    const ttlRaw = Number(value?.lockTtlMinutes);
-    const ttl = Number.isFinite(ttlRaw) && ttlRaw > 0 ? Math.round(ttlRaw) : DEFAULT_LOCKING_CONFIG.lockTtlMinutes;
-    const heartbeatRaw = Number(value?.heartbeatMinutes);
-    let heartbeat = Number.isFinite(heartbeatRaw) && heartbeatRaw > 0 ? Math.round(heartbeatRaw) : null;
-    if (heartbeat !== null && heartbeat > ttl) heartbeat = ttl;
-    return {
-      mode,
-      lockTtlMinutes: ttl,
-      heartbeatMinutes: heartbeat,
-      source: value?.source || null,
-    };
-  }, []);
+  const normaliseLocking = useCallback(
+    value => {
+      const modeRaw = typeof value?.mode === "string" ? value.mode.toLowerCase() : DEFAULT_LOCKING_CONFIG.mode;
+      const mode = LOCKING_MODE_OPTIONS.some(option => option.value === modeRaw)
+        ? modeRaw
+        : DEFAULT_LOCKING_CONFIG.mode;
 
-  const toLockingEditState = useCallback((config) => ({
+      const ttlRaw = Number(value?.lockTtlMinutes);
+      const ttl = Number.isFinite(ttlRaw) && ttlRaw > 0 ? Math.round(ttlRaw) : DEFAULT_LOCKING_CONFIG.lockTtlMinutes;
+
+      const heartbeatRaw = Number(value?.heartbeatMinutes);
+      let heartbeat = Number.isFinite(heartbeatRaw) && heartbeatRaw > 0 ? Math.round(heartbeatRaw) : null;
+      if (heartbeat !== null && heartbeat > ttl) heartbeat = ttl;
+
+      return {
+        mode,
+        lockTtlMinutes: ttl,
+        heartbeatMinutes: heartbeat,
+        source: value?.source || null,
+      };
+    },
+    [],
+  );
+
+  const toLockingEditState = useCallback(config => ({
     mode: config.mode,
-    lockTtlMinutes: config.lockTtlMinutes != null ? String(config.lockTtlMinutes) : '',
-    heartbeatMinutes: config.heartbeatMinutes != null ? String(config.heartbeatMinutes) : '',
+    lockTtlMinutes: config.lockTtlMinutes != null ? String(config.lockTtlMinutes) : "",
+    heartbeatMinutes: config.heartbeatMinutes != null ? String(config.heartbeatMinutes) : "",
   }), []);
 
   const lockingDirty = useMemo(() => {
@@ -165,61 +555,36 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
     const ttl = parseLockingMinutes(lockingEdits.lockTtlMinutes) ?? lockingConfig.lockTtlMinutes;
     const heartbeat = parseLockingMinutes(lockingEdits.heartbeatMinutes);
     const normalizedHeartbeat = heartbeat ?? null;
-    return lockingEdits.mode !== lockingConfig.mode
-      || ttl !== lockingConfig.lockTtlMinutes
-      || (normalizedHeartbeat ?? null) !== (lockingConfig.heartbeatMinutes ?? null);
+    return (
+      lockingEdits.mode !== lockingConfig.mode ||
+      ttl !== lockingConfig.lockTtlMinutes ||
+      (normalizedHeartbeat ?? null) !== (lockingConfig.heartbeatMinutes ?? null)
+    );
   }, [lockingConfig, lockingEdits, parseLockingMinutes]);
-
-  const saveLockingConfig = useCallback(async () => {
-    if (!canEditLocking || !lockingEdits) return;
-    setLockingSaving(true);
-    setLockingError(null);
-    try {
-      const ttl = parseLockingMinutes(lockingEdits.lockTtlMinutes) ?? lockingConfig?.lockTtlMinutes ?? DEFAULT_LOCKING_CONFIG.lockTtlMinutes;
-      const heartbeat = parseLockingMinutes(lockingEdits.heartbeatMinutes);
-      const payload = {
-        mode: lockingEdits.mode || DEFAULT_LOCKING_CONFIG.mode,
-        lockTtlMinutes: ttl,
-        heartbeatMinutes: heartbeat ?? null,
-      };
-      const saved = await fetchJSON('/api/config/runtime/locking', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const normalized = normaliseLocking(saved);
-      setLockingConfig(normalized);
-      setLockingEdits(toLockingEditState(normalized));
-    } catch (err) {
-      setLockingError(err.message);
-    } finally {
-      setLockingSaving(false);
-    }
-  }, [canEditLocking, lockingEdits, lockingConfig, normaliseLocking, parseLockingMinutes, toLockingEditState]);
-
-  const resetLockingEdits = useCallback(() => {
-    if (!lockingConfig) return;
-    setLockingEdits(toLockingEditState(lockingConfig));
-    setLockingError(null);
-  }, [lockingConfig, toLockingEditState]);
 
   const lockingUi = useMemo(() => {
     const currentMode = lockingEdits?.mode || lockingConfig?.mode || DEFAULT_LOCKING_CONFIG.mode;
-    const selectedMode = LOCKING_MODE_OPTIONS.find((option) => option.value === currentMode) || LOCKING_MODE_OPTIONS[0];
-    const ttlInput = lockingEdits?.lockTtlMinutes ?? '';
-    const heartbeatInput = lockingEdits?.heartbeatMinutes ?? '';
+    const selectedMode =
+      LOCKING_MODE_OPTIONS.find(option => option.value === currentMode) || LOCKING_MODE_OPTIONS[0];
+    const ttlInput = lockingEdits?.lockTtlMinutes ?? "";
+    const heartbeatInput = lockingEdits?.heartbeatMinutes ?? "";
+
     const parsedTtl = parseLockingMinutes(ttlInput);
-    const ttlError = ttlInput && parsedTtl === null ? 'Enter a positive number of minutes.' : null;
+    const ttlError = ttlInput && parsedTtl === null ? "Enter a positive number of minutes." : null;
+
     const parsedHeartbeat = parseLockingMinutes(heartbeatInput);
-    let heartbeatError = heartbeatInput && parsedHeartbeat === null ? 'Enter a positive number of minutes.' : null;
+    let heartbeatError = heartbeatInput && parsedHeartbeat === null ? "Enter a positive number of minutes." : null;
     if (!heartbeatError && parsedHeartbeat !== null) {
       const compareTtl = parsedTtl ?? lockingConfig?.lockTtlMinutes ?? DEFAULT_LOCKING_CONFIG.lockTtlMinutes;
       if (parsedHeartbeat > compareTtl) {
-        heartbeatError = 'Heartbeat interval must be less than or equal to the lock timeout.';
+        heartbeatError = "Heartbeat interval must be less than or equal to the lock timeout.";
       }
     }
+
     const disableInputs = lockingLoading || !canEditLocking;
-    const disableActions = disableInputs || lockingSaving || !lockingDirty || Boolean(ttlError) || Boolean(heartbeatError);
+    const disableActions =
+      disableInputs || lockingSaving || !lockingDirty || Boolean(ttlError) || Boolean(heartbeatError);
+
     return {
       selectedMode,
       ttlInput,
@@ -229,81 +594,329 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
       disableInputs,
       disableActions,
     };
-  }, [lockingEdits, lockingConfig, parseLockingMinutes, lockingLoading, canEditLocking, lockingSaving, lockingDirty]);
+  }, [
+    lockingEdits,
+    lockingConfig,
+    parseLockingMinutes,
+    lockingLoading,
+    canEditLocking,
+    lockingSaving,
+    lockingDirty,
+  ]);
 
-  // Layout items
-  const defaultBoardItems = React.useMemo(() => ([
-    { id: 'ai', columnSpan: 2, rowSpan: 4, data: { type: 'ai' } },
-    { id: 'auth', columnSpan: 2, rowSpan: 4, data: { type: 'auth' } },
-    { id: 'slaConfig', columnSpan: 2, rowSpan: 3, data: { type: 'sla' }, label: 'SLA Config' },
-    { id: 'sessionAudit', columnSpan: 2, rowSpan: 3, data: { type: 'sessionAudit' } },
-    { id: 'cors', columnSpan: 2, rowSpan: 2, data: { type: 'cors' } },
-    { id: 'env', columnSpan: 2, rowSpan: 4, data: { type: 'env' } },
-    { id: 'secrets', columnSpan: 2, rowSpan: 3, data: { type: 'secrets' } },
-    { id: 'locking', columnSpan: 2, rowSpan: 4, data: { type: 'locking' }, label: 'Record Locking' },
-    { id: 'appearance', columnSpan: 2, rowSpan: 2, data: { type: 'appearance' } }
-  ]), []);
-  const [boardItems, setBoardItems] = useState(defaultBoardItems);
-  const resetLayout = () => setBoardItems(defaultBoardItems);
-  // Phase 5 linkage stats
-  // Removed linkage widget state
-  // Session audit stats
-  const [auditStats, setAuditStats] = useState(null);
-  const [auditRecent, setAuditRecent] = useState([]);
-  const [auditLoading, setAuditLoading] = useState(false);
-  const [auditError, setAuditError] = useState(null);
-  const fetchAudit = useCallback(async () => {
-    setAuditLoading(true); setAuditError(null);
+  const handleDemoToolbarVisibilityChange = useCallback((roleName, visible) => {
+    setDemoToolbarVisibility(prev => {
+      const next = { ...(prev || {}), [roleName]: visible };
+      writeDemoNavigationVisibility(next);
+      return next;
+    });
+  }, []);
+
+  const demoToolbarRows = useMemo(() => {
+    const map = demoToolbarVisibility || {};
+    return DEMO_NAVIGATION_ROLES.map(roleName => ({
+      role: roleName,
+      visible: Object.prototype.hasOwnProperty.call(map, roleName) ? !!map[roleName] : true,
+    }));
+  }, [demoToolbarVisibility]);
+
+  const demoToolbarColumns = useMemo(
+    () => [
+      {
+        id: "role",
+        header: "Role",
+        cell: item => item.role,
+      },
+      {
+        id: "visible",
+        header: "Visible",
+        cell: item => (
+          <Button
+            variant={item.visible ? "normal" : "link"}
+            onClick={() => handleDemoToolbarVisibilityChange(item.role, !item.visible)}
+          >
+            {item.visible ? "Visible" : "Hidden"}
+          </Button>
+        ),
+      },
+    ],
+    [handleDemoToolbarVisibilityChange],
+  );
+
+  const seedSlaEdits = useCallback(items => {
+    const next = items.reduce((acc, item) => {
+      const hours = item?.target_hours;
+      acc[item.stage_key] = {
+        target_hours: hours === null || hours === undefined ? "" : String(hours),
+        description: item?.description || "",
+      };
+      return acc;
+    }, {});
+    setSlaEdits(next);
+  }, []);
+
+  const fetchSlaTargets = useCallback(async () => {
+    setSlaLoading(true);
+    setSlaError(null);
     try {
-      const stats = await fetchJSON('/api/audit/session/stats');
-      const recent = await fetchJSON('/api/audit/session/recent?limit=25');
+      const response = await fetchJSON("/api/config/sla-targets");
+      const items = Array.isArray(response?.targets) ? response.targets : [];
+      const normalised = items.length
+        ? items.map(item => ({
+            id: item.id || null,
+            stage_key: item.stage_key || item.stage || "",
+            display_name: item.display_name || SLA_STAGE_LABELS[item.stage_key] || item.stage_key,
+            target_hours: item.target_hours ?? item.targetHours ?? "",
+            description: item.description || "",
+            applies_to_role: item.applies_to_role ?? item.appliesToRole ?? null,
+          }))
+        : SLA_STAGE_PLACEHOLDER.map(item => ({ ...item }));
+      setSlaTargets(normalised);
+      seedSlaEdits(normalised);
+    } catch (err) {
+      const message = err?.message || "Failed to load SLA targets";
+      setSlaTargets(prev => {
+        if (prev.length) return prev;
+        const fallback = SLA_STAGE_PLACEHOLDER.map(item => ({ ...item }));
+        seedSlaEdits(fallback);
+        return fallback;
+      });
+      if (!String(message).includes("404")) {
+        setSlaError(message);
+      }
+    } finally {
+      setSlaLoading(false);
+    }
+  }, [seedSlaEdits]);
+
+  useEffect(() => {
+    fetchSlaTargets();
+  }, [fetchSlaTargets]);
+
+  const effectiveSlaTargets = useMemo(
+    () => (slaTargets.length ? slaTargets : SLA_STAGE_PLACEHOLDER),
+    [slaTargets],
+  );
+
+  const isSlaDirty = useMemo(
+    () =>
+      effectiveSlaTargets.some(item => {
+        const edit = slaEdits[item.stage_key];
+        if (!edit) return false;
+        const originalHours =
+          item.target_hours === null || item.target_hours === undefined
+            ? ""
+            : String(item.target_hours);
+        const originalNotes = item.description || "";
+        return (
+          edit.target_hours !== originalHours ||
+          (edit.description || "") !== originalNotes
+        );
+      }),
+    [effectiveSlaTargets, slaEdits],
+  );
+
+  const handleSlaEdit = useCallback((stageKey, field, value) => {
+    setSlaEdits(prev => ({
+      ...prev,
+      [stageKey]: {
+        ...prev[stageKey],
+        target_hours:
+          field === "target_hours"
+            ? value.replace(/[^0-9]/g, "")
+            : prev[stageKey]?.target_hours ?? "",
+        description:
+          field === "description" ? value : prev[stageKey]?.description ?? "",
+      },
+    }));
+  }, []);
+
+  const handleSlaReset = useCallback(() => {
+    seedSlaEdits(effectiveSlaTargets);
+    setSlaError(null);
+  }, [effectiveSlaTargets, seedSlaEdits]);
+
+  const handleSlaSave = useCallback(async () => {
+    if (!canEditSla) return;
+
+    const payloads = effectiveSlaTargets.map(item => {
+      const edit = slaEdits[item.stage_key] || { target_hours: "", description: "" };
+      const hoursValue = edit.target_hours === "" ? null : Number(edit.target_hours);
+      return {
+        id: item.id,
+        stage_key: item.stage_key,
+        target_hours: hoursValue,
+        description: edit.description || "",
+        applies_to_role: item.applies_to_role || null,
+        display_name: item.display_name,
+      };
+    });
+
+    for (const target of payloads) {
+      if (target.target_hours === null || Number.isNaN(target.target_hours)) {
+        setSlaError(
+          `Target hours required for ${SLA_STAGE_LABELS[target.stage_key] || target.stage_key}`,
+        );
+        return;
+      }
+    }
+
+    setSavingSla(true);
+    setSlaError(null);
+    try {
+      await Promise.all(
+        payloads.map(async target => {
+          const body = {
+            target_hours: target.target_hours,
+            description: target.description,
+          };
+          if (target.id) {
+            await fetchJSON(`/api/config/sla-targets/${target.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+          } else {
+            await fetchJSON("/api/config/sla-targets", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                stage_key: target.stage_key,
+                target_hours: target.target_hours,
+                description: target.description,
+                applies_to_role: target.applies_to_role,
+              }),
+            });
+          }
+        }),
+      );
+      await fetchSlaTargets();
+    } catch (err) {
+      setSlaError(err?.message || "Failed to save SLA targets");
+    } finally {
+      setSavingSla(false);
+    }
+  }, [canEditSla, effectiveSlaTargets, fetchSlaTargets, slaEdits]);
+
+  const fetchAudit = useCallback(async () => {
+    setAuditLoading(true);
+    setAuditError(null);
+    try {
+      const stats = await fetchJSON("/api/audit/session/stats");
+      const recent = await fetchJSON("/api/audit/session/recent?limit=25");
       setAuditStats(stats);
       setAuditRecent(recent.sessions || []);
-    } catch(e){ setAuditError(e.message); }
-    finally { setAuditLoading(false); }
+    } catch (err) {
+      setAuditError(err.message);
+    } finally {
+      setAuditLoading(false);
+    }
   }, []);
-  useEffect(() => { fetchAudit(); }, [fetchAudit]);
-  // Removed linkage fetch logic
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    fetchAudit();
+  }, [fetchAudit]);
+
+  const loadModelOptions = useCallback(async () => {
+    setModelsLoading(true);
+    try {
+      const data = await fetchJSON("/api/ai/models");
+      const options = Array.isArray(data?.models)
+        ? data.models.map(model => ({
+            value: model.id,
+            label: model.name || model.id,
+            description: model.provider || model.architecture,
+          }))
+        : [];
+      setModelOptions(options);
+    } catch (err) {
+      console.error("[configuration] Failed to load AI model catalogue:", err);
+    } finally {
+      setModelsLoading(false);
+    }
+  }, []);
+
+  const loadAiStatus = useCallback(async () => {
+    try {
+      const status = await fetchJSON("/api/ai/status");
+      if (status?.model) {
+        setAiModelValue(status.model);
+      }
+      if (status?.params) {
+        setParams(prev => ({
+          ...prev,
+          temperature:
+            typeof status.params.temperature === "number" ? Number(status.params.temperature) : "",
+          top_p: typeof status.params.top_p === "number" ? Number(status.params.top_p) : "",
+          max_tokens:
+            typeof status.params.max_tokens === "number" ? Number(status.params.max_tokens) : "",
+          presence_penalty:
+            typeof status.params.presence_penalty === "number"
+              ? Number(status.params.presence_penalty)
+              : "",
+          frequency_penalty:
+            typeof status.params.frequency_penalty === "number"
+              ? Number(status.params.frequency_penalty)
+              : "",
+        }));
+      }
+      if (Array.isArray(status?.fallbacks)) {
+        setFallbackValues(status.fallbacks.map(value => String(value)));
+      }
+    } catch (err) {
+      console.error("[configuration] Failed to load AI status:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadModelOptions();
+    loadAiStatus();
+  }, [loadModelOptions, loadAiStatus]);
+
+  const loadConfiguration = useCallback(async () => {
     setError(null);
     setLockingLoading(true);
     setLockingError(null);
     try {
       const [runtimeResponse, securityResponse] = await Promise.all([
-        fetchJSON('/api/config/runtime'),
-        fetchJSON('/api/config/security'),
+        fetchJSON("/api/config/runtime"),
+        fetchJSON("/api/config/security"),
       ]);
 
       setRuntime(runtimeResponse);
       setSecurity(securityResponse);
 
       if (runtimeResponse?.ai?.model) {
-        setAiModel({ label: runtimeResponse.ai.model, value: runtimeResponse.ai.model });
+        setAiModelValue(runtimeResponse.ai.model);
       }
       if (runtimeResponse?.ai?.params) {
         const cleaned = {};
-        const defaults = { temperature: 0.7, top_p: 1, presence_penalty: 0, frequency_penalty: 0 };
+        const defaults = {
+          temperature: 0.7,
+          top_p: 1,
+          presence_penalty: 0,
+          frequency_penalty: 0,
+        };
         Object.entries(runtimeResponse.ai.params).forEach(([key, value]) => {
-          if (value === null || typeof value === 'undefined') {
-            cleaned[key] = key === 'max_tokens' ? '' : (defaults[key] ?? '');
+          if (value === null || typeof value === "undefined") {
+            cleaned[key] = key === "max_tokens" ? "" : defaults[key] ?? "";
           } else {
             cleaned[key] = value;
           }
         });
-        setParams((prev) => ({ ...prev, ...cleaned }));
+        setParams(prev => ({ ...prev, ...cleaned }));
       }
       if (Array.isArray(runtimeResponse?.ai?.fallbackModels)) {
-        setFallbacks(runtimeResponse.ai.fallbackModels.map((model) => ({ label: model, value: model })));
+        setFallbackValues(runtimeResponse.ai.fallbackModels.map(model => String(model)));
       }
 
       const tokenTtl = runtimeResponse?.auth?.tokenTtl || {};
-      const sessionTemplate = (scope) => ({
-        access: scope.access || '',
-        id: scope.id || '',
-        refresh: scope.refresh || '',
-        frontendIdle: scope.frontendIdle || '',
-        absolute: scope.absolute || '',
+      const sessionTemplate = scope => ({
+        access: scope.access || "",
+        id: scope.id || "",
+        refresh: scope.refresh || "",
+        frontendIdle: scope.frontendIdle || "",
+        absolute: scope.absolute || "",
       });
       const ttlCommon = sessionTemplate(tokenTtl);
       setAuthSessionAdminOriginal(ttlCommon);
@@ -311,8 +924,8 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
       setAuthSessionPublicOriginal(ttlCommon);
       setAuthSessionPublicEdits(ttlCommon);
 
-      const policyTemplate = (auth) => ({
-        mfaMode: auth?.mfa?.mode || auth?.mfaMode || 'off',
+      const policyTemplate = auth => ({
+        mfaMode: auth?.mfa?.mode || auth?.mfaMode || "off",
         pkceRequired: !!auth?.pkceRequired,
         passwordPolicy: {
           minLength: auth?.passwordPolicy?.minLength || 8,
@@ -329,9 +942,11 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
           providers: auth?.federation?.providers || [],
           lastSync: auth?.federation?.lastSync || null,
         },
-        maxPasswordResetsPerDay: auth?.maxPasswordResetsPerDay != null ? auth.maxPasswordResetsPerDay : 5,
-        anomalyProtection: auth?.anomalyProtection || 'standard',
+        maxPasswordResetsPerDay:
+          auth?.maxPasswordResetsPerDay != null ? auth.maxPasswordResetsPerDay : 5,
+        anomalyProtection: auth?.anomalyProtection || "standard",
       });
+
       const baseAuth = runtimeResponse?.auth || {};
       const adminPolicy = policyTemplate(baseAuth);
       const publicPolicy = policyTemplate(baseAuth);
@@ -341,36 +956,15 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
       setAuthPolicyPublicEdits(publicPolicy);
 
       try {
-        setSlaLoading(true);
-        const response = await fetchJSON('/api/config/sla-targets');
-        const rows = response?.targets || [];
-        setSlaTargets(rows.length ? rows : SLA_STAGE_PLACEHOLDER);
-        const edits = {};
-        rows.forEach((row) => {
-          edits[row.stage_key] = {
-            target_hours: row.target_hours ?? '',
-            description: row.description ?? '',
-          };
-        });
-        setSlaEdits(edits);
-      } catch (slaErr) {
-        setSlaError(slaErr.message);
-        setSlaTargets(SLA_STAGE_PLACEHOLDER);
-        setSlaEdits({});
-      } finally {
-        setSlaLoading(false);
-      }
-
-      try {
         if (runtimeResponse?.appearance?.darkMode != null) {
           setUseDarkMode(!!runtimeResponse.appearance.darkMode);
         }
       } catch {
-        /* ignore theme sync errors */
+        // ignore theme sync errors
       }
 
       try {
-        const locking = await fetchJSON('/api/config/runtime/locking');
+        const locking = await fetchJSON("/api/config/runtime/locking");
         const normalized = normaliseLocking(locking);
         setLockingConfig(normalized);
         setLockingEdits(toLockingEditState(normalized));
@@ -385,292 +979,181 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
     } catch (err) {
       setError(err.message);
       setLockingLoading(false);
-    } finally {
     }
   }, [normaliseLocking, setUseDarkMode, toLockingEditState]);
 
   useEffect(() => {
-    const unsubscribe = subscribeToDemoNavigationVisibility(map => {
-      setDemoToolbarVisibility(map || readDemoNavigationVisibility());
-    });
-    return unsubscribe;
-  }, []);
+    loadConfiguration();
+  }, [loadConfiguration]);
 
-  useEffect(() => { load(); }, [load]);
-
-  const handleDemoToolbarVisibilityChange = useCallback((roleName, visible) => {
-    setDemoToolbarVisibility(prev => {
-      const next = { ...(prev || {}), [roleName]: visible };
-      writeDemoNavigationVisibility(next);
-      return next;
-    });
-  }, []);
-
-  const demoToolbarRows = React.useMemo(() => {
-    const map = demoToolbarVisibility || {};
-    return DEMO_NAVIGATION_ROLES.map(roleName => ({
-      role: roleName,
-      visible: Object.prototype.hasOwnProperty.call(map, roleName) ? !!map[roleName] : true
-    }));
-  }, [demoToolbarVisibility]);
-
-  const demoToolbarColumns = React.useMemo(() => ([
-    {
-      id: 'role',
-      header: 'Role',
-      cell: item => item.role
-    },
-    {
-      id: 'visible',
-      header: 'Visible',
-      cell: item => (
-        <Toggle
-          checked={item.visible}
-          onChange={({ detail }) => handleDemoToolbarVisibilityChange(item.role, detail.checked)}
-        >
-          {item.visible ? 'Visible' : 'Hidden'}
-        </Toggle>
-      )
-    }
-  ]), [handleDemoToolbarVisibilityChange]);
-
-    async function saveModel() {
-      if (!aiModel) return; setSavingModel(true); setError(null);
-      try {
-        const body = { model: aiModel.value };
-        const r = await fetchJSON('/api/config/runtime/ai-model', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        setRuntime(o => ({ ...(o||{}), ai: { ...(o?.ai||{}), model: r.model || body.model } }));
-      } catch (e) { setError(e.message); } finally { setSavingModel(false); }
-    }
-    async function saveParams() {
-      setSavingParams(true); setError(null);
-      try {
-        const body = { params };
-        const r = await fetchJSON('/api/config/runtime/ai-params', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        setRuntime(o => ({ ...(o||{}), ai: { ...(o?.ai||{}), params: r.params || body.params } }));
-      } catch (e) { setError(e.message); } finally { setSavingParams(false); }
-    }
-    async function saveFallbacks() {
-      setSavingFallbacks(true); setError(null);
-      try {
-        const body = { fallbackModels: fallbacks.map(f => f.value) };
-        const r = await fetchJSON('/api/config/runtime/ai-fallbacks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        setRuntime(o => ({ ...(o||{}), ai: { ...(o?.ai||{}), fallbackModels: r.fallbackModels || body.fallbackModels } }));
-      } catch (e) { setError(e.message); } finally { setSavingFallbacks(false); }
-    }
-
-  function numberInput(key, min, max, step = 'any') {
-    const raw = params[key];
-    const value = raw === null || raw === undefined ? '' : raw === '' ? '' : String(raw);
-    return (
-      <Input
-        type="number"
-        value={value}
-        step={step}
-        onChange={e => {
-          const v = e.detail.value;
-          setParams(p => ({ ...p, [key]: v === '' ? '' : Number(v) }));
-        }}
-        disabled={!canEditAI}
-        inputMode="decimal"
-        ariaLabel={key}
-        placeholder="auto"
-        constraintText={`Range ${min} to ${max}`}
-      />
-    );
-  }
-
-  const seedSlaEdits = React.useCallback((items = []) => {
-    const next = items.reduce((acc, item) => {
-      const hours = item?.target_hours;
-      acc[item.stage_key] = {
-        target_hours: hours === null || hours === undefined ? '' : String(hours),
-        description: item?.description || ''
-      };
-      return acc;
-    }, {});
-    setSlaEdits(next);
-  }, []);
-
-  const fetchSlaTargets = React.useCallback(async () => {
-    setSlaLoading(true);
-    setSlaError(null);
+  const saveModel = useCallback(async () => {
+    if (!selectedAiModel?.value) return;
+    setSavingModel(true);
     try {
-      const response = await fetchJSON('/api/config/sla-targets');
-      const items = Array.isArray(response?.targets) ? response.targets : [];
-      const normalised = items.length ? items.map(item => ({
-        id: item.id || null,
-        stage_key: item.stage_key || item.stage || '',
-        display_name: item.display_name || SLA_STAGE_LABELS[item.stage_key] || item.stage_key,
-        target_hours: item.target_hours ?? item.targetHours ?? '',
-        description: item.description || '',
-        applies_to_role: item.applies_to_role ?? item.appliesToRole ?? null
-      })) : SLA_STAGE_PLACEHOLDER.map(item => ({ ...item }));
-      setSlaTargets(normalised);
-      seedSlaEdits(normalised);
-    } catch (error) {
-      const message = error?.message || 'Failed to load SLA targets';
-      let fallbackApplied = false;
-      setSlaTargets(prev => {
-        if (prev.length) {
-          return prev;
-        }
-        const fallback = SLA_STAGE_PLACEHOLDER.map(item => ({ ...item }));
-        seedSlaEdits(fallback);
-        fallbackApplied = true;
-        return fallback;
+      await fetchJSON("/api/config/runtime/ai-model", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: selectedAiModel.value }),
       });
-      if (fallbackApplied) {
-        setSlaError(null);
-      } else if (String(message).includes('404')) {
-        setSlaError(null);
-      } else {
-        setSlaError(message);
-      }
+    } catch (err) {
+      console.error("[configuration] Failed to save AI model:", err);
     } finally {
-      setSlaLoading(false);
+      setSavingModel(false);
     }
-  }, [seedSlaEdits]);
+  }, [selectedAiModel]);
 
-  React.useEffect(() => {
-    fetchSlaTargets();
-  }, [fetchSlaTargets]);
-
-  const effectiveSlaTargets = React.useMemo(() => (
-    slaTargets.length ? slaTargets : SLA_STAGE_PLACEHOLDER
-  ), [slaTargets]);
-
-  const isSlaDirty = React.useMemo(() => (
-    effectiveSlaTargets.some(item => {
-      const edit = slaEdits[item.stage_key];
-      if (!edit) return false;
-      const originalHours = item.target_hours === null || item.target_hours === undefined ? '' : String(item.target_hours);
-      const originalNotes = item.description || '';
-      return edit.target_hours !== originalHours || (edit.description || '') !== originalNotes;
-    })
-  ), [effectiveSlaTargets, slaEdits]);
-
-  const handleSlaEdit = React.useCallback((stageKey, field, value) => {
-    setSlaEdits(prev => ({
-      ...prev,
-      [stageKey]: {
-        ...prev[stageKey],
-        target_hours: field === 'target_hours' ? value.replace(/[^0-9]/g, '') : (prev[stageKey]?.target_hours ?? ''),
-        description: field === 'description' ? value : (prev[stageKey]?.description ?? '')
-      }
-    }));
-  }, []);
-
-  const handleSlaReset = React.useCallback(() => {
-    seedSlaEdits(effectiveSlaTargets);
-    setSlaError(null);
-  }, [effectiveSlaTargets, seedSlaEdits]);
-
-  const handleSlaSave = React.useCallback(async () => {
-    if (!canEditSla) return;
-
-    const payloads = effectiveSlaTargets.map(item => {
-      const edit = slaEdits[item.stage_key] || { target_hours: '', description: '' };
-      const hoursValue = edit.target_hours === '' ? null : Number(edit.target_hours);
-      return {
-        id: item.id,
-        stage_key: item.stage_key,
-        target_hours: hoursValue,
-        description: edit.description || '',
-        applies_to_role: item.applies_to_role || null,
-        display_name: item.display_name
-      };
-    });
-
-    for (const target of payloads) {
-      if (target.target_hours === null || Number.isNaN(target.target_hours)) {
-        setSlaError(`Target hours required for ${SLA_STAGE_LABELS[target.stage_key] || target.stage_key}`);
-        return;
-      }
-    }
-
-    setSavingSla(true);
-    setSlaError(null);
-    try {
-      await Promise.all(payloads.map(async target => {
-        const body = {
-          target_hours: target.target_hours,
-          description: target.description
-        };
-        if (target.id) {
-          await fetchJSON(`/api/config/sla-targets/${target.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-          });
-        } else {
-          await fetchJSON('/api/config/sla-targets', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              stage_key: target.stage_key,
-              target_hours: target.target_hours,
-              description: target.description,
-              applies_to_role: target.applies_to_role
-            })
-          });
-        }
-      }));
-      await fetchSlaTargets();
-    } catch (error) {
-      setSlaError(error?.message || 'Failed to save SLA targets');
-    } finally {
-      setSavingSla(false);
-    }
-  }, [canEditSla, effectiveSlaTargets, fetchSlaTargets, slaEdits]);
-
-  // Auth rendering (separate to keep switch simple)
-  function renderAuth() {
-    const authSingle = runtime?.auth || null;
-    if (!authSingle) return <Box fontSize="body-s" color="text-status-inactive">Auth configuration unavailable.</Box>;
-    const authAdmin = runtime?.authAdmin || authSingle?.admin || authSingle;
-    const authPublic = runtime?.authPublic || authSingle?.public || authSingle;
-    function maskClient(id) { if (!id) return ''; if (id.includes('*')) return id; if (id.length <= 6) return id[0] + '*'.repeat(Math.max(0, id.length - 2)) + id.slice(-1); return id.slice(0,4)+'*'.repeat(id.length-6)+id.slice(-2); }
-    const scopeState = scope => ({
-      authObj: scope === 'admin' ? authAdmin : authPublic,
-      sessionOriginal: scope === 'admin' ? authAdmin : authPublic,
-      sessionEdits: scope === 'admin' ? authSessionAdminEdits : authSessionPublicEdits,
-      setSessionEdits: scope === 'admin' ? setAuthSessionAdminEdits : setAuthSessionPublicEdits,
-        policyOriginal: scope === 'admin' ? authPolicyAdminOriginal : authPolicyPublicOriginal,
-      policyEdits: scope === 'admin' ? authPolicyAdminEdits : authPolicyPublicEdits,
-      setPolicyEdits: scope === 'admin' ? setAuthPolicyAdminEdits : setAuthPolicyPublicEdits,
-      savingSession: !!savingAuthSessionScope[scope],
-      savingPolicy: !!savingAuthPolicyScope[scope],
-      syncingFederation: !!syncingFederationScope[scope]
-    });
-    const ttlInput = (scope, field, label, help) => {
-      const { sessionEdits, setSessionEdits, savingSession } = scopeState(scope);
-      if (!sessionEdits) return null;
-      return (
-        <FormField label={label} description={help} constraintText="Seconds (integer)">
-          <Input
-            type="number"
-            value={sessionEdits[field] === '' ? '' : String(sessionEdits[field])}
-            onChange={e => setSessionEdits(ed => ({ ...ed, [field]: e.detail.value === '' ? '' : Number(e.detail.value) }))}
-            disabled={!canEditAuth || savingSession}
-            placeholder="default"
-          />
-        </FormField>
-      );
+  const saveParams = useCallback(async () => {
+    setSavingParams(true);
+    const coerceNumber = value => {
+      if (value === "" || value === null || typeof value === "undefined") return null;
+      const num = Number(value);
+      return Number.isFinite(num) ? num : null;
     };
-    const isSessionDirty = scope => {
+    try {
+      await fetchJSON("/api/config/runtime/ai-params", {
+        method: "PATCH",
+        body: {
+          temperature: coerceNumber(params.temperature),
+          top_p: coerceNumber(params.top_p),
+          max_tokens: coerceNumber(params.max_tokens),
+          presence_penalty: coerceNumber(params.presence_penalty),
+          frequency_penalty: coerceNumber(params.frequency_penalty),
+        },
+      });
+    } catch (err) {
+      console.error("[configuration] Failed to save AI parameters:", err);
+    } finally {
+      setSavingParams(false);
+    }
+  }, [params]);
+
+  const saveFallbacks = useCallback(async () => {
+    setSavingFallbacks(true);
+    try {
+      await fetchJSON("/api/config/runtime/ai-fallbacks", {
+        method: "PATCH",
+        body: { fallbackModels: fallbackValues },
+      });
+    } catch (err) {
+      console.error("[configuration] Failed to save AI fallbacks:", err);
+    } finally {
+      setSavingFallbacks(false);
+    }
+  }, [fallbackValues]);
+
+  const numberInput = useCallback(
+    (field, min, max, step) => {
+      const raw = params[field];
+      const value =
+        raw === "" || raw === null || typeof raw === "undefined" ? "" : String(raw);
+      return (
+        <Input
+          type="number"
+          value={value}
+          onChange={event => {
+            const next = event.detail.value;
+            setParams(prev => ({
+              ...prev,
+              [field]: next === "" ? "" : Number(next),
+            }));
+          }}
+          min={min}
+          max={max}
+          step={step}
+          disabled={!canEditAI}
+        />
+      );
+    },
+    [canEditAI, params],
+  );
+
+  const resetLockingEdits = useCallback(() => {
+    if (!lockingConfig) return;
+    setLockingEdits(toLockingEditState(lockingConfig));
+    setLockingError(null);
+  }, [lockingConfig, toLockingEditState]);
+
+  const saveLockingConfig = useCallback(async () => {
+    if (!canEditLocking || !lockingEdits) return;
+    setLockingSaving(true);
+    setLockingError(null);
+    try {
+      const ttl =
+        parseLockingMinutes(lockingEdits.lockTtlMinutes) ??
+        lockingConfig?.lockTtlMinutes ??
+        DEFAULT_LOCKING_CONFIG.lockTtlMinutes;
+      const heartbeat = parseLockingMinutes(lockingEdits.heartbeatMinutes);
+      const payload = {
+        mode: lockingEdits.mode || DEFAULT_LOCKING_CONFIG.mode,
+        lockTtlMinutes: ttl,
+        heartbeatMinutes: heartbeat ?? null,
+      };
+      const saved = await fetchJSON("/api/config/runtime/locking", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const normalized = normaliseLocking(saved);
+      setLockingConfig(normalized);
+      setLockingEdits(toLockingEditState(normalized));
+    } catch (err) {
+      setLockingError(err.message);
+    } finally {
+      setLockingSaving(false);
+    }
+  }, [
+    canEditLocking,
+    lockingEdits,
+    lockingConfig,
+    normaliseLocking,
+    parseLockingMinutes,
+    toLockingEditState,
+  ]);
+
+  const scopeState = useCallback(
+    scope => {
+      const adminScope = scope === "admin";
+      return {
+        sessionOriginal: adminScope ? authSessionAdminOriginal : authSessionPublicOriginal,
+        sessionEdits: adminScope ? authSessionAdminEdits : authSessionPublicEdits,
+        setSessionEdits: adminScope ? setAuthSessionAdminEdits : setAuthSessionPublicEdits,
+        policyOriginal: adminScope ? authPolicyAdminOriginal : authPolicyPublicOriginal,
+        policyEdits: adminScope ? authPolicyAdminEdits : authPolicyPublicEdits,
+        setPolicyEdits: adminScope ? setAuthPolicyAdminEdits : setAuthPolicyPublicEdits,
+      };
+    },
+    [
+      authSessionAdminOriginal,
+      authSessionPublicOriginal,
+      authSessionAdminEdits,
+      authSessionPublicEdits,
+      authPolicyAdminOriginal,
+      authPolicyPublicOriginal,
+      authPolicyAdminEdits,
+      authPolicyPublicEdits,
+    ],
+  );
+
+  const isSessionDirty = useCallback(
+    scope => {
       const { sessionOriginal, sessionEdits } = scopeState(scope);
-      return !!(sessionOriginal && sessionEdits && (
+      if (!sessionOriginal || !sessionEdits) return false;
+      return (
         sessionOriginal.access !== sessionEdits.access ||
         sessionOriginal.id !== sessionEdits.id ||
         sessionOriginal.refresh !== sessionEdits.refresh ||
-  sessionOriginal.frontendIdle !== sessionEdits.frontendIdle ||
-  sessionOriginal.absolute !== sessionEdits.absolute
-      ));
-    };
-    const isPolicyDirty = scope => {
+        sessionOriginal.frontendIdle !== sessionEdits.frontendIdle ||
+        sessionOriginal.absolute !== sessionEdits.absolute
+      );
+    },
+    [scopeState],
+  );
+
+  const isPolicyDirty = useCallback(
+    scope => {
       const { policyOriginal, policyEdits } = scopeState(scope);
-      return !!(policyOriginal && policyEdits && (
+      if (!policyOriginal || !policyEdits) return false;
+      return (
         policyOriginal.mfaMode !== policyEdits.mfaMode ||
         policyOriginal.pkceRequired !== policyEdits.pkceRequired ||
         policyOriginal.passwordPolicy.minLength !== policyEdits.passwordPolicy.minLength ||
@@ -679,695 +1162,626 @@ export default function ConfigurationSettings({ toggleHelpPanel }) {
         policyOriginal.passwordPolicy.requireNumber !== policyEdits.passwordPolicy.requireNumber ||
         policyOriginal.passwordPolicy.requireSymbol !== policyEdits.passwordPolicy.requireSymbol ||
         policyOriginal.lockout.threshold !== policyEdits.lockout.threshold ||
-  policyOriginal.lockout.durationSeconds !== policyEdits.lockout.durationSeconds ||
-  policyOriginal.maxPasswordResetsPerDay !== policyEdits.maxPasswordResetsPerDay ||
-  policyOriginal.anomalyProtection !== policyEdits.anomalyProtection
-      ));
-    };
-    const saveSession = async scope => {
+        policyOriginal.lockout.durationSeconds !== policyEdits.lockout.durationSeconds ||
+        policyOriginal.maxPasswordResetsPerDay !== policyEdits.maxPasswordResetsPerDay ||
+        policyOriginal.anomalyProtection !== policyEdits.anomalyProtection
+      );
+    },
+    [scopeState],
+  );
+
+  const sessionDirty = useMemo(
+    () => ({ admin: isSessionDirty("admin"), public: isSessionDirty("public") }),
+    [isSessionDirty],
+  );
+
+  const policyDirty = useMemo(
+    () => ({ admin: isPolicyDirty("admin"), public: isPolicyDirty("public") }),
+    [isPolicyDirty],
+  );
+
+  const resetAuthSession = useCallback(
+    scope => {
+      const adminScope = scope === "admin";
+      if (adminScope && authSessionAdminOriginal) {
+        setAuthSessionAdminEdits(authSessionAdminOriginal);
+      }
+      if (!adminScope && authSessionPublicOriginal) {
+        setAuthSessionPublicEdits(authSessionPublicOriginal);
+      }
+    },
+    [authSessionAdminOriginal, authSessionPublicOriginal],
+  );
+
+  const resetAuthPolicy = useCallback(
+    scope => {
+      const adminScope = scope === "admin";
+      if (adminScope && authPolicyAdminOriginal) {
+        setAuthPolicyAdminEdits(authPolicyAdminOriginal);
+      }
+      if (!adminScope && authPolicyPublicOriginal) {
+        setAuthPolicyPublicEdits(authPolicyPublicOriginal);
+      }
+    },
+    [authPolicyAdminOriginal, authPolicyPublicOriginal],
+  );
+
+  const saveAuthSession = useCallback(
+    async scope => {
       if (!isSessionDirty(scope)) return;
       const { sessionEdits } = scopeState(scope);
       if (!sessionEdits) return;
       try {
-        setSavingAuthSessionScope(s => ({ ...s, [scope]: true }));
+        setSavingAuthSessionScope(prev => ({ ...prev, [scope]: true }));
         const body = { tokenTtl: sessionEdits };
-        const pathBase = '/api/config/runtime/auth-session';
-        let resp;
+        const pathBase = "/api/config/runtime/auth-session";
+        let response;
         try {
-          resp = await fetchJSON(`${pathBase}?scope=${scope}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-        } catch (e) {
-          if (/404/.test(e.message)) resp = await fetchJSON(pathBase, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}); else throw e;
+          response = await fetchJSON(`${pathBase}?scope=${scope}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        } catch (err) {
+          if (/404/.test(err.message)) {
+            response = await fetchJSON(pathBase, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+          } else {
+            throw err;
+          }
         }
-        setRuntime(r => ({ ...(r||{}), auth:{ ...(r?.auth||{}), tokenTtl:{ ...(resp?.tokenTtl||sessionEdits) } } }));
-        if (scope === 'admin') setAuthSessionAdminOriginal(sessionEdits); else setAuthSessionPublicOriginal(sessionEdits);
-      } catch(e) { setError(e.message); } finally {
-        setSavingAuthSessionScope(s => ({ ...s, [scope]: false }));
+        setRuntime(current => ({
+          ...(current || {}),
+          auth: {
+            ...(current?.auth || {}),
+            tokenTtl: { ...(response?.tokenTtl || sessionEdits) },
+          },
+        }));
+        if (scope === "admin") {
+          setAuthSessionAdminOriginal(sessionEdits);
+        } else {
+          setAuthSessionPublicOriginal(sessionEdits);
+        }
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setSavingAuthSessionScope(prev => ({ ...prev, [scope]: false }));
       }
-    };
-    const discardSession = scope => {
-      if (scope === 'admin' && authSessionAdminOriginal) setAuthSessionAdminEdits(authSessionAdminOriginal);
-      if (scope === 'public' && authSessionPublicOriginal) setAuthSessionPublicEdits(authSessionPublicOriginal);
-    };
-    const savePolicy = async scope => {
+    },
+    [isSessionDirty, scopeState],
+  );
+
+  const saveAuthPolicy = useCallback(
+    async scope => {
       if (!isPolicyDirty(scope)) return;
       const { policyEdits } = scopeState(scope);
       if (!policyEdits) return;
       try {
-        setSavingAuthPolicyScope(s => ({ ...s, [scope]: true }));
-        const body = { mfa:{ mode: policyEdits.mfaMode }, passwordPolicy: policyEdits.passwordPolicy, lockout: policyEdits.lockout, pkceRequired: policyEdits.pkceRequired };
-        if (scope === 'public') {
+        setSavingAuthPolicyScope(prev => ({ ...prev, [scope]: true }));
+        const body = {
+          mfa: { mode: policyEdits.mfaMode },
+          passwordPolicy: policyEdits.passwordPolicy,
+          lockout: policyEdits.lockout,
+          pkceRequired: policyEdits.pkceRequired,
+        };
+        if (scope === "public") {
           body.maxPasswordResetsPerDay = policyEdits.maxPasswordResetsPerDay;
           body.anomalyProtection = policyEdits.anomalyProtection;
         }
-        const pathBase = '/api/config/runtime/auth-policy';
-        let resp;
-        try {
-          resp = await fetchJSON(`${pathBase}?scope=${scope}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-        } catch (e) {
-          if (/404/.test(e.message)) resp = await fetchJSON(pathBase, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}); else throw e;
+        await fetchJSON(`/api/config/runtime/auth-policy?scope=${scope}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (scope === "admin") {
+          setAuthPolicyAdminOriginal(policyEdits);
+        } else {
+          setAuthPolicyPublicOriginal(policyEdits);
         }
-  setRuntime(r => ({ ...(r||{}), auth:{ ...(r?.auth||{}), mfa: resp?.mfa || { mode: body.mfa.mode }, passwordPolicy: resp?.passwordPolicy || body.passwordPolicy, lockout: resp?.lockout || body.lockout, pkceRequired: resp?.pkceRequired !== undefined ? resp.pkceRequired : body.pkceRequired } }));
-        if (scope === 'admin') setAuthPolicyAdminOriginal(policyEdits); else setAuthPolicyPublicOriginal(policyEdits);
-      } catch(e) { setError(e.message); } finally {
-        setSavingAuthPolicyScope(s => ({ ...s, [scope]: false }));
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setSavingAuthPolicyScope(prev => ({ ...prev, [scope]: false }));
       }
-    };
-    const discardPolicy = scope => {
-      if (scope === 'admin' && authPolicyAdminOriginal) setAuthPolicyAdminEdits(authPolicyAdminOriginal);
-      if (scope === 'public' && authPolicyPublicOriginal) setAuthPolicyPublicEdits(authPolicyPublicOriginal);
-    };
-    const syncFederation = async scope => {
-      const { policyEdits } = scopeState(scope);
-      if (!policyEdits) return;
-      try {
-        setSyncingFederationScope(s => ({ ...s, [scope]: true }));
-        const resp = await fetchJSON('/api/config/runtime/auth-federation-sync', { method:'POST' });
-        const lastSync = resp.lastSync || new Date().toISOString();
-        const setPolicyEditsFn = scope === 'admin' ? setAuthPolicyAdminEdits : setAuthPolicyPublicEdits;
-        setPolicyEditsFn(p => ({ ...p, federation: { ...p.federation, lastSync } }));
-      } catch(e) { setError(e.message); } finally {
-        setSyncingFederationScope(s => ({ ...s, [scope]: false }));
-      }
-    };
-    const openClaimsModal = () => {
-      const mapping = authAdmin.claimsMapping || authAdmin.claims_map || authAdmin.customClaimsMapping || null;
-      if (mapping) {
-        try { setClaimsModalContent(JSON.stringify(mapping, null, 2)); } catch { setClaimsModalContent('Could not serialize claims mapping.'); }
-      } else setClaimsModalContent('No claims mapping available.');
-      setShowClaimsModal(true);
-    };
-    const renderSession = scope => {
-      const dirty = isSessionDirty(scope);
-      const { sessionEdits } = scopeState(scope);
-      if (!sessionEdits) return null;
-      const saving = !!savingAuthSessionScope[scope];
-      return (
-        <SpaceBetween size="xs">
-          <Box fontSize="heading-xs" variant="h4">Session / Token Lifetimes {dirty && <Badge color="blue">Unsaved</Badge>}</Box>
-          <ColumnLayout columns={5} variant="text-grid">
-            {ttlInput(scope,'access','Access Token','JWT access TTL')}
-            {ttlInput(scope,'id','ID Token','ID token TTL')}
-            {ttlInput(scope,'refresh','Refresh Token','Refresh token max age')}
-            {ttlInput(scope,'frontendIdle','Frontend Idle','Inactivity logout threshold')}
-            {ttlInput(scope,'absolute','Absolute Session','Max session lifetime')}
-          </ColumnLayout>
-          {sessionEdits.absolute && sessionEdits.frontendIdle && Number(sessionEdits.frontendIdle) > Number(sessionEdits.absolute) && (
-            <Alert type="warning" header="Idle timeout exceeds absolute session">Idle timeout should be lower than absolute session lifetime.</Alert>
-          )}
-          {canEditAuth && (
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button onClick={() => saveSession(scope)} loading={saving} disabled={!dirty || saving}>Save TTLs</Button>
-              <Button variant="link" onClick={() => discardSession(scope)} disabled={!dirty || saving}>Discard</Button>
-            </SpaceBetween>
-          )}
-        </SpaceBetween>
-      );
-    };
-    const renderPolicy = scope => {
-      const dirty = isPolicyDirty(scope);
-      const { policyEdits, syncingFederation } = scopeState(scope);
-      if (!policyEdits) return null;
-      const saving = !!savingAuthPolicyScope[scope];
-      const charClasses = ['requireUpper','requireLower','requireNumber','requireSymbol'].filter(k => policyEdits.passwordPolicy[k]).length;
-      const pwWeak = policyEdits.passwordPolicy.minLength < 12 || charClasses < 3;
-      return (
-        <SpaceBetween size="xs">
-          <Box fontSize="heading-xs" variant="h4">Authentication Policy {dirty && <Badge color="blue">Unsaved</Badge>}</Box>
-          {pwWeak && (
-            <Alert statusIconAriaLabel="Warning" type="warning" header="Password policy below recommended guardrails">
-              Recommended: min length 12+, at least 3 of 4 character categories, lockout threshold 5-10 attempts.
-            </Alert>
-          )}
-          <ColumnLayout columns={4} variant="text-grid">
-            <FormField label="MFA Mode" description="off / optional / required">
-              <Select
-                selectedOption={policyEdits.mfaMode ? { label: policyEdits.mfaMode, value: policyEdits.mfaMode } : null}
-                onChange={e => canEditAuth && scopeState(scope).setPolicyEdits(p => ({ ...p, mfaMode: e.detail.selectedOption?.value || '' }))}
-                options={['off','optional','required'].map(v => ({ label: v, value: v }))}
-                disabled={!canEditAuth || saving}
-                placeholder="Select mode"
-              />
-            </FormField>
-            <FormField label="Min Password Length">
-              <Input type="number" value={String(policyEdits.passwordPolicy.minLength)} onChange={e => scopeState(scope).setPolicyEdits(p => ({ ...p, passwordPolicy: { ...p.passwordPolicy, minLength: Number(e.detail.value)||0 } }))} disabled={!canEditAuth || saving} />
-            </FormField>
-            <FormField label="Lockout Threshold" description="Failed attempts">
-              <Input type="number" value={String(policyEdits.lockout.threshold)} onChange={e => scopeState(scope).setPolicyEdits(p => ({ ...p, lockout: { ...p.lockout, threshold: Number(e.detail.value)||0 } }))} disabled={!canEditAuth || saving} />
-            </FormField>
-            <FormField label="Lockout Duration" description="Seconds">
-              <Input type="number" value={String(policyEdits.lockout.durationSeconds)} onChange={e => scopeState(scope).setPolicyEdits(p => ({ ...p, lockout: { ...p.lockout, durationSeconds: Number(e.detail.value)||0 } }))} disabled={!canEditAuth || saving} />
-            </FormField>
-          </ColumnLayout>
-          <ColumnLayout columns={scope === 'public' ? 7 : 5} variant="text-grid">
-            <FormField label="Uppercase" description="Require upper-case letter"><Checkbox checked={policyEdits.passwordPolicy.requireUpper} onChange={e => scopeState(scope).setPolicyEdits(p => ({ ...p, passwordPolicy: { ...p.passwordPolicy, requireUpper: e.detail.checked } }))} disabled={!canEditAuth || saving}>Uppercase</Checkbox></FormField>
-            <FormField label="Lowercase"><Checkbox checked={policyEdits.passwordPolicy.requireLower} onChange={e => scopeState(scope).setPolicyEdits(p => ({ ...p, passwordPolicy: { ...p.passwordPolicy, requireLower: e.detail.checked } }))} disabled={!canEditAuth || saving}>Lowercase</Checkbox></FormField>
-            <FormField label="Number"><Checkbox checked={policyEdits.passwordPolicy.requireNumber} onChange={e => scopeState(scope).setPolicyEdits(p => ({ ...p, passwordPolicy: { ...p.passwordPolicy, requireNumber: e.detail.checked } }))} disabled={!canEditAuth || saving}>Number</Checkbox></FormField>
-            <FormField label="Symbol"><Checkbox checked={policyEdits.passwordPolicy.requireSymbol} onChange={e => scopeState(scope).setPolicyEdits(p => ({ ...p, passwordPolicy: { ...p.passwordPolicy, requireSymbol: e.detail.checked } }))} disabled={!canEditAuth || saving}>Symbol</Checkbox></FormField>
-            <FormField label="PKCE Required"><Toggle checked={policyEdits.pkceRequired} onChange={e => scopeState(scope).setPolicyEdits(p => ({ ...p, pkceRequired: e.detail.checked }))} disabled={!canEditAuth || saving}>PKCE</Toggle></FormField>
-            {scope === 'public' && (
-              <FormField label="Max Password Resets / Day" description="Public scope only">
-                <Input type="number" value={String(policyEdits.maxPasswordResetsPerDay)} onChange={e => scopeState(scope).setPolicyEdits(p => ({ ...p, maxPasswordResetsPerDay: Number(e.detail.value)||0 }))} disabled={!canEditAuth || saving} />
-              </FormField>
-            )}
-            {scope === 'public' && (
-              <FormField label="Anomaly Protection" description="Risk-based adaptive security">
-                <Select
-                  selectedOption={policyEdits.anomalyProtection ? { label: policyEdits.anomalyProtection, value: policyEdits.anomalyProtection } : null}
-                  onChange={e => scopeState(scope).setPolicyEdits(p => ({ ...p, anomalyProtection: e.detail.selectedOption?.value || 'standard' }))}
-                  options={['standard','strict'].map(v => ({ label: v, value: v }))}
-                  disabled={!canEditAuth || saving}
-                  placeholder="Select"
-                />
-              </FormField>
-            )}
-          </ColumnLayout>
-          {/* Guardrail alerts placed after form fields for layout clarity */}
-          {scope === 'public' && policyEdits.maxPasswordResetsPerDay > 20 && (
-            <Alert type="warning" header="High password reset allowance">Consider lowering max daily resets to reduce enumeration risk.</Alert>
-          )}
-          {policyEdits.lockout.threshold > 10 && (
-            <Alert type="warning" header="Lockout threshold higher than guideline">CCCS heuristic recommends 5-10 attempts before lockout.</Alert>
-          )}
-          {policyEdits.lockout.durationSeconds < 300 && (
-            <Alert type="warning" header="Lockout duration below 300s">Short duration reduces effectiveness of brute force mitigation.</Alert>
-          )}
-          {policyEdits.federation.providers.length > 0 && (
-            <SpaceBetween size="xxs">
-              <Box fontSize="heading-xs" variant="h4">Federation Providers</Box>
-              <SpaceBetween size="xxs">{policyEdits.federation.providers.map((pv, idx) => <Box key={`prov-${idx}-${pv}` } fontSize="body-s">{pv}</Box>)}</SpaceBetween>
-              <Box fontSize="body-s" color="text-status-inactive">Last Sync: {policyEdits.federation.lastSync || 'n/a'}</Box>
-              {canEditAuth && (
-                <Button size="small" onClick={() => syncFederation(scope)} loading={syncingFederation}>Sync Federation</Button>
-              )}
-            </SpaceBetween>
-          )}
-          {scope === 'admin' && (authAdmin.claimsMapping || authAdmin.claims_map || authAdmin.customClaimsMapping) && (
-            <Button onClick={openClaimsModal} variant="normal" iconName="view">View Claims Mapping</Button>
-          )}
-          {canEditAuth && (
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button onClick={() => savePolicy(scope)} loading={saving} disabled={!dirty || saving}>Save Policy</Button>
-              <Button variant="link" onClick={() => discardPolicy(scope)} disabled={!dirty || saving}>Discard</Button>
-            </SpaceBetween>
-          )}
-        </SpaceBetween>
-      );
-    };
-    const ScopeSummary = ({ scope }) => {
-      const { authObj } = scopeState(scope);
-      if (!authObj) return <Box fontSize="body-s" color="text-status-inactive">Unavailable</Box>;
-      const issuer = authObj.issuer || authObj.iss;
-      const domain = authObj.domain || authObj.domainUrl || '';
-      const region = authObj.region || authObj.awsRegion || '';
-      const scopes = Array.isArray(authObj.scopes) ? authObj.scopes : (typeof authObj.scopes === 'string' ? authObj.scopes.split(/[\s,]+/) : []);
-      const rawClientId = authObj.clientIdMasked || authObj.clientId || '';
-      const redirects = authObj.redirects || {};
-      const callbackUris = Array.isArray(redirects.callback) ? redirects.callback : [];
-      const logoutUris = Array.isArray(redirects.postLogout) ? redirects.postLogout : [];
-      const clientIdDisplay = maskClient(rawClientId);
-      return (
-        <SpaceBetween size="xs">
-          <SpaceBetween size="xxs">
-            <Box>Provider: <strong>{authObj.provider || 'Unknown'}</strong></Box>
-            {issuer && <Box>Issuer: <span style={{wordBreak:'break-all'}}>{issuer}</span></Box>}
-            {domain && <Box>Domain: {domain}</Box>}
-            {region && <Box>Region: {region}</Box>}
-            {rawClientId && <Box>Client ID: {clientIdDisplay}</Box>}
-            {!!scopes.length && <Box>Scopes: {scopes.join(', ')}</Box>}
-            {authObj.devBypass && <StatusIndicator type="warning">Dev auth bypass active</StatusIndicator>}
-            {authObj.audit && (authObj.audit.updatedAt || authObj.audit.updatedBy) && (
-              <Box fontSize="body-s" color="text-status-inactive">Last Change: {authObj.audit.updatedAt || 'unknown'}{authObj.audit.updatedBy ? ` by ${authObj.audit.updatedBy}` : ''}</Box>
-            )}
-          </SpaceBetween>
-          {renderSession(scope)}
-          {renderPolicy(scope)}
-          {(callbackUris.length > 0 || logoutUris.length > 0) && (
-            <SpaceBetween size="xs">
-              <Box fontSize="heading-xs" variant="h4">Redirect URIs</Box>
-              {callbackUris.length > 0 && (
-                <FormField label="Callback URIs" description="Registered OAuth2 redirect endpoints (read-only)">
-                  <SpaceBetween size="xxs">
-                    {callbackUris.map((u, idx) => <Box key={`cb-${idx}`} fontSize="body-s" style={{wordBreak:'break-all'}}>{u}</Box>)}
-                  </SpaceBetween>
-                </FormField>
-              )}
-              {logoutUris.length > 0 && (
-                <FormField label="Post Logout URIs" description="Where the IdP may redirect after sign-out">
-                  <SpaceBetween size="xxs">
-                    {logoutUris.map((u, idx) => <Box key={`lo-${idx}`} fontSize="body-s" style={{wordBreak:'break-all'}}>{u}</Box>)}
-                  </SpaceBetween>
-                </FormField>
-              )}
-            </SpaceBetween>
-          )}
-        </SpaceBetween>
-      );
-    };
-    return (
-      <Tabs
-        activeTabId={authTab}
-        onChange={e => setAuthTab(e.detail.activeTabId)}
-        tabs={[
-          { id: 'admin', label: 'Admin', content: <ScopeSummary scope="admin" /> },
-          { id: 'public', label: 'Applicants', content: <ScopeSummary scope="public" /> }
-        ]}
-      />
-    );
-  }
-
-  // Help components mapping
-  const helpComponents = {
-    ai: require('../helpPanelContents/aiConfigWidgetHelp.js').default,
-    auth: require('../helpPanelContents/authWidgetHelp.js').default,
-    sessionAudit: require('../helpPanelContents/sessionAuditWidgetHelp.js').default,
-    cors: require('../helpPanelContents/corsOriginsWidgetHelp.js').default,
-    env: require('../helpPanelContents/environmentWidgetHelp.js').default,
-    sla: require('../helpPanelContents/slaWidgetHelp.js').default,
-    secrets: require('../helpPanelContents/secretsWidgetHelp.js').default,
-    appearance: require('../helpPanelContents/appearanceWidgetHelp.js').default,
-    locking: require('../helpPanelContents/lockingSettingsHelp.js').default,
-  };
-
-  function renderBoardContent(type) {
-    switch (type) {
-      case 'ai':
-        return (
-          <SpaceBetween size="s">
-            <FormField label="Default Model" description="Primary model used when no per-request override is provided.">
-              <Select
-                selectedOption={aiModel}
-                onChange={e => canEditAI && setAiModel(e.detail.selectedOption)}
-                options={modelOptions}
-                filteringType="auto"
-                statusType={modelsLoading ? 'loading' : 'finished'}
-                disabled={!canEditAI}
-                placeholder="Select model"
-              />
-            </FormField>
-            {canEditAI && <Button loading={savingModel} onClick={saveModel} disabled={!aiModel}>Save Model</Button>}
-            <ColumnLayout columns={3} variant="text-grid">
-              <FormField label="Temperature" description="0=deterministic, higher=creative">{numberInput('temperature', 0, 2, 0.1)}</FormField>
-              <FormField label="Top P" description="Nucleus sampling">{numberInput('top_p', 0, 1, 0.01)}</FormField>
-              <FormField label="Max Tokens" description="Blank for provider default">
-                <Input type="number" value={params.max_tokens === '' ? '' : String(params.max_tokens)} onChange={e => setParams(p => ({ ...p, max_tokens: e.detail.value === '' ? '' : Number(e.detail.value) }))} disabled={!canEditAI} placeholder="auto" />
-              </FormField>
-            </ColumnLayout>
-            <ColumnLayout columns={3} variant="text-grid">
-              <FormField label="Presence Penalty" description="Encourage new topics">{numberInput('presence_penalty', -2, 2, 0.1)}</FormField>
-              <FormField label="Frequency Penalty" description="Reduce repetition">{numberInput('frequency_penalty', -2, 2, 0.1)}</FormField>
-              <FormField label="Fallback Models" description="Tried in order if primary returns an error (4xx).">
-                <Multiselect selectedOptions={fallbacks} onChange={e => canEditAI && setFallbacks(e.detail.selectedOptions)} options={modelOptions.filter(o => !aiModel || o.value !== aiModel.value)} placeholder="Select fallback models" disabled={!canEditAI} tokenLimit={5} />
-              </FormField>
-            </ColumnLayout>
-            {canEditAI && (
-              <SpaceBetween direction="horizontal" size="xs">
-                <Button loading={savingParams} onClick={saveParams}>Save Parameters</Button>
-                <Button loading={savingFallbacks} onClick={saveFallbacks}>Save Fallbacks</Button>
-              </SpaceBetween>
-            )}
-      </SpaceBetween>
-    );
-  case 'auth':
-    return renderAuth();
-  case 'locking': {
-    const { selectedMode, ttlInput, heartbeatInput, ttlError, heartbeatError, disableInputs } = lockingUi;
-
-    return (
-      <SpaceBetween size="s">
-        {lockingError && (
-          <Alert type="error" header="Locking configuration error" onDismiss={() => setLockingError(null)} dismissible>
-            {lockingError}
-          </Alert>
-        )}
-        {lockingLoading ? (
-          <StatusIndicator type="loading">Loading locking settings</StatusIndicator>
-        ) : (
-          <ColumnLayout columns={2} variant="text-grid">
-            <FormField label="Mode" description="Choose whether to require pessimistic locks during editing sessions.">
-              <Select
-                selectedOption={selectedMode}
-                options={LOCKING_MODE_OPTIONS}
-                disabled={disableInputs}
-                onChange={({ detail }) => {
-                  const next = detail.selectedOption?.value || DEFAULT_LOCKING_CONFIG.mode;
-                  setLockingEdits((prev) => ({ ...(prev || {}), mode: next }));
-                }}
-              />
-            </FormField>
-            <FormField
-              label="Lock timeout (minutes)"
-              description="Locks expire automatically when the timeout is reached."
-              errorText={ttlError || undefined}
-            >
-              <Input
-                type="number"
-                value={ttlInput}
-                disabled={disableInputs}
-                onChange={({ detail }) => setLockingEdits((prev) => ({ ...(prev || {}), lockTtlMinutes: detail.value }))}
-                placeholder={String(lockingConfig?.lockTtlMinutes ?? DEFAULT_LOCKING_CONFIG.lockTtlMinutes)}
-              />
-            </FormField>
-            <FormField
-              label="Heartbeat interval (minutes)"
-              description="Optional: automatically refresh the lock before it expires."
-              errorText={heartbeatError || undefined}
-            >
-              <Input
-                type="number"
-                value={heartbeatInput}
-                disabled={disableInputs}
-                onChange={({ detail }) => setLockingEdits((prev) => ({ ...(prev || {}), heartbeatMinutes: detail.value }))}
-                placeholder="e.g. 2"
-              />
-            </FormField>
-            <Box />
-          </ColumnLayout>
-        )}
-        <Box variant="small" color="text-status-inactive">
-          Locks are automatically released on save, on cancel, or when the timeout elapses. Heartbeats run only while the editor keeps the form open.
-        </Box>
-      </SpaceBetween>
-    );
-  }
-  case 'sla':
-    return (
-      <SpaceBetween size="s">
-        {slaError && <Alert type="error" header="SLA configuration">{slaError}</Alert>}
-            {slaLoading ? (
-              <StatusIndicator type="loading">Loading SLA targets</StatusIndicator>
-            ) : (
-              <Table
-                columnDefinitions={[
-                  { id: 'stage', header: 'Stage', cell: item => item.display_name || SLA_STAGE_LABELS[item.stage_key] || item.stage_key },
-                  { id: 'target', header: 'Target (hours)', cell: item => (
-                    canEditSla ? (
-                      <Input
-                        type="number"
-                        value={slaEdits[item.stage_key]?.target_hours ?? ''}
-                        onChange={e => handleSlaEdit(item.stage_key, 'target_hours', e.detail.value)}
-                        inputMode="numeric"
-                        ariaLabel={`Target hours for ${item.display_name || SLA_STAGE_LABELS[item.stage_key] || item.stage_key}`}
-                      />
-                    ) : (
-                      <Box>{item.target_hours}</Box>
-                    )
-                  )},
-                  { id: 'notes', header: 'Notes', cell: item => (
-                    canEditSla ? (
-                      <Input
-                        value={slaEdits[item.stage_key]?.description ?? ''}
-                        onChange={e => handleSlaEdit(item.stage_key, 'description', e.detail.value)}
-                        placeholder="Optional"
-                      />
-                    ) : (
-                      <Box>{item.description || '—'}</Box>
-                    )
-                  )}
-                ]}
-                items={effectiveSlaTargets}
-                trackBy="stage_key"
-                variant="embedded"
-                header={<Header variant="h3">SLA Target Baselines</Header>}
-                empty={<Box>No SLA targets configured.</Box>}
-              />
-            )}
-            {!canEditSla && <StatusIndicator type="stopped">Read only</StatusIndicator>}
-          </SpaceBetween>
-        );
-      case 'sessionAudit':
-        return (
-          <SpaceBetween size="s">
-            {auditError && <Alert type="error" header="Session audit error">{auditError}</Alert>}
-            <SpaceBetween size="xxs">
-              <Box fontSize="heading-xs" variant="h4">Session Audit</Box>
-              {auditLoading && <StatusIndicator type="loading">Loading</StatusIndicator>}
-              {auditStats && (
-                <ColumnLayout columns={4} variant="text-grid">
-                  <FormField label="Total Sessions"><Box>{auditStats.total}</Box></FormField>
-                  <FormField label="Active Users 24h"><Box>{auditStats.activeUsers24h}</Box></FormField>
-                  <FormField label="Rows (24h)"><Box>{auditStats.rows24h}</Box></FormField>
-                  <FormField label="Newest Seen"><Box>{auditStats.newest ? new Date(auditStats.newest).toLocaleString() : '—'}</Box></FormField>
-                </ColumnLayout>
-              )}
-              {auditRecent.length > 0 && (
-                <FormField label="Recent Sessions">
-                  <SpaceBetween size="xxs">
-                    {auditRecent.map(s => (
-                      <Box key={s.session_key} fontSize="body-s" color="text-status-inactive">
-                        {s.user_id} · {new Date(s.last_seen_at).toLocaleTimeString()} · {s.session_key.slice(0,10)}…
-                      </Box>
-                    ))}
-                  </SpaceBetween>
-                </FormField>
-              )}
-              <SpaceBetween direction="horizontal" size="xs">
-                <Button iconName="refresh" onClick={fetchAudit} loading={auditLoading}>Refresh</Button>
-                <Button iconName="close" onClick={async () => { try { await fetchJSON('/api/audit/session/prune?days=60', { method:'POST' }); fetchAudit(); } catch(e){ setAuditError(e.message);} }} disabled={auditLoading}>Prune &lt;60d</Button>
-              </SpaceBetween>
-            </SpaceBetween>
-          </SpaceBetween>
-        );
-      case 'cors':
-        return runtime && (<SpaceBetween size="xs">{(runtime.cors?.allowedOrigins || []).map(o => <Box key={o}>{o}</Box>)}</SpaceBetween>);
-      case 'env':
-        return (
-          <SpaceBetween size="s">
-            {runtime
-              ? <Box>NODE_ENV: {runtime.env?.nodeEnv || 'unknown'}</Box>
-              : <StatusIndicator type="loading">Loading environment</StatusIndicator>}
-            <Table
-              variant="embedded"
-              resizableColumns={false}
-              columnDefinitions={demoToolbarColumns}
-              items={demoToolbarRows}
-              trackBy="role"
-              header={<Header variant="h3">Demo Toolbar Visibility</Header>}
-              empty={<Box>No roles available</Box>}
-            />
-          </SpaceBetween>
-        );
-      case 'secrets':
-        return security && canSeeAny ? (
-          <SpaceBetween size="xs">
-            {security.secrets.map(s => (
-              <Box key={s.key}>{s.key}: {s.present ? s.masked : <i>missing</i>}</Box>
-            ))}
-            {!fullyAdmin && <Box fontSize="body-s" color="text-status-info">Additional privileges required to view fuller detail.</Box>}
-          </SpaceBetween>
-        ) : <Box fontSize="body-s" color="text-status-inactive">Insufficient role to view secrets.</Box>;
-      case 'appearance':
-        return (
-          <SpaceBetween size="s">
-            <Box fontSize="body-s" color="text-status-info">Dark mode preference (scaffold only).</Box>
-            <Toggle checked={isDarkMode} onChange={e => setUseDarkMode(e.detail.checked)}>Dark Mode</Toggle>
-          </SpaceBetween>
-        );
-      default:
-        return <Box>Unknown widget</Box>;
-    }
-  }
-
-  const boardI18n = {
-    empty: 'No widgets',
-    loading: 'Loading',
-    columnAriaLabel: i => `Column ${i + 1}`,
-    itemPositionAnnouncement: e => {
-      const { currentIndex, currentColumn, currentRow } = e;
-      return `Item moved to position ${currentIndex + 1}, column ${currentColumn + 1}, row ${currentRow + 1}`;
     },
-    liveAnnouncementDndStarted: e => `Picked up item at position ${e.position + 1}.`,
-    liveAnnouncementDndItemReordered: e => `Item moved from position ${e.initialPosition + 1} to ${e.currentPosition + 1}.`,
-    liveAnnouncementDndItemResized: e => `Item resized to ${e.size.width} by ${e.size.height}.`,
-    liveAnnouncementDndItemInserted: e => `Item inserted at position ${e.position + 1}.`,
-    liveAnnouncementDndCommitted: e => `Drag and drop committed. Final position ${e.finalPosition != null ? e.finalPosition + 1 : 'unchanged'}.`,
-    liveAnnouncementDndDiscarded: () => 'Drag and drop canceled.',
-    liveAnnouncementItemRemoved: e => `Removed item at position ${e.position + 1}.`,
-  };
-  const boardItemI18n = {
-    dragHandleAriaLabel: 'Drag handle',
-    dragHandleAriaDescription: 'Press Space or Enter to start dragging the widget',
-    dragHandleAriaDescriptionInactive: 'Drag not active',
-    resizeHandleAriaLabel: 'Resize handle',
-    resizeHandleAriaDescription: 'Press Space or Enter to start resizing the widget',
-    resizeHandleAriaDescriptionInactive: 'Resize not active',
-    removeItemAriaLabel: 'Remove widget',
-    editItemAriaLabel: 'Edit widget',
-    dragInactiveItemAriaLabel: 'Draggable widget',
-    dragActiveItemAriaLabel: 'Dragging widget',
-    resizeInactiveItemAriaLabel: 'Resizable widget',
-    resizeActiveItemAriaLabel: 'Resizing widget'
-  };
+    [isPolicyDirty, scopeState],
+  );
+
+  const handleAuthSave = useCallback(
+    async scope => {
+      await Promise.all([saveAuthSession(scope), saveAuthPolicy(scope)]);
+    },
+    [saveAuthPolicy, saveAuthSession],
+  );
+
+  const handleAuthCancel = useCallback(
+    scope => {
+      resetAuthSession(scope);
+      resetAuthPolicy(scope);
+    },
+    [resetAuthPolicy, resetAuthSession],
+  );
+
+  const buildAiHeaderActions = useCallback(() => {
+    const badges = [];
+    if (runtime?.ai?.model) {
+      badges.push(
+        <Badge key="model" color="blue">
+          {runtime.ai.model}
+        </Badge>,
+      );
+    }
+    if (runtime?.ai?.enabled != null) {
+      badges.push(
+        <Badge key="enabled" color={runtime.ai.enabled ? "green" : "red"}>
+          {runtime.ai.enabled ? "Enabled" : "Disabled"}
+        </Badge>,
+      );
+    }
+    if (!badges.length) return undefined;
+    return (
+      <SpaceBetween direction="horizontal" size="xs">
+        {badges}
+      </SpaceBetween>
+    );
+  }, [runtime]);
+
+  const buildSlaHeaderActions = useCallback(() => {
+    if (!canEditSla) {
+      return <Badge color="grey">Read only</Badge>;
+    }
+    return (
+      <SpaceBetween direction="horizontal" size="xs">
+        <Button onClick={handleSlaSave} loading={savingSla} disabled={!isSlaDirty || savingSla}>
+          Save
+        </Button>
+        <Button variant="link" onClick={handleSlaReset} disabled={!isSlaDirty || savingSla}>
+          Cancel
+        </Button>
+      </SpaceBetween>
+    );
+  }, [canEditSla, handleSlaReset, handleSlaSave, isSlaDirty, savingSla]);
+
+  const buildLockingHeaderActions = useCallback(() => {
+    if (!canEditLocking) {
+      return <Badge color="grey">Read only</Badge>;
+    }
+    return (
+      <SpaceBetween direction="horizontal" size="xs">
+        <Button
+          onClick={resetLockingEdits}
+          disabled={lockingLoading || lockingSaving || !lockingDirty}
+        >
+          Reset
+        </Button>
+        <Button
+          variant="primary"
+          loading={lockingSaving}
+          disabled={lockingUi.disableActions}
+          onClick={saveLockingConfig}
+        >
+          Save locking settings
+        </Button>
+      </SpaceBetween>
+    );
+  }, [
+    canEditLocking,
+    lockingDirty,
+    lockingLoading,
+    lockingSaving,
+    lockingUi.disableActions,
+    resetLockingEdits,
+    saveLockingConfig,
+  ]);
+
+  const buildAuthHeaderActions = useCallback(() => {
+    const auth = runtime?.auth || {};
+    const currentScope = authTab === "public" ? "public" : "admin";
+    const dirty = sessionDirty[currentScope] || policyDirty[currentScope];
+    const scopeSaving =
+      savingAuthSessionScope[currentScope] || savingAuthPolicyScope[currentScope];
+
+    const actions = [];
+    if (canEditAuth) {
+      actions.push(
+        <Button
+          key="auth-save"
+          onClick={() => handleAuthSave(currentScope)}
+          loading={scopeSaving}
+          disabled={!dirty}
+        >
+          Save
+        </Button>,
+      );
+      actions.push(
+        <Button
+          key="auth-cancel"
+          variant="link"
+          onClick={() => handleAuthCancel(currentScope)}
+          disabled={!dirty || scopeSaving}
+        >
+          Cancel
+        </Button>,
+      );
+    }
+    if (auth.provider) {
+      actions.push(
+        <Badge key="provider" color="blue">
+          {auth.provider}
+        </Badge>,
+      );
+    }
+    const mfaMode = auth.mfa?.mode || auth.mfaMode;
+    if (mfaMode) {
+      actions.push(
+        <Badge key="mfa" color="purple">
+          MFA: {mfaMode.toLowerCase()}
+        </Badge>,
+      );
+    }
+    const ssoEnabled = auth.ssoEnabled || auth.sso?.enabled;
+    if (ssoEnabled) {
+      actions.push(
+        <Badge key="sso" color="green">
+          SSO
+        </Badge>,
+      );
+    }
+    if (auth.devBypass) {
+      actions.push(
+        <Badge key="dev-bypass" color="red">
+          Dev bypass
+        </Badge>,
+      );
+    }
+    if (auth.issuer) {
+      actions.push(
+        <Button
+          key="copy-issuer"
+          variant="inline-icon"
+          iconName="copy"
+          ariaLabel="Copy issuer URL"
+          onClick={() => navigator?.clipboard?.writeText(auth.issuer).catch(() => {})}
+        />,
+      );
+    }
+    if (auth.issuer || auth.jwksUri) {
+      actions.push(
+        <Button
+          key="open-jwks"
+          variant="inline-icon"
+          iconName="external"
+          ariaLabel="Open JWKS"
+          onClick={() => {
+            const jwks =
+              auth.jwksUri ||
+              (auth.issuer ? auth.issuer.replace(/\/$/, "") + "/.well-known/jwks.json" : null);
+            if (jwks) window.open(jwks, "_blank", "noopener");
+          }}
+        />,
+      );
+    }
+    actions.push(
+      <Button
+        key="refresh-auth"
+        variant="inline-icon"
+        iconName="refresh"
+        ariaLabel="Refresh auth config"
+        onClick={loadConfiguration}
+      />,
+    );
+    if (!actions.length) return undefined;
+    return (
+      <SpaceBetween direction="horizontal" size="xs">
+        {actions}
+      </SpaceBetween>
+    );
+  }, [
+    authTab,
+    canEditAuth,
+    handleAuthCancel,
+    handleAuthSave,
+    loadConfiguration,
+    policyDirty,
+    runtime,
+    savingAuthPolicyScope,
+    savingAuthSessionScope,
+    sessionDirty,
+  ]);
+  const renderItem = useCallback(
+    (item, actions) => {
+      if (!item?.id) return null;
+      const metadata = item.data;
+      switch (item.id) {
+        case "ai":
+          return (
+            <AiConfigWidget
+              actions={actions}
+              metadata={metadata}
+              toggleHelpPanel={toggleHelpPanel}
+              headerActions={buildAiHeaderActions()}
+              aiModel={selectedAiModel}
+              setAiModel={option => setAiModelValue(option?.value || null)}
+              canEditAI={canEditAI}
+              modelOptions={modelOptions}
+              modelsLoading={modelsLoading}
+              savingModel={savingModel}
+              saveModel={saveModel}
+              params={params}
+              setParams={setParams}
+              numberInput={numberInput}
+              fallbacks={selectedFallbackOptions}
+              setFallbacks={options => setFallbackValues(options.map(option => option.value))}
+              savingParams={savingParams}
+              saveParams={saveParams}
+              savingFallbacks={savingFallbacks}
+              saveFallbacks={saveFallbacks}
+            />
+          );
+        case "auth":
+          return (
+            <AuthConfigWidget
+              actions={actions}
+              metadata={metadata}
+              toggleHelpPanel={toggleHelpPanel}
+              headerActions={buildAuthHeaderActions()}
+              runtime={runtime}
+              canEditAuth={canEditAuth}
+              authSessionAdminEdits={authSessionAdminEdits}
+              setAuthSessionAdminEdits={setAuthSessionAdminEdits}
+              authSessionPublicEdits={authSessionPublicEdits}
+              setAuthSessionPublicEdits={setAuthSessionPublicEdits}
+              authPolicyAdminOriginal={authPolicyAdminOriginal}
+              authPolicyPublicOriginal={authPolicyPublicOriginal}
+              authPolicyAdminEdits={authPolicyAdminEdits}
+              setAuthPolicyAdminEdits={setAuthPolicyAdminEdits}
+              authPolicyPublicEdits={authPolicyPublicEdits}
+              setAuthPolicyPublicEdits={setAuthPolicyPublicEdits}
+              savingAuthSessionScope={savingAuthSessionScope}
+              savingAuthPolicyScope={savingAuthPolicyScope}
+              syncingFederationScope={syncingFederationScope}
+              setSyncingFederationScope={setSyncingFederationScope}
+              sessionDirty={sessionDirty}
+              policyDirty={policyDirty}
+              setClaimsModalContent={setClaimsModalContent}
+              setShowClaimsModal={setShowClaimsModal}
+              fetchJSON={fetchJSON}
+              setError={setError}
+              authTab={authTab}
+              setAuthTab={setAuthTab}
+            />
+          );
+        case "locking":
+          return (
+            <LockingConfigWidget
+              actions={actions}
+              metadata={metadata}
+              toggleHelpPanel={toggleHelpPanel}
+              headerActions={buildLockingHeaderActions()}
+              lockingError={lockingError}
+              setLockingError={setLockingError}
+              lockingLoading={lockingLoading}
+              lockingUi={lockingUi}
+              lockingModeOptions={LOCKING_MODE_OPTIONS}
+              lockingConfig={lockingConfig}
+              defaultLockingConfig={DEFAULT_LOCKING_CONFIG}
+              setLockingEdits={setLockingEdits}
+            />
+          );
+        case "slaConfig":
+          return (
+            <SlaConfigWidget
+              actions={actions}
+              metadata={metadata}
+              toggleHelpPanel={toggleHelpPanel}
+              headerActions={buildSlaHeaderActions()}
+              slaError={slaError}
+              slaLoading={slaLoading}
+              effectiveSlaTargets={effectiveSlaTargets}
+              canEditSla={canEditSla}
+              slaEdits={slaEdits}
+              handleSlaEdit={handleSlaEdit}
+              slaStageLabels={SLA_STAGE_LABELS}
+            />
+          );
+        case "sessionAudit":
+          return (
+            <SessionAuditWidget
+              actions={actions}
+              metadata={metadata}
+              toggleHelpPanel={toggleHelpPanel}
+              headerActions={undefined}
+              auditError={auditError}
+              setAuditError={setAuditError}
+              auditLoading={auditLoading}
+              auditStats={auditStats}
+              auditRecent={auditRecent}
+              fetchAudit={fetchAudit}
+              fetchJSON={fetchJSON}
+            />
+          );
+        case "cors":
+          return (
+            <CorsOriginsWidget
+              actions={actions}
+              metadata={metadata}
+              toggleHelpPanel={toggleHelpPanel}
+              headerActions={undefined}
+              runtime={runtime}
+            />
+          );
+        case "env":
+          return (
+            <EnvironmentWidget
+              actions={actions}
+              metadata={metadata}
+              toggleHelpPanel={toggleHelpPanel}
+              headerActions={undefined}
+              runtime={runtime}
+              demoToolbarColumns={demoToolbarColumns}
+              demoToolbarRows={demoToolbarRows}
+            />
+          );
+        case "secrets":
+          return (
+            <SecretsWidget
+              actions={actions}
+              metadata={metadata}
+              toggleHelpPanel={toggleHelpPanel}
+              headerActions={undefined}
+              security={security}
+              canSeeAny={canSeeAnySecrets}
+              fullyAdmin={fullyAdminSecrets}
+            />
+          );
+        case "appearance":
+          return (
+            <AppearanceWidget
+              actions={actions}
+              metadata={metadata}
+              toggleHelpPanel={toggleHelpPanel}
+              headerActions={undefined}
+              isDarkMode={isDarkMode}
+              setUseDarkMode={setUseDarkMode}
+            />
+          );
+        default:
+          return null;
+      }
+    },
+    [
+      auditError,
+      auditLoading,
+      auditRecent,
+      auditStats,
+      authPolicyAdminEdits,
+      authPolicyAdminOriginal,
+      authPolicyPublicEdits,
+      authPolicyPublicOriginal,
+      authSessionAdminEdits,
+      authSessionPublicEdits,
+      authTab,
+      buildAiHeaderActions,
+      buildAuthHeaderActions,
+      buildLockingHeaderActions,
+      buildSlaHeaderActions,
+      canEditAI,
+      canEditAuth,
+      canEditSla,
+      canSeeAnySecrets,
+      demoToolbarColumns,
+      demoToolbarRows,
+      effectiveSlaTargets,
+      fetchAudit,
+      fullyAdminSecrets,
+      handleSlaEdit,
+      isDarkMode,
+      lockingConfig,
+      lockingError,
+      lockingLoading,
+      lockingUi,
+      modelOptions,
+      modelsLoading,
+      numberInput,
+      params,
+      policyDirty,
+      runtime,
+      savingAuthPolicyScope,
+      savingAuthSessionScope,
+      savingFallbacks,
+      savingModel,
+      savingParams,
+      saveFallbacks,
+      saveModel,
+      saveParams,
+      security,
+      selectedAiModel,
+      selectedFallbackOptions,
+      sessionDirty,
+      setUseDarkMode,
+      slaEdits,
+      slaError,
+      slaLoading,
+      syncingFederationScope,
+      toggleHelpPanel,
+    ],
+  );
 
   return (
-    <>
-      {error && <Box color="text-status-error">{error}</Box>}
-      <SpaceBetween size="s">
-        <Board
-          items={boardItems}
-          renderItem={(item, actions) => (
-            <BoardItem
-              header={
-                <Header
-                  variant="h2"
-                  description={item.id === 'locking' ? LOCKING_HEADER_DESCRIPTION : undefined}
-                  info={<Link variant="info" onClick={() => {
-                    const Comp = helpComponents[item.data.type];
-                    if (toggleHelpPanel && Comp) {
-                      toggleHelpPanel(<Comp />, (
-                        item.id === 'ai' ? 'AI / LLM Configuration' :
-                        item.id === 'auth' ? 'Authentication' :
-                        item.id === 'linkage' ? 'Cognito Linkage Readiness' :
-                        item.id === 'cors' ? 'CORS / Origins' :
-                        item.id === 'env' ? 'Environment' :
-                        item.id === 'appearance' ? 'Appearance & Theme' :
-                        item.id === 'slaConfig' ? 'SLA Config' :
-                        item.id === 'sessionAudit' ? 'Session Audit' : 'Info'
-                      ), (Comp.aiContext || ''));
-                    }
-                  }}>Info</Link>}
-                  actions={(() => {
-                    if (item.id === 'slaConfig') {
-                      if (!canEditSla) {
-                        return <Badge color="grey">Read only</Badge>;
-                      }
-                      return (
-                        <SpaceBetween direction="horizontal" size="xs">
-                          <Button onClick={handleSlaSave} loading={savingSla} disabled={!isSlaDirty || savingSla}>Save</Button>
-                          <Button variant="link" onClick={handleSlaReset} disabled={!isSlaDirty || savingSla}>Cancel</Button>
-                    </SpaceBetween>
-                  );
-                }
-                if (item.id === 'locking') {
-                  if (!canEditLocking) {
-                    return <Badge color="grey">Read only</Badge>;
-                  }
-                  return (
-                    <SpaceBetween direction="horizontal" size="xs">
-                      <Button onClick={resetLockingEdits} disabled={lockingLoading || lockingSaving || !lockingDirty}>
-                        Reset
-                      </Button>
-                      <Button
-                        variant="primary"
-                        loading={lockingSaving}
-                        disabled={lockingUi.disableActions}
-                        onClick={saveLockingConfig}
-                      >
-                        Save locking settings
-                      </Button>
-                    </SpaceBetween>
-                  );
-                }
-                if (item.id === 'ai') {
-                  return (
-                    <SpaceBetween direction="horizontal" size="xs">
-                      {runtime?.ai?.model && (
-                            <Badge color="blue">{runtime.ai.model}</Badge>
-                          )}
-                          {runtime?.ai?.enabled != null && (
-                            runtime.ai.enabled ? <Badge color="green">Enabled</Badge> : <Badge color="red">Disabled</Badge>
-                          )}
-                        </SpaceBetween>
-                      );
-                    }
-                    if (item.id === 'auth') {
-                      const auth = runtime?.auth || {};
-                      const mfaMode = auth.mfa?.mode || auth.mfaMode;
-                      const devBypass = !!auth.devBypass;
-                      const ssoEnabled = auth.ssoEnabled || auth.sso?.enabled;
-                      return (
-                        <SpaceBetween direction="horizontal" size="xs">
-                          {auth.provider && <Badge color="blue">{auth.provider}</Badge>}
-                          {mfaMode && <Badge color="purple">MFA: {mfaMode.toLowerCase()}</Badge>}
-                          {ssoEnabled && <Badge color="green">SSO</Badge>}
-                          {devBypass && <Badge color="red">Dev Bypass</Badge>}
-                          {auth.issuer && (
-                            <Button
-                              variant="inline-icon"
-                              iconName="copy"
-                              ariaLabel="Copy issuer URL"
-                              onClick={() => navigator?.clipboard?.writeText(auth.issuer).catch(()=>{})}
-                            />
-                          )}
-                          {(auth.issuer || auth.jwksUri) && (
-                            <Button
-                              variant="inline-icon"
-                              iconName="external"
-                              ariaLabel="Open JWKS"
-                              onClick={() => {
-                                const jwks = auth.jwksUri || (auth.issuer ? auth.issuer.replace(/\/$/, '') + '/.well-known/jwks.json' : null);
-                                if (jwks) window.open(jwks, '_blank', 'noopener');
-                              }}
-                            />
-                          )}
-                          <Button
-                            variant="inline-icon"
-                            iconName="refresh"
-                            ariaLabel="Refresh auth config"
-                            onClick={load}
-                          />
-                        </SpaceBetween>
-                      );
-                    }
-                    return null;
-                  })()}
-                >
-                  {item.id === 'ai'
-                    ? 'AI / LLM Configuration'
-                    : item.id === 'auth'
-                      ? 'Authentication'
-                      : item.id === 'linkage'
-                        ? 'Cognito Linkage Readiness'
-                      : item.id === 'cors'
-                        ? 'CORS / Origins'
-                        : item.id === 'env'
-                          ? 'Environment'
-                          : item.id === 'appearance'
-                            ? 'Appearance & Theme'
-                            : item.id === 'slaConfig'
-                              ? 'SLA Config'
-                              : item.id.charAt(0).toUpperCase() + item.id.slice(1)}
-                </Header>
-              }
-              i18nStrings={boardItemI18n}
-              {...actions}
-            >
-              {renderBoardContent(item.data.type)}
-            </BoardItem>
-          )}
-          onItemsChange={e => {
-            // Deduplicate by id to avoid duplicate key warnings from accidental duplicates
-            const seen = new Set();
-            const deduped = [];
-            for (const it of e.detail.items) {
-              if (!seen.has(it.id)) { seen.add(it.id); deduped.push(it); }
-            }
-            setBoardItems(deduped);
-          }}
-          i18nStrings={boardI18n}
-          empty={<Box>No widgets</Box>}
-          ariaLabel="Configuration widgets board"
-        />
-        <SpaceBetween direction="horizontal" size="xs">
-          <Button onClick={resetLayout} variant="link">Reset Layout</Button>
-        </SpaceBetween>
-      </SpaceBetween>
+    <SpaceBetween size="l">
+      {error && (
+        <Box color="text-status-error" fontSize="body-s">
+          {error}
+        </Box>
+      )}
+      <Board
+        boardId="configuration-dashboard"
+        items={boardItems}
+        renderItem={renderItem}
+        onItemsChange={handleItemsChange}
+        i18nStrings={{
+          empty: "No widgets configured.",
+          loading: "Loading widgets",
+          columnAriaLabel: index => `Column ${index + 1}`,
+          itemPositionAnnouncement: ({ currentColumn, currentIndex, currentRow }) =>
+            `Widget moved to position ${currentIndex + 1}, column ${currentColumn + 1}, row ${currentRow + 1}`,
+          liveAnnouncementDndStarted: () => "Dragging widget",
+          liveAnnouncementDndItemReordered: operation => {
+            const position =
+              operation.direction === "horizontal"
+                ? `column ${operation.placement.x + 1}`
+                : `row ${operation.placement.y + 1}`;
+            return `Widget moved to ${position}.`;
+          },
+          liveAnnouncementDndItemResized: operation => {
+            const base =
+              operation.direction === "horizontal"
+                ? `columns ${operation.placement.width}`
+                : `rows ${operation.placement.height}`;
+            return `Widget resized to ${base}.`;
+          },
+          liveAnnouncementDndItemInserted: operation => {
+            const column = `column ${operation.placement.x + 1}`;
+            const row = `row ${operation.placement.y + 1}`;
+            return `Widget inserted into ${column}, ${row}.`;
+          },
+          liveAnnouncementDndCommitted: () => "Drag and drop committed.",
+          liveAnnouncementDndDiscarded: () => "Drag and drop cancelled.",
+          liveAnnouncementItemRemoved: () => "Removed widget.",
+        }}
+        empty={
+          <Box padding="m" textAlign="center" color="text-status-inactive">
+            Add widgets from the palette to start configuring the dashboard.
+          </Box>
+        }
+      />
       {showClaimsModal && (
         <Modal
+          visible
           onDismiss={() => setShowClaimsModal(false)}
-          visible={true}
           header="Claims Mapping"
           closeAriaLabel="Close claims mapping"
           size="large"
           footer={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button onClick={() => navigator?.clipboard?.writeText(claimsModalContent).catch(()=>{})} variant="primary">Copy JSON</Button>
+              <Button
+                onClick={() => navigator?.clipboard?.writeText(claimsModalContent).catch(() => {})}
+                variant="primary"
+              >
+                Copy JSON
+              </Button>
               <Button onClick={() => setShowClaimsModal(false)}>Close</Button>
             </SpaceBetween>
           }
         >
-          <Box as="pre" fontSize="body-s" style={{ maxHeight: '60vh', overflow: 'auto', margin: 0 }}>{claimsModalContent}</Box>
+          <Box as="pre" fontSize="body-s" style={{ maxHeight: "60vh", overflow: "auto", margin: 0 }}>
+            {claimsModalContent}
+          </Box>
         </Modal>
       )}
-    </>
+    </SpaceBetween>
   );
 }
