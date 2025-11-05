@@ -1090,9 +1090,7 @@ const ModifyComponent = () => {
   const condWorkflowsLoadedRef = useRef(false);
   useEffect(() => {
     if (!selectedComponent) return;
-    const t = String(selectedComponent.template_key || selectedComponent.type || '').toLowerCase();
-    if (t !== 'file-upload') return;
-    if (condWorkflowsLoadedRef.current) return;
+    const t = String(selectedComponent.template_key || selectedComponent.type || '').toLowerCase();    const allowedTypes = new Set(['file-upload', 'radio', 'radios']);    if (!allowedTypes.has(t)) return;    if (condWorkflowsLoadedRef.current) return;
     setCondWfLoading(true);
     (async () => {
       try {
@@ -1968,20 +1966,26 @@ const ModifyComponent = () => {
                 );
               })()}
               {selectedComponent && (() => {
-                // Scaffold: Conditional visibility editor (beta) for file-upload components
+                // Scaffold: Conditional visibility editor (beta) for selected component types (initially file-upload, now extends to radios)
                 const t = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
-                if (t !== 'file-upload') return null;
+                const allowedTypes = new Set(['file-upload', 'radio', 'radios']);
+                if (!allowedTypes.has(t)) return null;
+
                 const idx = selectedComponent.index;
                 // Gather prior components as potential refs
                 // Local step prior components
                 const inputLikeTypes = new Set(['input','text','email','phone','password','number','textarea','select','radio','radios','checkbox','checkboxes','date','date-input','character-count','file-upload']);
-                const priorLocal = components.slice(0, idx).filter(Boolean).filter(c => {
-                  const ttype = String(c.template_key || c.type || '').toLowerCase();
-                  return inputLikeTypes.has(ttype);
-                }).map((c,i) => {
-                  const ref = c.props?.name || c.props?.id || c.id || c.templateId || `comp-${i+1}`;
-                  return { label: ref, value: ref, group: 'This Step' };
-                });
+                const priorLocal = components
+                  .slice(0, idx)
+                  .filter(Boolean)
+                  .filter(c => {
+                    const ttype = String(c.template_key || c.type || '').toLowerCase();
+                    return inputLikeTypes.has(ttype);
+                  })
+                  .map((c, i) => {
+                    const ref = c.props?.name || c.props?.id || c.id || c.templateId || `comp-${i + 1}`;
+                    return { label: ref, value: ref, group: 'This Step' };
+                  });
                 // Prototype: if workflow fields snapshot already attached to this component (e.g., via future PropertiesPanel selection)
                 // expect structure props.__workflowFields = [{ stepId, components:[{ ref, label }] }]
                 const wfFields = [];
@@ -2005,39 +2009,83 @@ const ModifyComponent = () => {
                     });
                   }
                 } catch (_) {}
+                const liveComponent = components[idx] || selectedComponent;
+                const liveConditions = liveComponent?.props?.conditions || { all: [] };
+                const condWfId = liveComponent?.props?.conditionsWorkflowId || null;
                 const prior = [...priorLocal, ...wfFields];
-                const conditions = selectedComponent.props?.conditions || { all: [] };
                 // Local ephemeral control state is not kept; rely on immediate writes to component props via setComponents.
                 const addRule = (rule) => {
-                  setComponents(prev => prev.map((c,i) => {
-                    if (i !== idx) return c;
-                    const nextConds = c.props?.conditions && typeof c.props.conditions === 'object' ? { ...c.props.conditions } : { all: [] };
-                    if (!Array.isArray(nextConds.all)) nextConds.all = [];
-                    nextConds.all = [...nextConds.all, rule];
-                    return { ...c, props: { ...(c.props||{}), conditions: nextConds } };
-                  }));
-                  // Refresh selectedComponent reference
-                  setSelectedComponent(sc => sc && sc.index === idx ? { ...components[idx], index: idx, props: { ...components[idx].props, conditions: { ...(conditions || { all: [] }), all: [...(conditions.all||[]), rule] } } } : sc);
+                  let updatedComp = null;
+                  setComponents(prev =>
+                    prev.map((c, i) => {
+                      if (i !== idx) return c;
+                      const nextConds =
+                        c.props?.conditions && typeof c.props.conditions === 'object'
+                          ? { ...c.props.conditions }
+                          : { all: [] };
+                      if (!Array.isArray(nextConds.all)) nextConds.all = [];
+                      nextConds.all = [...nextConds.all, rule];
+                      const nextComp = { ...c, props: { ...(c.props || {}), conditions: nextConds } };
+                      updatedComp = nextComp;
+                      return nextComp;
+                    })
+                  );
+                  if (updatedComp) {
+                    setSelectedComponent(sc => (sc && sc.index === idx ? { ...updatedComp, index: idx } : sc));
+                  }
                 };
+
                 const removeRule = (rIdx) => {
-                  setComponents(prev => prev.map((c,i) => {
-                    if (i !== idx) return c;
-                    const nextConds = c.props?.conditions && typeof c.props.conditions === 'object' ? { ...c.props.conditions } : { all: [] };
-                    if (Array.isArray(nextConds.all)) nextConds.all = nextConds.all.filter((_,ri) => ri !== rIdx);
-                    return { ...c, props: { ...(c.props||{}), conditions: nextConds } };
-                  }));
-                  setSelectedComponent(sc => sc && sc.index === idx ? { ...components[idx], index: idx } : sc);
+                  if (window?.__ISET_DEBUG_CONDITIONALS) {
+                    console.groupCollapsed('[ConditionalVisibility] removeRule click');
+                    console.log('componentIndex', idx);
+                    console.log('ruleIndex', rIdx);
+                  }
+                  let updatedComp = null;
+                  setComponents(prev =>
+                    prev.map((c, i) => {
+                      if (i !== idx) return c;
+                      const nextConds =
+                        c.props?.conditions && typeof c.props.conditions === 'object'
+                          ? { ...c.props.conditions }
+                          : { all: [] };
+                      const before = Array.isArray(nextConds.all) ? nextConds.all : [];
+                      if (window?.__ISET_DEBUG_CONDITIONALS) {
+                        console.log('conditions before', JSON.parse(JSON.stringify(before)));
+                      }
+                      nextConds.all = before.filter((_, ri) => ri !== rIdx);
+                      if (window?.__ISET_DEBUG_CONDITIONALS) {
+                        console.log('conditions after', JSON.parse(JSON.stringify(nextConds.all)));
+                      }
+                      const nextComp = { ...c, props: { ...(c.props || {}), conditions: nextConds } };
+                      updatedComp = nextComp;
+                      return nextComp;
+                    })
+                  );
+                  if (updatedComp) {
+                    setSelectedComponent(sc => {
+                      if (window?.__ISET_DEBUG_CONDITIONALS) {
+                        console.log('selectedComponent before', sc);
+                      }
+                      const nextSel = sc && sc.index === idx ? { ...updatedComp, index: idx } : sc;
+                      if (window?.__ISET_DEBUG_CONDITIONALS) {
+                        console.log('selectedComponent after', nextSel);
+                        console.groupEnd();
+                      }
+                      return nextSel;
+                    });
+                  } else if (window?.__ISET_DEBUG_CONDITIONALS) {
+                    console.log('removeRule did not find component index', idx);
+                    console.groupEnd();
+                  }
                 };
+
                 // Temporary state for new rule inputs kept in refs to avoid re-renders
                 // Replaced ref object with component state (condDraftRef/Op/Value) so inputs are interactive.
-                const condWfId = selectedComponent.props?.conditionsWorkflowId || null;
                 return (
                   <ExpandableSection headerText="Conditional Visibility (Beta)" defaultExpanded={false}>
                     <SpaceBetween size="s">
-                      <Box variant="p" fontSize="body-s" color="text-body-secondary">
-                        Show this file upload only when all listed conditions evaluate true. Stored under props.conditions.all[].
-                      </Box>
-                      <FormField label="Workflow context" description="Optionally pull fields from another workflow's steps.">
+                      <Box variant="p" fontSize="body-s" color="text-body-secondary">                        Use these conditions to show this component only when every rule you add evaluates to true.                      </Box>                      <FormField label="Workflow context" description="Optionally pull fields from another workflow's steps.">
                         <Select
                           statusType={condWfLoading ? 'loading' : 'finished'}
                           placeholder={condWfLoading ? 'Loading workflows…' : 'Select workflow (optional)'}
@@ -2050,13 +2098,13 @@ const ModifyComponent = () => {
                       {!condWfId && (
                         <Box color="text-body-secondary">Select a workflow to configure visibility conditions.</Box>
                       )}
-                      {condWfId && !selectedComponent.props?.__workflowFields && (
+                      {condWfId && !liveComponent?.props?.__workflowFields && (
                         <Box variant="span" color="text-status-info">Loading workflow fields…</Box>
                       )}
-                      {condWfId && selectedComponent.props?.__workflowFields && (
+                      {condWfId && liveComponent?.props?.__workflowFields && (
                         <>
                           {(() => {
-                            const snap = selectedComponent.props?.__workflowFields || [];
+                            const snap = liveComponent?.props?.__workflowFields || [];
                             const totalFields = snap.reduce((acc,s)=> acc + ((s.components&&s.components.length)||0),0);
                             if (totalFields === 0) {
                               return (
@@ -2073,11 +2121,16 @@ const ModifyComponent = () => {
                               { id: 'ref', header: 'Ref', cell: r => r.ref },
                               { id: 'op', header: 'Op', cell: r => r.op },
                               { id: 'val', header: 'Value', cell: r => (r.value===undefined||r.value===null||r.value==='') ? '—' : String(r.value) },
-                              { id: 'act', header: '', cell: (_r, ri) => (
-                                <Button variant="icon" iconName="close" ariaLabel="Remove" onClick={() => removeRule(ri)} />
+                              { id: 'act', header: '', cell: (row) => (
+                                <Button
+                                  variant="icon"
+                                  iconName="close"
+                                  ariaLabel="Remove"
+                                  onClick={() => removeRule(row.__ruleIndex)}
+                                />
                               ) }
                             ]}
-                            items={(conditions.all||[]).map(r => ({ ...r }))}
+                            items={(liveConditions.all || []).map((r, ri) => ({ ...r, __ruleIndex: ri }))}
                             empty={<Box color="text-body-secondary">No conditions defined.</Box>}
                             ariaLabels={{ tableLabel: 'Conditional visibility rules' }}
                           />
@@ -2144,3 +2197,7 @@ const ModifyComponent = () => {
 };
 export { setComponentConfigValue };
 export default ModifyComponent;
+
+
+
+

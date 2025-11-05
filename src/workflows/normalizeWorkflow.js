@@ -440,7 +440,9 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         if (typeof props?.showMimeList !== 'undefined') component.showMimeList = !!props.showMimeList;
         if (typeof props?.showMaxSize !== 'undefined') component.showMaxSize = !!props.showMaxSize;
         if (typeof props?.disabled !== 'undefined') component.disabled = !!props.disabled;
-        // Conditional visibility (v1): emit props.conditions if present and structurally valid ({ all: [] })
+      }
+      // Conditional visibility (v1): emit props.conditions for supported component types ({ all: [] })
+      if (['file-upload', 'radio'].includes(normalisedType)) {
         try {
           const conds = props && props.conditions;
           if (conds && typeof conds === 'object' && Array.isArray(conds.all) && conds.all.length) {
@@ -448,7 +450,7 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
               .filter(r => r && typeof r === 'object' && r.ref && r.op)
               .map(r => {
                 const out = { ref: String(r.ref), op: String(r.op) };
-                if (!['exists','notExists'].includes(r.op) && r.value !== undefined && r.value !== null && r.value !== '') out.value = String(r.value);
+                if (!['exists', 'notExists'].includes(r.op) && r.value !== undefined && r.value !== null && r.value !== '') out.value = String(r.value);
                 return out;
               });
             if (sanitized.length) component.conditions = { all: sanitized };
@@ -462,16 +464,19 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
       if (options) {
         const srcItems = Array.isArray(props?.items) ? props.items : [];
         component.options = options.map((o, idx) => {
-          const src = srcItems[idx] || {};
-          const opt = src && src.id ? { ...o, id: String(src.id) } : { ...o };
-          if (src.conditionalChildId) opt.conditionalChildId = String(src.conditionalChildId);
-          if (src.hint && typeof src.hint === 'object') {
-            // Preserve per-option hint if provided (parallel to label text)
-            const h = src.hint.text || src.hint.html || src.hint;
-            if (h) opt.hint = h;
-          }
-            return opt;
-        });
+        const src = srcItems[idx] || {};
+        const opt = src && src.id ? { ...o, id: String(src.id) } : { ...o };
+        if (src.conditionalChildId) opt.conditionalChildId = String(src.conditionalChildId);
+        if (src.hint) {
+          // Normalise option-level hint to bilingual object (mirrors component.hint handling)
+          const rawHint = (typeof src.hint === 'object' && (src.hint.text || src.hint.html))
+            ? (src.hint.text || src.hint.html)
+            : src.hint;
+          const hintObj = toI18nObject(rawHint, undefined);
+          if (hintObj && (hintObj.en || hintObj.fr)) opt.hint = hintObj;
+        }
+        return opt;
+      });
       }
       if (['radio','radios','checkbox','checkboxes'].includes(tplType) && props) {
         if (props.name) component.name = String(props.name);
