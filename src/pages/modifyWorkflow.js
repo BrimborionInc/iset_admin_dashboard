@@ -21,6 +21,35 @@ const STORAGE_KEY = 'mw:steps-v1';
 
 // (Step Properties UI moved to widgets/StepPropertiesWidget)
 
+const makeSnapshot = (steps, wfName, wfStatus, startUiId) => {
+  const normSteps = steps.map(s => ({
+    id: s.id,
+    name: s.name,
+    stepId: s.stepId,
+    routing: (() => {
+      const r = s.routing || { mode: 'linear' };
+      if (r.mode === 'linear') return { mode: 'linear', next: r.next || null };
+      const mapping = r.mapping || {};
+      const sortedKeys = Object.keys(mapping).sort();
+      const sortedMapping = {};
+      for (const k of sortedKeys) sortedMapping[k] = mapping[k] || null;
+      return {
+        mode: 'byOption',
+        fieldKey: r.fieldKey || '',
+        options: Array.isArray(r.options) ? [...r.options] : [],
+        mapping: sortedMapping,
+        defaultNext: r.defaultNext || null
+      };
+    })()
+  }));
+  return {
+    wfName: wfName || '',
+    wfStatus: wfStatus || 'draft',
+    startUiId: startUiId || null,
+    steps: normSteps
+  };
+};
+
 export default function ModifyWorkflowEditorWidget() {
   const [steps, setSteps] = useState(initialSteps);
   const [selectedId, setSelectedId] = useState(null);
@@ -90,23 +119,14 @@ export default function ModifyWorkflowEditorWidget() {
   const baselineRef = useRef(null);
   const baselineReadyRef = useRef(false);
 
-  const snapshot = useCallback(() => {
-    const normSteps = steps.map(s => ({
-      id: s.id,
-      name: s.name,
-      stepId: s.stepId,
-      routing: (() => {
-        const r = s.routing || { mode: 'linear' };
-        if (r.mode === 'linear') return { mode: 'linear', next: r.next || null };
-        const mapping = r.mapping || {};
-        const sortedKeys = Object.keys(mapping).sort();
-        const sortedMapping = {};
-        for (const k of sortedKeys) sortedMapping[k] = mapping[k] || null;
-        return { mode: 'byOption', fieldKey: r.fieldKey || '', options: Array.isArray(r.options) ? [...r.options] : [], mapping: sortedMapping, defaultNext: r.defaultNext || null };
-      })()
-    }));
-    return { wfName: wfName || '', wfStatus: wfStatus || 'draft', startUiId: startUiId || null, steps: normSteps };
-  }, [steps, wfName, wfStatus, startUiId]);
+  const snapshot = useCallback(
+    () => makeSnapshot(steps, wfName, wfStatus, startUiId),
+    [steps, wfName, wfStatus, startUiId]
+  );
+
+  // Track whether any user-initiated edit has occurred to avoid premature dirty flag
+  const userEditRef = useRef(false);
+  const markUserEdited = () => { userEditRef.current = true; };
 
   // Load workflow details if wfId present
   useEffect(() => {
@@ -118,8 +138,8 @@ export default function ModifyWorkflowEditorWidget() {
         if (!resp.ok) throw new Error(`Load workflow HTTP ${resp.status}`);
         const data = await resp.json();
         if (cancelled) return;
-        setWfName(data.name || '');
-        setWfStatus(data.status || 'draft');
+        const nextName = data.name || '';
+        const nextStatus = data.status || 'draft';
         const uiSteps = (data.steps || []).map((s, idx) => ({ id: `S${idx + 1}`, name: s.name, stepId: s.id, routing: { mode: 'linear' } }));
         const byDbToUi = new Map();
         uiSteps.forEach(u => byDbToUi.set(u.stepId, u.id));
@@ -141,24 +161,24 @@ export default function ModifyWorkflowEditorWidget() {
             step.routing = { mode: 'byOption', fieldKey: r.field_key || '', options: values, mapping, defaultNext: r.default_next_step_id ? byDbToUi.get(r.default_next_step_id) : undefined };
           }
         }
-        setSteps(uiSteps);
         const start = (data.steps || []).find(s => s.is_start);
-        if (start) setStartUiId(byDbToUi.get(start.id) || null);
-        else setStartUiId(uiSteps[0]?.id || null);
-        baselineRef.current = snapshot();
+        const resolvedStart = start ? (byDbToUi.get(start.id) || null) : (uiSteps[0]?.id || null);
+        setWfName(nextName);
+        setWfStatus(nextStatus);
+        setSteps(uiSteps);
+        setStartUiId(resolvedStart);
+        const snap = makeSnapshot(uiSteps, nextName, nextStatus, resolvedStart);
+        baselineRef.current = snap;
         baselineReadyRef.current = true;
         dirtyRef.current = false;
+        userEditRef.current = false;
         setIsDirty(false);
       } catch (e) {
         // If load fails, leave as-is (new)
       }
     })();
     return () => { cancelled = true; };
-  }, [wfId, snapshot]);
-
-  // Track whether any user-initiated edit has occurred to avoid premature dirty flag
-  const userEditRef = useRef(false);
-  const markUserEdited = () => { userEditRef.current = true; };
+  }, [wfId]);
 
   const recomputeDirty = useCallback(() => {
     if (!baselineReadyRef.current || !baselineRef.current) return; // no baseline yet
