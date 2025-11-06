@@ -136,6 +136,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const [nocVersionsLoading, setNocVersionsLoading] = useState(false);
   const [nocSuggestions, setNocSuggestions] = useState([]);
   const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
+  const [conflictDeclarationSigned, setConflictDeclarationSigned] = useState(Boolean(caseData?.assessment_conflict_declaration_signed));
+  const [declarationChecked, setDeclarationChecked] = useState(false);
+  const [isSigningDeclaration, setIsSigningDeclaration] = useState(false);
+  const [declarationError, setDeclarationError] = useState(null);
 
   const rawApplicationStatus = caseData?.applicationStatus ?? caseData?.application_status ?? null;
   const rawCaseStatusSnapshot = caseData?.status ?? '';
@@ -151,6 +155,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus });
   const lacksOutcomePermission = Boolean(userRole) && isPendingApprovalStatus && !canManageOutcomeReview;
   const requiresNoc = useMemo(() => requiresNocForCode(assessment.interventionCode), [assessment.interventionCode]);
+  const isDeclarationGateActive = !conflictDeclarationSigned;
   const selectedInterventionCodeOption = useMemo(
     () => interventionCodes.find(option => option.value === assessment.interventionCode) || null,
     [interventionCodes, assessment.interventionCode]
@@ -340,6 +345,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     };
     setAssessment(a => ({ ...placeholders, ...a }));
     setInitialAssessment(placeholders);
+    setConflictDeclarationSigned(Boolean(caseData?.assessment_conflict_declaration_signed));
+    setDeclarationChecked(false);
+    setDeclarationError(null);
   }, [caseData]);
 
   // Show NWAC section after submission, review completion, final decision, or outcome-ready status
@@ -518,6 +526,115 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     lockState.owned,
     refreshLockHeartbeat,
     showLockAlert
+  ]);
+  const handleSignDeclaration = useCallback(async () => {
+    if (conflictDeclarationSigned || isSigningDeclaration) {
+      return;
+    }
+    if (!declarationChecked) {
+      setDeclarationError('You must confirm the declaration before continuing.');
+      return;
+    }
+    setIsSigningDeclaration(true);
+    setDeclarationError(null);
+    try {
+      const lockCheck = await ensureLockForOperation();
+      if (!lockCheck.ok) {
+        setIsSigningDeclaration(false);
+        return;
+      }
+      const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
+      const versionToken = Number(applicationRowVersion || caseData?.application_row_version || 0);
+      const payload = { assessment_conflict_declaration_signed: true };
+      if (versionToken > 0) {
+        payload.expectedRowVersion = versionToken;
+      }
+      const res = await apiFetch(`/api/cases/${caseData.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
+        if (latestVersion) setApplicationRowVersion(latestVersion);
+        if (typeof actions?.refreshCaseData === 'function') {
+          try {
+            await actions.refreshCaseData();
+          } catch (_) {}
+        }
+        setAlert({
+          type: 'warning',
+          content: 'Another user updated this case. The latest information has been reloaded; review and try again.',
+          dismissible: true,
+          statusIconAriaLabel: 'Warning'
+        });
+        setTimeout(() => {
+          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 0);
+        if (releaseAfterSuccess) {
+          releaseLock({ silent: true }).catch(() => {});
+        }
+        return;
+      }
+      if (!res.ok || !result?.success) {
+        throw new Error(result?.error || 'Failed to sign conflict of interest declaration.');
+      }
+      const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
+      if (updatedRowVersion) {
+        setApplicationRowVersion(updatedRowVersion);
+      }
+      setConflictDeclarationSigned(true);
+      setDeclarationChecked(false);
+      const successAlert = {
+        type: 'success',
+        content: 'Conflict of interest declaration signed. Assessment sections are now available.',
+        dismissible: true,
+        statusIconAriaLabel: 'Success'
+      };
+      setAlert(successAlert);
+      setTimeout(() => {
+        alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 0);
+      if (typeof actions?.refreshCaseData === 'function') {
+        try {
+          await actions.refreshCaseData();
+        } catch (_) {}
+      }
+      if (typeof onCaseUpdate === 'function') {
+        onCaseUpdate({
+          assessment_conflict_declaration_signed: true
+        });
+      }
+      if (releaseAfterSuccess) {
+        releaseLock({ silent: true }).catch(() => {});
+      }
+    } catch (error) {
+      setDeclarationError(error?.message || 'Failed to sign the conflict of interest declaration.');
+      setAlert({
+        type: 'error',
+        content: error?.message || 'Failed to sign the conflict of interest declaration.',
+        dismissible: true,
+        statusIconAriaLabel: 'Error'
+      });
+      setTimeout(() => {
+        alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 0);
+    } finally {
+      setIsSigningDeclaration(false);
+    }
+  }, [
+    actions,
+    applicationRowVersion,
+    caseData?.application_row_version,
+    caseData?.id,
+    conflictDeclarationSigned,
+    declarationChecked,
+    ensureLockForOperation,
+    lockHeldByCurrentUser,
+    onCaseUpdate,
+    releaseLock,
+    setApplicationRowVersion
   ]);
   const validateAssessment = (assessment) => {
     const errors = {};
@@ -1095,66 +1212,149 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     }
   };
 
-  return (
-    <BoardItem
-      header={
-        <Header
-          variant="h2"
-          actions={
-            <SpaceBetween direction="horizontal" size="s">
-              {!lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && isReviewComplete && (
-                <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
+  const headerElement = (
+    <Header
+      variant="h2"
+      actions={
+        <SpaceBetween direction="horizontal" size="s">
+          {!isDeclarationGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && isReviewComplete && (
+            <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
+          )}
+          {!isDeclarationGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && assessmentSubmitted && !isEditingAssessment && (
+            <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
+          )}
+          {!isDeclarationGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+            <Button variant="primary" disabled={!isChanged} onClick={handleSave}>Save</Button>
+          )}
+          {!isDeclarationGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+            <Button variant="normal" disabled={!isChanged} onClick={handleCancel}>Cancel</Button>
+          )}
+          {!isDeclarationGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+            <Button variant="primary" onClick={handleSubmit}>Submit</Button>
+          )}
+          {!isDeclarationGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && (
+            <Button variant="primary" onClick={handleComplete} disabled={!isPendingApprovalStatus || !canManageOutcomeReview}>Approve/Reject</Button>
+          )}
+        </SpaceBetween>
+      }
+      info={
+        <Link
+          variant="info"
+          onFollow={() => {
+            if (!toggleHelpPanel) return;
+            if (showNWACSection) {
+              toggleHelpPanel(<NwacAssessmentHelp />, 'NWAC Assessment Help', NwacAssessmentHelp.aiContext);
+            } else {
+              toggleHelpPanel(<ApplicationAssessmentHelp />, 'Application Assessment Help', ApplicationAssessmentHelp.aiContext);
+            }
+          }}
+        >
+          Info
+        </Link>
+      }
+    >
+      {showNWACSection ? 'NWAC Assessment' : 'Application Assessment'}
+    </Header>
+  );
+  const boardItemI18nStrings = {
+    dragHandleAriaLabel: 'Drag handle',
+    dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
+    resizeHandleAriaLabel: 'Resize handle',
+    resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.'
+  };
+  const boardItemSettings = (
+    <ButtonDropdown
+      items={[{ id: 'remove', text: 'Remove' }]}
+      ariaLabel="Board item settings"
+      variant="icon"
+      onItemClick={() => actions && actions.removeItem && actions.removeItem()}
+    />
+  );
+
+  if (isDeclarationGateActive) {
+    return (
+      <BoardItem header={headerElement} i18nStrings={boardItemI18nStrings} settings={boardItemSettings}>
+        <Box>
+          <Box variant="small" margin={{ bottom: 's' }}>
+            This form is used by the ISET admin team to assess the applicant's needs, eligibility, and funding recommendation.
+            Complete the conflict of interest declaration below to unlock the assessment.
+          </Box>
+          <div ref={alertAnchorRef} style={{ height: 0, margin: 0, padding: 0, border: 0 }} aria-hidden="true" />
+          {lockAlertMessage && (
+            <Alert type={lockedByAnotherUser ? 'warning' : 'info'}>
+              {lockAlertMessage}
+            </Alert>
+          )}
+          {alert && (
+            <Alert
+              type={alert.type}
+              dismissible={alert.dismissible}
+              onDismiss={() => setAlert(null)}
+              statusIconAriaLabel={alert.statusIconAriaLabel}
+              header={alert.header}
+            >
+              {alert.content}
+            </Alert>
+          )}
+          <Box padding={{ top: 'm' }}>
+            <SpaceBetween size="m">
+              <Box>
+                <Box fontWeight="bold">Conflict of Interest Declaration</Box>
+                <Box margin={{ top: 'xs' }}>
+                  As the Client Case Manager, I confirm that I have no actual, potential, or perceived conflict of interest or bias in relation to this
+                  client's application, assessment and funding, and I have not provided, or attempted to assign the client with priority or preferential
+                  treatment outside of the established assessment process.
+                </Box>
+              </Box>
+              {declarationError && (
+                <Alert
+                  type="error"
+                  statusIconAriaLabel="Error"
+                  dismissible
+                  onDismiss={() => setDeclarationError(null)}
+                >
+                  {declarationError}
+                </Alert>
               )}
-              {!lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && assessmentSubmitted && !isEditingAssessment && (
-                <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
-              )}
-              {!lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
-                <Button variant="primary" disabled={!isChanged} onClick={handleSave}>Save</Button>
-              )}
-              {!lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
-                <Button variant="normal" disabled={!isChanged} onClick={handleCancel}>Cancel</Button>
-              )}
-              {!lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
-                <Button variant="primary" onClick={handleSubmit}>Submit</Button>
-              )}
-              {!lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && (
-                <Button variant="primary" onClick={handleComplete} disabled={!isPendingApprovalStatus || !canManageOutcomeReview}>Approve/Reject</Button>
+              <Checkbox
+                checked={declarationChecked}
+                onChange={({ detail }) => {
+                  setDeclarationChecked(detail.checked);
+                  if (detail.checked) {
+                    setDeclarationError(null);
+                  }
+                }}
+                disabled={lockedByAnotherUser || isSigningDeclaration}
+              >
+                I confirm the statement above and agree to proceed.
+              </Checkbox>
+              <SpaceBetween direction="horizontal" size="s">
+                <Button
+                  variant="primary"
+                  onClick={handleSignDeclaration}
+                  loading={isSigningDeclaration}
+                  disabled={!declarationChecked || lockedByAnotherUser || isSigningDeclaration}
+                >
+                  Sign and Continue
+                </Button>
+              </SpaceBetween>
+              {lockedByAnotherUser && (
+                <Box color="text-status-inactive">
+                  Another user currently has this case locked. Ask them to release it before signing the declaration.
+                </Box>
               )}
             </SpaceBetween>
-          }
-          info={
-            <Link
-              variant="info"
-              onFollow={() => {
-                if (!toggleHelpPanel) return;
-                if (showNWACSection) {
-                  toggleHelpPanel(<NwacAssessmentHelp />, 'NWAC Assessment Help', NwacAssessmentHelp.aiContext);
-                } else {
-                  toggleHelpPanel(<ApplicationAssessmentHelp />, 'Application Assessment Help', ApplicationAssessmentHelp.aiContext);
-                }
-              }}
-            >
-              Info
-            </Link>
-          }
-        >
-          {showNWACSection ? 'NWAC Assessment' : 'Application Assessment'}
-        </Header>
-      }
-      i18nStrings={{
-        dragHandleAriaLabel: 'Drag handle',
-        dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
-        resizeHandleAriaLabel: 'Resize handle',
-        resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.'
-      }}
-      settings={
-        <ButtonDropdown
-          items={[{ id: 'remove', text: 'Remove' }]}
-          ariaLabel="Board item settings"
-          variant="icon"
-          onItemClick={() => actions && actions.removeItem && actions.removeItem()}
-        />
-      }
+          </Box>
+        </Box>
+      </BoardItem>
+    );
+  }
+
+  return (
+    <BoardItem
+      header={headerElement}
+      i18nStrings={boardItemI18nStrings}
+      settings={boardItemSettings}
     >
       <Box>
         <Box variant="small" margin={{ bottom: 's' }}>

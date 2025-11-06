@@ -32,11 +32,62 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - Patch v0.1.5 (25 October 2025)',
-      description: 'Patch v0.1.5 introduces the portfolio dashboard and case workspace scaffolding for ISET case management.',
+      sectionTitle: 'Release Notes - v0.2.0 (6 Nov 2025)',
+      description: 'Release 0.2.0 introduces the Caseworking module for post-approval case management, plus intake, assessment, and eligibility updates.',
       features: {
         heading: 'Updates',
         sections: [
+          {
+            title: 'Release v0.2.0 — Case management',
+            paragraphs: [
+              'This major release introduces the Caseworking module. When an application is approved in the Application assessment module it appears in Caseworking.',
+              'Caseworking is where you manage the case from first follow-up to closure. Open a case to a workspace with panels for the case header, secure messaging, supporting documents, notes and tasks, calendar, action plans, interventions, finance, compliance, and an export preview. Drag to reorder, resize, add or remove panels, and your layout is remembered.',
+              'Caseworking workspace:',
+              '- Create action plans, then activate, close, or archive them as the case progresses; keep plan dates and status up to date.',
+              '- Select the current plan to see and edit its interventions. Update status, dates, description, outcomes, and funding pot; add notes for team context.',
+              '- Use the calendar to schedule follow-ups and view upcoming reminders and plan milestones in one place; it highlights what’s due next.',
+              '- Read and send secure messages; any attachments you open also show up in Supporting documents for quick download.',
+              '- Add notes and simple tasks as you go; use follow‑up dates to place reminders on the calendar.',
+              '- Check finance totals and pot balances to catch overspend early and confirm funding mappings.',
+              '- Review compliance messages to resolve anything blocking export.',
+              '- Preview the export to confirm what will be sent before you proceed.',
+              '- Confirm the client, agreement, and owner in the case header; reassign ownership when needed.',
+              '- You can reset the layout to the default at any time, and each panel includes brief help for common actions.',
+              'Intake and assessment updates:',
+              '- Updated the Client EI consent step and signature to the new format. Submission is blocked until forms are signed.',
+              '- Added a Conflict of Interest step with signature to intake. Submission is blocked until forms are signed.',
+              'Printable applicant declarations:',
+              '- Client EI consent (PDF)',
+              '- Indigenous declaration (PDF)',
+              '- Conflict of Interest (PDF)',
+              'Assessment widget:',
+              '- Added the Assessor conflict of interest block and blocked access until it is checked.',
+              'Eligibility rules:',
+              '- Eligibility limited to Indigenous Women (First Nations, Métis, Inuit).',
+              '- Canadian citizenship required.',
+              '- Applicants must be unemployed, under-employed, or at risk.',
+              '- Removed age restriction (no age limit).',
+              '- Removed Eligibility Check step.',
+              'Form standardization and fields:',
+              '- Biological sex and gender identity fields standardized.',
+              '- Added self-declaration form and treaty/status number fields.',
+              '- Added province/territory drop-down for education section.',
+              '- Updated Employment Goal wording to align with ISET support.',
+              '- Added options for Group Training and Self-employment Supports.',
+              "- Corrected 'Band Denial Letter' label and added upload options — now requests a Denial or Approval letter based on whether a funding amount was entered earlier.",
+              '- Added disability identification and medical documentation fields, including file upload logic.',
+              '- Updated marital status to “Married or equivalent”.',
+              '- Removed Internet as an eligible expense.',
+              '- Removed “Other expenses” and added a catch-all training expense question.',
+              '- Updated transportation options to Bus Pass, Parking Pass, or Mileage.',
+              '- Added Alimony and Child Support to household income options.',
+              'Configuration and widgets:',
+              '- Patch list confirmed and applied to live configuration.',
+              '- Added lookup for Indigenous community field.',
+              '- Updated the application form widget with the new fields.',
+              '- Added an EI consent form modal and save function to the application form widget.'
+            ]
+          },
           {
             title: 'Patch v0.1.5',
             paragraphs: [
@@ -102,43 +153,17 @@ const copy = {
         heading: 'Coming Soon',
         sections: [
           {
-            title: 'Assessor Widget & Caseworking',
+            title: 'Post‑0.2.0 To‑Dos',
             paragraphs: [
-              'An overhaul of the assessor widget is planned to better align the Intervention section with ESDC data requirements.',
-              'The upcoming Caseworking module will build on this by allowing multiple interventions to be added to a single case.'
+              'Tidy the burger menu in the public portal.',
+              'In the support section, fix the AI input.',
+              'Remove the email from the technical support paragraph.',
+              'In the user dashboard, rename Applications to My Applications.',
+              'Create dummy draft update.',
+              'Include a new widget in the ISET application assessment dashboard for document checklist.',
+              'Document Upload function in Documents Widget.'
             ]
-          },
-          {
-            title: 'Payment Alerts',
-            paragraphs: [
-              'Configure automatic finance notifications whenever an ISET payment is approved.'
-            ]
-          },
-          {
-            title: 'User-based Approver Rights',
-            paragraphs: [
-              'Program Administrators can grant individual users approve/reject privileges directly from their profiles.',
-              'Trusted staff gain self-approval controls in the application assessment widget, while others continue to route decisions for review.'
-            ]
-          },
-          {
-            title: 'Case Management Dashboard',
-            paragraphs: [
-              'Launch a post-approval dashboard that centralizes follow-up work, documents, and status tracking for each case.'
-            ]
-          },
-          {
-            title: 'Financial Management Dashboard',
-            paragraphs: [
-              'Deliver integrated financial controls and reporting tied to the Case Management dashboard to track ISET program spending against ESDC requirements.'
-            ]
-          },
-          { title: 'Records Retention and Archiving', paragraphs: ['Introduce configurable retention, archiving, and disposition policies, backed by warehouse storage, automated record-keeping, and legal hold controls.'] },
-          { title: 'Analytics Dashboard', paragraphs: ['Deliver a dedicated analytics view with charts, reports, and metrics.'] },
-          { title: 'Release Management', paragraphs: ['Add enhanced release tooling to stage and control changes to intake workflows.'] },
-          { title: 'Tutorials', paragraphs: ['Publish guided walkthroughs for each primary function.'] },
-          { title: 'Notification Templates', paragraphs: ['Re-enable the Notification Settings dashboard with editable email templates, dynamic audiences, and audit history.'] },
-          { title: 'Enhanced Workflow', paragraphs: ['Strengthen workflow-driven status controls to replace the current manual status updates.'] }
+          }
         ]
       }
     },
@@ -400,9 +425,13 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
                 {content.releaseNotes.features.sections.map(section => (
                   <section key={section.title}>
                     <h4>{section.title}</h4>
-                    {section.paragraphs.map((text, idx) => (
-                      <p key={idx}>{text}</p>
-                    ))}
+                    {section.paragraphs.map((text, idx) => {
+                      const t = typeof text === 'string' ? text.trim() : '';
+                      const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
+                      return (
+                        <p key={idx}>{isSubheading ? <strong>{text}</strong> : text}</p>
+                      );
+                    })}
                   </section>
                 ))}
               </div>
@@ -413,9 +442,13 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
                 {content.releaseNotes.knownBugs.sections.map(section => (
                   <section key={section.title}>
                     <h4>{section.title}</h4>
-                    {section.paragraphs.map((text, idx) => (
-                      <p key={idx}>{text}</p>
-                    ))}
+                    {section.paragraphs.map((text, idx) => {
+                      const t = typeof text === 'string' ? text.trim() : '';
+                      const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
+                      return (
+                        <p key={idx}>{isSubheading ? <strong>{text}</strong> : text}</p>
+                      );
+                    })}
                   </section>
                 ))}
               </div>
@@ -426,9 +459,13 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
                 {content.releaseNotes.comingNext.sections.map(section => (
                   <section key={section.title}>
                     <h4>{section.title}</h4>
-                    {section.paragraphs.map((text, idx) => (
-                      <p key={idx}>{text}</p>
-                    ))}
+                    {section.paragraphs.map((text, idx) => {
+                      const t = typeof text === 'string' ? text.trim() : '';
+                      const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
+                      return (
+                        <p key={idx}>{isSubheading ? <strong>{text}</strong> : text}</p>
+                      );
+                    })}
                   </section>
                 ))}
               </div>

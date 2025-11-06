@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const multer = require('multer');
 const puppeteer = require('puppeteer');
 const { maskName } = require('./src/utils/utils');
 const { getInternalNotifications, dismissInternalNotification } = require('./src/internalNotifications');
@@ -20,6 +21,121 @@ const events = require('events');
 events.EventEmitter.defaultMaxListeners = 20;
 
 const ENSURED_HISTORY_EVENT_TYPE_ENUM = { prepared: false };
+
+const INTAKE_ROOT = path.resolve(__dirname, '..', 'ISET-intake');
+const INTAKE_UPLOADS_ROOT = path.join(INTAKE_ROOT, 'uploads');
+const ADMIN_MANUAL_UPLOAD_DIR = path.join(INTAKE_UPLOADS_ROOT, 'manual');
+const ADMIN_UPLOAD_ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/bmp',
+  'image/tiff'
+]);
+const ADMIN_UPLOAD_MAX_BYTES = Number(process.env.ADMIN_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
+
+function ensureDirectoryExists(dirPath) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+  } catch (err) {
+    if (err && err.code !== 'EEXIST') {
+      console.warn('[admin:uploads] failed to ensure directory %s: %s', dirPath, err.message);
+      throw err;
+    }
+  }
+}
+
+ensureDirectoryExists(INTAKE_UPLOADS_ROOT);
+ensureDirectoryExists(ADMIN_MANUAL_UPLOAD_DIR);
+
+function toIntakeRelativePath(absolutePath) {
+  if (!absolutePath) return null;
+  const relative = path.relative(INTAKE_ROOT, absolutePath);
+  return relative ? relative.replace(/\\/g, '/') : null;
+}
+
+function sanitiseUploadFilename(originalName) {
+  const fallback = 'document';
+  if (!originalName || typeof originalName !== 'string') {
+    return `${fallback}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.bin`;
+  }
+  const parsed = path.parse(originalName);
+  const base = parsed.name ? parsed.name.replace(/[^a-z0-9_\-]+/gi, '_').slice(0, 80) : fallback;
+  const ext = parsed.ext && parsed.ext.length <= 10 ? parsed.ext.toLowerCase() : '';
+  const hash = crypto.randomBytes(4).toString('hex');
+  const timestamp = Date.now();
+  const safeBase = base || fallback;
+  return `${safeBase}-${timestamp}-${hash}${ext}`;
+}
+
+const adminUploadStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, ADMIN_MANUAL_UPLOAD_DIR),
+  filename: (_req, file, cb) => cb(null, sanitiseUploadFilename(file.originalname))
+});
+
+const adminUploadFileFilter = (_req, file, cb) => {
+  if (ADMIN_UPLOAD_ALLOWED_MIME_TYPES.has(file.mimetype)) {
+    cb(null, true);
+  } else {
+    const error = new Error('unsupported_file_type');
+    error.code = 'UNSUPPORTED_FILE_TYPE';
+    cb(error);
+  }
+};
+
+const adminDocumentUpload = multer({
+  storage: adminUploadStorage,
+  limits: { fileSize: ADMIN_UPLOAD_MAX_BYTES },
+  fileFilter: adminUploadFileFilter
+});
+
+function computeFileSha256(filePath) {
+  return new Promise((resolve, reject) => {
+    if (!filePath) return resolve(null);
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('end', () => {
+      try {
+        resolve(hash.digest('hex'));
+      } catch (err) {
+        resolve(null);
+      }
+    });
+    stream.on('error', err => {
+      console.warn('[admin:uploads] checksum failed for %s: %s', filePath, err.message);
+      resolve(null);
+    });
+  });
+}
+
+function normalisePositiveInteger(value) {
+  if (value === null || typeof value === 'undefined') return null;
+  const asNumber = Number(value);
+  if (!Number.isFinite(asNumber)) return null;
+  const int = Math.trunc(asNumber);
+  return int > 0 ? int : null;
+}
+
+function resolveAdminActorUserId(req) {
+  if (!req || typeof req !== 'object') return null;
+  const candidates = [
+    req.staffProfile?.user_id,
+    req.staffProfile?.id,
+    req.auth?.staffProfileId,
+    req.auth?.userId,
+    req.auth?.id,
+    req.auth?.sub,
+    req.headers?.['x-dev-userid'],
+    req.headers?.['x-dev-user-id'],
+    req.headers?.['x-dev-user_id']
+  ];
+  for (const candidate of candidates) {
+    const normalised = normalisePositiveInteger(candidate);
+    if (normalised !== null) return normalised;
+  }
+  return null;
+}
 
 function escapeHtml(value) {
   if (value === null || value === undefined) return '';
@@ -13264,6 +13380,135 @@ app.post('/api/create-dummy-draft', async (req, res) => {
 });
 
 // Unified applicant documents endpoint now sources from iset_document (generalized store)
+app.post('/api/applicants/:id/documents/upload', (req, res) => {
+  adminDocumentUpload.single('file')(req, res, async err => {
+    if (err) {
+      const isMulterError = err instanceof multer.MulterError;
+      if (err.code === 'LIMIT_FILE_SIZE' || (isMulterError && err.code === 'LIMIT_FILE_SIZE')) {
+        return res.status(400).json({
+          error: 'file_too_large',
+          maxBytes: ADMIN_UPLOAD_MAX_BYTES
+        });
+      }
+      if (err.code === 'UNSUPPORTED_FILE_TYPE' || err.message === 'unsupported_file_type') {
+        return res.status(400).json({ error: 'unsupported_file_type' });
+      }
+      console.error('[admin:documents:upload] multer error', err);
+      return res.status(400).json({ error: 'upload_failed', message: err.message || 'Upload failed' });
+    }
+
+    const applicantId = normalisePositiveInteger(req.params.id);
+    const cleanupUploadedFile = () => {
+      if (req.file && req.file.path) {
+        fs.unlink(req.file.path, unlinkErr => {
+          if (unlinkErr && unlinkErr.code !== 'ENOENT') {
+            console.warn('[admin:documents:upload] cleanup failed for %s: %s', req.file.path, unlinkErr.message);
+          }
+        });
+      }
+    };
+
+    if (!applicantId) {
+      cleanupUploadedFile();
+      return res.status(400).json({ error: 'invalid_applicant_id' });
+    }
+
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ error: 'file_required' });
+    }
+
+    const labelRaw = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
+    const label = labelRaw ? labelRaw.slice(0, 255) : null;
+    const caseId = normalisePositiveInteger(req.body?.caseId);
+    const applicationId = normalisePositiveInteger(req.body?.applicationId);
+    const source = 'manual_upload';
+    const uploaderUserId = resolveAdminActorUserId(req);
+    const mimeType = file.mimetype || null;
+    const sizeBytes = Number.isFinite(Number(file.size)) ? Number(file.size) : null;
+    const checksum = await computeFileSha256(file.path);
+    const originalNameRaw = typeof file.originalname === 'string' ? file.originalname.trim() : '';
+    const fileNameForDb = (originalNameRaw || file.filename || 'document').slice(0, 255);
+
+    const relativePath = toIntakeRelativePath(file.path);
+    if (!relativePath) {
+      cleanupUploadedFile();
+      return res.status(500).json({ error: 'path_resolution_failed' });
+    }
+
+    let insertId = null;
+    try {
+      const insertPayload = [
+        caseId,
+        applicationId,
+        applicantId,
+        uploaderUserId,
+        source,
+        fileNameForDb,
+        relativePath,
+        mimeType,
+        label,
+        sizeBytes,
+        checksum
+      ];
+      const [result] = await pool.query(
+        `INSERT INTO iset_document
+           (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, size_bytes, checksum_sha256, status)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?, 'active')
+         ON DUPLICATE KEY UPDATE
+           applicant_user_id = VALUES(applicant_user_id),
+           application_id = VALUES(application_id),
+           case_id = VALUES(case_id),
+           user_id = VALUES(user_id),
+           label = VALUES(label),
+           mime_type = VALUES(mime_type),
+           size_bytes = VALUES(size_bytes),
+           checksum_sha256 = VALUES(checksum_sha256),
+           status = 'active',
+           updated_at = NOW()`,
+        insertPayload
+      );
+      insertId = result.insertId || null;
+    } catch (dbErr) {
+      console.error('[admin:documents:upload] insert failed', dbErr);
+      cleanupUploadedFile();
+      return res.status(500).json({ error: 'document_store_failed' });
+    }
+
+    try {
+      const lookupKey = insertId
+        ? ['id = ?', [insertId]]
+        : ['file_path = ?', [relativePath]];
+      const [rows] = await pool.query(
+        `SELECT id, case_id, application_id, applicant_user_id, file_name, file_path, label, source, mime_type, size_bytes, status, created_at AS uploaded_at
+           FROM iset_document
+         WHERE ${lookupKey[0]}
+         LIMIT 1`,
+        lookupKey[1]
+      );
+      if (!rows || !rows.length) {
+        return res.status(200).json({
+          ok: true,
+          message: 'uploaded',
+          document: null
+        });
+      }
+      return res.status(200).json({
+        ok: true,
+        message: 'uploaded',
+        document: rows[0]
+      });
+    } catch (lookupErr) {
+      console.warn('[admin:documents:upload] lookup failed', lookupErr);
+      return res.status(200).json({
+        ok: true,
+        message: 'uploaded',
+        document: null
+      });
+    }
+  });
+});
+
 app.get('/api/applicants/:id/documents', async (req, res) => {
   const applicantId = req.params.id;
   try {
@@ -16359,7 +16604,10 @@ app.get('/api/cases/:id', async (req, res) => {
         ca.childcare_need AS assessment_childcare_need,
         ca.childcare_funding_details AS assessment_childcare_funding_details,
         ca.action_plan_result_code AS assessment_action_plan_result_code,
-        ca.action_plan_result_date AS assessment_action_plan_result_date
+        ca.action_plan_result_date AS assessment_action_plan_result_date,
+        ca.conflict_declaration_signed AS assessment_conflict_declaration_signed,
+        ca.conflict_declaration_signed_at AS assessment_conflict_declaration_signed_at,
+        ca.conflict_declaration_signed_by AS assessment_conflict_declaration_signed_by
       FROM iset_case c
       LEFT JOIN iset_application a ON c.application_id = a.id
       LEFT JOIN application_lock al ON al.application_id = c.application_id AND al.expires_at > NOW()
@@ -19892,7 +20140,7 @@ if (fs.existsSync(buildDir)) {
 }
 
 // Serve uploaded files statically for document viewing (corrected path)
-app.use('/uploads', express.static('X:/ISET/ISET-intake/uploads'));
+app.use('/uploads', express.static(INTAKE_UPLOADS_ROOT));
 
 app.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
@@ -20641,6 +20889,9 @@ app.put('/api/cases/:id', async (req, res) => {
   let shouldMarkSubmissionNeedsReview = false;
   let shouldRecomputeCaseStatus = false;
   let autoPlanSuggestion = null;
+  let previousConflictDeclarationSigned = null;
+  let conflictDeclarationJustSigned = false;
+  let conflictDeclarationSignedAt = null;
 
   try {
     conn = await pool.getConnection();
@@ -20792,12 +21043,31 @@ app.put('/api/cases/:id', async (req, res) => {
       'assessment_childcare_funding_details',
       'assessment_action_plan_result_code',
       'assessment_action_plan_result_date',
+      'assessment_conflict_declaration_signed',
       'case_summary'
     ];
 
     const hasAssessmentPayload = assessmentKeys.some(key => Object.prototype.hasOwnProperty.call(body, key));
 
     if (hasAssessmentPayload) {
+      if (Object.prototype.hasOwnProperty.call(body, 'assessment_conflict_declaration_signed')) {
+        try {
+          const [conflictRows] = await conn.query(
+            'SELECT conflict_declaration_signed FROM iset_case_assessment WHERE case_id = ? LIMIT 1 FOR UPDATE',
+            [caseId]
+          );
+          previousConflictDeclarationSigned = Array.isArray(conflictRows) && conflictRows.length
+            ? conflictRows[0]?.conflict_declaration_signed ?? null
+            : null;
+        } catch (conflictErr) {
+          if (conflictErr && (conflictErr.code === 'ER_NO_SUCH_TABLE' || conflictErr.code === 'ER_BAD_FIELD_ERROR')) {
+            previousConflictDeclarationSigned = null;
+          } else {
+            throw conflictErr;
+          }
+        }
+      }
+
       const insertColumns = ['case_id'];
       const insertValues = [caseId];
       const updateAssignments = [];
@@ -20837,6 +21107,22 @@ app.put('/api/cases/:id', async (req, res) => {
       add('childcare_funding_details', toNull(body.assessment_childcare_funding_details));
       add('action_plan_result_code', toNull(body.assessment_action_plan_result_code));
       add('action_plan_result_date', toNull(body.assessment_action_plan_result_date));
+      const conflictSigned = toTinyInt(body.assessment_conflict_declaration_signed);
+      if (typeof conflictSigned !== 'undefined') {
+        add('conflict_declaration_signed', conflictSigned);
+        if (conflictSigned === 1) {
+          conflictDeclarationSignedAt = new Date();
+          add('conflict_declaration_signed_at', conflictDeclarationSignedAt);
+          add('conflict_declaration_signed_by', identity.userId || null);
+          if (Number(previousConflictDeclarationSigned) !== 1) {
+            conflictDeclarationJustSigned = true;
+          }
+        } else {
+          add('conflict_declaration_signed_at', null);
+          add('conflict_declaration_signed_by', null);
+          conflictDeclarationJustSigned = false;
+        }
+      }
 
       if (updateAssignments.length) {
         const placeholders = insertColumns.map(() => '?').join(', ');
@@ -21039,6 +21325,30 @@ app.put('/api/cases/:id', async (req, res) => {
         ? null
         : Number(caseRow.application_row_version);
     }
+    if (Object.prototype.hasOwnProperty.call(caseRow, 'assessment_conflict_declaration_signed')) {
+      const signedValue = caseRow.assessment_conflict_declaration_signed;
+      caseRow.assessment_conflict_declaration_signed =
+        signedValue === null || signedValue === undefined ? null : Number(signedValue) === 1;
+    }
+    if (Object.prototype.hasOwnProperty.call(caseRow, 'assessment_conflict_declaration_signed_at')) {
+      const signedAtValue = caseRow.assessment_conflict_declaration_signed_at;
+      if (signedAtValue instanceof Date) {
+        caseRow.assessment_conflict_declaration_signed_at = Number.isNaN(signedAtValue.getTime())
+          ? null
+          : signedAtValue.toISOString();
+      } else if (typeof signedAtValue !== 'string') {
+        caseRow.assessment_conflict_declaration_signed_at = null;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(caseRow, 'assessment_conflict_declaration_signed_by')) {
+      const signedBy = caseRow.assessment_conflict_declaration_signed_by;
+      if (signedBy === null || signedBy === undefined) {
+        caseRow.assessment_conflict_declaration_signed_by = null;
+      } else {
+        const numericSignedBy = Number(signedBy);
+        caseRow.assessment_conflict_declaration_signed_by = Number.isNaN(numericSignedBy) ? null : numericSignedBy;
+      }
+    }
 
     const afterStatus = (normalizedStatus !== undefined ? normalizedStatus : caseRow.status) || caseRow.status;
     const { actorId, actorName } = resolveRequestActor(req);
@@ -21096,6 +21406,25 @@ app.put('/api/cases/:id', async (req, res) => {
           message: 'NWAC review submitted.',
         },
 
+        trackingId,
+        actorId,
+        actorName,
+      });
+    }
+    if (conflictDeclarationJustSigned) {
+      const signedAtIso = (conflictDeclarationSignedAt || new Date()).toISOString();
+      await captureCaseEvent({
+        type: 'conflict_declaration_signed',
+        caseId,
+        payload: {
+          signed_at: signedAtIso,
+          actor_id: actorId || null,
+          actor_name: actorName || null,
+          tracking_id: trackingId,
+          message: actorName
+            ? 'Conflict of interest declaration signed by ' + actorName + '.'
+            : 'Conflict of interest declaration signed.'
+        },
         trackingId,
         actorId,
         actorName,

@@ -38,6 +38,7 @@
     "jose": "^5.9.3",
     "json-logic-js": "^2.0.5",
     "lodash.template": "^4.5.0",
+    "multer": "^2.0.2",
     "mysql": "^2.18.1",
     "mysql2": "^3.12.0",
     "nunjucks": "^3.2.4",

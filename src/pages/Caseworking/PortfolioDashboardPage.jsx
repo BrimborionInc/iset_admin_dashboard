@@ -47,11 +47,7 @@ const widgetRegistry = {
   },
 };
 
-const defaultLayout = [
-  { id: "summaryMetrics", rowSpan: 2, columnSpan: 4 },
-  { id: "financeOverview", rowSpan: 4, columnSpan: 4 },
-  { id: "casesTable", rowSpan: 6, columnSpan: 4 },
-];
+const defaultLayout = [{ id: "casesTable", rowSpan: 6, columnSpan: 4 }];
 
 const exportLayout = items =>
   items.map(({ id, rowSpan, columnSpan, columnOffset }) => ({
