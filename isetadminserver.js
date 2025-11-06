@@ -14,6 +14,10 @@ const nunjucks = require("nunjucks");
 let pool; // Initialized after DB config loads
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
 const { createEventService, EventValidationError, registerNotificationHook } = require('../shared/events');
+const events = require('events');
+
+// Increase default listener cap to avoid noisy warnings when wiring shared buses.
+events.EventEmitter.defaultMaxListeners = 20;
 
 const ENSURED_HISTORY_EVENT_TYPE_ENUM = { prepared: false };
 
@@ -33,6 +37,27 @@ const CONSENT_PARAGRAPHS = [
   "All information referred to above shall be treated as confidential, and the Native Women's Association of Canada and its sub-agreement holders will take all security measures reasonably necessary for the protection of such information against unauthorized release or disclosure.",
   'Further, I understand that my personal information shall not be used or disclosed for purposes other than those for which it was collected, except with the expressed consent of you, as the client, or as required by law. Personal information shall be retained only as long as necessary for the fulfilment of those purposes.'
 ];
+const INDIGENOUS_DECLARATION_PARAGRAPHS = [
+  'I, the undersigned, understand that the funding opportunity under the Indigenous Skills and Employment Training (ISET) program for which I am being assessed is intended to increase Indigenous participation in the Canadian labour market and support First Nations, Metis and Inuit peoples’ access to sustainable and meaningful employment. The ISET program provides access to training and employment supports to eligible Canadian Indigenous women in their diversities, including status and non-status First Nations, Metis and Inuit peoples whether residing on or off-reserve, in urban centres and in rural, remote communities.',
+  'Further, I understand that providing false or misleading information and/or omission of information by me about my Indigenous identity may result in an investigation. If an investigation is founded, it will be grounds for immediate suspension of any funding provided or promised to me and further, revocation of any Funding Agreement signed between me and the Native Women’s Association of Canada and/or its sub-agreement holders, and will result in a repayment of funds to Employment and Social Development Canada (ESDC), for monies I received to which I was not entitled.'
+];
+const CONFLICT_DECLARATION_PARAGRAPHS = [
+  "The Indigenous Skills and Employment Training (ISET) program is committed to fairness, transparency, and accountability in all funding decisions.",
+  "To protect the integrity of the program, all applicants must declare any actual, potential, or perceived conflicts of interest or biases related to their ISET application.",
+  "I do not have any personal, family, financial, or other relationship with any staff member of the Native Women's Association of Canada (NWAC) or any regional Provincial/Territorial Member Association (PTMA) that could influence or appear to influence the assessment or approval of my ISET application.",
+  "I have not attempted to influence or put pressure on any NWAC or regional PTMA staff involved in assessing or approving my ISET application.",
+  "I have not requested that my application be given priority ahead of other applicants, as I understand my application will be assessed in the order in which it was received by NWAC and/or the regional PTMA.",
+  "I have disclosed below any relationships, positive or negative biases, or circumstances that may create a real or perceived conflict of interest."
+];
+
+const INDIGENOUS_DECLARATION_STATEMENT =
+  'I hereby declare that I am an Indigenous person in Canada, which for the purposes of the Indigenous Skills and Employment Training (ISET) Program is inclusive of persons who are First Nations, Inuit, or Metis.';
+const CONFLICT_DECLARATION_STATEMENT =
+  'Are you declaring a conflict of interest or bias in relation to your ISET application?';
+const CONFLICT_OPTION_LABELS = {
+  no_conflict: 'I have no conflicts of interest or biases to declare',
+  conflict: 'I wish to declare the following potential conflicts or biases'
+};
 
 const CONSENT_LOGO_PATH = path.join(__dirname, 'public', 'nwac-consent-logo.png');
 let consentLogoDataUriCache = null;
@@ -49,7 +74,7 @@ function getConsentLogoDataUri() {
   return consentLogoDataUriCache;
 }
 
-function formatConsentDate(value) {
+function formatSignatureDate(value) {
   if (!value) return 'Not signed';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
@@ -60,6 +85,10 @@ function formatConsentDate(value) {
     hour: '2-digit',
     minute: '2-digit'
   });
+}
+
+function formatMultilineHtml(value) {
+  return escapeHtml(value || '').replace(/\r?\n/g, '<br />');
 }
 
 const ISET_TEST_DATA_TABLE_ORDER = [
@@ -13144,6 +13173,8 @@ const normaliseDummyDraftPayload = (draftPayload, template) => {
   }
 
   draftPayload['contact-email-address'] = draftPayload['contact-email-address'] || 'demo.applicant@example.com';
+  draftPayload['indigenous-affiliation-declaration'] =
+    draftPayload['indigenous-affiliation-declaration'] || 'Demo Nation of Kiskinohaw';
 };
 
 const buildDummyDraft = () => {
@@ -19358,7 +19389,7 @@ app.post('/api/consent-letter/pdf', async (req, res) => {
 
   const signed = Boolean(consentSigned);
   const signatureName = signed ? (consentSignedName || 'Not provided') : 'Not signed';
-  const signedOnDisplay = signed ? formatConsentDate(consentSignedAt) : 'Not signed';
+  const signedOnDisplay = signed ? formatSignatureDate(consentSignedAt) : 'Not signed';
   const logoDataUri = getConsentLogoDataUri();
 
   const html = `<!DOCTYPE html>
@@ -19427,6 +19458,229 @@ app.post('/api/consent-letter/pdf', async (req, res) => {
   } catch (err) {
     console.error('[consent-pdf] failed to generate PDF:', err);
     return res.status(500).json({ error: 'Unable to generate consent PDF' });
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (_) {}
+    }
+  }
+});
+
+app.post('/api/indigenous-declaration/pdf', async (req, res) => {
+  const { applicationId, declarationSigned, declarationSignedName, declarationSignedAt, affiliation } = req.body || {};
+  if (!applicationId) {
+    return res.status(400).json({ error: 'applicationId is required' });
+  }
+
+  const signed = Boolean(declarationSigned);
+  const rawSignatureName = typeof declarationSignedName === 'string' ? declarationSignedName.trim() : '';
+  const signatureBoxContent = signed ? escapeHtml(rawSignatureName || 'Not provided') : 'Not signed';
+  const signatureBoxClass = signed ? 'signature-box' : 'signature-box unsigned';
+  const signedOnDisplay = signed ? formatSignatureDate(declarationSignedAt) : 'Not signed';
+  const signedOnHtml = escapeHtml(signedOnDisplay);
+  const affiliationHtml = affiliation && typeof affiliation === 'string' && affiliation.trim()
+    ? escapeHtml(affiliation.trim())
+    : 'Not provided';
+  const logoDataUri = getConsentLogoDataUri();
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Indigenous Declaration</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; color: #1b1b1b; margin: 40px; line-height: 1.5; }
+    h1 { text-align: center; font-size: 24px; margin-bottom: 12px; }
+    h2 { font-size: 18px; margin-top: 32px; }
+    .logo { text-align: center; margin-bottom: 24px; }
+    .logo img { max-height: 80px; width: auto; }
+    .signature-box { border: 1px solid #9ba7b6; border-radius: 6px; padding: 16px; min-height: 80px; display: flex; align-items: center; font-size: 22px; font-family: 'Segoe Script', 'Lucida Handwriting', cursive; }
+    .signature-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .signature-box.unsigned { font-family: Arial, Helvetica, sans-serif; font-size: 16px; color: #6b7280; }
+    .signature-box.unsigned { font-family: Arial, Helvetica, sans-serif; font-size: 16px; color: #6b7280; }
+    .meta { font-size: 14px; color: #374151; }
+    .footer { text-align: center; font-size: 12px; color: #6b7280; margin-top: 48px; }
+    .paragraph { margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { vertical-align: top; padding-right: 16px; }
+    .affiliation-block { margin-top: 24px; padding: 16px; background-color: #f8fafc; border-radius: 6px; }
+    .statement { margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    ${logoDataUri ? `<img src="${logoDataUri}" alt="Native Women's Association of Canada logo" />` : ''}
+  </div>
+  <h1>Indigenous Declaration</h1>
+  ${INDIGENOUS_DECLARATION_PARAGRAPHS.map(paragraph => `<p class="paragraph">${escapeHtml(paragraph)}</p>`).join('')}
+  <div class="affiliation-block">
+    <div class="meta"><strong>My Nation/Community/Treaty Area affiliation</strong></div>
+    <div class="meta">${affiliationHtml}</div>
+  </div>
+  <div class="statement">
+    <div class="meta"><strong>Declaration statement</strong></div>
+    <div class="meta">${escapeHtml(INDIGENOUS_DECLARATION_STATEMENT)}</div>
+  </div>
+  <table style="margin-top: 24px;">
+    <tr>
+      <td style="width: 50%;">
+        <div class="meta"><strong>Client signature</strong></div>
+        <div class="${signatureBoxClass}">${signatureBoxContent}</div>
+        <div class="signature-label">Client signature</div>
+      </td>
+      <td style="width: 50%;">
+        <div class="meta"><strong>Signed on</strong></div>
+        <div class="meta">${signedOnHtml}</div>
+        <div class="signature-label">Electronic declaration captured via the ISET intake portal.</div>
+      </td>
+    </tr>
+  </table>
+  <div class="footer">NWAC wishes to acknowledge support for this project through the Government of Canada's ISET Program.</div>
+</body>
+</html>`;
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '25mm', bottom: '25mm', left: '20mm', right: '20mm' }
+    });
+    await page.close();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="indigenous-declaration-${applicationId}.pdf"`);
+    return res.end(pdfBuffer);
+  } catch (err) {
+    console.error('[indigenous-declaration-pdf] failed to generate PDF:', err);
+    return res.status(500).json({ error: 'Unable to generate Indigenous declaration PDF' });
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (_) {}
+    }
+  }
+});
+
+app.post('/api/conflict-declaration/pdf', async (req, res) => {
+  const {
+    applicationId,
+    declarationSigned,
+    declarationSignedName,
+    declarationSignedAt,
+    selection,
+    optionLabel,
+    explanation
+  } = req.body || {};
+  if (!applicationId) {
+    return res.status(400).json({ error: 'applicationId is required' });
+  }
+
+  const signed = Boolean(declarationSigned);
+  const rawSignatureName = typeof declarationSignedName === 'string' ? declarationSignedName.trim() : '';
+  const signatureBoxContent = signed ? escapeHtml(rawSignatureName || 'Not provided') : 'Not signed';
+  const signedOnDisplay = signed ? formatSignatureDate(declarationSignedAt) : 'Not signed';
+  const signedOnHtml = escapeHtml(signedOnDisplay);
+  const sanitizedSelection = typeof selection === 'string' ? selection.trim().toLowerCase() : '';
+  let resolvedOptionLabel = typeof optionLabel === 'string' ? optionLabel.trim() : '';
+  if (!resolvedOptionLabel) {
+    resolvedOptionLabel = CONFLICT_OPTION_LABELS[sanitizedSelection] || CONFLICT_OPTION_LABELS.no_conflict;
+  }
+  const optionLabelHtml = escapeHtml(resolvedOptionLabel);
+  const isConflict = sanitizedSelection === 'conflict';
+  const explanationText = isConflict && typeof explanation === 'string' ? explanation.trim() : '';
+  const explanationBlock = isConflict ? formatMultilineHtml(explanationText || 'No additional details provided.') : '';
+  const statusLabelBase = isConflict ? 'Signed with conflict' : 'Signed no conflict';
+  const statusName = signed ? (rawSignatureName || 'Not provided') : '';
+  const statusDisplay = statusName ? `${statusLabelBase} by ${statusName}` : statusLabelBase;
+  const statusHtml = escapeHtml(statusDisplay);
+  const selectionBorderColor = isConflict ? '#f97316' : '#16a34a';
+  const statusClass = isConflict ? 'status-warning' : 'status-success';
+  const logoDataUri = getConsentLogoDataUri();
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Conflict of Interest Declaration</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; color: #1b1b1b; margin: 40px; line-height: 1.5; }
+    h1 { text-align: center; font-size: 24px; margin-bottom: 12px; }
+    .logo { text-align: center; margin-bottom: 24px; }
+    .logo img { max-height: 80px; width: auto; }
+    .signature-box { border: 1px solid #9ba7b6; border-radius: 6px; padding: 16px; min-height: 80px; display: flex; align-items: center; font-size: 22px; font-family: 'Segoe Script', 'Lucida Handwriting', cursive; }
+    .signature-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .meta { font-size: 14px; color: #374151; }
+    .footer { text-align: center; font-size: 12px; color: #6b7280; margin-top: 48px; }
+    .paragraph { margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { vertical-align: top; padding-right: 16px; }
+    .selection { margin-top: 24px; padding: 16px; background-color: #f8fafc; border-radius: 6px; border-left: 4px solid ${selectionBorderColor}; }
+    .selection-title { font-weight: bold; margin-bottom: 4px; }
+    .explanation { margin-top: 8px; color: #4b5563; }
+    .statement { margin-top: 24px; }
+    .status { margin-top: 24px; font-weight: bold; }
+    .status-success { color: #166534; }
+    .status-warning { color: #b45309; }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    ${logoDataUri ? `<img src="${logoDataUri}" alt="Native Women's Association of Canada logo" />` : ''}
+  </div>
+  <h1>Conflict of Interest and Bias Declaration</h1>
+  ${CONFLICT_DECLARATION_PARAGRAPHS.map(paragraph => `<p class="paragraph">${escapeHtml(paragraph)}</p>`).join('')}
+  <div class="selection">
+    <div class="selection-title">Declaration selection</div>
+    <div>${optionLabelHtml}</div>
+    ${isConflict ? `<div class="explanation">${explanationBlock}</div>` : ''}
+  </div>
+  <div class="statement">
+    <div class="meta"><strong>Declaration statement</strong></div>
+    <div class="meta">${escapeHtml(CONFLICT_DECLARATION_STATEMENT)}</div>
+  </div>
+  <p class="status ${statusClass}">${statusHtml}</p>
+  <table style="margin-top: 24px;">
+    <tr>
+      <td style="width: 50%;">
+        <div class="meta"><strong>Client signature</strong></div>
+        <div class="${signatureBoxClass}">${signatureBoxContent}</div>
+        <div class="signature-label">Client signature</div>
+      </td>
+      <td style="width: 50%;">
+        <div class="meta"><strong>Signed on</strong></div>
+        <div class="meta">${signedOnHtml}</div>
+        <div class="signature-label">Electronic declaration captured via the ISET intake portal.</div>
+      </td>
+    </tr>
+  </table>
+  <div class="footer">NWAC wishes to acknowledge support for this project through the Government of Canada's ISET Program.</div>
+</body>
+</html>`;
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '25mm', bottom: '25mm', left: '20mm', right: '20mm' }
+    });
+    await page.close();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="conflict-declaration-${applicationId}.pdf"`);
+    return res.end(pdfBuffer);
+  } catch (err) {
+    console.error('[conflict-declaration-pdf] failed to generate PDF:', err);
+    return res.status(500).json({ error: 'Unable to generate conflict of interest declaration PDF' });
   } finally {
     if (browser) {
       try { await browser.close(); } catch (_) {}

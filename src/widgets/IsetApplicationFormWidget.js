@@ -346,12 +346,12 @@ const renderConflictDeclaration = (answers) => {
   if (!signature || typeof signature !== 'object' || !signature.signed) {
     return <StatusIndicator type="pending">Not signed</StatusIndicator>;
   }
-  const declaration = String(answers?.conflict_of_interest || '').toLowerCase();
+  const declaration = String(answers?.conflict_of_interest ?? '').trim().toLowerCase();
   const hasConflict = declaration === 'conflict';
-  const fallbackName = [
-    answers ? answers['first-name'] : '',
-    answers ? answers['last-name'] : ''
-  ].filter(Boolean).join(' ').trim() || 'applicant';
+  const fallbackName = [answers?.['first-name'] || '', answers?.['last-name'] || '']
+    .filter(Boolean)
+    .join(' ')
+    .trim() || 'applicant';
   const name = signature.name || fallbackName;
   return (
     <StatusIndicator type={hasConflict ? 'warning' : 'success'}>
@@ -407,12 +407,34 @@ const answersDiff = (baseline = {}, updated = {}) => {
   return diff;
 };
 
+
 const EI_CONSENT_PARAGRAPHS = [
   "I, the undersigned, give my expressed and informed consent to the Native Women's Association of Canada and/or its sub-agreement holders to the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET), to collect personal or sensitive information as it relates to my request for funding under the ISET program funded by Employment and Social Development Canada (ESDC). My consent extends to providing my Social Insurance Number (SIN), to determine my eligibility for interventions such as skills training and wage subsidies as part of the Labour Market Development Agreements (LMDA) program.",
   'I acknowledge that the information is collected and administered in accordance with the Privacy Act (R.S.C. 1985, c P-21), the Department Employment and Social Development Canada Act (S.C. 2005, c.34), and the Access to Information Act (R.S.C., 1985, c.A-1). Information collected is to be used to determine eligibility for the ISET program; to measure results of this Agreement and evaluate its success; evaluate the effectiveness of the Program in achieving its objective; and, to meet its obligations of accountability by reporting on the results of the Program.',
   "All information referred to above shall be treated as confidential, and the Native Women's Association of Canada and its sub-agreement holders will take all security measures reasonably necessary for the protection of such information against unauthorized release or disclosure.",
   'Further, I understand that my personal information shall not be used or disclosed for purposes other than those for which it was collected, except with the expressed consent of you, as the client, or as required by law. Personal information shall be retained only as long as necessary for the fulfilment of those purposes.'
 ];
+
+const INDIGENOUS_DECLARATION_PARAGRAPHS = [
+  'I, the undersigned, understand that the funding opportunity under the Indigenous Skills and Employment Training (ISET) program for which I am being assessed is intended to increase Indigenous participation in the Canadian labour market and support First Nations, Metis and Inuit peoples’ access to sustainable and meaningful employment. The ISET program provides access to training and employment supports to eligible Canadian Indigenous women in their diversities, including status and non-status First Nations, Metis and Inuit peoples whether residing on or off-reserve, in urban centres and in rural, remote communities.',
+  'Further, I understand that providing false or misleading information and/or omission of information by me about my Indigenous identity may result in an investigation. If an investigation is founded, it will be grounds for immediate suspension of any funding provided or promised to me and further, revocation of any Funding Agreement signed between me and the Native Women’s Association of Canada and/or its sub-agreement holders, and will result in a repayment of funds to Employment and Social Development Canada (ESDC), for monies I received to which I was not entitled.'
+];
+const INDIGENOUS_DECLARATION_STATEMENT =
+  'I hereby declare that I am an Indigenous person in Canada, which for the purposes of the Indigenous Skills and Employment Training (ISET) Program is inclusive of persons who are First Nations, Inuit, or Metis.';
+const CONFLICT_DECLARATION_PARAGRAPHS = [
+  'The Indigenous Skills and Employment Training (ISET) program is committed to fairness, transparency, and accountability in all funding decisions.',
+  'To protect the integrity of the program, all applicants must declare any actual, potential, or perceived conflicts of interest or biases related to their ISET application.',
+  'I do not have any personal, family, financial, or other relationship with any staff member of the Native Women’s Association of Canada (NWAC) or any regional Provincial/Territorial Member Association (PTMA) that could influence or appear to influence the assessment or approval of my ISET application.',
+  'I have not attempted to influence or put pressure on any NWAC or regional PTMA staff involved in assessing or approving my ISET application.',
+  'I have not requested that my application be given priority ahead of other applicants, as I understand my application will be assessed in the order in which it was received by NWAC and/or the regional PTMA.',
+  'I have disclosed below any relationships, positive or negative biases, or circumstances that may create a real or perceived conflict of interest.'
+];
+const CONFLICT_DECLARATION_STATEMENT =
+  'Are you declaring a conflict of interest or bias in relation to your ISET application?';
+const CONFLICT_OPTION_LABELS = {
+  no_conflict: 'I have no conflicts of interest or biases to declare',
+  conflict: 'I wish to declare the following potential conflicts or biases'
+};
 
 const resolveSignatureTimestamp = (signature) => {
   if (!signature || typeof signature !== 'object') return null;
@@ -426,7 +448,7 @@ const resolveSignatureTimestamp = (signature) => {
   );
 };
 
-const buildSectionDefinitions = ({ onOpenConsentModal } = {}) => [
+const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, onOpenConflictModal } = {}) => [
   {
     id: 'consent',
     title: 'Consent & declarations',
@@ -435,7 +457,23 @@ const buildSectionDefinitions = ({ onOpenConsentModal } = {}) => [
     editable: false,
     items: [
       {
-        label: 'Indigenous declaration',
+        label: (
+          <Box display="inline-flex" alignItems="center">
+            <Box as="span" display="inline" fontWeight="bold" margin={{ right: 'xxs' }}>
+              Indigenous declaration
+            </Box>
+            <Button
+              variant="icon"
+              iconName="external"
+              ariaLabel="View Indigenous declaration"
+              onClick={event => {
+                event?.preventDefault();
+                event?.stopPropagation();
+                onOpenIndigenousModal?.();
+              }}
+            />
+          </Box>
+        ),
         renderValue: answers => signatureStatus(answers?.indigenous_declaration)
       },
       {
@@ -465,7 +503,23 @@ const buildSectionDefinitions = ({ onOpenConsentModal } = {}) => [
         )
       },
       {
-        label: 'Conflict of interest declaration',
+        label: (
+          <Box display="inline-flex" alignItems="center">
+            <Box as="span" display="inline" fontWeight="bold" margin={{ right: 'xxs' }}>
+              Conflict of interest declaration
+            </Box>
+            <Button
+              variant="icon"
+              iconName="external"
+              ariaLabel="View conflict of interest declaration"
+              onClick={event => {
+                event?.preventDefault();
+                event?.stopPropagation();
+                onOpenConflictModal?.();
+              }}
+            />
+          </Box>
+        ),
         renderValue: answers => renderConflictDeclaration(answers)
       }
     ]
@@ -895,6 +949,10 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   const [flashbarItems, setFlashbarItems] = useState([]);
   const [consentModalVisible, setConsentModalVisible] = useState(false);
   const [consentDownloadLoading, setConsentDownloadLoading] = useState(false);
+  const [indigenousModalVisible, setIndigenousModalVisible] = useState(false);
+  const [indigenousDownloadLoading, setIndigenousDownloadLoading] = useState(false);
+  const [conflictModalVisible, setConflictModalVisible] = useState(false);
+  const [conflictDownloadLoading, setConflictDownloadLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editableAnswers, setEditableAnswers] = useState({});
   const [showEditConfirm, setShowEditConfirm] = useState(false);
@@ -1053,6 +1111,22 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
 
   const handleCloseConsentModal = useCallback(() => {
     setConsentModalVisible(false);
+  }, []);
+
+  const handleOpenIndigenousModal = useCallback(() => {
+    setIndigenousModalVisible(true);
+  }, []);
+
+  const handleCloseIndigenousModal = useCallback(() => {
+    setIndigenousModalVisible(false);
+  }, []);
+
+  const handleOpenConflictModal = useCallback(() => {
+    setConflictModalVisible(true);
+  }, []);
+
+  const handleCloseConflictModal = useCallback(() => {
+    setConflictModalVisible(false);
   }, []);
 
   const diff = useMemo(() => answersDiff(answers, editableAnswers), [answers, editableAnswers]);
@@ -1537,8 +1611,13 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   ], [handleRestoreVersion, handleViewVersion, restoringVersionId, versionDetailsLoading]);
 
   const sectionDefinitions = useMemo(
-    () => buildSectionDefinitions({ onOpenConsentModal: handleOpenConsentModal }),
-    [handleOpenConsentModal]
+    () =>
+      buildSectionDefinitions({
+        onOpenConsentModal: handleOpenConsentModal,
+        onOpenIndigenousModal: handleOpenIndigenousModal,
+        onOpenConflictModal: handleOpenConflictModal
+      }),
+    [handleOpenConsentModal, handleOpenIndigenousModal, handleOpenConflictModal]
   );
 
   const consentSignature = answers?.consent || {};
@@ -1554,6 +1633,24 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
     null;
   const displayTimestamp = consentSignedAtRaw || submissionTimestampRaw;
   const consentSignedAt = displayTimestamp ? formatDateTime(displayTimestamp) : '-';
+
+  const indigenousSignature = answers?.indigenous_declaration || {};
+  const indigenousSignedName = indigenousSignature?.name || 'Not provided';
+  const indigenousSigned = Boolean(indigenousSignature?.signed);
+  const indigenousSignedAtRaw = resolveSignatureTimestamp(indigenousSignature);
+  const indigenousDisplayTimestamp = indigenousSignedAtRaw || submissionTimestampRaw;
+  const indigenousSignedAt = indigenousDisplayTimestamp ? formatDateTime(indigenousDisplayTimestamp) : '-';
+  const indigenousAffiliation = answers?.['indigenous-affiliation-declaration'] || '';
+  const conflictSignature = answers?.conflict_applicant_signature || {};
+  const conflictSignedName = conflictSignature?.name || 'Not provided';
+  const conflictSigned = Boolean(conflictSignature?.signed);
+  const conflictSignedAtRaw = resolveSignatureTimestamp(conflictSignature);
+  const conflictDisplayTimestamp = conflictSignedAtRaw || submissionTimestampRaw;
+  const conflictSignedAt = conflictDisplayTimestamp ? formatDateTime(conflictDisplayTimestamp) : '-';
+  const conflictSelectionRaw = (answers?.conflict_of_interest ?? '').toString().trim().toLowerCase();
+  const conflictSelection = conflictSelectionRaw || 'no_conflict';
+  const conflictOptionLabel = CONFLICT_OPTION_LABELS[conflictSelection] || CONFLICT_OPTION_LABELS.no_conflict;
+  const conflictExplanation = answers?.['2022_conflict_follow'] || '';
 
   const handleDownloadConsent = useCallback(async () => {
     if (typeof window === 'undefined' || !application?.id) return;
@@ -1597,6 +1694,114 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
       setConsentDownloadLoading(false);
     }
   }, [application?.id, consentSigned, consentSignedName, displayTimestamp, pushFlash]);
+
+  const handleDownloadIndigenous = useCallback(async () => {
+    if (typeof window === 'undefined' || !application?.id) return;
+    setIndigenousDownloadLoading(true);
+    try {
+      const response = await apiFetch('/api/indigenous-declaration/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          applicationId: application.id,
+          declarationSigned: indigenousSigned,
+          declarationSignedName: indigenousSignedName,
+          declarationSignedAt: indigenousSignedAtRaw || submissionTimestampRaw,
+          affiliation: indigenousAffiliation
+        })
+      });
+      if (!response.ok) {
+        let message = 'Failed to download Indigenous declaration';
+        try {
+          const errBody = await response.json();
+          if (errBody?.error) message = errBody.error;
+        } catch (_) {}
+        throw new Error(message);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        throw new Error('Indigenous declaration response was empty');
+      }
+      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const fileName = `indigenous-declaration-${application.id}.pdf`;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      pushFlash({ type: 'error', content: error?.message || 'Failed to download Indigenous declaration' });
+    } finally {
+      setIndigenousDownloadLoading(false);
+    }
+  }, [
+    application?.id,
+    indigenousAffiliation,
+    indigenousSigned,
+    indigenousSignedName,
+    indigenousSignedAtRaw,
+    submissionTimestampRaw,
+    pushFlash
+  ]);
+
+  const handleDownloadConflict = useCallback(async () => {
+    if (typeof window === 'undefined' || !application?.id) return;
+    setConflictDownloadLoading(true);
+    try {
+      const response = await apiFetch('/api/conflict-declaration/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          applicationId: application.id,
+          declarationSigned: conflictSigned,
+          declarationSignedName: conflictSignedName,
+          declarationSignedAt: conflictSignedAtRaw || submissionTimestampRaw,
+          selection: conflictSelection,
+          optionLabel: conflictOptionLabel,
+          explanation: conflictExplanation
+        })
+      });
+      if (!response.ok) {
+        let message = 'Failed to download conflict of interest declaration';
+        try {
+          const errBody = await response.json();
+          if (errBody?.error) message = errBody.error;
+        } catch (_) {}
+        throw new Error(message);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        throw new Error('Conflict declaration response was empty');
+      }
+      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const fileName = `conflict-declaration-${application.id}.pdf`;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      pushFlash({ type: 'error', content: error?.message || 'Failed to download conflict of interest declaration' });
+    } finally {
+      setConflictDownloadLoading(false);
+    }
+  }, [
+    application?.id,
+    conflictSigned,
+    conflictSignedName,
+    conflictSignedAtRaw,
+    conflictSelection,
+    conflictOptionLabel,
+    conflictExplanation,
+    submissionTimestampRaw,
+    pushFlash
+  ]);
 
   const employmentNarrativeReadOnly = renderTextBlock(answers['long-term-goal']);
   const employmentNarrativeValue = editableAnswers['long-term-goal'] ?? '';
@@ -1801,6 +2006,196 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
           </SpaceBetween>
         </Modal>
       )}
+      {indigenousModalVisible && (
+        <Modal
+          visible
+          size="large"
+          header="Indigenous Declaration"
+          onDismiss={handleCloseIndigenousModal}
+          footer={
+            <SpaceBetween direction="horizontal" size="xs" alignItems="end">
+              <Button onClick={handleDownloadIndigenous} loading={indigenousDownloadLoading} disabled={indigenousDownloadLoading}>
+                Download (PDF)
+              </Button>
+              <Button variant="primary" onClick={handleCloseIndigenousModal}>
+                Close
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="l">
+            <Box textAlign="center">
+              <Box margin={{ bottom: 's' }} display="flex" justifyContent="center">
+                <img
+                  src="/nwac-consent-logo.png"
+                  alt="Native Women's Association of Canada logo"
+                  style={{ maxHeight: '64px', width: 'auto' }}
+                />
+              </Box>
+              <Box fontSize="heading-s" fontWeight="bold">
+                Native Women's Association of Canada
+              </Box>
+              <Box fontSize="body-s" color="text-body-secondary">
+                Association des femmes autochtones du Canada
+              </Box>
+            </Box>
+            <SpaceBetween size="s">
+              {INDIGENOUS_DECLARATION_PARAGRAPHS.map((paragraph, index) => (
+                <Box key={index} lineHeight="body-m">
+                  {paragraph}
+                </Box>
+              ))}
+            </SpaceBetween>
+            <SpaceBetween size="xs">
+              <Box fontWeight="bold">My Nation/Community/Treaty Area affiliation</Box>
+              <Box>{indigenousAffiliation || 'Not provided'}</Box>
+              <Box color="text-body-secondary">
+                (e.g., Mohawk of Kahnawà:ke; Inuit of Nunatsiavut; Metis Nation of Alberta, Region 3, etc.)
+              </Box>
+            </SpaceBetween>
+            <SpaceBetween size="xs">
+              <Box fontWeight="bold">Declaration</Box>
+              <Box color="text-body-secondary">
+                {INDIGENOUS_DECLARATION_STATEMENT}
+              </Box>
+            </SpaceBetween>
+            <ColumnLayout columns={2} variant="text-grid">
+              <SpaceBetween size="xs">
+                <Box fontWeight="bold">Client signature</Box>
+                <Box
+                  borderColor="border-divider"
+                  borderStyle="solid"
+                  borderWidth="1px"
+                  borderRadius="small"
+                  padding="m"
+                  backgroundColor="background-secondary"
+                  minHeight="4rem"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="flex-start"
+                >
+                  {indigenousSigned ? (
+                    <Box fontFamily="'Segoe Script', 'Lucida Handwriting', cursive" fontSize="heading-xl">
+                      {indigenousSignedName}
+                    </Box>
+                  ) : (
+                    <Box color="text-status-inactive">Not signed</Box>
+                  )}
+                </Box>
+                <Box fontSize="body-s" color="text-body-secondary">
+                  Client signature
+                </Box>
+              </SpaceBetween>
+              <SpaceBetween size="xs">
+                <Box fontWeight="bold">Signed on</Box>
+                <Box>{indigenousSigned ? indigenousSignedAt : 'Not signed'}</Box>
+                <Box fontSize="body-s" color="text-body-secondary">
+                  Electronic declaration captured via the ISET intake portal.
+                </Box>
+              </SpaceBetween>
+            </ColumnLayout>
+            <Box color="text-body-secondary" fontSize="body-s" textAlign="center">
+              NWAC wishes to acknowledge support for this project through the Government of Canada's ISET Program.
+            </Box>
+          </SpaceBetween>
+        </Modal>
+      )}
+      {conflictModalVisible && (
+        <Modal
+          visible
+          size="large"
+          header="Conflict of Interest Declaration"
+          onDismiss={handleCloseConflictModal}
+          footer={
+            <SpaceBetween direction="horizontal" size="xs" alignItems="end">
+              <Button onClick={handleDownloadConflict} loading={conflictDownloadLoading} disabled={conflictDownloadLoading}>
+                Download (PDF)
+              </Button>
+              <Button variant="primary" onClick={handleCloseConflictModal}>
+                Close
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="l">
+            <Box textAlign="center">
+              <Box margin={{ bottom: 's' }} display="flex" justifyContent="center">
+                <img
+                  src="/nwac-consent-logo.png"
+                  alt="Native Women's Association of Canada logo"
+                  style={{ maxHeight: '64px', width: 'auto' }}
+                />
+              </Box>
+              <Box fontSize="heading-s" fontWeight="bold">
+                Native Women's Association of Canada
+              </Box>
+              <Box fontSize="body-s" color="text-body-secondary">
+                Association des femmes autochtones du Canada
+              </Box>
+            </Box>
+            <SpaceBetween size="s">
+              {CONFLICT_DECLARATION_PARAGRAPHS.map((paragraph, index) => (
+                <Box key={index} lineHeight="body-m">
+                  {paragraph}
+                </Box>
+              ))}
+            </SpaceBetween>
+            <SpaceBetween size="xs">
+              <Box fontWeight="bold">Declaration selection</Box>
+              <Box>{conflictOptionLabel}</Box>
+              {conflictSelection === 'conflict' && (
+                <Box color="text-body-secondary">
+                  {conflictExplanation || 'No details provided.'}
+                </Box>
+              )}
+            </SpaceBetween>
+            <SpaceBetween size="xs">
+              <Box fontWeight="bold">Declaration statement</Box>
+              <Box color="text-body-secondary">
+                {CONFLICT_DECLARATION_STATEMENT}
+              </Box>
+            </SpaceBetween>
+            <ColumnLayout columns={2} variant="text-grid">
+              <SpaceBetween size="xs">
+                <Box fontWeight="bold">Client signature</Box>
+                <Box
+                  borderColor="border-divider"
+                  borderStyle="solid"
+                  borderWidth="1px"
+                  borderRadius="small"
+                  padding="m"
+                  backgroundColor="background-secondary"
+                  minHeight="4rem"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="flex-start"
+                >
+                  {conflictSigned ? (
+                    <Box fontFamily="'Segoe Script', 'Lucida Handwriting', cursive" fontSize="heading-xl">
+                      {conflictSignedName}
+                    </Box>
+                  ) : (
+                    <Box color="text-status-inactive">Not signed</Box>
+                  )}
+                </Box>
+                <Box fontSize="body-s" color="text-body-secondary">
+                  Client signature
+                </Box>
+              </SpaceBetween>
+              <SpaceBetween size="xs">
+                <Box fontWeight="bold">Signed on</Box>
+                <Box>{conflictSigned ? conflictSignedAt : 'Not signed'}</Box>
+                <Box fontSize="body-s" color="text-body-secondary">
+                  Electronic declaration captured via the ISET intake portal.
+                </Box>
+              </SpaceBetween>
+            </ColumnLayout>
+            <Box color="text-body-secondary" fontSize="body-s" textAlign="center">
+              NWAC wishes to acknowledge support for this project through the Government of Canada's ISET Program.
+            </Box>
+          </SpaceBetween>
+        </Modal>
+      )}
       {consentModalVisible && (
         <Modal
           visible
@@ -1892,3 +2287,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   );
 };
 export default IsetApplicationFormWidget;
+
+
+
