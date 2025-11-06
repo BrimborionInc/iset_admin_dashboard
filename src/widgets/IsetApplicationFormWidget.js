@@ -32,23 +32,9 @@ import useCurrentUser from '../hooks/useCurrentUser';
 const NOT_PROVIDED = <Box color="text-body-secondary">Not provided</Box>;
 
 const OPTION_LABELS = {
-  'eligibility-indigenous': { yes: 'Yes', no: 'No' },
-  'eligibility-female': { yes: 'Yes', no: 'No' },
-  'eligibility-canadian': { yes: 'Yes', no: 'No' },
-  'eligibility-age': { yes: 'Yes', no: 'No' },
-  'eligibility-employment': { yes: 'Yes', no: 'No' },
-  'eligibility-training': { yes: 'Yes', no: 'No' },
-  'eligibility-financial': { yes: 'Yes', no: 'No' },
-  'eligibility-disqualified': { yes: 'Yes', no: 'No' },
-  'what-is-your-gender-identity': {
-    '1': 'Woman',
-    '2': 'Two-Spirit',
-    '3': 'Transgender Woman',
-    '4': 'Gender Diverse',
-    '5': 'Prefer not to say'
-  },
   'address-province': {
     ab: 'Alberta',
+    bc: 'British Columbia',
     mb: 'Manitoba',
     nb: 'New Brunswick',
     nl: 'Newfoundland and Labrador',
@@ -61,6 +47,31 @@ const OPTION_LABELS = {
     ns: 'Nova Scotia',
     yt: 'Yukon Territory'
   },
+  'education-location': {
+    ab: 'Alberta',
+    bc: 'British Columbia',
+    mb: 'Manitoba',
+    nb: 'New Brunswick',
+    nl: 'Newfoundland and Labrador',
+    ns: 'Nova Scotia',
+    nt: 'Northwest Territories',
+    nu: 'Nunavut',
+    on: 'Ontario',
+    pe: 'Prince Edward Island',
+    qc: 'Quebec',
+    sk: 'Saskatchewan',
+    yt: 'Yukon Territory',
+    other: 'Other'
+  },
+  biological_sex: {
+    female: 'Female',
+    male: 'Male'
+  },
+  gender_identity: {
+    female: 'Female',
+    male: 'Male',
+    other: 'Other'
+  },
   'legal-indigenous-identity': {
     first_nations_status: 'First Nations (Status)',
     first_nations_non_status: 'First Nations (Non-Status)',
@@ -68,17 +79,18 @@ const OPTION_LABELS = {
     metis: 'Metis'
   },
   'preferred-language': { en: 'English', fr: 'French' },
-  'visible-minority': { true: 'Yes', false: 'No' },
+  'visible-minority': { true: 'Yes', false: 'No', '1': 'Yes', '0': 'No' },
   'marital-status': {
-    married: 'Married',
+    married: 'Married or equivalent',
     single: 'Single',
     separated: 'Separated',
     divorced: 'Divorced',
     widowed: 'Widowed'
   },
-  'dependent-children': { yes: 'Yes', no: 'No' },
-  'has-disability': { yes: 'Yes', no: 'No' },
-  'social-assistance': { yes: 'Yes', no: 'No' },
+  'dependent-children': { yes: 'Yes', no: 'No', '1': 'Yes', '0': 'No' },
+  'has-disability': { yes: 'Yes', no: 'No', '1': 'Yes', '0': 'No' },
+  'disability-support': { yes: 'Yes', no: 'No', '1': 'Yes', '0': 'No' },
+  'social-assistance': { yes: 'Yes', no: 'No', '1': 'Yes', '0': 'No' },
   'labour-force-status': {
     unemployed: 'Unemployed',
     underemployed: 'Underemployed',
@@ -114,14 +126,21 @@ const OPTION_LABELS = {
     skills_development: 'Skills Development (Education)',
     tws: 'Targeted Wage Subsidy',
     jcp: 'Job Creation Partnership',
+    group: 'Group Training',
+    self_support: 'Self-employment supports',
     not_yet: 'Not yet'
   },
   'requested-supports': {
     tuition: 'Tuition',
-    books: 'Books / Materials',
+    books: 'Books or program materials',
     living: 'Living allowance',
     transportation: 'Transportation',
     other: 'Other'
+  },
+  expenses_transport: {
+    buss_pass: 'Bus pass',
+    parking: 'Parking (at the school)',
+    mileage: 'Mileage (home to school)'
   }
 };
 
@@ -136,39 +155,36 @@ const normaliseYesNo = (value) => {
   return null;
 };
 
-// Render a Pass/Fail badge for eligibility keys, with inverted logic for 'eligibility-disqualified'.
-const formatEligibility = (key, value) => {
-  const yn = normaliseYesNo(value);
-  if (yn === null) return NOT_PROVIDED;
-  const inverted = key === 'eligibility-disqualified';
-  const pass = inverted ? yn === 'no' : yn === 'yes';
-  return <Badge color={pass ? 'green' : 'red'}>{pass ? 'Pass' : 'Fail'}</Badge>;
-};
-
 const DOCUMENT_FIELDS = [
   { key: 'status-card', label: 'Status / Treaty Card (or equivalent)' },
   { key: 'govt-id', label: 'Government-issued ID' },
   { key: 'acceptance-letter', label: 'Letter of Acceptance' },
   { key: 'applicant-pay-stubs', label: 'Pay stubs (applicant)' },
   { key: 'spouse-pay-stubs', label: 'Pay stubs (spouse)' },
-  { key: 'uploaded-file-6', label: 'Band denial letter' }
+  { key: 'band-funding-letter', label: 'Band funding letter' },
+  { key: 'band-denial-letter', label: 'Band denial letter' },
+  { key: 'medical-documents', label: 'Medical documentation' }
 ];
 
 const INCOME_FIELDS = [
   { key: 'income-employment', label: 'Employment income' },
   { key: 'income-spousal', label: 'Spousal income' },
   { key: 'income-social-assist', label: 'Social assistance' },
+  { key: 'income-child-support', label: 'Child support' },
   { key: 'income-child-benefit', label: 'Canada Child Benefit' },
   { key: 'income-jordans', label: "Jordan's Principle" },
   { key: 'income-band-funding', label: 'Band funding' },
-  { key: 'income-other', label: 'Other income' }
+  { key: 'income-alimony', label: 'Alimony / spousal support' },
+  { key: 'income-other-description', label: 'Other income (amount)' }
 ];
 
 const EXPENSE_FIELDS = [
   { key: 'expenses-rent', label: 'Rent / Mortgage' },
   { key: 'expenses-utilities', label: 'Utilities' },
   { key: 'expenses-groceries', label: 'Groceries' },
-  { key: 'expenses-transitpass', label: 'Transit pass' },
+  { key: 'expenses_bus_pass', label: 'Bus pass' },
+  { key: 'expenses-parking', label: 'Parking charges' },
+  { key: 'expenses_transport_mileage', label: 'Mileage (home to school)' },
   { key: 'example-input-5', label: 'Other expenses total' }
 ];
 
@@ -241,18 +257,27 @@ const getOptionsForField = (fieldKey, schemaSnapshot, fallbackOptions) => {
 const formatOption = (key, value) => {
   if (value === null || value === undefined || value === '') return NOT_PROVIDED;
   const map = OPTION_LABELS[key];
-  if (!map) return String(value);
-  const normalised = String(value).toLowerCase();
-  return map[normalised] || map[value] || String(value);
+  if (map) {
+    const stringValue = String(value);
+    const normalised = stringValue.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(map, normalised)) {
+      return map[normalised];
+    }
+    if (Object.prototype.hasOwnProperty.call(map, stringValue)) {
+      return map[stringValue];
+    }
+  }
+  const yn = normaliseYesNo(value);
+  if (yn) {
+    return yn === 'yes' ? 'Yes' : 'No';
+  }
+  return String(value);
 };
 
 const formatOptionList = (key, values) => {
   if ((values === null || values === undefined) || (Array.isArray(values) && values.length === 0)) return NOT_PROVIDED;
   const list = Array.isArray(values) ? values : [values];
   const chips = list.map((item, index) => {
-    if (String(key).startsWith('eligibility-')) {
-      return <React.Fragment key={index}>{formatEligibility(key, item)}</React.Fragment>;
-    }
     const label = formatOption(key, item);
     if (typeof label === 'string' && ['Yes', 'No'].includes(label)) {
       return <Badge key={index} color={label === 'Yes' ? 'green' : 'grey'}>{label}</Badge>;
@@ -316,6 +341,25 @@ const signatureStatus = (value) => {
   );
 };
 
+const renderConflictDeclaration = (answers) => {
+  const signature = answers?.conflict_applicant_signature;
+  if (!signature || typeof signature !== 'object' || !signature.signed) {
+    return <StatusIndicator type="pending">Not signed</StatusIndicator>;
+  }
+  const declaration = String(answers?.conflict_of_interest || '').toLowerCase();
+  const hasConflict = declaration === 'conflict';
+  const fallbackName = [
+    answers ? answers['first-name'] : '',
+    answers ? answers['last-name'] : ''
+  ].filter(Boolean).join(' ').trim() || 'applicant';
+  const name = signature.name || fallbackName;
+  return (
+    <StatusIndicator type={hasConflict ? 'warning' : 'success'}>
+      {hasConflict ? `Signed with conflict by ${name}` : `Signed no conflict by ${name}`}
+    </StatusIndicator>
+  );
+};
+
 const buildFinancialRows = (fields, answers, totalLabel) => {
   let total = 0;
   const rows = fields.map(({ key, label }) => {
@@ -362,7 +406,27 @@ const answersDiff = (baseline = {}, updated = {}) => {
   });
   return diff;
 };
-const SECTION_DEFINITIONS = [
+
+const EI_CONSENT_PARAGRAPHS = [
+  "I, the undersigned, give my expressed and informed consent to the Native Women's Association of Canada and/or its sub-agreement holders to the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET), to collect personal or sensitive information as it relates to my request for funding under the ISET program funded by Employment and Social Development Canada (ESDC). My consent extends to providing my Social Insurance Number (SIN), to determine my eligibility for interventions such as skills training and wage subsidies as part of the Labour Market Development Agreements (LMDA) program.",
+  'I acknowledge that the information is collected and administered in accordance with the Privacy Act (R.S.C. 1985, c P-21), the Department Employment and Social Development Canada Act (S.C. 2005, c.34), and the Access to Information Act (R.S.C., 1985, c.A-1). Information collected is to be used to determine eligibility for the ISET program; to measure results of this Agreement and evaluate its success; evaluate the effectiveness of the Program in achieving its objective; and, to meet its obligations of accountability by reporting on the results of the Program.',
+  "All information referred to above shall be treated as confidential, and the Native Women's Association of Canada and its sub-agreement holders will take all security measures reasonably necessary for the protection of such information against unauthorized release or disclosure.",
+  'Further, I understand that my personal information shall not be used or disclosed for purposes other than those for which it was collected, except with the expressed consent of you, as the client, or as required by law. Personal information shall be retained only as long as necessary for the fulfilment of those purposes.'
+];
+
+const resolveSignatureTimestamp = (signature) => {
+  if (!signature || typeof signature !== 'object') return null;
+  return (
+    signature.signedAt ||
+    signature.signed_at ||
+    signature.timestamp ||
+    signature.updatedAt ||
+    signature.updated_at ||
+    null
+  );
+};
+
+const buildSectionDefinitions = ({ onOpenConsentModal } = {}) => [
   {
     id: 'consent',
     title: 'Consent & declarations',
@@ -371,53 +435,38 @@ const SECTION_DEFINITIONS = [
     editable: false,
     items: [
       {
-        label: 'Application consent',
-        renderValue: answers => signatureStatus(answers?.consent)
-      },
-      {
         label: 'Indigenous declaration',
         renderValue: answers => signatureStatus(answers?.indigenous_declaration)
-      }
-    ]
-  },
-  {
-    id: 'eligibility',
-    title: 'Eligibility screening',
-    description: 'Snapshot of automated eligibility questions.',
-    columns: 2,
-    editable: false,
-    items: [
-      {
-        label: 'First Nations / Inuit / Metis member',
-        renderValue: answers => formatOptionList('eligibility-indigenous', answers['eligibility-indigenous'])
       },
       {
-        label: 'Identifies as woman / gender diverse',
-        renderValue: answers => formatOptionList('eligibility-female', answers['eligibility-female'])
+        label: 'Nation / community affiliation',
+        renderValue: answers => renderPlainText(answers['indigenous-affiliation-declaration'])
       },
       {
-        label: 'Canadian citizen',
-        renderValue: answers => formatOptionList('eligibility-canadian', answers['eligibility-canadian'])
+        label: (
+          <Box display="inline-flex" alignItems="center">
+            <Box as="span" display="inline" fontWeight="bold" margin={{ right: 'xxs' }}>
+              Client EI consent
+            </Box>
+            <Button
+              variant="icon"
+              iconName="external"
+              ariaLabel="View client EI consent form"
+              onClick={event => {
+                event?.preventDefault();
+                event?.stopPropagation();
+                onOpenConsentModal?.();
+              }}
+            />
+          </Box>
+        ),
+        renderValue: answers => (
+          signatureStatus(answers?.consent)
+        )
       },
       {
-        label: 'Aged 15 or older',
-        renderValue: answers => formatOptionList('eligibility-age', answers['eligibility-age'])
-      },
-      {
-        label: 'Unemployed / under-employed / at risk',
-        renderValue: answers => formatOptionList('eligibility-employment', answers['eligibility-employment'])
-      },
-      {
-        label: 'Pursuing post-secondary training',
-        renderValue: answers => formatOptionList('eligibility-training', answers['eligibility-training'])
-      },
-      {
-        label: 'Has unmet financial need',
-        renderValue: answers => formatOptionList('eligibility-financial', answers['eligibility-financial'])
-      },
-      {
-        label: 'Previous ISET default',
-        renderValue: answers => formatOptionList('eligibility-disqualified', answers['eligibility-disqualified'])
+        label: 'Conflict of interest declaration',
+        renderValue: answers => renderConflictDeclaration(answers)
       }
     ]
   },
@@ -434,11 +483,18 @@ const SECTION_DEFINITIONS = [
       { label: 'Preferred name', field: 'preferred-name', controlType: 'input', renderValue: answers => renderPlainText(answers['preferred-name']) },
       { label: 'Date of birth', field: 'dob', controlType: 'date', renderValue: answers => formatDate(answers['dob']) },
       {
-        label: 'Gender identity',
-        field: 'what-is-your-gender-identity',
+        label: 'Biological sex',
+        field: 'biological_sex',
         controlType: 'select',
-        optionsKey: 'what-is-your-gender-identity',
-        renderValue: answers => formatOption('what-is-your-gender-identity', answers['what-is-your-gender-identity'])
+        optionsKey: 'biological_sex',
+        renderValue: answers => formatOption('biological_sex', answers['biological_sex'])
+      },
+      {
+        label: 'Gender identity',
+        field: 'gender_identity',
+        controlType: 'select',
+        optionsKey: 'gender_identity',
+        renderValue: answers => formatOption('gender_identity', answers['gender_identity'])
       },
       { label: 'Social Insurance Number', field: 'social-insurance-number', controlType: 'input', renderValue: answers => renderPlainText(answers['social-insurance-number']) },
       {
@@ -494,7 +550,7 @@ const SECTION_DEFINITIONS = [
   },
   {
     id: 'demographics',
-    title: 'Demographics & supports',
+    title: 'Demographics & household',
     description: 'Additional context for program prioritisation.',
     columns: 2,
     editable: true,
@@ -520,6 +576,7 @@ const SECTION_DEFINITIONS = [
         optionsKey: 'marital-status',
         renderValue: answers => formatOption('marital-status', answers['marital-status'])
       },
+      { label: "Spouse's name", field: 'spouses-name', controlType: 'input', renderValue: answers => renderPlainText(answers['spouses-name']) },
       {
         label: 'Has dependent children',
         field: 'dependent-children',
@@ -527,8 +584,9 @@ const SECTION_DEFINITIONS = [
         optionsKey: 'dependent-children',
         renderValue: answers => formatOption('dependent-children', answers['dependent-children'])
       },
+      { label: 'Ages of children', field: 'ages-of-children', controlType: 'input', renderValue: answers => renderPlainText(answers['ages-of-children']) },
       {
-        label: 'Disability',
+        label: 'Has disability',
         field: 'has-disability',
         controlType: 'select',
         optionsKey: 'has-disability',
@@ -539,6 +597,19 @@ const SECTION_DEFINITIONS = [
         field: 'disability-description',
         controlType: 'textarea',
         renderValue: answers => renderTextBlock(answers['disability-description'])
+      },
+      {
+        label: 'Requesting disability support',
+        field: 'disability-support',
+        controlType: 'select',
+        optionsKey: 'disability-support',
+        renderValue: answers => formatOption('disability-support', answers['disability-support'])
+      },
+      {
+        label: 'Disability support request',
+        field: 'disability-support_yes_follow',
+        controlType: 'textarea',
+        renderValue: answers => renderTextBlock(answers['disability-support_yes_follow'])
       },
       {
         label: 'Receiving social assistance',
@@ -577,7 +648,13 @@ const SECTION_DEFINITIONS = [
         renderValue: answers => formatOption('example-radio-2', answers['example-radio-2'])
       },
       { label: 'Year completed', field: 'education-year', controlType: 'input', renderValue: answers => renderPlainText(answers['education-year']) },
-      { label: 'Where completed', field: 'edication-location', controlType: 'input', renderValue: answers => renderPlainText(answers['edication-location']) },
+      {
+        label: 'Where completed',
+        field: 'education-location',
+        controlType: 'select',
+        optionsKey: 'education-location',
+        renderValue: answers => formatOption('education-location', answers['education-location'])
+      },
       {
         label: 'Identified program / employer',
         field: 'target-program',
@@ -588,12 +665,13 @@ const SECTION_DEFINITIONS = [
     ]
   },
   {
-    id: 'barriers',
-    title: 'Barriers & support requests',
-    description: 'Self-reported barriers and requested supports.',
+    id: 'employment-goals',
+    title: 'Employment goals & barriers',
+    description: 'Self-identified goals and obstacles.',
     columns: 2,
     editable: true,
     items: [
+      { label: 'Long-term goal', field: 'long-term-goal', controlType: 'textarea', renderValue: answers => renderTextBlock(answers['long-term-goal']) },
       {
         label: 'Current barriers',
         field: 'barriers',
@@ -601,7 +679,16 @@ const SECTION_DEFINITIONS = [
         optionsKey: 'barriers',
         renderValue: answers => formatOptionList('barriers', answers['barriers'])
       },
-      { label: 'Other barrier', field: 'other-barrier', controlType: 'textarea', renderValue: answers => renderTextBlock(answers['other-barrier']) },
+      { label: 'Other barrier', field: 'other-barrier', controlType: 'textarea', renderValue: answers => renderTextBlock(answers['other-barrier']) }
+    ]
+  },
+  {
+    id: 'supports',
+    title: 'Supports requested',
+    description: 'Funding supports requested by the applicant.',
+    columns: 2,
+    editable: true,
+    items: [
       {
         label: 'Supports requested',
         field: 'requested-supports',
@@ -609,19 +696,24 @@ const SECTION_DEFINITIONS = [
         optionsKey: 'requested-supports',
         renderValue: answers => formatOptionList('requested-supports', answers['requested-supports'])
       },
-      { label: 'Other support detail', field: 'other-requested-support', controlType: 'textarea', renderValue: answers => renderTextBlock(answers['other-requested-support']) }
+      {
+        label: 'Other support detail',
+        field: 'other-requested-support',
+        controlType: 'textarea',
+        renderValue: answers => renderTextBlock(answers['other-requested-support'])
+      }
     ]
   },
   {
     id: 'finances',
-    title: 'Income & expenses',
+    title: 'Household finances',
     description: 'Monthly household cash flow snapshot.',
     columns: 2,
     editable: true,
     tables: [
       {
         id: 'income-table',
-        header: <Header variant="h4">Monthly income</Header>,
+        header: <Header variant="h4">Household income</Header>,
         fields: INCOME_FIELDS,
         totalLabel: 'Total monthly income',
         editableAmounts: true,
@@ -629,7 +721,7 @@ const SECTION_DEFINITIONS = [
       },
       {
         id: 'expense-table',
-        header: <Header variant="h4">Monthly expenses</Header>,
+        header: <Header variant="h4">Household expenses</Header>,
         fields: EXPENSE_FIELDS,
         totalLabel: 'Total monthly expenses',
         editableAmounts: true,
@@ -637,7 +729,14 @@ const SECTION_DEFINITIONS = [
       }
     ],
     items: [
-      { label: 'Other income detail', field: 'income-other-description', controlType: 'textarea', renderValue: answers => renderTextBlock(answers['income-other-description']) },
+      { label: 'Other income source(s)', field: 'income-other', controlType: 'textarea', renderValue: answers => renderTextBlock(answers['income-other']) },
+      {
+        label: 'Transport expense categories',
+        field: 'expenses_transport',
+        controlType: 'multiselect',
+        optionsKey: 'expenses_transport',
+        renderValue: answers => formatOptionList('expenses_transport', answers['expenses_transport'])
+      },
       { label: 'Other expenses (list)', field: 'expenses-other-list', controlType: 'textarea', renderValue: answers => renderTextBlock(answers['expenses-other-list']) }
     ]
   },
@@ -651,6 +750,19 @@ const SECTION_DEFINITIONS = [
       label,
       renderValue: answers => renderDocumentLinks(answers[key])
     }))
+  },
+  {
+    id: 'submission',
+    title: 'Submission confirmation',
+    description: 'Final signature captured at submission.',
+    columns: 1,
+    editable: false,
+    items: [
+      {
+        label: 'Applicant signature',
+        renderValue: answers => signatureStatus(answers?.applicant_signature)
+      }
+    ]
   }
 ];
 const Section = ({
@@ -781,6 +893,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   const [loading, setLoading] = useState(Boolean(application_id));
   const [loadError, setLoadError] = useState(null);
   const [flashbarItems, setFlashbarItems] = useState([]);
+  const [consentModalVisible, setConsentModalVisible] = useState(false);
+  const [consentDownloadLoading, setConsentDownloadLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editableAnswers, setEditableAnswers] = useState({});
   const [showEditConfirm, setShowEditConfirm] = useState(false);
@@ -931,6 +1045,14 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
 
   const handleFieldChange = useCallback((field, value) => {
     setEditableAnswers(prev => ({ ...prev, [field]: value }));
+  }, []);
+
+  const handleOpenConsentModal = useCallback(() => {
+    setConsentModalVisible(true);
+  }, []);
+
+  const handleCloseConsentModal = useCallback(() => {
+    setConsentModalVisible(false);
   }, []);
 
   const diff = useMemo(() => answersDiff(answers, editableAnswers), [answers, editableAnswers]);
@@ -1414,6 +1536,68 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
     }
   ], [handleRestoreVersion, handleViewVersion, restoringVersionId, versionDetailsLoading]);
 
+  const sectionDefinitions = useMemo(
+    () => buildSectionDefinitions({ onOpenConsentModal: handleOpenConsentModal }),
+    [handleOpenConsentModal]
+  );
+
+  const consentSignature = answers?.consent || {};
+  const consentSignedName = consentSignature?.name || 'Not provided';
+  const consentSigned = Boolean(consentSignature?.signed);
+  const consentSignedAtRaw = resolveSignatureTimestamp(consentSignature);
+  const submissionTimestampRaw =
+    application?.submitted_at ||
+    payload?.submission_snapshot?.submitted_at ||
+    payload?.submitted_at ||
+    application?.created_at ||
+    payload?.ingested_at ||
+    null;
+  const displayTimestamp = consentSignedAtRaw || submissionTimestampRaw;
+  const consentSignedAt = displayTimestamp ? formatDateTime(displayTimestamp) : '-';
+
+  const handleDownloadConsent = useCallback(async () => {
+    if (typeof window === 'undefined' || !application?.id) return;
+    setConsentDownloadLoading(true);
+    try {
+      const response = await apiFetch('/api/consent-letter/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          applicationId: application.id,
+          consentSigned,
+          consentSignedName,
+          consentSignedAt: displayTimestamp
+        })
+      });
+      if (!response.ok) {
+        let message = 'Failed to download consent letter';
+        try {
+          const errBody = await response.json();
+          if (errBody?.error) message = errBody.error;
+        } catch (_) {}
+        throw new Error(message);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        throw new Error('Consent PDF response was empty');
+      }
+      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const fileName = `client-ei-consent-${application.id}.pdf`;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      pushFlash({ type: 'error', content: error?.message || 'Failed to download consent letter' });
+    } finally {
+      setConsentDownloadLoading(false);
+    }
+  }, [application?.id, consentSigned, consentSignedName, displayTimestamp, pushFlash]);
+
   const employmentNarrativeReadOnly = renderTextBlock(answers['long-term-goal']);
   const employmentNarrativeValue = editableAnswers['long-term-goal'] ?? '';
   const showEmploymentNarrative = isEditing || employmentNarrativeReadOnly !== NOT_PROVIDED;
@@ -1501,7 +1685,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
             This view presents the applicant's submitted ISET application. Review each section for accuracy, capture clarifications when needed, and use edit mode to publish updates to the case file.
           </Box>
           <SpaceBetween size="l">
-            {SECTION_DEFINITIONS.map(section => (
+            {sectionDefinitions.map(section => (
               <Section
                 key={section.id}
                 {...section}
@@ -1617,8 +1801,94 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
           </SpaceBetween>
         </Modal>
       )}
+      {consentModalVisible && (
+        <Modal
+          visible
+          size="large"
+          header="CLIENT CONSENT FOR EI VERIFICATION"
+          onDismiss={handleCloseConsentModal}
+          footer={
+            <SpaceBetween direction="horizontal" size="xs" alignItems="end">
+              <Button onClick={handleDownloadConsent} loading={consentDownloadLoading} disabled={consentDownloadLoading}>
+                Download (PDF)
+              </Button>
+              <Button variant="primary" onClick={handleCloseConsentModal}>
+                Close
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="l">
+            <Box textAlign="center">
+              <Box margin={{ bottom: 's' }} display="flex" justifyContent="center">
+                <img
+                  src="/nwac-consent-logo.png"
+                  alt="Native Women's Association of Canada logo"
+                  style={{ maxHeight: '64px', width: 'auto' }}
+                />
+              </Box>
+              <Box fontSize="heading-s" fontWeight="bold">
+                Native Women's Association of Canada
+              </Box>
+              <Box fontSize="body-s" color="text-body-secondary">
+                Association des femmes autochtones du Canada
+              </Box>
+            </Box>
+            <SpaceBetween size="s">
+              {EI_CONSENT_PARAGRAPHS.map((paragraph, index) => (
+                <Box key={index} lineHeight="body-m">
+                  {paragraph}
+                </Box>
+              ))}
+            </SpaceBetween>
+            <SpaceBetween size="xs">
+              <Box fontWeight="bold">Client acknowledgement</Box>
+              <Box color="text-body-secondary">
+                I confirm that I have read and understood the above consent and agree to proceed with my application.
+              </Box>
+            </SpaceBetween>
+            <ColumnLayout columns={2} variant="text-grid">
+              <SpaceBetween size="xs">
+                <Box fontWeight="bold">Client signature</Box>
+                <Box
+                  borderColor="border-divider"
+                  borderStyle="solid"
+                  borderWidth="1px"
+                  borderRadius="small"
+                  padding="m"
+                  backgroundColor="background-secondary"
+                  minHeight="4rem"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="flex-start"
+                >
+                  {consentSigned ? (
+                    <Box fontFamily="'Segoe Script', 'Lucida Handwriting', cursive" fontSize="heading-xl">
+                      {consentSignedName}
+                    </Box>
+                  ) : (
+                    <Box color="text-status-inactive">Not signed</Box>
+                  )}
+                </Box>
+                <Box fontSize="body-s" color="text-body-secondary">
+                  Client signature
+                </Box>
+              </SpaceBetween>
+              <SpaceBetween size="xs">
+                <Box fontWeight="bold">Signed on</Box>
+                <Box>{consentSigned ? consentSignedAt : 'Not signed'}</Box>
+                <Box fontSize="body-s" color="text-body-secondary">
+                  Electronic consent captured via the ISET intake portal.
+                </Box>
+              </SpaceBetween>
+            </ColumnLayout>
+            <Box color="text-body-secondary" fontSize="body-s" textAlign="center">
+              NWAC wishes to acknowledge support for this project through the Government of Canada's ISET Program.
+            </Box>
+          </SpaceBetween>
+        </Modal>
+      )}
     </BoardItem>
   );
 };
 export default IsetApplicationFormWidget;
-

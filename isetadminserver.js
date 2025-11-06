@@ -1,5 +1,7 @@
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
+const puppeteer = require('puppeteer');
 const { maskName } = require('./src/utils/utils');
 const { getInternalNotifications, dismissInternalNotification } = require('./src/internalNotifications');
 const {
@@ -14,6 +16,51 @@ const { getRenderer: getComponentRenderer } = require('./src/server/componentRen
 const { createEventService, EventValidationError, registerNotificationHook } = require('../shared/events');
 
 const ENSURED_HISTORY_EVENT_TYPE_ENUM = { prepared: false };
+
+function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const CONSENT_PARAGRAPHS = [
+  "I, the undersigned, give my expressed and informed consent to the Native Women's Association of Canada and/or its sub-agreement holders to the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET), to collect personal or sensitive information as it relates to my request for funding under the ISET program funded by Employment and Social Development Canada (ESDC). My consent extends to providing my Social Insurance Number (SIN), to determine my eligibility for interventions such as skills training and wage subsidies as part of the Labour Market Development Agreements (LMDA) program.",
+  'I acknowledge that the information is collected and administered in accordance with the Privacy Act (R.S.C. 1985, c P-21), the Department Employment and Social Development Canada Act (S.C. 2005, c.34), and the Access to Information Act (R.S.C., 1985, c.A-1). Information collected is to be used to determine eligibility for the ISET program; to measure results of this Agreement and evaluate its success; evaluate the effectiveness of the Program in achieving its objective; and, to meet its obligations of accountability by reporting on the results of the Program.',
+  "All information referred to above shall be treated as confidential, and the Native Women's Association of Canada and its sub-agreement holders will take all security measures reasonably necessary for the protection of such information against unauthorized release or disclosure.",
+  'Further, I understand that my personal information shall not be used or disclosed for purposes other than those for which it was collected, except with the expressed consent of you, as the client, or as required by law. Personal information shall be retained only as long as necessary for the fulfilment of those purposes.'
+];
+
+const CONSENT_LOGO_PATH = path.join(__dirname, 'public', 'nwac-consent-logo.png');
+let consentLogoDataUriCache = null;
+
+function getConsentLogoDataUri() {
+  if (consentLogoDataUriCache !== null) return consentLogoDataUriCache;
+  try {
+    const logoBuffer = fs.readFileSync(CONSENT_LOGO_PATH);
+    consentLogoDataUriCache = `data:image/png;base64,${logoBuffer.toString('base64')}`;
+  } catch (err) {
+    console.warn('[consent-pdf] Unable to load NWAC logo:', err.message);
+    consentLogoDataUriCache = '';
+  }
+  return consentLogoDataUriCache;
+}
+
+function formatConsentDate(value) {
+  if (!value) return 'Not signed';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('en-CA', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
 
 const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_internal_notification_dismissal',
@@ -4139,7 +4186,6 @@ const { CognitoIdentityProviderClient, ListUsersInGroupCommand } = require('@aws
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
-const fs = require('fs');
 const intakeEnvPath = path.resolve(__dirname, '../ISET-intake/.env');
 if (fs.existsSync(intakeEnvPath)) {
   require('dotenv').config({ path: intakeEnvPath, override: false });
@@ -12185,21 +12231,28 @@ const generateSystemTasks = async () => {
 
 // Dummy draft data helpers ---------------------------------------------------
 const DUMMY_DRAFT_HISTORY = [
-  "consent",
-  "indigenous-declaration",
-  "eligibility",
-  "social-insurance-number",
-  "name",
-  "date-of-birth",
-  "gender",
-  "contact-information",
-  "emergency-contact",
-  "indigenous-legal-identity",
-  "registration-number",
-  "home-community",
-  "demographics",
-  "disability",
-  "summary-page"
+  'consent',
+  'indigenous-declaration',
+  'conflict-of-interest',
+  'social-insurance-number',
+  'name',
+  'date-of-birth',
+  'gender',
+  'contact-information',
+  'emergency-contact',
+  'indigenous-legal-identity',
+  'registration-number',
+  'home-community',
+  'demographics',
+  'disability-and-social-assistance',
+  'labour-force-and-education-history',
+  'employment-goals-and-barriers',
+  'financial-supports-requested',
+  'household-income',
+  'household-expenses',
+  'summary-page',
+  'iset-document-upload',
+  'legal-and-submission'
 ];
 
 const DUMMY_APPLICATION_PROFILES = [
@@ -12210,18 +12263,20 @@ const DUMMY_APPLICATION_PROFILES = [
       "dob": "1991-06-14",
       "consent": { "name": "Aiyana Bear", "signed": true },
       "indigenous_declaration": { "name": "Aiyana Bear", "signed": true },
+      "conflict_of_interest": "no_conflict",
+      "conflict_applicant_signature": { "name": "Aiyana Bear", "signed": true },
       "barriers": ["education", "funding"],
       "last-name": "Bear",
       "first-name": "Aiyana",
       "address-city": "Maskwacis",
-      "income-other": "120",
+      "income-other": "Seasonal beading workshops",
       "middle-names": "Skye",
       "spouses-name": "",
       "expenses-rent": "880",
       "other-barrier": "",
       "telephone-alt": "",
       "telephone-day": "(780) 555-4821",
-      "top-up-amount": "340",
+      "top-up-amount": "0",
       "education-year": "2013",
       "has-disability": "no",
       "home-comminuty": "Maskwacis",
@@ -12232,7 +12287,7 @@ const DUMMY_APPLICATION_PROFILES = [
       "preferred-name": "Aiyana",
       "target-program": "skills_development",
       "eligibility-age": "yes",
-      "example-input-5": "",
+      "example-input-5": "55",
       "example-radio-2": "college",
       "address-postcode": "T0C 1N0",
       "address-province": "ab",
@@ -12256,7 +12311,7 @@ const DUMMY_APPLICATION_PROFILES = [
       "expenses-transitpass": "75",
       "income-child-benefit": "0",
       "income-social-assist": "0",
-      "contact-email-address": "bill@sillery.co.uk",
+      "contact-email-address": "aiyana.bear@example.com",
       "eligibility-financial": "yes",
       "address-street-address": "14 Buffalo Drive",
       "disability-description": "No disability disclosed.",
@@ -12267,25 +12322,42 @@ const DUMMY_APPLICATION_PROFILES = [
       "other-requested-support": "",
       "social-insurance-number": "000 000 000",
       "eligibility-disqualified": "no",
-      "income-other-description": "Seasonal beading workshops.",
+      "income-other-description": "120",
       "legal-indigenous-identity": "first_nations_status",
       "emergency-contact-telephone": "(780) 555-4820",
-      "what-is-your-gender-identity": "1",
+      "biological_sex": "female",
+      "gender_identity": "female",
+      "disability-support": "no",
+      "disability-support_yes_follow": "",
+      "education-location": "ab",
+      "income-child-support": "0",
+      "income-alimony": "0",
+      "expenses_bus_pass": "75",
+      "expenses-parking": "0",
+      "expenses_transport_mileage": "0",
+      "expenses_transport": ["buss_pass"],
       "emergency-contact-relationship": "Aunt"
     }
   },
   {
     id: "noah-whitecloud",
     registrationPrefix: "OCN",
+    conflict: {
+      value: "conflict",
+      follow: "Spouse employed part-time by regional PTMA; recused from decision-making."
+    },
     payload: {
       "dob": "1987-11-03",
       "consent": { "name": "Noah Whitecloud", "signed": true },
       "indigenous_declaration": { "name": "Noah Whitecloud", "signed": true },
+      "conflict_of_interest": "conflict",
+      "2022_conflict_follow": "Spouse employed part-time by regional PTMA; recused from decision-making.",
+      "conflict_applicant_signature": { "name": "Noah Whitecloud", "signed": true },
       "barriers": ["lack-of-job-opportunities", "other"],
       "last-name": "Whitecloud",
       "first-name": "Noah",
       "address-city": "The Pas",
-      "income-other": "260",
+      "income-other": "Traditional crafts sold at winter market",
       "middle-names": "River",
       "spouses-name": "Jordan Whitecloud",
       "expenses-rent": "920",
@@ -12303,7 +12375,7 @@ const DUMMY_APPLICATION_PROFILES = [
       "preferred-name": "Noah",
       "target-program": "jcp",
       "eligibility-age": "yes",
-      "example-input-5": "",
+      "example-input-5": "120",
       "example-radio-2": "apprenticeship_trades",
       "address-postcode": "R9A 1K8",
       "address-province": "mb",
@@ -12327,7 +12399,7 @@ const DUMMY_APPLICATION_PROFILES = [
       "expenses-transitpass": "95",
       "income-child-benefit": "420",
       "income-social-assist": "540",
-      "contact-email-address": "bill@sillery.co.uk",
+      "contact-email-address": "noah.whitecloud@example.com",
       "eligibility-financial": "yes",
       "address-street-address": "102 Cedar Trail",
       "disability-description": "Managing chronic respiratory issues made worse by smoke season.",
@@ -12338,10 +12410,20 @@ const DUMMY_APPLICATION_PROFILES = [
       "other-requested-support": "Childcare during evening classes.",
       "social-insurance-number": "000 000 000",
       "eligibility-disqualified": "no",
-      "income-other-description": "Traditional crafts sold at winter market.",
+      "income-other-description": "260",
       "legal-indigenous-identity": "first_nations_status",
       "emergency-contact-telephone": "(431) 555-0145",
-      "what-is-your-gender-identity": "2",
+      "biological_sex": "male",
+      "gender_identity": "male",
+      "disability-support": "yes",
+      "disability-support_yes_follow": "Requires ergonomic workstation setup.",
+      "education-location": "mb",
+      "income-child-support": "0",
+      "income-alimony": "0",
+      "expenses_bus_pass": "95",
+      "expenses-parking": "0",
+      "expenses_transport_mileage": "120",
+      "expenses_transport": ["buss_pass", "mileage"],
       "emergency-contact-relationship": "Sister"
     }
   },
@@ -12352,11 +12434,13 @@ const DUMMY_APPLICATION_PROFILES = [
       "dob": "1993-02-18",
       "consent": { "name": "Serenity Kalluk", "signed": true },
       "indigenous_declaration": { "name": "Serenity Kalluk", "signed": true },
+      "conflict_of_interest": "no_conflict",
+      "conflict_applicant_signature": { "name": "Serenity Kalluk", "signed": true },
       "barriers": ["location", "funding"],
       "last-name": "Kalluk",
       "first-name": "Serenity",
       "address-city": "Iqaluit",
-      "income-other": "0",
+      "income-other": "Community art commissions",
       "middle-names": "Aurora",
       "spouses-name": "",
       "expenses-rent": "1320",
@@ -12374,7 +12458,7 @@ const DUMMY_APPLICATION_PROFILES = [
       "preferred-name": "Serenity",
       "target-program": "skills_development",
       "eligibility-age": "yes",
-      "example-input-5": "",
+      "example-input-5": "140",
       "example-radio-2": "college",
       "address-postcode": "X0A 0H0",
       "address-province": "nu",
@@ -12383,8 +12467,7 @@ const DUMMY_APPLICATION_PROFILES = [
       "income-employment": "950",
       "social-assistance": "yes",
       "dependent-children": "yes",
-      "edication-location": "Nunavut Arctic College, NU",
-      "eligibility-female": "yes",
+      "education-location": "nu",
       "expenses-groceries": "580",
       "expenses-utilities": "310",
       "preferred-language": "en",
@@ -12393,26 +12476,29 @@ const DUMMY_APPLICATION_PROFILES = [
       "income-band-funding": "240",
       "labour-force-status": "student",
       "registration-number": "IK-000000",
-      "eligibility-canadian": "yes",
-      "eligibility-training": "yes",
       "expenses-transitpass": "85",
       "income-child-benefit": "460",
       "income-social-assist": "320",
-      "contact-email-address": "bill@sillery.co.uk",
-      "eligibility-financial": "yes",
+      "income-child-support": "0",
+      "income-alimony": "0",
+      "income-other-description": "0",
+      "contact-email-address": "serenity.kalluk@example.com",
       "address-street-address": "8 Nanuq Crescent",
-      "disability-description": "No disability disclosed.",
-      "eligibility-employment": "yes",
-      "eligibility-indigenous": "yes",
-      "emergency-contact-name": "Amaruq Kalluk",
+      "disability-description": "",
       "address-mailing-address": "",
       "other-requested-support": "",
       "social-insurance-number": "000 000 000",
-      "eligibility-disqualified": "no",
-      "income-other-description": "",
       "legal-indigenous-identity": "inuit",
       "emergency-contact-telephone": "(867) 555-1930",
-      "what-is-your-gender-identity": "1",
+      "biological_sex": "female",
+      "gender_identity": "female",
+      "disability-support": "no",
+      "disability-support_yes_follow": "",
+      "expenses_bus_pass": "85",
+      "expenses-parking": "60",
+      "expenses_transport_mileage": "50",
+      "expenses_transport": ["buss_pass", "parking", "mileage"],
+      "emergency-contact-name": "Amaruq Kalluk",
       "emergency-contact-relationship": "Uncle"
     }
   },
@@ -12423,6 +12509,8 @@ const DUMMY_APPLICATION_PROFILES = [
       "dob": "1990-04-27",
       "consent": { "name": "Jonah Sutherland", "signed": true },
       "indigenous_declaration": { "name": "Jonah Sutherland", "signed": true },
+      "conflict_of_interest": "no_conflict",
+      "conflict_applicant_signature": { "name": "Jonah Sutherland", "signed": true },
       "barriers": ["education", "other"],
       "last-name": "Sutherland",
       "first-name": "Jonah",
@@ -12946,11 +13034,124 @@ const generateRandomSin = () => {
   return `${digits.slice(0, 3).join('')} ${digits.slice(3, 6).join('')} ${digits.slice(6).join('')}`;
 };
 
+const coerceMoneyString = (value, fallback = '0') => {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  const str = String(value).trim();
+  if (!str) return fallback;
+  const match = str.replace(/,/g, '').match(/-?\d+(\.\d+)?/);
+  return match ? match[0] : fallback;
+};
+
+const coerceYesNo = (value, defaultValue = 'no') => {
+  if (value === null || value === undefined) return defaultValue;
+  const str = String(value).trim().toLowerCase();
+  if (['yes', 'true', '1'].includes(str)) return 'yes';
+  if (['no', 'false', '0'].includes(str)) return 'no';
+  return defaultValue;
+};
+
+const normaliseDummyDraftPayload = (draftPayload, template) => {
+  const firstName = (draftPayload['first-name'] || '').trim();
+  const lastName = (draftPayload['last-name'] || '').trim();
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || 'Demo Applicant';
+
+  const templateConflict = template?.conflict || {};
+  if (!draftPayload.conflict_of_interest) {
+    draftPayload.conflict_of_interest = templateConflict.value || 'no_conflict';
+  }
+  if (!draftPayload.conflict_applicant_signature || typeof draftPayload.conflict_applicant_signature !== 'object') {
+    draftPayload.conflict_applicant_signature = { name: fullName, signed: true };
+  } else if (!draftPayload.conflict_applicant_signature.name) {
+    draftPayload.conflict_applicant_signature.name = fullName;
+  }
+  if (draftPayload.conflict_of_interest === 'conflict') {
+    if (templateConflict.follow && !draftPayload['2022_conflict_follow']) {
+      draftPayload['2022_conflict_follow'] = templateConflict.follow;
+    }
+  } else if (!templateConflict.follow) {
+    delete draftPayload['2022_conflict_follow'];
+  }
+
+  if (!draftPayload.biological_sex) {
+    const eligFemale = coerceYesNo(draftPayload['eligibility-female'], 'no');
+    draftPayload.biological_sex = eligFemale === 'yes' ? 'female' : 'male';
+  }
+  if (!draftPayload.gender_identity) {
+    const genderMap = {
+      '1': 'female',
+      '2': 'other',
+      '3': 'other',
+      '4': 'other',
+      '5': 'other',
+      female: 'female',
+      male: 'male'
+    };
+    const original = draftPayload['what-is-your-gender-identity'];
+    const mapped = genderMap[String(original || '').toLowerCase()] || draftPayload.biological_sex || 'female';
+    draftPayload.gender_identity = mapped;
+  }
+
+  draftPayload['has-disability'] = coerceYesNo(draftPayload['has-disability'], 'no');
+  draftPayload['social-assistance'] = coerceYesNo(draftPayload['social-assistance'], 'no');
+  draftPayload['dependent-children'] = coerceYesNo(draftPayload['dependent-children'], 'no');
+  draftPayload['disability-support'] = coerceYesNo(
+    draftPayload['disability-support'],
+    draftPayload['has-disability'] === 'yes' ? 'yes' : 'no'
+  );
+  if (!draftPayload['disability-support_yes_follow']) {
+    draftPayload['disability-support_yes_follow'] = '';
+  }
+
+  if (!draftPayload['education-location']) {
+    draftPayload['education-location'] = draftPayload['address-province'] || 'other';
+  }
+
+  const incomeKeys = [
+    'income-employment',
+    'income-spousal',
+    'income-social-assist',
+    'income-child-support',
+    'income-child-benefit',
+    'income-jordans',
+    'income-band-funding',
+    'income-alimony',
+    'income-other-description'
+  ];
+  incomeKeys.forEach(key => {
+    draftPayload[key] = coerceMoneyString(draftPayload[key]);
+  });
+  if (!draftPayload['income-other']) {
+    draftPayload['income-other'] = '';
+  }
+
+  draftPayload['top-up-amount'] = coerceMoneyString(draftPayload['top-up-amount']);
+  draftPayload['example-input-5'] = coerceMoneyString(draftPayload['example-input-5']);
+
+  if (!draftPayload['expenses_bus_pass'] && draftPayload['expenses-transitpass'] !== undefined) {
+    draftPayload['expenses_bus_pass'] = coerceMoneyString(draftPayload['expenses-transitpass']);
+  } else {
+    draftPayload['expenses_bus_pass'] = coerceMoneyString(draftPayload['expenses_bus_pass']);
+  }
+  draftPayload['expenses-parking'] = coerceMoneyString(draftPayload['expenses-parking']);
+  draftPayload['expenses_transport_mileage'] = coerceMoneyString(draftPayload['expenses_transport_mileage']);
+  if (!Array.isArray(draftPayload['expenses_transport'])) {
+    const transport = [];
+    if (Number(coerceMoneyString(draftPayload['expenses_bus_pass'])) > 0) transport.push('buss_pass');
+    if (Number(coerceMoneyString(draftPayload['expenses-parking'])) > 0) transport.push('parking');
+    if (Number(coerceMoneyString(draftPayload['expenses_transport_mileage'])) > 0) transport.push('mileage');
+    draftPayload['expenses_transport'] = transport;
+  }
+
+  draftPayload['contact-email-address'] = draftPayload['contact-email-address'] || 'demo.applicant@example.com';
+};
+
 const buildDummyDraft = () => {
   const template = randomChoice(DUMMY_APPLICATION_PROFILES) || DUMMY_APPLICATION_PROFILES[0];
   const draftPayload = JSON.parse(JSON.stringify(template.payload));
   draftPayload['registration-number'] = generateRegistrationNumber(template.registrationPrefix);
   draftPayload['social-insurance-number'] = generateRandomSin();
+  normaliseDummyDraftPayload(draftPayload, template);
   const history = Array.isArray(template.history) && template.history.length
     ? [...template.history]
     : [...DUMMY_DRAFT_HISTORY];
@@ -19146,6 +19347,90 @@ app.get('/api/applications/:id/versions/:versionId', async (req, res) => {
     res.status(500).json({ error: 'Failed to load application version' });
   } finally {
     connection.release();
+  }
+});
+
+app.post('/api/consent-letter/pdf', async (req, res) => {
+  const { applicationId, consentSigned, consentSignedName, consentSignedAt } = req.body || {};
+  if (!applicationId) {
+    return res.status(400).json({ error: 'applicationId is required' });
+  }
+
+  const signed = Boolean(consentSigned);
+  const signatureName = signed ? (consentSignedName || 'Not provided') : 'Not signed';
+  const signedOnDisplay = signed ? formatConsentDate(consentSignedAt) : 'Not signed';
+  const logoDataUri = getConsentLogoDataUri();
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Client EI Consent</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; color: #1b1b1b; margin: 40px; line-height: 1.5; }
+    h1 { text-align: center; font-size: 24px; margin-bottom: 12px; }
+    h2 { font-size: 18px; margin-top: 32px; }
+    .logo { text-align: center; margin-bottom: 24px; }
+    .logo img { max-height: 80px; width: auto; }
+    .signature-box { border: 1px solid #9ba7b6; border-radius: 6px; padding: 16px; min-height: 80px; display: flex; align-items: center; font-size: 22px; font-family: 'Segoe Script', 'Lucida Handwriting', cursive; }
+    .signature-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .meta { font-size: 14px; color: #374151; }
+    .footer { text-align: center; font-size: 12px; color: #6b7280; margin-top: 48px; }
+    .paragraph { margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { vertical-align: top; padding-right: 16px; }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    ${logoDataUri ? `<img src="${logoDataUri}" alt="Native Women's Association of Canada logo" />` : ''}
+  </div>
+  <h1>CLIENT CONSENT FOR EI VERIFICATION</h1>
+  ${CONSENT_PARAGRAPHS.map(paragraph => `<p class="paragraph">${escapeHtml(paragraph)}</p>`).join('')}
+  <h2>Client acknowledgement</h2>
+  <p>I confirm that I have read and understood the above consent and agree to proceed with my application.</p>
+  <table style="margin-top: 24px;">
+    <tr>
+      <td style="width: 50%;">
+        <div class="meta"><strong>Client signature</strong></div>
+        <div class="signature-box">${escapeHtml(signatureName)}</div>
+        <div class="signature-label">Client signature</div>
+      </td>
+      <td style="width: 50%;">
+        <div class="meta"><strong>Signed on</strong></div>
+        <div class="meta">${escapeHtml(signedOnDisplay)}</div>
+        <div class="signature-label">Electronic consent captured via the ISET intake portal.</div>
+      </td>
+    </tr>
+  </table>
+  <div class="footer">NWAC wishes to acknowledge support for this project through the Government of Canada's ISET Program.</div>
+</body>
+</html>`;
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '25mm', bottom: '25mm', left: '20mm', right: '20mm' }
+    });
+    await page.close();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="client-ei-consent-${applicationId}.pdf"`);
+    return res.end(pdfBuffer);
+  } catch (err) {
+    console.error('[consent-pdf] failed to generate PDF:', err);
+    return res.status(500).json({ error: 'Unable to generate consent PDF' });
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (_) {}
+    }
   }
 });
 
