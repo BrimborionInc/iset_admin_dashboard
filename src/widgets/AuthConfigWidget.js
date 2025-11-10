@@ -68,6 +68,26 @@ export default function AuthConfigWidget({
       </Link>
     ) : undefined;
 
+  const formatTokenDisplay = (tokenInfo) => {
+    if (!tokenInfo) return 'Unavailable';
+    const { raw, unit, seconds } = tokenInfo;
+    if (raw != null && unit) {
+      const plural = raw === 1 ? '' : 's';
+      const base = `${raw} ${unit}${plural}`;
+      if (seconds != null) {
+        return `${base} (${seconds} seconds)`;
+      }
+      return base;
+    }
+    if (seconds != null) {
+      if (seconds % 86400 === 0) return `${seconds / 86400} days (${seconds} seconds)`;
+      if (seconds % 3600 === 0) return `${seconds / 3600} hours (${seconds} seconds)`;
+      if (seconds % 60 === 0) return `${seconds / 60} minutes (${seconds} seconds)`;
+      return `${seconds} seconds`;
+    }
+    return 'Unavailable';
+  };
+
   const settingsMenu =
     actions && typeof actions.removeItem === 'function' ? (
       <ButtonDropdown
@@ -159,13 +179,15 @@ export default function AuthConfigWidget({
   };
 
   const renderSessionSection = scope => {
-    const { sessionEdits, setSessionEdits, savingSession } = scopeLookup(scope);
+    const { sessionEdits, setSessionEdits, savingSession, authObj } = scopeLookup(scope);
     if (!sessionEdits) {
       return null;
     }
     const dirty = sessionDirty[scope];
     const idleValue = sessionEdits.frontendIdle;
     const absoluteValue = sessionEdits.absolute;
+    const tokenFieldsReadonly = scope === 'public';
+    const readonlyTokenData = tokenFieldsReadonly ? authObj?.cognitoTokens || null : null;
     const idleExceedsAbsolute =
       idleValue !== '' &&
       idleValue != null &&
@@ -188,43 +210,6 @@ export default function AuthConfigWidget({
       ),
       (
         <ColumnLayout key="session-grid" columns={5} variant="text-grid">
-          <FormField
-            key="access"
-            label="Access token"
-            description="JWT access token lifetime"
-            constraintText="Seconds"
-          >
-            <Input
-              type="number"
-              value={sessionEdits.access === '' ? '' : String(sessionEdits.access)}
-              onChange={({ detail }) => updateField('access', detail.value)}
-              disabled={!canEditAuth || savingSession}
-              placeholder="default"
-            />
-          </FormField>
-          <FormField key="id" label="ID token" description="ID token lifetime" constraintText="Seconds">
-            <Input
-              type="number"
-              value={sessionEdits.id === '' ? '' : String(sessionEdits.id)}
-              onChange={({ detail }) => updateField('id', detail.value)}
-              disabled={!canEditAuth || savingSession}
-              placeholder="default"
-            />
-          </FormField>
-          <FormField
-            key="refresh"
-            label="Refresh token"
-            description="Refresh token maximum age"
-            constraintText="Seconds"
-          >
-            <Input
-              type="number"
-              value={sessionEdits.refresh === '' ? '' : String(sessionEdits.refresh)}
-              onChange={({ detail }) => updateField('refresh', detail.value)}
-              disabled={!canEditAuth || savingSession}
-              placeholder="default"
-            />
-          </FormField>
           <FormField
             key="frontendIdle"
             label="Frontend idle timeout"
@@ -252,6 +237,75 @@ export default function AuthConfigWidget({
               disabled={!canEditAuth || savingSession}
               placeholder="default"
             />
+          </FormField>
+          <FormField
+            key="access"
+            label="Access token"
+            description="JWT access token lifetime"
+            constraintText={tokenFieldsReadonly ? undefined : 'Seconds'}
+          >
+            {tokenFieldsReadonly ? (
+              <SpaceBetween size="xxs">
+                <Box fontSize="body-m">{formatTokenDisplay(readonlyTokenData?.access)}</Box>
+                <Box fontSize="body-s" color="text-status-inactive">
+                  Managed in Cognito
+                </Box>
+              </SpaceBetween>
+            ) : (
+              <Input
+                type="number"
+                value={sessionEdits.access === '' ? '' : String(sessionEdits.access)}
+                onChange={({ detail }) => updateField('access', detail.value)}
+                disabled={!canEditAuth || savingSession}
+                placeholder="default"
+              />
+            )}
+          </FormField>
+          <FormField
+            key="id"
+            label="ID token"
+            description="ID token lifetime"
+            constraintText={tokenFieldsReadonly ? undefined : 'Seconds'}
+          >
+            {tokenFieldsReadonly ? (
+              <SpaceBetween size="xxs">
+                <Box fontSize="body-m">{formatTokenDisplay(readonlyTokenData?.id)}</Box>
+                <Box fontSize="body-s" color="text-status-inactive">
+                  Managed in Cognito
+                </Box>
+              </SpaceBetween>
+            ) : (
+              <Input
+                type="number"
+                value={sessionEdits.id === '' ? '' : String(sessionEdits.id)}
+                onChange={({ detail }) => updateField('id', detail.value)}
+                disabled={!canEditAuth || savingSession}
+                placeholder="default"
+              />
+            )}
+          </FormField>
+          <FormField
+            key="refresh"
+            label="Refresh token"
+            description="Refresh token maximum age"
+            constraintText={tokenFieldsReadonly ? undefined : 'Seconds'}
+          >
+            {tokenFieldsReadonly ? (
+              <SpaceBetween size="xxs">
+                <Box fontSize="body-m">{formatTokenDisplay(readonlyTokenData?.refresh)}</Box>
+                <Box fontSize="body-s" color="text-status-inactive">
+                  Managed in Cognito
+                </Box>
+              </SpaceBetween>
+            ) : (
+              <Input
+                type="number"
+                value={sessionEdits.refresh === '' ? '' : String(sessionEdits.refresh)}
+                onChange={({ detail }) => updateField('refresh', detail.value)}
+                disabled={!canEditAuth || savingSession}
+                placeholder="default"
+              />
+            )}
           </FormField>
         </ColumnLayout>
       )
@@ -285,7 +339,7 @@ export default function AuthConfigWidget({
     };
 
     return (
-      <ColumnLayout columns={scope === 'public' ? 7 : 5} variant="text-grid">
+      <ColumnLayout columns={5} variant="text-grid">
         <FormField key="requireUpper" label="Require uppercase characters">
           <Checkbox
             checked={!!policyEdits.passwordPolicy.requireUpper}
@@ -336,54 +390,47 @@ export default function AuthConfigWidget({
             PKCE
           </Toggle>
         </FormField>
-        {scope === 'public' && (
-          <FormField
-            key="maxPasswordResetsPerDay"
-            label="Max password resets per day"
-            description="Applies only to the public portal"
-          >
-            <Input
-              type="number"
-              value={String(policyEdits.maxPasswordResetsPerDay ?? '')}
-              onChange={({ detail }) =>
-                setPolicyEdits(prev => ({
-                  ...prev,
-                  maxPasswordResetsPerDay: detail.value === '' ? 0 : Number(detail.value)
-                }))
-              }
-              disabled={disabled}
-            />
-          </FormField>
-        )}
-        {scope === 'public' && (
-          <FormField key="anomalyProtection" label="Anomaly protection mode" description="Adaptive protection level">
-            <Select
-              selectedOption={
-                policyEdits.anomalyProtection
-                  ? { label: policyEdits.anomalyProtection, value: policyEdits.anomalyProtection }
-                  : null
-              }
-              onChange={({ detail }) =>
-                setPolicyEdits(prev => ({
-                  ...prev,
-                  anomalyProtection: detail.selectedOption?.value || 'standard'
-                }))
-              }
-              options={[
-                { label: 'standard', value: 'standard' },
-                { label: 'strict', value: 'strict' }
-              ]}
-              disabled={disabled}
-              placeholder="Select mode"
-            />
-          </FormField>
-        )}
       </ColumnLayout>
     );
   };
 
+  const boolLabel = (value) => (value ? 'Enabled' : 'Disabled');
+
   const renderPolicySection = scope => {
     const { policyEdits, setPolicyEdits, savingPolicy, syncingFederation, authObj } = scopeLookup(scope);
+    const readonlyPolicy = scope === 'public' ? authObj?.cognitoPolicy : null;
+    if (scope === 'public' && readonlyPolicy) {
+      const pw = readonlyPolicy.passwordPolicy || {};
+      const mfa = readonlyPolicy.mfa || {};
+      return (
+        <SpaceBetween size="s">
+          <Box fontSize="heading-xs" variant="h4">
+            Authentication policy (managed in Cognito)
+          </Box>
+          <SpaceBetween size="xxs">
+            <Box>
+              <strong>MFA mode:</strong> {mfa.mode || 'unknown'}
+            </Box>
+            <Box>
+              SMS MFA: {boolLabel(mfa.smsEnabled)} · Software token MFA: {boolLabel(mfa.softwareTokenEnabled)}
+            </Box>
+          </SpaceBetween>
+          <SpaceBetween size="xxs">
+            <Box>
+              <strong>Password policy</strong>
+            </Box>
+            <Box>Minimum length: {pw.minLength != null ? pw.minLength : 'unknown'}</Box>
+            <Box>Requires uppercase: {boolLabel(pw.requireUpper)}</Box>
+            <Box>Requires lowercase: {boolLabel(pw.requireLower)}</Box>
+            <Box>Requires number: {boolLabel(pw.requireNumber)}</Box>
+            <Box>Requires symbol: {boolLabel(pw.requireSymbol)}</Box>
+            {pw.temporaryPasswordValidityDays != null && (
+              <Box>Temporary password validity: {pw.temporaryPasswordValidityDays} day(s)</Box>
+            )}
+          </SpaceBetween>
+        </SpaceBetween>
+      );
+    }
     if (!policyEdits) return null;
 
     const dirty = policyDirty[scope];

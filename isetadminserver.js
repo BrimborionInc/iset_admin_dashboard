@@ -4327,7 +4327,7 @@ if (process.env.NODE_ENV !== 'production' && !process.env.ALLOWED_ORIGIN) {
 }
 
 const express = require('express');
-const { CognitoIdentityProviderClient, ListUsersInGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
+const { CognitoIdentityProviderClient, ListUsersInGroupCommand, DescribeUserPoolClientCommand, DescribeUserPoolCommand } = require('@aws-sdk/client-cognito-identity-provider');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
@@ -4691,13 +4691,76 @@ const PLACEHOLDER_ASSIGNABLE_LOOKUP = new Map(PLACEHOLDER_ASSIGNABLE_STAFF.map(e
 
 const COGNITO_POOL_ID = process.env.COGNITO_USER_POOL_ID || process.env.USER_POOL_ID || process.env.AWS_USER_POOL_ID || null;
 const COGNITO_REGION = process.env.AWS_REGION || process.env.COGNITO_REGION || null;
-let cognitoAssignableClient = null;
-function getCognitoAssignableClient() {
+let cognitoIdpClient = null;
+function getCognitoIdpClient() {
   if (!COGNITO_REGION) throw new Error('Missing AWS region for Cognito');
-  if (!cognitoAssignableClient) {
-    cognitoAssignableClient = new CognitoIdentityProviderClient({ region: COGNITO_REGION });
+  if (!cognitoIdpClient) {
+    cognitoIdpClient = new CognitoIdentityProviderClient({ region: COGNITO_REGION });
   }
-  return cognitoAssignableClient;
+  return cognitoIdpClient;
+}
+
+const TOKEN_UNIT_MULTIPLIERS = {
+  seconds: 1,
+  minutes: 60,
+  hours: 3600,
+  days: 86400
+};
+
+function normaliseTokenSeconds(rawValue, unit, defaultUnit) {
+  if (typeof rawValue !== 'number' || Number.isNaN(rawValue)) return null;
+  const baseUnit = (unit || defaultUnit || '').toLowerCase();
+  const multiplier = TOKEN_UNIT_MULTIPLIERS[baseUnit] || TOKEN_UNIT_MULTIPLIERS[defaultUnit?.toLowerCase?.()] || TOKEN_UNIT_MULTIPLIERS.seconds;
+  return rawValue * multiplier;
+}
+
+let cognitoTokenValidityCache = { value: null, expiresAt: 0 };
+
+async function getCognitoTokenValidity() {
+  const now = Date.now();
+  if (cognitoTokenValidityCache.value && now < cognitoTokenValidityCache.expiresAt) {
+    return cognitoTokenValidityCache.value;
+  }
+  const clientId = process.env.COGNITO_PORTAL_CLIENT_ID || process.env.COGNITO_CLIENT_ID;
+  if (!COGNITO_POOL_ID || !clientId) {
+    return null;
+  }
+  try {
+    const client = getCognitoIdpClient();
+    const response = await client.send(new DescribeUserPoolClientCommand({
+      UserPoolId: COGNITO_POOL_ID,
+      ClientId: clientId
+    }));
+    const cfg = response.UserPoolClient || {};
+    const units = (cfg.TokenValidityUnits || {});
+    const accessSeconds = normaliseTokenSeconds(cfg.AccessTokenValidity, units.AccessToken, 'minutes');
+    const idSeconds = normaliseTokenSeconds(cfg.IdTokenValidity, units.IdToken, 'minutes');
+    const refreshRaw = typeof cfg.RefreshTokenValidity === 'number' ? cfg.RefreshTokenValidity : cfg.RefreshTokenValidityDays;
+    const refreshSeconds = normaliseTokenSeconds(refreshRaw, units.RefreshToken, 'days');
+    const value = {
+      access: {
+        seconds: accessSeconds,
+        raw: cfg.AccessTokenValidity ?? null,
+        unit: (units.AccessToken || 'minutes').toLowerCase()
+      },
+      id: {
+        seconds: idSeconds,
+        raw: cfg.IdTokenValidity ?? null,
+        unit: (units.IdToken || 'minutes').toLowerCase()
+      },
+      refresh: {
+        seconds: refreshSeconds,
+        raw: refreshRaw ?? null,
+        unit: (units.RefreshToken || 'days').toLowerCase()
+      }
+    };
+    cognitoTokenValidityCache = { value, expiresAt: now + 5 * 60 * 1000 };
+    return value;
+  } catch (err) {
+    console.warn('[auth-config] Failed to load Cognito token validity:', err.message);
+    cognitoTokenValidityCache = { value: null, expiresAt: now + 60 * 1000 };
+    return null;
+  }
 }
 async function fetchActiveSlaTargets(pool) {
   try {
@@ -4726,6 +4789,50 @@ async function fetchActiveSlaTargets(pool) {
       }));
     }
     throw err;
+  }
+}
+
+let cognitoAuthPolicyCache = { value: null, expiresAt: 0 };
+
+async function getCognitoAuthPolicy() {
+  const now = Date.now();
+  if (cognitoAuthPolicyCache.value && now < cognitoAuthPolicyCache.expiresAt) {
+    return cognitoAuthPolicyCache.value;
+  }
+  if (!COGNITO_POOL_ID) {
+    return null;
+  }
+  try {
+    const client = getCognitoIdpClient();
+    const response = await client.send(new DescribeUserPoolCommand({
+      UserPoolId: COGNITO_POOL_ID
+    }));
+    const pool = response.UserPool || {};
+    const pwd = pool.Policies?.PasswordPolicy || {};
+    const mfaMode = (pool.MfaConfiguration || 'OFF').toLowerCase();
+    const smsEnabled = !!pool.SmsConfiguration?.SnsCallerArn;
+    const softwareTokenEnabled = !!pool.SoftwareTokenMfaConfiguration?.Enabled;
+    const value = {
+      mfa: {
+        mode: mfaMode,
+        smsEnabled,
+        softwareTokenEnabled
+      },
+      passwordPolicy: {
+        minLength: pwd.MinimumLength || null,
+        requireLower: !!pwd.RequireLowercase,
+        requireUpper: !!pwd.RequireUppercase,
+        requireNumber: !!pwd.RequireNumbers,
+        requireSymbol: !!pwd.RequireSymbols,
+        temporaryPasswordValidityDays: pwd.TemporaryPasswordValidityDays || null
+      }
+    };
+    cognitoAuthPolicyCache = { value, expiresAt: now + 5 * 60 * 1000 };
+    return value;
+  } catch (err) {
+    console.warn('[auth-config] Failed to load Cognito auth policy:', err.message);
+    cognitoAuthPolicyCache = { value: null, expiresAt: now + 60 * 1000 };
+    return null;
   }
 }
 
@@ -5728,7 +5835,7 @@ async function ensureStaffProfile(pool, cognitoSub, email, roleLabel, legacyKey)
 async function fetchAssignableFromCognito(pool) {
   if (!COGNITO_POOL_ID || !COGNITO_REGION) return null;
   try {
-    const client = getCognitoAssignableClient();
+    const client = getCognitoIdpClient();
     const seen = new Map();
     for (const groupName of ASSIGNABLE_GROUP_NAMES) {
       let nextToken = undefined;
@@ -7095,7 +7202,6 @@ app.patch('/api/config/runtime/locking', async (req, res) => {
 // NOTE: Only exposes values safe for admin viewing; secrets go through /api/config/security
 // ---------------- Multi-scope Auth Runtime (Phase 4) ----------------
 // Persistent (filesystem JSON) multi-scope auth configuration
-// Public-only fields: maxPasswordResetsPerDay, anomalyProtection
 const authConfigPath = process.env.AUTH_CONFIG_FILE || path.resolve(__dirname, 'db', 'auth-config.json');
 const AUTH_CONFIG_SCOPE = 'admin';
 const AUTH_CONFIG_KEY = 'auth.config';
@@ -7133,9 +7239,7 @@ function defaultAuthConfig() {
         pkceRequired: true,
         passwordPolicy: { minLength: 12, requireUpper: true, requireLower: true, requireNumber: true, requireSymbol: false },
         lockout: { threshold: 5, durationSeconds: 900 },
-        federation: { providers: [], lastSync: null },
-        maxPasswordResetsPerDay: 5,
-        anomalyProtection: 'standard'
+        federation: { providers: [], lastSync: null }
       }
     }
   };
@@ -7252,7 +7356,7 @@ function sysAdminOnly(req) {
   return normalizeRole(role) === 'System Administrator';
 }
 
-app.get('/api/config/runtime', (req, res) => {
+app.get('/api/config/runtime', async (req, res) => {
   try {
     const enabled = !!AI_KEY;
     const aiModel = (process.env.OPENROUTER_MODEL || '').trim() || 'mistralai/mistral-7b-instruct';
@@ -7270,6 +7374,10 @@ app.get('/api/config/runtime', (req, res) => {
     const nodeEnv = process.env.NODE_ENV || 'development';
     const authAdmin = __authConfig.admin;
     const authPublic = __authConfig.public;
+    const [cognitoTokens, cognitoPolicy] = await Promise.all([
+      getCognitoTokenValidity(),
+      getCognitoAuthPolicy()
+    ]);
     res.json({
       ai: { enabled, model: aiModel, params: aiParams, fallbackModels },
       auth: { // legacy combined surface (admin-focused)
@@ -7300,8 +7408,8 @@ app.get('/api/config/runtime', (req, res) => {
         lockout: authPublic.policy.lockout,
         pkceRequired: authPublic.policy.pkceRequired,
         federation: authPublic.policy.federation,
-        maxPasswordResetsPerDay: authPublic.policy.maxPasswordResetsPerDay,
-        anomalyProtection: authPublic.policy.anomalyProtection
+        cognitoTokens,
+        cognitoPolicy
       },
       cors: { allowedOrigins },
       env: { nodeEnv }
@@ -7399,27 +7507,14 @@ app.patch('/api/config/runtime/auth-policy', async (req, res) => {
     };
     if (scope) apply(__authConfig[scope]); else { apply(__authConfig.admin); apply(__authConfig.public); }
     // Public-only fields
-    if (body.maxPasswordResetsPerDay !== undefined && (!scope || scope === 'public')) {
-      const target = scope ? __authConfig[scope] : __authConfig.public; // if both, only apply to public
-      target.policy.maxPasswordResetsPerDay = Number(body.maxPasswordResetsPerDay) || 0;
-    }
-    if (body.anomalyProtection && (!scope || scope === 'public')) {
-      const target = scope ? __authConfig[scope] : __authConfig.public;
-      target.policy.anomalyProtection = String(body.anomalyProtection);
-    }
     await persistAuthConfig(__authConfig);
     const src = scope ? __authConfig[scope] : __authConfig.admin;
-    const pub = __authConfig.public;
     const base = {
       mfa: { mode: src.policy.mfaMode },
       passwordPolicy: src.policy.passwordPolicy,
       lockout: src.policy.lockout,
       pkceRequired: src.policy.pkceRequired
     };
-    if (scope === 'public') {
-      base.maxPasswordResetsPerDay = pub.policy.maxPasswordResetsPerDay;
-      base.anomalyProtection = pub.policy.anomalyProtection;
-    }
     res.json(base);
   } catch (e) { res.status(500).json({ error: 'auth_policy_update_failed', message: e.message }); }
 });

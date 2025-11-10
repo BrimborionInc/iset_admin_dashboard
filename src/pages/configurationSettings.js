@@ -912,17 +912,20 @@ export default function ConfigurationSettings({
 
       const tokenTtl = runtimeResponse?.auth?.tokenTtl || {};
       const sessionTemplate = scope => ({
-        access: scope.access || "",
-        id: scope.id || "",
-        refresh: scope.refresh || "",
-        frontendIdle: scope.frontendIdle || "",
-        absolute: scope.absolute || "",
+        access: scope?.access || "",
+        id: scope?.id || "",
+        refresh: scope?.refresh || "",
+        frontendIdle: scope?.frontendIdle || "",
+        absolute: scope?.absolute || "",
       });
-      const ttlCommon = sessionTemplate(tokenTtl);
-      setAuthSessionAdminOriginal(ttlCommon);
-      setAuthSessionAdminEdits(ttlCommon);
-      setAuthSessionPublicOriginal(ttlCommon);
-      setAuthSessionPublicEdits(ttlCommon);
+      const adminTtlSource = runtimeResponse?.authAdmin?.tokenTtl || tokenTtl;
+      const publicTtlSource = runtimeResponse?.authPublic?.tokenTtl || tokenTtl;
+      const adminSession = sessionTemplate(adminTtlSource);
+      const publicSession = sessionTemplate(publicTtlSource);
+      setAuthSessionAdminOriginal(adminSession);
+      setAuthSessionAdminEdits(adminSession);
+      setAuthSessionPublicOriginal(publicSession);
+      setAuthSessionPublicEdits(publicSession);
 
       const policyTemplate = auth => ({
         mfaMode: auth?.mfa?.mode || auth?.mfaMode || "off",
@@ -942,9 +945,6 @@ export default function ConfigurationSettings({
           providers: auth?.federation?.providers || [],
           lastSync: auth?.federation?.lastSync || null,
         },
-        maxPasswordResetsPerDay:
-          auth?.maxPasswordResetsPerDay != null ? auth.maxPasswordResetsPerDay : 5,
-        anomalyProtection: auth?.anomalyProtection || "standard",
       });
 
       const baseAuth = runtimeResponse?.auth || {};
@@ -1162,9 +1162,7 @@ export default function ConfigurationSettings({
         policyOriginal.passwordPolicy.requireNumber !== policyEdits.passwordPolicy.requireNumber ||
         policyOriginal.passwordPolicy.requireSymbol !== policyEdits.passwordPolicy.requireSymbol ||
         policyOriginal.lockout.threshold !== policyEdits.lockout.threshold ||
-        policyOriginal.lockout.durationSeconds !== policyEdits.lockout.durationSeconds ||
-        policyOriginal.maxPasswordResetsPerDay !== policyEdits.maxPasswordResetsPerDay ||
-        policyOriginal.anomalyProtection !== policyEdits.anomalyProtection
+        policyOriginal.lockout.durationSeconds !== policyEdits.lockout.durationSeconds
       );
     },
     [scopeState],
@@ -1267,10 +1265,6 @@ export default function ConfigurationSettings({
           lockout: policyEdits.lockout,
           pkceRequired: policyEdits.pkceRequired,
         };
-        if (scope === "public") {
-          body.maxPasswordResetsPerDay = policyEdits.maxPasswordResetsPerDay;
-          body.anomalyProtection = policyEdits.anomalyProtection;
-        }
         await fetchJSON(`/api/config/runtime/auth-policy?scope=${scope}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
