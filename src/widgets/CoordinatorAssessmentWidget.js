@@ -137,6 +137,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const [nocSuggestions, setNocSuggestions] = useState([]);
   const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
   const [conflictDeclarationSigned, setConflictDeclarationSigned] = useState(Boolean(caseData?.assessment_conflict_declaration_signed));
+  const [conflictDeclarationSignedAt, setConflictDeclarationSignedAt] = useState(caseData?.assessment_conflict_declaration_signed_at || null);
   const [declarationChecked, setDeclarationChecked] = useState(false);
   const [isSigningDeclaration, setIsSigningDeclaration] = useState(false);
   const [declarationError, setDeclarationError] = useState(null);
@@ -156,6 +157,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const lacksOutcomePermission = Boolean(userRole) && isPendingApprovalStatus && !canManageOutcomeReview;
   const requiresNoc = useMemo(() => requiresNocForCode(assessment.interventionCode), [assessment.interventionCode]);
   const isDeclarationGateActive = !conflictDeclarationSigned;
+  const conflictDeclarationSignedDisplayDate = conflictDeclarationSignedAt
+    ? formatDate(conflictDeclarationSignedAt)
+    : null;
   const selectedInterventionCodeOption = useMemo(
     () => interventionCodes.find(option => option.value === assessment.interventionCode) || null,
     [interventionCodes, assessment.interventionCode]
@@ -346,6 +350,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     setAssessment(a => ({ ...placeholders, ...a }));
     setInitialAssessment(placeholders);
     setConflictDeclarationSigned(Boolean(caseData?.assessment_conflict_declaration_signed));
+    setConflictDeclarationSignedAt(caseData?.assessment_conflict_declaration_signed_at || null);
     setDeclarationChecked(false);
     setDeclarationError(null);
   }, [caseData]);
@@ -545,7 +550,12 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       }
       const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
       const versionToken = Number(applicationRowVersion || caseData?.application_row_version || 0);
+      const shouldPromoteToInReview = canonicalApplicationStatus === 'submitted';
       const payload = { assessment_conflict_declaration_signed: true };
+      if (shouldPromoteToInReview) {
+        payload.status = 'in_review';
+        payload.applicationStatus = 'in_review';
+      }
       if (versionToken > 0) {
         payload.expectedRowVersion = versionToken;
       }
@@ -584,11 +594,15 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       if (updatedRowVersion) {
         setApplicationRowVersion(updatedRowVersion);
       }
+      const signedAtIso = new Date().toISOString();
       setConflictDeclarationSigned(true);
+      setConflictDeclarationSignedAt(signedAtIso);
       setDeclarationChecked(false);
       const successAlert = {
         type: 'success',
-        content: 'Conflict of interest declaration signed. Assessment sections are now available.',
+        content: shouldPromoteToInReview
+          ? 'Declaration signed. Application status moved to In Review and assessment sections are now available.'
+          : 'Conflict of interest declaration signed. Assessment sections are now available.',
         dismissible: true,
         statusIconAriaLabel: 'Success'
       };
@@ -602,9 +616,17 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         } catch (_) {}
       }
       if (typeof onCaseUpdate === 'function') {
-        onCaseUpdate({
-          assessment_conflict_declaration_signed: true
-        });
+        const updates = {
+          assessment_conflict_declaration_signed: true,
+          assessment_conflict_declaration_signed_at: signedAtIso,
+          assessment_conflict_declaration_signed_by: currentUserId || null
+        };
+        if (shouldPromoteToInReview) {
+          updates.status = 'in_review';
+          updates.statusRaw = 'in_review';
+          updates.applicationStatus = 'in_review';
+        }
+        onCaseUpdate(updates);
       }
       if (releaseAfterSuccess) {
         releaseLock({ silent: true }).catch(() => {});
@@ -630,6 +652,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     caseData?.id,
     conflictDeclarationSigned,
     declarationChecked,
+    canonicalApplicationStatus,
     ensureLockForOperation,
     lockHeldByCurrentUser,
     onCaseUpdate,
@@ -1299,12 +1322,15 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           <Box padding={{ top: 'm' }}>
             <SpaceBetween size="m">
               <Box>
-                <Box fontWeight="bold">Conflict of Interest Declaration</Box>
-                <Box margin={{ top: 'xs' }}>
-                  As the Client Case Manager, I confirm that I have no actual, potential, or perceived conflict of interest or bias in relation to this
-                  client's application, assessment and funding, and I have not provided, or attempted to assign the client with priority or preferential
-                  treatment outside of the established assessment process.
-                </Box>
+              <Box fontWeight="bold">Conflict of Interest Declaration</Box>
+              <Box margin={{ top: 'xs' }}>
+                As the Client Case Manager, I confirm that I have no actual, potential, or perceived conflict of interest or bias in relation to this
+                client's application, assessment and funding, and I have not provided, or attempted to assign the client with priority or preferential
+                treatment outside of the established assessment process.
+              </Box>
+              <Box color="text-status-inactive">
+                This declaration is recorded per staff member. Even if a previous owner signed, you must complete it before continuing your assessment work.
+              </Box>
               </Box>
               {declarationError && (
                 <Alert
@@ -1381,6 +1407,12 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
               ))}
             </ul>
           </Alert>
+        )}
+        {conflictDeclarationSigned && (
+          <Box color="text-status-success" margin={{ bottom: 's' }}>
+            Conflict of interest declaration signed
+            {conflictDeclarationSignedDisplayDate ? ` on ${conflictDeclarationSignedDisplayDate}` : ''}.
+          </Box>
         )}
         {alert && (
           <Alert

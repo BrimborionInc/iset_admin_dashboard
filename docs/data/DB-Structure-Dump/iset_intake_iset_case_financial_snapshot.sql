@@ -38,15 +38,6 @@ CREATE TABLE `iset_case_financial_snapshot` (
   CONSTRAINT `fk_case_financial_snapshot_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table `iset_case_financial_snapshot`
---
-
-LOCK TABLES `iset_case_financial_snapshot` WRITE;
-/*!40000 ALTER TABLE `iset_case_financial_snapshot` DISABLE KEYS */;
-/*!40000 ALTER TABLE `iset_case_financial_snapshot` ENABLE KEYS */;
-UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -57,4 +48,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-28 13:56:21
+-- Dump completed on 2025-11-11  8:57:12

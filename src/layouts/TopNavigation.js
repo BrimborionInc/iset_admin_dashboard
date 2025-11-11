@@ -107,7 +107,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) =>
   return (
     <div>
       <TopNavigation
-        identity={{ href: '/', title: 'Awentech Solutions', logo: { src: '/bromborionLogo.png', alt: 'Awentech Inc Logo' } }}
+        identity={{ href: '/', title: 'NWAC', logo: { src: '/nwac-logo.png', alt: 'Awentech Inc Logo' } }}
         utilities={utilities}
       />
     </div>

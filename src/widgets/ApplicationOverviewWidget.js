@@ -133,6 +133,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   const lockOwnerId = activeLock?.ownerUserId ? String(activeLock.ownerUserId) : null;
   const lockHeldByCurrentUser = Boolean(isLockedByMe || (currentUserId && lockOwnerId && String(currentUserId) === lockOwnerId));
   const lockedByAnotherUser = Boolean(lockOwnerId && !lockHeldByCurrentUser);
+  const [lockAlertDismissed, setLockAlertDismissed] = useState(false);
   const lockAlertMessage = useMemo(() => {
     const lockExpiresAt = activeLock?.expiresAt ? new Date(activeLock.expiresAt) : null;
     if (lockedByAnotherUser) {
@@ -145,6 +146,15 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     }
     return null;
   }, [activeLock, currentUserName, lockHeldByCurrentUser, lockedByAnotherUser]);
+
+  useEffect(() => {
+    const shouldHide =
+      lockAlertDismissed &&
+      !lockedByAnotherUser &&
+      !(lockHeldByCurrentUser && lockAlertMessage);
+    if (!shouldHide) return;
+    setLockAlertDismissed(false);
+  }, [lockAlertDismissed, lockHeldByCurrentUser, lockedByAnotherUser, lockAlertMessage]);
 
   const fetchLatestApplication = useCallback(async () => {
     if (!application_id) return null;
@@ -530,8 +540,12 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
       }
     >
       <SpaceBetween size="l">
-        {lockAlertMessage && (
-          <Alert type={lockedByAnotherUser ? 'warning' : 'info'}>
+        {lockAlertMessage && !lockAlertDismissed && (
+          <Alert
+            type={lockedByAnotherUser ? 'warning' : 'info'}
+            dismissible
+            onDismiss={() => setLockAlertDismissed(true)}
+          >
             {lockAlertMessage}
           </Alert>
         )}

@@ -6543,17 +6543,18 @@ app.get('/api/admin/contact-messages/:id', async (req, res) => {
          h.id,
          h.previous_status AS previousStatus,
          h.new_status      AS newStatus,
-         h.changed_by_user_id AS changedByUserId,
+         h.changed_by_staff_profile_id AS changedByStaffProfileId,
          h.changed_at      AS changedAt,
-         u.name            AS changedByName,
-         u.email           AS changedByEmail,
+         sp.display_name   AS changedByName,
+         sp.email          AS changedByEmail,
          CASE
-           WHEN u.name IS NOT NULL AND TRIM(u.name) <> '' THEN u.name
-           WHEN u.email IS NOT NULL AND u.email <> '' THEN u.email
+           WHEN sp.display_name IS NOT NULL AND TRIM(sp.display_name) <> '' THEN sp.display_name
+           WHEN sp.name IS NOT NULL AND TRIM(sp.name) <> '' THEN sp.name
+           WHEN sp.email IS NOT NULL AND sp.email <> '' THEN sp.email
            ELSE NULL
          END AS changedByDisplay
        FROM contact_message_status_history h
-       LEFT JOIN user u ON u.id = h.changed_by_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = h.changed_by_staff_profile_id
        WHERE h.contact_message_id = ?
        ORDER BY h.changed_at DESC, h.id DESC`,
       [id]
@@ -6595,7 +6596,7 @@ app.patch('/api/admin/contact-messages/:id/status', async (req, res) => {
   const nextStatus = typeof req.body?.status === 'string' ? req.body.status.trim() : '';
   if (!nextStatus) return res.status(400).json({ error: 'invalid_status' });
 
-  const actorUserId = req.staffProfile?.id || req.auth?.userId || null;
+  const actorStaffProfileId = req.staffProfile?.id || null;
 
   let connection;
   try {
@@ -6612,6 +6613,10 @@ app.patch('/api/admin/contact-messages/:id/status', async (req, res) => {
     }
 
     if (current.status !== nextStatus) {
+      if (!actorStaffProfileId) {
+        await connection.rollback();
+        return res.status(400).json({ error: 'staff_profile_required' });
+      }
       await connection.query(
         `UPDATE contact_message
            SET status = ?, updated_at = NOW()
@@ -6621,9 +6626,9 @@ app.patch('/api/admin/contact-messages/:id/status', async (req, res) => {
 
       await connection.query(
         `INSERT INTO contact_message_status_history
-           (contact_message_id, previous_status, new_status, changed_by_user_id, changed_at)
+           (contact_message_id, previous_status, new_status, changed_by_staff_profile_id, changed_at)
          VALUES (?, ?, ?, ?, NOW())`,
-        [id, current.status, nextStatus, actorUserId]
+        [id, current.status, nextStatus, actorStaffProfileId]
       );
     }
 
@@ -6636,7 +6641,7 @@ app.patch('/api/admin/contact-messages/:id/status', async (req, res) => {
           messageId: id,
           previousStatus: current.status,
           newStatus: nextStatus,
-          changedBy: actorUserId
+          changedBy: actorStaffProfileId
         }
       });
     } catch (notifyErr) {
@@ -16651,6 +16656,9 @@ app.patch('/api/action-plans/:id', async (req, res) => {
 
 app.get('/api/cases/:id', async (req, res) => {
   const caseId = req.params.id;
+  const staffProfileIdRaw = req?.staffProfile?.id ?? req?.auth?.staffProfileId ?? null;
+  const parsedStaffProfileId = staffProfileIdRaw != null ? Number.parseInt(staffProfileIdRaw, 10) : null;
+  const conflictJoinStaffId = Number.isFinite(parsedStaffProfileId) ? parsedStaffProfileId : 0;
   try {
     // Fetch case core details + assessment snapshot
     const baseSql = `
@@ -16700,19 +16708,23 @@ app.get('/api/cases/:id', async (req, res) => {
         ca.childcare_funding_details AS assessment_childcare_funding_details,
         ca.action_plan_result_code AS assessment_action_plan_result_code,
         ca.action_plan_result_date AS assessment_action_plan_result_date,
-        ca.conflict_declaration_signed AS assessment_conflict_declaration_signed,
-        ca.conflict_declaration_signed_at AS assessment_conflict_declaration_signed_at,
-        ca.conflict_declaration_signed_by AS assessment_conflict_declaration_signed_by
+        CASE WHEN cd.id IS NULL THEN 0 ELSE 1 END AS assessment_conflict_declaration_signed,
+        cd.signed_at AS assessment_conflict_declaration_signed_at,
+        cd.staff_profile_id AS assessment_conflict_declaration_signed_by
       FROM iset_case c
       LEFT JOIN iset_application a ON c.application_id = a.id
       LEFT JOIN application_lock al ON al.application_id = c.application_id AND al.expires_at > NOW()
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+      LEFT JOIN iset_case_conflict_declaration cd
+        ON cd.case_id = c.id
+       AND cd.staff_profile_id = ?
+       AND cd.revoked_at IS NULL
       WHERE c.id = ?
     `;
 
-    const params = [caseId];
+    const params = [conflictJoinStaffId, caseId];
 
     let rows;
     try {
@@ -21053,47 +21065,49 @@ app.put('/api/cases/:id', async (req, res) => {
         return res.status(422).json({ success: false, error: 'invalid_status', lock: lockCheck.lock || null });
       }
 
+      let derivedCaseStatus = null;
       switch (requestedStatus) {
         case 'approved':
         case 'initiated':
-          statusToPersist = CASE_STATUS_DERIVED_VALUES.initiated;
+          derivedCaseStatus = CASE_STATUS_DERIVED_VALUES.initiated;
           break;
         case 'pending':
         case 'pending_approval':
         case 'open':
         case 'submitted':
         case 'in_review':
-          statusToPersist = CASE_STATUS_DERIVED_VALUES.pendingApproval;
+          derivedCaseStatus = CASE_STATUS_DERIVED_VALUES.pendingApproval;
           break;
         case 'active':
-          statusToPersist = CASE_STATUS_DERIVED_VALUES.active;
+          derivedCaseStatus = CASE_STATUS_DERIVED_VALUES.active;
           break;
         case 'dormant':
-          statusToPersist = CASE_STATUS_DERIVED_VALUES.dormant;
+          derivedCaseStatus = CASE_STATUS_DERIVED_VALUES.dormant;
           break;
         case 'ready_to_close':
-          statusToPersist = CASE_STATUS_DERIVED_VALUES.readyToClose;
+          derivedCaseStatus = CASE_STATUS_DERIVED_VALUES.readyToClose;
           break;
         case 'closed':
-          statusToPersist = CASE_STATUS_DERIVED_VALUES.closed;
+          derivedCaseStatus = CASE_STATUS_DERIVED_VALUES.closed;
           break;
         case 'archived':
-          statusToPersist = CASE_STATUS_DERIVED_VALUES.archived;
+          derivedCaseStatus = CASE_STATUS_DERIVED_VALUES.archived;
           break;
         default:
-          await conn.rollback();
-          return res.status(422).json({ success: false, error: 'unsupported_status', lock: lockCheck.lock || null });
+          derivedCaseStatus = null;
       }
 
-      if (statusToPersist !== beforeStatusNormalised) {
-        await conn.query('UPDATE iset_case SET status = ? WHERE id = ?', [statusToPersist, caseId]);
+      statusToPersist = derivedCaseStatus;
+
+      if (derivedCaseStatus && derivedCaseStatus !== beforeStatusNormalised) {
+        await conn.query('UPDATE iset_case SET status = ? WHERE id = ?', [derivedCaseStatus, caseId]);
         statusChanged = true;
         bumpApplicationRowVersion = true;
         shouldRecomputeCaseStatus = true;
-        if (statusToPersist === CASE_STATUS_DERIVED_VALUES.initiated) {
+        if (derivedCaseStatus === CASE_STATUS_DERIVED_VALUES.initiated) {
           shouldEnsureClientLink = true;
         }
-        if (beforeStatusNormalised === CASE_STATUS_DERIVED_VALUES.initiated && statusToPersist !== CASE_STATUS_DERIVED_VALUES.initiated) {
+        if (beforeStatusNormalised === CASE_STATUS_DERIVED_VALUES.initiated && derivedCaseStatus !== CASE_STATUS_DERIVED_VALUES.initiated) {
           shouldMarkSubmissionNeedsReview = true;
         }
       }
@@ -21138,31 +21152,13 @@ app.put('/api/cases/:id', async (req, res) => {
       'assessment_childcare_funding_details',
       'assessment_action_plan_result_code',
       'assessment_action_plan_result_date',
-      'assessment_conflict_declaration_signed',
       'case_summary'
     ];
 
+    const conflictSignatureRequested = Object.prototype.hasOwnProperty.call(body, 'assessment_conflict_declaration_signed');
     const hasAssessmentPayload = assessmentKeys.some(key => Object.prototype.hasOwnProperty.call(body, key));
 
     if (hasAssessmentPayload) {
-      if (Object.prototype.hasOwnProperty.call(body, 'assessment_conflict_declaration_signed')) {
-        try {
-          const [conflictRows] = await conn.query(
-            'SELECT conflict_declaration_signed FROM iset_case_assessment WHERE case_id = ? LIMIT 1 FOR UPDATE',
-            [caseId]
-          );
-          previousConflictDeclarationSigned = Array.isArray(conflictRows) && conflictRows.length
-            ? conflictRows[0]?.conflict_declaration_signed ?? null
-            : null;
-        } catch (conflictErr) {
-          if (conflictErr && (conflictErr.code === 'ER_NO_SUCH_TABLE' || conflictErr.code === 'ER_BAD_FIELD_ERROR')) {
-            previousConflictDeclarationSigned = null;
-          } else {
-            throw conflictErr;
-          }
-        }
-      }
-
       const insertColumns = ['case_id'];
       const insertValues = [caseId];
       const updateAssignments = [];
@@ -21202,23 +21198,6 @@ app.put('/api/cases/:id', async (req, res) => {
       add('childcare_funding_details', toNull(body.assessment_childcare_funding_details));
       add('action_plan_result_code', toNull(body.assessment_action_plan_result_code));
       add('action_plan_result_date', toNull(body.assessment_action_plan_result_date));
-      const conflictSigned = toTinyInt(body.assessment_conflict_declaration_signed);
-      if (typeof conflictSigned !== 'undefined') {
-        add('conflict_declaration_signed', conflictSigned);
-        if (conflictSigned === 1) {
-          conflictDeclarationSignedAt = new Date();
-          add('conflict_declaration_signed_at', conflictDeclarationSignedAt);
-          add('conflict_declaration_signed_by', identity.userId || null);
-          if (Number(previousConflictDeclarationSigned) !== 1) {
-            conflictDeclarationJustSigned = true;
-          }
-        } else {
-          add('conflict_declaration_signed_at', null);
-          add('conflict_declaration_signed_by', null);
-          conflictDeclarationJustSigned = false;
-        }
-      }
-
       if (updateAssignments.length) {
         const placeholders = insertColumns.map(() => '?').join(', ');
         const updateClause = updateAssignments.join(', ');
@@ -21228,6 +21207,70 @@ app.put('/api/cases/:id', async (req, res) => {
           insertValues
         );
         bumpApplicationRowVersion = true;
+      }
+    }
+
+    if (conflictSignatureRequested) {
+      const conflictSigned = toTinyInt(body.assessment_conflict_declaration_signed);
+      if (typeof conflictSigned !== 'undefined' && conflictSigned !== null) {
+        const signingStaffProfileId = identity.userId || null;
+        if (!signingStaffProfileId) {
+          await conn.rollback();
+          return res.status(400).json({
+            success: false,
+            error: 'conflict_declaration_requires_staff_profile',
+            lock: lockCheck.lock || null,
+          });
+        }
+        const [declarationRows] = await conn.query(
+          `SELECT id, revoked_at, signed_at
+             FROM iset_case_conflict_declaration
+            WHERE case_id = ?
+              AND staff_profile_id = ?
+            ORDER BY signed_at DESC
+            LIMIT 1 FOR UPDATE`,
+          [caseId, signingStaffProfileId]
+        );
+        const existingDeclaration = Array.isArray(declarationRows) && declarationRows.length ? declarationRows[0] : null;
+        previousConflictDeclarationSigned =
+          existingDeclaration && !existingDeclaration.revoked_at ? 1 : 0;
+
+        if (conflictSigned === 1) {
+          if (Number(previousConflictDeclarationSigned) !== 1) {
+            const forwardedFor = req.get('x-forwarded-for') || req.get('X-Forwarded-For') || null;
+            const clientIpSource = forwardedFor || req.ip || null;
+            const clientIp =
+              typeof clientIpSource === 'string'
+                ? clientIpSource.split(',')[0].trim().slice(0, 64)
+                : null;
+            const userAgentHeader = req.get('user-agent') || req.get('User-Agent') || null;
+            const signedUserAgent =
+              typeof userAgentHeader === 'string' ? userAgentHeader.slice(0, 255) : null;
+
+            await conn.query(
+              `INSERT INTO iset_case_conflict_declaration
+                 (case_id, staff_profile_id, signed_at, signed_ip, signed_user_agent)
+               VALUES (?, ?, NOW(), ?, ?)`,
+              [caseId, signingStaffProfileId, clientIp || null, signedUserAgent || null]
+            );
+            conflictDeclarationJustSigned = true;
+            conflictDeclarationSignedAt = new Date();
+          } else {
+            conflictDeclarationSignedAt = existingDeclaration?.signed_at || null;
+          }
+        } else if (conflictSigned === 0) {
+          if (Number(previousConflictDeclarationSigned) === 1 && existingDeclaration && !existingDeclaration.revoked_at) {
+            await conn.query(
+              `UPDATE iset_case_conflict_declaration
+                  SET revoked_at = NOW(),
+                      revoked_reason = 'manual_reset'
+                WHERE id = ?`,
+              [existingDeclaration.id]
+            );
+            conflictDeclarationJustSigned = false;
+            conflictDeclarationSignedAt = null;
+          }
+        }
       }
     }
 
@@ -21300,6 +21343,7 @@ app.put('/api/cases/:id', async (req, res) => {
   }
 
   try {
+    const conflictSummaryStaffId = Number.isFinite(identity.userId) ? Number(identity.userId) : 0;
     const [[caseRow]] = await pool.query(
       `SELECT c.status, c.application_id,
               COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
@@ -21333,13 +21377,20 @@ app.put('/api/cases/:id', async (req, res) => {
               ca.childcare_need AS assessment_childcare_need,
               ca.childcare_funding_details AS assessment_childcare_funding_details,
               ca.action_plan_result_code AS assessment_action_plan_result_code,
-              ca.action_plan_result_date AS assessment_action_plan_result_date
+              ca.action_plan_result_date AS assessment_action_plan_result_date,
+              CASE WHEN cd2.id IS NULL THEN 0 ELSE 1 END AS assessment_conflict_declaration_signed,
+              cd2.signed_at AS assessment_conflict_declaration_signed_at,
+              cd2.staff_profile_id AS assessment_conflict_declaration_signed_by
          FROM iset_case c
          JOIN iset_application a ON c.application_id = a.id
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
          LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+         LEFT JOIN iset_case_conflict_declaration cd2
+           ON cd2.case_id = c.id
+          AND cd2.staff_profile_id = ?
+          AND cd2.revoked_at IS NULL
         WHERE c.id = ?`,
-      [caseId]
+      [conflictSummaryStaffId, caseId]
     );
 
     try {

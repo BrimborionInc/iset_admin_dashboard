@@ -48,18 +48,8 @@ CREATE TABLE `iset_case_intervention` (
   CONSTRAINT `fk_case_intervention_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_case_intervention_created_by` FOREIGN KEY (`created_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_case_intervention_plan` FOREIGN KEY (`action_plan_id`) REFERENCES `iset_case_action_plan` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table `iset_case_intervention`
---
-
-LOCK TABLES `iset_case_intervention` WRITE;
-/*!40000 ALTER TABLE `iset_case_intervention` DISABLE KEYS */;
-INSERT INTO `iset_case_intervention` VALUES (1,2,2,'10','in_progress','2025-10-28','2025-10-28','EI',450000.00,NULL,NULL,'2','Intervention Note','{\"noc\": \"31301\", \"code\": \"10\", \"cost\": 450000, \"notes\": \"Intervention Note\", \"title\": \"Test Intervention\", \"outcome\": \"2\", \"compliance\": {\"ilmp\": \"pending\", \"finance\": \"pending\"}, \"nocVersion\": \"2021\", \"durationWeeks\": 31, \"fundingStream\": \"EI\"}',164692,'2025-10-28 17:21:05','2025-10-28 17:21:05',NULL);
-/*!40000 ALTER TABLE `iset_case_intervention` ENABLE KEYS */;
-UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -70,4 +60,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-28 13:56:21
+-- Dump completed on 2025-11-11  8:57:15

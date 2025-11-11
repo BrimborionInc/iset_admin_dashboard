@@ -30,6 +30,8 @@ CREATE TABLE `iset_case_note` (
   `body` text COLLATE utf8mb4_unicode_ci NOT NULL,
   `is_internal` tinyint(1) NOT NULL DEFAULT '1',
   `is_pinned` tinyint(1) NOT NULL DEFAULT '0',
+  `follow_up_at` datetime DEFAULT NULL,
+  `reminder_id` bigint unsigned DEFAULT NULL,
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `deleted_at` datetime(3) DEFAULT NULL,
@@ -44,11 +46,14 @@ CREATE TABLE `iset_case_note` (
   KEY `idx_deleted_at` (`deleted_at`),
   KEY `fk_case_note_editor_profile` (`edited_by_staff_profile_id`),
   KEY `fk_case_note_editor_user` (`edited_by_user_id`),
+  KEY `idx_case_note_follow_up` (`case_id`,`follow_up_at`),
+  KEY `fk_case_note_reminder` (`reminder_id`),
   CONSTRAINT `fk_case_note_author_profile` FOREIGN KEY (`author_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_case_note_author_user` FOREIGN KEY (`author_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_case_note_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_case_note_editor_profile` FOREIGN KEY (`edited_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_case_note_editor_user` FOREIGN KEY (`edited_by_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL
+  CONSTRAINT `fk_case_note_editor_user` FOREIGN KEY (`edited_by_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_case_note_reminder` FOREIGN KEY (`reminder_id`) REFERENCES `iset_case_reminder` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -61,4 +66,4 @@ CREATE TABLE `iset_case_note` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-27 12:14:07
+-- Dump completed on 2025-11-11  8:57:07

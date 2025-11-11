@@ -54,15 +54,6 @@ CREATE TABLE `iset_case_task` (
   CONSTRAINT `fk_case_task_updated_by` FOREIGN KEY (`updated_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table `iset_case_task`
---
-
-LOCK TABLES `iset_case_task` WRITE;
-/*!40000 ALTER TABLE `iset_case_task` DISABLE KEYS */;
-/*!40000 ALTER TABLE `iset_case_task` ENABLE KEYS */;
-UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -73,4 +64,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-28 13:56:20
+-- Dump completed on 2025-11-11  8:57:08

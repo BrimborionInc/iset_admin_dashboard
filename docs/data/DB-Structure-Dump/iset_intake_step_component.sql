@@ -36,7 +36,7 @@ CREATE TABLE `step_component` (
   KEY `ix_step_component_template` (`template_id`),
   CONSTRAINT `fk_step_component_step` FOREIGN KEY (`step_id`) REFERENCES `step` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_step_component_template` FOREIGN KEY (`template_id`) REFERENCES `component_template` (`id`) ON DELETE RESTRICT
-) ENGINE=InnoDB AUTO_INCREMENT=1608 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2044 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -48,4 +48,4 @@ CREATE TABLE `step_component` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-27 12:14:00
+-- Dump completed on 2025-11-11  8:57:07

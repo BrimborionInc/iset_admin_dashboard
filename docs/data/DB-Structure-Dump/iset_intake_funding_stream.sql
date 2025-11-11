@@ -35,16 +35,6 @@ CREATE TABLE `funding_stream` (
   UNIQUE KEY `uq_funding_stream_code` (`code`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table `funding_stream`
---
-
-LOCK TABLES `funding_stream` WRITE;
-/*!40000 ALTER TABLE `funding_stream` DISABLE KEYS */;
-INSERT INTO `funding_stream` VALUES (1,'EI','Employment Insurance (EI)','EI-funded interventions under contribution agreements',1,1,'2025-10-28 16:25:28','2025-10-28 16:25:28'),(2,'CRF','Consolidated Revenue Fund (CRF)','CRF-funded interventions under contribution agreements',1,2,'2025-10-28 16:25:28','2025-10-28 16:25:28');
-/*!40000 ALTER TABLE `funding_stream` ENABLE KEYS */;
-UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -55,4 +45,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-28 13:56:34
+-- Dump completed on 2025-11-11  8:57:15

@@ -35,16 +35,6 @@ CREATE TABLE `noc_version` (
   UNIQUE KEY `uq_noc_version_code` (`code`)
 ) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table `noc_version`
---
-
-LOCK TABLES `noc_version` WRITE;
-/*!40000 ALTER TABLE `noc_version` DISABLE KEYS */;
-INSERT INTO `noc_version` VALUES (1,'2021','National Occupational Classification 2021 Version 1.0','Five-digit TEER structure released September 2022',1,1,'2025-10-28 16:38:03','2025-10-28 17:17:20'),(2,'2016','National Occupational Classification 2016 Version 1.3','Four-digit skill type/level structure',1,2,'2025-10-28 16:38:03','2025-10-28 17:17:19');
-/*!40000 ALTER TABLE `noc_version` ENABLE KEYS */;
-UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -55,4 +45,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-28 13:56:22
+-- Dump completed on 2025-11-11  8:57:11

@@ -196,8 +196,9 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 
 ### Backend Auto-Emitted (bypassing catalogue)
 - status_changed � added in `PUT /api/cases/:id` when coordinator status changes.
-- assessment_submitted � emitted alongside assessment submission.
-- nwac_review_submitted � emitted when NWAC review payload is present.
+- assessment_submitted – emitted alongside assessment submission.
+- nwac_review_submitted – emitted when NWAC review payload is present.
+- conflict_declaration_signed – emitted when an assessor signs the conflict-of-interest declaration gate in the coordinator widget.
 - case_approved / case_rejected � sent by the coordinator widget via `/api/events`.
 - documents_overdue � referenced by reporting queries; no matching emitter located.
 

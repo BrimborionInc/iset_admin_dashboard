@@ -52,18 +52,8 @@ CREATE TABLE `iset_case_action_plan` (
   CONSTRAINT `fk_case_action_plan_owner_user` FOREIGN KEY (`owner_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL,
   CONSTRAINT `chk_case_action_plan_result_date` CHECK (((`result_date` is null) or (`effective_date` is null) or (`result_date` >= `effective_date`))),
   CONSTRAINT `chk_case_action_plan_status` CHECK ((`status` in (_utf8mb4'draft',_utf8mb4'active',_utf8mb4'closed',_utf8mb4'archived')))
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table `iset_case_action_plan`
---
-
-LOCK TABLES `iset_case_action_plan` WRITE;
-/*!40000 ALTER TABLE `iset_case_action_plan` DISABLE KEYS */;
-INSERT INTO `iset_case_action_plan` VALUES (1,2,'Skills Development','closed',1,164692,NULL,'2025-10-28','2025-10-31','2025-10-28 10:01:27','2025-10-28 10:02:05','ready_for_work','2025-10-31','This is the outcome summary','These are the closure notes.','Testing the action plan','{\"summary\": \"Testing the action plan\"}','2025-10-28 12:25:45','2025-10-28 14:02:05',NULL),(2,2,'Plan 2','active',1,164692,NULL,'2025-10-28','2025-10-30','2025-10-28 10:11:26',NULL,NULL,NULL,NULL,NULL,'Plan 2','{\"summary\": \"Plan 2\"}','2025-10-28 14:11:16','2025-10-28 17:21:05',NULL);
-/*!40000 ALTER TABLE `iset_case_action_plan` ENABLE KEYS */;
-UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -74,4 +64,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-10-28 13:56:26
+-- Dump completed on 2025-11-11  8:57:12
