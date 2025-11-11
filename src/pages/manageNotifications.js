@@ -8,16 +8,16 @@ import NotificationSettingsWidget from '../widgets/notificationSettingsWidget';
 const ManageNotifications = ({ toggleHelpPanel }) => {
   const [items, setItems] = useState([
     {
+      id: 'manage-templates',
+      rowSpan: 7,
+      columnSpan: 4,
+      data: { title: 'Template Editor' }
+    },
+    {
       id: 'notification-settings-widget',
       rowSpan: 7,
       columnSpan: 4,
-      data: { title: 'Notifications Settings' },
-    },
-    {
-      id: 'manage-templates',
-      rowSpan: 7,
-      columnSpan: 3,
-      data: { title: 'Template Editor' },
+      data: { title: 'Notifications Settings' }
     },
     // {
     //   id: 'configure-notifications',

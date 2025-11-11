@@ -5,6 +5,7 @@ import {
   Box,
   Button,
   ButtonDropdown,
+  ColumnLayout,
   Container,
   ExpandableSection,
   FormField,
@@ -14,10 +15,9 @@ import {
   Input,
   Link,
   Modal,
-  Select,
   SpaceBetween,
   Table,
-  Textarea
+  Tabs
 } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { apiFetch } from '../auth/apiClient';
@@ -32,28 +32,53 @@ const tokenOptions = [
   { label: 'Support Email', value: '{support_email}' }
 ];
 
-const statuses = ['Draft', 'For Review', 'For Approval', 'Approved', 'Released', 'Superseded', 'Archived'];
-const languages = ['English'];
+const languages = [
+  { id: 'en', label: 'English' },
+  { id: 'fr', label: 'Français' }
+];
 
-const debugLog = (...args) => {
-  if (process.env.NODE_ENV !== 'production') {
-    console.debug('[TemplateEditor]', ...args);
+const defaultLocalizedContent = () => ({
+  en: { subject: '', textBody: '' },
+  fr: { subject: '', textBody: '' }
+});
+
+const cloneLocalizedContent = (content) => ({
+  en: { ...content.en },
+  fr: { ...content.fr }
+});
+
+const extractJson = (s) => {
+  if (!s || typeof s !== 'string') return null;
+  try { return JSON.parse(s); } catch (_) {}
+  const fenced = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```\s*([\s\S]*?)```/);
+  if (fenced && fenced[1]) {
+    try { return JSON.parse(fenced[1]); } catch (_) {}
   }
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    const slice = s.slice(start, end + 1);
+    try { return JSON.parse(slice); } catch (_) {}
+  }
+  return null;
 };
 
 const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [subject, setSubject] = useState('');
-  const [htmlBody, setHtmlBody] = useState('');
-  const [textBody, setTextBody] = useState('');
-  const [selectedLanguage, setSelectedLanguage] = useState('English');
-  const [status, setStatus] = useState('Draft');
+  const [localizedContent, setLocalizedContent] = useState(defaultLocalizedContent());
+  const [activeLanguage, setActiveLanguage] = useState('en');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState(null);
+  const [baselineTemplate, setBaselineTemplate] = useState(null);
+  const [translating, setTranslating] = useState(false);
+  const [translateModal, setTranslateModal] = useState(null); // { mode: 'missing'|'confirm', fromLang, targetLang, fromLabel, targetLabel, message }
   const textAreaRef = useRef(null);
-  const selectionRef = useRef({ start: 0, end: 0 });
+  const selectionRef = useRef({
+    en: { start: 0, end: 0 },
+    fr: { start: 0, end: 0 }
+  });
 
   useEffect(() => {
     fetchTemplates();
@@ -78,25 +103,37 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
       .then((response) => response.json())
       .then((data) => {
         setSelectedTemplate(data);
-        setSubject(data.subject || '');
-        setHtmlBody(data.htmlBody || data.content || '');
-        setTextBody(data.textBody || data.text || '');
-        setSelectedLanguage(data.language || 'English');
-        setStatus(data.status || 'Draft');
+        const localized = defaultLocalizedContent();
+        localized.en.subject = data.localized?.en?.subject || data.subject || '';
+        localized.en.textBody = data.localized?.en?.textBody || data.textBody || data.content || '';
+        localized.fr.subject = data.localized?.fr?.subject || '';
+        localized.fr.textBody = data.localized?.fr?.textBody || '';
+        setLocalizedContent(localized);
+        setActiveLanguage('en');
+        selectionRef.current = {
+          en: { start: 0, end: 0 },
+          fr: { start: 0, end: 0 }
+        };
+        setBaselineTemplate({
+          name: data.name || '',
+          localized: cloneLocalizedContent(localized)
+        });
+        // status temporarily dropped from UI/payload
       })
       .catch((error) => console.error('Error fetching template details:', error));
   };
 
   const handleSaveTemplate = () => {
-    if (!selectedTemplate) return;
+    if (!selectedTemplate || !baselineTemplate || !isDirty) return;
+    const english = localizedContent.en;
     const updatedTemplate = {
       name: selectedTemplate.name,
-      status,
-      language: selectedLanguage,
-      subject,
-      htmlBody,
-      textBody,
-      content: htmlBody
+      language: 'en',
+      subject: english.subject,
+      htmlBody: english.textBody,
+      textBody: english.textBody,
+      content: english.textBody,
+      localized: localizedContent
     };
 
     apiFetch(`/api/templates/${selectedTemplate.id}`, {
@@ -108,14 +145,28 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
       .then(() => {
         alert("Template saved successfully!");
         fetchTemplates();
-        setSelectedTemplate(null);
+        setBaselineTemplate({
+          name: selectedTemplate.name,
+          localized: cloneLocalizedContent(localizedContent)
+        });
       })
       .catch((error) => console.error("Error saving template:", error));
   };
 
-  const handleCancelEdit = () => {
-    setSelectedTemplate(null);
-  };
+  useEffect(() => {
+    if (!selectedTemplate) return;
+    const textarea = textAreaRef.current;
+    if (!textarea) return;
+    const selection = selectionRef.current[activeLanguage] || { start: 0, end: 0 };
+    requestAnimationFrame(() => {
+      try {
+        textarea.focus();
+        textarea.setSelectionRange(selection.start, selection.end);
+      } catch (_) {
+        /* ignore */
+      }
+    });
+  }, [activeLanguage, selectedTemplate]);
 
   const handleNewTemplate = () => {
     const newTemplate = {
@@ -127,48 +178,71 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
       textBody: "Write your email..."
     };
     setSelectedTemplate(newTemplate);
-    setSubject(newTemplate.subject);
-    setHtmlBody(newTemplate.htmlBody);
-    setTextBody(newTemplate.textBody);
-    setSelectedLanguage(newTemplate.language);
-    setStatus(newTemplate.status);
+    setLocalizedContent({
+      en: { subject: newTemplate.subject, textBody: newTemplate.textBody },
+      fr: { subject: '', textBody: '' }
+    });
+    setActiveLanguage('en');
+    selectionRef.current = {
+      en: { start: 0, end: 0 },
+      fr: { start: 0, end: 0 }
+    };
+    setBaselineTemplate({
+      name: newTemplate.name,
+      localized: cloneLocalizedContent({
+        en: { subject: newTemplate.subject, textBody: newTemplate.textBody },
+        fr: { subject: '', textBody: '' }
+      })
+    });
+    // status temporarily dropped from UI/payload
   };
 
   const captureSelection = () => {
     const textarea = textAreaRef.current;
-    if (textarea && typeof textarea.selectionStart === 'number') {
-      selectionRef.current = {
-        start: textarea.selectionStart,
-        end: textarea.selectionEnd
-      };
-      debugLog('Captured selection', selectionRef.current);
-    }
+    if (!textarea) return;
+    selectionRef.current[activeLanguage] = {
+      start: textarea.selectionStart || 0,
+      end: textarea.selectionEnd || 0
+    };
   };
 
   const handleInsertToken = (token) => {
     if (!token) return;
     const textarea = textAreaRef.current;
-    const currentValue = textBody || '';
-    const selection = selectionRef.current;
-    debugLog('Attempting insert', { token: token.value, selection, hasRef: !!textarea });
+    const currentValue = localizedContent[activeLanguage].textBody || '';
+    const selection = selectionRef.current[activeLanguage] || { start: 0, end: 0 };
     if (textarea && typeof selection.start === 'number') {
       const { start, end } = selection;
       const nextValue =
         currentValue.slice(0, start) + token.value + currentValue.slice(end);
-      setTextBody(nextValue);
-      setHtmlBody(nextValue);
-      setTimeout(() => {
-        textarea.focus();
+      setLocalizedContent((prev) => ({
+        ...prev,
+        [activeLanguage]: {
+          ...prev[activeLanguage],
+          textBody: nextValue
+        }
+      }));
+      requestAnimationFrame(() => {
+        const el = textAreaRef.current;
+        if (!el) return;
         const cursor = start + token.value.length;
-        textarea.selectionStart = textarea.selectionEnd = cursor;
-        selectionRef.current = { start: cursor, end: cursor };
-        debugLog('Updated cursor after insert', selectionRef.current);
-      }, 0);
+        el.focus();
+        try {
+          el.setSelectionRange(cursor, cursor);
+        } catch (err) {
+          console.warn('setSelectionRange failed', err);
+        }
+        selectionRef.current[activeLanguage] = { start: cursor, end: cursor };
+      });
     } else {
       const nextValue = currentValue + token.value;
-      setTextBody(nextValue);
-      setHtmlBody(nextValue);
-      debugLog('Fallback append path used');
+      setLocalizedContent((prev) => ({
+        ...prev,
+        [activeLanguage]: {
+          ...prev[activeLanguage],
+          textBody: nextValue
+        }
+      }));
     }
   };
 
@@ -205,6 +279,199 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
     return body.replace(/\{([^}]+)\}/g, (_, token) => previewSample[token] || `{${token}}`);
   };
 
+  const isDirty = useMemo(() => {
+    if (!selectedTemplate || !baselineTemplate) return false;
+    const nameDirty = (selectedTemplate.name || '') !== (baselineTemplate.name || '');
+    const localizedDirty = JSON.stringify(localizedContent) !== JSON.stringify(baselineTemplate.localized);
+    return nameDirty || localizedDirty;
+  }, [selectedTemplate, baselineTemplate, localizedContent]);
+
+  const handleRevertChanges = () => {
+    if (!baselineTemplate || !selectedTemplate) return;
+    setSelectedTemplate((prev) => ({ ...prev, name: baselineTemplate.name }));
+    setLocalizedContent(cloneLocalizedContent(baselineTemplate.localized));
+    setActiveLanguage('en');
+    selectionRef.current = {
+      en: { start: 0, end: 0 },
+      fr: { start: 0, end: 0 }
+    };
+    setTranslateModal(null);
+  };
+
+  const translateBatch = async (items) => {
+    const system = {
+      role: 'system',
+      content: 'You are a translation assistant. Translate between English and Canadian French. Preserve placeholders like {token}, numbers, punctuation, and formatting. Respond ONLY with JSON matching the requested schema.'
+    };
+    const user = {
+      role: 'user',
+      content: JSON.stringify({
+        instruction: 'For each item, translate text from `from` to `to`. Respond with { "translations": [{ "id": string, "lang": "en"|"fr", "text": string }] }',
+        items
+      })
+    };
+    const res = await apiFetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [system, user] })
+    });
+    if (res.status === 501) {
+      const err = new Error('ai-disabled');
+      err.code = 'ai-disabled';
+      throw err;
+    }
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content || '';
+    const parsed = extractJson(content);
+    const translations = parsed?.translations;
+    if (!Array.isArray(translations) || !translations.length) {
+      throw new Error('unexpected-response');
+    }
+    return translations
+      .filter((entry) => entry && typeof entry.id === 'string' && typeof entry.text === 'string')
+      .map((entry) => ({ id: entry.id, lang: entry.lang, text: entry.text }));
+  };
+
+  const openTranslateModal = (fromLang) => {
+    if (translating) return;
+    const targetLang = fromLang === 'en' ? 'fr' : 'en';
+    const fromLabel = languages.find((l) => l.id === fromLang)?.label || fromLang;
+    const targetLabel = languages.find((l) => l.id === targetLang)?.label || targetLang;
+    const source = localizedContent[fromLang];
+    const missing = [];
+    if (!source.subject || !source.subject.trim()) missing.push('subject');
+    if (!source.textBody || !source.textBody.trim()) missing.push('email body');
+    if (missing.length) {
+      setTranslateModal({
+        mode: 'missing',
+        message: `Provide the ${missing.join(' and ')} in ${fromLabel} before translating.`
+      });
+      return;
+    }
+    setTranslateModal({
+      mode: 'confirm',
+      fromLang,
+      targetLang,
+      fromLabel,
+      targetLabel
+    });
+  };
+
+  const performTranslation = async ({ fromLang, targetLang, fromLabel, targetLabel }) => {
+    setTranslating(true);
+    try {
+      const source = localizedContent[fromLang];
+      const items = [
+        { id: 'subject', from: fromLang, to: targetLang, text: source.subject },
+        { id: 'textBody', from: fromLang, to: targetLang, text: source.textBody }
+      ];
+      const translations = await translateBatch(items);
+      setLocalizedContent((prev) => {
+        const next = cloneLocalizedContent(prev);
+        translations.forEach((entry) => {
+          if (!entry || entry.lang !== targetLang) return;
+          if (entry.id === 'subject') next[targetLang].subject = entry.text;
+          if (entry.id === 'textBody') next[targetLang].textBody = entry.text;
+        });
+        return next;
+      });
+      selectionRef.current[targetLang] = { start: 0, end: 0 };
+      setActiveLanguage(targetLang);
+    } catch (error) {
+      if (error.code === 'ai-disabled') {
+        setTranslateModal({ mode: 'info', message: 'AI translation is disabled on this environment.' });
+      } else if (error.message === 'unexpected-response') {
+        setTranslateModal({ mode: 'info', message: 'Translation service returned an unexpected response.' });
+      } else {
+        setTranslateModal({ mode: 'info', message: `Translation failed: ${error.message || String(error)}` });
+      }
+      return;
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  const handleSubjectChange = (lang, value) => {
+    setLocalizedContent((prev) => ({
+      ...prev,
+      [lang]: {
+        ...prev[lang],
+        subject: value
+      }
+    }));
+  };
+
+  const handleBodyChange = (lang, value) => {
+    setLocalizedContent((prev) => ({
+      ...prev,
+      [lang]: {
+        ...prev[lang],
+        textBody: value
+      }
+    }));
+  };
+
+  const renderLanguageSection = (lang) => {
+    if (lang !== activeLanguage) {
+      return null;
+    }
+    const langLabel = languages.find((l) => l.id === lang)?.label || lang;
+    const targetLang = lang === 'en' ? 'fr' : 'en';
+    const targetLabel = languages.find((l) => l.id === targetLang)?.label || targetLang;
+    const content = localizedContent[lang];
+    return (
+      <SpaceBetween size="m">
+        <Grid gridDefinition={[{ colspan: 9 }, { colspan: 3 }]}
+          className="subject-row" alignItems="end">
+          <FormField label={`Subject (${langLabel})`}>
+            <Input value={content.subject} onChange={({ detail }) => handleSubjectChange(lang, detail.value)} />
+          </FormField>
+          <Box display="flex" alignItems="center" justifyContent="flex-end">
+            <Button
+              onClick={() => openTranslateModal(lang)}
+              iconName="gen-ai"
+              disabled={translating}
+            >
+              {lang === 'en' ? 'Translate to French' : 'Traduire en anglais'}
+            </Button>
+          </Box>
+        </Grid>
+        <ColumnLayout columns={2} variant="text-grid">
+          <div style={{ border: '1px solid var(--color-border-divider-default)', borderRadius: '8px', padding: '16px', backgroundColor: 'var(--color-background-container-content)', minHeight: 320 }}>
+            <FormField label={`Email body (${langLabel})`}>
+              <textarea
+                ref={lang === activeLanguage ? textAreaRef : null}
+                rows={18}
+                className="textarea-native"
+                value={content.textBody}
+                onChange={(event) => {
+                  handleBodyChange(lang, event.target.value);
+                  captureSelection();
+                }}
+                onClick={captureSelection}
+                onKeyUp={captureSelection}
+                onKeyDown={captureSelection}
+                onSelect={captureSelection}
+                onFocus={captureSelection}
+                onMouseUp={captureSelection}
+                placeholder="Write the message applicants or staff will receive."
+                style={{ width: '100%', minHeight: 280, padding: '12px', borderRadius: '8px', border: '1px solid var(--color-border-input-default)' }}
+              />
+            </FormField>
+          </div>
+          <div style={{ border: '1px solid var(--color-border-divider-default)', borderRadius: '8px', padding: '16px', backgroundColor: 'var(--color-background-container-content)', minHeight: 320 }}>
+            <Header variant="h4">Preview (sample data)</Header>
+            <Box padding="m" style={{ backgroundColor: 'var(--color-background-layout-panel, #f8f8f8)', minHeight: 250 }}>
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
+                {renderPreview(content.textBody || 'No content yet.')}
+              </pre>
+            </Box>
+          </div>
+        </ColumnLayout>
+      </SpaceBetween>
+    );
+  };
+
   return (
     <BoardItem
       header={
@@ -226,18 +493,10 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
         />
       }
     >
-      <Grid gridDefinition={[{ colspan: 4 }, { colspan: 8 }]}>
-        <Container
-          header={<Header variant="h3">Template Library</Header>}
-          footer={
-            <Alert statusIconAriaLabel="Info">
-              Templates shown here feed the Notification Settings matrix. Select one to edit a draft.
-            </Alert>
-          }
-        >
+      <Grid gridDefinition={[{ colspan: 4 }, { colspan: 8 }]}> 
+        <Container header={<Header variant="h3">Template Library</Header>}>
           <SpaceBetween size="m">
             <Table
-              header={<Header variant="h4">Templates</Header>}
               items={templates}
               loading={loading}
               trackBy="id"
@@ -251,36 +510,60 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
                     </Link>
                   )
                 },
-                { id: 'status', header: 'Status', cell: item => item.status || '—' },
-                { id: 'language', header: 'Lang', cell: item => item.language || 'en' },
                 {
                   id: 'actions',
                   header: ' ',
                   cell: item => (
                     <Button
-                      variant="inline-link"
+                      variant="icon"
+                      iconName="close"
                       ariaLabel={`Delete ${item.name}`}
                       onClick={() => { setTemplateToDelete(item); setShowDeleteModal(true); }}
-                    >
-                      Delete
-                    </Button>
+                    />
                   )
                 }
               ]}
             />
-            <ExpandableSection header="Token reference" variant="footer">
-              <SpaceBetween size="xs">
-                {tokenOptions.map(token => (
-                  <Badge key={token.value} color="blue">
-                    {token.value}
-                  </Badge>
-                ))}
-              </SpaceBetween>
-            </ExpandableSection>
           </SpaceBetween>
         </Container>
 
-        <Container header={<Header variant="h3">Editor</Header>}>
+        <Container
+          header={
+            <Header
+              variant="h3"
+              actions={
+                selectedTemplate ? (
+                  <SpaceBetween direction="horizontal" size="s">
+                    <ButtonDropdown
+                      items={tokenOptions.map(token => ({ id: token.value, text: token.label }))}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        captureSelection();
+                      }}
+                      onItemClick={({ detail }) => {
+                        handleInsertToken({ value: detail.id });
+                      }}
+                    >
+                      Insert field
+                    </ButtonDropdown>
+                    <Button
+                      variant="primary"
+                      onClick={handleSaveTemplate}
+                      disabled={!isDirty}
+                    >
+                      Save changes
+                    </Button>
+                    <Button onClick={handleRevertChanges} disabled={!isDirty}>
+                      Cancel
+                    </Button>
+                  </SpaceBetween>
+                ) : null
+              }
+            >
+              Editor
+            </Header>
+          }
+        >
           {!selectedTemplate ? (
             <Box textAlign="center" padding="xxl">
               <SpaceBetween size="m">
@@ -291,94 +574,73 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
             </Box>
           ) : (
             <SpaceBetween size="l">
-              <Grid gridDefinition={[{ colspan: 4 }, { colspan: 8 }]}>
-                <SpaceBetween size="l">
-                  <Container header={<Header variant="h4">Template details</Header>}>
-                    <SpaceBetween size="m">
-                      <FormField label="Template name">
-                        <Input
-                          value={selectedTemplate.name}
-                          onChange={({ detail }) => setSelectedTemplate({ ...selectedTemplate, name: detail.value })}
-                        />
-                      </FormField>
-                      <FormField label="Status">
-                        <Select
-                          options={statuses.map(value => ({ label: value, value }))}
-                          selectedOption={{ label: status, value: status }}
-                          onChange={({ detail }) => setStatus(detail.selectedOption.value)}
-                        />
-                      </FormField>
-                      <FormField label="Language">
-                        <Select
-                          options={languages.map(lang => ({ label: lang, value: lang }))}
-                          selectedOption={{ label: selectedLanguage, value: selectedLanguage }}
-                          onChange={({ detail }) => setSelectedLanguage(detail.selectedOption.value)}
-                        />
-                      </FormField>
-                      <FormField label="Insert field">
-                        <ButtonDropdown
-                          items={tokenOptions.map(token => ({ id: token.value, text: token.label }))}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                            captureSelection();
-                          }}
-                          onItemClick={({ detail }) => {
-                            handleInsertToken({ value: detail.id });
-                          }}
-                        >
-                          Insert field
-                        </ButtonDropdown>
-                      </FormField>
-                    </SpaceBetween>
-                  </Container>
-                </SpaceBetween>
-
-                <SpaceBetween size="l">
-                  <Container header={<Header variant="h4">Content</Header>}>
-                    <SpaceBetween size="m">
-                      <FormField label="Subject">
-                        <Input value={subject} onChange={({ detail }) => setSubject(detail.value)} />
-                      </FormField>
-                      <FormField label="Email body (plain text)">
-                        <Textarea
-                          ref={textAreaRef}
-                          rows={14}
-                          value={textBody}
-                          onChange={({ detail }) => {
-                            setTextBody(detail.value);
-                            setHtmlBody(detail.value);
-                            captureSelection();
-                          }}
-                          onClick={captureSelection}
-                          onMouseUp={captureSelection}
-                          onFocus={captureSelection}
-                          onKeyUp={captureSelection}
-                          onSelect={captureSelection}
-                          placeholder="Write the message applicants or staff will receive."
-                        />
-                      </FormField>
-                    </SpaceBetween>
-                  </Container>
-
-                  <Container header={<Header variant="h4">Preview (sample data)</Header>}>
-                    <Box padding="m" style={{ backgroundColor: 'var(--color-background-layout-panel, #f8f8f8)' }}>
-                      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
-                        {renderPreview(textBody || 'No content yet.')}
-                      </pre>
-                    </Box>
-                  </Container>
-
-                  <SpaceBetween direction="horizontal" size="s">
-                    <Button variant="primary" onClick={handleSaveTemplate}>Save changes</Button>
-                    <Button onClick={handleCancelEdit}>Cancel</Button>
-                  </SpaceBetween>
-                </SpaceBetween>
-              </Grid>
+              <SpaceBetween size="m">
+                <FormField label="Template name">
+                  <Input
+                    value={selectedTemplate.name}
+                    onChange={({ detail }) => setSelectedTemplate({ ...selectedTemplate, name: detail.value })}
+                  />
+                </FormField>
+                <Tabs
+                  activeTabId={activeLanguage}
+                  onChange={({ detail }) => setActiveLanguage(detail.activeTabId)}
+                  tabs={languages.map((lang) => ({
+                    id: lang.id,
+                    label: lang.label,
+                    content: renderLanguageSection(lang.id)
+                  }))}
+                />
+              </SpaceBetween>
 
             </SpaceBetween>
           )}
         </Container>
       </Grid>
+
+      {translateModal && (
+        <Modal
+          onDismiss={() => setTranslateModal(null)}
+          visible
+          closeAriaLabel="Close modal"
+          header={
+            translateModal.mode === 'confirm'
+              ? `Translate ${translateModal.fromLabel} content`
+              : 'Translation notice'
+          }
+          footer={
+            translateModal.mode === 'confirm' ? (
+            <SpaceBetween direction="horizontal" size="s">
+              <Button onClick={() => setTranslateModal(null)}>Cancel</Button>
+              <Button
+                variant="primary"
+                loading={translating}
+                disabled={translating}
+                onClick={() => {
+                  const payload = translateModal;
+                  setTranslateModal(null);
+                  performTranslation(payload);
+                }}
+              >
+                {`Overwrite with ${translateModal.targetLabel === 'Français' ? 'French' : translateModal.targetLabel}`}
+              </Button>
+            </SpaceBetween>
+            ) : (
+              <Button onClick={() => setTranslateModal(null)}>Close</Button>
+            )
+          }
+        >
+          {translateModal.mode === 'confirm' ? (
+            <SpaceBetween size="s">
+              <p>
+                {`This will overwrite the ${translateModal.targetLabel} subject and email body with AI-generated text based on the ${translateModal.fromLabel} version.`}
+              </p>
+              <p>AI translations can contain errors. Review the results before sending to applicants.</p>
+            </SpaceBetween>
+          ) : (
+            <p>{translateModal.message}</p>
+          )}
+        </Modal>
+      )}
 
       {showDeleteModal && (
         <Modal
