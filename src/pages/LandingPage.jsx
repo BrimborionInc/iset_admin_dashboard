@@ -3,7 +3,7 @@ import { buildLoginUrl } from '../auth/cognito';
 import '../css/awentech-landing.css';
 import Button from '@cloudscape-design/components/button';
 import SegmentedControl from '@cloudscape-design/components/segmented-control';
-import heroBackground from '../assets/images/awentech/hero-background.png';
+import heroBackground from '../assets/images/awentech/alt-hero.png';
 
 const portalUrl = process.env.REACT_APP_PORTAL_URL || 'http://localhost:3000/';
 

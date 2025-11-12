@@ -324,7 +324,7 @@ const AppRoutes = ({
       </Route>
 
       <Route path="/configuration-settings">
-        <Guard roles={['System Administrator']} path="/configuration-settings">
+        <Guard path="/configuration-settings">
           {renderContent(
             ConfigurationSettings,
             [{ text: 'Home', href: '/' }, { text: 'Configuration Settings', href: '/configuration-settings' }],

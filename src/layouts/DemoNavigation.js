@@ -33,6 +33,7 @@ const CLEAR_TABLES = [
   'iset_case_note',
   'iset_case_task',
   'iset_case_watch',
+  'iset_case_conflict_declaration',
   'application_lock',
   'contact_message',
   'contact_message_note',
