@@ -53,7 +53,7 @@ Notification toggles, templates, and applicant rows already exist in the admin d
 |-----------|--------|-------|--------|
 | CR approval & scope sign-off | 2025-11-07 | Review with product + ops | Pending |
 | Phase 0 scaffolding merged | 2025-11-12 | Types, feature flags, SES config docs | Pending |
-| Template editor uplift GA | 2025-11-19 | Rich text, placeholders, autosave, refresh hooks | Pending |
+| Template editor uplift GA | 2025-11-19 | Rich text, placeholders, autosave, refresh hooks (Template Editor dashboard split, toolbar + link/list formatting, Cloudscape board controls) | In progress |
 | Intake resolver MVP (submission) | 2025-11-26 | Handles `application_submitted`, fallback copy, logging | Pending |
 | Secure messaging + decisions | 2025-12-03 | Extend resolver coverage | Pending |
 | Production readiness review | 2025-12-06 | Runbook updates, alerts, toggle plan | Pending |
@@ -79,12 +79,20 @@ Notification toggles, templates, and applicant rows already exist in the admin d
 - [ ] Socialise CR with stakeholders (product, ops, intake, admin UI).
 - [ ] Finalise renderer technology choice and placeholder contract.
 - [ ] Draft technical design for `NotificationConfigService` caching/invalidation.
-- [ ] Spike template editor toolbar + placeholder validation in a feature branch.
+- [ ] Complete Template Editor dashboard polish (palette defaults, header links) and document the split in `docs/dashboards/template-editor-dashboard.md`.
 - [ ] Define SES verification + sandbox exit criteria in `docs/ops` runbooks.
+- [x] Implement intake-side template renderer (loads `notification_setting` + `notification_template`, applies token substitutions, provides fallback copy) and replace the hard-coded SES copy path for applicant submission emails.
+- [x] Extend renderer integration to secure message + decision notifications (ensure logging/fallbacks remain consistent).
+- [x] Add unit/integration tests plus structured logging to cover renderer fallbacks, missing templates, and token substitution failures.
 
 ## 9. Progress Log
 
 - 2025-11-05: CR drafted to capture scope across scaffolding, template editor uplift, and intake resolver workstreams; awaiting review.
+- 2025-11-08: Template Editor dashboard split into dedicated widgets (Library + Editor), Cloudscape help panels and toolbar scaffolding completed, Notification Settings dashboard cleaned up, access control + documentation updated.
+- 2025-11-08: Intake pipeline plan outlined—template renderer + SES integration to replace legacy hard-coded copy; pending implementation.
+- 2025-11-09: Added `notifications/templateRenderer.js`, wired submission confirmations to template-driven SES payloads with placeholder support; next up secure message + decision flows.
+- 2025-11-09: Secure message + decision notifications now use the shared renderer (event-driven context, placeholder support, fallbacks). Admin dashboard token palette updated with the new placeholders.
+- 2025-11-10: Documented the token contract & caching plan, added structured renderer logging + `node:test` coverage (`notifications/__tests__/templateRenderer.test.js`), and exposed `npm run test:renderer` for smoke checks.
 
 ---
 

@@ -5,26 +5,20 @@ export const ManageNotificationsHelp = () => (
   <div>
     <SpaceBetween direction="vertical" size="s">
       <Alert type="info" header="Manage Notifications dashboard">
-        Use this workspace to keep outbound messaging consistent across staff and
-        applicant audiences. The Template Editor lets you draft bilingual email
-        copy for each notification, while the Notification Settings matrix
-        decides which events are enabled, which roles receive them, and which
-        template ID is linked to each delivery channel.
+        Use this dashboard to configure which workflow events trigger outbound notifications, which
+        roles receive them, and which template ID each row should use. Authoring happens in the
+        Template Editor dashboard; this space is dedicated to routing and delivery flags.
       </Alert>
     </SpaceBetween>
     <h2>When to use this dashboard</h2>
     <p>
-      Visit the Manage Notifications dashboard whenever you need to refresh email
-      wording, add a new locale, or toggle applicant/staff delivery for a given
-      workflow event. Draft updates in the Template Editor, save, and then
-      select the refreshed template inside Notification Settings so downstream
-      services render the new copy.
+      Visit the Manage Notifications dashboard when you need to enable/disable events, switch
+      templates, or adjust email vs. bell alerts for staff and applicant roles. After saving, the
+      intake service reads the updated settings to decide who gets notified.
     </p>
     <p>
-      Changes here feed the configurable notification pipeline documented in
-      <code>docs/dashboards/manage-notifications-dashboard.md</code>; keep both
-      widgets in sync so intake and casework services always pull the expected
-      template IDs and delivery flags.
+      Need to change the content itself? Open the Template Editor dashboard, publish your updates,
+      and return here to link the refreshed template to the appropriate events.
     </p>
   </div>
 );

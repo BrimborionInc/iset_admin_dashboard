@@ -37,6 +37,41 @@ Keep applicant-facing notifications configurable from the same matrix used for s
 - Wire the intake-side dispatchers (submission confirmation, document upload alerts, etc.) to consult `notification_setting` before sending emails.
 - Add smoke/acceptance tests that exercise the applicant flow end-to-end once the email pipeline is connected.
 
+## Template Token Contract
+
+Authoring guidance is now standardised so admins know exactly which placeholders render downstream:
+
+| Token | Description | Notes |
+|-------|-------------|-------|
+| `{applicant_name}` | Applicant full name (falls back to greeting) | Always available |
+| `{application_id}` | Internal application identifier | Provided when the intake record exists |
+| `{tracking_id}` | Public-facing tracking/reference number | Common to all applicant events |
+| `{submission_date}` | Human-readable timestamp | Submission confirmations |
+| `{assessor_name}` | Assigned assessor/coordinator | Optional (populated when known) |
+| `{portal_dashboard_url}` | Applicant portal login link | Derived from `APPLICANT_PORTAL_*` env vars |
+| `{support_email}` | Support mailbox | `NOTIFICATION_SUPPORT_EMAIL` → `SUPPORT_EMAIL` → `DEFAULT_SUPPORT_EMAIL` |
+| `{message_subject}` | Secure message subject line | Secure message alerts |
+| `{message_to_name}` | Display name shown in the secure message “To” field | Captured from the compose modal (default “Applicant”) |
+| `{message_from_name}` | Display name shown in the secure message “From” field | Captured from the compose modal (default “Case Worker”) |
+| `{decision_outcome}` | Machine-friendly outcome (`approved`, `not_approved`) | Decision/status alerts |
+| `{decision_outcome_label}` | Human-friendly outcome label | Decision/status alerts |
+
+Formatting tokens follow the editor’s bracket syntax: `[b]`, `[i]`, `[u]`, `[ul]/[ol]/[li]`, and `[link url="https://..."]text[/link]`. The renderer upgrades these markers to semantic HTML and strips them for the plain-text alternative so SES sends always include both MIME parts.
+
+## Renderer & Caching Design
+
+Short-term behaviour:
+- Each notification call queries MySQL for the relevant `{event, role, language}` row and joined template.
+- Structured logs (JSON) capture every invocation outcome (`rendered`, `suppressed`, `fallback`) with metadata like template ID, language, and reason code.
+
+Upcoming `NotificationConfigService`:
+1. **Hydration + TTL cache** – load all rows at startup, memoise for ~60 seconds, and expose a `refresh()` hook.
+2. **Invalidation** – `/api/templates` and `/api/notifications` will ping an internal endpoint so intake workers flush caches immediately after admin saves.
+3. **Feature flags** – lookups remain behind `notifications.emailPipeline.enabled` so we can toggle rollout per environment.
+4. **Metrics** – emit structured events (or CloudWatch metrics) per lookup so ops can monitor cache hit rate, fallback frequency, and disabled/suppressed counts.
+
+Until the cache layer lands, the structured logs plus Jest coverage help us detect regressions early and prove the renderer contract.
+
 ## Collaboration Notes
 - Context: Hard-coded applicant confirmation emails were removed from the intake service; delivery must now respect `notification_setting` and templates configured via the admin dashboard.
 - SES: account still sandboxed in ca-central-1; use verified sender/recipient for all testing and keep the sandbox redirect in `sesMailer` until production access is granted.

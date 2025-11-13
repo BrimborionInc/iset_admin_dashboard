@@ -32,8 +32,10 @@ import BookAppointmentQ7 from '../previews/bookAppointmentQ7.js';
 import BookAppointmentQ8 from '../previews/bookAppointmentQ8.js';
 import ConfigurationSettings from '../pages/configurationSettings.js';
 import ReportingAndMonitoringDashboard from '../pages/reportingAndMonitoringDashboard.js'; // Import the new component
-import ManageNotifications from '../pages/manageNotifications.js'; // Import the new component
-import { ManageNotificationsHelp } from '../helpPanelContents/manageNotificationsHelp.js'; // Named export
+import ManageNotifications from '../pages/manageNotifications.js';
+import { ManageNotificationsHelp } from '../helpPanelContents/manageNotificationsHelp.js';
+import TemplateEditorDashboard from '../pages/templateEditorDashboard.js';
+import TemplateEditorDashboardHelp from '../helpPanelContents/templateEditorDashboardHelp.js';
 import ManageLocationsHelp from '../helpPanelContents/manageLocationsHelp'; // Import the help panel content
 import ModifyComponent from '../pages/modifyIntakeStep.js'; // Import the new component
 import ModifyIntakeStepHelp from '../helpPanelContents/modifyIntakeStep.js'; // Renamed help panel content
@@ -406,6 +408,37 @@ const AppRoutes = ({
             [{ text: 'Home', href: '/' }, { text: 'Manage Notifications', href: '/manage-notifications' }],
             'Manage Notifications',
             <ManageNotificationsHelp />
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/template-editor">
+        <Guard path="/template-editor">
+          {renderContent(
+            TemplateEditorDashboard,
+            [{ text: 'Home', href: '/' }, { text: 'Template Editor', href: '/template-editor' }],
+            'Template Editor',
+            <TemplateEditorDashboardHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('templateEditor:openPalette'))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('templateEditor:resetLayout'))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            )
           )}
         </Guard>
       </Route>

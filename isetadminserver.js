@@ -18166,9 +18166,22 @@ app.get('/api/cases/:id/messages', async (req, res) => {
 // POST /api/cases/:id/messages  { subject, body, urgent }
 app.post('/api/cases/:id/messages', async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
-  const { subject, body, urgent } = req.body || {};
+  const {
+    subject,
+    body,
+    urgent,
+    toDisplayName,
+    fromDisplayName
+  } = req.body || {};
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
-  if (!subject || !body) return res.status(400).json({ error: 'missing_required_fields' });
+  const subjectValue = typeof subject === 'string' ? subject.trim() : '';
+  const bodyValue = typeof body === 'string' ? body.trim() : '';
+  const toNameValue = typeof toDisplayName === 'string' ? toDisplayName.trim() : '';
+  const fromNameValue = typeof fromDisplayName === 'string' ? fromDisplayName.trim() : '';
+  if (!subjectValue || !bodyValue) return res.status(400).json({ error: 'missing_required_fields' });
+  if (!toNameValue || !fromNameValue) {
+    return res.status(400).json({ error: 'recipient_and_sender_names_required' });
+  }
   try {
     // Resolve applicant user id
     const [[caseRow]] = await pool.query(
@@ -18177,7 +18190,14 @@ app.post('/api/cases/:id/messages', async (req, res) => {
               COALESCE(
                 s.reference_number,
                 JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))
-              ) AS tracking_reference
+              ) AS tracking_reference,
+              COALESCE(
+                NULLIF(applicant.name, ''),
+                JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.applicant_signature.name')),
+                JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.applicant_name')),
+                applicant.email
+              ) AS applicant_name,
+              applicant.email AS applicant_email
          FROM iset_case c
          JOIN iset_application a ON c.application_id = a.id
          LEFT JOIN iset_application_submission s ON a.submission_id = s.id
@@ -18214,13 +18234,32 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     const [result] = await pool.query(
       `INSERT INTO messages (sender_id, recipient_id, case_id, application_id, subject, body, status, deleted, urgent, created_at)
        VALUES (?, ?, ?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
-      [senderId, recipientId, caseId, caseRow?.application_id || null, subject, body, !!urgent]
+      [senderId, recipientId, caseId, caseRow?.application_id || null, subjectValue, bodyValue, !!urgent]
     );
+    const { actorName } = resolveRequestActor(req);
+    const assessorDisplayName =
+      req?.staffProfile?.display_name ||
+      req?.staffProfile?.name ||
+      actorName ||
+      req?.auth?.name ||
+      null;
+
+    const effectiveApplicantName =
+      toNameValue ||
+      caseRow?.applicant_name ||
+      caseRow?.applicant_email ||
+      null;
+    const effectiveAssessorName = fromNameValue || assessorDisplayName || null;
     try {
       await sendSecureMessageAlert({
         pool,
         userId: recipientId,
         trackingId: caseRow?.tracking_reference || null,
+        messageSubject: subjectValue || null,
+        applicantName: effectiveApplicantName,
+        assessorName: effectiveAssessorName,
+        recipientDisplayName: toNameValue,
+        senderDisplayName: fromNameValue,
       });
     } catch (notifyErr) {
       console.error('[notifications] secure message email failed', notifyErr?.message || notifyErr);
@@ -21507,10 +21546,6 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
-
-
-
-
 
 
 

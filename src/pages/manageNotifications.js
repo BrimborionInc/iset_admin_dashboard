@@ -1,106 +1,39 @@
 import React, { useState } from 'react';
 import { SpaceBetween } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
-import ManageTemplates from '../widgets/manageTemplates';
-// import ConfigureNotifications from '../widgets/configureNotifications'; // Import the new widget
 import NotificationSettingsWidget from '../widgets/notificationSettingsWidget';
 
 const ManageNotifications = ({ toggleHelpPanel }) => {
   const [items, setItems] = useState([
     {
-      id: 'manage-templates',
+      id: 'notification-settings',
       rowSpan: 7,
-      columnSpan: 4,
-      data: { title: 'Template Editor' }
-    },
-    {
-      id: 'notification-settings-widget',
-      rowSpan: 7,
-      columnSpan: 4,
-      data: { title: 'Notifications Settings' }
-    },
-    // {
-    //   id: 'configure-notifications',
-    //   rowSpan: 7,
-    //   columnSpan: 1,
-    //   data: { title: 'Configure Reminders and Notifications' },
-    // },
-    // Add more widgets here as needed
+      columnSpan: 8,
+      data: { title: 'Notification Settings' }
+    }
   ]);
 
   return (
     <SpaceBetween size="l">
       <Board
-        renderItem={(item, actions) => {
-          if (item.id === 'notification-settings-widget') {
-            return (
-              <NotificationSettingsWidget
-                actions={actions}
-                toggleHelpPanel={toggleHelpPanel}
-              />
-            );
-          }
-          if (item.id === 'manage-templates') {
-            return (
-              <ManageTemplates
-                actions={actions}
-                dragHandleAriaLabel="Drag handle"
-                i18nStrings={{
-                  dragHandleAriaLabel: 'Drag handle',
-                  dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
-                  resizeHandleAriaLabel: 'Resize handle',
-                  resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.',
-                }}
-                toggleHelpPanel={toggleHelpPanel}
-              />
-            );
-          }
-          // if (item.id === 'configure-notifications') {
-          // return (
-          // <ConfigureNotifications
-          // actions={actions}
-          // dragHandleAriaLabel="Drag handle"
-          // i18nStrings={{
-          // dragHandleAriaLabel: 'Drag handle',
-          // dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
-          // resizeHandleAriaLabel: 'Resize handle',
-          // resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.',
-          // }}
-          // />
-          // );
-          // }
-          // Render other items here if needed
-          return null;
-        }}
+        renderItem={(item, actions) =>
+          item.id === 'notification-settings' ? (
+            <NotificationSettingsWidget actions={actions} toggleHelpPanel={toggleHelpPanel} />
+          ) : null
+        }
         items={items}
         onItemsChange={(event) => setItems(event.detail.items)}
         i18nStrings={{
-          liveAnnouncementDndStarted: (operationType) =>
-            operationType === 'resize' ? 'Resizing' : 'Dragging',
-          liveAnnouncementDndItemReordered: (operation) => {
-            const columns = `column ${operation.placement.x + 1}`;
-            const rows = `row ${operation.placement.y + 1}`;
-            return `Item moved to ${operation.direction === 'horizontal' ? columns : rows}.`;
-          },
-          liveAnnouncementDndItemResized: (operation) => {
-            const columnsConstraint = operation.isMinimalColumnsReached ? ' (minimal)' : '';
-            const rowsConstraint = operation.isMinimalRowsReached ? ' (minimal)' : '';
-            const sizeAnnouncement = operation.direction === 'horizontal'
-              ? `columns ${operation.placement.width}${columnsConstraint}`
-              : `rows ${operation.placement.height}${rowsConstraint}`;
-            return `Item resized to ${sizeAnnouncement}.`;
-          },
-          liveAnnouncementDndItemInserted: (operation) => {
-            const columns = `column ${operation.placement.x + 1}`;
-            const rows = `row ${operation.placement.y + 1}`;
-            return `Item inserted to ${columns}, ${rows}.`;
-          },
+          liveAnnouncementDndStarted: () => 'Dragging',
+          liveAnnouncementDndItemReordered: () => 'Item moved',
+          liveAnnouncementDndItemResized: () => 'Item resized',
+          liveAnnouncementDndItemInserted: () => 'Item inserted',
           liveAnnouncementDndCommitted: (operationType) => `${operationType} committed`,
           liveAnnouncementDndDiscarded: (operationType) => `${operationType} discarded`,
-          liveAnnouncementItemRemoved: (op) => `Removed item ${op.item.data.title}.`,
+          liveAnnouncementItemRemoved: (op) => `Removed ${op.item.data.title}`,
           navigationAriaLabel: 'Board navigation',
           navigationAriaDescription: 'Click on non-empty item to move focus over',
-          navigationItemAriaLabel: (item) => (item ? item.data.title : 'Empty'),
+          navigationItemAriaLabel: (item) => (item ? item.data.title : 'Empty')
         }}
       />
     </SpaceBetween>

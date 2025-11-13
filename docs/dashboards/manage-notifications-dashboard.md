@@ -12,10 +12,6 @@ Last updated: 2025-10-01
 - Each row captures `enabled`, `template_id`, `email_alert`, and `bell_alert`; the Save action only posts rows whose state changed and refreshes from the API so new IDs or template edits flow through immediately.
 - Success and error states surface through a `Flashbar`, and the Cancel button restores the last-saved matrix snapshot without reloading the page.
 
-### Manage Templates
-- Sits beside the settings matrix for quick edits to notification/reminder templates.
-- Uses the shared API client (`apiFetch`) to list, load, update, and delete templates; changes become available to the settings widget after its next refresh.
-
 ### Configure Notifications (disabled)
 - The original reminder configuration widget is still commented out in the board definition for future use.
 
@@ -30,3 +26,4 @@ Last updated: 2025-10-01
 - Surface template audience/language metadata in the select once multi-language support lands.
 - Auto-refresh the settings widget after template saves or creations so newly added templates appear without a manual reload.
 - Hook the applicant/staff email pipelines to the stored `email_alert` and `template_id` values (tracked separately in the intake service).
+- Template authoring now lives on the dedicated Template Editor dashboard (`/template-editor`). Link from here after saving changes so configuration stays in sync.

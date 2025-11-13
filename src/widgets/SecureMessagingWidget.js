@@ -144,6 +144,8 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
   const [composeUrgent, setComposeUrgent] = useState(false);
   const [composeSending, setComposeSending] = useState(false);
   const [composeError, setComposeError] = useState(null);
+  const [composeToName, setComposeToName] = useState('Applicant');
+  const [composeFromName, setComposeFromName] = useState('Case Worker');
   const [showHardDeleteModal, setShowHardDeleteModal] = useState(false);
   const [showEmptyDeletedModal, setShowEmptyDeletedModal] = useState(false);
   const [emptyConfirmText, setEmptyConfirmText] = useState('');
@@ -457,6 +459,8 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     setComposeBody('');
     setComposeUrgent(false);
     setComposeError(null);
+    setComposeToName(applicantName || 'Applicant');
+    setComposeFromName(currentEvaluatorName || 'Case Worker');
     setComposeModalOpen(true);
   };
 
@@ -474,13 +478,23 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     setComposeBody(`\n\n${quotedBody}`);
     setComposeUrgent(false);
     setComposeError(null);
+    setComposeToName(getSenderName(selectedMessage) || applicantName || 'Applicant');
+    setComposeFromName(currentEvaluatorName || 'Case Worker');
     setComposeModalOpen(true);
   };
 
   const handleSendMessage = async () => {
     if (!caseId) return;
-    if (!composeSubject.trim() || !composeBody.trim()) {
+    const subject = composeSubject.trim();
+    const body = composeBody.trim();
+    const toName = composeToName.trim();
+    const fromName = composeFromName.trim();
+    if (!subject || !body) {
       setComposeError('Subject and message are required.');
+      return;
+    }
+    if (!toName || !fromName) {
+      setComposeError('"To" and "From" names are required.');
       return;
     }
     setComposeSending(true);
@@ -490,9 +504,11 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          subject: composeSubject.trim(),
-          body: composeBody.trim(),
-          urgent: composeUrgent
+          subject,
+          body,
+          urgent: composeUrgent,
+          toDisplayName: toName,
+          fromDisplayName: fromName
         })
       });
       if (!response.ok) {
@@ -502,6 +518,8 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
       setComposeModalOpen(false);
       setComposeSubject('');
       setComposeBody('');
+      setComposeToName(applicantName || 'Applicant');
+      setComposeFromName(currentEvaluatorName || 'Case Worker');
       setComposeUrgent(false);
       await loadMessages({ silent: true });
     } catch (err) {
@@ -820,7 +838,13 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
               variant="primary"
               onClick={handleSendMessage}
               loading={composeSending}
-              disabled={composeSending || !composeSubject.trim() || !composeBody.trim()}
+              disabled={
+                composeSending ||
+                !composeSubject.trim() ||
+                !composeBody.trim() ||
+                !composeToName.trim() ||
+                !composeFromName.trim()
+              }
             >
               Send
             </Button>
@@ -837,11 +861,21 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
         <SpaceBetween size="s">
           <div>
             <label style={{ fontWeight: 'bold' }}>To:</label>
-            <Input readOnly value={applicantName} />
+            <Input
+              value={composeToName}
+              placeholder="Applicant"
+              onChange={({ detail }) => setComposeToName(detail.value)}
+              disabled={composeSending}
+            />
           </div>
           <div>
             <label style={{ fontWeight: 'bold' }}>From:</label>
-            <Input readOnly value={currentEvaluatorName || 'Case evaluator'} />
+            <Input
+              value={composeFromName}
+              placeholder="Case Worker"
+              onChange={({ detail }) => setComposeFromName(detail.value)}
+              disabled={composeSending}
+            />
           </div>
           <div>
             <label style={{ fontWeight: 'bold' }}>Subject:</label>

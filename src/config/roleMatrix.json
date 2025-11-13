@@ -123,6 +123,10 @@
       "System Administrator",
       "Program Administrator"
     ],
+    "/template-editor": [
+      "System Administrator",
+      "Program Administrator"
+    ],
     "/manage-security-options": [
       "System Administrator",
       "Program Administrator"

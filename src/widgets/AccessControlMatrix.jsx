@@ -47,6 +47,7 @@ const ROUTE_LABELS = {
   '/language-settings-dashboard': 'Language Settings',
   '/manage-components': 'Manage Intake Steps',
   '/manage-notifications': 'Notification Settings',
+  '/template-editor': 'Template Editor',
   '/manage-security-options': 'Security Settings',
   '/manage-workflows': 'Manage Workflows',
   '/iset/cases': 'ISET Case Portfolio',

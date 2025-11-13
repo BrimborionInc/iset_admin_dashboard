@@ -172,6 +172,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
         { type: 'link', text: 'User Management', href: '/user-management-dashboard' },
         { type: 'link', text: 'Release Management', href: '/release-management-dashboard' },
         { type: 'link', text: 'Notification Settings', href: '/manage-notifications' },
+        { type: 'link', text: 'Template Editor', href: '/template-editor' },
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
         { type: 'link', text: 'Event Logging', href: '/configuration/events' },
         { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
