@@ -51,6 +51,7 @@ const ManageNotifications = ({ toggleHelpPanel }) => {
                   resizeHandleAriaLabel: 'Resize handle',
                   resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.',
                 }}
+                toggleHelpPanel={toggleHelpPanel}
               />
             );
           }

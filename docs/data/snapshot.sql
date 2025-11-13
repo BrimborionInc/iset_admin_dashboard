@@ -2515,6 +2515,7 @@ CREATE TABLE `notification_template` (
   `language` varchar(10) NOT NULL DEFAULT 'en',
   `subject` varchar(255) DEFAULT NULL,
   `content` text NOT NULL,
+  `localized` json DEFAULT NULL,
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -2528,7 +2529,7 @@ CREATE TABLE `notification_template` (
 
 LOCK TABLES `notification_template` WRITE;
 /*!40000 ALTER TABLE `notification_template` DISABLE KEYS */;
-INSERT INTO `notification_template` VALUES (1,'Applicant Submitted Template','Email','Released','en','Your application has been submitted','Dear applicant, your application has been received.','2025-06-16 12:01:17','2025-06-16 12:01:17'),(2,'Admin Alert Template','Email','Released','en','A new application has been submitted','A new application has been submitted and requires review.','2025-06-16 12:01:17','2025-06-16 12:01:17'),(3,'Case Assigned Template','Email','Released','en','A case has been assigned to you','You have been assigned a new case.','2025-06-16 12:01:17','2025-06-16 12:01:17'),(4,'Document Uploaded Template','Email','Released','en','A document has been uploaded','A required document has been uploaded by the applicant.','2025-06-16 12:01:17','2025-06-16 12:01:17');
+INSERT INTO `notification_template` VALUES (1,'Applicant Submitted Template','Email','Released','en','Your application has been submitted','Dear applicant, your application has been received.',NULL,'2025-06-16 12:01:17','2025-06-16 12:01:17'),(2,'Admin Alert Template','Email','Released','en','A new application has been submitted','A new application has been submitted and requires review.',NULL,'2025-06-16 12:01:17','2025-06-16 12:01:17'),(3,'Case Assigned Template','Email','Released','en','A case has been assigned to you','You have been assigned a new case.',NULL,'2025-06-16 12:01:17','2025-06-16 12:01:17'),(4,'Document Uploaded Template','Email','Released','en','A document has been uploaded','A required document has been uploaded by the applicant.',NULL,'2025-06-16 12:01:17','2025-06-16 12:01:17');
 /*!40000 ALTER TABLE `notification_template` ENABLE KEYS */;
 UNLOCK TABLES;
 

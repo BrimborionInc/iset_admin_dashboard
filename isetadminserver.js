@@ -16833,15 +16833,94 @@ app.get('/api/services', async (req, res) => {
 
 // --- Notification Templates API (DB-backed) ---
 
+const ensureString = (value) => {
+  if (value === null || value === undefined) return '';
+  return typeof value === 'string' ? value : String(value);
+};
+
+const parseJsonColumn = (value) => {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    console.warn('[templates] Failed to parse JSON column', error);
+    return null;
+  }
+};
+
+const normalizeLocalizedForRead = (row) => {
+  const stored = parseJsonColumn(row.localized);
+  const localized = {};
+
+  if (stored && typeof stored === 'object') {
+    Object.entries(stored).forEach(([lang, content]) => {
+      localized[lang] = {
+        subject: ensureString(content?.subject),
+        textBody: ensureString(content?.textBody ?? content?.htmlBody)
+      };
+    });
+  }
+
+  if (!localized.en) {
+    localized.en = {
+      subject: ensureString(row.subject),
+      textBody: ensureString(row.content)
+    };
+  } else {
+    localized.en.subject = localized.en.subject || ensureString(row.subject);
+    localized.en.textBody = localized.en.textBody || ensureString(row.content);
+  }
+
+  return localized;
+};
+
+const normalizeLocalizedForWrite = (payload, fallbackSubject, fallbackBody) => {
+  const localized = {};
+  if (payload && typeof payload === 'object') {
+    Object.entries(payload).forEach(([lang, content]) => {
+      localized[lang] = {
+        subject: ensureString(content?.subject),
+        textBody: ensureString(content?.textBody ?? content?.htmlBody)
+      };
+    });
+  }
+  if (!localized.en) {
+    localized.en = {
+      subject: ensureString(fallbackSubject),
+      textBody: ensureString(fallbackBody)
+    };
+  } else {
+    localized.en.subject = localized.en.subject || ensureString(fallbackSubject);
+    localized.en.textBody = localized.en.textBody || ensureString(fallbackBody);
+  }
+  return localized;
+};
+
+const hydrateTemplateRow = (row) => ({
+  ...row,
+  localized: normalizeLocalizedForRead(row)
+});
+
+const fetchTemplateById = async (templateId) => {
+  const [rows] = await pool.query(
+    `SELECT id, name, type, status, language, subject, content, localized, created_at, updated_at
+     FROM notification_template
+     WHERE id = ?`,
+    [templateId]
+  );
+  return rows;
+};
+
 // Get all templates
 app.get('/api/templates', async (req, res) => {
   try {
     const [rows] = await pool.query(`
-      SELECT id, name, type, status, language, subject, content, created_at, updated_at
+      SELECT id, name, type, status, language, subject, content, localized, created_at, updated_at
       FROM notification_template
       ORDER BY name, language, type, status
     `);
-    res.status(200).json(rows);
+    res.status(200).json(rows.map(hydrateTemplateRow));
   } catch (error) {
     console.error('Error fetching templates:', error);
     res.status(500).json({ error: 'Failed to fetch templates' });
@@ -16852,14 +16931,11 @@ app.get('/api/templates', async (req, res) => {
 app.get('/api/templates/:templateId', async (req, res) => {
   const templateId = req.params.templateId;
   try {
-    const [rows] = await pool.query(
-      'SELECT id, name, type, status, language, subject, content, created_at, updated_at FROM notification_template WHERE id = ?',
-      [templateId]
-    );
+    const rows = await fetchTemplateById(templateId);
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Template not found' });
     }
-    res.status(200).json(rows[0]);
+    res.status(200).json(hydrateTemplateRow(rows[0]));
   } catch (error) {
     console.error('Error fetching template:', error);
     res.status(500).json({ error: 'Failed to fetch template' });
@@ -16869,28 +16945,81 @@ app.get('/api/templates/:templateId', async (req, res) => {
 // Save (create or update) a template by ID
 app.post('/api/templates/:templateId', async (req, res) => {
   const templateId = req.params.templateId;
-  const { name, type, status, language, subject, content } = req.body;
-  if (!name || !type || !content || !subject) {
-    return res.status(400).json({ error: 'Missing required fields' });
+  const { name } = req.body || {};
+
+  if (!name) {
+    return res.status(400).json({ error: 'Name is required' });
   }
+
+  const englishSubject =
+    ensureString(req.body?.localized?.en?.subject ?? req.body?.subject ?? '');
+  const englishBody = ensureString(
+    req.body?.localized?.en?.textBody ??
+    req.body?.localized?.en?.htmlBody ??
+    req.body?.htmlBody ??
+    req.body?.textBody ??
+    req.body?.content ??
+    ''
+  );
+
+  const localizedPayload = normalizeLocalizedForWrite(
+    req.body?.localized,
+    englishSubject,
+    englishBody
+  );
+
   try {
-    // If templateId is 'new' or not a number, insert; else update
-    if (templateId === 'new' || isNaN(Number(templateId))) {
+    const isInsert = templateId === 'new' || isNaN(Number(templateId));
+
+    if (isInsert) {
+      const channel = req.body?.type || 'Email';
+      const status = req.body?.status || 'Draft';
+      const language = req.body?.language || 'en';
       const [result] = await pool.query(
-        `INSERT INTO notification_template (name, type, status, language, subject, content) VALUES (?, ?, ?, ?, ?, ?)`,
-        [name, type, status, language, subject, content]
+        `INSERT INTO notification_template (name, type, status, language, subject, content, localized)
+         VALUES (?, ?, ?, ?, ?, ?, CAST(? AS JSON))`,
+        [
+          name,
+          channel,
+          status,
+          language,
+          englishSubject,
+          englishBody,
+          JSON.stringify(localizedPayload)
+        ]
       );
-      res.status(201).json({ id: result.insertId, message: 'Template created' });
-    } else {
-      const [result] = await pool.query(
-        `UPDATE notification_template SET name=?, type=?, status=?, language=?, subject=?, content=? WHERE id=?`,
-        [name, type, status, language, subject, content, templateId]
-      );
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ error: 'Template not found' });
-      }
-      res.status(200).json({ id: templateId, message: 'Template updated' });
+      const rows = await fetchTemplateById(result.insertId);
+      return res.status(201).json(hydrateTemplateRow(rows[0]));
     }
+
+    const rows = await fetchTemplateById(templateId);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    const current = rows[0];
+    const nextType = req.body?.type || current.type || 'Email';
+    const nextStatus = req.body?.status || current.status || 'Draft';
+    const nextLanguage = req.body?.language || current.language || 'en';
+
+    await pool.query(
+      `UPDATE notification_template
+       SET name=?, type=?, status=?, language=?, subject=?, content=?, localized=CAST(? AS JSON)
+       WHERE id=?`,
+      [
+        name,
+        nextType,
+        nextStatus,
+        nextLanguage,
+        englishSubject,
+        englishBody,
+        JSON.stringify(localizedPayload),
+        templateId
+      ]
+    );
+
+    const refreshed = await fetchTemplateById(templateId);
+    return res.status(200).json(hydrateTemplateRow(refreshed[0]));
   } catch (error) {
     console.error('Error saving template:', error);
     res.status(500).json({ error: 'Failed to save template' });
@@ -21378,7 +21507,6 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
-
 
 
 

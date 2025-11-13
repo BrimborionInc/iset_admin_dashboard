@@ -21,6 +21,7 @@ import {
 } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { apiFetch } from '../auth/apiClient';
+import ManageTemplatesWidgetHelp from '../helpPanelContents/manageTemplatesWidgetHelp';
 
 const tokenOptions = [
   { label: 'Applicant Name', value: '{applicant_name}' },
@@ -42,9 +43,9 @@ const defaultLocalizedContent = () => ({
   fr: { subject: '', textBody: '' }
 });
 
-const cloneLocalizedContent = (content) => ({
-  en: { ...content.en },
-  fr: { ...content.fr }
+const cloneLocalizedContent = (content = {}) => ({
+  en: { ...(content.en || { subject: '', textBody: '' }) },
+  fr: { ...(content.fr || { subject: '', textBody: '' }) }
 });
 
 const extractJson = (s) => {
@@ -63,7 +64,53 @@ const extractJson = (s) => {
   return null;
 };
 
-const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
+const STORAGE_KEY = 'manageTemplates.selection.v1';
+
+const safeSessionStorage = () => {
+  try {
+    if (typeof window === 'undefined' || !window.sessionStorage) {
+      return null;
+    }
+    return window.sessionStorage;
+  } catch (err) {
+    console.warn('[templates] sessionStorage unavailable', err);
+    return null;
+  }
+};
+
+const readStoredSelection = () => {
+  try {
+    const storage = safeSessionStorage();
+    if (!storage) return null;
+    const raw = storage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    console.warn('[templates] failed to read stored selection', err);
+    return null;
+  }
+};
+
+const writeStoredSelection = (payload) => {
+  try {
+    const storage = safeSessionStorage();
+    if (!storage) return;
+    storage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  } catch (err) {
+    console.warn('[templates] failed to persist selection', err);
+  }
+};
+
+const clearStoredSelection = () => {
+  try {
+    const storage = safeSessionStorage();
+    if (!storage) return;
+    storage.removeItem(STORAGE_KEY);
+  } catch (err) {
+    console.warn('[templates] failed to clear stored selection', err);
+  }
+};
+
+const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings, toggleHelpPanel }) => {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
@@ -74,11 +121,14 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
   const [baselineTemplate, setBaselineTemplate] = useState(null);
   const [translating, setTranslating] = useState(false);
   const [translateModal, setTranslateModal] = useState(null); // { mode: 'missing'|'confirm', fromLang, targetLang, fromLabel, targetLabel, message }
+  const [feedbackModal, setFeedbackModal] = useState(null); // { status: 'success'|'error', message: string }
   const textAreaRef = useRef(null);
   const selectionRef = useRef({
     en: { start: 0, end: 0 },
     fr: { start: 0, end: 0 }
   });
+  const storedSelectionRef = useRef(readStoredSelection());
+  const hasRestoredSelectionRef = useRef(false);
 
   useEffect(() => {
     fetchTemplates();
@@ -91,25 +141,70 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
       .then((data) => {
         setTemplates(Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []));
         setLoading(false);
+        attemptRestoreSelection();
       })
       .catch((error) => {
         console.error('Error fetching templates:', error);
         setLoading(false);
+        attemptRestoreSelection();
       });
   };
 
-  const handleTemplateSelection = (templateId) => {
+  const attemptRestoreSelection = () => {
+    if (hasRestoredSelectionRef.current) return;
+    const stored = storedSelectionRef.current;
+    if (!stored) {
+      hasRestoredSelectionRef.current = true;
+      return;
+    }
+
+    hasRestoredSelectionRef.current = true;
+    if (stored.type === 'existing' && stored.templateId) {
+      handleTemplateSelection(stored.templateId, { draftOverride: stored });
+      return;
+    }
+
+    if (stored.type === 'new') {
+      const localized = cloneLocalizedContent(stored.localized || defaultLocalizedContent());
+      setSelectedTemplate({
+        id: null,
+        name: stored.name || stored.baseline?.name || 'New Template',
+        status: 'Draft',
+        language: 'English',
+        subject: localized.en.subject || 'Subject line',
+        htmlBody: localized.en.textBody || '',
+        textBody: localized.en.textBody || ''
+      });
+      setLocalizedContent(localized);
+      setActiveLanguage(stored.activeLanguage || 'en');
+      selectionRef.current = {
+        en: { start: 0, end: 0 },
+        fr: { start: 0, end: 0 }
+      };
+      setBaselineTemplate({
+        name: stored.baseline?.name || 'New Template',
+        localized: cloneLocalizedContent(stored.baseline?.localized || defaultLocalizedContent())
+      });
+    }
+  };
+
+  const handleTemplateSelection = (templateId, options = {}) => {
+    const draftOverride = options.draftOverride;
     apiFetch(`/api/templates/${templateId}`)
       .then((response) => response.json())
       .then((data) => {
-        setSelectedTemplate(data);
+        const nextTemplate = {
+          ...data,
+          name: draftOverride?.name || data.name
+        };
+        setSelectedTemplate(nextTemplate);
         const localized = defaultLocalizedContent();
         localized.en.subject = data.localized?.en?.subject || data.subject || '';
         localized.en.textBody = data.localized?.en?.textBody || data.textBody || data.content || '';
         localized.fr.subject = data.localized?.fr?.subject || '';
         localized.fr.textBody = data.localized?.fr?.textBody || '';
         setLocalizedContent(localized);
-        setActiveLanguage('en');
+        setActiveLanguage(draftOverride?.activeLanguage || 'en');
         selectionRef.current = {
           en: { start: 0, end: 0 },
           fr: { start: 0, end: 0 }
@@ -118,40 +213,73 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
           name: data.name || '',
           localized: cloneLocalizedContent(localized)
         });
+        if (draftOverride?.localized) {
+          setLocalizedContent(cloneLocalizedContent(draftOverride.localized));
+        }
         // status temporarily dropped from UI/payload
       })
       .catch((error) => console.error('Error fetching template details:', error));
   };
 
-  const handleSaveTemplate = () => {
+  const handleSaveTemplate = async () => {
     if (!selectedTemplate || !baselineTemplate || !isDirty) return;
     const english = localizedContent.en;
-    const updatedTemplate = {
+    const payload = {
       name: selectedTemplate.name,
-      language: 'en',
+      localized: localizedContent,
       subject: english.subject,
       htmlBody: english.textBody,
       textBody: english.textBody,
-      content: english.textBody,
-      localized: localizedContent
+      content: english.textBody
     };
 
-    apiFetch(`/api/templates/${selectedTemplate.id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedTemplate)
-    })
-      .then((response) => response.json())
-      .then(() => {
-        alert("Template saved successfully!");
-        fetchTemplates();
+    try {
+      const response = await apiFetch(`/api/templates/${selectedTemplate.id ?? 'new'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = data?.error || 'Failed to save template.';
+        throw new Error(message);
+      }
+
+      fetchTemplates();
+      if (data) {
+        setSelectedTemplate(data);
+        setBaselineTemplate({
+          name: data.name,
+          localized: cloneLocalizedContent(data.localized || localizedContent)
+        });
+        setLocalizedContent(cloneLocalizedContent(data.localized || localizedContent));
+      } else {
         setBaselineTemplate({
           name: selectedTemplate.name,
           localized: cloneLocalizedContent(localizedContent)
         });
-      })
-      .catch((error) => console.error("Error saving template:", error));
+      }
+      setFeedbackModal({ status: 'success', message: 'Template saved successfully.' });
+    } catch (error) {
+      console.error('Error saving template:', error);
+      setFeedbackModal({ status: 'error', message: error.message || 'Failed to save template.' });
+    }
   };
+
+  useEffect(() => {
+    if (!selectedTemplate || !baselineTemplate) return;
+    const payload = {
+      type: selectedTemplate.id ? 'existing' : 'new',
+      templateId: selectedTemplate.id || null,
+      name: selectedTemplate.name || '',
+      localized: localizedContent,
+      baseline: baselineTemplate,
+      activeLanguage
+    };
+    storedSelectionRef.current = payload;
+    writeStoredSelection(payload);
+  }, [selectedTemplate, localizedContent, baselineTemplate, activeLanguage]);
 
   useEffect(() => {
     if (!selectedTemplate) return;
@@ -254,14 +382,34 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
     })
       .then((response) => {
         if (response.ok) {
-          alert("Template deleted successfully!");
           fetchTemplates();
+          if (selectedTemplate && templateToDelete.id === selectedTemplate.id) {
+            setSelectedTemplate(null);
+            setLocalizedContent(defaultLocalizedContent());
+            setBaselineTemplate(null);
+            storedSelectionRef.current = null;
+            clearStoredSelection();
+          }
           setTemplateToDelete(null);
+          setFeedbackModal({
+            status: 'success',
+            message: 'Template deleted successfully.'
+          });
         } else {
           console.error("Error deleting template:", response.statusText);
+          setFeedbackModal({
+            status: 'error',
+            message: 'Failed to delete template.'
+          });
         }
       })
-      .catch((error) => console.error("Error deleting template:", error));
+      .catch((error) => {
+        console.error("Error deleting template:", error);
+        setFeedbackModal({
+          status: 'error',
+          message: error.message || 'Failed to delete template.'
+        });
+      });
   };
 
   const previewSample = useMemo(() => ({
@@ -437,11 +585,11 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
           </Box>
         </Grid>
         <ColumnLayout columns={2} variant="text-grid">
-          <div style={{ border: '1px solid var(--color-border-divider-default)', borderRadius: '8px', padding: '16px', backgroundColor: 'var(--color-background-container-content)', minHeight: 320 }}>
+          <div style={{ border: '1px solid var(--color-border-divider-default)', borderRadius: '8px', padding: '16px', backgroundColor: 'var(--color-background-container-content)', minHeight: 280 }}>
             <FormField label={`Email body (${langLabel})`}>
               <textarea
                 ref={lang === activeLanguage ? textAreaRef : null}
-                rows={18}
+                rows={16}
                 className="textarea-native"
                 value={content.textBody}
                 onChange={(event) => {
@@ -455,13 +603,13 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
                 onFocus={captureSelection}
                 onMouseUp={captureSelection}
                 placeholder="Write the message applicants or staff will receive."
-                style={{ width: '100%', minHeight: 280, padding: '12px', borderRadius: '8px', border: '1px solid var(--color-border-input-default)' }}
+                style={{ width: '100%', minHeight: 201.6, padding: '12px', borderRadius: '8px', border: '1px solid var(--color-border-input-default)' }}
               />
             </FormField>
           </div>
-          <div style={{ border: '1px solid var(--color-border-divider-default)', borderRadius: '8px', padding: '16px', backgroundColor: 'var(--color-background-container-content)', minHeight: 320 }}>
+          <div style={{ border: '1px solid var(--color-border-divider-default)', borderRadius: '8px', padding: '16px', backgroundColor: 'var(--color-background-container-content)', minHeight: 280 }}>
             <Header variant="h4">Preview (sample data)</Header>
-            <Box padding="m" style={{ backgroundColor: 'var(--color-background-layout-panel, #f8f8f8)', minHeight: 250 }}>
+            <Box padding="m" style={{ backgroundColor: 'var(--color-background-layout-panel, #f8f8f8)', minHeight: 220 }}>
               <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
                 {renderPreview(content.textBody || 'No content yet.')}
               </pre>
@@ -477,7 +625,19 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
       header={
         <Header
           variant="h2"
-          actions={<Button onClick={handleNewTemplate}>New Template</Button>}
+          description="Draft localized email templates for applicant and staff events. Select a template, edit the bilingual subject and body tabs, then save to publish updates for Notification Settings."
+          info={
+            <Link
+              variant="info"
+              onFollow={() =>
+                toggleHelpPanel &&
+                ManageTemplatesWidgetHelp &&
+                toggleHelpPanel(<ManageTemplatesWidgetHelp />, 'Template Editor Help')
+              }
+            >
+              Info
+            </Link>
+          }
         >
           Template Editor
         </Header>
@@ -493,44 +653,51 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
         />
       }
     >
-      <Grid gridDefinition={[{ colspan: 4 }, { colspan: 8 }]}> 
-        <Container header={<Header variant="h3">Template Library</Header>}>
-          <SpaceBetween size="m">
-            <Table
-              items={templates}
-              loading={loading}
-              trackBy="id"
-              columnDefinitions={[
-                {
-                  id: 'name',
-                  header: 'Name',
-                  cell: item => (
-                    <Link onClick={() => handleTemplateSelection(item.id)}>
-                      {item.name}
-                    </Link>
-                  )
-                },
-                {
-                  id: 'actions',
-                  header: ' ',
-                  cell: item => (
-                    <Button
-                      variant="icon"
-                      iconName="close"
-                      ariaLabel={`Delete ${item.name}`}
-                      onClick={() => { setTemplateToDelete(item); setShowDeleteModal(true); }}
-                    />
-                  )
-                }
-              ]}
-            />
-          </SpaceBetween>
-        </Container>
+      <Grid gridDefinition={[{ colspan: 4 }, { colspan: 8 }]}>
+        <Table
+          header={
+            <Header
+              variant="h3"
+              description="Select a template to load it into the editor. Use the action column to remove unused entries."
+              actions={<Button onClick={handleNewTemplate}>New Template</Button>}
+            >
+              Template Library
+            </Header>
+          }
+          items={templates}
+          loading={loading}
+          trackBy="id"
+          stripedRows
+          columnDefinitions={[
+            {
+              id: 'name',
+              header: 'Name',
+              cell: item => (
+                <Link onClick={() => handleTemplateSelection(item.id)}>
+                  {item.name}
+                </Link>
+              )
+            },
+            {
+              id: 'actions',
+              header: 'Actions',
+              cell: item => (
+                <Button
+                  variant="icon"
+                  iconName="close"
+                  ariaLabel={`Delete ${item.name}`}
+                  onClick={() => { setTemplateToDelete(item); setShowDeleteModal(true); }}
+                />
+              )
+            }
+          ]}
+        />
 
         <Container
           header={
             <Header
               variant="h3"
+              description="Edit subject lines and email bodies for each locale. Use the Insert field menu to drop placeholders, translate between English and French as needed, then save when both tabs look good."
               actions={
                 selectedTemplate ? (
                   <SpaceBetween direction="horizontal" size="s">
@@ -596,6 +763,26 @@ const ManageTemplates = ({ actions, dragHandleAriaLabel, i18nStrings }) => {
           )}
         </Container>
       </Grid>
+
+      {feedbackModal && (
+        <Modal
+          visible
+          onDismiss={() => setFeedbackModal(null)}
+          closeAriaLabel="Close modal"
+          header={feedbackModal.status === 'success' ? 'Template updated' : 'Action failed'}
+          footer={
+            <SpaceBetween direction="horizontal" size="s">
+              <Button variant="primary" onClick={() => setFeedbackModal(null)}>
+                Close
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <Box>
+            {feedbackModal.message}
+          </Box>
+        </Modal>
+      )}
 
       {translateModal && (
         <Modal

@@ -52,3 +52,4 @@ The runner executes automatically at startup unless disabled (details below).
 - The runner uses the same MySQL connection pool as the app; ensure database credentials are valid before startup.
 - For long deployments, consider running with `AUTO_MIGRATIONS_DRY_RUN=true` first to see what will execute, then remove the flag and restart.
 - Keep destructive operations (drops, truncates) in their own migration files so you can review logs to confirm they ran.
+- **Pitfall (2025-11-06):** A localized-template migration was mistakenly dropped into `db/migrations/`, so the runner never applied it. Admin console migrations must live in `admin-dashboard/sql/`; double-check the path before restarting the server.
