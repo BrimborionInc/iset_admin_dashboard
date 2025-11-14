@@ -17,8 +17,8 @@ Last Updated: 2025-10-07
 - **Draft/event operations** – Only authenticated users can access intake drafts (`server.js:6560-6700`) and messaging endpoints (`server.js:7562+`), using the same middleware path.
 
 ## Data Handling & Privacy
-- **Server-side intake state** - Dynamic intake steps store answers in backend memory (`server.js:1522-1900`) and MySQL drafts, never in browser storage. Ephemeral caches must be cleared as soon as the wizard lifecycle ends: explicit logout, session expiration/new login, save-and-finish-later (after persisting the draft), successful submission, or the inactivity timeout (`server.js:1280-1295`, `server.js:1517-1534`, `server.js:1891-1940`, `server.js:2774-2800`). Timeout duration is configurable via `iset_runtime_config` (`scope='runtime', k='intake.ephemeral_ttl_minutes'`; default 5 minutes) and the front-end warning dialog follows `scope='runtime', k='intake.session_timeout_warning_seconds'` (default 30 seconds).
-- **Aggregate JSON controls** – `/api/intake-json` merges step data server-side (`server.js:5452-5550`), enabling resume flow without exposing history locally.
+- **Server-side intake state** – Dynamic intake steps keep answers off the client by combining an in-memory cache with a shared database table (`input_json_state`). The table is keyed by `(user_id, session_token)` and automatically prunes via `expires_at` so data exists only during the session (defaults to ~30 minutes). Lifecycle hooks clear both memory and DB entries on logout, save-and-finish-later, successful submission, or session timeout (`server.js:1660-2100`). TTL duration remains configurable via `iset_runtime_config` (`scope='runtime', k='intake.ephemeral_ttl_minutes'`).
+- **Aggregate JSON controls** – `/api/intake-json` now persists merge patches to `input_json_state` (`server.js:1719-1905`), ensuring load-balanced instances read the same state without ever exposing history in browser storage.
 - **Sensitive env segregation** – Runtime pulls configuration from `.env` with secrets excluded from source control (`docs/ops/env-vars.md`), keeping credentials out of the bundle.
 
 ## File Upload Protection
