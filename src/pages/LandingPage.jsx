@@ -32,11 +32,19 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.2.0 (6 Nov 2025)',
-      description: 'Release 0.2.0 introduces the Caseworking module for post-approval case management, plus intake, assessment, and eligibility updates.',
+      sectionTitle: 'Release Notes - v0.2.1 (14 Nov 2025)',
+      description: 'Release 0.2.1 focuses on communication: program staff now have a Notification Template Editor plus toggles that determine which templates go out with each event.',
       features: {
         heading: 'Updates',
         sections: [
+          {
+            title: 'Release v0.2.1 — Notification templates',
+            paragraphs: [
+              'New Notification Template Editor lets administrators adjust submission confirmations, secure message alerts, and decision emails with inline formatting controls, placeholder hints, and preview—all inside the dashboard.',
+              'Notification Settings are now live: when an event/role is enabled and linked to a template, the applicant/staff emails use that exact copy with the appropriate placeholders.',
+              'Template helpers highlight the available tokens (tracking ID, applicant name, portal link, etc.) so the final email matches the data captured in intake.'
+            ]
+          },
           {
             title: 'Release v0.2.0 — Case management',
             paragraphs: [
@@ -145,6 +153,7 @@ const copy = {
           { title: 'Workflow Studio', paragraphs: ['The "flowchart" views do not pan or zoom consistently, making drag interactions unreliable.'] },
           { title: 'Intake Step Editor', paragraphs: ['Dragging components within the workspace causes flicker and the insertion point is unclear.'] },
           { title: 'Notification Settings', paragraphs: ['Email notifications are currently hard-wired: account verification, password reset, submission confirmation, secure message alerts, and NWAC ISET Team triage notices. The Notification Settings dashboard is disabled until configurable templates return.'] },
+          { title: 'Template Editor (checkbox layout)', paragraphs: ['Checkbox options can overlap their labels in dense blocks; refresh or collapse the section to restore spacing while we patch the layout.'] },
           { title: 'Default French Strings', paragraphs: ['Certain intake components ship with default French text that interferes with AI-driven translation.'] },
           { title: 'AI Support', paragraphs: ['The support assistant is not yet fully trained on the solution and can drift off topic.'] }
         ]
@@ -161,7 +170,8 @@ const copy = {
               'In the user dashboard, rename Applications to My Applications.',
               'Create dummy draft update.',
               'Include a new widget in the ISET application assessment dashboard for document checklist.',
-              'Document Upload function in Documents Widget.'
+              'Document Upload function in Documents Widget.',
+              'Convert the mileage entry in the intake wizard from a dollar amount to a distance field and apply cost calculations automatically.'
             ]
           }
         ]

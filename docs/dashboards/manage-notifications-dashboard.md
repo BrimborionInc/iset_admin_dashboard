@@ -20,6 +20,7 @@ Last updated: 2025-10-01
 - Role comparisons rely on canonical string values. Ensure backend payloads emit the normalised keys used in the widget (`ApplicationAssessor`, `applicant`, etc.).
 - Templates are optional. When none is selected the backend stores `NULL`; dispatchers fall back to stock messaging until template rendering is implemented.
 - `bell_alert` toggles currently drive staff-facing internal notifications via `shared/events/notificationDispatcher`. `email_alert` values are persisted for each role/event and will power SES delivery once the intake service hooks into the same configuration.
+- When a template is assigned the intake service reads the `localized` JSON blob (English + French bodies) and picks the applicant’s preferred language. Leave both language blocks populated to ensure bilingual delivery; missing translations automatically fall back to English and log the fallback.
 
 ## Follow-ups
 - Add an inline refresh button so administrators can rehydrate the matrix without reloading the board.

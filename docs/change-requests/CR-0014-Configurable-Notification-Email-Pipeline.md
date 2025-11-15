@@ -81,6 +81,7 @@ Notification toggles, templates, and applicant rows already exist in the admin d
 - [ ] Draft technical design for `NotificationConfigService` caching/invalidation.
 - [ ] Complete Template Editor dashboard polish (palette defaults, header links) and document the split in `docs/dashboards/template-editor-dashboard.md`.
 - [ ] Define SES verification + sandbox exit criteria in `docs/ops` runbooks.
+- [ ] Store the test SES access keys in Parameter Store (`/nwac/test/portal/env`) and document the redeploy procedure so portal `.env` always contains `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
 - [x] Implement intake-side template renderer (loads `notification_setting` + `notification_template`, applies token substitutions, provides fallback copy) and replace the hard-coded SES copy path for applicant submission emails.
 - [x] Extend renderer integration to secure message + decision notifications (ensure logging/fallbacks remain consistent).
 - [x] Add unit/integration tests plus structured logging to cover renderer fallbacks, missing templates, and token substitution failures.
@@ -93,6 +94,7 @@ Notification toggles, templates, and applicant rows already exist in the admin d
 - 2025-11-09: Added `notifications/templateRenderer.js`, wired submission confirmations to template-driven SES payloads with placeholder support; next up secure message + decision flows.
 - 2025-11-09: Secure message + decision notifications now use the shared renderer (event-driven context, placeholder support, fallbacks). Admin dashboard token palette updated with the new placeholders.
 - 2025-11-10: Documented the token contract & caching plan, added structured renderer logging + `node:test` coverage (`notifications/__tests__/templateRenderer.test.js`), and exposed `npm run test:renderer` for smoke checks.
+- 2025-11-14: Resolved test SES send failures by rotating the IAM access keys (`SES_backend`) and updating `/nwac/test/portal/.env` so AWS credentials deploy with the portal; portal + admin PM2 processes confirmed healthy afterward.
 
 ---
 
