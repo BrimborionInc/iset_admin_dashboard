@@ -17805,6 +17805,23 @@ app.post('/api/cases/:caseId/notes', async (req, res) => {
     }
     await connection.commit();
     const note = await fetchCaseNoteById(caseId, noteId);
+    try {
+      const { actorId, actorName } = resolveRequestActor(req);
+      await captureCaseEvent({
+        type: 'note_added',
+        caseId,
+        payload: {
+          note_id: noteId,
+          body: trimmed,
+          is_pinned: Boolean(isPinned),
+          follow_up_at: followUpDate || null,
+        },
+        actorId,
+        actorName,
+      });
+    } catch (eventErr) {
+      console.warn('[case-notes] failed to emit note_added event', eventErr?.message || eventErr);
+    }
     return res.status(201).json(note);
   } catch (err) {
     if (connection) {
@@ -21232,7 +21249,13 @@ app.put('/api/cases/:id', async (req, res) => {
         payload: {
           evaluator_name: actorName || null,
           tracking_id: trackingId,
-          message: 'NWAC review submitted.',
+          outcome: body.assessment_nwac_review || null,
+          reason: body.assessment_nwac_reason || null,
+          message: body.assessment_nwac_review === 'approve'
+            ? 'NWAC review approved.'
+            : body.assessment_nwac_review
+              ? 'NWAC review rejected.'
+              : 'NWAC review submitted.',
         },
 
         trackingId,

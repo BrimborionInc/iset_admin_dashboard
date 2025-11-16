@@ -1152,40 +1152,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       if (updatedRowVersion) {
         setApplicationRowVersion(updatedRowVersion);
       }
-      // 2. Log NWAC review submitted event
-      const userId = caseData?.user_id || caseData?.applicant_user_id || null;
-      if (userId) {
-        await apiFetch('/api/events', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'nwac_review_submitted',
-            caseId: caseData.id,
-            payload: {
-              message: 'NWAC review submitted.',
-              nwac_review: assessment.nwacReview,
-              timestamp: new Date().toISOString(),
-            },
-          }),
-        });
-        // 4. Log event for approval/rejection
-        await apiFetch('/api/events', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: assessment.nwacReviewStatus === 'approve' ? 'case_approved' : 'case_rejected',
-            caseId: caseData.id,
-            payload: {
-              message: assessment.nwacReviewStatus === 'approve' ? 'Case approved by NWAC.' : 'Case rejected by NWAC.',
-              reason: assessment.nwacReason || '',
-              nwac_review: assessment.nwacReview,
-              timestamp: new Date().toISOString(),
-            },
-          }),
-        });
-
-      }
-      // 4. Refresh caseData to reflect new status
+      // Events emitted server-side; refresh caseData to reflect new status
       const fallbackUpdates = {
         status: payload.status,
         statusRaw: payload.status,

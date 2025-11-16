@@ -113,7 +113,13 @@ const formatEventMessage = (event, actorDisplay) => {
     }
     case 'nwac_review_submitted': {
       const reviewer = trimValue(payload.evaluator_name) || actorDisplay;
-      const base = 'NWAC review submitted';
+      const outcomeRaw = trimValue(payload.outcome);
+      const outcome = outcomeRaw ? outcomeRaw.replace(/_/g, ' ') : '';
+      const reason = trimValue(payload.reason);
+      const parts = ['NWAC review'];
+      if (outcome) parts.push(`(${outcome})`);
+      let base = parts.join(' ');
+      if (reason) base += `: ${reason}`;
       return ensureSentence(reviewer ? `${base} by ${reviewer}` : base);
     }
     case 'application_submitted': {
