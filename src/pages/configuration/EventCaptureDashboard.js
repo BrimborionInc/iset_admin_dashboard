@@ -11,6 +11,8 @@ import Spinner from '@cloudscape-design/components/spinner';
 import Container from '@cloudscape-design/components/container';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import { apiFetch } from '../../auth/apiClient';
+import Modal from '@cloudscape-design/components/modal';
+import Button from '@cloudscape-design/components/button';
 
 const severityToColor = (severity) => {
   switch (severity) {
@@ -55,6 +57,8 @@ const EventCaptureDashboard = () => {
   const [state, setState] = useState({ categories: [], updatedAt: null });
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [flashMessages, setFlashMessages] = useState([]);
+  const [dependencyPrompt, setDependencyPrompt] = useState(null);
+  const [dependencyActionLoading, setDependencyActionLoading] = useState(false);
   // TODO: add search/filter and pagination once the catalogue grows beyond a handful of categories.
 
   const pushFlash = useCallback((item) => {
@@ -103,6 +107,28 @@ const EventCaptureDashboard = () => {
     loadState();
   }, [loadState]);
 
+  const fetchDependencies = useCallback(async (typeId) => {
+    const response = await apiFetch(`/api/admin/event-capture-dependencies?type=${encodeURIComponent(typeId)}`);
+    if (!response.ok) {
+      const message = await safeReadMessage(response);
+      throw new Error(message || 'Failed to check dependencies');
+    }
+    return response.json();
+  }, []);
+
+  const disableNotificationsForEvent = useCallback(async (typeId) => {
+    const response = await apiFetch('/api/admin/event-notifications/disable', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: typeId }),
+    });
+    if (!response.ok) {
+      const message = await safeReadMessage(response);
+      throw new Error(message || 'Failed to disable notifications');
+    }
+    return response.json();
+  }, []);
+
   const updateRules = useCallback(async (updates, successMessage) => {
     if (!Array.isArray(updates) || updates.length === 0) return;
     setSaving(true);
@@ -138,12 +164,30 @@ const EventCaptureDashboard = () => {
     ], `${category.label} capture ${nextEnabled ? 'enabled' : 'disabled'}.`);
   }, [updateRules]);
 
-  const handleTypeToggle = useCallback((category, type, nextEnabled) => {
+  const handleTypeToggle = useCallback(async (category, type, nextEnabled) => {
     if (!category || !type) return;
-    updateRules([
-      { categoryId: category.id, typeId: type.id, enabled: nextEnabled }
-    ], `${type.label} ${nextEnabled ? 'enabled' : 'disabled'}.`);
-  }, [updateRules]);
+    if (nextEnabled) {
+      updateRules([
+        { categoryId: category.id, typeId: type.id, enabled: nextEnabled }
+      ], `${type.label} enabled.`);
+      return;
+    }
+    setSaving(true);
+    try {
+      const deps = await fetchDependencies(type.id);
+      if (deps && deps.active > 0) {
+        setDependencyPrompt({ category, type, deps });
+      } else {
+        updateRules([
+          { categoryId: category.id, typeId: type.id, enabled: nextEnabled }
+        ], `${type.label} disabled.`);
+      }
+    } catch (err) {
+      pushFlash({ type: 'error', header: 'Update failed', content: err.message });
+    } finally {
+      setSaving(false);
+    }
+  }, [fetchDependencies, pushFlash, updateRules]);
 
   const items = useMemo(() => buildCategoryItems(state.categories || []), [state]);
 
@@ -318,6 +362,75 @@ const EventCaptureDashboard = () => {
           </StatusIndicator>
         )}
       </SpaceBetween>
+      {dependencyPrompt && (
+        <Modal
+          visible
+          onDismiss={() => dependencyActionLoading ? null : setDependencyPrompt(null)}
+          header="Disable capture or notifications?"
+          closeAriaLabel="Close modal"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button onClick={() => setDependencyPrompt(null)} disabled={dependencyActionLoading}>Cancel</Button>
+              <Button
+                variant="normal"
+                loading={dependencyActionLoading}
+                onClick={async () => {
+                  if (!dependencyPrompt?.type) return;
+                  setDependencyActionLoading(true);
+                  try {
+                    await disableNotificationsForEvent(dependencyPrompt.type.id);
+                    await loadState();
+                    setDependencyPrompt(null);
+                    pushFlash({ type: 'success', content: 'Notifications disabled; capture left enabled.' });
+                  } catch (err) {
+                    pushFlash({ type: 'error', header: 'Update failed', content: err.message });
+                  } finally {
+                    setDependencyActionLoading(false);
+                  }
+                }}
+              >
+                Disable notifications only
+              </Button>
+              <Button
+                variant="primary"
+                loading={dependencyActionLoading}
+                onClick={async () => {
+                  if (!dependencyPrompt?.type || !dependencyPrompt?.category) return;
+                  setDependencyActionLoading(true);
+                  try {
+                    await disableNotificationsForEvent(dependencyPrompt.type.id);
+                    await updateRules([
+                      { categoryId: dependencyPrompt.category.id, typeId: dependencyPrompt.type.id, enabled: false }
+                    ], `${dependencyPrompt.type.label} disabled with notifications.`);
+                    setDependencyPrompt(null);
+                  } catch (err) {
+                    pushFlash({ type: 'error', header: 'Update failed', content: err.message });
+                  } finally {
+                    setDependencyActionLoading(false);
+                  }
+                }}
+              >
+                Disable capture and notifications
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            <Box>
+              <Box fontWeight="bold">{dependencyPrompt.type?.label}</Box>
+              <Box color="text-label">This type has active notification settings. Disabling capture stops audit logging and removes the trigger.</Box>
+            </Box>
+            <Box>
+              <Box>Notification settings referencing this event: {dependencyPrompt.deps?.active ?? 0} active / {dependencyPrompt.deps?.total ?? 0} total.</Box>
+              {dependencyPrompt.deps?.byRole && Object.keys(dependencyPrompt.deps.byRole).length > 0 && (
+                <Box color="text-label">
+                  Roles: {Object.entries(dependencyPrompt.deps.byRole).map(([role, count]) => `${role} (${count})`).join(', ')}
+                </Box>
+              )}
+            </Box>
+          </SpaceBetween>
+        </Modal>
+      )}
     </ContentLayout>
   );
 };

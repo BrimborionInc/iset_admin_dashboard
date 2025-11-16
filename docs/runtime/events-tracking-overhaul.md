@@ -171,47 +171,28 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 - Critical portal events (e.g., submission receipts) can be earmarked for locking later, but at this stage every type remains configurable.
 - Ensure RBAC updates reflect that only authorised system administrators can alter these shared settings.
 
+
 ## Current Event Type Inventory
 
-### Seeded Catalogue (`iset_event_type`)
-| event_type | Label | Notes |
-| --- | --- | --- |
-| application_started | Application started | First successful intake step transition with applicant input |
-| draft_saved | Draft saved for later | Explicit “Save and finish later” action |
-| draft_deleted | Draft deleted | Applicant removes a saved draft from their dashboard |
-| application_submitted | Application submitted | Visible in dev data; emitted by portal submission flow |
-| submission_acknowledged | Submission acknowledged | Confirmation screen rendered with tracking details |
-| case_assigned | Case assigned | Seeded but no active emitter in current admin code |
-| case_unassigned | Case unassigned | Seeded but no active emitter |
-| document_uploaded | Document uploaded | Present in live data; emitted when files are adopted |
-| message_deleted | Message deleted | Seeded; no emitter located |
-| message_received | Message received | Seeded; no emitter located |
-| message_sent | Message sent | Seeded; no emitter located |
-| system_error | System error | Reserved for automated fault reporting |
+### Catalogue vs emitters (2025-09-30)
+- **Case Lifecycle**: all types shown in the admin Event Types UI (`status_changed`, `case_assigned`, `case_reassigned`, `case_unassigned`, `case_watch_added`, `case_watch_removed`) are in the catalog and have emitters wired via `captureCaseEvent`/`publishAssignmentEvent`.
+- **Assessment**: `assessment_submitted`, `nwac_review_submitted`, and `conflict_declaration_signed` emit during the assessment update flow; catalog is up to date.
+- **Application Submission**: portal currently emits `application_submitted`; other portal types (`application_started`, `draft_saved`, `draft_deleted`, `submission_acknowledged`) are catalogued but still need portal emitters migrated to the shared service.
+- **Documents/Notes/Messaging/System**: document uploads are now emitted from admin flows; messaging types remain draft-only, with `message_received` renamed to `message_received` (label “Secure message posted”) and `message_sent` removed until emitters are added.
 
-### Observed in `iset_case_event` (dev database)
-- application_submitted
-- document_uploaded
-- status_changed *(inserted by backend helper; not registered in the catalogue)*
+### Keep catalog and emitters in sync
+- Treat `shared/events/catalog.js` as the source of truth; update it in the same PR when adding a new emitter or changing severity/labels.
+- When adding a new flow, wire `emitCaseEvent`/`captureCaseEvent` so capture rules apply automatically and include payload fields the UI renders (actor, message, tracking id).
+- If a feature is portal-only, mark `source: 'portal'`; lock types (`locked: true`) only when capture must never be disabled.
+- Remove or mark `draft: true` for placeholders (`followup_due`, `note_added`, messaging events) if scope changes. (`documents_overdue` was removed from the catalog and should not be reintroduced.)
 
-### Backend Auto-Emitted (bypassing catalogue)
-- status_changed � added in `PUT /api/cases/:id` when coordinator status changes.
-- assessment_submitted – emitted alongside assessment submission.
-- nwac_review_submitted – emitted when NWAC review payload is present.
-- conflict_declaration_signed – emitted when an assessor signs the conflict-of-interest declaration gate in the coordinator widget.
-- case_approved / case_rejected � sent by the coordinator widget via `/api/events`.
-- documents_overdue � referenced by reporting queries; no matching emitter located.
-
-### Frontend Expectations & Draft Event Types
-- case_reassigned � rendered in `CaseUpdates` widget, but no current emitter.
-- note_added � expected by `CaseUpdates`; relies on future notes feature.
-- followup_due � expected by `CaseUpdates`; likely tied to task SLA logic.
-
-### Gaps Identified
-- Several emitted event types (`status_changed`, `assessment_submitted`, `nwac_review_submitted`, `case_approved`, `case_rejected`) are missing from `iset_event_type`, so metadata (label, alert variant) is unavailable in the UI.
-- Seeded catalogue entries (e.g., `case_assigned`, `message_sent`) have no emitting code paths in the current admin backend, suggesting either unfinished features or portal-only flows.
-- The configuration dashboard will need an authoritative list that merges catalogue entries with code expectations; we should validate each before deciding whether to lock or retire them later.
-- Future retention/compliance requirements may introduce additional event types; keep the catalogue extensible and versioned.
+### Maintenance checklist for new modules (e.g., financial management)
+1. Define catalog entries (category, type id, label, severity, source, draft/locked) in `shared/events/catalog.js`.
+2. Implement emitters alongside the feature using the shared service; avoid ad-hoc SQL inserts.
+3. Confirm capture toggles work by hitting the Event Capture config API and ensuring events stop/start when disabled/enabled.
+4. Add UI coverage: labels/badges in widgets should handle the new type gracefully and tolerate missing optional payload fields.
+5. Seed at least one sample event (dev/fixtures) so timelines show the new type during demos and regression tests.
+6. Update this section with the new type plus the emitting endpoint/module to avoid drift between config UI, catalog, and code.
 
 ## Configuration Dashboard UI Plan
 - **Navigation**: Add a new board under the existing "Configuration" category in the left-hand navigation (e.g., `/configuration/events`). Menu entry visible only to `System Administrator` role via RBAC matrix updates.
@@ -330,11 +311,6 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 - Finalise scope for Step 2 (legacy code removal) and create tracking tasks.
 - Draft schema migration scripts and event service interface skeletons.
 - Define API contracts (OpenAPI/TypeScript types) for frontend and portal teams.
-
-
-
-
-
 
 
 

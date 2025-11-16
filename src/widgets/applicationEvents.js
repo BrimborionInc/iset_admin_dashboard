@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { apiFetch } from '../auth/apiClient';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Header, ButtonDropdown, Table, StatusIndicator, Box, Spinner, TextFilter, SpaceBetween, Link } from '@cloudscape-design/components';
+import { Header, ButtonDropdown, Table, StatusIndicator, Box, Spinner, TextFilter, SpaceBetween, Link, Button } from '@cloudscape-design/components';
 import ApplicationEventsHelp from '../helpPanelContents/applicationEventsHelp';
 
 const STATUS_LABELS = {
@@ -147,19 +147,26 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
 
   const caseId = caseData?.id || caseData?.case_id || null;
 
-  useEffect(() => {
+  const loadEvents = useCallback(async (options = {}) => {
+    const { silent = false } = options;
     if (!caseId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
-    apiFetch('/api/cases/' + caseId + '/events')
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch events');
-        return res.json();
-      })
-      .then(data => setEvents(Array.isArray(data) ? data : []))
-      .catch(() => setError('Failed to load events'))
-      .finally(() => setLoading(false));
+    try {
+      const res = await apiFetch('/api/cases/' + caseId + '/events');
+      if (!res.ok) throw new Error('Failed to fetch events');
+      const data = await res.json();
+      setEvents(Array.isArray(data) ? data : []);
+    } catch (_) {
+      setError('Failed to load events');
+    } finally {
+      setLoading(false);
+    }
   }, [caseId]);
+
+  useEffect(() => {
+    loadEvents();
+  }, [loadEvents]);
 
   const decoratedEvents = useMemo(() => events.map(decorateEvent), [events]);
 
@@ -239,6 +246,17 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
                 Info
               </Link>
             ) : undefined
+          }
+          actions={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="icon"
+                iconName="refresh"
+                ariaLabel="Refresh events"
+                onClick={() => loadEvents({ silent: false })}
+                disabled={loading || !caseId}
+              />
+            </SpaceBetween>
           }
         >
           Events

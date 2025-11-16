@@ -3015,48 +3015,6 @@ function getRequesterIdentity(req) {
   };
 }
 
-const MESSAGE_EVENT_TYPE = 'message_received';
-
-async function dispatchMessageReceivedEmail({ pool, event, logger = console }) {
-  try {
-    if (!event || event.event_type !== MESSAGE_EVENT_TYPE) return;
-    const payload = event.event_data || {};
-    const toUserId = payload.to_user_id || payload.recipient_id || null;
-    const trackingId = payload.tracking_id || event.tracking_id || null;
-    const messageSubject = payload.message_subject || payload.subject || null;
-    const applicantName = payload.to_display_name || payload.applicant_name || null;
-    const assessorName = payload.from_display_name || payload.assessor_name || null;
-    const senderDisplayName = payload.from_display_name || null;
-    const recipientDisplayName = payload.to_display_name || null;
-
-    const [settings] = await pool.query(
-      `SELECT 1 FROM notification_setting
-         WHERE event = ? AND enabled = 1 AND COALESCE(email_alert,0) <> 0`,
-      [MESSAGE_EVENT_TYPE]
-    );
-    if (!settings || settings.length === 0) return;
-
-    const resolvedUserId = toUserId || event.actor_id || null;
-    if (!resolvedUserId) {
-      logger.warn('[notifications] message_received event missing recipient user id');
-      return;
-    }
-
-    await sendSecureMessageAlert({
-      pool,
-      userId: resolvedUserId,
-      trackingId,
-      messageSubject,
-      applicantName,
-      assessorName,
-      recipientDisplayName,
-      senderDisplayName,
-    });
-  } catch (err) {
-    logger.error('[notifications] message_received email dispatch failed', err?.message || err);
-  }
-}
-
 async function fetchCaseRow(caseId) {
   const [[row]] = await pool.query(
     'SELECT id, application_id, client_id, assigned_to_user_id, status FROM iset_case WHERE id = ? LIMIT 1',
@@ -4377,6 +4335,11 @@ const { CognitoIdentityProviderClient, ListUsersInGroupCommand, DescribeUserPool
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
+const intakeEnvPath = path.resolve(__dirname, '../ISET-intake/.env');
+if (fs.existsSync(intakeEnvPath)) {
+  require('dotenv').config({ path: intakeEnvPath, override: false });
+  console.log('Loaded intake .env fallback from:', intakeEnvPath);
+}
 const cheerio = require('cheerio');
 const { sendSecureMessageAlert, sendDecisionOutcome } = require('../ISET-intake/notifications/applicantEmailNotifications');
 const axios = require('axios');
@@ -7517,465 +7480,7 @@ app.patch('/api/admin/event-capture-rules', async (req, res) => {
     res.json(state);
   } catch (err) {
     console.error('[events] failed to update capture rules', err);
-     res.status(500).json({ error: 'event_capture_rules_update_failed', message: err.message });
-  }
-});
-
-const DUMMY_HISTORY_STEPS = Object.freeze([
-  'consent',
-  'indigenous-declaration',
-  'conflict-of-interest',
-  'social-insurance-number',
-  'name',
-  'date-of-birth',
-  'gender',
-  'contact-information',
-  'emergency-contact',
-  'indigenous-legal-identity',
-  'registration-number',
-  'home-community',
-  'demographics',
-  'disability-and-social-assistance',
-  'labour-force-and-education-history',
-  'employment-goals-and-barriers',
-  'financial-supports-requested',
-  'household-income',
-  'household-expenses',
-  'summary-page',
-  'iset-document-upload',
-  'legal-and-submission'
-]);
-
-const DUMMY_DRAFTS = [
-  {
-    id: 'anne-applicant',
-    registrationPrefix: 'ABC',
-    payload: {
-      'consent': { name: 'Anne Applicant', signed: true },
-      'indigenous-affiliation-declaration': 'ABC Community',
-      'indigenous_declaration': { name: 'Anne Applicant', signed: true },
-      'conflict_of_interest': 'no_conflict',
-      'conflict_applicant_signature': { name: 'Anne Applicant', signed: true },
-      'social-insurance-number': '123 456 789',
-      'first-name': 'Anne',
-      'last-name': 'Applicant',
-      'middle-names': 'Jane',
-      'preferred-name': 'Anne',
-      'dob': '1990-01-01',
-      'biological_sex': 'female',
-      'gender_identity': 'female',
-      'address-street-address': '123 Main Street',
-      'address-city': 'Kimmirut',
-      'address-province': 'nu',
-      'address-postcode': 'X0A 0T0',
-      'telephone-day': '(514) 555-1234',
-      'contact-email-address': 'bill@sillery.co.uk',
-      'telephone-alt': '(514) 555-9876',
-      'address-mailing-address': '',
-      'emergency-contact-name': 'Carrie',
-      'emergency-contact-telephone': '(514) 924 6602',
-      'emergency-contact-relationship': 'Aunt',
-      'legal-indigenous-identity': 'metis',
-      'registration-number': 'QC-12345',
-      'home-comminuty': 'Kimmirut',
-      'preferred-language': 'en',
-      'visible-minority': 'true',
-      'marital-status': 'married',
-      'dependent-children': 1,
-      'has-disability': 1,
-      'social-assistance': 1,
-      'labour-force-status': 'underemployed',
-      'example-radio-2': 'post_secondary_training',
-      'education-year': '2010',
-      'education-location': 'ns',
-      'long-term-goal': 'Launch an online language mentorship program.',
-      'barriers': ['funding', 'lack-of-job-opportunities', 'other'],
-      'target-program': 'group',
-      'requested-supports': ['books', 'living', 'other'],
-      'disability-support': 1,
-      'income-employment': '1000',
-      'income-spousal': '2100',
-      'income-social-assist': '0',
-      'income-child-support': '100',
-      'income-child-benefit': '0',
-      'income-jordans': '10',
-      'income-band-funding': '0',
-      'income-alimony': '0',
-      'income-other': 'Seasonal craft sales',
-      'income-other-description': 'Arts co-op stipend',
-      'expenses-rent': 1234,
-      'expenses-groceries': 2314,
-      'expenses-utilities': 2134,
-      'expenses_transport': ['mileage', 'buss_pass'],
-      'expenses-other-list': 'School supplies',
-      'example-input-5': '500',
-      'status-card': [],
-      'govt-id': [],
-      'acceptance-letter': [],
-      'applicant-pay-stubs': [],
-      'spouse-pay-stubs': [],
-      'band-denial-letter': [],
-      'band-funding-letter': [],
-      'medical-documents': [],
-      'applicant_signature': { name: 'Anne Applicant', signed: true }
-    }
-  },
-  {
-    id: 'aiyana-bear',
-    registrationPrefix: 'FN',
-    payload: {
-      'consent': { name: 'Aiyana Bear', signed: true },
-      'indigenous-affiliation-declaration': 'Maskwacis Cree',
-      'indigenous_declaration': { name: 'Aiyana Bear', signed: true },
-      'conflict_of_interest': 'no_conflict',
-      'conflict_applicant_signature': { name: 'Aiyana Bear', signed: true },
-      'social-insurance-number': '000 111 222',
-      'first-name': 'Aiyana',
-      'last-name': 'Bear',
-      'middle-names': 'Skye',
-      'preferred-name': 'Aya',
-      'dob': '1991-06-14',
-      'biological_sex': 'female',
-      'gender_identity': 'female',
-      'address-street-address': '14 Buffalo Drive',
-      'address-city': 'Maskwacis',
-      'address-province': 'ab',
-      'address-postcode': 'T0C 1N0',
-      'telephone-day': '(780) 555-4821',
-      'contact-email-address': 'bill@sillery.co.uk',
-      'telephone-alt': '',
-      'address-mailing-address': '',
-      'emergency-contact-name': 'Evelyn Bear',
-      'emergency-contact-telephone': '(780) 555-4820',
-      'emergency-contact-relationship': 'Aunt',
-      'legal-indigenous-identity': 'first_nations_status',
-      'registration-number': 'FN-000000',
-      'home-comminuty': 'Maskwacis',
-      'preferred-language': 'en',
-      'visible-minority': 'true',
-      'marital-status': 'single',
-      'dependent-children': 0,
-      'has-disability': 'no',
-      'social-assistance': 'no',
-      'labour-force-status': 'underemployed',
-      'example-radio-2': 'college',
-      'education-year': '2013',
-      'education-location': 'ab',
-      'long-term-goal': 'Launch a Cree language mentorship program for youth.',
-      'barriers': ['education', 'funding'],
-      'target-program': 'skills_development',
-      'requested-supports': ['tuition', 'living'],
-      'disability-support': 'no',
-      'income-employment': '2100',
-      'income-spousal': '0',
-      'income-social-assist': '0',
-      'income-child-support': '0',
-      'income-child-benefit': '0',
-      'income-jordans': '0',
-      'income-band-funding': '150',
-      'income-alimony': '0',
-      'income-other': 'Seasonal beading workshops',
-      'income-other-description': 'artisan sales',
-      'expenses-rent': '880',
-      'expenses-groceries': '430',
-      'expenses-utilities': '190',
-      'expenses_transport': ['buss_pass'],
-      'expenses-other-list': 'Workshop supplies',
-      'example-input-5': '55',
-      'status-card': [],
-      'govt-id': [],
-      'acceptance-letter': [],
-      'applicant-pay-stubs': [],
-      'spouse-pay-stubs': [],
-      'band-denial-letter': [],
-      'band-funding-letter': [],
-      'medical-documents': [],
-      'applicant_signature': { name: 'Aiyana Bear', signed: true }
-    }
-  },
-  {
-    id: 'noah-whitecloud',
-    registrationPrefix: 'OCN',
-    payload: {
-      'consent': { name: 'Noah Whitecloud', signed: true },
-      'indigenous-affiliation-declaration': 'Opaskwayak Cree Nation',
-      'indigenous_declaration': { name: 'Noah Whitecloud', signed: true },
-      'conflict_of_interest': 'conflict',
-      'conflict_applicant_signature': { name: 'Noah Whitecloud', signed: true },
-      'social-insurance-number': '987 654 321',
-      'first-name': 'Noah',
-      'last-name': 'Whitecloud',
-      'middle-names': 'River',
-      'preferred-name': 'Noah',
-      'dob': '1987-11-03',
-      'biological_sex': 'male',
-      'gender_identity': 'male',
-      'address-street-address': '22 Cedar Lane',
-      'address-city': 'Thompson',
-      'address-province': 'mb',
-      'address-postcode': 'R8N 0A1',
-      'telephone-day': '(204) 555-7171',
-      'contact-email-address': 'bill@sillery.co.uk',
-      'telephone-alt': '',
-      'address-mailing-address': '',
-      'emergency-contact-name': 'Joel Whitecloud',
-      'emergency-contact-telephone': '(204) 555-8100',
-      'emergency-contact-relationship': 'Brother',
-      'legal-indigenous-identity': 'first_nations_status',
-      'registration-number': 'OCN-123456',
-      'home-comminuty': 'Opaskwayak',
-      'preferred-language': 'en',
-      'visible-minority': 'false',
-      'marital-status': 'married',
-      'dependent-children': 2,
-      'has-disability': 'no',
-      'social-assistance': 'no',
-      'labour-force-status': 'underemployed',
-      'example-radio-2': 'college',
-      'education-year': '2008',
-      'education-location': 'mb',
-      'long-term-goal': 'Expand community-based trades training.',
-      'barriers': ['education', 'funding'],
-      'target-program': 'group',
-      'requested-supports': ['books', 'living', 'other'],
-      'disability-support': 'no',
-      'income-employment': '1800',
-      'income-spousal': '0',
-      'income-social-assist': '0',
-      'income-child-support': '0',
-      'income-child-benefit': '0',
-      'income-jordans': '0',
-      'income-band-funding': '0',
-      'income-alimony': '0',
-      'income-other': 'Seasonal construction',
-      'income-other-description': 'Snow removal',
-      'expenses-rent': '950',
-      'expenses-groceries': '520',
-      'expenses-utilities': '210',
-      'expenses_transport': ['buss_pass'],
-      'expenses-other-list': 'Tools',
-      'example-input-5': '75',
-      'status-card': [],
-      'govt-id': [],
-      'acceptance-letter': [],
-      'applicant-pay-stubs': [],
-      'spouse-pay-stubs': [],
-      'band-denial-letter': [],
-      'band-funding-letter': [],
-      'medical-documents': [],
-      'applicant_signature': { name: 'Noah Whitecloud', signed: true }
-    }
-  },
-  {
-    id: 'sophia-rain',
-    registrationPrefix: 'YU',
-    payload: {
-      'consent': { name: 'Sophia Rain', signed: true },
-      'indigenous-affiliation-declaration': 'Whitehorse',
-      'indigenous_declaration': { name: 'Sophia Rain', signed: true },
-      'conflict_of_interest': 'no_conflict',
-      'conflict_applicant_signature': { name: 'Sophia Rain', signed: true },
-      'social-insurance-number': '321 654 987',
-      'first-name': 'Sophia',
-      'last-name': 'Rain',
-      'middle-names': 'Lynn',
-      'preferred-name': 'Soph',
-      'dob': '1993-04-12',
-      'biological_sex': 'female',
-      'gender_identity': 'female',
-      'address-street-address': '9 Aurora Way',
-      'address-city': 'Whitehorse',
-      'address-province': 'yt',
-      'address-postcode': 'Y1A 0A1',
-      'telephone-day': '(867) 555-0101',
-      'telephone-alt': '',
-      'contact-email-address': 'bill@sillery.co.uk',
-      'address-mailing-address': '',
-      'emergency-contact-name': 'Maya Rain',
-      'emergency-contact-telephone': '(867) 555-0102',
-      'emergency-contact-relationship': 'Sister',
-      'home-comminuty': 'Whitehorse',
-      'preferred-language': 'en',
-      'long-term-goal': 'Start a renewable energy coop.',
-      'target-program': 'skills_development',
-      'requested-supports': ['tuition', 'books'],
-      'income-employment': '2400',
-      'income-other': 'Part-time tutoring',
-      'expenses-rent': '1200',
-      'expenses-groceries': '500',
-      'expenses-utilities': '250',
-      'applicant_signature': { name: 'Sophia Rain', signed: true }
-    }
-  },
-  {
-    id: 'liam-rivers',
-    registrationPrefix: 'BC',
-    payload: {
-      'consent': { name: 'Liam Rivers', signed: true },
-      'indigenous-affiliation-declaration': 'Powell River',
-      'indigenous_declaration': { name: 'Liam Rivers', signed: true },
-      'conflict_of_interest': 'no_conflict',
-      'conflict_applicant_signature': { name: 'Liam Rivers', signed: true },
-      'social-insurance-number': '555 666 777',
-      'first-name': 'Liam',
-      'last-name': 'Rivers',
-      'middle-names': 'James',
-      'preferred-name': 'Liam',
-      'dob': '1989-09-09',
-      'biological_sex': 'male',
-      'gender_identity': 'male',
-      'address-street-address': '77 Cedar Point',
-      'address-city': 'Powell River',
-      'address-province': 'bc',
-      'address-postcode': 'V8A 0A1',
-      'telephone-day': '(604) 555-2222',
-      'telephone-alt': '',
-      'contact-email-address': 'bill@sillery.co.uk',
-      'address-mailing-address': '',
-      'emergency-contact-name': 'Harper Rivers',
-      'emergency-contact-telephone': '(604) 555-3333',
-      'emergency-contact-relationship': 'Sibling',
-      'home-comminuty': 'Powell River',
-      'preferred-language': 'en',
-      'long-term-goal': 'Launch a cultural tourism venture.',
-      'target-program': 'group',
-      'requested-supports': ['tuition', 'living', 'other'],
-      'income-employment': '1900',
-      'income-other': 'Seasonal guiding',
-      'income-other-description': 'Cultural tours',
-      'expenses-rent': '990',
-      'expenses-groceries': '450',
-      'expenses-utilities': '230',
-      'applicant_signature': { name: 'Liam Rivers', signed: true }
-    }
-  }
-];
-
-function buildDummyDraft() {
-  const choice = DUMMY_DRAFTS[Math.floor(Math.random() * DUMMY_DRAFTS.length)];
-  const draftPayload = { ...choice.payload, history: [...DUMMY_HISTORY_STEPS] };
-  const summary = {
-    applicantName: `${choice.payload['first-name']} ${choice.payload['last-name']}`.trim(),
-    profileId: choice.id,
-    homeCommunity: draftPayload['home-comminuty'] || null,
-    targetProgram: draftPayload['target-program'] || null
-  };
-  return { draftPayload, history: DUMMY_HISTORY_STEPS, summary };
-}
-
-// POST /api/create-dummy-draft
-// Body (optional): { userId?: number, stepCursor?: string, workflowId?: string }
-// Inserts or updates a single-row draft (table has UNIQUE user_id) to speed portal testing.
-app.post('/api/create-dummy-draft', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const userId = Number(body.userId) || 48;               // default test applicant
-    const workflowId = String(body.workflowId || 'iset-v1');
-    const stepCursor = String(body.stepCursor || 'summary-page');
-
-    const { draftPayload, history, summary } = buildDummyDraft();
-
-    // Check existing row
-    const [existingRows] = await pool.query(
-      'SELECT id, version FROM iset_intake.iset_application_draft_dynamic WHERE user_id = ? LIMIT 1',
-      [userId]
-    );
-
-    if (existingRows.length) {
-      const current = existingRows[0];
-      const newVersion = Number(current.version || 1) + 1;
-      await pool.query(
-        `UPDATE iset_intake.iset_application_draft_dynamic
-           SET workflow_id = ?, step_cursor = ?, draft_payload = ?, history = ?, doc_refs = NULL, version = ?
-         WHERE user_id = ?`,
-        [workflowId, stepCursor, JSON.stringify(draftPayload), JSON.stringify(history), newVersion, userId]
-      );
-      return res.json({
-        ok: true,
-        action: 'updated',
-        userId,
-        version: newVersion,
-        stepCursor,
-        workflowId,
-        applicant: summary
-      });
-    }
-
-    // Insert fresh
-    await pool.query(
-      `INSERT INTO iset_intake.iset_application_draft_dynamic
-         (user_id, workflow_id, step_cursor, draft_payload, history, doc_refs, version)
-       VALUES (?,?,?,?,?,NULL,1)`,
-      [userId, workflowId, stepCursor, JSON.stringify(draftPayload), JSON.stringify(history)]
-    );
-
-    res.json({
-      ok: true,
-      action: 'inserted',
-      userId,
-      version: 1,
-      stepCursor,
-      workflowId,
-      applicant: summary
-    });
-  } catch (err) {
-    console.error('[dummy-draft] error:', err.message);
-    res.status(500).json({ error: 'dummy_draft_failed', message: err.message });
-  }
-});
-
-const normaliseEventId = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed || null;
-};
-
-app.get('/api/admin/event-capture-dependencies', async (req, res) => {
-  if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
-  const typeId = normaliseEventId(req.query.type || req.query.typeId || req.query.event);
-  if (!typeId) return res.status(400).json({ error: 'event_required' });
-  try {
-    const [rows] = await pool.query(
-      `SELECT id, event, role, language, enabled, email_alert, bell_alert, template_id, updated_at
-         FROM notification_setting
-        WHERE event = ?`,
-      [typeId]
-    );
-    const active = rows.filter(row => row.enabled || row.email_alert || row.bell_alert);
-    const byRole = active.reduce((acc, row) => {
-      const role = row.role || 'unknown';
-      acc[role] = (acc[role] || 0) + 1;
-      return acc;
-    }, {});
-    res.json({
-      event: typeId,
-      total: rows.length,
-      active: active.length,
-      byRole,
-      settings: rows,
-    });
-  } catch (err) {
-    console.error('[events] failed to load event dependencies', err);
-    res.status(500).json({ error: 'event_dependency_lookup_failed', message: err.message });
-  }
-});
-
-app.post('/api/admin/event-notifications/disable', async (req, res) => {
-  if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
-  const body = req.body || {};
-  const typeId = normaliseEventId(body.event || body.type || body.typeId);
-  if (!typeId) return res.status(400).json({ error: 'event_required' });
-  try {
-    const [result] = await pool.query(
-      `UPDATE notification_setting
-          SET enabled = 0, email_alert = 0, bell_alert = 0, updated_at = NOW()
-        WHERE event = ?`,
-      [typeId]
-    );
-    res.json({ success: true, updated: result.affectedRows || 0 });
-  } catch (err) {
-    console.error('[events] failed to disable notifications for event', typeId, err);
-    res.status(500).json({ error: 'event_notifications_disable_failed', message: err.message });
+    res.status(500).json({ error: 'event_capture_rules_update_failed', message: err.message });
   }
 });
 
@@ -8648,7 +8153,6 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
 const eventService = createEventService({ pool, logger: console });
 registerNotificationHook(async (event) => {
   await dispatchInternalNotifications({ pool, event, logger: console });
-  await dispatchMessageReceivedEmail({ pool, event, logger: console });
 });
 
 const emitEvent = eventService.emit;
@@ -12883,42 +12387,582 @@ app.get('/api/tasks', async (req, res) => {
 
 ///Casework Task Scheduler
 const generateSystemTasks = async () => {
-  // documents_overdue events were removed from the catalog; skip legacy task sync.
+  try {
+    // Fetch all 'documents_overdue' events from the unified event store
+    let events = [];
+    try {
+      const [rows] = await pool.query(
+        `SELECT e.id,
+                e.subject_id,
+                CAST(e.subject_id AS UNSIGNED) AS case_id,
+                e.payload_json AS payload,
+                e.captured_at,
+                JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id
+           FROM iset_event_entry e
+           JOIN iset_case c ON c.id = CAST(e.subject_id AS UNSIGNED)
+           JOIN iset_application a ON c.application_id = a.id
+          WHERE e.subject_type = 'case' AND e.event_type = 'documents_overdue'`
+      );
+      events = rows;
+    } catch (err) {
+      if (isMissingTableErrorLocal(err)) {
+        console.warn('[tasks] event store unavailable; skipping documents_overdue sync');
+        events = [];
+      } else {
+        throw err;
+      }
+    }
+
+    for (const event of events) {
+      const caseIdRaw = event.case_id ?? event.subject_id;
+      const caseId = Number(caseIdRaw);
+      if (!Number.isFinite(caseId)) continue;
+
+      let payload = event.payload;
+      if (payload && typeof payload === 'string') {
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          payload = {};
+        }
+      } else if (!payload || typeof payload !== 'object') {
+        payload = {};
+      }
+
+      let missingItems = payload.missing;
+      if (Array.isArray(missingItems)) {
+        missingItems = missingItems.filter(item => item != null && item !== '');
+      } else if (typeof missingItems === 'string' && missingItems.trim()) {
+        missingItems = [missingItems.trim()];
+      } else {
+        missingItems = [];
+      }
+
+      if (missingItems.length === 0) continue;
+
+      const trackingId = event.tracking_id || payload.tracking_id || `CASE-${caseId}`;
+
+      const [existingTask] = await pool.query(
+        `SELECT id FROM iset_case_task WHERE case_id = ? AND title = 'Request missing documents' AND status != 'completed'`,
+        [caseId]
+      );
+
+      if (existingTask.length > 0) continue;
+
+      const title = 'Request missing documents';
+      const description = `Follow up with applicant to submit ${missingItems.join(', ')}`;
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 2);
+
+      await pool.query(
+        `INSERT INTO iset_case_task (
+          case_id, assigned_to_user_id, title, description, due_date, priority, status, source, created_by_user_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          caseId,
+          18,
+          title,
+          description,
+          dueDate,
+          'high',
+          'open',
+          'system',
+          null,
+        ]
+      );
+
+      console.log(`[tasks] created documents_overdue task for case ${trackingId}`);
+    }
+  } catch (err) {
+    console.error('Error generating system tasks:', err);
+  }
 };
 
-// Unified applicant documents endpoint now sources from iset_document (generalized store)
-async function emitDocumentUploadedEvent({ req, caseId, applicationId, applicantUserId, fileName, source, sizeBytes, message }) {
-  const normalizedCaseId = normalisePositiveInteger(caseId);
-  if (!normalizedCaseId) return;
-  const { actorId, actorName } = resolveRequestActor(req) || {};
-  let trackingId = null;
-  try {
-    trackingId = await fetchTrackingIdForCase(applicationId, normalizedCaseId);
-  } catch (err) {
-    console.warn('[events] failed to resolve tracking id for document upload', err?.message || err);
+// Dummy draft data helpers ---------------------------------------------------
+const randomChoice = (list) => {
+  if (!Array.isArray(list) || !list.length) return null;
+  const idx = Math.floor(Math.random() * list.length);
+  return list[idx];
+};
+
+const DUMMY_DRAFT_HISTORY = [
+  'consent',
+  'indigenous-declaration',
+  'conflict-of-interest',
+  'social-insurance-number',
+  'name',
+  'date-of-birth',
+  'gender',
+  'contact-information',
+  'emergency-contact',
+  'indigenous-legal-identity',
+  'registration-number',
+  'home-community',
+  'demographics',
+  'disability-and-social-assistance',
+  'labour-force-and-education-history',
+  'employment-goals-and-barriers',
+  'financial-supports-requested',
+  'household-income',
+  'household-expenses',
+  'summary-page',
+  'iset-document-upload',
+  'legal-and-submission'
+];
+
+const DUMMY_APPLICATION_PROFILES = [
+  {
+    id: 'bill-sillery',
+    registrationPrefix: 'QC',
+    conflict: { value: 'no_conflict', follow: '' },
+    payload: {
+      'consent': { name: 'Anne Applicant', signed: true },
+      'indigenous-affiliation-declaration': 'Mohawk of Kahnawà:ke',
+      'indigenous_declaration': { name: 'Anne Applicant', signed: true },
+      'conflict_of_interest': 'no_conflict',
+      'conflict_applicant_signature': { name: 'Anne Applicant', signed: true },
+      'social-insurance-number': '123 456 789',
+      'first-name': 'William',
+      'last-name': 'Sillery',
+      'middle-names': 'John',
+      'preferred-name': 'Bill',
+      'dob': '2000-04-10',
+      'biological_sex': 'male',
+      'gender_identity': 'other',
+      'address-street-address': '251 Avenue Kensington',
+      'address-city': 'Westmount',
+      'address-province': 'qc',
+      'address-postcode': 'H3Z 2G9',
+      'telephone-day': '(151) 497 5169',
+      'contact-email-address': 'bill@sillery.co.uk',
+      'telephone-alt': '(613) 111 4444',
+      'address-mailing-address': '123 Frobisher Street\nOxford\nKentucky',
+      'emergency-contact-name': 'Carrie',
+      'emergency-contact-telephone': '(514) 924 6602',
+      'emergency-contact-relationship': 'Aunt',
+      'legal-indigenous-identity': 'metis',
+      'registration-number': 'QC-12345',
+      'home-comminuty': 'Kimmirut',
+      'preferred-language': 'en',
+      'visible-minority': 'true',
+      'marital-status': 'married',
+      'dependent-children': 1,
+      'has-disability': 1,
+      'social-assistance': 1,
+      'labour-force-status': 'underemployed',
+      'example-radio-2': 'post_secondary_training',
+      'education-year': '2010',
+      'education-location': 'ns',
+      'long-term-goal': 'Launch an online language mentorship program.',
+      'barriers': ['funding', 'lack-of-job-opportunities', 'other'],
+      'target-program': 'group',
+      'requested-supports': ['books', 'living', 'other'],
+      'disability-support': 1,
+      'income-employment': '1000',
+      'income-spousal': '2100',
+      'income-social-assist': '0',
+      'income-child-support': '100',
+      'income-child-benefit': '0',
+      'income-jordans': '10',
+      'income-band-funding': '0',
+      'income-alimony': '0',
+      'income-other': 'Seasonal craft sales',
+      'income-other-description': 'Arts co-op stipend',
+      'expenses-rent': 1234,
+      'expenses-groceries': 2314,
+      'expenses-utilities': 2134,
+      'expenses_transport': ['mileage', 'buss_pass'],
+      'expenses-other-list': 'School supplies',
+      'example-input-5': '500',
+      'status-card': [],
+      'govt-id': [],
+      'acceptance-letter': [],
+      'applicant-pay-stubs': [],
+      'spouse-pay-stubs': [],
+      'band-denial-letter': [],
+      'band-funding-letter': [],
+      'medical-documents': [],
+      'applicant_signature': { name: 'Anne Applicant', signed: true }
+    }
+  },
+  {
+    id: 'aiyana-bear',
+    registrationPrefix: 'FN',
+    conflict: { value: 'no_conflict', follow: '' },
+    payload: {
+      'consent': { name: 'Aiyana Bear', signed: true },
+      'indigenous-affiliation-declaration': 'Maskwacis Cree',
+      'indigenous_declaration': { name: 'Aiyana Bear', signed: true },
+      'conflict_of_interest': 'no_conflict',
+      'conflict_applicant_signature': { name: 'Aiyana Bear', signed: true },
+      'social-insurance-number': '000 111 222',
+      'first-name': 'Aiyana',
+      'last-name': 'Bear',
+      'middle-names': 'Skye',
+      'preferred-name': 'Aya',
+      'dob': '1991-06-14',
+      'biological_sex': 'female',
+      'gender_identity': 'female',
+      'address-street-address': '14 Buffalo Drive',
+      'address-city': 'Maskwacis',
+      'address-province': 'ab',
+      'address-postcode': 'T0C 1N0',
+      'telephone-day': '(780) 555-4821',
+      'contact-email-address': 'aiyana.bear@example.com',
+      'telephone-alt': '',
+      'address-mailing-address': '',
+      'emergency-contact-name': 'Evelyn Bear',
+      'emergency-contact-telephone': '(780) 555-4820',
+      'emergency-contact-relationship': 'Aunt',
+      'legal-indigenous-identity': 'first_nations_status',
+      'registration-number': 'FN-000000',
+      'home-comminuty': 'Maskwacis',
+      'preferred-language': 'en',
+      'visible-minority': 'true',
+      'marital-status': 'single',
+      'dependent-children': 0,
+      'has-disability': 'no',
+      'social-assistance': 'no',
+      'labour-force-status': 'underemployed',
+      'example-radio-2': 'college',
+      'education-year': '2013',
+      'education-location': 'ab',
+      'long-term-goal': 'Launch a Cree language mentorship program for youth.',
+      'barriers': ['education', 'funding'],
+      'target-program': 'skills_development',
+      'requested-supports': ['tuition', 'living'],
+      'disability-support': 'no',
+      'income-employment': '2100',
+      'income-spousal': '0',
+      'income-social-assist': '0',
+      'income-child-support': '0',
+      'income-child-benefit': '0',
+      'income-jordans': '0',
+      'income-band-funding': '150',
+      'income-alimony': '0',
+      'income-other': 'Seasonal beading workshops',
+      'income-other-description': 'artisan sales',
+      'expenses-rent': '880',
+      'expenses-groceries': '430',
+      'expenses-utilities': '190',
+      'expenses_transport': ['buss_pass'],
+      'expenses-other-list': 'Workshop supplies',
+      'example-input-5': '55',
+      'status-card': [],
+      'govt-id': [],
+      'acceptance-letter': [],
+      'applicant-pay-stubs': [],
+      'spouse-pay-stubs': [],
+      'band-denial-letter': [],
+      'band-funding-letter': [],
+      'medical-documents': [],
+      'applicant_signature': { name: 'Aiyana Bear', signed: true }
+    }
+  },
+  {
+    id: 'noah-whitecloud',
+    registrationPrefix: 'OCN',
+    conflict: {
+      value: 'conflict',
+      follow: 'Spouse employed part-time by regional PTMA; recused from decision-making.'
+    },
+    payload: {
+      'consent': { name: 'Noah Whitecloud', signed: true },
+      'indigenous-affiliation-declaration': 'Opaskwayak Cree Nation',
+      'indigenous_declaration': { name: 'Noah Whitecloud', signed: true },
+      'conflict_of_interest': 'conflict',
+      'conflict_applicant_signature': { name: 'Noah Whitecloud', signed: true },
+      'social-insurance-number': '987 654 321',
+      'first-name': 'Noah',
+      'last-name': 'Whitecloud',
+      'middle-names': 'River',
+      'preferred-name': 'Noah',
+      'dob': '1987-11-03',
+      'biological_sex': 'male',
+      'gender_identity': 'male',
+      'address-street-address': '96 Clearwater Road',
+      'address-city': 'The Pas',
+      'address-province': 'mb',
+      'address-postcode': 'R9A 2J7',
+      'telephone-day': '(204) 555-7742',
+      'contact-email-address': 'noah.whitecloud@example.com',
+      'telephone-alt': '(204) 555-7746',
+      'address-mailing-address': 'PO Box 210\nThe Pas\nMB',
+      'emergency-contact-name': 'Jordan Whitecloud',
+      'emergency-contact-telephone': '(204) 555-7740',
+      'emergency-contact-relationship': 'Spouse',
+      'legal-indigenous-identity': 'first_nations_non_status',
+      'registration-number': 'OCN-458321',
+      'home-comminuty': 'Opaskwayak',
+      'preferred-language': 'en',
+      'visible-minority': 'false',
+      'marital-status': 'married',
+      'dependent-children': 2,
+      'has-disability': 'no',
+      'social-assistance': 'no',
+      'labour-force-status': 'unemployed',
+      'example-radio-2': 'high_school',
+      'education-year': '2005',
+      'education-location': 'mb',
+      'long-term-goal': 'Open a community-owned repair co-operative.',
+      'barriers': ['lack-of-job-opportunities', 'other'],
+      'target-program': 'skills_development',
+      'requested-supports': ['tools', 'tuition'],
+      'disability-support': 'no',
+      'income-employment': '850',
+      'income-spousal': '600',
+      'income-social-assist': '0',
+      'income-child-support': '0',
+      'income-child-benefit': '320',
+      'income-jordans': '0',
+      'income-band-funding': '0',
+      'income-alimony': '0',
+      'income-other': 'Traditional crafts',
+      'income-other-description': 'winter market sales',
+      'expenses-rent': '920',
+      'expenses-groceries': '520',
+      'expenses-utilities': '210',
+      'expenses_transport': ['buss_pass', 'mileage'],
+      'expenses-other-list': 'Fuel for trapping line',
+      'example-input-5': '75',
+      'status-card': [],
+      'govt-id': [],
+      'acceptance-letter': [],
+      'applicant-pay-stubs': [],
+      'spouse-pay-stubs': [],
+      'band-denial-letter': [],
+      'band-funding-letter': [],
+      'medical-documents': [],
+      'applicant_signature': { name: 'Noah Whitecloud', signed: true }
+    }
   }
-  const payload = {
-    file_name: fileName || null,
-    source: source || null,
-    size_bytes: typeof sizeBytes === 'number' && Number.isFinite(sizeBytes) ? sizeBytes : null,
-    applicant_user_id: applicantUserId || null,
-    tracking_id: trackingId,
-    message: message || (fileName ? `Document uploaded: ${fileName}.` : 'Document uploaded.')
+];
+
+const randomIntInclusive = (min, max) => {
+  const lower = Math.ceil(Math.min(min, max));
+  const upper = Math.floor(Math.max(min, max));
+  if (upper <= lower) {
+    return lower;
+  }
+  return lower + Math.floor(Math.random() * (upper - lower + 1));
+};
+
+const generateRegistrationNumber = (prefix) => {
+  const safePrefix = String(prefix || 'ISET').trim().toUpperCase() || 'ISET';
+  return `${safePrefix}-${randomIntInclusive(100000, 999999)}`;
+};
+
+const generateRandomSin = () => {
+  const digits = Array.from({ length: 9 }, (_, idx) => {
+    if (idx === 0) {
+      return randomIntInclusive(1, 9);
+    }
+    return randomIntInclusive(0, 9);
+  });
+  return `${digits.slice(0, 3).join('')} ${digits.slice(3, 6).join('')} ${digits.slice(6).join('')}`;
+};
+
+const coerceMoneyString = (value, fallback = '0') => {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  const str = String(value).trim();
+  if (!str) return fallback;
+  const match = str.replace(/,/g, '').match(/-?\d+(\.\d+)?/);
+  return match ? match[0] : fallback;
+};
+
+const coerceYesNo = (value, defaultValue = 'no') => {
+  if (value === null || value === undefined) return defaultValue;
+  const str = String(value).trim().toLowerCase();
+  if (['yes', 'true', '1'].includes(str)) return 'yes';
+  if (['no', 'false', '0'].includes(str)) return 'no';
+  return defaultValue;
+};
+
+const normaliseDummyDraftPayload = (draftPayload, template) => {
+  const firstName = (draftPayload['first-name'] || '').trim();
+  const lastName = (draftPayload['last-name'] || '').trim();
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || 'Demo Applicant';
+
+  const templateConflict = template?.conflict || {};
+  if (!draftPayload.conflict_of_interest) {
+    draftPayload.conflict_of_interest = templateConflict.value || 'no_conflict';
+  }
+  if (!draftPayload.conflict_applicant_signature || typeof draftPayload.conflict_applicant_signature !== 'object') {
+    draftPayload.conflict_applicant_signature = { name: fullName, signed: true };
+  } else if (!draftPayload.conflict_applicant_signature.name) {
+    draftPayload.conflict_applicant_signature.name = fullName;
+  }
+  if (draftPayload.conflict_of_interest === 'conflict') {
+    if (templateConflict.follow && !draftPayload['2022_conflict_follow']) {
+      draftPayload['2022_conflict_follow'] = templateConflict.follow;
+    }
+  } else if (!templateConflict.follow) {
+    delete draftPayload['2022_conflict_follow'];
+  }
+
+  if (!draftPayload.biological_sex) {
+    const eligFemale = coerceYesNo(draftPayload['eligibility-female'], 'no');
+    draftPayload.biological_sex = eligFemale === 'yes' ? 'female' : 'male';
+  }
+  if (!draftPayload.gender_identity) {
+    const genderMap = {
+      '1': 'female',
+      '2': 'other',
+      '3': 'other',
+      '4': 'other',
+      '5': 'other',
+      female: 'female',
+      male: 'male'
+    };
+    const original = draftPayload['what-is-your-gender-identity'];
+    const mapped = genderMap[String(original || '').toLowerCase()] || draftPayload.biological_sex || 'female';
+    draftPayload.gender_identity = mapped;
+  }
+
+  draftPayload['has-disability'] = coerceYesNo(draftPayload['has-disability'], 'no');
+  draftPayload['social-assistance'] = coerceYesNo(draftPayload['social-assistance'], 'no');
+  draftPayload['dependent-children'] = coerceYesNo(draftPayload['dependent-children'], 'no');
+  draftPayload['disability-support'] = coerceYesNo(
+    draftPayload['disability-support'],
+    draftPayload['has-disability'] === 'yes' ? 'yes' : 'no'
+  );
+  if (!draftPayload['disability-support_yes_follow']) {
+    draftPayload['disability-support_yes_follow'] = '';
+  }
+
+  if (!draftPayload['education-location']) {
+    draftPayload['education-location'] = draftPayload['address-province'] || 'other';
+  }
+
+  const incomeKeys = [
+    'income-employment',
+    'income-spousal',
+    'income-social-assist',
+    'income-child-support',
+    'income-child-benefit',
+    'income-jordans',
+    'income-band-funding',
+    'income-alimony',
+    'income-other-description'
+  ];
+  incomeKeys.forEach(key => {
+    draftPayload[key] = coerceMoneyString(draftPayload[key]);
+  });
+  if (!draftPayload['income-other']) {
+    draftPayload['income-other'] = '';
+  }
+
+  draftPayload['top-up-amount'] = coerceMoneyString(draftPayload['top-up-amount']);
+  draftPayload['example-input-5'] = coerceMoneyString(draftPayload['example-input-5']);
+
+  if (!draftPayload['expenses_bus_pass'] && draftPayload['expenses-transitpass'] !== undefined) {
+    draftPayload['expenses_bus_pass'] = coerceMoneyString(draftPayload['expenses-transitpass']);
+  } else {
+    draftPayload['expenses_bus_pass'] = coerceMoneyString(draftPayload['expenses_bus_pass']);
+  }
+  draftPayload['expenses-parking'] = coerceMoneyString(draftPayload['expenses-parking']);
+  draftPayload['expenses_transport_mileage'] = coerceMoneyString(draftPayload['expenses_transport_mileage']);
+  if (!Array.isArray(draftPayload['expenses_transport'])) {
+    const transport = [];
+    if (Number(coerceMoneyString(draftPayload['expenses_bus_pass'])) > 0) transport.push('buss_pass');
+    if (Number(coerceMoneyString(draftPayload['expenses-parking'])) > 0) transport.push('parking');
+    if (Number(coerceMoneyString(draftPayload['expenses_transport_mileage'])) > 0) transport.push('mileage');
+    draftPayload['expenses_transport'] = transport;
+  }
+
+  draftPayload['contact-email-address'] = draftPayload['contact-email-address'] || 'demo.applicant@example.com';
+  draftPayload['indigenous-affiliation-declaration'] =
+    draftPayload['indigenous-affiliation-declaration'] || 'Demo Nation of Kiskinohaw';
+};
+
+const buildDummyDraft = () => {
+  const template = randomChoice(DUMMY_APPLICATION_PROFILES) || DUMMY_APPLICATION_PROFILES[0];
+  const draftPayload = JSON.parse(JSON.stringify(template.payload));
+  draftPayload['registration-number'] = generateRegistrationNumber(template.registrationPrefix);
+  draftPayload['social-insurance-number'] = generateRandomSin();
+  normaliseDummyDraftPayload(draftPayload, template);
+  const history = Array.isArray(template.history) && template.history.length
+    ? [...template.history]
+    : [...DUMMY_DRAFT_HISTORY];
+  const applicantName = [
+    draftPayload['first-name'],
+    draftPayload['last-name']
+  ].filter(Boolean).join(' ').trim() || 'Demo Applicant';
+  return {
+    draftPayload,
+    history,
+    summary: {
+      applicantName,
+      profileId: template.id,
+      homeCommunity: draftPayload['home-comminuty'] || null,
+      targetProgram: draftPayload['target-program'] || null
+    }
   };
+};
+// --- Dummy Draft Insertion (test helper) ------------------------------------
+// POST /api/create-dummy-draft
+// Body (optional): { userId?: number, stepCursor?: string, workflowId?: string }
+// Inserts or updates a single-row draft (table has UNIQUE user_id) to speed portal testing.
+app.post('/api/create-dummy-draft', async (req, res) => {
   try {
-    await captureCaseEvent({
-      type: 'document_uploaded',
-      caseId: normalizedCaseId,
-      payload,
-      trackingId,
-      actorId,
-      actorName,
+    const body = req.body || {};
+    const userId = Number(body.userId) || 48;               // default test applicant
+    const workflowId = String(body.workflowId || 'iset-v1');
+    const stepCursor = String(body.stepCursor || 'summary-page');
+
+    const { draftPayload, history, summary } = buildDummyDraft();
+
+    // Check existing row
+    const [existingRows] = await pool.query(
+      'SELECT id, version FROM iset_intake.iset_application_draft_dynamic WHERE user_id = ? LIMIT 1',
+      [userId]
+    );
+
+    if (existingRows.length) {
+      const current = existingRows[0];
+      const newVersion = Number(current.version || 1) + 1;
+      await pool.query(
+        `UPDATE iset_intake.iset_application_draft_dynamic
+           SET workflow_id = ?, step_cursor = ?, draft_payload = ?, history = ?, doc_refs = NULL, version = ?
+         WHERE user_id = ?`,
+        [workflowId, stepCursor, JSON.stringify(draftPayload), JSON.stringify(history), newVersion, userId]
+      );
+      return res.json({
+        ok: true,
+        action: 'updated',
+        userId,
+        version: newVersion,
+        stepCursor,
+        workflowId,
+        applicant: summary
+      });
+    }
+
+    // Insert fresh
+    await pool.query(
+      `INSERT INTO iset_intake.iset_application_draft_dynamic
+         (user_id, workflow_id, step_cursor, draft_payload, history, doc_refs, version)
+       VALUES (?,?,?,?,?,NULL,1)`,
+      [userId, workflowId, stepCursor, JSON.stringify(draftPayload), JSON.stringify(history)]
+    );
+
+    res.json({
+      ok: true,
+      action: 'inserted',
+      userId,
+      version: 1,
+      stepCursor,
+      workflowId,
+      applicant: summary
     });
   } catch (err) {
-    console.warn('[events] document_uploaded emit failed', err?.message || err);
+    console.error('[dummy-draft] error:', err.message);
+    res.status(500).json({ error: 'dummy_draft_failed', message: err.message });
   }
-}
+});
 
+// Unified applicant documents endpoint now sources from iset_document (generalized store)
 app.post('/api/applicants/:id/documents/upload', (req, res) => {
   adminDocumentUpload.single('file')(req, res, async err => {
     if (err) {
@@ -13014,51 +13058,33 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
       return res.status(500).json({ error: 'document_store_failed' });
     }
 
-      try {
-        const lookupKey = insertId
-          ? ['id = ?', [insertId]]
-          : ['file_path = ?', [relativePath]];
-        const [rows] = await pool.query(
+    try {
+      const lookupKey = insertId
+        ? ['id = ?', [insertId]]
+        : ['file_path = ?', [relativePath]];
+      const [rows] = await pool.query(
         `SELECT id, case_id, application_id, applicant_user_id, file_name, file_path, label, source, mime_type, size_bytes, status, created_at AS uploaded_at
            FROM iset_document
          WHERE ${lookupKey[0]}
          LIMIT 1`,
         lookupKey[1]
       );
-        if (!rows || !rows.length) {
-          return res.status(200).json({
-            ok: true,
-            message: 'uploaded',
-            document: null
-          });
-        }
-        const documentRow = rows[0];
-
-        const resolvedCaseId = caseId || normalisePositiveInteger(documentRow?.case_id);
-        const resolvedApplicationId = applicationId || normalisePositiveInteger(documentRow?.application_id);
-
-        if (resolvedCaseId) {
-          await emitDocumentUploadedEvent({
-            req,
-            caseId: resolvedCaseId,
-            applicationId: resolvedApplicationId,
-            applicantUserId: applicantId,
-            fileName: documentRow?.file_name || label || fileNameForDb,
-            source,
-            sizeBytes,
-            message: `Document uploaded (${source}): ${documentRow?.file_name || fileNameForDb}.`
-          });
-        }
-
+      if (!rows || !rows.length) {
         return res.status(200).json({
           ok: true,
           message: 'uploaded',
-          document: documentRow
+          document: null
         });
-      } catch (lookupErr) {
-        console.warn('[admin:documents:upload] lookup failed', lookupErr);
-        return res.status(200).json({
-          ok: true,
+      }
+      return res.status(200).json({
+        ok: true,
+        message: 'uploaded',
+        document: rows[0]
+      });
+    } catch (lookupErr) {
+      console.warn('[admin:documents:upload] lookup failed', lookupErr);
+      return res.status(200).json({
+        ok: true,
         message: 'uploaded',
         document: null
       });
@@ -18225,27 +18251,18 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       null;
     const effectiveAssessorName = fromNameValue || assessorDisplayName || null;
     try {
-      await captureCaseEvent({
-        type: MESSAGE_EVENT_TYPE,
-        caseId,
-        payload: {
-          message_id: result.insertId,
-          message_subject: subjectValue || null,
-          recipient_id: recipientId,
-          recipient_display_name: toNameValue || null,
-          to_user_id: recipientId,
-          to_display_name: toNameValue || null,
-          from_display_name: fromNameValue || assessorDisplayName || null,
-          assessor_name: effectiveAssessorName,
-          applicant_name: effectiveApplicantName,
-          tracking_id: caseRow?.tracking_reference || null,
-        },
+      await sendSecureMessageAlert({
+        pool,
+        userId: recipientId,
         trackingId: caseRow?.tracking_reference || null,
-        actorId: senderId,
-        actorName: assessorDisplayName,
+        messageSubject: subjectValue || null,
+        applicantName: effectiveApplicantName,
+        assessorName: effectiveAssessorName,
+        recipientDisplayName: toNameValue,
+        senderDisplayName: fromNameValue,
       });
     } catch (notifyErr) {
-      console.error('[events] message_received emit failed', notifyErr?.message || notifyErr);
+      console.error('[notifications] secure message email failed', notifyErr?.message || notifyErr);
     }
     res.status(201).json({ message: 'Message sent', messageId: result.insertId });
   } catch (e) {
@@ -20485,8 +20502,6 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
         null;
     }
 
-    const adoptedAttachments = [];
-
     if (caseId) {
       for (const att of attachments) {
         const docApplicantUserId =
@@ -20511,7 +20526,7 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
         }
 
         try {
-          const [insertResult] = await pool.query(
+          await pool.query(
             `INSERT INTO iset_document (case_id, application_id, applicant_user_id, user_id, origin_message_id, source, file_name, file_path, label, created_at)
              VALUES (?, ?, ?, ?, ?, 'secure_message_attachment', ?, ?, 'Secure Message Attachment', ?)
              ON DUPLICATE KEY UPDATE applicant_user_id = VALUES(applicant_user_id), application_id = VALUES(application_id), user_id = VALUES(user_id), origin_message_id = VALUES(origin_message_id), updated_at = NOW()` ,
@@ -20526,12 +20541,6 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
               createdAt
             ]
           );
-          if (insertResult && insertResult.affectedRows === 1) {
-            adoptedAttachments.push({
-              fileName: att.original_filename || 'Attachment',
-              agentId: docUserId || null,
-            });
-          }
         } catch (err) {
           if (err && (err.code === 'ER_DUP_ENTRY' || err.code === '23505')) {
             continue;
@@ -20541,23 +20550,6 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
           }
         }
       }
-    }
-
-    if (caseId && adoptedAttachments.length) {
-      const firstName = adoptedAttachments[0]?.fileName || 'Attachment';
-      const message =
-        adoptedAttachments.length === 1
-          ? `Secure message attachment adopted: ${firstName}.`
-          : `${adoptedAttachments.length} secure message attachments adopted (e.g., ${firstName}).`;
-      await emitDocumentUploadedEvent({
-        req,
-        caseId,
-        applicationId: resolvedApplicationId,
-        applicantUserId,
-        fileName: firstName,
-        source: 'secure_message_attachment',
-        message,
-      });
     }
 
     res.status(200).json(attachments);
@@ -21182,22 +21174,7 @@ app.put('/api/cases/:id', async (req, res) => {
       }
     }
 
-    const submitActionRaw = body.assessment_submit_action;
-    const submitAction =
-      submitActionRaw === true ||
-      submitActionRaw === 1 ||
-      submitActionRaw === '1' ||
-      (typeof submitActionRaw === 'string' && submitActionRaw.toLowerCase() === 'true');
-
-    const hasRecommendation = Boolean(body.assessment_recommendation);
-    const hasJustification = Boolean(body.assessment_justification);
-    const hasStatusField = typeof body.status !== 'undefined' && body.status !== null && body.status !== '';
-
-    const assessmentSubmitted =
-      hasRecommendation &&
-      hasJustification &&
-      (submitAction || hasStatusField);
-
+    const assessmentSubmitted = body.assessment_recommendation && body.assessment_justification;
     if (assessmentSubmitted) {
       const coordinatorName = actorName || '';
       await captureCaseEvent({
@@ -21213,15 +21190,6 @@ app.put('/api/cases/:id', async (req, res) => {
         trackingId,
         actorId,
         actorName: coordinatorName || actorName,
-      });
-    } else {
-      console.debug('[events] assessment_submitted not emitted', {
-        caseId,
-        submitAction,
-        hasStatusField,
-        hasRecommendation,
-        hasJustification,
-        trackingId,
       });
     }
 
@@ -21578,3 +21546,14 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
+
+
+
+
+
+
+
+
+
+
+

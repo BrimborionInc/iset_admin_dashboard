@@ -332,7 +332,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     }
 
     const currentApplicationStatus = (assignTargetCase.application_status || assignTargetCase.status || '').toLowerCase();
-    const shouldPromoteStatus = currentApplicationStatus === 'submitted';
+    const shouldPromoteStatus = false; // do not auto-change status on assignment
     const isReassign = Boolean(assignTargetCase?.assigned_user_id);
     const trackingLabel = assignTargetCase?.tracking_id || assignTargetCase?.case_id;
     const assigneeLabel = selectedAssignee?.label;
@@ -347,22 +347,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         throw new Error('assign_failed');
       }
 
-      if (shouldPromoteStatus) {
-        const statusResponse = await apiFetch(`/api/cases/${assignTargetCase.case_id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'in_review' }),
-        });
-
-        if (!statusResponse.ok) {
-          addAlert({
-            type: 'warning',
-            header: 'Status update failed',
-            content: `Case ${trackingLabel} was assigned but could not be moved to In Review. Please refresh and try again.`
-          });
-          throw new Error('status_update_failed');
-        }
-      }
+      // Status is no longer auto-promoted on assignment.
 
       setAssignSubmitting(false);
       setAssignModalVisible(false);

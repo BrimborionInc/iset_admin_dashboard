@@ -1112,6 +1112,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       assessment_childcare_need: assessment.childcareNeed || null,
       assessment_childcare_funding_details: assessment.childcareFunding || null,
       case_summary: assessment.overview || null,
+      assessment_submit_action: true,
       status: assessment.nwacReviewStatus === 'approve' ? 'initiated' : 'archived',
       applicationStatus: assessment.nwacReviewStatus === 'approve' ? 'approved' : 'rejected'
     };
