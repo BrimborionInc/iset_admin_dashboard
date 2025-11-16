@@ -122,6 +122,29 @@ const formatEventMessage = (event, actorDisplay) => {
       if (reason) base += `: ${reason}`;
       return ensureSentence(reviewer ? `${base} by ${reviewer}` : base);
     }
+    case 'reminder_created': {
+      const title = trimValue(payload.title) || 'Reminder';
+      const due = payload.due_at ? new Date(payload.due_at).toLocaleDateString() : '';
+      const base = due ? `${title} (due ${due})` : title;
+      return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
+    }
+    case 'reminder_due': {
+      const title = trimValue(payload.title) || 'Reminder';
+      const due = payload.due_at ? new Date(payload.due_at).toLocaleDateString() : 'today';
+      const base = `Reminder due: ${title} (due ${due})`;
+      return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
+    }
+    case 'reminder_overdue': {
+      const title = trimValue(payload.title) || 'Reminder';
+      const due = payload.due_at ? new Date(payload.due_at).toLocaleDateString() : 'previously';
+      const base = `Reminder overdue: ${title} (was due ${due})`;
+      return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
+    }
+    case 'reminder_completed': {
+      const title = trimValue(payload.title) || 'Reminder';
+      const base = `Reminder completed: ${title}`;
+      return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
+    }
     case 'application_submitted': {
       const submitter = actorDisplay || trimValue(payload.submitter_name) || trimValue(payload.submitter_email);
       const base = 'Application submitted';
@@ -150,6 +173,7 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
   const [filteringText, setFilteringText] = useState('');
   const [sortingColumn, setSortingColumn] = useState({ sortingField: 'created_at' });
   const [isDescending, setIsDescending] = useState(true);
+  const [ackLoadingId, setAckLoadingId] = useState(null);
 
   const caseId = caseData?.id || caseData?.case_id || null;
 
@@ -173,6 +197,42 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
   useEffect(() => {
     loadEvents();
   }, [loadEvents]);
+
+  useEffect(() => {
+    const handler = event => {
+      const targetCaseId = event?.detail?.caseId;
+      if (!caseId) return;
+      if (targetCaseId && Number(targetCaseId) !== Number(caseId)) return;
+      loadEvents({ silent: true });
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('case-events-refresh', handler);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('case-events-refresh', handler);
+      }
+    };
+  }, [caseId, loadEvents]);
+
+  const handleAcknowledgeReminder = async reminderId => {
+    if (!reminderId || !caseId) return;
+    setAckLoadingId(reminderId);
+    try {
+      const res = await apiFetch(`/api/reminders/${reminderId}/acknowledge`, { method: 'POST' });
+      if (!res.ok) throw res;
+      loadEvents({ silent: true });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId } }));
+        window.dispatchEvent(new CustomEvent('case-notes-refresh', { detail: { caseId } }));
+      }
+    } catch (err) {
+      // surface minimal error inline
+      console.error('Failed to acknowledge reminder', err);
+    } finally {
+      setAckLoadingId(null);
+    }
+  };
 
   const decoratedEvents = useMemo(() => events.map(decorateEvent), [events]);
 
@@ -214,7 +274,24 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
     {
       id: 'actions',
       header: 'Actions',
-      cell: () => ''
+      cell: item => {
+        const reminderId = item?.event_data?.reminder_id;
+        const isReminderEvent = item?.event_type?.startsWith('reminder_') && reminderId;
+        const isCompleted =
+          item?.event_type === 'reminder_completed' ||
+          (item?.event_data?.status || '').toLowerCase() === 'completed' ||
+          (item?.event_data?.status || '').toLowerCase() === 'cancelled';
+        if (!isReminderEvent || isCompleted) return '';
+        return (
+          <Button
+            variant="inline-link"
+            onClick={() => handleAcknowledgeReminder(reminderId)}
+            loading={ackLoadingId === reminderId}
+          >
+            Acknowledge reminder
+          </Button>
+        );
+      }
     }
   ];
 

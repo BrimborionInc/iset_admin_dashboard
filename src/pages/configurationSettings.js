@@ -24,6 +24,7 @@ import CorsOriginsWidget from "../widgets/CorsOriginsWidget";
 import EnvironmentWidget from "../widgets/EnvironmentWidget";
 import SecretsWidget from "../widgets/SecretsWidget";
 import AppearanceWidget from "../widgets/AppearanceWidget";
+import BackendJobsWidget from "../widgets/BackendJobsWidget";
 import AiConfigWidgetHelp from "../helpPanelContents/aiConfigWidgetHelp";
 import AuthWidgetHelp from "../helpPanelContents/authWidgetHelp";
 import SessionAuditWidgetHelp from "../helpPanelContents/sessionAuditWidgetHelp";
@@ -33,6 +34,7 @@ import SlaWidgetHelp from "../helpPanelContents/slaWidgetHelp";
 import SecretsWidgetHelp from "../helpPanelContents/secretsWidgetHelp";
 import AppearanceWidgetHelp from "../helpPanelContents/appearanceWidgetHelp";
 import LockingSettingsHelp from "../helpPanelContents/lockingSettingsHelp";
+import BackendJobsWidgetHelp from "../helpPanelContents/backendJobsWidgetHelp";
 import { apiFetch } from "../auth/apiClient";
 import {
   getIdTokenClaims,
@@ -119,7 +121,9 @@ const LOCKING_MODE_OPTIONS = [
 const LOCKING_HEADER_DESCRIPTION =
   "Configure pessimistic locking for application edits. Optimistic version checks remain enabled in all modes; enabling pessimistic locking adds a database lock so only one user can edit at a time within the configured timeout.";
 
-const STORAGE_KEY = "configuration-dashboard-layout-v1";
+// Bump the layout storage key whenever the default layout changes so new widgets
+// (like Backend jobs) appear on the board instead of lingering in the palette.
+const STORAGE_KEY = "configuration-dashboard-layout-v2";
 
 const widgetRegistry = {
   ai: {
@@ -188,6 +192,17 @@ const widgetRegistry = {
     helpTitle: "CORS origins",
     aiContext: CorsOriginsWidgetHelp?.aiContext,
   },
+  "backend-jobs": {
+    id: "backend-jobs",
+    defaultRowSpan: 2,
+    defaultColumnSpan: 2,
+    component: BackendJobsWidget,
+    title: "Backend jobs",
+    description: "Configure server-side background jobs (e.g., reminder polling).",
+    helpComponent: BackendJobsWidgetHelp,
+    helpTitle: "Backend jobs",
+    aiContext: BackendJobsWidgetHelp?.aiContext,
+  },
   env: {
     id: "env",
     defaultRowSpan: 4,
@@ -230,6 +245,7 @@ const defaultLayout = [
   { id: "slaConfig", rowSpan: 3, columnSpan: 2 },
   { id: "sessionAudit", rowSpan: 3, columnSpan: 2 },
   { id: "cors", rowSpan: 2, columnSpan: 2 },
+  { id: "backend-jobs", rowSpan: 2, columnSpan: 2 },
   { id: "env", rowSpan: 4, columnSpan: 2 },
   { id: "secrets", rowSpan: 3, columnSpan: 2 },
   { id: "appearance", rowSpan: 2, columnSpan: 2 },
@@ -1640,6 +1656,15 @@ export default function ConfigurationSettings({
               headerActions={undefined}
               isDarkMode={isDarkMode}
               setUseDarkMode={setUseDarkMode}
+            />
+          );
+        case "backend-jobs":
+          return (
+            <BackendJobsWidget
+              actions={actions}
+              metadata={metadata}
+              toggleHelpPanel={toggleHelpPanel}
+              headerActions={undefined}
             />
           );
         default:

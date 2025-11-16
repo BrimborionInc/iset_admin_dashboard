@@ -33,6 +33,10 @@ const ADMIN_UPLOAD_ALLOWED_MIME_TYPES = new Set([
   'image/tiff'
 ]);
 const ADMIN_UPLOAD_MAX_BYTES = Number(process.env.ADMIN_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
+const DEFAULT_BACKEND_JOBS_CONFIG = { reminderPollMinutes: 5 };
+const REMINDER_POLL_INTERVAL_MS = DEFAULT_BACKEND_JOBS_CONFIG.reminderPollMinutes * 60 * 1000;
+let reminderPollIntervalMsDynamic = REMINDER_POLL_INTERVAL_MS;
+let reminderPollTimer = null;
 
 function ensureDirectoryExists(dirPath) {
   try {
@@ -116,6 +120,15 @@ function normalisePositiveInteger(value) {
   const int = Math.trunc(asNumber);
   return int > 0 ? int : null;
 }
+
+const clampReminderMinutes = (value) => {
+  const parsed = normalisePositiveInteger(value);
+  const minutes = parsed || DEFAULT_BACKEND_JOBS_CONFIG.reminderPollMinutes;
+  // Bound between 1 minute and 24 hours to avoid runaway intervals
+  return Math.min(Math.max(minutes, 1), 24 * 60);
+};
+
+const reminderMinutesToMs = minutes => clampReminderMinutes(minutes) * 60 * 1000;
 
 function resolveAdminActorUserId(req) {
   if (!req || typeof req !== 'object') return null;
@@ -4314,6 +4327,38 @@ function lockingModeRequiresPessimistic(config) {
   return mode && mode !== 'optimistic';
 }
 
+// --- Backend jobs runtime config (reminder poll interval) -------------------
+function normaliseBackendJobsConfig(raw) {
+  const minutes = clampReminderMinutes(raw?.reminderPollMinutes ?? raw?.reminder_poll_minutes);
+  return { reminderPollMinutes: minutes };
+}
+
+async function readBackendJobsConfig() {
+  try {
+    const [[row]] = await pool.query("SELECT v FROM iset_runtime_config WHERE scope='admin' AND k='backend.jobs' LIMIT 1");
+    if (!row) return { ...DEFAULT_BACKEND_JOBS_CONFIG, source: 'default' };
+    let value = row.v;
+    if (value && typeof value === 'string') {
+      try { value = JSON.parse(value); } catch { value = null; }
+    }
+    const config = normaliseBackendJobsConfig(value || {});
+    return { ...config, source: 'stored' };
+  } catch (err) {
+    console.warn('[backend-jobs] read config failed:', err.message);
+    return { ...DEFAULT_BACKEND_JOBS_CONFIG, source: 'error' };
+  }
+}
+
+async function writeBackendJobsConfig(config) {
+  const normalised = normaliseBackendJobsConfig(config || {});
+  await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  await pool.query(
+    "INSERT INTO iset_runtime_config (scope,k,v) VALUES ('admin','backend.jobs',CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v)",
+    [JSON.stringify(normalised)]
+  );
+  return normalised;
+}
+
 async function enforceApplicationLock(connection, applicationId, req, lockConfig) {
   if (!lockingModeRequiresPessimistic(lockConfig)) {
     return { ok: true, reason: 'not_required' };
@@ -6640,6 +6685,7 @@ app.patch('/api/admin/contact-messages/:id/status', async (req, res) => {
   const actorStaffProfileId = req.staffProfile?.id || null;
 
   let connection;
+  const pendingReminderCreates = [];
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -7240,6 +7286,28 @@ app.patch('/api/config/runtime/locking', async (req, res) => {
   } catch (err) {
     console.error('[locking] config update failed:', err);
     res.status(500).json({ error: 'locking_config_update_failed', message: err.message });
+  }
+});
+
+app.get('/api/config/runtime/backend-jobs', async (_req, res) => {
+  try {
+    const config = await readBackendJobsConfig();
+    res.json(config);
+  } catch (err) {
+    console.error('[backend-jobs] config fetch failed:', err);
+    res.status(500).json({ error: 'backend_jobs_config_fetch_failed', message: err.message });
+  }
+});
+
+app.patch('/api/config/runtime/backend-jobs', async (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const saved = await writeBackendJobsConfig(req.body || {});
+    applyReminderPollInterval(saved.reminderPollMinutes);
+    res.json(saved);
+  } catch (err) {
+    console.error('[backend-jobs] config update failed:', err);
+    res.status(500).json({ error: 'backend_jobs_config_update_failed', message: err.message });
   }
 });
 
@@ -8298,6 +8366,14 @@ hydrateAuthConfigFromDatabase().catch(err => {
   console.warn('[auth-config] Initial hydration failed:', err.message);
 });
 
+// Start reminder poller using stored runtime config (falls back to default on failure)
+readBackendJobsConfig()
+  .then(cfg => applyReminderPollInterval(cfg?.reminderPollMinutes))
+  .catch(err => {
+    console.warn('[backend-jobs] bootstrap poller using default interval:', err?.message || err);
+    applyReminderPollInterval(DEFAULT_BACKEND_JOBS_CONFIG.reminderPollMinutes);
+  });
+
 app.get('/api/config/sla-targets', async (req, res) => {
   try {
     if (!hasSlaAdminAccess(req)) {
@@ -8660,6 +8736,21 @@ const loadEventCaptureState = eventService.loadCaptureState;
 const updateEventCaptureRules = eventService.updateCaptureRules;
 const getEventCatalog = eventService.getCatalog;
 
+// Reminder due/overdue poller: interval scheduled after config load
+const runReminderPoll = () => {
+  pollRemindersForDue().catch(err => {
+    console.warn('[reminders] due poll error', err?.message || err);
+  });
+};
+
+const applyReminderPollInterval = minutes => {
+  const ms = reminderMinutesToMs(minutes);
+  reminderPollIntervalMsDynamic = ms;
+  if (reminderPollTimer) clearInterval(reminderPollTimer);
+  reminderPollTimer = setInterval(runReminderPoll, ms);
+  return ms;
+};
+
 async function deleteTableIfExists(tableName) {
   try {
     await pool.query(`DELETE FROM ${tableName}`);
@@ -8984,6 +9075,120 @@ const fetchReminderById = async (reminderId) => {
   const [rows] = await pool.query(sql, [reminderId]);
   return rows.length ? mapReminderRow(rows[0]) : null;
 };
+
+const emitReminderEvent = async ({ type, reminder, actorId, actorName }) => {
+  if (!reminder || !reminder.caseId) return;
+  const payload = {
+    reminder_id: reminder.id,
+    title: reminder.title || null,
+    description: reminder.description || null,
+    category: reminder.category || null,
+    status: reminder.status || null,
+    due_at: reminder.dueAt || null,
+    completed_at: reminder.completedAt || null,
+    assigned_staff_profile_id: reminder.assignedStaffProfileId || null,
+  };
+  await captureCaseEvent({
+    type,
+    caseId: reminder.caseId,
+    payload,
+    trackingId: reminder.applicationId || null,
+    actorId: actorId || null,
+    actorName: actorName || null,
+  });
+};
+
+const updateReminderMetadata = async (reminderId, metadata) => {
+  const encoded = metadata ? JSON.stringify(metadata) : null;
+  await pool.query(
+    'UPDATE iset_case_reminder SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL',
+    [encoded, reminderId]
+  );
+};
+
+const mapReminderMetadata = (row) => {
+  if (!row) return {};
+  const meta = safeJsonParse(row.metadata_json, {});
+  return meta && typeof meta === 'object' ? meta : {};
+};
+
+const isSameDay = (a, b) => {
+  if (!a || !b) return false;
+  const ad = new Date(a);
+  const bd = new Date(b);
+  if (Number.isNaN(ad.getTime()) || Number.isNaN(bd.getTime())) return false;
+  return (
+    ad.getUTCFullYear() === bd.getUTCFullYear() &&
+    ad.getUTCMonth() === bd.getUTCMonth() &&
+    ad.getUTCDate() === bd.getUTCDate()
+  );
+};
+
+function pollRemindersForDue() {
+  return (async () => {
+  const now = new Date();
+  let rows = [];
+  try {
+    const [result] = await pool.query(
+      `SELECT id, case_id, application_id, title, description, category, status, due_at, metadata_json
+         FROM iset_case_reminder
+        WHERE deleted_at IS NULL
+          AND status = 'open'
+          AND due_at IS NOT NULL
+        LIMIT 500`
+    );
+    rows = result || [];
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return;
+    }
+    console.warn('[reminders] due poll failed', err?.message || err);
+    return;
+  }
+
+  for (const row of rows) {
+    const reminder = {
+      id: row.id,
+      caseId: row.case_id || null,
+      applicationId: row.application_id || null,
+      title: row.title || null,
+      description: row.description || null,
+      category: row.category || null,
+      status: row.status || null,
+      dueAt: row.due_at || null,
+      metadata: mapReminderMetadata(row),
+    };
+    const meta = reminder.metadata || {};
+    const dueAt = reminder.dueAt ? new Date(reminder.dueAt) : null;
+    if (!dueAt || Number.isNaN(dueAt.getTime())) continue;
+
+    const dueEmitted = meta.due_emitted === true;
+    const overdueEmitted = meta.overdue_emitted === true;
+
+    if (!dueEmitted && isSameDay(dueAt, now)) {
+      try {
+        await emitReminderEvent({ type: 'reminder_due', reminder, actorId: null, actorName: null });
+        meta.due_emitted = true;
+        await updateReminderMetadata(reminder.id, meta);
+      } catch (eventErr) {
+        console.warn('[reminders] failed to emit reminder_due', eventErr?.message || eventErr);
+      }
+      continue;
+    }
+
+    if (!overdueEmitted && dueAt.getTime() < now.getTime()) {
+      try {
+        await emitReminderEvent({ type: 'reminder_overdue', reminder, actorId: null, actorName: null });
+        meta.overdue_emitted = true;
+        await updateReminderMetadata(reminder.id, meta);
+      } catch (eventErr) {
+        console.warn('[reminders] failed to emit reminder_overdue', eventErr?.message || eventErr);
+      }
+    }
+  }
+  })();
+}
+
 
 const listReminders = async (options = {}) => {
   const { caseId, applicationId, includeGlobal = false, statuses = [], limit, offset } = options;
@@ -15087,6 +15292,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
   const metadata = summary ? { summary } : null;
 
   let connection;
+  const pendingReminderCreates = [];
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -17367,6 +17573,12 @@ app.post('/api/reminders', async (req, res) => {
       throw err;
     }
     const reminder = await fetchReminderById(insertResult.insertId);
+    try {
+      const { actorId, actorName } = resolveRequestActor(req);
+      await emitReminderEvent({ type: 'reminder_created', reminder, actorId, actorName });
+    } catch (eventErr) {
+      console.warn('[reminders] failed to emit reminder_created', eventErr?.message || eventErr);
+    }
     return res.status(201).json(reminder);
   } catch (err) {
     if (isMissingTableErrorLocal(err)) {
@@ -17624,6 +17836,15 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
       return res.status(404).json({ error: 'reminder_not_found' });
     }
     const reminder = await fetchReminderById(reminderId);
+    const statusBecameCompleted = statusProvided && statusValue === 'completed' && existing.status !== 'completed';
+    if (statusBecameCompleted) {
+      try {
+        const { actorId, actorName } = resolveRequestActor(req);
+        await emitReminderEvent({ type: 'reminder_completed', reminder, actorId, actorName });
+      } catch (eventErr) {
+        console.warn('[reminders] failed to emit reminder_completed', eventErr?.message || eventErr);
+      }
+    }
     return res.json(reminder);
   } catch (err) {
     if (isMissingTableErrorLocal(err)) {
@@ -17694,6 +17915,12 @@ app.post('/api/reminders/:reminderId/complete', async (req, res) => {
       return res.status(404).json({ error: 'reminder_not_found' });
     }
     const reminder = await fetchReminderById(reminderId);
+    try {
+      const { actorId, actorName } = resolveRequestActor(req);
+      await emitReminderEvent({ type: 'reminder_completed', reminder, actorId, actorName });
+    } catch (eventErr) {
+      console.warn('[reminders] failed to emit reminder_completed', eventErr?.message || eventErr);
+    }
     return res.json(reminder);
   } catch (err) {
     if (isMissingTableErrorLocal(err)) {
@@ -17701,6 +17928,103 @@ app.post('/api/reminders/:reminderId/complete', async (req, res) => {
     }
     console.error(`POST /api/reminders/${reminderId}/complete failed:`, err.message);
     return res.status(500).json({ error: 'failed_to_complete_reminder' });
+  }
+});
+
+// POST /api/reminders/:reminderId/acknowledge
+// Marks a reminder as completed and, if linked to a case note, removes the follow-up date.
+app.post('/api/reminders/:reminderId/acknowledge', async (req, res) => {
+  const reminderId = Number.parseInt(req.params.reminderId, 10);
+  if (!Number.isInteger(reminderId) || reminderId <= 0) {
+    return res.status(400).json({ error: 'invalid_reminder_id' });
+  }
+  const actingStaffProfileId = req.staffProfile?.id || null;
+  const editorUserId = getAuthenticatedNumericUserId(req);
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [rows] = await connection.query(
+      `SELECT id, case_id, application_id, action_plan_id, intervention_id, title, description, category, status, due_at,
+              completed_at, completed_by_staff_profile_id, assigned_staff_profile_id, metadata_json, created_by_staff_profile_id,
+              updated_by_staff_profile_id, deleted_at
+         FROM iset_case_reminder
+        WHERE id = ?
+        FOR UPDATE`,
+      [reminderId]
+    );
+    if (!rows.length || rows[0].deleted_at) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'reminder_not_found' });
+    }
+    const reminderRow = rows[0];
+    const metadata = safeJsonParse(reminderRow.metadata_json, {});
+    const noteId = metadata?.case_note_id ? Number(metadata.case_note_id) : null;
+    const caseIdValue = reminderRow.case_id || null;
+
+    const completedAt = new Date();
+    await connection.query(
+      `UPDATE iset_case_reminder
+         SET status = 'completed',
+             completed_at = ?,
+             completed_by_staff_profile_id = COALESCE(?, completed_by_staff_profile_id),
+             updated_by_staff_profile_id = COALESCE(?, updated_by_staff_profile_id),
+             deleted_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND deleted_at IS NULL`,
+      [completedAt, actingStaffProfileId || null, actingStaffProfileId || null, reminderId]
+    );
+
+    if (noteId && caseIdValue) {
+      await connection.query(
+        `UPDATE iset_case_note
+            SET follow_up_at = NULL,
+                reminder_id = NULL,
+                updated_at = CURRENT_TIMESTAMP(3),
+                edited_at = CURRENT_TIMESTAMP(3),
+                edited_by_staff_profile_id = COALESCE(?, edited_by_staff_profile_id),
+                edited_by_user_id = COALESCE(?, edited_by_user_id)
+          WHERE id = ? AND case_id = ? AND deleted_at IS NULL`,
+        [actingStaffProfileId || null, editorUserId || null, noteId, caseIdValue]
+      );
+    }
+
+    await connection.commit();
+
+    try {
+      const { actorId, actorName } = resolveRequestActor(req);
+      const reminderForEvent = {
+        id: reminderRow.id,
+        caseId: reminderRow.case_id || null,
+        applicationId: reminderRow.application_id || null,
+        title: reminderRow.title || null,
+        description: reminderRow.description || null,
+        category: reminderRow.category || null,
+        status: 'completed',
+        dueAt: reminderRow.due_at || null,
+        completedAt,
+        completedByStaffProfileId: actingStaffProfileId || reminderRow.completed_by_staff_profile_id || null,
+        assignedStaffProfileId: reminderRow.assigned_staff_profile_id || null,
+        metadata
+      };
+      await emitReminderEvent({ type: 'reminder_completed', reminder: reminderForEvent, actorId, actorName });
+    } catch (eventErr) {
+      console.warn('[reminders] failed to emit reminder_completed (acknowledge)', eventErr?.message || eventErr);
+    }
+
+    return res.json({ ok: true, reminderId, noteId, caseId: caseIdValue });
+  } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) { /* ignore */ }
+    }
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(404).json({ error: 'reminder_not_found' });
+    }
+    console.error(`POST /api/reminders/${reminderId}/acknowledge failed:`, err.message);
+    return res.status(500).json({ error: 'failed_to_acknowledge_reminder', message: err.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -17762,6 +18086,7 @@ app.post('/api/cases/:caseId/notes', async (req, res) => {
   const authorUserId = getAuthenticatedNumericUserId(req);
   const pinnedValue = isPinned ? 1 : 0;
   let connection;
+  const pendingReminderCreates = [];
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -17795,6 +18120,7 @@ app.post('/api/cases/:caseId/notes', async (req, res) => {
           staffProfileId,
         });
         await connection.query('UPDATE iset_case_note SET reminder_id = ? WHERE id = ?', [reminderId, noteId]);
+        pendingReminderCreates.push(reminderId);
       } catch (err) {
         if (isMissingTableErrorLocal(err)) {
           await connection.rollback();
@@ -17805,6 +18131,17 @@ app.post('/api/cases/:caseId/notes', async (req, res) => {
     }
     await connection.commit();
     const note = await fetchCaseNoteById(caseId, noteId);
+    if (pendingReminderCreates.length) {
+      for (const reminderId of pendingReminderCreates) {
+        try {
+          const reminder = await fetchReminderById(reminderId);
+          const { actorId, actorName } = resolveRequestActor(req);
+          await emitReminderEvent({ type: 'reminder_created', reminder, actorId, actorName });
+        } catch (eventErr) {
+          console.warn('[reminders] failed to emit reminder_created (note add post-commit)', eventErr?.message || eventErr);
+        }
+      }
+    }
     try {
       const { actorId, actorName } = resolveRequestActor(req);
       await captureCaseEvent({
@@ -17879,6 +18216,7 @@ app.put('/api/cases/:caseId/notes/:noteId', async (req, res) => {
   const staffProfileId = req.staffProfile?.id || null;
   const editorUserId = getAuthenticatedNumericUserId(req);
   let connection;
+  const pendingReminderCreates = [];
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -17940,6 +18278,7 @@ app.put('/api/cases/:caseId/notes/:noteId', async (req, res) => {
               reminderId = newReminderId;
               updates.push('reminder_id = ?');
               params.push(reminderId);
+              pendingReminderCreates.push(reminderId);
             }
           } else {
             const newReminderId = await createReminderForCaseNote(connection, {
@@ -17953,6 +18292,7 @@ app.put('/api/cases/:caseId/notes/:noteId', async (req, res) => {
             reminderId = newReminderId;
             updates.push('reminder_id = ?');
             params.push(reminderId);
+            pendingReminderCreates.push(reminderId);
           }
         } catch (err) {
           if (isMissingTableErrorLocal(err)) {
@@ -18024,6 +18364,17 @@ app.put('/api/cases/:caseId/notes/:noteId', async (req, res) => {
 
     await connection.commit();
     const note = await fetchCaseNoteById(caseId, noteId);
+    if (pendingReminderCreates.length) {
+      for (const reminderId of pendingReminderCreates) {
+        try {
+          const reminder = await fetchReminderById(reminderId);
+          const { actorId, actorName } = resolveRequestActor(req);
+          await emitReminderEvent({ type: 'reminder_created', reminder, actorId, actorName });
+        } catch (eventErr) {
+          console.warn('[reminders] failed to emit reminder_created (note update post-commit)', eventErr?.message || eventErr);
+        }
+      }
+    }
     return res.json(note);
   } catch (err) {
     if (connection) {

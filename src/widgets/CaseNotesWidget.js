@@ -72,6 +72,9 @@ const classifyFollowUpStatus = (value) => {
   if (diffDays < 0) {
     return { color: 'red', label: 'Overdue follow-up' };
   }
+  if (diffDays === 0) {
+    return { color: 'green', label: 'Follow-up today' };
+  }
   if (diffDays <= 7) {
     return { color: 'yellow', label: 'Follow-up due soon' };
   }
@@ -138,6 +141,7 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
   const [activeNoteId, setActiveNoteId] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState(null);
+  const [pendingAcknowledgeId, setPendingAcknowledgeId] = useState(null);
 
   const canMutate = Boolean(caseId);
 
@@ -211,9 +215,29 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
     loadNotes();
   }, [loadNotes]);
 
+  useEffect(() => {
+    const handler = event => {
+      const targetCaseId = event?.detail?.caseId;
+      if (!caseId) return;
+      if (targetCaseId && Number(targetCaseId) !== Number(caseId)) return;
+      loadNotes({ silent: true });
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('case-notes-refresh', handler);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('case-notes-refresh', handler);
+      }
+    };
+  }, [caseId, loadNotes]);
+
   const handleRefresh = () => {
     if (!caseId || isLoading) return;
     loadNotes({ silent: true });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('case-notes-refresh', { detail: { caseId } }));
+    }
   };
 
   const toggleExpanded = (noteId) => {
@@ -228,13 +252,21 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
     });
   };
 
+  const [deletePrompt, setDeletePrompt] = useState({ open: false, noteId: null });
+
   const handleDelete = async (noteId) => {
     if (!noteId || !caseId) return;
-    const confirmation = 'Delete this note? This action cannot be undone.';
-    if (typeof window !== 'undefined' && !window.confirm(confirmation)) {
+    setDeletePrompt({ open: true, noteId });
+  };
+
+  const confirmDelete = async () => {
+    const noteId = deletePrompt.noteId;
+    if (!noteId || !caseId) {
+      setDeletePrompt({ open: false, noteId: null });
       return;
     }
     setPendingDeleteId(noteId);
+    setDeletePrompt({ open: false, noteId: null });
     setError(null);
     try {
       const res = await apiFetch(`/api/cases/${caseId}/notes/${noteId}`, {
@@ -247,11 +279,36 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
         next.delete(noteId);
         return next;
       });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId } }));
+        window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId } }));
+      }
     } catch (err) {
       const message = await getErrorMessage(err, 'Failed to delete note.');
       setError(message);
     } finally {
       setPendingDeleteId(null);
+    }
+  };
+
+  const handleAcknowledgeReminder = async (note) => {
+    if (!note?.reminderId || !caseId) return;
+    setPendingAcknowledgeId(note.id);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/reminders/${note.reminderId}/acknowledge`, { method: 'POST' });
+      if (!res.ok) throw res;
+      await loadNotes({ silent: true });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId } }));
+        window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId } }));
+        window.dispatchEvent(new CustomEvent('case-notes-refresh', { detail: { caseId } }));
+      }
+    } catch (err) {
+      const message = await getErrorMessage(err, 'Failed to acknowledge reminder.');
+      setError(message);
+    } finally {
+      setPendingAcknowledgeId(null);
     }
   };
 
@@ -340,6 +397,7 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
     const limit = 420;
     const displayDate = formatFollowUpDate(note.followUpAt);
   const followUpStatus = classifyFollowUpStatus(note.followUpAt);
+    const canAcknowledgeReminder = note.followUpAt && note.reminderId;
 
     const textContent =
       text.length <= limit ? (
@@ -369,6 +427,15 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
         <Box fontWeight="bold">Follow-up</Box>
         {followUpStatus ? <Badge color={followUpStatus.color}>{followUpStatus.label}</Badge> : null}
         <Box color="text-body-secondary">Due {displayDate}</Box>
+        {canAcknowledgeReminder ? (
+          <Button
+            size="small"
+            onClick={() => handleAcknowledgeReminder(note)}
+            loading={pendingAcknowledgeId === note.id}
+          >
+            Acknowledge reminder
+          </Button>
+        ) : null}
       </div>
     ) : null;
 
@@ -386,6 +453,22 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
 
   return (
     <>
+      <Modal
+        visible={deletePrompt.open}
+        header="Delete note"
+        onDismiss={() => setDeletePrompt({ open: false, noteId: null })}
+        closeAriaLabel="Close delete note confirmation"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button onClick={() => setDeletePrompt({ open: false, noteId: null })}>Cancel</Button>
+            <Button variant="primary" loading={pendingDeleteId === deletePrompt.noteId} onClick={confirmDelete}>
+              Delete
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <Box>Delete this note? This action cannot be undone.</Box>
+      </Modal>
       <BoardItem
         header={
           <Header
@@ -411,7 +494,7 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
                   onFollow={() =>
                   toggleHelpPanel(
                     <CaseNotesHelp />,
-                    'Notes and Tasks Help',
+                    'Notes and Reminders Help',
                     CaseNotesHelp.aiContext
                   )
                 }
@@ -421,7 +504,7 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
             ) : undefined
           }
         >
-          Notes and Tasks
+          Notes and Reminders
         </Header>
       }
         i18nStrings={{

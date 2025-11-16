@@ -36,3 +36,6 @@ Following the pattern above keeps new dashboards from entering the runaway rende
 7. **Reset defaults with a storage-key bump.** Whenever you change the default layout (adding/removing widgets), increment the localStorage key. Without that, browsers keep hydrating the old layout and new widgets never appear by default.
 
 8. **Wrap shared widgets lightly.** When reusing a shared widget (like Supporting Documents) across dashboards, keep a thin wrapper per board that simply forwards the Cloudscape `actions`, context data, and help metadata—no custom logic that might block `actions.removeItem()` or other board callbacks.
+
+### Configuration dashboard note (Nov 2025)
+- The configuration dashboard storage key moved to `configuration-dashboard-layout-v2` when the Backend jobs widget was added. If new widgets appear only in “Available Widgets”, clear `localStorage` for the old key or bump it again when adjusting the default layout.

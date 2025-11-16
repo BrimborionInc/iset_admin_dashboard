@@ -262,6 +262,42 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     };
   }, [useLiveData, caseId]);
 
+  useEffect(() => {
+    const handler = event => {
+      const targetCaseId = event?.detail?.caseId;
+      if (!useLiveData || !caseId || (targetCaseId && Number(targetCaseId) !== Number(caseId))) {
+        return;
+      }
+      // Re-trigger by toggling the state to refetch
+      (async () => {
+        try {
+          const response = await apiFetch(`/api/reminders?caseId=${caseId}`);
+          if (!response.ok) throw new Error(`Failed to load reminders (${response.status})`);
+          const payload = await response.json();
+          setRemindersState({
+            items: Array.isArray(payload) ? payload : [],
+            isLoading: false,
+            error: null
+          });
+        } catch (error) {
+          setRemindersState({
+            items: [],
+            isLoading: false,
+            error: error?.message || 'Failed to load reminders.'
+          });
+        }
+      })();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('case-reminders-refresh', handler);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('case-reminders-refresh', handler);
+      }
+    };
+  }, [caseId, useLiveData]);
+
   const monthLabel = useMemo(
     () =>
       monthAnchor.toLocaleDateString(undefined, {
