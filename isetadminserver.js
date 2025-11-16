@@ -4335,11 +4335,6 @@ const { CognitoIdentityProviderClient, ListUsersInGroupCommand, DescribeUserPool
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
-const intakeEnvPath = path.resolve(__dirname, '../ISET-intake/.env');
-if (fs.existsSync(intakeEnvPath)) {
-  require('dotenv').config({ path: intakeEnvPath, override: false });
-  console.log('Loaded intake .env fallback from:', intakeEnvPath);
-}
 const cheerio = require('cheerio');
 const { sendSecureMessageAlert, sendDecisionOutcome } = require('../ISET-intake/notifications/applicantEmailNotifications');
 const axios = require('axios');
@@ -21546,7 +21541,6 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
-
 
 
 
