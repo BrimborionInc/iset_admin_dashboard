@@ -15,8 +15,10 @@ import {
   SpaceBetween,
   Button,
   Modal,
-  Link
+  Link,
+  Input
 } from '@cloudscape-design/components';
+import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
 import { apiFetch } from '../auth/apiClient';
 import ApplicationOverviewHelp from '../helpPanelContents/applicationOverviewHelp';
 import useCurrentUser from '../hooks/useCurrentUser';
@@ -270,8 +272,8 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   const statusContext = getCaseStatusContext(fallbackStatus);
   const roleAccess = getRoleGroups(userRole);
   const { canonicalStatus, isFinalStatus } = statusContext;
-  const { isAdminRole } = roleAccess;
-  const canEditStatus = canEditCaseStatus({
+  const { isSystemAdministratorRole } = roleAccess;
+  const canEditStatus = isSystemAdministratorRole && canEditCaseStatus({
     role: userRole,
     status: fallbackStatus,
     hasCase: Boolean(caseData?.id),
@@ -283,8 +285,95 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   const badgeLabel = statusLabel;
   const badgeColor = statusColor(statusOption?.value || fallbackStatus || 'unknown');
   const statusSelectDisabled = !canEditStatus || savingStatus || lockedByAnotherUser;
+  const canRunQuickActions = !lockedByAnotherUser;
+
+  const statusKey = (fallbackStatus || '').toLowerCase();
+  const normalizedStatusKey = (fallbackStatus || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const quickActionItems = [];
+  if (statusKey === 'in_review' || normalizedStatusKey === 'in_review' || normalizedStatusKey === 'pending_approval') {
+    quickActionItems.push({
+      id: 'suspend',
+      text: 'Suspend Application',
+      description: 'Move to Action Required when you need more information from the applicant.'
+    });
+  }
+  if (statusKey === 'docs_requested' || normalizedStatusKey === 'docs_requested') {
+    quickActionItems.push({
+      id: 'resume',
+      text: 'Resume Application',
+      description: 'Return to In Review after applicant provides requested information.'
+    });
+  }
+  if (
+    ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(statusKey) ||
+    ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(normalizedStatusKey)
+  ) {
+    quickActionItems.push({
+      id: 'withdraw',
+      text: 'Withdraw Application',
+      description: 'Mark the application as withdrawn.'
+    });
+  }
 
   const handleConfirmDismiss = () => setConfirmStatusChange(null);
+  const [quickActionConfirm, setQuickActionConfirm] = useState(null);
+  const [quickActionConfirmInput, setQuickActionConfirmInput] = useState('');
+
+  const selectOptionByValue = value =>
+    APPLICATION_STATUS_OPTIONS.find(option => option.value === value) ||
+    { value, label: formatStatusLabel(value) };
+
+  const handleQuickActionSelect = ({ detail }) => {
+    const actionId = detail?.id;
+    if (!actionId || !canRunQuickActions) return;
+    if (lockedByAnotherUser) {
+      setStatusFeedback({
+        type: 'warning',
+        content: lockAlertMessage || 'This case is currently locked by another user.'
+      });
+      return;
+    }
+
+    const buildConfirm = (title, body, targetStatus) => ({
+      title,
+      body,
+      targetStatus,
+      targetOption: selectOptionByValue(targetStatus),
+    });
+
+    if (actionId === 'suspend') {
+      setQuickActionConfirmInput('');
+      setQuickActionConfirm(buildConfirm(
+        'Suspend application',
+        'Suspending will set the application to Action Required so the applicant can provide additional information or documents.',
+        'docs_requested'
+      ));
+      return;
+    }
+
+    if (actionId === 'resume') {
+      setQuickActionConfirmInput('');
+      setQuickActionConfirm(buildConfirm(
+        'Resume application',
+        'Resuming returns the application to In Review so you can continue the evaluation after receiving the requested information.',
+        'in_review'
+      ));
+      return;
+    }
+
+    if (actionId === 'withdraw') {
+      setQuickActionConfirmInput('');
+      setQuickActionConfirm({
+        ...buildConfirm(
+          'Withdraw application',
+          'Withdrawing will move this application to Withdrawn. Once withdrawn it cannot be processed further. Use this when the applicant requests withdrawal or is no longer pursuing the application.',
+          'withdrawn'
+        ),
+        confirmWord: 'withdraw',
+      });
+      return;
+    }
+  };
 
   const handleConfirmProceed = async () => {
     if (!confirmStatusChange) return;
@@ -296,6 +385,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   const confirmModalVisible = Boolean(confirmStatusChange);
   const confirmTargetLabel = confirmStatusChange?.nextOption?.label || confirmStatusChange?.nextStatus;
   const confirmCurrentLabel = badgeLabel || formatStatusLabel(canonicalStatus) || 'current status';
+  const quickModalVisible = Boolean(quickActionConfirm);
 
   const runStatusUpdate = async (nextStatus, nextOption) => {
     if (!caseData?.id) {
@@ -409,7 +499,10 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     }
 
     if (statusSelectDisabled) {
-      setStatusFeedback({ type: 'info', content: 'Status changes are not permitted for your role on this case.' });
+      const message = !canEditStatus
+        ? 'Status changes in this widget are limited to system administrators.'
+        : 'Status changes are not permitted right now.';
+      setStatusFeedback({ type: 'info', content: message });
       return;
     }
 
@@ -422,7 +515,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
       return;
     }
 
-    if (isAdminRole && isFinalStatus && canonicalNextStatus !== canonicalStatus) {
+    if (isSystemAdministratorRole && isFinalStatus && canonicalNextStatus !== canonicalStatus) {
       setConfirmStatusChange({ nextStatus, nextOption });
       return;
     }
@@ -430,7 +523,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     runStatusUpdate(nextStatus, nextOption);
   };
 
-  const statusFormField = (
+  const statusFormField = isSystemAdministratorRole ? (
     <FormField stretch={true} label="" description="">
       <Select
         selectedOption={selectedStatusOption}
@@ -445,13 +538,26 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
         ariaLabel="Application status"
       />
     </FormField>
+  ) : (
+    <Badge color={badgeColor}>{badgeLabel}</Badge>
   );
 
   const overviewItems = [];
 
   const referenceNumber = payload?.submission_snapshot?.reference_number || caseData?.tracking_id;
   if (referenceNumber) {
-    overviewItems.push({ label: 'Reference #', value: referenceNumber });
+    overviewItems.push({
+      label: 'Reference #',
+      value: (
+        <CopyToClipboard
+          copyButtonAriaLabel="Copy reference number"
+          copyErrorText="Reference number failed to copy"
+          copySuccessText="Reference number copied"
+          textToCopy={referenceNumber}
+          variant="inline"
+        />
+      ),
+    });
   }
 
   overviewItems.push({ label: 'Application Status', value: statusFormField });
@@ -460,7 +566,6 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   if (preferredName) overviewItems.push({ label: 'Preferred Name', value: preferredName });
 
   const applicantName = caseData?.applicant_name || [answers['first-name'], answers['middle-names'], answers['last-name']].filter(Boolean).join(' ');
-  if (applicantName) overviewItems.push({ label: 'Applicant', value: applicantName });
 
   const contactEmail = caseData?.applicant_email || answers['contact-email-address'] || answers.email;
   if (contactEmail) overviewItems.push({ label: 'Email', value: contactEmail });
@@ -497,11 +602,30 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     <Box color="text-status-inactive">No overview data available.</Box>
   );
 
+  const headerTitle = applicantName ? `Application Overview - ${applicantName}` : 'Application Overview';
+
   return (
     <BoardItem
       header={
         <Header
-          actions={badgeLabel ? <Badge color={badgeColor}>{badgeLabel}</Badge> : null}
+          actions={
+            (
+              <SpaceBetween direction="horizontal" size="xs">
+                {quickActionItems.length ? (
+                  <ButtonDropdown
+                    items={quickActionItems}
+                    onItemClick={handleQuickActionSelect}
+                    ariaLabel="Quick actions"
+                    expandToViewport
+                    disabled={!canRunQuickActions || savingStatus || quickActionItems.length === 0}
+                  >
+                    Quick actions
+                  </ButtonDropdown>
+                ) : null}
+                {badgeLabel ? <Badge color={badgeColor}>{badgeLabel}</Badge> : null}
+              </SpaceBetween>
+            )
+          }
           info={
             toggleHelpPanel ? (
               <Link
@@ -519,7 +643,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
             ) : undefined
           }
         >
-          Application Overview
+          {headerTitle}
         </Header>
       }
       i18nStrings={{
@@ -586,6 +710,70 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
               <Box fontWeight="bold">
                 Do you want to move it to {confirmTargetLabel || 'the selected status'}?
               </Box>
+            </SpaceBetween>
+          </Modal>
+        )}
+        {quickModalVisible && (
+          <Modal
+            visible={quickModalVisible}
+            onDismiss={() => {
+              setQuickActionConfirm(null);
+              setQuickActionConfirmInput('');
+            }}
+            closeAriaLabel="Close quick action confirmation"
+            header={quickActionConfirm?.title || 'Confirm action'}
+            footer={
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button
+                  onClick={() => {
+                    setQuickActionConfirm(null);
+                    setQuickActionConfirmInput('');
+                  }}
+                  disabled={savingStatus}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    if (!quickActionConfirm?.targetStatus) {
+                      setQuickActionConfirm(null);
+                      setQuickActionConfirmInput('');
+                      return;
+                    }
+                    const targetOption = quickActionConfirm?.targetOption;
+                    setQuickActionConfirm(null);
+                    setQuickActionConfirmInput('');
+                    runStatusUpdate(quickActionConfirm.targetStatus, targetOption);
+                  }}
+                  loading={savingStatus}
+                  disabled={
+                    savingStatus ||
+                    (quickActionConfirm?.confirmWord &&
+                      quickActionConfirmInput.trim().toLowerCase() !== quickActionConfirm.confirmWord)
+                  }
+                >
+                  Confirm
+                </Button>
+              </SpaceBetween>
+            }
+          >
+            <SpaceBetween direction="vertical" size="s">
+              <Box>{quickActionConfirm?.body}</Box>
+              {quickActionConfirm?.targetOption ? (
+                <Box fontWeight="bold">
+                  This will set status to {quickActionConfirm.targetOption.label}.
+                </Box>
+              ) : null}
+              {quickActionConfirm?.confirmWord ? (
+                <FormField label={`Type "${quickActionConfirm.confirmWord}" to confirm`}>
+                  <Input
+                    value={quickActionConfirmInput}
+                    onChange={e => setQuickActionConfirmInput(e.detail.value || '')}
+                    placeholder={quickActionConfirm.confirmWord}
+                  />
+                </FormField>
+              ) : null}
             </SpaceBetween>
           </Modal>
         )}

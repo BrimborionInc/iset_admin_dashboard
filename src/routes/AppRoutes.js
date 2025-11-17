@@ -758,7 +758,22 @@ const AppRoutes = ({
             ],
             'ISET Application Assessment',
             <ApplicationCaseDashboardHelp />,
-            null,
+            (
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button
+                  iconName="add-plus"
+                  onClick={() => window.dispatchEvent(new CustomEvent("applicationAssessment:openPalette"))}
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() => window.dispatchEvent(new CustomEvent("applicationAssessment:resetLayout"))}
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
             ApplicationCaseDashboardHelp.aiContext
           )}
         </Guard>

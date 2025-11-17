@@ -1806,6 +1806,11 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   const employmentNarrativeReadOnly = renderTextBlock(answers['long-term-goal']);
   const employmentNarrativeValue = editableAnswers['long-term-goal'] ?? '';
   const showEmploymentNarrative = isEditing || employmentNarrativeReadOnly !== NOT_PROVIDED;
+  const currentApplicationStatus = (caseData?.applicationStatus || caseData?.status || application?.status || '')
+    .toString()
+    .trim()
+    .toLowerCase();
+  const isWithdrawnStatus = currentApplicationStatus === 'withdrawn';
 
   const headerActions = (
     <SpaceBetween direction="horizontal" size="xs">
@@ -1825,7 +1830,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
       ) : (
         <Button
           onClick={handleRequestEdit}
-          disabled={loading || !application || isDecisionFinal || lockedByAnotherUser}
+          disabled={loading || !application || isDecisionFinal || lockedByAnotherUser || isWithdrawnStatus}
           variant="primary"
         >
           Edit

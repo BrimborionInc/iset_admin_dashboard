@@ -1,4 +1,6 @@
-const ADMIN_ROLE_VALUES = Object.freeze(['program administrator', 'system administrator']);
+const PROGRAM_ADMIN_ROLE_VALUES = Object.freeze(['program administrator']);
+const SYSTEM_ADMIN_ROLE_VALUES = Object.freeze(['system administrator']);
+const ADMIN_ROLE_VALUES = Object.freeze([...PROGRAM_ADMIN_ROLE_VALUES, ...SYSTEM_ADMIN_ROLE_VALUES]);
 const REGIONAL_COORDINATOR_ROLE_VALUES = Object.freeze(['regional coordinator']);
 const APPLICATION_ASSESSOR_ROLE_VALUES = Object.freeze(['application assessor']);
 const OUTCOME_REVIEW_ROLE_VALUES = Object.freeze([
@@ -10,6 +12,7 @@ const OUTCOME_REVIEW_ROLE_VALUES = Object.freeze([
 ]);
 
 const ADMIN_ROLES = new Set(ADMIN_ROLE_VALUES);
+const SYSTEM_ADMIN_ROLES = new Set(SYSTEM_ADMIN_ROLE_VALUES);
 const REGIONAL_COORDINATOR_ROLES = new Set(REGIONAL_COORDINATOR_ROLE_VALUES);
 const APPLICATION_ASSESSOR_ROLES = new Set(APPLICATION_ASSESSOR_ROLE_VALUES);
 const OUTCOME_REVIEW_ROLES = new Set(OUTCOME_REVIEW_ROLE_VALUES);
@@ -70,6 +73,7 @@ export function getRoleGroups(role) {
   return {
     normalizedRole,
     isAdminRole: ADMIN_ROLES.has(normalizedRole),
+    isSystemAdministratorRole: SYSTEM_ADMIN_ROLES.has(normalizedRole),
     isRegionalCoordinatorRole: REGIONAL_COORDINATOR_ROLES.has(normalizedRole),
     isApplicationAssessorRole: APPLICATION_ASSESSOR_ROLES.has(normalizedRole),
     isOutcomeReviewerRole: OUTCOME_REVIEW_ROLES.has(normalizedRole),
@@ -119,6 +123,12 @@ export function isStatusTransitionAllowed({ role, fromStatus, toStatus }) {
   if (!fromKey || !toKey) return false;
   if (fromKey === toKey) return true;
 
+  // Allow everyone to move between in_review and docs_requested (action required) states
+  const canFreelyToggleActionRequired =
+    (fromKey === 'pending_approval' && toKey === 'docs_requested') ||
+    (fromKey === 'docs_requested' && toKey === 'pending_approval');
+  if (canFreelyToggleActionRequired) return true;
+
   if (isAdminRole) return true;
 
   if (isRegionalCoordinatorRole) {
@@ -151,6 +161,8 @@ export function requiresFinalStatusConfirmation({ role, currentStatus }) {
 }
 
 export const RBAC_CONSTANTS = Object.freeze({
+  PROGRAM_ADMIN_ROLE_VALUES,
+  SYSTEM_ADMIN_ROLE_VALUES,
   ADMIN_ROLE_VALUES,
   REGIONAL_COORDINATOR_ROLE_VALUES,
   APPLICATION_ASSESSOR_ROLE_VALUES,

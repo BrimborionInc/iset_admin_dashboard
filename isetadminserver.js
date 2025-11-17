@@ -21124,10 +21124,14 @@ app.put('/api/cases/:id', async (req, res) => {
           derivedCaseStatus = null;
       }
 
+      if (!derivedCaseStatus) {
+        derivedCaseStatus = requestedStatus;
+      }
+
       statusToPersist = derivedCaseStatus;
 
-      if (derivedCaseStatus && derivedCaseStatus !== beforeStatusNormalised) {
-        await conn.query('UPDATE iset_case SET status = ? WHERE id = ?', [derivedCaseStatus, caseId]);
+      if (statusToPersist && statusToPersist !== beforeStatusNormalised) {
+        await conn.query('UPDATE iset_case SET status = ? WHERE id = ?', [statusToPersist, caseId]);
         statusChanged = true;
         bumpApplicationRowVersion = true;
         shouldRecomputeCaseStatus = true;

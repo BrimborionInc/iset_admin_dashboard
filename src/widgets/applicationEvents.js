@@ -174,6 +174,7 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
   const [sortingColumn, setSortingColumn] = useState({ sortingField: 'created_at' });
   const [isDescending, setIsDescending] = useState(true);
   const [ackLoadingId, setAckLoadingId] = useState(null);
+  const [csvGenerating, setCsvGenerating] = useState(false);
 
   const caseId = caseData?.id || caseData?.case_id || null;
 
@@ -309,6 +310,37 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
     return 0;
   });
 
+  const handleDownloadCsv = useCallback(() => {
+    if (!sortedEvents.length || csvGenerating) return;
+    setCsvGenerating(true);
+    try {
+      const header = ['Date/Time', 'Event Type', 'Event Data', 'Actor'];
+      const rows = sortedEvents.map(item => {
+        const dateStr = item.created_at ? new Date(item.created_at).toISOString() : '';
+        const typeStr = item.event_type_label || item.event_type || '';
+        const dataStr = (item.displayMessage || '').replace(/\r?\n/g, ' ').trim();
+        const actorStr = item.actorDisplay || '';
+        return [dateStr, typeStr, dataStr, actorStr];
+      });
+      const csv = [header, ...rows]
+        .map(cols => cols.map(value => `"${String(value).replace(/"/g, '""')}"`).join(','))
+        .join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'case-events.csv');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download CSV', err);
+    } finally {
+      setCsvGenerating(false);
+    }
+  }, [csvGenerating, sortedEvents]);
+
   return (
     <BoardItem
       header={
@@ -333,6 +365,12 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
           actions={
             <SpaceBetween direction="horizontal" size="xs">
               <Button
+                onClick={handleDownloadCsv}
+                disabled={!sortedEvents.length || csvGenerating}
+              >
+                Download .csv
+              </Button>
+              <Button
                 variant="icon"
                 iconName="refresh"
                 ariaLabel="Refresh events"
@@ -342,7 +380,7 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
             </SpaceBetween>
           }
         >
-          Events
+          Events Timeline
         </Header>
       }
       i18nStrings={{

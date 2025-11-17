@@ -6,20 +6,25 @@ Created: 2025-09-20
 ## Purpose
 Operational dashboard for reviewing and adjudicating individual ISET applications. Anchored to an `iset_case` record (route: `/application-case/:id`).
 
-## Current Board Items
-| Widget ID | Title | File | Status |
-|-----------|-------|------|--------|
-| iset-application-form | ISET Application Form | `src/widgets/IsetApplicationFormWidget.js` | Implemented (editable answers, schema-enriched) |
-| supporting-documents | Supporting Documents | `src/widgets/SupportingDocumentsWidget.js` | Implemented |
+## Current Board Items (production)
+| Title | File | Purpose / scope |
+|-------|------|-----------------|
+| Application Overview | `src/widgets/ApplicationOverviewWidget.js` | Case header with status badge, sysadmin-only status selector (others see read-only badge), and quick actions to suspend/resume/withdraw; shows reference # with copy control, locks awareness, assigned evaluator, timestamps. |
+| ISET Application Form | `src/widgets/IsetApplicationFormWidget.js` | Read-only or lock-protected edit view of the submitted application; version history and restore; edit disabled when decision final or status=withdrawn. |
+| Application Assessment | `src/widgets/CoordinatorAssessmentWidget.js` | Assessment workflow (declaration, recommendations, NWAC review) with status progression rules and locking; submits to `/api/cases/:id`. |
+| Supporting Documents | `src/widgets/SupportingDocumentsWidget.js` | Unified document list across submissions and secure messages; refresh control. |
+| Secure Messaging | `src/widgets/SecureMessagingWidget.js` | Inbox/Sent/Deleted tabs, thread view, compose/reply with attachment support. |
+| Notes and Tasks | `src/widgets/CaseNotesWidget.js` | Case notes and lightweight tasks (current implementation surface). |
+| Case Calendar | `src/widgets/CaseCalendarWidget.js` | Calendar/list view of reminders and deadlines; supports demo mode when live reminders unavailable. |
+| Application Events | `src/widgets/applicationEvents.js` | Timeline of events such as `status_changed`, submissions, document updates. |
 
 ## Planned / Backlog Widgets
 | Working Name | Intent / Function | Notes | Status |
-|--------------|-------------------|-------|--------|
-| evaluator-assignment | Assign / change evaluator(s) | Uses future endpoint listing evaluators; fallback empty list. | Not started |
-| application-summary (recovery) | Concise top-level summary snapshot | File name removed; needs git history lookup. | Not started |
-| decision-record | Capture decision (approve/deny/defer) + rationale | Not yet modeled in DB. | Deferred |
-| risk-flags | Surface automated/manual risk indicators | Requires rule layer. | Deferred |
-| timeline/events | Chronological events (status changes, edits) | Needs events source. | Deferred |
+|--------------|-------------------|-------|-------|
+| Evaluator assignment | Assign / change evaluator(s) | Requires evaluator roster endpoint | Not started |
+| Decision record | Capture decision (approve/deny/defer) + rationale | Depends on data model | Deferred |
+| Risk flags | Surface automated/manual risk indicators | Needs rules layer | Deferred |
+| Summary snapshot | Concise top-level summary | Needs design | Deferred |
 
 ## Data Sources
 - Application: `iset_application` (joined via `iset_case.application_id`).

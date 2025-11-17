@@ -837,7 +837,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     >
       <SpaceBetween size='m'>
         <Box variant='small' color='text-body-secondary'>
-          Month view scaffold. Toggle "Use live case data" off in Demo Controls to explore sample reminders.
+          Review upcoming reminders and deadlines for this case. Switch calendar/list views, and use demo mode to see sample reminders when live data is unavailable.
         </Box>
         {useLiveData && remindersState.error ? (
           <Box color='text-status-warning' fontSize='body-s'>

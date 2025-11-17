@@ -37,5 +37,7 @@ Following the pattern above keeps new dashboards from entering the runaway rende
 
 8. **Wrap shared widgets lightly.** When reusing a shared widget (like Supporting Documents) across dashboards, keep a thin wrapper per board that simply forwards the Cloudscape `actions`, context data, and help metadata—no custom logic that might block `actions.removeItem()` or other board callbacks.
 
+9. **Expose board-level add/reset buttons via AppRoutes.** Each dashboard route should pass header actions into `renderContent` that dispatch custom events (e.g., `finance:openPalette`, `finance:resetLayout`, `applicationAssessment:openPalette`). The page component must listen for those events, call `setAvailableItems` and `setSplitPanelOpen(true)` to show the palette, and call `resetLayout` to restore defaults. This keeps the UX consistent with the “Add widget” / “Reset layout” buttons shown in examples and avoids broken or missing palette integration.
+
 ### Configuration dashboard note (Nov 2025)
 - The configuration dashboard storage key moved to `configuration-dashboard-layout-v2` when the Backend jobs widget was added. If new widgets appear only in “Available Widgets”, clear `localStorage` for the old key or bump it again when adjusting the default layout.
