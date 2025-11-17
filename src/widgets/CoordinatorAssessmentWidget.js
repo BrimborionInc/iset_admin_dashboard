@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { forwardRef, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
@@ -107,10 +107,101 @@ const parseCurrencyToNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate }) => {
+const isEmptyString = (val) => val === null || val === undefined || val === '';
+const isEmptyArray = (val) => !Array.isArray(val) || val.length === 0;
+const mergeAssessmentState = (current, incoming) => {
+  const next = { ...incoming };
+  const takeIfNonEmpty = (key) => {
+    if (isEmptyString(incoming[key]) && !isEmptyString(current?.[key])) {
+      next[key] = current[key];
+    }
+  };
+  [
+    'dateOfAssessment',
+    'clientName',
+    'overview',
+    'employmentGoals',
+    'previousISET',
+    'previousISETDetails',
+    'otherFunding',
+    'esdcEligibility',
+    'startDate',
+    'endDate',
+    'institution',
+    'programName',
+    'recommendation',
+    'justification',
+    'nwacReviewStatus',
+    'nwacReview',
+    'nwacReason',
+    'interventionCode',
+    'interventionDuration',
+    'interventionCost',
+    'interventionNoc',
+    'interventionNocVersion',
+    'childcareNeed',
+    'childcareFunding',
+  ].forEach(takeIfNonEmpty);
+
+  if (isEmptyArray(incoming.barriers) && Array.isArray(current?.barriers) && current.barriers.length) {
+    next.barriers = current.barriers;
+  }
+  if (isEmptyArray(incoming.priorities) && Array.isArray(current?.priorities) && current.priorities.length) {
+    next.priorities = current.priorities;
+  }
+
+  const mergeObj = (key, shape) => {
+    const incomingVal = incoming[key] || {};
+    const currentVal = current?.[key] || {};
+    const merged = { ...shape };
+    Object.keys(shape).forEach((field) => {
+      const incomingField = incomingVal[field];
+      const currentField = currentVal[field];
+      merged[field] = isEmptyString(incomingField) && !isEmptyString(currentField) ? currentField : incomingField ?? '';
+    });
+    next[key] = merged;
+  };
+  mergeObj('itp', { tuition: '', books: '', materials: '', living: '' });
+  mergeObj('wage', { wages: '', mercs: '', nonwages: '', other: '' });
+
+  return next;
+};
+
+const buildEmptyAssessment = () => ({
+  dateOfAssessment: '',
+  clientName: '',
+  overview: '',
+  employmentGoals: '',
+  previousISET: '',
+  previousISETDetails: '',
+  barriers: [],
+  priorities: [],
+  otherFunding: '',
+  esdcEligibility: '',
+  startDate: '',
+  endDate: '',
+  institution: '',
+  programName: '',
+  itp: { tuition: '', books: '', materials: '', living: '' },
+  wage: { wages: '', mercs: '', nonwages: '', other: '' },
+  recommendation: '',
+  justification: '',
+  nwacReviewStatus: '',
+  nwacReview: '',
+  nwacReason: '',
+  interventionCode: '',
+  interventionDuration: '',
+  interventionCost: '',
+  interventionNoc: '',
+  interventionNocVersion: '',
+  childcareNeed: '',
+  childcareFunding: ''
+});
+
+const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate }, ref) => {
   // State for form fields
-  const [assessment, setAssessment] = useState({});
-  const [initialAssessment, setInitialAssessment] = useState({});
+  const [assessment, setAssessment] = useState(() => buildEmptyAssessment());
+  const [initialAssessment, setInitialAssessment] = useState(() => buildEmptyAssessment());
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [alert, setAlert] = useState(null);
   const [applicationRowVersion, setApplicationRowVersion] = useState(() => Number(caseData?.application_row_version || 0));
@@ -124,6 +215,14 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
   const [localAssessmentSubmitted, setLocalAssessmentSubmitted] = useState(false);
   const widgetRootRef = useRef(null);
+  const setWidgetRootRef = useCallback((node) => {
+    widgetRootRef.current = node;
+    if (typeof ref === 'function') {
+      ref(node);
+    } else if (ref && typeof ref === 'object') {
+      ref.current = node;
+    }
+  }, [ref]);
   const {
     lockState,
     acquireLock,
@@ -289,12 +388,22 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   }, [activeLock, currentUserName, lockHeldByCurrentUser, lockedByAnotherUser]);
 
   useEffect(() => {
-    setApplicationRowVersion(Number(caseData?.application_row_version || 0));
+    const incoming = Number(caseData?.application_row_version || 0);
+    setApplicationRowVersion(prev => {
+      if (!incoming) return prev;
+      // Only move forward; ignore stale payloads that would decrement the version.
+      return incoming >= (Number(prev) || 0) ? incoming : prev;
+    });
   }, [caseData?.application_row_version]);
 
   // Pre-populate fields from application form as placeholders
   useEffect(() => {
     if (!caseData) return;
+    const incomingVersion = Number(caseData?.application_row_version || 0);
+    if (incomingVersion && incomingVersion < (Number(applicationRowVersion) || 0)) {
+      // Ignore stale payloads so we don't overwrite newer local edits after a save.
+      return;
+    }
     const parseOrDefault = (val, def) => {
       if (!val) return def;
       try {
@@ -362,8 +471,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       })(),
       childcareFunding: caseData.assessment_childcare_funding_details || ''
     };
-    setAssessment(a => ({ ...placeholders, ...a }));
-    setInitialAssessment(placeholders);
+    const mergedIncoming = { ...buildEmptyAssessment(), ...placeholders };
+    const merged = mergeAssessmentState(assessment, mergedIncoming);
+    setAssessment(merged);
+    setInitialAssessment(merged);
     setConflictDeclarationSigned(Boolean(caseData?.assessment_conflict_declaration_signed));
     setConflictDeclarationSignedAt(caseData?.assessment_conflict_declaration_signed_at || null);
     setDeclarationChecked(false);
@@ -761,6 +872,17 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     const lockCheck = await ensureLockForOperation();
     if (!lockCheck.ok) return;
     const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
+    // Pull the freshest row_version before building the submit payload to avoid optimistic conflicts.
+    let latestRowVersion = applicationRowVersion;
+    try {
+      const latest = typeof actions?.refreshCaseData === 'function' ? await actions.refreshCaseData() : null;
+      const refreshedVersion = Number(latest?.application_row_version || latest?.applicationRowVersion || 0);
+      if (refreshedVersion > 0) {
+        latestRowVersion = refreshedVersion;
+        setApplicationRowVersion(refreshedVersion);
+      }
+    } catch (_) {}
+
     // 1. If assessment_date_of_assessment is missing, set to today (2025-06-11)
     let dateOfAssessment = assessment.dateOfAssessment;
     if (!dateOfAssessment) {
@@ -769,7 +891,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     dateOfAssessment = formatDate(dateOfAssessment);
 
     // 2. Save assessment (PUT /api/cases/:id)
-    const versionToken = Number(applicationRowVersion || caseData?.application_row_version || 0);
+    const versionToken = Number(latestRowVersion || caseData?.application_row_version || 0);
     let nextApplicationStatus = caseData?.applicationStatus || caseData?.status || null;
     const payload = {
       ...assessment,
@@ -848,7 +970,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         releaseLock({ silent: true }).catch(() => {});
         return;
       }
-      if (!res.ok || !result?.success) throw new Error(result?.error || 'Failed to save assessment.');
+      if (!res.ok || !result?.success) {
+        throw new Error(result?.error || 'Failed to save assessment.');
+      }
       const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
       if (updatedRowVersion) {
         setApplicationRowVersion(updatedRowVersion);
@@ -937,19 +1061,19 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         assessment_institution: assessment.institution || null,
         assessment_program_name: assessment.programName || null,
         assessment_itp: assessment.itp || [],
-      assessment_wage: assessment.wage || [],
-      assessment_recommendation: assessment.recommendation || null,
-      assessment_justification: assessment.justification || null,
-      assessment_nwac_review: assessment.nwacReview || null,
-      assessment_nwac_reason: assessment.nwacReason || null,
-      assessment_intervention_code: assessment.interventionCode || null,
-      assessment_intervention_duration_days: assessment.interventionDuration || null,
-      assessment_intervention_cost_total: assessment.interventionCost || null,
-      assessment_intervention_related_noc: assessment.interventionNoc || null,
-      assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
-      assessment_childcare_need: assessment.childcareNeed || null,
-      assessment_childcare_funding_details: assessment.childcareFunding || null,
-      case_summary: assessment.overview || null
+        assessment_wage: assessment.wage || [],
+        assessment_recommendation: assessment.recommendation || null,
+        assessment_justification: assessment.justification || null,
+        assessment_nwac_review: assessment.nwacReview || null,
+        assessment_nwac_reason: assessment.nwacReason || null,
+        assessment_intervention_code: assessment.interventionCode || null,
+        assessment_intervention_duration_days: assessment.interventionDuration || null,
+        assessment_intervention_cost_total: assessment.interventionCost || null,
+        assessment_intervention_related_noc: assessment.interventionNoc || null,
+        assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
+        assessment_childcare_need: assessment.childcareNeed || null,
+        assessment_childcare_funding_details: assessment.childcareFunding || null,
+        case_summary: assessment.overview || null
       };
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return;
@@ -996,8 +1120,13 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       }
       if (res.ok && result?.success) {
         const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
+        const caseUpdatePayload = { ...payload };
         if (updatedRowVersion) {
           setApplicationRowVersion(updatedRowVersion);
+          caseUpdatePayload.application_row_version = updatedRowVersion;
+        }
+        if (typeof onCaseUpdate === 'function') {
+          onCaseUpdate(caseUpdatePayload);
         }
         setAlert({ type: 'success', content: 'Assessment saved successfully. All changes have been recorded.', dismissible: true, statusIconAriaLabel: 'Success' });
         setInitialAssessment(assessment);
@@ -1261,7 +1390,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   if (isDeclarationGateActive) {
     return (
       <BoardItem header={headerElement} i18nStrings={boardItemI18nStrings} settings={boardItemSettings}>
-        <Box ref={widgetRootRef}>
+        <div ref={setWidgetRootRef}>
           <Box variant="small" margin={{ bottom: 's' }}>
             This form is used by the ISET admin team to assess the applicant's needs, eligibility, and funding recommendation.
             Complete the conflict of interest declaration below to unlock the assessment.
@@ -1334,7 +1463,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
               )}
             </SpaceBetween>
           </Box>
-        </Box>
+        </div>
       </BoardItem>
     );
   }
@@ -1345,7 +1474,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       i18nStrings={boardItemI18nStrings}
       settings={boardItemSettings}
     >
-      <Box ref={widgetRootRef}>
+      <div ref={setWidgetRootRef}>
         <Box variant="small" margin={{ bottom: 's' }}>
           This form is used by the ISET admin team to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, the final approval fields will become available.
         </Box>
@@ -1522,7 +1651,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
             description="Indicate if the client has received ISET funding in the past. If yes, provide details below.">
             <Checkbox checked={assessment.previousISET === 'yes'} onChange={({ detail }) => handleField('previousISET', detail.checked ? 'yes' : 'no')} disabled={isAssessmentDisabled}>Yes</Checkbox>
           </FormField>
-          {assessment.previousISET === 'yes' && (
+          {assessment.previousISET === 'yes' ? (
             <Grid gridDefinition={[{ colspan: 12 }]}> 
               <FormField label="If Yes, provide dates and specifics" stretch={true} errorText={hasSubmitted && fieldErrors.previousISETDetails ? fieldErrors.previousISETDetails : undefined}
                 description="List the dates and details of any previous ISET funding the client has received.">
@@ -1531,6 +1660,8 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
                 </Box>
               </FormField>
             </Grid>
+          ) : (
+            <div />  // placeholder to satisfy two-column grid
           )}
         </Grid>
         {sectionHeader('Barriers to Employment')}
@@ -1541,10 +1672,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
               {BARRIERS.map((barrier, index) => (
                 <Checkbox
                   key={barrier}
-                  checked={assessment.barriers?.includes(barrier)}
+                  checked={Array.isArray(assessment.barriers) && assessment.barriers.includes(barrier)}
                   data-error-focus={hasSubmitted && fieldErrors.barriers && index === 0 ? 'true' : undefined}
                   onChange={({ detail }) => {
-                    const next = assessment.barriers || [];
+                    const next = Array.isArray(assessment.barriers) ? assessment.barriers : [];
                     handleField('barriers', detail.checked ? [...next, barrier] : next.filter(b => b !== barrier));
                   }}
                   disabled={isAssessmentDisabled}
@@ -1561,9 +1692,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
               {PRIORITIES.map(priority => (
                 <Checkbox
                   key={priority}
-                  checked={assessment.priorities?.includes(priority)}
+                  checked={Array.isArray(assessment.priorities) && assessment.priorities.includes(priority)}
                   onChange={({ detail }) => {
-                    const next = assessment.priorities || [];
+                    const next = Array.isArray(assessment.priorities) ? assessment.priorities : [];
                     handleField('priorities', detail.checked ? [...next, priority] : next.filter(p => p !== priority));
                   }}
                   disabled={isAssessmentDisabled}
@@ -1925,10 +2056,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         >
           <Box>Are you sure you want to edit the previously submitted assessment? This will allow you to make changes and resubmit. Your changes will not be saved until you click Save or Submit.</Box>
         </Modal>
-      </Box>
+      </div>
     </BoardItem>
   );
-};
+});
 
 export default CoordinatorAssessmentWidget;
 

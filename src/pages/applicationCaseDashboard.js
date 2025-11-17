@@ -192,7 +192,6 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   const [loadError, setLoadError] = useState(null);
   const [layout, setLayout] = useState(() => loadLayoutFromStorage() ?? defaultLayout);
   const paletteSignatureRef = useRef(JSON.stringify(computePaletteItems(layout)));
-  const fetchedRef = useRef(false);
   const cacheRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_CACHE || (window.__ISET_CASE_CACHE = new Map())) : new Map());
   const inflightRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_INFLIGHT || (window.__ISET_CASE_INFLIGHT = new Map())) : new Map());
 
@@ -286,6 +285,18 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     });
   };
 
+  const applyCaseDataIfNewer = (key, nextData) => {
+    const current = cacheRef.current.get(key);
+    const currentVersion = Number(current?.application_row_version ?? 0) || 0;
+    const nextVersion = Number(nextData?.application_row_version ?? 0) || 0;
+    // If we have a version and the incoming payload is older, ignore it to prevent stale overwrites.
+    if (currentVersion && nextVersion && nextVersion < currentVersion) {
+      return current || nextData;
+    }
+    cacheRef.current.set(key, nextData);
+    return nextData;
+  };
+
   const refreshCaseData = useCallback(async () => {
     if (!id) return null;
     try {
@@ -298,10 +309,10 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       const applicationStatus =
         data.applicationStatus ?? data.application_status ?? null;
       const normalised = { ...data, applicationStatus, application_status: applicationStatus ?? data.application_status ?? null };
-      cacheRef.current.set(String(id), normalised);
-      setCaseData(normalised);
+      const applied = applyCaseDataIfNewer(String(id), normalised);
+      setCaseData(applied);
       setLoadError(null);
-      return normalised;
+      return applied;
     } catch (err) {
       let message = 'Failed to refresh case';
       if (err && typeof err.json === 'function') {
@@ -316,18 +327,16 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   }, [id, location?.state?.assessorEmail]);
 
   useEffect(() => {
-    if (!id || fetchedRef.current) return;
-    fetchedRef.current = true;
+    if (!id) return;
     let isMounted = true;
     setLoadError(null);
     const key = String(id);
+
+    // Show cached data immediately if we have it, but still fetch fresh data
     if (cacheRef.current.has(key)) {
-      const cached = cacheRef.current.get(key);
-      setCaseData(cached);
-      return () => {
-        isMounted = false;
-      };
+      setCaseData(cacheRef.current.get(key));
     }
+
     const doFetch = async () => {
       try {
         if (!inflightRef.current.has(key)) {
@@ -345,8 +354,8 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         const applicationStatus =
           hydrated.applicationStatus ?? hydrated.application_status ?? null;
         const normalised = { ...hydrated, applicationStatus, application_status: applicationStatus ?? hydrated.application_status ?? null };
-        cacheRef.current.set(key, normalised);
-        setCaseData(normalised);
+        const applied = applyCaseDataIfNewer(key, normalised);
+        setCaseData(applied);
         setLoadError(null);
         updateBreadcrumbs &&
           updateBreadcrumbs([
