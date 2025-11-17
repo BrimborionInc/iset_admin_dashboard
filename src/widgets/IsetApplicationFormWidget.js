@@ -22,7 +22,8 @@ import {
   Input,
   Select,
   Multiselect,
-  Spinner
+  Spinner,
+  Autosuggest
 } from '@cloudscape-design/components';
 import IsetApplicationFormHelpPanelContent from '../helpPanelContents/isetApplicationFormHelpPanelContent';
 import { apiFetch } from '../auth/apiClient';
@@ -454,7 +455,7 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
     title: 'Consent & declarations',
     description: 'Signatures captured at submission time.',
     columns: 2,
-    editable: false,
+    editable: true,
     items: [
       {
         label: (
@@ -474,10 +475,15 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
             />
           </Box>
         ),
+        editable: false,
         renderValue: answers => signatureStatus(answers?.indigenous_declaration)
       },
       {
         label: 'Nation / community affiliation',
+        field: 'indigenous-affiliation-declaration',
+        controlType: 'band-search',
+        bandSearchKey: 'affiliation',
+        placeholder: 'Search communities',
         renderValue: answers => renderPlainText(answers['indigenous-affiliation-declaration'])
       },
       {
@@ -498,6 +504,7 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
             />
           </Box>
         ),
+        editable: false,
         renderValue: answers => (
           signatureStatus(answers?.consent)
         )
@@ -520,6 +527,7 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
             />
           </Box>
         ),
+        editable: false,
         renderValue: answers => renderConflictDeclaration(answers)
       }
     ]
@@ -559,7 +567,14 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
         renderValue: answers => formatOption('legal-indigenous-identity', answers['legal-indigenous-identity'])
       },
       { label: 'Registration number', field: 'registration-number', controlType: 'input', renderValue: answers => renderPlainText(answers['registration-number']) },
-      { label: 'Home community', field: 'home-comminuty', controlType: 'input', renderValue: answers => renderPlainText(answers['home-comminuty']) }
+      {
+        label: 'Home community',
+        field: 'home-comminuty',
+        controlType: 'band-search',
+        bandSearchKey: 'home',
+        placeholder: 'Search communities',
+        renderValue: answers => renderPlainText(answers['home-comminuty'])
+      }
     ]
   },
   {
@@ -975,6 +990,8 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   } = useApplicationLock(application_id);
   const [locking, setLocking] = useState(false);
   const { userId: currentUserId, displayName: currentUserName } = useCurrentUser();
+  const [bandSearchOptions, setBandSearchOptions] = useState({ affiliation: [], home: [] });
+  const [bandSearchLoading, setBandSearchLoading] = useState({ affiliation: false, home: false });
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -1103,6 +1120,37 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
 
   const handleFieldChange = useCallback((field, value) => {
     setEditableAnswers(prev => ({ ...prev, [field]: value }));
+  }, []);
+
+  const searchIndigenousBands = useCallback(async (query, key = 'affiliation') => {
+    const targetKey = key || 'affiliation';
+    const trimmed = (query || '').trim();
+    if (trimmed.length < 2) {
+      setBandSearchOptions(prev => ({ ...prev, [targetKey]: [] }));
+      return;
+    }
+    setBandSearchLoading(prev => ({ ...prev, [targetKey]: true }));
+    try {
+      const res = await apiFetch(`/api/reference/indigenous-bands?query=${encodeURIComponent(trimmed)}`);
+      if (!res.ok) {
+        throw new Error(`Search failed (${res.status})`);
+      }
+      const data = await res.json().catch(() => []);
+      const options = Array.isArray(data)
+        ? data
+            .map(item => ({
+              value: item.bandName || '',
+              label: item.bandNumber ? `${item.bandName} (${item.bandNumber})` : (item.bandName || ''),
+              description: item.type ? `Type: ${item.type}` : undefined,
+            }))
+            .filter(opt => opt.value)
+        : [];
+      setBandSearchOptions(prev => ({ ...prev, [targetKey]: options }));
+    } catch (err) {
+      console.error('Failed to search indigenous bands', err?.message || err);
+    } finally {
+      setBandSearchLoading(prev => ({ ...prev, [targetKey]: false }));
+    }
   }, []);
 
   const handleOpenConsentModal = useCallback(() => {
@@ -1530,6 +1578,35 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         />
       );
     }
+    if (controlType === 'band-search') {
+      const stateKey = item.bandSearchKey || fieldKey;
+      const optionsForKey = bandSearchOptions[stateKey] || [];
+      const loadingForKey = bandSearchLoading[stateKey];
+      return (
+        <Autosuggest
+          value={value ?? ''}
+          options={optionsForKey}
+          loadingText="Searching communities..."
+          statusType={loadingForKey ? 'loading' : 'finished'}
+          empty={loadingForKey ? 'Searching communities...' : 'No matches'}
+          placeholder={item.placeholder || 'Search communities'}
+          onChange={({ detail }) => {
+            const next = detail.value || '';
+            handleFieldChange(fieldKey, next);
+            const query = next.trim();
+            if (query.length >= 2) {
+              searchIndigenousBands(query, stateKey);
+            } else {
+              setBandSearchOptions(prev => ({ ...prev, [stateKey]: [] }));
+            }
+          }}
+          onSelect={({ detail }) => {
+            handleFieldChange(fieldKey, detail.value || '');
+          }}
+          disabled={disabled}
+        />
+      );
+    }
     if (controlType === 'date') {
       return (
         <Input
@@ -1558,7 +1635,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         disabled={disabled}
       />
     );
-  }, [editableAnswers, handleFieldChange, saving, schemaSnapshot]);
+  }, [bandSearchLoading, bandSearchOptions, editableAnswers, handleFieldChange, saving, schemaSnapshot, searchIndigenousBands]);
   const versionColumns = useMemo(() => [
     {
       id: 'version',

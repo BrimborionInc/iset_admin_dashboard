@@ -4954,6 +4954,14 @@ const WORK_QUEUE_BUCKET_META = {
     label: 'Overdue',
     description: 'Cases past the program turnaround target.'
   },
+  'awaiting-decision': {
+    label: 'Awaiting approval',
+    description: 'Applications with completed assessments pending program approval across all regions.'
+  },
+  'awaiting-my-approval': {
+    label: 'Awaiting my approval',
+    description: 'Applications with completed assessments assigned to the coordinator or their team, awaiting approval.'
+  },
   'region-queue': {
     label: 'Assigned to my region',
     description: 'Cases owned by the coordinator or assessors in their region.'
@@ -5049,18 +5057,13 @@ async function countProgramAdminUnassignedBacklog(pool) {
 
 async function countProgramAdminInAssessment(pool) {
   try {
-    const excludedStatuses = ['approved', 'rejected', 'withdrawn', 'archived', 'pending_approval'];
-    const params = [];
-    let statusCondition = 'c.status IS NULL';
-    if (excludedStatuses.length) {
-      const placeholders = excludedStatuses.map(() => '?').join(',');
-      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-      params.push(...excludedStatuses);
-    }
+    const params = ['in_review'];
     const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
+         JOIN iset_application a ON a.id = c.application_id
         WHERE c.assigned_to_user_id IS NOT NULL
-          AND ${statusCondition}`;
+          AND a.status IS NOT NULL
+          AND LOWER(a.status) = ?`;
     const [[row]] = await pool.query(sql, params);
     return Number(row?.total ?? 0);
   } catch (err) {
@@ -5079,9 +5082,10 @@ async function countProgramAdminInAssessment(pool) {
 async function countProgramAdminAwaitingDecision(pool) {
   try {
     const sql = `SELECT COUNT(*) AS total
-         FROM iset_case c
-        WHERE c.status IS NOT NULL
-          AND LOWER(c.status) = ?`;
+         FROM iset_application a
+         JOIN iset_case c ON c.application_id = a.id
+        WHERE a.status IS NOT NULL
+          AND LOWER(a.status) = ?`;
     const [[row]] = await pool.query(sql, ['pending_approval']);
     return Number(row?.total ?? 0);
   } catch (err) {
@@ -5712,6 +5716,23 @@ async function countRegionalOverdue(pool, staffIds) {
   return total;
 }
 
+async function countRegionalPendingApproval(pool, staffIds) {
+  const ids = normalizeStaffIdList(staffIds);
+  if (!ids.length) return 0;
+  const staffPlaceholders = ids.map(() => '?').join(',');
+  const statusValues = ['pending_approval'];
+  const statusPlaceholders = statusValues.map(() => '?').join(',');
+  const params = [...ids, ...statusValues];
+  const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+         JOIN iset_application a ON a.id = c.application_id
+        WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+          AND a.status IS NOT NULL
+          AND LOWER(a.status) IN (${statusPlaceholders})`;
+  const [[row]] = await pool.query(sql, params);
+  return Number(row?.total ?? 0);
+}
+
 async function countAssessorAssignedToMe(pool, staffProfileId) {
   const assessorId = Number(staffProfileId);
   if (!Number.isInteger(assessorId) || assessorId <= 0) return 0;
@@ -6020,6 +6041,39 @@ app.get('/api/staff/assignable', async (req, res) => {
   } catch (e) {
     console.error('GET /api/staff/assignable failed:', e.message);
     res.status(500).json({ error: 'assignable_fetch_failed' });
+  }
+});
+
+app.get('/api/reference/indigenous-bands', async (req, res) => {
+  try {
+    const query = (req.query.query || '').toString().trim();
+    if (!query || query.length < 2) {
+      return res.json([]);
+    }
+    const like = `%${query}%`;
+    const [rows] = await pool.query(
+      `SELECT id, band_number, band_name, type, coord_sys, latitude, longitude
+         FROM iset_indigenous_bands
+        WHERE band_name LIKE ? OR CAST(band_number AS CHAR) LIKE ?
+        ORDER BY band_name ASC
+        LIMIT 20`,
+      [like, like]
+    );
+    const results = Array.isArray(rows)
+      ? rows.map(row => ({
+          id: row.id,
+          bandNumber: row.band_number,
+          bandName: row.band_name,
+          type: row.type,
+          coordSys: row.coord_sys,
+          latitude: row.latitude,
+          longitude: row.longitude,
+        }))
+      : [];
+    return res.json(results);
+  } catch (err) {
+    console.error('Failed to search indigenous bands', err);
+    return res.status(500).json({ error: 'Failed to search indigenous bands' });
   }
 });
 
@@ -8577,6 +8631,7 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
     if (role === 'Regional Coordinator') {
       const metaRegion = WORK_QUEUE_BUCKET_META['region-queue'];
       const metaNeeds = WORK_QUEUE_BUCKET_META['needs-reassignment'];
+      const metaAwaitingApproval = WORK_QUEUE_BUCKET_META['awaiting-my-approval'];
       const metaAwaiting = WORK_QUEUE_BUCKET_META['awaiting-info'];
       const metaDueWeek = WORK_QUEUE_BUCKET_META['due-this-week'];
       const metaOverdue = WORK_QUEUE_BUCKET_META['overdue'];
@@ -8586,6 +8641,7 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
       let awaitingInfoCount = 0;
       let dueThisWeekCount = 0;
       let overdueCount = 0;
+      let awaitingMyApprovalCount = 0;
 
       const context = await resolveRegionalCoordinatorContext(req);
       if (context?.valid) {
@@ -8594,12 +8650,14 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
         [
           regionQueueCount,
           needsReassignmentCount,
+          awaitingMyApprovalCount,
           awaitingInfoCount,
           dueThisWeekCount,
           overdueCount
         ] = await Promise.all([
           countRegionalAssignedToRegion(pool, staffIds, contextParams),
           countRegionalNeedsReassignment(pool, staffProfileId),
+          countRegionalPendingApproval(pool, staffIds),
           countRegionalAwaitingApplicantInfo(pool, staffIds),
           countRegionalDueThisWeek(pool, staffIds),
           countRegionalOverdue(pool, staffIds)
@@ -8625,6 +8683,12 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
             count: needsReassignmentCount
           },
           {
+            id: 'awaiting-my-approval',
+            label: metaAwaitingApproval?.label || 'Awaiting my approval',
+            description: metaAwaitingApproval?.description || null,
+            count: awaitingMyApprovalCount
+          },
+          {
             id: 'awaiting-info',
             label: metaAwaiting?.label || 'Awaiting applicant info',
             description: metaAwaiting?.description || null,
@@ -8641,6 +8705,12 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
             label: metaOverdue?.label || 'Overdue',
             description: metaOverdue?.description || null,
             count: overdueCount
+          },
+          {
+            id: 'awaiting-my-approval',
+            label: metaAwaitingApproval?.label || 'Awaiting my approval',
+            description: metaAwaitingApproval?.description || null,
+            count: awaitingMyApprovalCount
           }
         ]
       });

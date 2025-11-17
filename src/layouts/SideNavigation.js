@@ -130,7 +130,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
     },
     {
       type: 'section',
-      text: 'ESDC Submissions',
+      text: 'ARMS Submissions',
       items: [
         { type: 'link', text: 'Overview', href: '/esdc/overview' },
         { type: 'link', text: 'Participants', href: '/esdc/participants' },

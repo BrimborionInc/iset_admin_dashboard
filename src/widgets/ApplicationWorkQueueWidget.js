@@ -17,7 +17,7 @@ const getMockMyWork = role => {
         { id: 'new-submissions', label: 'New submissions', count: 18, description: 'Applications received in the last 24 hours awaiting triage.' },
         { id: 'unassigned', label: 'Unassigned backlog', count: 32, description: 'Cases ready to be routed to regional teams or assessors.' },
         { id: 'in-assessment', label: 'In assessment', count: 57, description: 'Applications actively under review across all regions.' },
-        { id: 'awaiting-decision', label: 'Awaiting program decision', count: 9, description: 'Assessments that need a Program Administrator approval.' },
+        { id: 'awaiting-decision', label: 'Awaiting approval', count: 9, description: 'Applications with completed assessments pending program approval across all regions.' },
         { id: 'on-hold', label: 'On hold / info requested', count: 6, description: 'Applicants have been asked for more information.' },
         { id: 'overdue', label: 'Overdue', count: 4, description: 'Cases past the program turnaround target.' }
       ];
@@ -25,6 +25,7 @@ const getMockMyWork = role => {
       return [
         { id: 'region-queue', label: 'Assigned to my region', count: 21, description: 'Cases owned by you or assessors in your region.' },
         { id: 'needs-reassignment', label: 'Assigned to me', count: 3, description: 'Cases waiting for you to re-route or pick up.' },
+        { id: 'awaiting-my-approval', label: 'Awaiting my approval', count: 0, description: 'Applications with completed assessments assigned to me or my team, awaiting my approval.' },
         { id: 'awaiting-info', label: 'Awaiting applicant info', count: 5, description: 'Follow-ups sent to applicants from your region.' },
         { id: 'due-this-week', label: 'Due this week', count: 12, description: 'Cases with upcoming SLA deadlines.' },
         { id: 'overdue', label: 'Overdue', count: 1, description: 'Items breaching SLA within your region.' }

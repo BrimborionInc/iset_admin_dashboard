@@ -54,6 +54,15 @@ const scrollToPageTop = () => {
   }
 };
 
+const scrollElementToTop = (element) => {
+  if (!element) return;
+  try {
+    element.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (_) {
+    element.scrollTop = 0;
+  }
+};
+
 // Helper to format date as YYYY-MM-DD
 const formatDate = (date) => {
   if (!date) return '';
@@ -114,7 +123,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
   const [localAssessmentSubmitted, setLocalAssessmentSubmitted] = useState(false);
-  const alertAnchorRef = useRef(null);
+  const widgetRootRef = useRef(null);
   const {
     lockState,
     acquireLock,
@@ -141,6 +150,12 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   const [declarationChecked, setDeclarationChecked] = useState(false);
   const [isSigningDeclaration, setIsSigningDeclaration] = useState(false);
   const [declarationError, setDeclarationError] = useState(null);
+  const scrollWidgetAndPageTop = useCallback(() => {
+    if (widgetRootRef.current) {
+      scrollElementToTop(widgetRootRef.current);
+    }
+    scrollToPageTop();
+  }, []);
 
   const rawApplicationStatus = caseData?.applicationStatus ?? caseData?.application_status ?? null;
   const rawCaseStatusSnapshot = caseData?.status ?? '';
@@ -433,6 +448,13 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     setIsChanged(JSON.stringify(assessment) !== JSON.stringify(initialAssessment));
   }, [assessment, initialAssessment]);
 
+  useEffect(() => {
+    const nextVersion = Number(caseData?.application_row_version || 0);
+    if (Number.isFinite(nextVersion) && nextVersion > 0 && nextVersion !== applicationRowVersion) {
+      setApplicationRowVersion(nextVersion);
+    }
+  }, [caseData?.application_row_version, applicationRowVersion]);
+
   // Handlers
   // Enhanced handleField to clear error for the field if value is now valid
   const handleField = (field, value) => {
@@ -473,9 +495,6 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       dismissible: true,
       statusIconAriaLabel: severity === 'warning' ? 'Warning' : 'Error'
     });
-    setTimeout(() => {
-      alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 0);
   }, []);
   const beginEditingAssessment = useCallback(async () => {
     if (lockingAssessment || isDecisionFinal || isLockedStatus) return;
@@ -579,9 +598,6 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });
-        setTimeout(() => {
-          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 0);
         if (releaseAfterSuccess) {
           releaseLock({ silent: true }).catch(() => {});
         }
@@ -607,9 +623,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         statusIconAriaLabel: 'Success'
       };
       setAlert(successAlert);
-      setTimeout(() => {
-        alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 0);
+      scrollWidgetAndPageTop();
       if (typeof actions?.refreshCaseData === 'function') {
         try {
           await actions.refreshCaseData();
@@ -639,9 +653,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         dismissible: true,
         statusIconAriaLabel: 'Error'
       });
-      setTimeout(() => {
-        alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 0);
+      scrollWidgetAndPageTop();
     } finally {
       setIsSigningDeclaration(false);
     }
@@ -657,7 +669,8 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
     lockHeldByCurrentUser,
     onCaseUpdate,
     releaseLock,
-    setApplicationRowVersion
+    setApplicationRowVersion,
+    scrollWidgetAndPageTop
   ]);
   const validateAssessment = (assessment) => {
     const errors = {};
@@ -737,9 +750,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         const firstErrorField = document.querySelector('[data-error-focus="true"]');
         if (firstErrorField) {
           firstErrorField.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          firstErrorField.focus();
-        } else {
-          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          if (typeof firstErrorField.focus === 'function') {
+            firstErrorField.focus();
+          }
         }
       }, 0);
       return;
@@ -831,9 +844,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });
-        setTimeout(() => {
-          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 0);
+        scrollWidgetAndPageTop();
         releaseLock({ silent: true }).catch(() => {});
         return;
       }
@@ -867,7 +878,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       setLocalAssessmentSubmitted(true);
       setFieldErrors({});
       setHasSubmitted(false);
-      scrollToPageTop();
+      scrollWidgetAndPageTop();
       setAlert({
         type: 'success',
         content: 'Assessment submitted successfully. Application status moved to Pending Approval. Complete the outcome notice to finish the review.',
@@ -880,9 +891,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       }
     } catch (err) {
       setAlert({ type: 'error', content: err.message || 'Failed to submit assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
-      setTimeout(() => {
-        alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 0);
+      scrollWidgetAndPageTop();
     }
   };
 
@@ -981,9 +990,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });
-        setTimeout(() => {
-          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 0);
+        scrollWidgetAndPageTop();
         releaseLock({ silent: true }).catch(() => {});
         return;
       }
@@ -1003,21 +1010,14 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
             // ignore refresh errors
           }
         }
-        // Scroll to the alert anchor so the alert is visible
-        setTimeout(() => {
-          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 0);
+        scrollWidgetAndPageTop();
       } else {
         setAlert({ type: 'error', content: result.error || 'Failed to save assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
-        setTimeout(() => {
-          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 0);
+        scrollWidgetAndPageTop();
       }
     } catch (err) {
       setAlert({ type: 'error', content: err.message || 'Failed to save assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
-      setTimeout(() => {
-        alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 0);
+      scrollWidgetAndPageTop();
     }
   };
 
@@ -1073,9 +1073,9 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
         const firstErrorField = document.querySelector('[data-error-focus="true"]');
         if (firstErrorField) {
           firstErrorField.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          firstErrorField.focus();
-        } else {
-          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          if (typeof firstErrorField.focus === 'function') {
+            firstErrorField.focus();
+          }
         }
       }, 0);
       return;
@@ -1142,9 +1142,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });
-        setTimeout(() => {
-          alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 0);
+        scrollWidgetAndPageTop();
         return;
       }
       if (!res.ok || !result?.success) throw new Error(result?.error || 'Failed to save NWAC review.');
@@ -1180,7 +1178,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       setLocalAssessmentSubmitted(true);
       setFieldErrors({});
       setHasSubmitted(false);
-      scrollToPageTop();
+      scrollWidgetAndPageTop();
       setAlert({
         type: 'success',
         content: assessment.nwacReviewStatus === 'approve'
@@ -1197,9 +1195,7 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       }
     } catch (err) {
       setAlert({ type: 'error', content: err.message || 'Failed to submit outcome notice.', dismissible: true, statusIconAriaLabel: 'Error' });
-      setTimeout(() => {
-        alertAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 0);
+      scrollWidgetAndPageTop();
     }
   };
 
@@ -1265,12 +1261,11 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
   if (isDeclarationGateActive) {
     return (
       <BoardItem header={headerElement} i18nStrings={boardItemI18nStrings} settings={boardItemSettings}>
-        <Box>
+        <Box ref={widgetRootRef}>
           <Box variant="small" margin={{ bottom: 's' }}>
             This form is used by the ISET admin team to assess the applicant's needs, eligibility, and funding recommendation.
             Complete the conflict of interest declaration below to unlock the assessment.
           </Box>
-          <div ref={alertAnchorRef} style={{ height: 0, margin: 0, padding: 0, border: 0 }} aria-hidden="true" />
           {lockAlertMessage && (
             <Alert type={lockedByAnotherUser ? 'warning' : 'info'}>
               {lockAlertMessage}
@@ -1350,11 +1345,10 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
       i18nStrings={boardItemI18nStrings}
       settings={boardItemSettings}
     >
-      <Box>
+      <Box ref={widgetRootRef}>
         <Box variant="small" margin={{ bottom: 's' }}>
           This form is used by the ISET admin team to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, the final approval fields will become available.
         </Box>
-        <div ref={alertAnchorRef} style={{ height: 0, margin: 0, padding: 0, border: 0 }} aria-hidden="true" />
         {lockAlertMessage && (
           <Alert type={lockedByAnotherUser ? 'warning' : 'info'}>
             {lockAlertMessage}
@@ -1544,10 +1538,11 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           <FormField label="Barriers (select all that apply)" errorText={hasSubmitted && fieldErrors.barriers ? fieldErrors.barriers : undefined}
             description="Select all barriers that may impact the client's ability to obtain or maintain employment. These may be self-identified or observed during assessment.">
             <ColumnLayout columns={3} borders="horizontal">
-              {BARRIERS.map(barrier => (
+              {BARRIERS.map((barrier, index) => (
                 <Checkbox
                   key={barrier}
                   checked={assessment.barriers?.includes(barrier)}
+                  data-error-focus={hasSubmitted && fieldErrors.barriers && index === 0 ? 'true' : undefined}
                   onChange={({ detail }) => {
                     const next = assessment.barriers || [];
                     handleField('barriers', detail.checked ? [...next, barrier] : next.filter(b => b !== barrier));
@@ -1660,51 +1655,6 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
           <FormField label="Program Name" errorText={hasSubmitted && fieldErrors.programName ? fieldErrors.programName : undefined}
             description="Enter the program or position name, if known.">
             <Input value={assessment.programName} onChange={({ detail }) => handleField('programName', detail.value)} ariaLabel="Program Name" data-error-focus={hasSubmitted && fieldErrors.programName ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
-          </FormField>
-        </Grid>
-        {sectionHeader('Optional Reporting Details')}
-        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-          <FormField
-            label="Intervention Duration (days)"
-            description={calculatedDuration ? `Optional. Calculated from start/end dates: ${calculatedDuration} day(s).` : 'Optional. Enter the number of days the intervention will run.'}
-            errorText={hasSubmitted && fieldErrors.interventionDuration ? fieldErrors.interventionDuration : undefined}
-            secondaryControl={
-              !isAssessmentDisabled && calculatedDuration && assessment.interventionDuration !== calculatedDuration ? (
-                <Button size="small" onClick={() => handleField('interventionDuration', calculatedDuration)}>
-                  Use {calculatedDuration}
-                </Button>
-              ) : null
-            }
-          >
-            <Input
-              inputMode="numeric"
-              value={assessment.interventionDuration || ''}
-              onChange={({ detail }) => handleField('interventionDuration', detail.value.replace(/[^\d]/g, ''))}
-              placeholder="e.g. 120"
-              data-error-focus={hasSubmitted && fieldErrors.interventionDuration ? 'true' : undefined}
-              disabled={isAssessmentDisabled}
-            />
-          </FormField>
-          <FormField
-            label="Intervention Cost (total)"
-            description={calculatedFundingTotal ? `Optional. Auto-calculated from funding tables: $${calculatedFundingTotal}. Adjust if needed.` : 'Optional. Enter the total planned cost (whole dollars).' }
-            errorText={hasSubmitted && fieldErrors.interventionCost ? fieldErrors.interventionCost : undefined}
-            secondaryControl={
-              !isAssessmentDisabled && calculatedFundingTotal && assessment.interventionCost !== calculatedFundingTotal ? (
-                <Button size="small" onClick={() => handleField('interventionCost', calculatedFundingTotal)}>
-                  Use {calculatedFundingTotal}
-                </Button>
-              ) : null
-            }
-          >
-            <Input
-              inputMode="numeric"
-              value={assessment.interventionCost || ''}
-              onChange={({ detail }) => handleField('interventionCost', detail.value.replace(/[^\d]/g, ''))}
-              placeholder="e.g. 4200"
-              data-error-focus={hasSubmitted && fieldErrors.interventionCost ? 'true' : undefined}
-              disabled={isAssessmentDisabled}
-            />
           </FormField>
         </Grid>
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
@@ -1875,6 +1825,51 @@ const CoordinatorAssessmentWidget = ({ actions, toggleHelpPanel, caseData, appli
             </>
           }
         />
+        {sectionHeader('Intervention Summary')}
+        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+          <FormField
+            label="Intervention Duration (days)"
+            description={calculatedDuration ? `Optional. Calculated from start/end dates: ${calculatedDuration} day(s).` : 'Optional. Enter the number of days the intervention will run.'}
+            errorText={hasSubmitted && fieldErrors.interventionDuration ? fieldErrors.interventionDuration : undefined}
+            secondaryControl={
+              !isAssessmentDisabled && calculatedDuration && assessment.interventionDuration !== calculatedDuration ? (
+                <Button size="small" onClick={() => handleField('interventionDuration', calculatedDuration)}>
+                  Use {calculatedDuration}
+                </Button>
+              ) : null
+            }
+          >
+            <Input
+              inputMode="numeric"
+              value={assessment.interventionDuration || ''}
+              onChange={({ detail }) => handleField('interventionDuration', detail.value.replace(/[^\d]/g, ''))}
+              placeholder="e.g. 120"
+              data-error-focus={hasSubmitted && fieldErrors.interventionDuration ? 'true' : undefined}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+          <FormField
+            label="Intervention Cost (total)"
+            description={calculatedFundingTotal ? `Optional. Auto-calculated from funding tables: $${calculatedFundingTotal}. Adjust if needed.` : 'Optional. Enter the total planned cost (whole dollars).' }
+            errorText={hasSubmitted && fieldErrors.interventionCost ? fieldErrors.interventionCost : undefined}
+            secondaryControl={
+              !isAssessmentDisabled && calculatedFundingTotal && assessment.interventionCost !== calculatedFundingTotal ? (
+                <Button size="small" onClick={() => handleField('interventionCost', calculatedFundingTotal)}>
+                  Use {calculatedFundingTotal}
+                </Button>
+              ) : null
+            }
+          >
+            <Input
+              inputMode="numeric"
+              value={assessment.interventionCost || ''}
+              onChange={({ detail }) => handleField('interventionCost', detail.value.replace(/[^\d]/g, ''))}
+              placeholder="e.g. 4200"
+              data-error-focus={hasSubmitted && fieldErrors.interventionCost ? 'true' : undefined}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+        </Grid>
         {sectionHeader("Coordinator's Recommendation")}
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
           <FormField label="Recommendation" errorText={hasSubmitted && fieldErrors.recommendation ? fieldErrors.recommendation : undefined}
