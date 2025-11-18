@@ -1095,6 +1095,17 @@ const AppRoutes = ({
           AdminDashboard,
           [{ text: 'Home', href: '/' }],
           'NWAC ISET Homepage',
+          'adminDashboardHome',
+          (
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button iconName="add-plus" onClick={() => window.dispatchEvent(new CustomEvent('home:openPalette'))}>
+                Add widget
+              </Button>
+              <Button iconName="refresh" onClick={() => window.dispatchEvent(new CustomEvent('home:resetLayout'))}>
+                Reset layout
+              </Button>
+            </SpaceBetween>
+          ),
           AdminDashboardHelp.aiContext
         )}
       </Route>

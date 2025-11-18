@@ -5,6 +5,7 @@ import {
   ButtonDropdown,
   ColumnLayout,
   Header,
+  Link,
   SpaceBetween,
   StatusIndicator
 } from '@cloudscape-design/components';
@@ -14,12 +15,12 @@ const getMockMyWork = role => {
   switch (role) {
     case 'Program Administrator':
       return [
-        { id: 'new-submissions', label: 'New submissions', count: 18, description: 'Applications received in the last 24 hours awaiting triage.' },
-        { id: 'unassigned', label: 'Unassigned backlog', count: 32, description: 'Cases ready to be routed to regional teams or assessors.' },
-        { id: 'in-assessment', label: 'In assessment', count: 57, description: 'Applications actively under review across all regions.' },
-        { id: 'awaiting-decision', label: 'Awaiting approval', count: 9, description: 'Applications with completed assessments pending program approval across all regions.' },
+        { id: 'new-submissions', label: 'Unassigned Applications', count: 18, description: 'Applications in submitted status without an assigned owner.' },
+        { id: 'unassigned', label: 'Assigned Applications', count: 32, description: 'Applications awaiting assessment by their assigned owners.' },
+        { id: 'in-assessment', label: 'In Assessment', count: 57, description: 'Applications in active review by their owners.' },
         { id: 'on-hold', label: 'On hold / info requested', count: 6, description: 'Applicants have been asked for more information.' },
-        { id: 'overdue', label: 'Overdue', count: 4, description: 'Cases past the program turnaround target.' }
+        { id: 'awaiting-decision', label: 'Assessed, awaiting approval', count: 9, description: 'Application assessments complete, but need program approval.' },
+        { id: 'decisions-made', label: 'Decisions Made', count: 4, description: 'Applications approved or rejected this week.' }
       ];
     case 'Regional Coordinator':
       return [
@@ -142,12 +143,7 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
           setBuckets(mergeWorkQueueBuckets(getMockMyWork(role), payload.buckets));
         }
       } catch (err) {
-        if (!ignore) {
-          setError('Showing default counts (live data unavailable).');
-        }
-        if (process.env.NODE_ENV !== 'production') {
-          console.warn('[dashboard] application work queue fetch failed', err);
-        }
+        // Silently fall back to default buckets if the request fails.
       } finally {
         if (!ignore) {
           setLoading(false);
@@ -161,16 +157,31 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
     };
   }, [role, refreshKey]);
 
+  const getBucketLink = (currentRole, bucketId) => {
+    if (currentRole === 'Program Administrator' && (bucketId === 'new-submissions' || bucketId === 'unassigned' || bucketId === 'in-assessment' || bucketId === 'on-hold' || bucketId === 'awaiting-decision' || bucketId === 'decisions-made')) {
+      return 'http://localhost:3001/case-assignment-dashboard';
+    }
+    return null;
+  };
+
   const content = useMemo(() => {
     if (!Array.isArray(buckets) || !buckets.length) {
       return <Box variant="p">No work items to display.</Box>;
     }
     return (
-      <ColumnLayout columns={3} variant="text-grid">
+      <ColumnLayout columns={6} variant="text-grid" minColumnWidth={185}>
         {buckets.map(item => (
           <Box key={item.id} padding={{ bottom: 's' }}>
             <Box fontSize="display-l" fontWeight="bold">{item.count}</Box>
-            <Box fontWeight="bold" margin={{ top: 'xxs' }}>{item.label}</Box>
+            <Box fontWeight="bold" margin={{ top: 'xxs' }}>
+              {(() => {
+                const link = getBucketLink(role, item.id);
+                if (link) {
+                  return <Link href={link}>{item.label}</Link>;
+                }
+                return item.label;
+              })()}
+            </Box>
             {item.description && (
               <Box fontSize="body-s" color="text-status-inactive" margin={{ top: 'xxs' }}>
                 {item.description}
@@ -180,7 +191,7 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
         ))}
       </ColumnLayout>
     );
-  }, [buckets]);
+  }, [buckets, role]);
 
   return (
     <BoardItem
@@ -206,7 +217,6 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
     >
       <SpaceBetween size="s">
         {loading && <StatusIndicator type="loading">Loading latest counts</StatusIndicator>}
-        {error && <Box color="text-status-inactive">{error}</Box>}
         {content}
       </SpaceBetween>
     </BoardItem>

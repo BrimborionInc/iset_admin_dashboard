@@ -4954,6 +4954,10 @@ const WORK_QUEUE_BUCKET_META = {
     label: 'Overdue',
     description: 'Cases past the program turnaround target.'
   },
+  'decisions-made': {
+    label: 'Decisions Made',
+    description: 'Applications approved or rejected this week.'
+  },
   'awaiting-decision': {
     label: 'Awaiting approval',
     description: 'Applications with completed assessments pending program approval across all regions.'
@@ -4991,20 +4995,20 @@ const WORK_QUEUE_BUCKET_META = {
     description: 'Cases approaching their SLA deadline within the next working day.'
   },
   'awaiting-decision': {
-    label: 'Awaiting program decision',
-    description: 'Assessments that need a Program Administrator approval.'
+    label: 'Assessed, awaiting approval',
+    description: 'Application assessments complete, but need program approval.'
   },
   'new-submissions': {
-    label: 'New submissions',
-    description: 'Applications received in the last 24 hours awaiting triage.'
+    label: 'Unassigned Applications',
+    description: 'Applications in submitted status that do not yet have an assigned owner.'
   },
   'unassigned': {
-    label: 'Unassigned backlog',
-    description: 'Cases ready to be routed to regional teams or assessors.'
+    label: 'Assigned Applications',
+    description: 'Applications awaiting assessment by their assigned owners.'
   },
   'in-assessment': {
-    label: 'In assessment',
-    description: 'Applications actively under review across all regions.'
+    label: 'In Assessment',
+    description: 'Applications in active review by their owners.'
   },
   'on-hold': {
     label: 'On hold / info requested',
@@ -5015,11 +5019,11 @@ async function countProgramAdminNewSubmissions(pool) {
   try {
     const [[row]] = await pool.query(
       `SELECT COUNT(*) AS total
-         FROM iset_application_submission s
-         LEFT JOIN iset_application a ON a.submission_id = s.id
-         LEFT JOIN iset_case c ON c.application_id = a.id
-        WHERE s.submitted_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-          AND c.id IS NULL`
+         FROM iset_case c
+         JOIN iset_application a ON a.id = c.application_id
+        WHERE (c.assigned_to_user_id IS NULL OR c.assigned_to_user_id = 0)
+          AND a.status IS NOT NULL
+          AND LOWER(a.status) = 'submitted'`
     );
     return Number(row?.total ?? 0);
   } catch (err) {
@@ -5033,19 +5037,14 @@ async function countProgramAdminNewSubmissions(pool) {
 
 async function countProgramAdminUnassignedBacklog(pool) {
   try {
-    const terminalValues = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
-    const params = [];
-    let statusCondition = 'c.status IS NULL';
-    if (terminalValues.length) {
-      const placeholders = terminalValues.map(() => '?').join(',');
-      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-      params.push(...terminalValues);
-    }
     const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
-        WHERE (c.assigned_to_user_id IS NULL OR c.assigned_to_user_id = 0)
-          AND ${statusCondition}`;
-    const [[row]] = await pool.query(sql, params);
+         JOIN iset_application a ON a.id = c.application_id
+        WHERE c.assigned_to_user_id IS NOT NULL
+          AND c.assigned_to_user_id <> 0
+          AND a.status IS NOT NULL
+          AND LOWER(a.status) = 'submitted'`;
+    const [[row]] = await pool.query(sql);
     return Number(row?.total ?? 0);
   } catch (err) {
     if (isMissingTableErrorLocal(err)) {
@@ -5103,103 +5102,33 @@ async function countProgramAdminAwaitingDecision(pool) {
 
 async function countProgramAdminOverdue(pool) {
   try {
-    const targets = await fetchActiveSlaTargets(pool);
-    const stageTargets = new Map();
-    for (const row of targets) {
-      if (!row || row.applies_to_role) continue;
-      stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
+    const monday = `DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)`;
+    const sql = `SELECT COUNT(*) AS total
+         FROM iset_application a
+        WHERE a.status IS NOT NULL
+          AND LOWER(a.status) IN ('approved','rejected')
+          AND COALESCE(a.updated_at, a.created_at) >= ${monday}`;
+    const [[row]] = await pool.query(sql);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
     }
-    const getTarget = stageKey => {
-      if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
-      const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
-      return fallback ? fallback.target_hours : 0;
-    };
+    throw err;
+  }
+}
 
-    const assignmentHours = getTarget('assignment');
-    const assessmentHours = getTarget('assessment');
-    const decisionHours = getTarget('program_decision');
 
-    const terminalValues = CASE_STATUS_TERMINAL_VALUES.map(v => v.toLowerCase());
-    const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT.map(v => v.toLowerCase());
-    const awaitingStatuses = CASE_STATUS_AWAITING_DECISION.map(v => v.toLowerCase());
-    const disallowedForAssessment = Array.from(new Set([...excludedValues, ...awaitingStatuses]));
-
-    let total = 0;
-
-    if (assignmentHours > 0) {
-      const params = [];
-      let statusCondition = 'c.status IS NULL';
-      if (terminalValues.length) {
-        const placeholders = terminalValues.map(() => '?').join(',');
-        statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-        params.push(...terminalValues);
-      }
-      const sql = `SELECT COUNT(*) AS total
-           FROM iset_case c
-          WHERE (c.assigned_to_user_id IS NULL OR c.assigned_to_user_id = 0)
-            AND ${statusCondition}
-            AND TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW()) > ?`;
-      params.push(assignmentHours);
-      try {
-        const [[row]] = await pool.query(sql, params);
-        total += Number(row?.total ?? 0);
-      } catch (err) {
-        if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
-          throw err;
-        }
-      }
-    }
-
-    if (assessmentHours > 0) {
-      const params = [];
-      let statusCondition = 'c.status IS NULL';
-      if (disallowedForAssessment.length) {
-        const placeholders = disallowedForAssessment.map(() => '?').join(',');
-        statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-        params.push(...disallowedForAssessment);
-      }
-      const sql = `SELECT COUNT(*) AS total
-           FROM iset_case c
-          WHERE c.assigned_to_user_id IS NOT NULL
-            AND ${statusCondition}
-            AND TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW()) > ?`;
-      params.push(assessmentHours);
-      try {
-        const [[row]] = await pool.query(sql, params);
-        total += Number(row?.total ?? 0);
-      } catch (err) {
-        if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
-          throw err;
-        }
-      }
-    }
-
-    if (decisionHours > 0 && awaitingStatuses.length) {
-      const awaitingPlaceholders = awaitingStatuses.map(() => '?').join(',');
-      const conditions = ['c.status IS NOT NULL', `LOWER(c.status) IN (${awaitingPlaceholders})`];
-      const params = [...awaitingStatuses];
-      if (terminalValues.length) {
-        const terminalPlaceholders = terminalValues.map(() => '?').join(',');
-        conditions.push(`LOWER(c.status) NOT IN (${terminalPlaceholders})`);
-        params.push(...terminalValues);
-      }
-      const whereClause = conditions.join('\n          AND ');
-      const sql = `SELECT COUNT(*) AS total
-           FROM iset_case c
-          WHERE ${whereClause}
-          AND TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW()) > ?`;
-      params.push(decisionHours);
-      try {
-        const [[row]] = await pool.query(sql, params);
-        total += Number(row?.total ?? 0);
-      } catch (err) {
-        if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
-          throw err;
-        }
-      }
-    }
-
-    return total;
+async function countProgramAdminDecisionsMade(pool) {
+  try {
+    const monday = `DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)`;
+    const sql = `SELECT COUNT(*) AS total
+         FROM iset_application a
+        WHERE a.status IS NOT NULL
+          AND LOWER(a.status) IN ('approved','rejected')
+          AND COALESCE(a.updated_at, a.created_at) >= ${monday}`;
+    const [[row]] = await pool.query(sql);
+    return Number(row?.total ?? 0);
   } catch (err) {
     if (isMissingTableErrorLocal(err)) {
       return 0;
@@ -8577,26 +8506,27 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
         countProgramAdminInAssessment(pool),
         countProgramAdminAwaitingDecision(pool),
         countProgramAdminOnHold(pool),
-        countProgramAdminOverdue(pool)
+        countProgramAdminDecisionsMade(pool)
       ]);
       const metaNew = WORK_QUEUE_BUCKET_META['new-submissions'];
       const metaUnassigned = WORK_QUEUE_BUCKET_META['unassigned'];
       const metaAssessment = WORK_QUEUE_BUCKET_META['in-assessment'];
       const metaDecision = WORK_QUEUE_BUCKET_META['awaiting-decision'];
       const metaOnHold = WORK_QUEUE_BUCKET_META['on-hold'];
+      const metaDecisionsMade = WORK_QUEUE_BUCKET_META['decisions-made'];
       return res.json({
         role,
         generatedAt: new Date().toISOString(),
         buckets: [
           {
             id: 'new-submissions',
-            label: metaNew?.label || 'New submissions',
+            label: metaNew?.label || 'Unassigned Applications',
             description: metaNew?.description || null,
             count: newSubmissionCount
           },
           {
             id: 'unassigned',
-            label: metaUnassigned?.label || 'Unassigned backlog',
+            label: metaUnassigned?.label || 'Assigned Applications',
             description: metaUnassigned?.description || null,
             count: unassignedCount
           },
@@ -8607,21 +8537,21 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
             count: inAssessmentCount
           },
           {
-            id: 'awaiting-decision',
-            label: metaDecision?.label || 'Awaiting program decision',
-            description: metaDecision?.description || null,
-            count: awaitingDecisionCount
-          },
-          {
             id: 'on-hold',
             label: metaOnHold?.label || 'On hold / info requested',
             description: metaOnHold?.description || null,
             count: onHoldCount
           },
           {
-            id: 'overdue',
-            label: WORK_QUEUE_BUCKET_META['overdue']?.label || 'Overdue',
-            description: WORK_QUEUE_BUCKET_META['overdue']?.description || null,
+            id: 'awaiting-decision',
+            label: metaDecision?.label || 'Awaiting program decision',
+            description: metaDecision?.description || null,
+            count: awaitingDecisionCount
+          },
+          {
+            id: 'decisions-made',
+            label: metaDecisionsMade?.label || 'Decisions Made',
+            description: metaDecisionsMade?.description || null,
             count: overdueCount
           }
         ]

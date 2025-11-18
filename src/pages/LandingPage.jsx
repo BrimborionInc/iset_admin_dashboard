@@ -1,7 +1,9 @@
 import React from 'react';
 import { buildLoginUrl } from '../auth/cognito';
 import '../css/awentech-landing.css';
+import Alert from '@cloudscape-design/components/alert';
 import Button from '@cloudscape-design/components/button';
+import ExpandableSection from '@cloudscape-design/components/expandable-section';
 import SegmentedControl from '@cloudscape-design/components/segmented-control';
 import heroBackground from '../assets/images/awentech/alt-hero.png';
 
@@ -15,31 +17,43 @@ const copy = {
       { id: 'resources', label: 'Resources' },
       { id: 'contact', label: 'Support' },
     ],
+    alert: {
+      header: 'Scheduled maintenance',
+      body: 'The ISET case management system will be unavailable today from 7:00–8:00 p.m. ET for maintenance. Service will resume once the window is complete.'
+    },
     header: {
       signIn: 'Sign in',
       languageLabel: 'Switch language'
     },
     hero: {
       eyebrow: "Native Women’s Association of Canada (NWAC)",
-      title: 'NWAC ISET Program intake & assessment portal',
-      lead: "This is the welcome page of the NWAC ISET Program digital intake and application assessment portal. The NWAC Admin Dashboard brings ISET intake, case management, and compliance tracking into a single Cloudscape experience. Built on Awentech’s secure forms platform, administrators can orchestrate workflow design, coordinate assessment reviews, and collaborate with regional delivery teams from one place.",
+      title: 'NWAC ISET Program Case Management System',
+      lead: "Welcome to the NWAC ISET Program Case Management System. Sign in with your NWAC credentials to work securely on applications and cases. Need help? Contact the NWAC ISET program admin team.",
       primaryCta: 'Sign in to manage NWAC programs',
       secondaryCta: "View the applicants' portal",
       meta: [
-        'Secure access with Cognito IAM',
-        'WCAG AA compliant applicant journeys',
-        'Integrated reporting & notifications'
+        'Digital Intake',
+        'Workflow Studio',
+        'Application Assessment',
+        'Secure Messaging',
+        'Case Management',
+        'Budget Management',
+        'Reporting',
+        'ARMS Input'
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.2.1 (14 Nov 2025)',
-      description: 'Release 0.2.1 focuses on communication: program staff now have a Notification Template Editor plus toggles that determine which templates go out with each event.',
+      sectionTitle: 'Release Notes - v0.2.1 (17 Nov 2025)',
+      description: 'Release 0.2.1 adds status-transition hotfixes, admin home community lookup, and configurable reminder notifications.',
       features: {
         heading: 'Updates',
         sections: [
           {
-            title: 'Release v0.2.1 — Notification templates',
+            title: 'Patch v0.2.1 — Notification templates',
             paragraphs: [
+              'Hotfixes to status transitions that occasionally blocked or skipped expected statuses.',
+              'Home community lookup added in the admin console to speed data entry.',
+              'Reminder notifications are now configurable in Settings.',
               'New Notification Template Editor lets administrators adjust submission confirmations, secure message alerts, and decision emails with inline formatting controls, placeholder hints, and preview—all inside the dashboard.',
               'Notification Settings are now live: when an event/role is enabled and linked to a template, the applicant/staff emails use that exact copy with the appropriate placeholders.',
               'Template helpers highlight the available tokens (tracking ID, applicant name, portal link, etc.) so the final email matches the data captured in intake.'
@@ -97,7 +111,7 @@ const copy = {
             ]
           },
           {
-            title: 'Patch v0.1.5',
+            title: 'Patch v0.1.5 — Case portfolio scaffolding',
             paragraphs: [
               'New Dashboards:',
               '- Scaffolded the Level 1 “ISET Case Portfolio” dashboard with persistent filters, finance overview, and case table widgets.',
@@ -112,7 +126,7 @@ const copy = {
             ]
           },
           {
-            title: 'Patch v0.1.4',
+            title: 'Patch v0.1.4 — Bug fixes',
             paragraphs: [
               'Bug Fixes:',
               '- Fixed a bug where the "Forgotten password" link was blocked in the public portal.',
@@ -126,7 +140,7 @@ const copy = {
             ]
           },
           {
-            title: 'Patch v0.1.3',
+            title: 'Patch v0.1.3 — ESDC submissions prep',
             paragraphs: [
               'You can test this by moving a submitted application to the "approved" status.',
               'Prepared the upcoming ESDC submissions module with four dashboards: Overview, Participants, Participant Submission Workspace, and Reporting.',
@@ -139,7 +153,7 @@ const copy = {
             ]
           },
           {
-            title: 'Previous Patch (v0.1.2)',
+            title: 'Patch v0.1.2 — Public portal updates',
             paragraphs: [
               'Refreshed public portal content (cookies, privacy, about, contact) and connected the Contact Messages dashboard.',
               'Simplified the "ISET Application – Draft Incomplete" card to focus on completion counts.'
@@ -152,7 +166,6 @@ const copy = {
         sections: [
           { title: 'Workflow Studio', paragraphs: ['The "flowchart" views do not pan or zoom consistently, making drag interactions unreliable.'] },
           { title: 'Intake Step Editor', paragraphs: ['Dragging components within the workspace causes flicker and the insertion point is unclear.'] },
-          { title: 'Notification Settings', paragraphs: ['Email notifications are currently hard-wired: account verification, password reset, submission confirmation, secure message alerts, and NWAC ISET Team triage notices. The Notification Settings dashboard is disabled until configurable templates return.'] },
           { title: 'Template Editor (checkbox layout)', paragraphs: ['Checkbox options can overlap their labels in dense blocks; refresh or collapse the section to restore spacing while we patch the layout.'] },
           { title: 'Default French Strings', paragraphs: ['Certain intake components ship with default French text that interferes with AI-driven translation.'] },
           { title: 'AI Support', paragraphs: ['The support assistant is not yet fully trained on the solution and can drift off topic.'] }
@@ -162,16 +175,11 @@ const copy = {
         heading: 'Coming Soon',
         sections: [
           {
-            title: 'Post‑0.2.0 To‑Dos',
+            title: 'Up Next',
             paragraphs: [
-              'Tidy the burger menu in the public portal.',
-              'In the support section, fix the AI input.',
-              'Remove the email from the technical support paragraph.',
-              'In the user dashboard, rename Applications to My Applications.',
-              'Create dummy draft update.',
-              'Include a new widget in the ISET application assessment dashboard for document checklist.',
-              'Document Upload function in Documents Widget.',
-              'Convert the mileage entry in the intake wizard from a dollar amount to a distance field and apply cost calculations automatically.'
+              'Home Community lookup integration into the public portal.',
+              'Ability to grant individual users approval rights (e.g., approve their own interventions).',
+              'Finance Module (currently still just dummy data).'
             ]
           }
         ]
@@ -200,54 +208,77 @@ const copy = {
       { id: 'resources', label: 'Ressources' },
       { id: 'contact', label: 'Soutien' },
     ],
+    alert: {
+      header: 'Maintenance planifiée',
+      body: 'Le système ISET sera indisponible aujourd’hui de 19 h à 20 h (HE) pour entretien. Le service reprendra après la fenêtre de maintenance.'
+    },
     header: {
       signIn: 'Se connecter',
       languageLabel: 'Changer de langue'
     },
     hero: {
       eyebrow: 'Association des Femmes Autochtones du Canada (AFAC)',
-      title: 'Portail d’accueil et d’évaluation du programme ISET de l’AFAC',
-      lead: "Page d’accueil du portail numérique d’accueil et d’évaluation du programme ISET de l’AFAC. Le tableau de bord administratif réunit dans Cloudscape l’accueil, la gestion des dossiers et le suivi de conformité. Construit sur la plateforme de formulaires sécurisés d’Awentech, il permet d’orchestrer les flux, de coordonner les évaluations et de collaborer avec les équipes régionales à partir d’un seul endroit.",
+      title: 'Système de gestion des dossiers du programme ISET de l’AFAC',
+      lead: "Bienvenue dans le système de gestion des dossiers du programme ISET de l’AFAC. Connectez-vous avec vos identifiants AFAC pour travailler en toute sécurité sur les demandes et dossiers. Besoin d’aide? Communiquez avec l’équipe d’administration du programme ISET de l’AFAC.",
       primaryCta: 'Se connecter pour gérer les programmes de l’AFAC',
       secondaryCta: 'Voir le portail des candidates',
       meta: [
-        'Accès sécurisé avec Cognito IAM',
-        'Parcours candidates conformes WCAG AA',
-        'Rapports et notifications intégrés'
+        'Accueil numérique',
+        'Studio des flux de travail',
+        'Évaluation des demandes',
+        'Messagerie sécurisée',
+        'Gestion des dossiers',
+        'Gestion budgétaire',
+        'Rapports',
+        'Saisie ARMS'
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - correctif v0.1.4 (24 octobre 2025)',
-      description: 'Le correctif v0.1.4 renforce la fiabilité des portails et poursuit la préparation des soumissions vers EDSC.',
+      sectionTitle: 'Notes de version - v0.2.1 (17 novembre 2025)',
+      description: 'La version 0.2.1 ajoute des correctifs pour les statuts, la recherche de communauté d’origine dans la console admin et la configuration des rappels.',
       features: {
         heading: 'Mises à jour',
         sections: [
           {
-            title: 'Correctif v0.1.4',
+            title: 'Correctif v0.2.1 — Maintenance et notifications',
             paragraphs: [
-              'Corrections de bogues :',
-              '- Correction d\'un bogue qui bloquait le lien « Mot de passe oublié » dans le portail public.',
-              '- Correction d\'un bogue qui empêchait la capture des événements « case_watch_removed ».',
-              '- Correction d\'un bogue qui remplaçait les caractères accentués par des points d\'interrogation dans le module de messages du portail public.',
-              '- Correction d\'un bogue qui empêchait les coordonnatrices régionales d\'approuver ou de rejeter des demandes.',
-              '- Correction d\'un bogue qui permettait parfois aux évaluatrices d\'approuver ou de rejeter des demandes sans respecter le processus.',
-              'Améliorations mineures :',
-              '- Modification du message affiché lorsque le NAS échoue la validation de somme de contrôle dans le tableau de bord des soumissions.',
-              '- Extension du fichier XML de soumission EDSC pour inclure l\'intervention. Le widget d\'évaluation devra recueillir les informations supplémentaires exigées par EDSC : code d\'intervention (codes WG 1-20), dates de début et de fin plus durée (semaines/heures), résultat d\'intervention, coût d\'intervention saisi comme nombre, CNP associé et version, code de résultat du plan d\'action et date, besoin en garde d\'enfants et description du financement, soutiens demandés par intervention, et notes ou narration d\'objectif.'
+              'Correctifs rapides sur certaines transitions de statut qui pouvaient bloquer ou sauter une étape attendue.',
+              'Recherche de communauté d’origine ajoutée dans la console admin pour accélérer la saisie.',
+              'Les notifications de rappel sont maintenant configurables dans Paramètres.',
+              'Nouvel éditeur de modèles de notification pour ajuster les confirmations de dépôt, alertes de messagerie sécurisée et courriels de décision.',
+              'Les paramètres de notification sont actifs : lorsqu’un événement/rôle est activé et lié à un modèle, les courriels utilisent ce texte avec les bons espaces réservés.'
             ]
           },
           {
-            title: 'Correctif v0.1.3',
+            title: 'Version 0.2.0 — Gestion des dossiers',
             paragraphs: [
-              'Prépare le module de soumission vers EDSC avec quatre tableaux de bord : Aperçu, Participantes, Espace de soumission des participantes et Rapports.',
-              'Le tableau Aperçu reste en échafaudage pour l’instant et accueillera bientôt des indicateurs, un suivi des échéances et un tableau des dépôts récents.',
-              'Le tableau Participantes alimente la file des demandes approuvées, permet de générer des fichiers XML et redirige vers l’Espace de soumission des participantes.',
-              'L’Espace de soumission des participantes valide une participante à la fois selon le schéma EDSC 1.4, y compris la vérification du numéro d’assurance sociale.',
-              'Le tableau Rapports demeure un espace réservé avant l’arrivée des rapports par dossier, des codes CNP et de l’intégration financière.'
+              'Ajout du module de gestion des dossiers avec espace de travail et panneaux (messagerie sécurisée, documents, notes/tâches, calendrier, plans d’action, interventions, finance, conformité, aperçu d’export).',
+              'Mise en page réinitialisable et aide rapide dans chaque panneau.'
             ]
           },
           {
-            title: 'Correctif précédent (v0.1.2)',
+            title: 'Correctif v0.1.5 — Échafaudage du portefeuille de dossiers',
+            paragraphs: [
+              'Préparation des tableaux de bord « Portefeuille de dossiers » et « Espace de travail du dossier » avec panneaux configurables et contrôles d’accès mis à jour.'
+            ]
+          },
+          {
+            title: 'Correctif v0.1.4 — Corrections de bogues',
+            paragraphs: [
+              'Réactivation du lien « Mot de passe oublié » et capture fiable des événements « case_watch_removed » dans le portail public.',
+              'Corrections pour l’affichage des accents dans la messagerie publique et pour les actions d’approbation/rejet des coordonnatrices et évaluatrices.',
+              'Message NAS ajusté et extension du fichier XML EDSC pour inclure l’intervention.'
+            ]
+          },
+          {
+            title: 'Correctif v0.1.3 — Préparation EDSC',
+            paragraphs: [
+              'Prépare le module de soumission vers EDSC avec quatre tableaux de bord (Aperçu, Participantes, Espace de soumission, Rapports).',
+              'Validation EDSC 1.4 par participante, y compris la vérification du NAS et la génération d’instantanés XML ILMP.'
+            ]
+          },
+          {
+            title: 'Correctif v0.1.2 — Portail public',
             paragraphs: [
               'Actualisation du contenu public (témoin, confidentialité, à propos, contact) et connexion du tableau des messages de contact.',
               'Simplification de la carte « Demande ISET – Brouillon incomplet » pour mettre de l’avant le nombre de sections complétées.'
@@ -260,7 +291,6 @@ const copy = {
         sections: [
           { title: 'Studio des parcours', paragraphs: ['Les vues « organigramme » ne gèrent pas correctement le déplacement ou le zoom, ce qui rend le glisser-déposer instable.'] },
           { title: 'Éditeur d’étapes', paragraphs: ['Le déplacement des composants dans l’aire de travail provoque un scintillement et le point d’insertion demeure flou.'] },
-          { title: 'Paramètres de notification', paragraphs: ['Les notifications courriel sont présentement codées en dur : vérification de compte, réinitialisation de mot de passe, accusé de réception de dépôt, alertes de messagerie sécurisée et avis de triage de l’équipe ISET de l’AFAC. Le tableau des paramètres de notification demeure désactivé jusqu’au retour des modèles configurables.'] },
           { title: 'Chaînes françaises par défaut', paragraphs: ['Certains composants d’accueil contiennent un texte français par défaut qui perturbe la traduction pilotée par l’IA.'] },
           { title: 'Assistant IA', paragraphs: ['L’assistant IA n’est pas encore formé sur l’ensemble de la solution et peut sortir du sujet.'] }
         ]
@@ -269,18 +299,13 @@ const copy = {
         heading: 'À venir bientôt',
         sections: [
           {
-            title: "Widget d'évaluation et gestion des dossiers",
+            title: 'Prochaines étapes',
             paragraphs: [
-              "Une refonte du widget d'évaluation est prévue afin d'aligner davantage la section Intervention sur les besoins d'EDSC pour consigner les bonnes données.",
-              "Le module de gestion des dossiers en préparation renforcera cette évolution en permettant d'ajouter plusieurs interventions à un même dossier."
+              'Intégration de la recherche de communauté d’origine dans le portail public.',
+              'Capacité d’accorder à des utilisateurs spécifiques des droits d’approbation (ex. approuver leurs propres interventions).',
+              'Module Finances (données factices pour le moment).'
             ]
-          },
-          { title: 'Conservation et archivage', paragraphs: ['Introduire des politiques configurables de conservation, d’archivage et de disposition, avec entrepôt de données, tenue de registres automatisée et contrôles de gel légal.'] },
-          { title: 'Tableau analytique', paragraphs: ['Offrir un tableau de bord analytique dédié avec graphiques, rapports et indicateurs.'] },
-          { title: 'Gestion des publications', paragraphs: ['Ajouter des outils de publication renforcés pour mettre en scène et contrôler les changements des parcours d’accueil.'] },
-          { title: 'Tutoriels', paragraphs: ['Publier des tutoriels guidés pour chaque fonction principale.'] },
-          { title: 'Modèles de notification', paragraphs: ['Réactiver le tableau des paramètres de notification avec des modèles courriel éditables, des publics dynamiques et un historique d’audit.'] },
-          { title: 'Flux renforcé', paragraphs: ['Renforcer les contrôles de statut pilotés par le flux pour remplacer les mises à jour manuelles actuelles.'] }
+          }
         ]
       }
     },
@@ -403,6 +428,15 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
           style={{ backgroundImage: `url(${heroBackground})` }}
         >
           <div className="landing-hero__overlay" />
+          <div className="landing-hero__banner">
+            <Alert
+              type="warning"
+              header={content.alert.header}
+              statusIconAriaLabel="Warning"
+            >
+              {content.alert.body}
+            </Alert>
+          </div>
           <div className="landing-hero__content">
             <p className="eyebrow">{content.hero.eyebrow}</p>
             <h1>{content.hero.title}</h1>
@@ -432,17 +466,21 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
             <article className="landing-card">
               <h3 className="release-notes-heading">{content.releaseNotes.features.heading}</h3>
               <div className="release-notes-sections">
-                {content.releaseNotes.features.sections.map(section => (
-                  <section key={section.title}>
-                    <h4>{section.title}</h4>
-                    {section.paragraphs.map((text, idx) => {
+                {content.releaseNotes.features.sections.map((section, idx) => (
+                  <ExpandableSection
+                    key={section.title}
+                    headerText={section.title}
+                    defaultExpanded={idx === 0}
+                    variant="container"
+                  >
+                    {section.paragraphs.map((text, index) => {
                       const t = typeof text === 'string' ? text.trim() : '';
                       const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
                       return (
-                        <p key={idx}>{isSubheading ? <strong>{text}</strong> : text}</p>
+                        <p key={index}>{isSubheading ? <strong>{text}</strong> : text}</p>
                       );
                     })}
-                  </section>
+                  </ExpandableSection>
                 ))}
               </div>
             </article>
@@ -516,7 +554,10 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
             </button>
           </div>
         </div>
-        <small>&copy; {new Date().getFullYear()} Awentech platform for NWAC. Cloudscape Design interface.</small>
+        <small>
+          &copy; {new Date().getFullYear()} Powered by the{' '}
+          <a href="https://www.awentech.ca" target="_blank" rel="noopener noreferrer">Awentech</a> nForm Engine for NWAC. Cloudscape Design interface.
+        </small>
       </footer>
     </div>
   );

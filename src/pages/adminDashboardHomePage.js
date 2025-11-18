@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Badge,
     Box,
@@ -22,52 +22,131 @@ import RecentActivityWidget from '../widgets/RecentActivityWidget';
 import StatisticsWidget from '../widgets/StatisticsWidget';
 import MyWatchlistWidget from '../widgets/MyWatchlistWidget';
 
-const BOARD_STORAGE_PREFIX = 'admin-dashboard.board.items.v1';
-
-const cloneBoardItems = items => items.map(item => ({
-    ...item,
-    data: item.data ? { ...item.data } : undefined
-}));
-
-const buildDefaultBoardItems = role => {
-    const defaults = [
-        { id: 'application-work-queue', rowSpan: 5, columnSpan: 2, data: { title: 'Application Work Queue' } },
-        { id: 'recent-activity', rowSpan: 5, columnSpan: 2, data: { title: 'Recent Activity' } },
-        { id: 'my-watchlist', rowSpan: 5, columnSpan: 2, data: { title: 'My Watchlist' } },
-        { id: 'statistics', rowSpan: 5, columnSpan: 4, data: { title: 'Statistics' } }
-    ];
-    if (role === 'System Administrator') {
-        defaults.push({ id: 'dev-task-tracker', rowSpan: 6, columnSpan: 4, data: { title: 'Development Tracker' } });
+const WIDGET_REGISTRY = {
+    'application-work-queue': {
+        id: 'application-work-queue',
+        component: ApplicationWorkQueueWidget,
+        title: 'Application Work Queue',
+        description: 'Applications currently in your remit by status.',
+        defaultRowSpan: 5,
+        defaultColumnSpan: 2
+    },
+    'recent-activity': {
+        id: 'recent-activity',
+        component: RecentActivityWidget,
+        title: 'Recent Activity',
+        description: 'Most recent submissions, assignments, and status changes.',
+        defaultRowSpan: 5,
+        defaultColumnSpan: 2
+    },
+    'my-watchlist': {
+        id: 'my-watchlist',
+        component: MyWatchlistWidget,
+        title: 'My Watchlist',
+        description: 'Cases and applications you have flagged for follow-up.',
+        defaultRowSpan: 5,
+        defaultColumnSpan: 2
+    },
+    statistics: {
+        id: 'statistics',
+        component: StatisticsWidget,
+        title: 'Statistics',
+        description: 'At-a-glance program totals and throughput metrics.',
+        defaultRowSpan: 5,
+        defaultColumnSpan: 4
+    },
+    'dev-task-tracker': {
+        id: 'dev-task-tracker',
+        component: null, // bound after DevTaskTracker definition
+        title: 'Development Tracker',
+        description: 'Track internal development tasks. Visible to System Administrators.',
+        defaultRowSpan: 6,
+        defaultColumnSpan: 4
     }
-    return defaults;
 };
 
-const filterAllowedBoardItems = (items, defaults) => {
-    const defaultsById = new Map(defaults.map(item => [item.id, item]));
-    const merged = [];
-    const seen = new Set();
+const STORAGE_PREFIX = 'admin-home-layout-v1';
 
-    (Array.isArray(items) ? items : []).forEach(item => {
-        if (!item || !defaultsById.has(item.id) || seen.has(item.id)) {
-            return;
-        }
-        const defaultItem = defaultsById.get(item.id);
-        merged.push({
-            ...defaultItem,
-            ...item,
-            data: item.data ? { ...defaultItem.data, ...item.data } : (defaultItem.data ? { ...defaultItem.data } : undefined)
+const filterWidgetsForRole = (role) => {
+    const allowed = { ...WIDGET_REGISTRY };
+    if (role !== 'System Administrator') {
+        delete allowed['dev-task-tracker'];
+    }
+    return allowed;
+};
+
+const buildDefaultLayout = (role) => {
+    const base = [
+        { id: 'application-work-queue', rowSpan: 2, columnSpan: 4 },
+        { id: 'recent-activity', rowSpan: 5, columnSpan: 2 },
+        { id: 'my-watchlist', rowSpan: 5, columnSpan: 2 },
+        { id: 'statistics', rowSpan: 5, columnSpan: 4 }
+    ];
+    if (role === 'System Administrator') {
+        base.push({ id: 'dev-task-tracker', rowSpan: 6, columnSpan: 4 });
+    }
+    return base;
+};
+
+const exportLayout = (items = [], allowed = {}) =>
+    items
+        .filter((item) => item && allowed[item.id])
+        .map(({ id, rowSpan, columnSpan, columnOffset }) => ({
+            id,
+            rowSpan,
+            columnSpan,
+            columnOffset
+        }));
+
+const toBoardItems = (layout = [], allowed = {}) =>
+    layout
+        .filter((entry) => entry && allowed[entry.id])
+        .map((entry) => {
+            const def = allowed[entry.id];
+            return {
+                id: def.id,
+                rowSpan: entry.rowSpan ?? def.defaultRowSpan,
+                columnSpan: entry.columnSpan ?? def.defaultColumnSpan,
+                columnOffset: entry.columnOffset,
+                data: { title: def.title, description: def.description }
+            };
         });
-        seen.add(item.id);
-    });
 
-    defaults.forEach(defaultItem => {
-        if (!seen.has(defaultItem.id)) {
-            merged.push({ ...defaultItem, data: defaultItem.data ? { ...defaultItem.data } : undefined });
-            seen.add(defaultItem.id);
+const computePaletteItems = (layout = [], allowed = {}) =>
+    Object.values(allowed)
+        .filter((def) => !layout.some((item) => item.id === def.id))
+        .map((def) => ({
+            id: def.id,
+            data: { title: def.title, description: def.description }
+        }));
+
+const areLayoutsEqual = (a = [], b = []) => {
+    if (a === b) return true;
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+        const left = a[i];
+        const right = b[i];
+        if (!left || !right || left.id !== right.id ||
+            (left.rowSpan ?? null) !== (right.rowSpan ?? null) ||
+            (left.columnSpan ?? null) !== (right.columnSpan ?? null) ||
+            (left.columnOffset ?? null) !== (right.columnOffset ?? null)) {
+            return false;
         }
-    });
+    }
+    return true;
+};
 
-    return merged;
+const loadLayoutFromStorage = (storageKey, allowed = {}) => {
+    try {
+        const raw = window.localStorage.getItem(storageKey);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return null;
+        const filtered = parsed.filter(entry => entry && allowed[entry.id]);
+        return filtered.length ? filtered : null;
+    } catch (_) {
+        return null;
+    }
 };
 
 const boardI18nStrings = {
@@ -105,7 +184,7 @@ const STATUS_OPTIONS = [
     { id: 'done', text: 'Done' }
 ];
 
-const AdminDashboard = () => {
+const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
     const iamOn = isIamOn();
     const signedIn = hasValidSession();
     const claims = signedIn ? getIdTokenClaims() : null;
@@ -118,7 +197,7 @@ const AdminDashboard = () => {
         return () => window.removeEventListener('auth:session-changed', handler);
     }, []);
 
-    const simulatedRole = (() => {
+    const simulatedRole = useMemo(() => {
         try {
             const raw = sessionStorage.getItem('currentRole');
             if (raw) {
@@ -130,7 +209,7 @@ const AdminDashboard = () => {
             }
         } catch (_) {}
         return null;
-    })();
+    }, []);
 
     const role = useMemo(() => {
         if (iamOn) {
@@ -139,97 +218,124 @@ const AdminDashboard = () => {
         return simulatedRole || tokenRole || 'Guest';
     }, [iamOn, tokenRole, simulatedRole]);
 
-    const simulateSignedOut = (() => {
+    const simulateSignedOut = useMemo(() => {
         try {
             return sessionStorage.getItem('simulateSignedOut') === 'true';
         } catch (_) {
             return false;
         }
-    })();
+    }, []);
 
-    const defaultItems = useMemo(() => cloneBoardItems(buildDefaultBoardItems(role)), [role]);
-    const storageKey = useMemo(() => `${BOARD_STORAGE_PREFIX}.${role || 'guest'}`, [role]);
-    const [boardItems, setBoardItems] = useState(defaultItems);
+    const allowedWidgets = useMemo(() => filterWidgetsForRole(role), [role]);
+    const storageKey = useMemo(() => `${STORAGE_PREFIX}.${role || 'guest'}`, [role]);
+    const defaultLayout = useMemo(() => buildDefaultLayout(role), [role]);
+    const [layout, setLayout] = useState(() => loadLayoutFromStorage(storageKey, allowedWidgets) ?? defaultLayout);
+    const boardItems = useMemo(() => toBoardItems(layout, allowedWidgets), [layout, allowedWidgets]);
+    const paletteItems = useMemo(() => computePaletteItems(layout, allowedWidgets), [layout, allowedWidgets]);
+    const paletteSignatureRef = useRef(JSON.stringify(paletteItems));
 
     useEffect(() => {
-        let restored = false;
+        const stored = loadLayoutFromStorage(storageKey, allowedWidgets);
+        setLayout(stored ?? defaultLayout);
+        paletteSignatureRef.current = JSON.stringify(computePaletteItems(stored ?? defaultLayout, allowedWidgets));
+    }, [storageKey, allowedWidgets, defaultLayout]);
+
+    useEffect(() => {
         try {
-            const raw = window.localStorage.getItem(storageKey);
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                if (Array.isArray(parsed)) {
-                    setBoardItems(filterAllowedBoardItems(parsed, defaultItems));
-                    restored = true;
-                }
-            }
+            window.localStorage.setItem(storageKey, JSON.stringify(layout));
         } catch (_) {}
-        if (!restored) {
-            setBoardItems(cloneBoardItems(defaultItems));
+    }, [layout, storageKey]);
+
+    useEffect(() => {
+        const signature = JSON.stringify(paletteItems);
+        if (signature !== paletteSignatureRef.current) {
+            paletteSignatureRef.current = signature;
+            if (typeof setAvailableItems === 'function') {
+                try { setAvailableItems(paletteItems); } catch (_) {}
+            }
         }
-    }, [defaultItems, storageKey]);
+    }, [paletteItems, setAvailableItems]);
 
-    const handleResetLayout = () => {
-        const next = cloneBoardItems(defaultItems);
-        setBoardItems(next);
+    const handleItemsChange = useCallback(({ detail }) => {
+        if (!detail || !Array.isArray(detail.items)) return;
+        const nextLayout = exportLayout(detail.items, allowedWidgets);
+        setLayout(current => areLayoutsEqual(current, nextLayout) ? current : nextLayout);
+    }, [allowedWidgets]);
+
+    const resetLayout = useCallback(() => {
+        setLayout(defaultLayout);
+        const defaultPalette = computePaletteItems(defaultLayout, allowedWidgets);
+        paletteSignatureRef.current = JSON.stringify(defaultPalette);
+        if (typeof setAvailableItems === 'function') {
+            try { setAvailableItems(defaultPalette); } catch (_) {}
+        }
         try { window.localStorage.removeItem(storageKey); } catch (_) {}
-    };
+    }, [allowedWidgets, defaultLayout, setAvailableItems, storageKey]);
 
-    const handleItemsChange = ({ detail }) => {
-        const next = filterAllowedBoardItems(detail.items, defaultItems);
-        setBoardItems(next);
-        try { window.localStorage.setItem(storageKey, JSON.stringify(next)); } catch (_) {}
-    };
+    const openPalette = useCallback(() => {
+        if (typeof setAvailableItems === 'function') {
+            try { setAvailableItems(paletteItems); } catch (_) {}
+        }
+        if (typeof setSplitPanelOpen === 'function') {
+            setSplitPanelOpen(true);
+        }
+    }, [paletteItems, setAvailableItems, setSplitPanelOpen]);
+
+    useEffect(() => {
+        const handleAdd = event => {
+            const id = event?.detail?.id;
+            if (!id || !allowedWidgets[id]) return;
+            setLayout(current => current.some(item => item.id === id) ? current : [...current, { id }]);
+        };
+        window.addEventListener('palette:add', handleAdd);
+        return () => window.removeEventListener('palette:add', handleAdd);
+    }, [allowedWidgets]);
+
+    useEffect(() => {
+        const handleOpen = () => openPalette();
+        const handleReset = () => resetLayout();
+        window.addEventListener('home:openPalette', handleOpen);
+        window.addEventListener('home:resetLayout', handleReset);
+        return () => {
+            window.removeEventListener('home:openPalette', handleOpen);
+            window.removeEventListener('home:resetLayout', handleReset);
+        };
+    }, [openPalette, resetLayout]);
 
     const renderBoardItem = (item, actions) => {
-        switch (item.id) {
-            case 'application-work-queue':
-                return <ApplicationWorkQueueWidget actions={actions} role={role} refreshKey={authVersion} />;
-            case 'recent-activity':
-                return <RecentActivityWidget actions={actions} role={role} refreshKey={authVersion} />;
-            case 'my-watchlist':
-                return <MyWatchlistWidget actions={actions} />;
-            case 'statistics':
-                return <StatisticsWidget actions={actions} role={role} refreshKey={authVersion} />;
-            case 'dev-task-tracker':
-                return <DevTaskTracker actions={actions} />;
-            default:
-                return null;
-        }
+        const definition = allowedWidgets[item.id];
+        if (!definition || !definition.component) return null;
+        const WidgetComponent = definition.component;
+        return (
+            <WidgetComponent
+                actions={actions}
+                role={role}
+                refreshKey={authVersion}
+            />
+        );
     };
 
     const shouldShowAuthPrompt = (iamOn && !signedIn) || (!iamOn && simulateSignedOut);
 
     if (shouldShowAuthPrompt) {
         return (
-            <ContentLayout header={<Header variant="h1">Administration Console</Header>}>
-                <SpaceBetween size="m">
-                    <Box variant="p">You are not signed in. Please authenticate to access administrative functions.</Box>
-                    <Button variant="primary" onClick={() => window.location.assign(buildLoginUrl())}>Sign in</Button>
-                </SpaceBetween>
-            </ContentLayout>
+            <SpaceBetween size="m">
+                <Box variant="p">You are not signed in. Please authenticate to access administrative functions.</Box>
+                <Button variant="primary" onClick={() => window.location.assign(buildLoginUrl())}>Sign in</Button>
+            </SpaceBetween>
         );
     }
 
     return (
-        <ContentLayout
-            header={
-                <Header
-                    variant="h1"
-                    actions={<Button onClick={handleResetLayout}>Reset layout</Button>}
-                >
-                    Administration Console
-                </Header>
-            }
-        >
-            <SpaceBetween size="l">
-                <Board
-                    renderItem={renderBoardItem}
-                    items={boardItems}
-                    onItemsChange={handleItemsChange}
-                    i18nStrings={boardI18nStrings}
-                />
-            </SpaceBetween>
-        </ContentLayout>
+        <SpaceBetween size="l">
+            <Board
+                renderItem={renderBoardItem}
+                items={boardItems}
+                onItemsChange={handleItemsChange}
+                i18nStrings={boardI18nStrings}
+                empty={<Box padding="m">No widgets on the dashboard.</Box>}
+            />
+        </SpaceBetween>
     );
 };
 
@@ -378,5 +484,7 @@ const DevTaskTracker = ({ actions }) => {
         </BoardItem>
     );
 };
+
+WIDGET_REGISTRY['dev-task-tracker'].component = DevTaskTracker;
 
 export default AdminDashboard;

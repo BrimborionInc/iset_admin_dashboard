@@ -27,6 +27,11 @@ This library captures the working knowledge for the admin dashboard. The goal is
 4. Use TODO lines for known gaps or follow-ups.
 5. Keep credentials, secrets, and environment-specific tokens out of this library.
 
+### Dashboard UI conventions
+
+- Favor Cloudscape components over native HTML for all in-product UI; use native elements only when there is no Cloudscape equivalent.
+- Use Cloudscape navigation: prefer `<Link>` from `@cloudscape-design/components` instead of native `<a>` tags in dashboard widgets (e.g., Application Work Queue) unless a specific case requires otherwise.
+
 ## Maintenance Hints
 
 - Update `meta/changelog.md` when you land user-visible or operational changes.
