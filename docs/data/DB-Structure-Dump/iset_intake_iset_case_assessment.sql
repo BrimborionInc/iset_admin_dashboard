@@ -45,9 +45,6 @@ CREATE TABLE `iset_case_assessment` (
   `childcare_funding_details` text COLLATE utf8mb4_unicode_ci,
   `action_plan_result_code` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `action_plan_result_date` date DEFAULT NULL,
-  `conflict_declaration_signed` tinyint(1) DEFAULT NULL,
-  `conflict_declaration_signed_at` datetime DEFAULT NULL,
-  `conflict_declaration_signed_by` bigint unsigned DEFAULT NULL,
   `institution` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `program_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `itp_payload` json DEFAULT NULL,
@@ -59,9 +56,6 @@ CREATE TABLE `iset_case_assessment` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`case_id`),
-  KEY `idx_case_assessment_conflict_signed` (`conflict_declaration_signed`),
-  KEY `fk_case_assessment_conflict_staff` (`conflict_declaration_signed_by`),
-  CONSTRAINT `fk_case_assessment_conflict_staff` FOREIGN KEY (`conflict_declaration_signed_by`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_iset_case_assessment_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -75,4 +69,4 @@ CREATE TABLE `iset_case_assessment` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-11  8:57:07
+-- Dump completed on 2025-11-17 19:39:54

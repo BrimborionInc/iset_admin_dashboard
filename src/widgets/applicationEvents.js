@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { apiFetch } from '../auth/apiClient';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Header, ButtonDropdown, Table, StatusIndicator, Box, Spinner, TextFilter, SpaceBetween, Link, Button } from '@cloudscape-design/components';
+import { Header, ButtonDropdown, Table, StatusIndicator, Box, Spinner, TextFilter, SpaceBetween, Link, Button, Badge } from '@cloudscape-design/components';
 import ApplicationEventsHelp from '../helpPanelContents/applicationEventsHelp';
 
 const STATUS_LABELS = {
@@ -49,6 +49,29 @@ const ensureSentence = (text) => {
   const trimmed = trimValue(text);
   if (!trimmed) return '';
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+};
+
+const truncate = (text, limit = 160) => {
+  const value = trimValue(text);
+  if (!value) return '';
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit).trim()}…`;
+};
+
+const formatReminderDetails = (payload = {}, fallbackTitle) => {
+  const title = trimValue(payload.title) || fallbackTitle || 'Reminder';
+  const due = payload.due_at ? new Date(payload.due_at).toLocaleDateString() : null;
+  const trackingId = payload.tracking_id || payload.application_id || '';
+  const caseId = payload.case_id || '';
+  const category = trimValue(payload.category);
+  const description = truncate(payload.description || payload.note || payload.body);
+  const parts = [`Reminder due: ${title}`];
+  if (due) parts.push(`due ${due}`);
+  if (category) parts.push(`Category: ${category}`);
+  if (trackingId) parts.push(`Tracking ID ${trackingId}`);
+  if (caseId) parts.push(`Case ${caseId}`);
+  if (description) parts.push(`Note: ${description}`);
+  return parts.join(' • ');
 };
 
 const formatActorDisplay = (event) => {
@@ -129,16 +152,24 @@ const formatEventMessage = (event, actorDisplay) => {
       return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
     }
     case 'reminder_due': {
-      const title = trimValue(payload.title) || 'Reminder';
-      const due = payload.due_at ? new Date(payload.due_at).toLocaleDateString() : 'today';
-      const base = `Reminder due: ${title} (due ${due})`;
+      const base = formatReminderDetails(
+        { ...payload, tracking_id: event.tracking_id, case_id: event.case_id }
+      );
       return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
     }
     case 'reminder_overdue': {
       const title = trimValue(payload.title) || 'Reminder';
       const due = payload.due_at ? new Date(payload.due_at).toLocaleDateString() : 'previously';
       const base = `Reminder overdue: ${title} (was due ${due})`;
-      return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
+      const detail = truncate(payload.description || payload.body || payload.note);
+      const trackingId = payload.tracking_id || payload.application_id || event.tracking_id;
+      const caseId = payload.case_id || event.case_id;
+      const parts = [base];
+      if (trackingId) parts.push(`Tracking ID ${trackingId}`);
+      if (caseId) parts.push(`Case ${caseId}`);
+      if (detail) parts.push(`Note: ${detail}`);
+      const message = parts.join(' • ');
+      return ensureSentence(actorSuffix ? `${message}${actorSuffix}` : message);
     }
     case 'reminder_completed': {
       const title = trimValue(payload.title) || 'Reminder';
@@ -162,6 +193,14 @@ const decorateEvent = (event) => {
   return {
     ...event,
     actorDisplay,
+    reminderDetails: formatReminderDetails(
+      {
+        ...event.event_data,
+        tracking_id: event.tracking_id,
+        case_id: event.case_id
+      },
+      event.event_data?.title
+    ),
     displayMessage: formatEventMessage(event, actorDisplay)
   };
 };
@@ -265,7 +304,36 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
     {
       id: 'data',
       header: 'Event Data',
-      cell: item => item.displayMessage || ''
+      cell: item => {
+        const isReminder =
+          item?.event_type && item.event_type.startsWith('reminder_') && item?.event_data?.reminder_id;
+        if (!isReminder) {
+          return item.displayMessage || '';
+        }
+        const trackingId = item.event_data?.tracking_id || item.tracking_id;
+        const caseId = item.event_data?.case_id || item.case_id;
+        const href = caseId
+          ? `/cases/${caseId}`
+          : trackingId
+            ? `/application-case/${trackingId}`
+            : null;
+        const detailText =
+          item.event_type === 'reminder_due'
+            ? item.reminderDetails || item.displayMessage || ''
+            : item.displayMessage || '';
+        return (
+          <SpaceBetween size="xxs">
+            <div>{detailText}</div>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+              {trackingId ? <Badge color="blue">Tracking ID {trackingId}</Badge> : null}
+              {item.event_data?.category ? <Badge color="grey">{item.event_data.category}</Badge> : null}
+              {href ? (
+                <Link href={href}>View {caseId ? 'case' : 'application'}</Link>
+              ) : null}
+            </div>
+          </SpaceBetween>
+        );
+      }
     },
     {
       id: 'actor',

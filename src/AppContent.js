@@ -9,6 +9,7 @@ import {
   SpaceBetween,
   Container
 } from '@cloudscape-design/components';
+import Link from '@cloudscape-design/components/link';
 import Avatar from "@cloudscape-design/chat-components/avatar";
 import ChatBubble from "@cloudscape-design/chat-components/chat-bubble";
 import ReactMarkdown from 'react-markdown';
@@ -545,14 +546,46 @@ const AppContent = ({ currentRole }) => {
   const notificationFlashbarItems = useMemo(() =>
     notifications
       .filter(n => n && n.dismissible !== false)
-      .map(n => ({
-        type: mapSeverityToType(n.severity),
-        header: n.title || undefined,
-        content: n.message,
-        dismissible: true,
-        onDismiss: () => handleDismissNotification(n.id),
-        id: `notification-${n.id}`,
-      })),
+      .map(n => {
+        let metadata = {};
+        try {
+          metadata = typeof n.metadata === 'string' ? JSON.parse(n.metadata) : (n.metadata || {});
+        } catch (_) {
+          metadata = {};
+        }
+        const caseId = metadata.caseId || null;
+        const trackingId = metadata.trackingId || null;
+        const caseNumber = metadata.caseNumber || null;
+        const appReference = metadata.applicationReference || null;
+        const isCaseManaged = metadata.isCaseManaged === true;
+        const href =
+          isCaseManaged && caseId
+            ? `/cases/${caseId}`
+            : trackingId
+              ? `/application-case/${trackingId}`
+              : null;
+        const linkLabel = isCaseManaged
+          ? caseNumber
+            ? `View case ${caseNumber}`
+            : 'View case'
+          : appReference
+            ? `View application ${appReference}`
+            : 'View application';
+        const content = href ? (
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'baseline' }}>
+            <span>{n.message}</span>
+            <Link href={href}>{linkLabel}</Link>
+          </div>
+        ) : n.message;
+        return {
+          type: mapSeverityToType(n.severity),
+          header: n.title || undefined,
+          content,
+          dismissible: true,
+          onDismiss: () => handleDismissNotification(n.id),
+          id: `notification-${n.id}`,
+        };
+      }),
   [notifications, handleDismissNotification, mapSeverityToType]);
 
   const refreshNotifications = useCallback(() => loadNotifications({ scrollIntoView: true }), [loadNotifications]);

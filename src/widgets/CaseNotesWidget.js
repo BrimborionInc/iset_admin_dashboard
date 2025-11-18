@@ -47,7 +47,24 @@ const toIsoUtcFromDateInput = (value) => {
   if (!value) return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  return `${trimmed}T00:00:00Z`;
+  const normalized = trimmed.replace(/\//g, '-');
+  const parts = normalized.split('-');
+  if (parts.length !== 3) return null;
+  const [yearStr, monthStr, dayStr] = parts;
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
+    return null;
+  }
+  // Use midday UTC so timezone offsets don't shift the calendar day
+  const utcMs = Date.UTC(year, month - 1, day, 12, 0, 0);
+  if (Number.isNaN(utcMs)) return null;
+  return new Date(utcMs).toISOString();
 };
 
 const formatFollowUpDate = (value) => {
@@ -358,6 +375,10 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
           payload
         ])
       );
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId } }));
+        window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId } }));
+      }
       closeModal();
     } catch (err) {
       const message = await getErrorMessage(err, 'Failed to save note.');

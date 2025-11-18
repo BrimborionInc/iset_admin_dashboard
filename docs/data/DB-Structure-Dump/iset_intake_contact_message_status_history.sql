@@ -27,14 +27,14 @@ CREATE TABLE `contact_message_status_history` (
   `contact_message_id` int NOT NULL,
   `previous_status` varchar(32) NOT NULL,
   `new_status` varchar(32) NOT NULL,
-  `changed_by_user_id` int DEFAULT NULL,
+  `changed_by_staff_profile_id` bigint unsigned DEFAULT NULL,
   `changed_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_contact_message_status_history_message` (`contact_message_id`),
-  KEY `idx_contact_message_status_history_changed_by` (`changed_by_user_id`),
+  KEY `idx_contact_status_history_staff` (`changed_by_staff_profile_id`),
   CONSTRAINT `fk_contact_message_status_history_message` FOREIGN KEY (`contact_message_id`) REFERENCES `contact_message` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_contact_message_status_history_user` FOREIGN KEY (`changed_by_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+  CONSTRAINT `fk_contact_status_history_staff` FOREIGN KEY (`changed_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -46,4 +46,4 @@ CREATE TABLE `contact_message_status_history` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-11  8:57:13
+-- Dump completed on 2025-11-17 19:39:51

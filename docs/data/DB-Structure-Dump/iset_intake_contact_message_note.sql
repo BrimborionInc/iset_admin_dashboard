@@ -33,7 +33,7 @@ CREATE TABLE `contact_message_note` (
   KEY `idx_contact_message_note_author` (`author_user_id`),
   CONSTRAINT `fk_contact_message_note_author` FOREIGN KEY (`author_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_contact_message_note_message` FOREIGN KEY (`contact_message_id`) REFERENCES `contact_message` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -45,4 +45,4 @@ CREATE TABLE `contact_message_note` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-11  8:57:15
+-- Dump completed on 2025-11-17 19:39:53

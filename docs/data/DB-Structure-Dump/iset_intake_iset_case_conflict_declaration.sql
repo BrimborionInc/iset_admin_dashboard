@@ -16,27 +16,29 @@
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
 --
--- Table structure for table `iset_application_draft_dynamic`
+-- Table structure for table `iset_case_conflict_declaration`
 --
 
-DROP TABLE IF EXISTS `iset_application_draft_dynamic`;
+DROP TABLE IF EXISTS `iset_case_conflict_declaration`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `iset_application_draft_dynamic` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `user_id` int NOT NULL,
-  `workflow_id` varchar(64) NOT NULL DEFAULT 'iset-v1',
-  `step_cursor` varchar(128) DEFAULT NULL,
-  `draft_payload` json NOT NULL,
-  `history` json DEFAULT NULL,
-  `doc_refs` json DEFAULT NULL,
-  `version` int NOT NULL DEFAULT '1',
-  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+CREATE TABLE `iset_case_conflict_declaration` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `case_id` bigint unsigned NOT NULL,
+  `staff_profile_id` bigint unsigned NOT NULL,
+  `signed_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `signed_ip` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `signed_user_agent` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `revoked_at` datetime DEFAULT NULL,
+  `revoked_reason` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `is_active` tinyint(1) GENERATED ALWAYS AS ((case when (`revoked_at` is null) then 1 else 0 end)) STORED,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `user_id` (`user_id`),
-  KEY `idx_iset_app_draft_dynamic_updated_at` (`updated_at`),
-  CONSTRAINT `fk_iset_application_draft_dynamic_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+  UNIQUE KEY `uq_case_conflict_active` (`case_id`,`staff_profile_id`,`is_active`),
+  KEY `idx_case_conflict_case` (`case_id`),
+  KEY `idx_case_conflict_staff` (`staff_profile_id`),
+  CONSTRAINT `fk_case_conflict_declaration_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_case_conflict_declaration_staff` FOREIGN KEY (`staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -48,4 +50,4 @@ CREATE TABLE `iset_application_draft_dynamic` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-17 19:39:51
+-- Dump completed on 2025-11-17 19:39:50

@@ -57,7 +57,7 @@ CREATE TABLE `iset_document` (
   KEY `idx_iset_document_linked_intervention` (`linked_intervention_id`),
   CONSTRAINT `fk_iset_document_intervention` FOREIGN KEY (`linked_intervention_id`) REFERENCES `iset_case_intervention` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_iset_document_task` FOREIGN KEY (`linked_task_id`) REFERENCES `iset_case_task` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -69,4 +69,4 @@ CREATE TABLE `iset_document` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-11  8:57:12
+-- Dump completed on 2025-11-17 19:39:52
