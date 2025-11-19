@@ -4,8 +4,8 @@ const IsetApplicationFormHelpPanelContent = () => (
   <div>
     <h2>ISET application dossier</h2>
     <p>
-      This widget houses the complete intake submission so you can review, correct, and publish updates without
-      leaving the case dashboard. Sections mirror the original form and expand for easier scanning.
+      Review and correct the full intake submission without leaving the case dashboard. Sections mirror the applicant
+      form and expand for easier scanning; version history keeps prior submissions intact.
     </p>
 
     <h3>What you can review</h3>
@@ -33,26 +33,30 @@ const IsetApplicationFormHelpPanelContent = () => (
 
     <h3>Editing the record</h3>
     <ul>
-      <li>Select <em>Edit</em> to enable fields; only sections that support updates will provide inputs.</li>
-      <li>Use <em>Save</em> to capture your changes without altering application history.</li>
-      <li>Version history stores every edit—open it to compare submissions or restore an earlier snapshot.</li>
-      <li>Clear totals in the financial tables with the inline “Clear” links if values were entered incorrectly.</li>
+      <li>Select <em>Edit</em> and confirm to acquire an edit lock; editing is disabled if the case is approved/rejected or another user holds the lock.</li>
+      <li>Only editable fields expose inputs; Save writes a new version and keeps the original submission available in version history.</li>
+      <li>Use <em>View versions</em> to compare or restore earlier submissions; Save or Cancel releases your lock.</li>
+      <li>Monthly income/expense tables allow inline correction; clear incorrect totals with the inline clear controls.</li>
+      <li>Download Indigenous Declaration or conflict-of-interest PDFs from the modal actions when validation is needed.</li>
     </ul>
 
     <h3>Tips for coordinators</h3>
     <ul>
-      <li>Cross-check the application summary against the coordinator assessment before finalising a decision.</li>
-      <li>Add clarifications in the Case Notes widget when you adjust applicant-provided data.</li>
-      <li>If a document is missing, request it via Secure Messaging—the attachment will automatically appear in
-        Supporting Documents.</li>
+      <li>Verify required evidence from the training module: Status/Treaty card or two Nation letters plus self-declaration, two IDs, acceptance letter and fee statement, band funding/denial letter (if applicable), and income/expense proofs for living allowance.</li>
+      <li>Use Case Notes to log any coordinator-made edits and outreach attempts (5-day contact rule; up to three attempts before closing for non-response).</li>
+      <li>If documents are missing, request them via Secure Messaging—uploads will surface in Supporting Documents.</li>
+      <li>Pending stays pending until docs are complete, the case manager recommendation is recorded, NWAC approves/denies, and the Funding Agreement is signed; reflect this in the assessment widget and notes.</li>
     </ul>
   </div>
 );
 
 IsetApplicationFormHelpPanelContent.aiContext = `
-You are assisting an ISET team member reviewing the ISET Application Form widget. Explain how to audit applicant
-details, edit sections safely, leverage version history, and coordinate with related widgets (Case Notes, Supporting
-Documents, Secure Messaging).
+You are assisting an ISET coordinator using the ISET Application Form widget. Key behaviors:
+- Edit flow: press **Edit**, confirm, acquire an edit lock, then Save or Cancel to release; editing is blocked if case status is approved/rejected or another user holds the lock.
+- Versioning: every save creates a new version; **View versions** shows history and allows restore. Original submission remains available.
+- Scope: sections include identity/contact, eligibility answers, supports/barriers, income/expense tables, document placeholders, and submission signatures. Income/expense amounts can be corrected inline during edit mode.
+- Related widgets: log coordinator-made edits/outreach in Notes and Tasks; request missing docs via Secure Messaging (attachments appear in Supporting Documents); align with the Application Assessment widget before final decisions.
+- Program rules to surface: 5-day contact SLA and up to three follow-ups for missing info; required evidence includes Status/Treaty card or two Nation letters plus self-declaration, two IDs, acceptance letter and fee statement, band funding/denial where applicable, and income/expense proofs for living allowance; all applications (funded or not) must stay recorded for audit; “pending” means docs + recommendation + NWAC decision + signed Funding Agreement are still outstanding.
 `;
 
 export default IsetApplicationFormHelpPanelContent;

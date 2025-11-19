@@ -57,6 +57,10 @@ const CaseAssignmentDashboardHelp = () => (
       <li>The refresh icon inside the widget retrieves the newest list without reloading the entire page.</li>
       <li>Watch for the success, warning, or error alerts that appear above the table after assignment attempts—they explain
         next steps if something fails.</li>
+      <li>For compliance, contact new applicants within five days and make up to three attempts for missing info; flag ageing
+        unassigned submissions so the team can stay within those timelines.</li>
+      <li>Reminder from the ISET training module: every application (funded or not) must be recorded and tracked, so avoid using
+        “closed” simply to clear an unassigned case without documenting the outcome.</li>
     </ul>
   </div>
 );
@@ -69,6 +73,12 @@ When an assignment succeeds and the prior status was Submitted, the frontend aut
 
 Only Program Administrators can see every row. Regional Coordinators see their region's cases plus their own. Assessors only see cases assigned to them. Bring up these visibility rules when users ask why they cannot find a case.
 
-If assignment fails, advise the coordinator to check the alert above the table for follow-up instructions, or try again after refreshing data.`;
+If assignment fails, advise the coordinator to check the alert above the table for follow-up instructions, or try again after refreshing data.
+
+Program policy cues from the ISET training module:
+- Contact new applicants within five days; make up to three attempts if documentation is missing.
+- Pending applications are those awaiting documents, case manager recommendation, NWAC approval, and a signed Funding Agreement; note this context when users ask why a case is still “submitted” or “pending”.
+- All applications—funded or not—must be captured and tracked for audit (ARMS compliance), so avoid untracked closure and keep status reasons clear.
+- Processing expectations: triage quickly, and the full review window is three weeks after all docs arrive; use SLA badges and filters to spot ageing unassigned files.`;
 
 export default CaseAssignmentDashboardHelp;

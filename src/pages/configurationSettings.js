@@ -77,30 +77,26 @@ async function fetchJSON(path, opts = {}) {
 
 const SLA_STAGE_PLACEHOLDER = [
   {
-    stage_key: "intake_triage",
-    display_name: "Intake triage",
-    target_hours: 24,
-    description: "Time to first open and triage new application.",
-  },
-  {
     stage_key: "assignment",
     display_name: "Assignment",
-    target_hours: 72,
-    description: "Time to assign a coordinator or assessor after triage.",
+    target_days: 3,
+    description: "Time from submission to assign an assessor or coordinator.",
   },
   {
     stage_key: "assessment",
     display_name: "Assessment",
-    target_hours: 240,
-    description: "Working time for assessors to complete review (10 days).",
+    target_days: 10,
+    description: "Time from submission to complete the assessment.",
   },
   {
     stage_key: "program_decision",
-    display_name: "Program decision",
-    target_hours: 48,
-    description: "Decision turnaround once assessment is complete.",
+    display_name: "Decision",
+    target_days: 2,
+    description: "Time from submission to issue the program decision.",
   },
 ];
+
+const SLA_STAGE_ALLOWLIST = new Set(SLA_STAGE_PLACEHOLDER.map(item => item.stage_key));
 
 const SLA_STAGE_LABELS = SLA_STAGE_PLACEHOLDER.reduce((acc, item) => {
   acc[item.stage_key] = item.display_name;
@@ -661,9 +657,9 @@ export default function ConfigurationSettings({
 
   const seedSlaEdits = useCallback(items => {
     const next = items.reduce((acc, item) => {
-      const hours = item?.target_hours;
+      const days = item?.target_days;
       acc[item.stage_key] = {
-        target_hours: hours === null || hours === undefined ? "" : String(hours),
+        target_days: days === null || days === undefined ? "" : String(days),
         description: item?.description || "",
       };
       return acc;
@@ -678,16 +674,26 @@ export default function ConfigurationSettings({
       const response = await fetchJSON("/api/config/sla-targets");
       const items = Array.isArray(response?.targets) ? response.targets : [];
       const normalised = items.length
-        ? items.map(item => ({
-            id: item.id || null,
-            stage_key: item.stage_key || item.stage || "",
-            display_name: item.display_name || SLA_STAGE_LABELS[item.stage_key] || item.stage_key,
-            target_hours: item.target_hours ?? item.targetHours ?? "",
-            description: item.description || "",
-            applies_to_role: item.applies_to_role ?? item.appliesToRole ?? null,
-          }))
+        ? items
+            .map(item => {
+              const key = item.stage_key || item.stage || "";
+              if (!SLA_STAGE_ALLOWLIST.has(key)) return null;
+              const hours = item.target_hours ?? item.targetHours ?? null;
+              return {
+                id: item.id || null,
+                stage_key: key,
+                display_name: item.display_name || SLA_STAGE_LABELS[key] || key,
+                target_days:
+                  hours === null || hours === undefined
+                    ? ""
+                    : String(Math.round(Number(hours) / 24)),
+                description: item.description || "",
+                applies_to_role: item.applies_to_role ?? item.appliesToRole ?? null,
+              };
+            })
+            .filter(Boolean)
         : SLA_STAGE_PLACEHOLDER.map(item => ({ ...item }));
-      setSlaTargets(normalised);
+      setSlaTargets(normalised.length ? normalised : SLA_STAGE_PLACEHOLDER.map(item => ({ ...item })));
       seedSlaEdits(normalised);
     } catch (err) {
       const message = err?.message || "Failed to load SLA targets";
@@ -714,22 +720,29 @@ export default function ConfigurationSettings({
     [slaTargets],
   );
 
+  const filteredSlaTargets = useMemo(() => {
+    const filtered = (effectiveSlaTargets || []).filter(item =>
+      item && SLA_STAGE_ALLOWLIST.has(item.stage_key)
+    );
+    return filtered.length ? filtered : SLA_STAGE_PLACEHOLDER;
+  }, [effectiveSlaTargets]);
+
   const isSlaDirty = useMemo(
     () =>
-      effectiveSlaTargets.some(item => {
+      filteredSlaTargets.some(item => {
         const edit = slaEdits[item.stage_key];
         if (!edit) return false;
-        const originalHours =
-          item.target_hours === null || item.target_hours === undefined
+        const originalDays =
+          item.target_days === null || item.target_days === undefined
             ? ""
-            : String(item.target_hours);
+            : String(item.target_days);
         const originalNotes = item.description || "";
         return (
-          edit.target_hours !== originalHours ||
+          edit.target_days !== originalDays ||
           (edit.description || "") !== originalNotes
         );
       }),
-    [effectiveSlaTargets, slaEdits],
+    [filteredSlaTargets, slaEdits],
   );
 
   const handleSlaEdit = useCallback((stageKey, field, value) => {
@@ -737,10 +750,10 @@ export default function ConfigurationSettings({
       ...prev,
       [stageKey]: {
         ...prev[stageKey],
-        target_hours:
-          field === "target_hours"
+        target_days:
+          field === "target_days"
             ? value.replace(/[^0-9]/g, "")
-            : prev[stageKey]?.target_hours ?? "",
+            : prev[stageKey]?.target_days ?? "",
         description:
           field === "description" ? value : prev[stageKey]?.description ?? "",
       },
@@ -748,20 +761,21 @@ export default function ConfigurationSettings({
   }, []);
 
   const handleSlaReset = useCallback(() => {
-    seedSlaEdits(effectiveSlaTargets);
+    seedSlaEdits(filteredSlaTargets);
     setSlaError(null);
-  }, [effectiveSlaTargets, seedSlaEdits]);
+  }, [filteredSlaTargets, seedSlaEdits]);
 
   const handleSlaSave = useCallback(async () => {
     if (!canEditSla) return;
 
-    const payloads = effectiveSlaTargets.map(item => {
-      const edit = slaEdits[item.stage_key] || { target_hours: "", description: "" };
-      const hoursValue = edit.target_hours === "" ? null : Number(edit.target_hours);
+    const payloads = filteredSlaTargets.map(item => {
+      const edit = slaEdits[item.stage_key] || { target_days: "", description: "" };
+      const daysValue = edit.target_days === "" ? null : Number(edit.target_days);
       return {
         id: item.id,
         stage_key: item.stage_key,
-        target_hours: hoursValue,
+        target_hours:
+          daysValue === null || Number.isNaN(daysValue) ? null : Number(daysValue) * 24,
         description: edit.description || "",
         applies_to_role: item.applies_to_role || null,
         display_name: item.display_name,
@@ -771,7 +785,7 @@ export default function ConfigurationSettings({
     for (const target of payloads) {
       if (target.target_hours === null || Number.isNaN(target.target_hours)) {
         setSlaError(
-          `Target hours required for ${SLA_STAGE_LABELS[target.stage_key] || target.stage_key}`,
+          `Target days required for ${SLA_STAGE_LABELS[target.stage_key] || target.stage_key}`,
         );
         return;
       }
@@ -812,7 +826,7 @@ export default function ConfigurationSettings({
     } finally {
       setSavingSla(false);
     }
-  }, [canEditSla, effectiveSlaTargets, fetchSlaTargets, slaEdits]);
+  }, [canEditSla, filteredSlaTargets, fetchSlaTargets, slaEdits]);
 
   const fetchAudit = useCallback(async () => {
     setAuditLoading(true);
@@ -1590,7 +1604,7 @@ export default function ConfigurationSettings({
               headerActions={buildSlaHeaderActions()}
               slaError={slaError}
               slaLoading={slaLoading}
-              effectiveSlaTargets={effectiveSlaTargets}
+              effectiveSlaTargets={filteredSlaTargets}
               canEditSla={canEditSla}
               slaEdits={slaEdits}
               handleSlaEdit={handleSlaEdit}

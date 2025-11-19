@@ -30,6 +30,13 @@ import {
   isStatusTransitionAllowed,
 } from '../utils/rbac';
 
+const SLA_DEFAULT_DAYS = {
+  assignment: 3,
+  assessment: 10,
+  program_decision: 2
+};
+const SLA_STAGE_ALLOWLIST = new Set(['assignment', 'assessment', 'program_decision']);
+
 function formatDateTime(value) {
   if (!value) return '';
   const date = new Date(value);
@@ -47,11 +54,75 @@ function statusColor(status = '') {
   const normalized = (status || '').toLowerCase();
   if (['approved', 'completed'].includes(normalized)) return 'green';
   if (['submitted', 'in review', 'in_review', 'in progress', 'pending', 'assigned', 'pending_approval'].includes(normalized)) return 'blue';
-  if (['docs requested', 'docs_requested', 'action required', 'action required (docs requested)'].includes(normalized)) return 'orange';
+  if (['docs requested', 'docs_requested', 'action required', 'action required (docs requested)'].includes(normalized)) return 'severity-high';
   if (['rejected', 'declined', 'errored'].includes(normalized)) return 'red';
   if (['withdrawn', 'closed', 'inactive', 'archived'].includes(normalized)) return 'grey';
   return 'grey';
 }
+
+const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'withdrawn', 'cancelled', 'closed', 'archived']);
+const DECISION_STATUSES = new Set(['pending_approval']);
+const ASSESSMENT_STATUSES = new Set([
+  'in_review', 'in review',
+  'docs_requested', 'docs requested',
+  'action_required', 'action required', 'action required (docs requested)',
+  'pending info', 'pending information', 'info requested', 'information requested',
+  'on hold', 'on_hold'
+]);
+
+const toDate = value => {
+  const d = value ? new Date(value) : null;
+  return d && !Number.isNaN(d.getTime()) ? d : null;
+};
+
+const getStatusInfo = (row) => {
+  const applicationStatusRaw = typeof row.application_status === 'string' ? row.application_status.trim() : '';
+  const caseStatusRaw = typeof row.case_status === 'string' ? row.case_status.trim() : '';
+  const fallbackStatus = row.case_id ? 'submitted' : 'new';
+  const rawStatus = (applicationStatusRaw || caseStatusRaw || fallbackStatus).toLowerCase();
+  const label = rawStatus
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+  const isUnassignedCase = Boolean(row.case_id) && !row.assigned_user_id && rawStatus === 'submitted';
+  const statusType = (() => {
+    if (['approved', 'completed'].includes(rawStatus)) return 'success';
+    if (['rejected', 'declined'].includes(rawStatus)) return 'error';
+    if (['withdrawn', 'cancelled'].includes(rawStatus)) return 'info';
+    if (['docs_requested', 'action_required'].includes(rawStatus)) return 'warning';
+    return isUnassignedCase || rawStatus === 'new' ? 'pending' : 'info';
+  })();
+  const statusLabel = isUnassignedCase ? `${label} • Unassigned` : label;
+  return { rawStatus, statusLabel, statusType, isUnassignedCase };
+};
+
+const computeSlaMeta = (application, slaTargets, rawStatus, isAssigned) => {
+  const submitted = toDate(application?.submitted_at) || toDate(application?.created_at);
+  if (!submitted) {
+    return { label: 'Unknown', color: 'grey' };
+  }
+  if (COMPLETED_STATUSES.has(rawStatus)) {
+    return { label: 'Complete', color: 'green' };
+  }
+  let targetKey = 'assignment';
+  if (DECISION_STATUSES.has(rawStatus)) {
+    targetKey = 'program_decision';
+  } else if (ASSESSMENT_STATUSES.has(rawStatus) || (rawStatus === 'submitted' && isAssigned)) {
+    targetKey = 'assessment';
+  }
+  const targetDays = Number(slaTargets[targetKey]) || SLA_DEFAULT_DAYS[targetKey] || 0;
+  if (!targetDays || Number.isNaN(targetDays)) {
+    return { label: 'Unknown', color: 'grey' };
+  }
+  const nowMs = Date.now();
+  const due = toDate(application?.sla_due_at) || new Date(submitted.getTime() + targetDays * 86400000);
+  const diffDays = Math.floor((due.getTime() - nowMs) / 86400000);
+  const stageLabel = targetKey === 'program_decision' ? 'Decision' : targetKey === 'assessment' ? 'Assessment' : 'Assignment';
+  if (diffDays < -4) return { label: `${stageLabel} ${Math.abs(diffDays)} days overdue`, color: 'severity-critical' };
+  if (diffDays < 0) return { label: `${stageLabel} ${Math.abs(diffDays)} days overdue`, color: 'severity-high' };
+  if (diffDays === 0) return { label: `${stageLabel} due today`, color: 'severity-medium' };
+  if (diffDays <= 3) return { label: `${stageLabel} due in ${diffDays} days`, color: 'severity-low' };
+  return { label: `${stageLabel} due in ${diffDays} days`, color: 'green' };
+};
 
 const APPLICATION_STATUS_OPTIONS = [
   { label: 'Submitted', value: 'submitted' },
@@ -91,6 +162,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   const [savingStatus, setSavingStatus] = useState(false);
   const [statusFeedback, setStatusFeedback] = useState(null);
   const manualStatusRef = useRef(null);
+  const [slaTargets, setSlaTargets] = useState(SLA_DEFAULT_DAYS);
   const {
     userId: currentUserId,
     displayName: currentUserName,
@@ -258,6 +330,36 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     }
   }, [applicationStatusFromCase, caseData?.status, application?.status, savingStatus, statusValue]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadSlaTargets = async () => {
+      try {
+        const res = await apiFetch('/api/config/sla-targets');
+        if (!res.ok) throw new Error('Failed to load SLA targets');
+        const data = await res.json();
+        const targets = Array.isArray(data?.targets) ? data.targets : [];
+        const next = { ...SLA_DEFAULT_DAYS };
+        targets.forEach(item => {
+          const key = item.stage_key || item.stage;
+          if (!SLA_STAGE_ALLOWLIST.has(key)) return;
+          const hours = item.target_hours ?? item.targetHours;
+          if (hours === null || hours === undefined) return;
+          const days = Number(hours) / 24;
+          if (!Number.isNaN(days) && days > 0) {
+            next[key] = Math.round(days);
+          }
+        });
+        if (!cancelled) setSlaTargets(next);
+      } catch (_) {
+        if (!cancelled) setSlaTargets(SLA_DEFAULT_DAYS);
+      }
+    };
+    loadSlaTargets();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const { answers, payload } = useMemo(() => {
     if (!application) return { answers: {}, payload: {} };
     const payload = application.__payload || {};
@@ -268,7 +370,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     };
   }, [application]);
 
-  const fallbackStatus = statusValue || applicationStatusFromCase || application?.status || caseData?.status || '';
+  const fallbackStatus = statusValue || applicationStatusFromCase || application?.status || '';
   const statusContext = getCaseStatusContext(fallbackStatus);
   const roleAccess = getRoleGroups(userRole);
   const { canonicalStatus, isFinalStatus } = statusContext;
@@ -576,6 +678,22 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
 
   if (application?.created_at) overviewItems.push({ label: 'Received At', value: formatDateTime(application.created_at) });
   if (application?.updated_at) overviewItems.push({ label: 'Last Updated', value: formatDateTime(application.updated_at) });
+  if (application) {
+    const assigned = Boolean(
+      caseData?.assigned_user_id ||
+      caseData?.assigned_to_user_id ||
+      application?.assigned_user_id ||
+      application?.assigned_to_user_id ||
+      application?.assigned_evaluator ||
+      application?.assigned_evaluator_id
+    );
+    const statusInfo = getStatusInfo({ application_status: fallbackStatus, case_status: null, case_id: null, assigned_user_id: assigned });
+    const slaMeta = computeSlaMeta(application, slaTargets, statusInfo.rawStatus, assigned);
+    overviewItems.push({
+      label: 'SLA Status',
+      value: <Badge color={slaMeta.color}>{slaMeta.label}</Badge>
+    });
+  }
 
   const assignedName = caseData?.assigned_user_name || application?.assigned_evaluator?.name;
   const assignedEmail = caseData?.assigned_user_email || application?.assigned_evaluator?.email;

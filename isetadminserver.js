@@ -3944,6 +3944,37 @@ const CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER = CASE_STATUS_EXCLUDED_FOR_ASSES
 const CASE_STATUS_AWAITING_DECISION_LOWER = CASE_STATUS_AWAITING_DECISION.map(v => v.toLowerCase());
 const DUE_SOON_THRESHOLD_HOURS = 7 * 24;
 const DUE_TODAY_THRESHOLD_HOURS = 24;
+const APPLICATION_STATUS_HOLD_VALUES = [
+  'docs_requested',
+  'docs requested',
+  'action_required',
+  'action required',
+  'action required (docs requested)',
+  'pending info',
+  'pending information',
+  'info requested',
+  'information requested',
+  'on hold',
+  'on_hold',
+];
+const APPLICATION_STATUS_HOLD_VALUES_LOWER = APPLICATION_STATUS_HOLD_VALUES.map(v => v.toLowerCase());
+const APPLICATION_COMPLETE_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'withdrawn', 'cancelled', 'closed', 'archived']);
+const APPLICATION_DECISION_STATUSES = new Set(['pending_approval']);
+const APPLICATION_ASSESSMENT_STATUSES = new Set([
+  'in_review',
+  'in review',
+  'docs_requested',
+  'docs requested',
+  'action_required',
+  'action required',
+  'action required (docs requested)',
+  'pending info',
+  'pending information',
+  'info requested',
+  'information requested',
+  'on hold',
+  'on_hold'
+]);
 
 
 const normaliseCaseStatusValue = value => {
@@ -4952,7 +4983,7 @@ function normalizeSlaTarget(row) {
 const WORK_QUEUE_BUCKET_META = {
   'overdue': {
     label: 'Overdue',
-    description: 'Cases past the program turnaround target.'
+    description: 'Applications past program target dates.'
   },
   'decisions-made': {
     label: 'Decisions Made',
@@ -4963,32 +4994,36 @@ const WORK_QUEUE_BUCKET_META = {
     description: 'Applications with completed assessments pending program approval across all regions.'
   },
   'awaiting-my-approval': {
-    label: 'Awaiting my approval',
-    description: 'Applications with completed assessments assigned to the coordinator or their team, awaiting approval.'
+    label: 'Awaiting approval',
+    description: 'Applications awaiting approval.'
   },
   'region-queue': {
     label: 'Assigned to my region',
-    description: 'Cases owned by the coordinator or assessors in their region.'
+    description: 'Applications owned by me or assessors in my region.'
   },
   'needs-reassignment': {
     label: 'Assigned to me',
-    description: 'Cases currently assigned to the coordinator.'
+    description: 'Applications currently assigned to me.'
   },
   'assigned-to-me': {
     label: 'Assigned to me',
-    description: 'Cases currently assigned to the assessor.'
+    description: 'Applications currently assigned to the assessor.'
+  },
+  'due-soon': {
+    label: 'Due soon',
+    description: 'Applications approaching their SLA.'
   },
   'awaiting-info': {
-    label: 'Awaiting applicant info',
-    description: 'Regional cases waiting on applicant action.'
+    label: 'Awaiting info',
+    description: 'Applications awaiting applicant action.'
   },
   'awaiting-applicant': {
-    label: 'Awaiting applicant response',
-    description: 'Cases waiting for applicant action.'
+    label: 'Awaiting applicant',
+    description: 'Applications waiting for applicant action.'
   },
   'due-this-week': {
     label: 'Due this week',
-    description: 'Cases in the region approaching their SLA deadline within 7 days.'
+    description: 'Applications approaching SLA within 7 days.'
   },
   'due-today': {
     label: 'Due today',
@@ -5488,28 +5523,29 @@ async function countRegionalDueThisWeek(pool, staffIds) {
   const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER;
   const terminalValues = CASE_STATUS_TERMINAL_VALUES_LOWER;
   const staffPlaceholders = ids.map(() => '?').join(',');
-  const elapsedExpr = 'TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW())';
+  const elapsedExpr = 'TIMESTAMPDIFF(HOUR, COALESCE(a.updated_at, a.created_at), NOW())';
 
   let total = 0;
 
   if (assessmentHours > 0) {
     const params = [...ids];
-    let statusExcludingPendingCondition = 'c.status IS NULL';
+    let statusExcludingPendingCondition = 'a.status IS NULL';
     if (stageValues.length) {
       const placeholders = stageValues.map(() => '?').join(',');
-      statusExcludingPendingCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+      statusExcludingPendingCondition = `(a.status IS NULL OR LOWER(a.status) NOT IN (${placeholders}))`;
       params.push(...stageValues);
     }
-    let statusCondition = 'c.status IS NULL';
+    let statusCondition = 'a.status IS NULL';
     if (excludedValues.length) {
       const placeholders = excludedValues.map(() => '?').join(',');
-      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+      statusCondition = `(a.status IS NULL OR LOWER(a.status) NOT IN (${placeholders}))`;
       params.push(...excludedValues);
     }
     const lowerBound = Math.max(assessmentHours - DUE_SOON_THRESHOLD_HOURS, 0);
     const upperBound = assessmentHours;
     const sql = `SELECT COUNT(*) AS total
        FROM iset_case c
+       JOIN iset_application a ON a.id = c.application_id
       WHERE c.assigned_to_user_id IN (${staffPlaceholders})
         AND ${statusExcludingPendingCondition}
         AND ${statusCondition}
@@ -5532,16 +5568,17 @@ async function countRegionalDueThisWeek(pool, staffIds) {
     let statusCondition = 'c.status IS NULL';
     if (terminalValues.length) {
       const placeholders = terminalValues.map(() => '?').join(',');
-      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
+      statusCondition = `(a.status IS NULL OR LOWER(a.status) NOT IN (${placeholders}))`;
       params.push(...terminalValues);
     }
     const lowerBound = Math.max(decisionHours - DUE_SOON_THRESHOLD_HOURS, 0);
     const upperBound = decisionHours;
     const sql = `SELECT COUNT(*) AS total
            FROM iset_case c
+           JOIN iset_application a ON a.id = c.application_id
            WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-            AND c.status IS NOT NULL
-            AND LOWER(c.status) IN (${stagePlaceholders})
+            AND a.status IS NOT NULL
+            AND LOWER(a.status) IN (${stagePlaceholders})
             AND ${statusCondition}
             AND ${elapsedExpr} >= ?
             AND ${elapsedExpr} < ?`;
@@ -5568,81 +5605,48 @@ async function countRegionalOverdue(pool, staffIds) {
     if (!row || row.applies_to_role) continue;
     stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
   }
-  const getTarget = stageKey => {
+  const getTargetHours = stageKey => {
     if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
     const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
-    return fallback ? fallback.target_hours : 0;
+    return fallback ? Number(fallback.target_hours) || 0 : 0;
   };
 
-  const assessmentHours = getTarget('assessment');
-  const decisionHours = getTarget('program_decision');
-  const stageValues = CASE_STATUS_AWAITING_DECISION_LOWER;
-  const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER;
-  const terminalValues = CASE_STATUS_TERMINAL_VALUES_LOWER;
   const staffPlaceholders = ids.map(() => '?').join(',');
-  const elapsedExpr = 'TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW())';
-
-  let total = 0;
-
-  if (assessmentHours > 0) {
-    const params = [...ids];
-    let statusExcludingPendingCondition = 'c.status IS NULL';
-    if (stageValues.length) {
-      const placeholders = stageValues.map(() => '?').join(',');
-      statusExcludingPendingCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-      params.push(...stageValues);
-    }
-    let statusCondition = 'c.status IS NULL';
-    if (excludedValues.length) {
-      const placeholders = excludedValues.map(() => '?').join(',');
-      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-      params.push(...excludedValues);
-    }
-    params.push(assessmentHours);
-    const sql = `SELECT COUNT(*) AS total
+  const sql = `SELECT a.status AS application_status, a.updated_at, a.created_at
        FROM iset_case c
-      WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-        AND ${statusExcludingPendingCondition}
-        AND ${statusCondition}
-        AND ${elapsedExpr} > ?`;
-    try {
-      const [[row]] = await pool.query(sql, params);
-      total += Number(row?.total ?? 0);
-    } catch (err) {
-      if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
-        throw err;
+       JOIN iset_application a ON a.id = c.application_id
+      WHERE c.assigned_to_user_id IN (${staffPlaceholders})`;
+
+  try {
+    const [rows] = await pool.query(sql, ids);
+    const nowMs = Date.now();
+    let total = 0;
+    for (const row of rows) {
+      const status = (row?.application_status || '').toLowerCase();
+      if (APPLICATION_COMPLETE_STATUSES.has(status)) continue;
+      let targetKey = 'assignment';
+      if (APPLICATION_DECISION_STATUSES.has(status)) {
+        targetKey = 'program_decision';
+      } else if (APPLICATION_ASSESSMENT_STATUSES.has(status)) {
+        targetKey = 'assessment';
+      }
+      const targetHours = getTargetHours(targetKey);
+      if (!targetHours || Number.isNaN(targetHours)) continue;
+      const start = row?.updated_at || row?.created_at;
+      const startDate = start ? new Date(start) : null;
+      if (!startDate || Number.isNaN(startDate.getTime())) continue;
+      const elapsedHours = (nowMs - startDate.getTime()) / 3600000;
+      if (elapsedHours > targetHours) {
+        total += 1;
       }
     }
-  }
-
-  if (decisionHours > 0 && stageValues.length) {
-    const stagePlaceholders = stageValues.map(() => '?').join(',');
-    const params = [...ids, ...stageValues];
-    let statusCondition = 'c.status IS NULL';
-    if (terminalValues.length) {
-      const placeholders = terminalValues.map(() => '?').join(',');
-      statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-      params.push(...terminalValues);
+    return total;
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
     }
-    params.push(decisionHours);
-    const sql = `SELECT COUNT(*) AS total
-           FROM iset_case c
-           WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-            AND c.status IS NOT NULL
-            AND LOWER(c.status) IN (${stagePlaceholders})
-            AND ${statusCondition}
-            AND ${elapsedExpr} > ?`;
-    try {
-      const [[row]] = await pool.query(sql, params);
-      total += Number(row?.total ?? 0);
-    } catch (err) {
-      if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
-        throw err;
-      }
-    }
+    throw err;
   }
-
-  return total;
 }
 
 async function countRegionalPendingApproval(pool, staffIds) {
@@ -5683,14 +5687,15 @@ async function countAssessorAssignedToMe(pool, staffProfileId) {
 async function countAssessorAwaitingApplicantResponse(pool, staffProfileId) {
   const assessorId = Number(staffProfileId);
   if (!Number.isInteger(assessorId) || assessorId <= 0) return 0;
-  if (!CASE_STATUS_HOLD_VALUES_LOWER.length) return 0;
-  const statusPlaceholders = CASE_STATUS_HOLD_VALUES_LOWER.map(() => '?').join(',');
+  if (!APPLICATION_STATUS_HOLD_VALUES_LOWER.length) return 0;
+  const statusPlaceholders = APPLICATION_STATUS_HOLD_VALUES_LOWER.map(() => '?').join(',');
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
+         JOIN iset_application a ON a.id = c.application_id
         WHERE c.assigned_to_user_id = ?
-          AND c.status IS NOT NULL
-          AND LOWER(c.status) IN (${statusPlaceholders})`;
-  const params = [assessorId, ...CASE_STATUS_HOLD_VALUES_LOWER];
+          AND a.status IS NOT NULL
+          AND LOWER(a.status) IN (${statusPlaceholders})`;
+  const params = [assessorId, ...APPLICATION_STATUS_HOLD_VALUES_LOWER];
   const [[row]] = await pool.query(sql, params);
   return Number(row?.total ?? 0);
 }
@@ -5704,93 +5709,156 @@ async function countAssessorDueToday(pool, staffProfileId) {
     if (!row || row.applies_to_role) continue;
     stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
   }
-  const getTarget = stageKey => {
+  const getTargetHours = stageKey => {
     if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
     const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
-    return fallback ? fallback.target_hours : 0;
+    return fallback ? Number(fallback.target_hours) || 0 : 0;
   };
 
-  const assessmentHours = getTarget('assessment');
-  const decisionHours = getTarget('program_decision');
-  const awaitingStatuses = CASE_STATUS_AWAITING_DECISION_LOWER;
-  const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER;
-  const terminalValues = CASE_STATUS_TERMINAL_VALUES_LOWER;
-  const disallowedForAssessment = Array.from(new Set([...excludedValues, ...awaitingStatuses]));
   const staffPlaceholders = ids.map(() => '?').join(',');
-  const elapsedExpr = 'TIMESTAMPDIFF(HOUR, COALESCE(c.last_activity_at, c.updated_at, c.created_at), NOW())';
+  const sql = `SELECT a.status AS application_status, a.updated_at, a.created_at
+         FROM iset_case c
+         JOIN iset_application a ON a.id = c.application_id
+        WHERE c.assigned_to_user_id IN (${staffPlaceholders})`;
 
-  let total = 0;
-
-  if (assessmentHours > 0) {
-    const lowerBound = Math.max(assessmentHours - DUE_TODAY_THRESHOLD_HOURS, 0);
-    const upperBound = assessmentHours;
-    if (upperBound > lowerBound) {
-      const params = [...ids];
-      let statusCondition = 'c.status IS NULL';
-      if (disallowedForAssessment.length) {
-        const placeholders = disallowedForAssessment.map(() => '?').join(',');
-        statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-        params.push(...disallowedForAssessment);
+  try {
+    const [rows] = await pool.query(sql, ids);
+    const nowMs = Date.now();
+    const todayThresholdHours = DUE_TODAY_THRESHOLD_HOURS;
+    let total = 0;
+    for (const row of rows) {
+      const status = (row?.application_status || '').toLowerCase();
+      if (APPLICATION_COMPLETE_STATUSES.has(status)) continue;
+      let targetKey = 'assignment';
+      if (APPLICATION_DECISION_STATUSES.has(status)) {
+        targetKey = 'program_decision';
+      } else if (APPLICATION_ASSESSMENT_STATUSES.has(status)) {
+        targetKey = 'assessment';
       }
-      params.push(lowerBound, upperBound);
-      const sql = `SELECT COUNT(*) AS total
-           FROM iset_case c
-          WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-            AND ${statusCondition}
-            AND ${elapsedExpr} >= ?
-            AND ${elapsedExpr} < ?`;
-      try {
-        const [[row]] = await pool.query(sql, params);
-        total += Number(row?.total ?? 0);
-      } catch (err) {
-        if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
-          throw err;
-        }
+      const targetHours = getTargetHours(targetKey);
+      if (!targetHours || Number.isNaN(targetHours)) continue;
+      const start = row?.updated_at || row?.created_at;
+      const startDate = start ? new Date(start) : null;
+      if (!startDate || Number.isNaN(startDate.getTime())) continue;
+      const elapsedHours = (nowMs - startDate.getTime()) / 3600000;
+      if (elapsedHours >= Math.max(targetHours - todayThresholdHours, 0) && elapsedHours < targetHours) {
+        total += 1;
       }
     }
-  }
-
-  if (decisionHours > 0 && awaitingStatuses.length) {
-    const lowerBound = Math.max(decisionHours - DUE_TODAY_THRESHOLD_HOURS, 0);
-    const upperBound = decisionHours;
-    if (upperBound > lowerBound) {
-      const stagePlaceholders = awaitingStatuses.map(() => '?').join(',');
-      const params = [...ids, ...awaitingStatuses];
-      let statusCondition = 'c.status IS NULL';
-      if (terminalValues.length) {
-        const placeholders = terminalValues.map(() => '?').join(',');
-        statusCondition = `(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`;
-        params.push(...terminalValues);
-      }
-      params.push(lowerBound, upperBound);
-      const sql = `SELECT COUNT(*) AS total
-       FROM iset_case c
-      WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-        AND c.status IS NOT NULL
-        AND LOWER(c.status) IN (${stagePlaceholders})
-        AND ${statusCondition}
-        AND ${elapsedExpr} >= ?
-        AND ${elapsedExpr} < ?`;
-      try {
-        const [[row]] = await pool.query(sql, params);
-        total += Number(row?.total ?? 0);
-      } catch (err) {
-        if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
-          throw err;
-        }
-      }
+    return total;
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
     }
+    throw err;
   }
-
-  return total;
 }
 
 
 
+async function countAssessorDueSoon(pool, staffProfileId) {
+  const ids = normalizeStaffIdList([staffProfileId]);
+  if (!ids.length) return 0;
+  const targets = await fetchActiveSlaTargets(pool);
+  const stageTargets = new Map();
+  for (const row of targets) {
+    if (!row || row.applies_to_role) continue;
+    stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
+  }
+  const getTargetHours = stageKey => {
+    if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
+    const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
+    return fallback ? Number(fallback.target_hours) || 0 : 0;
+  };
+  const staffPlaceholders = ids.map(() => '?').join(',');
+  const sql = `SELECT a.status AS application_status, a.updated_at, a.created_at
+         FROM iset_case c
+         JOIN iset_application a ON a.id = c.application_id
+        WHERE c.assigned_to_user_id IN (${staffPlaceholders})`;
+  try {
+    const [rows] = await pool.query(sql, ids);
+    const nowMs = Date.now();
+    let total = 0;
+    for (const row of rows) {
+      const status = (row?.application_status || '').toLowerCase();
+      if (APPLICATION_COMPLETE_STATUSES.has(status)) continue;
+      let targetKey = 'assignment';
+      if (APPLICATION_DECISION_STATUSES.has(status)) {
+        targetKey = 'program_decision';
+      } else if (APPLICATION_ASSESSMENT_STATUSES.has(status)) {
+        targetKey = 'assessment';
+      }
+      const targetHours = getTargetHours(targetKey);
+      if (!targetHours || Number.isNaN(targetHours)) continue;
+      const start = row?.updated_at || row?.created_at;
+      const startDate = start ? new Date(start) : null;
+      if (!startDate || Number.isNaN(startDate.getTime())) continue;
+      const elapsedHours = (nowMs - startDate.getTime()) / 3600000;
+      const lowerBound = Math.max(targetHours - DUE_SOON_THRESHOLD_HOURS, 0);
+      if (elapsedHours >= lowerBound && elapsedHours < targetHours) {
+        total += 1;
+      }
+    }
+    return total;
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
 async function countAssessorOverdue(pool, staffProfileId) {
   const ids = normalizeStaffIdList([staffProfileId]);
   if (!ids.length) return 0;
-  return countRegionalOverdue(pool, ids);
+  const targets = await fetchActiveSlaTargets(pool);
+  const stageTargets = new Map();
+  for (const row of targets) {
+    if (!row || row.applies_to_role) continue;
+    stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
+  }
+  const getTargetHours = stageKey => {
+    if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
+    const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
+    return fallback ? Number(fallback.target_hours) || 0 : 0;
+  };
+
+  const staffPlaceholders = ids.map(() => '?').join(',');
+  const sql = `SELECT a.status AS application_status, a.updated_at, a.created_at
+         FROM iset_case c
+         JOIN iset_application a ON a.id = c.application_id
+        WHERE c.assigned_to_user_id IN (${staffPlaceholders})`;
+
+  try {
+    const [rows] = await pool.query(sql, ids);
+    const nowMs = Date.now();
+    let total = 0;
+    for (const row of rows) {
+      const status = (row?.application_status || '').toLowerCase();
+      if (APPLICATION_COMPLETE_STATUSES.has(status)) continue;
+      let targetKey = 'assignment';
+      if (APPLICATION_DECISION_STATUSES.has(status)) {
+        targetKey = 'program_decision';
+      } else if (APPLICATION_ASSESSMENT_STATUSES.has(status)) {
+        targetKey = 'assessment';
+      }
+      const targetHours = getTargetHours(targetKey);
+      if (!targetHours || Number.isNaN(targetHours)) continue;
+      const start = row?.updated_at || row?.created_at;
+      const startDate = start ? new Date(start) : null;
+      if (!startDate || Number.isNaN(startDate.getTime())) continue;
+      const elapsedHours = (nowMs - startDate.getTime()) / 3600000;
+      if (elapsedHours > targetHours) {
+        total += 1;
+      }
+    }
+    return total;
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
+    }
+    throw err;
+  }
 }
 
 
@@ -8649,11 +8717,13 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
     if (role === 'Application Assessor') {
       const metaAssigned = WORK_QUEUE_BUCKET_META['assigned-to-me'];
       const metaDueToday = WORK_QUEUE_BUCKET_META['due-today'];
+      const metaDueSoon = WORK_QUEUE_BUCKET_META['due-soon'];
       const metaAwaitingApplicant = WORK_QUEUE_BUCKET_META['awaiting-applicant'];
       const metaOverdue = WORK_QUEUE_BUCKET_META['overdue'];
 
       let assignedCount = 0;
       let dueTodayCount = 0;
+      let dueSoonCount = 0;
       let awaitingApplicantCount = 0;
       let overdueCount = 0;
 
@@ -8663,11 +8733,13 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
         [
           assignedCount,
           dueTodayCount,
+          dueSoonCount,
           awaitingApplicantCount,
           overdueCount
         ] = await Promise.all([
           countAssessorAssignedToMe(pool, staffId),
           countAssessorDueToday(pool, staffId),
+          countAssessorDueSoon(pool, staffId),
           countAssessorAwaitingApplicantResponse(pool, staffId),
           countAssessorOverdue(pool, staffId)
         ]);
@@ -8690,6 +8762,12 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
             label: metaDueToday?.label || 'Due today',
             description: metaDueToday?.description || null,
             count: dueTodayCount
+          },
+          {
+            id: 'due-soon',
+            label: metaDueSoon?.label || 'Due soon',
+            description: metaDueSoon?.description || null,
+            count: dueSoonCount
           },
           {
             id: 'awaiting-applicant',
@@ -20318,7 +20396,7 @@ app.get('/api/applications', async (req, res) => {
     // Base case + application join using new lean model.
     // Assignment user now from staff_profiles (nullable); tracking_id fallback derived from payload_json->submission_snapshot.reference_number if tracking_id column absent.
     // We'll attempt to select a.tracking_id; if schema lacks it, COALESCE will choose JSON extracted value.
-    let baseSql = `SELECT c.id AS case_id, c.application_id, c.status AS case_status, a.status AS application_status, c.assigned_to_user_id,
+    let baseSql = `SELECT c.id AS case_id, c.application_id, a.status AS application_status, c.assigned_to_user_id,
       c.created_at AS opened_at, c.updated_at AS last_activity_at,
       sp.email AS assigned_user_email, sp.primary_role AS assigned_user_role,
       sp.id AS staff_profile_id,
@@ -20348,7 +20426,7 @@ app.get('/api/applications', async (req, res) => {
     const params = [];
     if (status) {
       const list = String(status).split(',').map(s => s.trim()).filter(Boolean);
-      if (list.length) { where.push(`c.status IN (${list.map(()=>'?').join(',')})`); params.push(...list); }
+      if (list.length) { where.push(`a.status IN (${list.map(()=>'?').join(',')})`); params.push(...list); }
     }
     if (search) {
       const term = `%${search}%`;
@@ -20384,7 +20462,7 @@ app.get('/api/applications', async (req, res) => {
     // Add unassigned submissions (applications without case) for elevated roles.
     if (role === 'Program Administrator' || role === 'System Administrator') {
       finalSql = `(${baseSql})\nUNION ALL\n(
-        SELECT NULL AS case_id, a.id AS application_id, 'New' AS case_status, a.status AS application_status, NULL AS assigned_to_user_id, NULL AS opened_at, NULL AS last_activity_at,
+        SELECT NULL AS case_id, a.id AS application_id, a.status AS application_status, NULL AS assigned_to_user_id, NULL AS opened_at, NULL AS last_activity_at,
         NULL AS assigned_user_email, NULL AS assigned_user_role, NULL AS staff_profile_id,
         NULL AS lock_owner_id, NULL AS lock_owner_name, NULL AS lock_owner_email, NULL AS lock_expires_at,
   JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
@@ -20432,9 +20510,9 @@ app.get('/api/applications', async (req, res) => {
     const rowsOut = rows.map(r => {
       const submittedMs = r.submitted_at ? new Date(r.submitted_at).getTime() : now;
       const ageDays = (now - submittedMs) / 86400000;
-      const caseStatus = r.case_status || null;
       const appStatus = r.application_status || null;
-      const sla_risk = (caseStatus !== 'Closed' && caseStatus !== 'Rejected' && ageDays > 14) ? 'overdue' : 'ok';
+      const statusLower = appStatus ? String(appStatus).toLowerCase() : null;
+      const sla_risk = (statusLower !== 'approved' && statusLower !== 'rejected' && ageDays > 14) ? 'overdue' : 'ok';
       const lockOwnerId = r.lock_owner_id || null;
       const lockOwnerName = r.lock_owner_name || null;
       const lockOwnerEmail = r.lock_owner_email || null;
@@ -20459,8 +20537,7 @@ app.get('/api/applications', async (req, res) => {
         case_id: r.case_id,
         application_id: r.application_id,
         tracking_id: r.tracking_id,
-        status: caseStatus,
-        case_status: caseStatus,
+        status: appStatus,
         application_status: appStatus,
         assigned_user_id: r.assigned_to_user_id,
         assigned_user_email: r.assigned_user_email || null,

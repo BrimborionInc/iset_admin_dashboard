@@ -27,6 +27,12 @@ import useCurrentUser from '../hooks/useCurrentUser';
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_VISIBLE_COLUMNS = ['watch','applicant_name','tracking_id','status','lock_state','sla_risk','assigned_user_email','submitted_at','actions'];
 const COLUMN_WIDTHS_STORAGE_KEY = 'applications-widget-column-widths';
+const SLA_STAGE_ALLOWLIST = new Set(['assignment', 'assessment', 'program_decision']);
+const SLA_DEFAULT_DAYS = {
+  assignment: 3,
+  assessment: 10,
+  program_decision: 2
+};
 
 const redactApplicantDisplay = (value) => {
   if (!value) {
@@ -101,14 +107,86 @@ const persistColumnWidths = (widths) => {
   }
 };
 
-const computeSlaMeta = (row) => {
-  // Placeholder: assume SLA due 14 days after submitted_at until backend provides sla_due_at
-  const submitted = new Date(row.submitted_at);
-  const now = Date.now();
-  const ageDays = Math.floor((now - submitted.getTime()) / 86400000);
-  const due = row.sla_due_at ? new Date(row.sla_due_at) : new Date(submitted.getTime() + 14 * 86400000);
-  const overdue = Date.now() > due.getTime();
-  return { ageDays, due, overdue };
+const toDate = value => {
+  const d = value ? new Date(value) : null;
+  return d && !Number.isNaN(d.getTime()) ? d : null;
+};
+
+const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'withdrawn', 'cancelled', 'closed', 'archived']);
+const DECISION_STATUSES = new Set(['pending_approval']);
+const ASSESSMENT_STATUSES = new Set([
+  'in_review', 'in review',
+  'docs_requested', 'docs requested',
+  'action_required', 'action required', 'action required (docs requested)',
+  'pending info', 'pending information', 'info requested', 'information requested',
+  'on hold', 'on_hold'
+]);
+
+const getStatusInfo = (row) => {
+  const applicationStatusRaw = typeof row.application_status === 'string' ? row.application_status.trim() : '';
+  const rawStatus = (applicationStatusRaw || 'submitted').toLowerCase();
+  const label = rawStatus
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+  const isUnassignedCase = rawStatus === 'submitted' && !row.assigned_user_id;
+  const statusType = (() => {
+    if (['approved', 'completed'].includes(rawStatus)) return 'success';
+    if (['rejected', 'declined'].includes(rawStatus)) return 'error';
+    if (['withdrawn', 'cancelled'].includes(rawStatus)) return 'info';
+    if (['docs_requested', 'action_required'].includes(rawStatus)) return 'warning';
+    return isUnassignedCase || rawStatus === 'new' ? 'pending' : 'info';
+  })();
+  const statusLabel = isUnassignedCase ? `${label} • Unassigned` : label;
+  return { rawStatus, statusLabel, statusType, isUnassignedCase };
+};
+
+const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
+  const submitted = toDate(row.submitted_at) || toDate(row.created_at);
+  if (!submitted) {
+    return { ageDays: null, due: null, status: 'unknown', deltaDays: null, label: 'Unknown' };
+  }
+  const due = row.sla_due_at ? toDate(row.sla_due_at) : null;
+  const statusKey = (rawStatus || '').toLowerCase();
+  if (COMPLETED_STATUSES.has(statusKey)) {
+    return {
+      ageDays: Math.floor((Date.now() - submitted.getTime()) / 86400000),
+      due: due || submitted,
+      status: 'ok',
+      deltaDays: null,
+      label: 'Complete'
+    };
+  }
+  let targetKey = 'assignment';
+  if (DECISION_STATUSES.has(statusKey)) {
+    targetKey = 'program_decision';
+  } else if (ASSESSMENT_STATUSES.has(statusKey) || (statusKey === 'submitted' && isAssigned)) {
+    targetKey = 'assessment';
+  } else {
+    targetKey = 'assignment';
+  }
+  const targetDays = Number(slaTargets[targetKey]) || SLA_DEFAULT_DAYS[targetKey] || 0;
+  if (!targetDays || Number.isNaN(targetDays)) {
+    return { ageDays: Math.floor((Date.now() - submitted.getTime()) / 86400000), due: null, status: 'unknown', deltaDays: null, label: 'Unknown' };
+  }
+
+  const nowMs = Date.now();
+  const ageDays = Math.floor((nowMs - submitted.getTime()) / 86400000);
+  const effectiveDue = due || new Date(submitted.getTime() + targetDays * 86400000);
+  const diffDays = Math.floor((effectiveDue.getTime() - nowMs) / 86400000);
+  let status = 'ok';
+  let label = diffDays > 0 ? `Due in ${diffDays} days` : diffDays === 0 ? 'Due today' : `${Math.abs(diffDays)} days overdue`;
+  if (diffDays < -4) {
+    status = 'critical-overdue';
+  } else if (diffDays < 0) {
+    status = 'high-overdue';
+  } else if (diffDays === 0) {
+    status = 'due-today';
+  } else if (diffDays <= 3) {
+    status = 'due-soon';
+  } else {
+    status = 'ok';
+  }
+  return { ageDays, due: effectiveDue, status, deltaDays: diffDays, label };
 };
 
 const ApplicationsWidget = ({ actions, refreshKey }) => {
@@ -134,6 +212,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const [watchPending, setWatchPending] = useState(new Set());
   const [showWatchedOnly, setShowWatchedOnly] = useState(false);
   const [alerts, setAlerts] = useState([]);
+  const [slaTargets, setSlaTargets] = useState(SLA_DEFAULT_DAYS);
   const {
     userId: currentUserIdRaw,
     displayName: currentUserName,
@@ -196,23 +275,8 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         id: 'status',
         header: 'Status',
         cell: i => {
-          const applicationStatusRaw = typeof i.application_status === 'string' ? i.application_status.trim() : '';
-          const caseStatusRaw = typeof i.case_status === 'string' ? i.case_status.trim() : '';
-          const fallbackStatus = i.case_id ? 'submitted' : 'new';
-          const rawStatus = (applicationStatusRaw || caseStatusRaw || fallbackStatus).toLowerCase();
-          const label = rawStatus
-            .replace(/[_-]+/g, ' ')
-            .replace(/\b\w/g, c => c.toUpperCase());
-          const isUnassignedCase = Boolean(i.case_id) && !i.assigned_user_id && rawStatus === 'submitted';
-          const statusType = (() => {
-            if (['approved', 'completed'].includes(rawStatus)) return 'success';
-            if (['rejected', 'declined'].includes(rawStatus)) return 'error';
-            if (['withdrawn', 'cancelled'].includes(rawStatus)) return 'info';
-            if (['docs_requested', 'action_required'].includes(rawStatus)) return 'warning';
-            return isUnassignedCase || rawStatus === 'new' ? 'pending' : 'info';
-          })();
-          const statusLabel = isUnassignedCase ? `${label} • Unassigned` : label;
-          return <StatusIndicator type={statusType}>{statusLabel}</StatusIndicator>;
+          const statusInfo = getStatusInfo(i);
+          return <StatusIndicator type={statusInfo.statusType}>{statusInfo.statusLabel}</StatusIndicator>;
         },
         minWidth: 140
       },
@@ -226,10 +290,31 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         id: 'sla_risk',
         header: 'Overdue?',
         cell: i => {
-          const meta = computeSlaMeta(i);
-          const badge = meta.overdue ? <Badge color="red">Overdue</Badge> : <Badge color="green">OK</Badge>;
+          const statusInfo = getStatusInfo(i);
+          const meta = computeSlaMeta(i, slaTargets, statusInfo.rawStatus, Boolean(i.assigned_user_id));
+          const badge = (() => {
+            switch (meta.status) {
+              case 'critical-overdue':
+                return <Badge color="severity-critical">{meta.label}</Badge>;
+              case 'high-overdue':
+                return <Badge color="severity-high">{meta.label}</Badge>;
+              case 'due-today':
+                return <Badge color="severity-medium">{meta.label}</Badge>;
+              case 'due-soon':
+                return <Badge color="severity-low">{meta.label}</Badge>;
+              case 'ok':
+                return <Badge color="green">{meta.label}</Badge>;
+              default:
+                return <Badge color="grey">Unknown</Badge>;
+            }
+          })();
           return (
-            <span title={`Age: ${meta.ageDays}d | Due: ${meta.due.toLocaleDateString()}${meta.overdue ? ' (Overdue)' : ''}`} aria-label={`SLA ${meta.overdue ? 'Overdue' : 'OK'}; Age ${meta.ageDays} days; Due ${meta.due.toLocaleDateString()}`}>{badge}</span>
+            <span
+              title={`Age: ${meta.ageDays ?? 'n/a'}d | Due: ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`}
+              aria-label={`SLA ${meta.status || 'unknown'}; Age ${meta.ageDays ?? 'n/a'} days; Due ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`}
+            >
+              {badge}
+            </span>
           );
         },
         minWidth: 110
@@ -237,7 +322,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       { id: 'assigned_user_email', header: 'Owner', cell: i => i.case_id ? (i.assigned_user_email || '-') : 'Unassigned', minWidth: 200 },
       { id: 'submitted_at', header: 'Received', cell: i => new Date(i.submitted_at).toLocaleDateString(), minWidth: 140 },
     ];
-  }, [currentUserId, currentUserName]);
+  }, [currentUserId, currentUserName, slaTargets]);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -254,6 +339,40 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     const c = load();
     return c;
   }, [load, refreshKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSlaTargets = async () => {
+      try {
+        const res = await apiFetch('/api/config/sla-targets');
+        if (!res.ok) throw new Error('Failed to load SLA targets');
+        const data = await res.json();
+        const targets = Array.isArray(data?.targets) ? data.targets : [];
+        const next = { ...SLA_DEFAULT_DAYS };
+        targets.forEach(item => {
+          const key = item.stage_key || item.stage;
+          if (!SLA_STAGE_ALLOWLIST.has(key)) return;
+          const hours = item.target_hours ?? item.targetHours;
+          if (hours === null || hours === undefined) return;
+          const days = Number(hours) / 24;
+          if (!Number.isNaN(days) && days > 0) {
+            next[key] = Math.round(days);
+          }
+        });
+        if (!cancelled) {
+          setSlaTargets(next);
+        }
+      } catch (_) {
+        if (!cancelled) {
+          setSlaTargets(SLA_DEFAULT_DAYS);
+        }
+      }
+    };
+    loadSlaTargets();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     persistColumnWidths(columnWidths);

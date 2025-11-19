@@ -24,18 +24,19 @@ const getMockMyWork = role => {
       ];
     case 'Regional Coordinator':
       return [
-        { id: 'region-queue', label: 'Assigned to my region', count: 21, description: 'Cases owned by you or assessors in your region.' },
-        { id: 'needs-reassignment', label: 'Assigned to me', count: 3, description: 'Cases waiting for you to re-route or pick up.' },
-        { id: 'awaiting-my-approval', label: 'Awaiting my approval', count: 0, description: 'Applications with completed assessments assigned to me or my team, awaiting my approval.' },
-        { id: 'awaiting-info', label: 'Awaiting applicant info', count: 5, description: 'Follow-ups sent to applicants from your region.' },
-        { id: 'due-this-week', label: 'Due this week', count: 12, description: 'Cases with upcoming SLA deadlines.' },
-        { id: 'overdue', label: 'Overdue', count: 1, description: 'Items breaching SLA within your region.' }
+        { id: 'region-queue', label: 'Assigned to my region', count: 21, description: 'Applications owned by me or assessors in my region.' },
+        { id: 'needs-reassignment', label: 'Assigned to me', count: 3, description: 'Applications waiting for me to re-route or pick up.' },
+        { id: 'awaiting-my-approval', label: 'Awaiting approval', count: 0, description: 'Applications awaiting approval.' },
+        { id: 'awaiting-info', label: 'Awaiting info', count: 5, description: 'Applications awaiting applicant action.' },
+        { id: 'due-this-week', label: 'Due this week', count: 12, description: 'Applications approaching SLA within 7 days.' },
+        { id: 'overdue', label: 'Overdue', count: 1, description: 'Applications breaching SLA within my region.' }
       ];
     case 'Application Assessor':
       return [
         { id: 'assigned-to-me', label: 'Assigned to me', count: 7, description: 'Your active assessment queue.' },
         { id: 'due-today', label: 'Due today', count: 2, description: 'Assessments approaching their SLA window.' },
-        { id: 'awaiting-applicant', label: 'Awaiting applicant response', count: 1, description: 'Cases paused while the applicant responds.' },
+        { id: 'due-soon', label: 'Due soon', count: 2, description: 'Assessments due within the next few days.' },
+        { id: 'awaiting-applicant', label: 'Awaiting applicant', count: 1, description: 'Cases paused while the applicant responds.' },
         { id: 'overdue', label: 'Overdue', count: 0, description: 'Cases past SLA that need immediate attention.' }
       ];
     case 'System Administrator':
@@ -158,7 +159,28 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
   }, [role, refreshKey]);
 
   const getBucketLink = (currentRole, bucketId) => {
-    if (currentRole === 'Program Administrator' && (bucketId === 'new-submissions' || bucketId === 'unassigned' || bucketId === 'in-assessment' || bucketId === 'on-hold' || bucketId === 'awaiting-decision' || bucketId === 'decisions-made')) {
+    if (
+      currentRole === 'Program Administrator' &&
+      (bucketId === 'new-submissions' ||
+        bucketId === 'unassigned' ||
+        bucketId === 'in-assessment' ||
+        bucketId === 'on-hold' ||
+        bucketId === 'awaiting-decision' ||
+        bucketId === 'decisions-made')
+    ) {
+      return 'http://localhost:3001/case-assignment-dashboard';
+    }
+    if (currentRole === 'Regional Coordinator') {
+      return 'http://localhost:3001/case-assignment-dashboard';
+    }
+    if (
+      currentRole === 'Application Assessor' &&
+      (bucketId === 'assigned-to-me' ||
+        bucketId === 'due-today' ||
+        bucketId === 'due-soon' ||
+        bucketId === 'awaiting-applicant' ||
+        bucketId === 'overdue')
+    ) {
       return 'http://localhost:3001/case-assignment-dashboard';
     }
     return null;

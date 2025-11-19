@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
   SpaceBetween,
@@ -56,6 +56,15 @@ export default function SlaConfigWidget({
       />
     ) : undefined;
 
+  const orderedItems = useMemo(() => {
+    const order = ['assignment', 'assessment', 'program_decision'];
+    const index = key => {
+      const i = order.indexOf(key);
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+    };
+    return [...(effectiveSlaTargets || [])].sort((a, b) => index(a.stage_key) - index(b.stage_key));
+  }, [effectiveSlaTargets]);
+
   return (
     <BoardItem
       header={
@@ -85,18 +94,18 @@ export default function SlaConfigWidget({
               },
               {
                 id: 'target',
-                header: 'Target (hours)',
+                header: 'Target (days)',
                 cell: item =>
                   canEditSla ? (
                     <Input
                       type="number"
-                      value={slaEdits[item.stage_key]?.target_hours ?? ''}
-                      onChange={e => handleSlaEdit(item.stage_key, 'target_hours', e.detail.value)}
+                      value={slaEdits[item.stage_key]?.target_days ?? ''}
+                      onChange={e => handleSlaEdit(item.stage_key, 'target_days', e.detail.value)}
                       inputMode="numeric"
-                      ariaLabel={`Target hours for ${item.display_name || slaStageLabels[item.stage_key] || item.stage_key}`}
+                      ariaLabel={`Target days for ${item.display_name || slaStageLabels[item.stage_key] || item.stage_key}`}
                     />
                   ) : (
-                    <Box>{item.target_hours}</Box>
+                    <Box>{item.target_days}</Box>
                   )
               },
               {
@@ -114,10 +123,9 @@ export default function SlaConfigWidget({
                   )
               }
             ]}
-            items={effectiveSlaTargets}
+            items={orderedItems}
             trackBy="stage_key"
             variant="embedded"
-            header={<Header variant="h3">SLA Target Baselines</Header>}
             empty={<Box>No SLA targets configured.</Box>}
           />
         )}
