@@ -1319,26 +1319,54 @@ const ChoiceConditionalScaffold = ({ options, fieldPath, updateComponentProperty
     return comp.id || comp.props?.name || '';
   };
 
-  const referencedIds = new Set();
-  optionList.forEach(o => { if (o && o.conditionalChildId) referencedIds.add(o.conditionalChildId); });
+  const readLabelValue = (val) => {
+    if (!val) return '';
+    if (typeof val === 'string') return val;
+    if (typeof val === 'object') {
+      if (val.en || val.fr) return val.en || val.fr || '';
+      for (const v of Object.values(val)) {
+        if (typeof v === 'string' && v.trim()) return v;
+      }
+    }
+    return '';
+  };
+
+  const conditionalUsage = React.useMemo(() => {
+    const map = new Map();
+    (pageComponents || []).forEach(parent => {
+      if (!parent || !parent.props) return;
+      const typ = String(parent.template_key || parent.type || '').toLowerCase();
+      if (!['radio','radios','checkbox','checkboxes'].includes(typ)) return;
+      const parentLabel = readLabelValue(parent.props?.fieldset?.legend?.text || parent.props?.label?.text || parent.props?.titleText || parent.props?.text) || parent.props?.name || parent.id || '';
+      const items = Array.isArray(parent.props.items) ? parent.props.items : [];
+      items.forEach(opt => {
+        if (!opt || !opt.conditionalChildId) return;
+        const key = String(opt.conditionalChildId);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push({
+          parent: parentLabel,
+          option: readLabelValue(opt.text || opt.html) || (opt.value || '')
+        });
+      });
+    });
+    return map;
+  }, [pageComponents]);
 
   const allComponents = Array.isArray(pageComponents) ? pageComponents : [];
   const candidateExisting = allComponents.filter(c => {
     if (!c) return false;
-    const keys = [c.id, c.props?.name].filter(Boolean);
+    const keys = [c.props?.name, c.id, c.props?.id].filter(Boolean).map(val => String(val));
     if (!keys.length) return false;
     const parentKeys = [selectedComponent?.id, selectedComponent?.props?.name].filter(Boolean);
     if (keys.some(k => parentKeys.includes(k))) return false;
     const t = String(c.type || c.template_key || '').toLowerCase();
     if (t === 'radio' || t === 'radios') return false;
-    // If any of the component's keys already referenced by some other option (and not the currently selected link), exclude
-    if (keys.some(k => referencedIds.has(k)) && !keys.includes(linkedChildId)) return false;
     if (!followTypes.includes(t)) return false;
     return true;
   });
 
   const linkExisting = (childId) => {
-    if (selectedOptionIdx < 0) return;
+    if (selectedOptionIdx < 0 || !childId) return;
     updateOptionArray(next => { next[selectedOptionIdx] = { ...next[selectedOptionIdx], conditionalChildId: childId }; });
     setMode('choose');
   };
@@ -1439,10 +1467,16 @@ const ChoiceConditionalScaffold = ({ options, fieldPath, updateComponentProperty
                     <Select
                       expandToViewport
                       placeholder={candidateExisting.length? 'Select component' : 'None available'}
-                      onChange={({ detail }) => linkExisting(detail.selectedOption.value)}
+                      onChange={({ detail }) => linkExisting(detail.selectedOption?.value)}
                       options={candidateExisting.map(c => {
-                        const key = c.id || c.props?.name;
-                        return { label: `${extractLabel(c)} (${c.type})`, value: key };
+                        const key = c.props?.name
+                          ? String(c.props.name)
+                          : (c.id != null ? String(c.id) : String(c.props?.id || ''));
+                        const usage = key ? conditionalUsage.get(String(key)) : null;
+                        const usageLabel = usage && usage.length
+                          ? ` – linked ${usage.length} time${usage.length > 1 ? 's' : ''}`
+                          : '';
+                        return { label: `${extractLabel(c)} (${c.type})${usageLabel}`, value: key };
                       })}
                     />
                   </FormField>

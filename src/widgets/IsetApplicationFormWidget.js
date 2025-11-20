@@ -142,6 +142,17 @@ const OPTION_LABELS = {
     buss_pass: 'Bus pass',
     parking: 'Parking (at the school)',
     mileage: 'Mileage (home to school)'
+  },
+  ei_status: {
+    receiving: 'Currently receiving EI',
+    not_receiving: 'Not using EI',
+    planning: 'Plan to apply for EI',
+    unsure: 'Unsure about EI'
+  },
+  'ei-documents-receiving': {
+    ei_consent: 'Client Consent for EI Verification',
+    ei_eligibility: 'EI Eligibility Verification form',
+    ei_authorization: 'Service Canada approval to leave work for training'
   }
 };
 
@@ -734,6 +745,29 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
     ]
   },
   {
+    id: 'employment-insurance',
+    title: 'Employment Insurance status',
+    description: 'Applicant-reported EI participation and supporting paperwork.',
+    columns: 2,
+    editable: true,
+    items: [
+      {
+        label: 'EI status',
+        field: 'ei_status',
+        controlType: 'select',
+        optionsKey: 'ei_status',
+        renderValue: answers => formatOption('ei_status', answers?.ei_status)
+      },
+      {
+        label: 'EI documents (held or expected)',
+        field: 'ei-documents-receiving',
+        controlType: 'multiselect',
+        optionsKey: 'ei-documents-receiving',
+        renderValue: answers => formatOptionList('ei-documents-receiving', answers?.['ei-documents-receiving'])
+      }
+    ]
+  },
+  {
     id: 'employment-goals',
     title: 'Employment goals & barriers',
     description: 'Self-identified goals and obstacles.',
@@ -1210,18 +1244,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   const lockOwnerId = activeLock?.ownerUserId ? String(activeLock.ownerUserId) : null;
   const lockHeldByCurrentUser = Boolean(isLockedByMe || (currentUserId && lockOwnerId && String(currentUserId) === lockOwnerId));
   const lockedByAnotherUser = Boolean(lockOwnerId && !lockHeldByCurrentUser);
-  const lockAlertMessage = useMemo(() => {
-    const lockExpiresAt = activeLock?.expiresAt ? new Date(activeLock.expiresAt) : null;
-    if (lockedByAnotherUser) {
-      return buildLockConflictMessage({ reason: 'owned_by_other', lock: activeLock });
-    }
-    if (lockHeldByCurrentUser) {
-      const ownerLabel = currentUserName || activeLock?.ownerDisplayName || 'you';
-      const expiresFragment = lockExpiresAt ? ` (expires ${lockExpiresAt.toLocaleTimeString()})` : '';
-      return `You (${ownerLabel}) currently hold an edit lock${expiresFragment}. Save or cancel to release it for other users.`;
-    }
-    return null;
-  }, [activeLock, currentUserName, lockHeldByCurrentUser, lockedByAnotherUser]);
 
   useEffect(() => {
     if (isDecisionFinal) {
@@ -1959,13 +1981,6 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
           {flashbarItems.length > 0 && (
             <Box margin={{ bottom: 's' }}>
               <Flashbar items={flashbarItems} />
-            </Box>
-          )}
-          {lockAlertMessage && (
-            <Box margin={{ bottom: 's' }}>
-              <Alert type={lockedByAnotherUser ? 'warning' : 'info'}>
-                {lockAlertMessage}
-              </Alert>
             </Box>
           )}
           <Box variant="small" margin={{ bottom: 's' }}>

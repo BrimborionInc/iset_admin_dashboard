@@ -215,6 +215,8 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
   const [localAssessmentSubmitted, setLocalAssessmentSubmitted] = useState(false);
   const widgetRootRef = useRef(null);
+  const alertAnchorRef = useRef(null);
+  const previousAlertKeyRef = useRef(null);
   const setWidgetRootRef = useCallback((node) => {
     widgetRootRef.current = node;
     if (typeof ref === 'function') {
@@ -374,18 +376,6 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
   const lockOwnerId = activeLock?.ownerUserId ? String(activeLock.ownerUserId) : null;
   const lockHeldByCurrentUser = Boolean(isLockedByMe || (currentUserId && lockOwnerId && String(currentUserId) === lockOwnerId));
   const lockedByAnotherUser = Boolean(lockOwnerId && !lockHeldByCurrentUser);
-  const lockAlertMessage = useMemo(() => {
-    const lockExpiresAt = activeLock?.expiresAt ? new Date(activeLock.expiresAt) : null;
-    if (lockedByAnotherUser) {
-      return buildLockConflictMessage({ reason: 'owned_by_other', lock: activeLock });
-    }
-    if (lockHeldByCurrentUser) {
-      const ownerLabel = currentUserName || activeLock?.ownerDisplayName || 'you';
-      const expiresFragment = lockExpiresAt ? ` (expires ${lockExpiresAt.toLocaleTimeString()})` : '';
-      return `You (${ownerLabel}) currently hold an edit lock${expiresFragment}. Save or cancel to release it for other users.`;
-    }
-    return null;
-  }, [activeLock, currentUserName, lockHeldByCurrentUser, lockedByAnotherUser]);
 
   useEffect(() => {
     const incoming = Number(caseData?.application_row_version || 0);
@@ -556,12 +546,42 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
 
   // Track changes
   useEffect(() => {
-    setIsChanged(JSON.stringify(assessment) !== JSON.stringify(initialAssessment));
+    const changed = JSON.stringify(assessment) !== JSON.stringify(initialAssessment);
+    setIsChanged(changed);
   }, [assessment, initialAssessment]);
 
   useEffect(() => {
+    if (!alertAnchorRef.current) return;
+    const alertKey =
+      alert?.content ||
+      alert?.header ||
+      validationAlert?.content ||
+      validationAlert?.header ||
+      declarationError ||
+      null;
+    const shouldScroll = Boolean(alert || validationAlert || declarationError);
+    if (!shouldScroll) {
+      previousAlertKeyRef.current = null;
+      return;
+    }
+    if (previousAlertKeyRef.current === alertKey) {
+      return;
+    }
+    previousAlertKeyRef.current = alertKey;
+    try {
+      alertAnchorRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (_) {
+      scrollWidgetAndPageTop();
+    }
+  }, [alert, validationAlert, declarationError, scrollWidgetAndPageTop]);
+
+  useEffect(() => {
     const nextVersion = Number(caseData?.application_row_version || 0);
-    if (Number.isFinite(nextVersion) && nextVersion > 0 && nextVersion !== applicationRowVersion) {
+    if (
+      Number.isFinite(nextVersion) &&
+      nextVersion > 0 &&
+      (applicationRowVersion === 0 || nextVersion > applicationRowVersion)
+    ) {
       setApplicationRowVersion(nextVersion);
     }
   }, [caseData?.application_row_version, applicationRowVersion]);
@@ -606,7 +626,8 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       dismissible: true,
       statusIconAriaLabel: severity === 'warning' ? 'Warning' : 'Error'
     });
-  }, []);
+    scrollWidgetAndPageTop();
+  }, [scrollWidgetAndPageTop]);
   const beginEditingAssessment = useCallback(async () => {
     if (lockingAssessment || isDecisionFinal || isLockedStatus) return;
     if (lockedByAnotherUser) {
@@ -709,6 +730,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });
+        scrollWidgetAndPageTop();
         if (releaseAfterSuccess) {
           releaseLock({ silent: true }).catch(() => {});
         }
@@ -1391,15 +1413,11 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
     return (
       <BoardItem header={headerElement} i18nStrings={boardItemI18nStrings} settings={boardItemSettings}>
         <div ref={setWidgetRootRef}>
+          <div ref={alertAnchorRef} />
           <Box variant="small" margin={{ bottom: 's' }}>
             This form is used by the ISET admin team to assess the applicant's needs, eligibility, and funding recommendation.
             Complete the conflict of interest declaration below to unlock the assessment.
           </Box>
-          {lockAlertMessage && (
-            <Alert type={lockedByAnotherUser ? 'warning' : 'info'}>
-              {lockAlertMessage}
-            </Alert>
-          )}
           {alert && (
             <Alert
               type={alert.type}
@@ -1475,14 +1493,10 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       settings={boardItemSettings}
     >
       <div ref={setWidgetRootRef}>
+        <div ref={alertAnchorRef} />
         <Box variant="small" margin={{ bottom: 's' }}>
           This form is used by the ISET admin team to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, the final approval fields will become available.
         </Box>
-        {lockAlertMessage && (
-          <Alert type={lockedByAnotherUser ? 'warning' : 'info'}>
-            {lockAlertMessage}
-          </Alert>
-        )}
         {validationAlert && (
           <Alert
             type="warning"

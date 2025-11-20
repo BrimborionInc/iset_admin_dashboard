@@ -229,7 +229,19 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
       items.forEach(it => {
         if (it && it.conditionalChildId) {
           const optLabel = extract(it.text || it.html || it.value) || (it.value || '');
-          if (!map.has(it.conditionalChildId)) map.set(it.conditionalChildId, { parentLabel, optionLabel: optLabel });
+          const key = String(it.conditionalChildId);
+          const ref = { parentLabel, optionLabel: optLabel };
+          if (!map.has(key)) {
+            map.set(key, { parentLabel, optionLabel: optLabel, references: [ref] });
+          } else {
+            const existing = map.get(key);
+            existing.references = Array.isArray(existing.references) ? existing.references : [];
+            existing.references.push(ref);
+            // keep the first entry as primary label
+            if (!existing.parentLabel) existing.parentLabel = parentLabel;
+            if (!existing.optionLabel) existing.optionLabel = optLabel;
+            map.set(key, existing);
+          }
         }
       });
     });
@@ -267,8 +279,8 @@ const PreviewArea = ({ components, setComponents, handleSelectComponent, selecte
                 selectedComponent={selectedComponent}
                 previewLang={previewLang}
                 conditionalRef={(() => {
-                  const idKey = comp?.id;
-                  const nameKey = comp?.props?.name;
+                  const idKey = comp?.id != null ? String(comp.id) : null;
+                  const nameKey = comp?.props?.name != null ? String(comp.props.name) : null;
                   if (idKey && conditionalRefMap.get(idKey)) return conditionalRefMap.get(idKey);
                   if (nameKey && conditionalRefMap.get(nameKey)) return conditionalRefMap.get(nameKey);
                   return null;
@@ -327,22 +339,29 @@ const DraggablePreviewItem = ({
   const handleClick = () => handleSelectComponent(index);
 
   // Server-rendered GOV.UK component (nunjucks output)
-  function useNunjucksHTML({ templateKey, templateId, version = 1, props }) {
-    const [html, setHtml] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const abortRef = useRef(null);
-    const debounceRef = useRef(null);
+function useNunjucksHTML({ templateKey, templateId, version = 1, props, suspended = false }) {
+  const [html, setHtml] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const abortRef = useRef(null);
+  const debounceRef = useRef(null);
 
     const propsSignature = useMemo(() => JSON.stringify(props ?? {}), [props]);
     const cacheKey = useMemo(() => {
       return `${templateKey ?? 'null'}|${templateId ?? 'null'}|${version ?? 0}|${propsSignature}`;
     }, [templateKey, templateId, version, propsSignature]);
 
-    useEffect(() => {
-      if (!(templateKey || templateId)) {
-        setHtml('');
-        setError('');
+  useEffect(() => {
+    if (suspended) {
+      setLoading(false);
+      return () => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        if (abortRef.current) abortRef.current.abort();
+      };
+    }
+    if (!(templateKey || templateId)) {
+      setHtml('');
+      setError('');
         setLoading(false);
         return () => {};
       }
@@ -388,12 +407,12 @@ const DraggablePreviewItem = ({
         if (debounceRef.current) clearTimeout(debounceRef.current);
         if (abortRef.current) abortRef.current.abort();
       };
-    }, [cacheKey, templateKey, templateId, version, props]);
+  }, [cacheKey, templateKey, templateId, version, props, suspended]);
 
     return { html, loading, error };
   }
 
-  const RenderComponentCard = React.memo(({ comp, previewLang = 'en', pendingFocusTargetRef, selectedIndex, setComponentsRef, itemIndex }) => {
+  const RenderComponentCard = React.memo(({ comp, previewLang = 'en', pendingFocusTargetRef, selectedIndex, setComponentsRef, itemIndex, suspended = false }) => {
     // Flatten any bilingual values like { en, fr } down to a single string for preview rendering
     const flattenTranslations = useCallback((value, langOverride = previewLang) => {
       const normalise = (val) => {
@@ -460,7 +479,8 @@ const DraggablePreviewItem = ({
       templateId,
       templateKey,
       version: comp?.version ?? 1,
-      props: previewProps
+      props: previewProps,
+      suspended
     });
     const containerRef = useRef(null);
 
@@ -834,7 +854,8 @@ const DraggablePreviewItem = ({
       prev.previewLang === next.previewLang &&
       prev.itemIndex === next.itemIndex &&
       prev.selectedIndex === next.selectedIndex &&
-      prev.setComponentsRef === next.setComponentsRef
+      prev.setComponentsRef === next.setComponentsRef &&
+      prev.suspended === next.suspended
     );
   });
 
@@ -843,6 +864,17 @@ const DraggablePreviewItem = ({
   useEffect(() => {
     debugDragLog('draggable state', { index, isDraggingFromMonitor: isDragging, isActiveDrag, combinedDragging: dragging });
   }, [index, isDragging, isActiveDrag, dragging]);
+
+  const conditionalRefs = (() => {
+    if (!conditionalRef) return [];
+    if (Array.isArray(conditionalRef.references) && conditionalRef.references.length) {
+      return conditionalRef.references;
+    }
+    return [{
+      parentLabel: conditionalRef.parentLabel,
+      optionLabel: conditionalRef.optionLabel
+    }].filter(ref => ref.parentLabel || ref.optionLabel);
+  })();
 
   return (
     <div
@@ -885,7 +917,7 @@ const DraggablePreviewItem = ({
         >
           ⠿
         </div>
-      {conditionalRef && (
+      {conditionalRefs.length > 0 && (
         <div
           className="conditional-badge"
           data-has-detail="1"
@@ -903,17 +935,17 @@ const DraggablePreviewItem = ({
             textTransform: 'uppercase',
             cursor: 'default'
           }}
-          aria-label={`Conditional follow-up: ${conditionalRef.parentLabel || 'Parent'} > ${conditionalRef.optionLabel || 'Option'}`}
+          aria-label={`Conditional follow-up linked from ${conditionalRefs.length} option${conditionalRefs.length > 1 ? 's' : ''}`}
         >
-          COND
+          {conditionalRefs.length > 1 ? `COND×${conditionalRefs.length}` : 'COND'}
           <span className="conditional-badge__tooltip" role="tooltip">
             <strong style={{display:'block', fontWeight:600}}>Conditional Follow-up</strong>
-            <span style={{fontSize:11, display:'block'}}>
-              <span style={{color:'#bbb'}}>Parent:</span> {conditionalRef.parentLabel || 'Parent'}
-            </span>
-            <span style={{fontSize:11, display:'block'}}>
-              <span style={{color:'#bbb'}}>Option:</span> {conditionalRef.optionLabel || 'Option'}
-            </span>
+            {conditionalRefs.map((ref, idx) => (
+              <span key={`${ref.parentLabel || 'parent'}-${ref.optionLabel || 'option'}-${idx}`} style={{fontSize:11, display:'block'}}>
+                <span style={{color:'#bbb'}}>Parent:</span> {ref.parentLabel || 'Parent'}<br />
+                <span style={{color:'#bbb'}}>Option:</span> {ref.optionLabel || 'Option'}
+              </span>
+            ))}
           </span>
         </div>
       )}
@@ -933,6 +965,7 @@ const DraggablePreviewItem = ({
           selectedIndex={selectedComponent?.index ?? null}
           itemIndex={index}
           setComponentsRef={setComponents}
+          suspended={isAnySorting}
         />
       </div>
       <Button className="delete" onClick={handleDelete} iconName="close" variant="icon" />

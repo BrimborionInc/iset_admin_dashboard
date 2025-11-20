@@ -168,7 +168,11 @@ Path: `src/pages/configurationSettings.js`
 
 ---
 
-## 8. Follow-ups / ideas
+## 8. Known fixes
+
+- Coordinator Assessment: resolved a false optimistic conflict that appeared right after signing the conflict-of-interest declaration. The client was overwriting its cached `application_row_version` with older `caseData` props, then sending a stale `expectedRowVersion` (e.g., 1 instead of 2) and hitting a 409. The widget now only updates the cached row version when the incoming value is newer, preventing spurious conflicts while keeping optimistic locking intact.
+
+## 9. Follow-ups / ideas
 
 - Add a dedicated heartbeat endpoint (`PATCH /api/locks/application/:id/heartbeat`) to avoid full re-acquisition.
 - Extend lock metadata (`metadata` JSON) with tab/session IDs to help with stale browser recovery.
