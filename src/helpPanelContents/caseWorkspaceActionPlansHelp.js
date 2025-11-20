@@ -14,6 +14,7 @@ const CaseWorkspaceActionPlansHelp = () => (
       <li><strong>Close:</strong> Record the result code and completion date once every intervention is finished.</li>
       <li><strong>Archive:</strong> Hide closed or unused drafts from the main list while preserving the history.</li>
       <li><strong>New plan:</strong> Start a fresh goal pathway when the client begins a new phase of support.</li>
+      <li><strong>Review date reminders:</strong> Setting a review date will create or update a calendar reminder for the case (assigned to the plan owner if available). Clearing the review date cancels the reminder.</li>
     </ul>
 
     <h3>Helpful tips</h3>

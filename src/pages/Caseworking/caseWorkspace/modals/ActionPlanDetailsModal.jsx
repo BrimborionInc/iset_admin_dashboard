@@ -10,7 +10,6 @@ import {
   Modal,
   SpaceBetween,
   Spinner,
-  StatusIndicator,
   Textarea,
 } from "@cloudscape-design/components";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
@@ -20,15 +19,6 @@ import {
   formatLabourForceStatus,
   formatLocalPriorities,
 } from "../utils/isetOptionLabels.js";
-
-const ReadOnlyItem = ({ label, value }) => (
-  <Box margin={{ bottom: "s" }}>
-    <Box fontSize="body-s" color="text-body-secondary">
-      {label}
-    </Box>
-    <Box>{value ?? "-"}</Box>
-  </Box>
-);
 
 const formatBoolean = value => {
   if (typeof value === "boolean") {
@@ -96,8 +86,23 @@ const toApiDateValue = value => {
   return date.toISOString().slice(0, 10);
 };
 
+const displayValue = (val) => (val === null || typeof val === "undefined" || val === "" ? "-" : String(val));
+
+const ReadOnlyField = ({ label, description, value, multiline = false, rows = 3 }) => (
+  <FormField
+    label={<Box fontWeight="bold">{label}</Box>}
+    description={description}
+  >
+    {multiline ? (
+      <Textarea value={displayValue(value)} readOnly rows={rows} />
+    ) : (
+      <Input value={displayValue(value)} readOnly />
+    )}
+  </FormField>
+);
+
 const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
-  const { updateActionPlan, fetchActionPlanContext } = useCaseWorkspace();
+  const { updateActionPlan, fetchActionPlanContext, upsertActionPlanReviewReminder, caseData } = useCaseWorkspace();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: "", summary: "", startDate: "", reviewDate: "" });
   const [saving, setSaving] = useState(false);
@@ -191,6 +196,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
         reviewDate: toApiDateValue(form.reviewDate),
         summary: form.summary || null,
       });
+      await upsertActionPlanReviewReminder({ ...plan, ...updated }, form.reviewDate || null);
       setSaving(false);
       setEditing(false);
       if (onSaved) onSaved(updated);
@@ -264,6 +270,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
       header="Action plan details"
       onDismiss={handleDismiss}
       closeAriaLabel="Close action plan details modal"
+      size="large"
       footer={footer}
     >
       <SpaceBetween size="l">
@@ -277,114 +284,127 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
             {error}
           </Alert>
         )}
-        <ColumnLayout columns={2} variant="text-grid">
-          <FormField label="Plan name">
-            {editing ? (
+
+        <SpaceBetween size="s">
+          <Box fontSize="heading-m" fontWeight="bold">
+            Plan overview
+          </Box>
+          <ColumnLayout columns={3} variant="text-grid">
+            <FormField label="Plan name">
+              {editing ? (
+                <Input
+                  value={form.name}
+                  onChange={({ detail }) => setForm(current => ({ ...current, name: detail.value }))}
+                />
+              ) : (
+                <Input value={form.name || "Untitled"} readOnly />
+              )}
+            </FormField>
+            <FormField label="Plan summary" description="High-level objective for this plan.">
+              {editing ? (
+                <Textarea
+                  value={form.summary}
+                  rows={3}
+                  onChange={({ detail }) => setForm(current => ({ ...current, summary: detail.value }))}
+                  placeholder="High-level objective for this plan"
+                />
+              ) : (
+                <Textarea value={form.summary || "-"} readOnly rows={3} />
+              )}
+            </FormField>
+            <FormField label="Start date" description="When the plan becomes active.">
+              {editing ? (
+                <DatePicker
+                  value={form.startDate}
+                  onChange={({ detail }) => setForm(current => ({ ...current, startDate: detail.value }))}
+                  placeholder="YYYY-MM-DD"
+                />
+              ) : (
+                <Input value={formatDateDisplay(form.startDate)} readOnly />
+              )}
+            </FormField>
+            <FormField label="Review date" description="Next scheduled review for this plan.">
+              {editing ? (
+                <DatePicker
+                  value={form.reviewDate}
+                  onChange={({ detail }) => setForm(current => ({ ...current, reviewDate: detail.value }))}
+                  placeholder="YYYY-MM-DD"
+                />
+              ) : (
+                <Input value={formatDateDisplay(form.reviewDate)} readOnly />
+              )}
+            </FormField>
+          </ColumnLayout>
+        </SpaceBetween>
+
+        <SpaceBetween size="s">
+          <Box fontSize="heading-m" fontWeight="bold">
+            Status & metrics
+          </Box>
+          <ColumnLayout columns={3} variant="text-grid">
+            <FormField label={<Box fontWeight="bold">Status</Box>} description="Current lifecycle state of the plan.">
               <Input
-                value={form.name}
-                onChange={({ detail }) => setForm(current => ({ ...current, name: detail.value }))}
+                value={displayValue(plan.status)}
+                readOnly
+                ariaLabel="Plan status"
               />
-            ) : (
-              <Box>{form.name || "Untitled"}</Box>
-            )}
-          </FormField>
-          <FormField label="Plan summary">
-            {editing ? (
-              <Textarea
-                value={form.summary}
-                rows={3}
-                onChange={({ detail }) => setForm(current => ({ ...current, summary: detail.value }))}
-                placeholder="High-level objective for this plan"
-              />
-            ) : (
-              <Box as="pre" margin="0">
-                {form.summary || "-"}
-              </Box>
-            )}
-          </FormField>
-          <FormField label="Start date">
-            {editing ? (
-              <DatePicker
-                value={form.startDate}
-                onChange={({ detail }) => setForm(current => ({ ...current, startDate: detail.value }))}
-                placeholder="YYYY-MM-DD"
-              />
-            ) : (
-              <Box>{formatDateDisplay(form.startDate)}</Box>
-            )}
-          </FormField>
-          <FormField label="Review date">
-            {editing ? (
-              <DatePicker
-                value={form.reviewDate}
-                onChange={({ detail }) => setForm(current => ({ ...current, reviewDate: detail.value }))}
-                placeholder="YYYY-MM-DD"
-              />
-            ) : (
-              <Box>{formatDateDisplay(form.reviewDate)}</Box>
-            )}
-          </FormField>
-        </ColumnLayout>
-
-        <ColumnLayout columns={2} variant="text-grid">
-          <Box>
-            <ReadOnlyItem
-              label="Status"
-              value={
-                <StatusIndicator type={statusType(plan.status)}>
-                  {plan.status || "unknown"}
-                </StatusIndicator>
-              }
+            </FormField>
+            <ReadOnlyField label="Interventions" description="Number of linked interventions." value={Number.isFinite(plan.interventionCount) ? plan.interventionCount : "-"} />
+            <ReadOnlyField label="Outcome summary" description="Summary recorded at closure." value={plan.outcomeSummary || "-"} multiline rows={2} />
+            <ReadOnlyField label="Closure notes" description="Notes captured when closing the plan." value={plan.closureNotes || "-"} multiline rows={2} />
+            <ReadOnlyField label="Result code" description="Outcome identifier for reporting." value={plan.resultCode || "-"} />
+            <ReadOnlyField label="Result date" description="Date the result was recorded." value={formatDateDisplay(plan.resultDate)} />
+            <ReadOnlyField label="Created at" description="When the plan was created." value={formatDateTimeDisplay(plan.createdAt)} />
+            <ReadOnlyField label="Last updated" description="Most recent update timestamp." value={formatDateTimeDisplay(plan.updatedAt)} />
+            <ReadOnlyField
+              label="Case ID"
+              description="Associated case identifier."
+              value={caseData?.caseNumber || caseData?.trackingId || plan.caseId || "-"}
             />
-            <ReadOnlyItem label="Activated at" value={formatDateTimeDisplay(plan.activatedAt)} />
-            <ReadOnlyItem label="Closed at" value={formatDateTimeDisplay(plan.closedAt)} />
-            <ReadOnlyItem label="Archived at" value={formatDateTimeDisplay(plan.archivedAt)} />
-            <ReadOnlyItem label="Result code" value={plan.resultCode || "-"} />
-            <ReadOnlyItem label="Result date" value={formatDateDisplay(plan.resultDate)} />
-          </Box>
-          <Box>
-            <ReadOnlyItem label="Outcome summary" value={plan.outcomeSummary || "-"} />
-            <ReadOnlyItem label="Closure notes" value={plan.closureNotes || "-"} />
-            <ReadOnlyItem label="Interventions" value={Number.isFinite(plan.interventionCount) ? plan.interventionCount : "-"} />
-            <ReadOnlyItem label="Created at" value={formatDateTimeDisplay(plan.createdAt)} />
-            <ReadOnlyItem label="Last updated" value={formatDateTimeDisplay(plan.updatedAt)} />
-            <ReadOnlyItem label="Case ID" value={plan.caseId || "-"} />
-            <ReadOnlyItem label="Owner staff profile ID" value={plan.ownerStaffProfileId || "-"} />
-            <ReadOnlyItem label="Owner user ID" value={plan.ownerUserId || "-"} />
-          </Box>
-        </ColumnLayout>
+            <ReadOnlyField
+              label="Assigned to"
+              description="Plan owner from the case header."
+              value={caseData?.owner?.email || caseData?.owner?.name || "-"}
+            />
+            <ReadOnlyField label="Activated at" description="When the plan was activated." value={formatDateTimeDisplay(plan.activatedAt)} />
+            <ReadOnlyField label="Closed at" description="When the plan was closed." value={formatDateTimeDisplay(plan.closedAt)} />
+            <ReadOnlyField label="Archived at" description="When the plan was archived." value={formatDateTimeDisplay(plan.archivedAt)} />
+          </ColumnLayout>
+        </SpaceBetween>
 
-        <Box>
-          <h4 style={{ marginBottom: "0.5rem" }}>Client context</h4>
+        <SpaceBetween size="s">
+          <Box fontSize="heading-m" fontWeight="bold">
+            Client context
+          </Box>
           {contextLoading ? (
             <Box padding="m">
               <Spinner />
             </Box>
           ) : (
-            <ColumnLayout columns={2} variant="text-grid">
-              <Box>
-                <ReadOnlyItem label="Employment goals" value={employmentContext.employmentGoals} />
-                <ReadOnlyItem label="Employment status" value={employmentContext.employmentStatus} />
-                <ReadOnlyItem label="Employment NOC" value={employmentContext.details?.employmentNoc || "-"} />
-                <ReadOnlyItem label="Employment NOC version" value={employmentContext.details?.employmentNocVersion || "-"} />
-              </Box>
-              <Box>
-                <ReadOnlyItem label="Education level" value={employmentContext.educationLevel} />
-                <ReadOnlyItem label="Social assistance" value={formatBoolean(employmentContext.details?.socialAssistance)} />
-                <ReadOnlyItem label="Employment insurance" value={formatBoolean(employmentContext.details?.employmentInsurance)} />
-                <ReadOnlyItem label="Childcare need" value={formatBoolean(employmentContext.details?.childcareNeed)} />
-                <ReadOnlyItem label="Childcare funding" value={employmentContext.details?.childcareFunding || "-"} />
-              </Box>
-              <Box>
-                <ReadOnlyItem label="Employment barriers" value={employmentContext.employmentBarriers} />
-                <ReadOnlyItem label="Local area priorities" value={employmentContext.localPriorities} />
-                <ReadOnlyItem label="Previous ISET" value={formatBoolean(employmentContext.details?.previousIset)} />
-                <ReadOnlyItem label="Previous ISET details" value={employmentContext.details?.previousIsetDetails || "-"} />
-                <ReadOnlyItem label="Other funding" value={employmentContext.details?.otherFunding || "-"} />
-              </Box>
+            <ColumnLayout columns={3} variant="text-grid">
+              <ReadOnlyField
+                label="Employment goals"
+                description="Applicant’s stated goals and context."
+                value={employmentContext.employmentGoals}
+                multiline
+                rows={3}
+              />
+              <ReadOnlyField label="Employment status" description="Current employment situation." value={employmentContext.employmentStatus} />
+              <ReadOnlyField label="Education level" description="Highest completed education." value={employmentContext.educationLevel} />
+              <ReadOnlyField label="Employment NOC" description="NOC code provided in application." value={employmentContext.details?.employmentNoc || "-"} />
+              <ReadOnlyField label="Employment NOC version" description="NOC version associated to the code." value={employmentContext.details?.employmentNocVersion || "-"} />
+              <ReadOnlyField label="Social assistance" description="Receiving social assistance." value={formatBoolean(employmentContext.details?.socialAssistance)} />
+              <ReadOnlyField label="Employment insurance" description="Employment insurance status." value={formatBoolean(employmentContext.details?.employmentInsurance)} />
+              <ReadOnlyField label="Childcare need" description="Whether childcare support is needed." value={formatBoolean(employmentContext.details?.childcareNeed)} />
+              <ReadOnlyField label="Childcare funding" description="Details on childcare funding." value={employmentContext.details?.childcareFunding || "-"} />
+              <ReadOnlyField label="Employment barriers" description="Barriers identified by the applicant." value={employmentContext.employmentBarriers} multiline rows={3} />
+              <ReadOnlyField label="Local area priorities" description="Priority categories relevant to this case." value={employmentContext.localPriorities} />
+              <ReadOnlyField label="Previous ISET" description="Has the applicant used ISET before." value={formatBoolean(employmentContext.details?.previousIset)} />
+              <ReadOnlyField label="Previous ISET details" description="Context on prior ISET participation." value={employmentContext.details?.previousIsetDetails || "-"} multiline rows={2} />
+              <ReadOnlyField label="Other funding" description="Additional funding noted in the application." value={employmentContext.details?.otherFunding || "-"} multiline rows={2} />
             </ColumnLayout>
           )}
-        </Box>
+        </SpaceBetween>
       </SpaceBetween>
     </Modal>
   );

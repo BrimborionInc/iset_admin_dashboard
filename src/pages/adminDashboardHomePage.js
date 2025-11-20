@@ -19,7 +19,6 @@ import { devTasks as devTasksData } from '../devTasksData';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../auth/cognito';
 import ApplicationWorkQueueWidget from '../widgets/ApplicationWorkQueueWidget';
 import RecentActivityWidget from '../widgets/RecentActivityWidget';
-import StatisticsWidget from '../widgets/StatisticsWidget';
 import MyWatchlistWidget from '../widgets/MyWatchlistWidget';
 
 const WIDGET_REGISTRY = {
@@ -47,14 +46,6 @@ const WIDGET_REGISTRY = {
         defaultRowSpan: 5,
         defaultColumnSpan: 2
     },
-    statistics: {
-        id: 'statistics',
-        component: StatisticsWidget,
-        title: 'Statistics',
-        description: 'At-a-glance program totals and throughput metrics.',
-        defaultRowSpan: 5,
-        defaultColumnSpan: 4
-    },
     'dev-task-tracker': {
         id: 'dev-task-tracker',
         component: null, // bound after DevTaskTracker definition
@@ -79,8 +70,7 @@ const buildDefaultLayout = (role) => {
     const base = [
         { id: 'application-work-queue', rowSpan: 2, columnSpan: 4 },
         { id: 'recent-activity', rowSpan: 5, columnSpan: 2 },
-        { id: 'my-watchlist', rowSpan: 5, columnSpan: 2 },
-        { id: 'statistics', rowSpan: 5, columnSpan: 4 }
+        { id: 'my-watchlist', rowSpan: 5, columnSpan: 2 }
     ];
     if (role === 'System Administrator') {
         base.push({ id: 'dev-task-tracker', rowSpan: 6, columnSpan: 4 });

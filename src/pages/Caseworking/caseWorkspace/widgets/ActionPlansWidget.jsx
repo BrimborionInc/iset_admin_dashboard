@@ -845,12 +845,6 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
               setSelectedActionPlanId(plan.id);
             }
           }}
-          onRowClick={({ detail }) => {
-            const plan = detail?.item;
-            if (plan) {
-              viewPlan(plan);
-            }
-          }}
           columnDefinitions={visibleColumnDefinitions}
           items={paginatedPlans}
           filter={filterComponent}

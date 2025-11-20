@@ -424,6 +424,7 @@ const CaseWorkspaceContext = createContext({
   runComplianceChecks: () => Promise.resolve(),
   prepareIlmpExport: () => Promise.resolve({}),
   fetchActionPlanContext: () => Promise.resolve({}),
+  upsertActionPlanReviewReminder: () => Promise.resolve(),
   interventionCodes: [],
   interventionCodesLoading: false,
   loadInterventionCodes: () => Promise.resolve([]),
@@ -461,6 +462,25 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
   const [nocVersions, setNocVersions] = useState([]);
   const [nocVersionsLoaded, setNocVersionsLoaded] = useState(false);
   const [nocVersionsLoading, setNocVersionsLoading] = useState(false);
+
+  const resolveCaseIdentifier = useCallback(() => {
+    const payload = state.caseData || {};
+    const value =
+      payload.caseNumber ||
+      payload.agreementNumber ||
+      payload.trackingId ||
+      payload.tracking_id;
+    if (value) return value;
+    if (caseId) return `Case #${caseId}`;
+    return "Case";
+  }, [caseId, state.caseData]);
+
+  const toReminderIso = (dateString) => {
+    if (!dateString) return null;
+    const date = new Date(`${dateString}T08:00:00`);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString();
+  };
 
   const loadCase = useCallback(async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -686,6 +706,79 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     }
     return response.json();
   }, []);
+
+  const upsertActionPlanReviewReminder = useCallback(
+    async (plan, reviewDate) => {
+      if (!plan || !plan.id || !caseId) return null;
+      const dueAtIso = toReminderIso(reviewDate);
+      const assignedStaffProfileId = plan.ownerStaffProfileId || state.caseData?.owner?.id || null;
+      const ownerLabel =
+        state.caseData?.owner?.email ||
+        state.caseData?.owner?.name ||
+        (plan.ownerUserId ? String(plan.ownerUserId) : null);
+      const titleParts = ["Action plan review", resolveCaseIdentifier()];
+      if (ownerLabel) titleParts.push(ownerLabel);
+      const reminderTitle = titleParts.join(" — ");
+      const description = plan.summary || "";
+
+      try {
+        const res = await apiFetch(`/api/reminders?caseId=${caseId}&status=all`);
+        if (!res.ok) throw new Error(`Failed to load reminders (${res.status})`);
+        const existingList = await res.json();
+        const existing = Array.isArray(existingList)
+          ? existingList.find(item => item.actionPlanId === plan.id)
+          : null;
+
+        if (!dueAtIso) {
+          if (existing) {
+            await apiFetch(`/api/reminders/${existing.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: "cancelled" }),
+            });
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("case-reminders-refresh", { detail: { caseId } }));
+            }
+          }
+          return null;
+        }
+
+        const payload = {
+          caseId,
+          applicationId: state.caseData?.applicationId ?? state.caseData?.application_id ?? null,
+          actionPlanId: plan.id,
+          title: reminderTitle,
+          description: description || null,
+          category: "Action plan",
+          status: "open",
+          dueAt: dueAtIso,
+          assignedStaffProfileId: assignedStaffProfileId || undefined,
+        };
+
+        if (existing) {
+          await apiFetch(`/api/reminders/${existing.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...payload, status: "open" }),
+          });
+        } else {
+          await apiFetch(`/api/reminders`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        }
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("case-reminders-refresh", { detail: { caseId } }));
+        }
+      } catch (err) {
+        console.warn("[ActionPlan] reminder upsert failed", err?.message || err);
+      }
+      return null;
+    },
+    [apiFetch, caseId, resolveCaseIdentifier, state.caseData]
+  );
 
   const createIntervention = useCallback(
     async (actionPlanId, payload) => {
@@ -1119,6 +1212,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     runComplianceChecks,
     prepareIlmpExport,
     fetchActionPlanContext,
+    upsertActionPlanReviewReminder,
     interventionCodes,
     interventionCodesLoading,
     loadInterventionCodes,
@@ -1137,7 +1231,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     archiveActionPlan,
     selectedActionPlanId,
     setSelectedActionPlanId,
-  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, fetchActionPlanContext, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, archiveActionPlan, selectedActionPlanId]);
+  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, fetchActionPlanContext, upsertActionPlanReviewReminder, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, archiveActionPlan, selectedActionPlanId]);
 
   return (
     <CaseWorkspaceContext.Provider value={contextValue}>

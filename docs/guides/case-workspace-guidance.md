@@ -47,6 +47,7 @@ Use this note when spinning up a fresh chat so the LLM has the context it needs 
 ## 5. Recent Fixes & Behavioural Updates
 - Action plan editing bug: sending ISO timestamps caused DB errors; now we convert to `YYYY-MM-DD`.
 - Action plan table default selection: sorts by recency and picks the newest plan.
+- Action plan review dates now drive reminders: creating or updating a plan with a review date upserts an open reminder via `/api/reminders` (case + action_plan scoped, assigned to the plan owner when available). Clearing the review date cancels the reminder. Reminders are set to 8:00 AM local so they surface at the start of the day and trigger `case-reminders-refresh` for the calendar.
 - Interventions table cost column: picks up persisted totals even after editing, thanks to new metadata merge logic.
 - CR-0011 is complete (both persistence and hydration).
 - Assessment dashboard status flow: `/api/cases/:id` now returns `application_status`, the Application Overview widget listens for the normalised payload, and both the overview and NWAC widgets trigger `refreshCaseData` on submit/approval. Earlier we spent hours chasing front-end cache issues because the SQL query omitted `a.status`; always verify the API is projecting new fields before debugging UI state.

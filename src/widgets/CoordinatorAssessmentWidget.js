@@ -107,6 +107,20 @@ const parseCurrencyToNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const parseCurrencyInput = (value) => {
+  if (value === null || typeof value === 'undefined') return null;
+  const cleaned = String(value).replace(/[^0-9.]/g, '');
+  if (!cleaned) return null;
+  const num = Number.parseFloat(cleaned);
+  return Number.isFinite(num) ? num : null;
+};
+
+const formatCurrencyDisplay = (value) => {
+  const num = parseCurrencyInput(value);
+  if (num === null) return '';
+  return `$ ${num.toFixed(2)}`;
+};
+
 const isEmptyString = (val) => val === null || val === undefined || val === '';
 const isEmptyArray = (val) => !Array.isArray(val) || val.length === 0;
 const mergeAssessmentState = (current, incoming) => {
@@ -862,8 +876,11 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
     if (assessment.interventionDuration && !/^\d+$/.test(assessment.interventionDuration.trim())) {
       errors.interventionDuration = 'Duration must be a whole number of days.';
     }
-    if (assessment.interventionCost && !/^\d+$/.test(assessment.interventionCost.trim())) {
-      errors.interventionCost = 'Cost must be a whole number (no decimals).';
+    if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
+      const costNumber = parseCurrencyInput(assessment.interventionCost);
+      if (costNumber === null || !Number.isFinite(costNumber) || costNumber < 0) {
+        errors.interventionCost = 'Enter a valid amount in dollars.';
+      }
     }
     return errors;
   };
@@ -938,7 +955,10 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       assessment_nwac_reason: assessment.nwacReason || null,
       assessment_intervention_code: assessment.interventionCode || null,
       assessment_intervention_duration_days: assessment.interventionDuration || null,
-      assessment_intervention_cost_total: assessment.interventionCost || null,
+        assessment_intervention_cost_total: (() => {
+          const val = parseCurrencyInput(assessment.interventionCost);
+          return val !== null ? String(val) : null;
+        })(),
       assessment_intervention_related_noc: assessment.interventionNoc || null,
       assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
       assessment_childcare_need: assessment.childcareNeed || null,
@@ -1090,7 +1110,10 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
         assessment_nwac_reason: assessment.nwacReason || null,
         assessment_intervention_code: assessment.interventionCode || null,
         assessment_intervention_duration_days: assessment.interventionDuration || null,
-        assessment_intervention_cost_total: assessment.interventionCost || null,
+        assessment_intervention_cost_total: (() => {
+          const val = parseCurrencyInput(assessment.interventionCost);
+          return val !== null ? String(val) : null;
+        })(),
         assessment_intervention_related_noc: assessment.interventionNoc || null,
         assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
         assessment_childcare_need: assessment.childcareNeed || null,
@@ -1257,7 +1280,10 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       assessment_nwac_reason: assessment.nwacReason || null,
       assessment_intervention_code: assessment.interventionCode || null,
       assessment_intervention_duration_days: assessment.interventionDuration || null,
-      assessment_intervention_cost_total: assessment.interventionCost || null,
+      assessment_intervention_cost_total: (() => {
+        const val = parseCurrencyInput(assessment.interventionCost);
+        return val !== null ? String(val) : null;
+      })(),
       assessment_intervention_related_noc: assessment.interventionNoc || null,
       assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
       assessment_childcare_need: assessment.childcareNeed || null,
@@ -1999,17 +2025,23 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
             errorText={hasSubmitted && fieldErrors.interventionCost ? fieldErrors.interventionCost : undefined}
             secondaryControl={
               !isAssessmentDisabled && calculatedFundingTotal && assessment.interventionCost !== calculatedFundingTotal ? (
-                <Button size="small" onClick={() => handleField('interventionCost', calculatedFundingTotal)}>
-                  Use {calculatedFundingTotal}
+                <Button size="small" onClick={() => handleField('interventionCost', formatCurrencyDisplay(calculatedFundingTotal))}>
+                  Use {formatCurrencyDisplay(calculatedFundingTotal) || calculatedFundingTotal}
                 </Button>
               ) : null
             }
           >
             <Input
-              inputMode="numeric"
+              inputMode="decimal"
               value={assessment.interventionCost || ''}
-              onChange={({ detail }) => handleField('interventionCost', detail.value.replace(/[^\d]/g, ''))}
-              placeholder="e.g. 4200"
+              onChange={({ detail }) => handleField('interventionCost', detail.value.replace(/[^\d.]/g, ''))}
+              onBlur={() => {
+                const formatted = formatCurrencyDisplay(assessment.interventionCost);
+                if (formatted) {
+                  handleField('interventionCost', formatted);
+                }
+              }}
+              placeholder="e.g. $4,200.00"
               data-error-focus={hasSubmitted && fieldErrors.interventionCost ? 'true' : undefined}
               disabled={isAssessmentDisabled}
             />

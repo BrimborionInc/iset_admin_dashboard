@@ -74,7 +74,7 @@ const NewActionPlanModal = ({
   onCreated,
   onSaved,
 }) => {
-  const { createActionPlan, updateActionPlan, fetchActionPlanContext, caseData } = useCaseWorkspace();
+  const { createActionPlan, updateActionPlan, fetchActionPlanContext, upsertActionPlanReviewReminder, caseData } = useCaseWorkspace();
   const currentUser = useCurrentUser();
   const [form, setForm] = useState(defaultForm);
   const [loading, setLoading] = useState(false);
@@ -152,6 +152,7 @@ const NewActionPlanModal = ({
           reviewDate: form.reviewDate || null,
           summary: form.summary || null,
         });
+        await upsertActionPlanReviewReminder({ ...plan, ...updated }, form.reviewDate || null);
         setLoading(false);
         if (onSaved) onSaved(updated);
       } else {
@@ -162,6 +163,9 @@ const NewActionPlanModal = ({
           summary: form.summary || null,
           ownerStaffProfileId: currentUser?.userId || caseData?.owner?.id || null,
         });
+        if (form.reviewDate) {
+          await upsertActionPlanReviewReminder(created, form.reviewDate);
+        }
         setLoading(false);
         setForm(defaultForm);
         onCreated(created);

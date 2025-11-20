@@ -15305,6 +15305,8 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
        c.application_id,
        c.assigned_to_user_id,
        c.portfolio_region_id,
+       c.tracking_id,
+       c.case_number,
        sp.region_id AS owner_region_id
      FROM iset_case c
      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
@@ -15368,9 +15370,9 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
 
   const planStatus = 'draft';
   const metadata = summary ? { summary } : null;
+  const caseIdentifier = caseRow.case_number || caseRow.tracking_id || `Case #${caseId}`;
 
   let connection;
-  const pendingReminderCreates = [];
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -15409,6 +15411,51 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
         summary: summary || null,
         interventionCount: 0,
       };
+
+    // Create a reminder for the plan review date (if provided)
+    try {
+      if (reviewDate) {
+        const reminderDueAt = parseReminderDateInput(`${reviewDate}T08:00:00`, 'due_at');
+        let ownerEmail = null;
+        if (resolvedOwnerStaffProfileId) {
+          try {
+            const [[ownerRow]] = await pool.query(
+              'SELECT email, display_name FROM staff_profiles WHERE id = ? LIMIT 1',
+              [resolvedOwnerStaffProfileId]
+            );
+            ownerEmail = ownerRow?.email || ownerRow?.display_name || null;
+          } catch (_) {
+            ownerEmail = null;
+          }
+        }
+        const titleParts = ['Action plan review', caseIdentifier];
+        if (ownerEmail) titleParts.push(ownerEmail);
+        const reminderTitle = titleParts.join(' — ');
+        const insertReminderSql = `INSERT INTO iset_case_reminder
+          (case_id, application_id, action_plan_id, intervention_id, title, description, category, status, due_at, completed_at, completed_by_staff_profile_id, assigned_staff_profile_id, metadata_json, created_by_staff_profile_id, updated_by_staff_profile_id)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+        const insertReminderParams = [
+          caseId,
+          Number.isFinite(caseRow.application_id) ? caseRow.application_id : null,
+          payload.id,
+          null,
+          reminderTitle,
+          summary || null,
+          'Action plan',
+          'open',
+          reminderDueAt,
+          null,
+          null,
+          resolvedOwnerStaffProfileId || null,
+          null,
+          resolvedOwnerStaffProfileId || null,
+          resolvedOwnerStaffProfileId || null
+        ];
+        await pool.query(insertReminderSql, insertReminderParams);
+      }
+    } catch (remErr) {
+      console.warn('[action-plan] failed to create review reminder', remErr?.message || remErr);
+    }
 
     res.status(201).json(payload);
   } catch (error) {
