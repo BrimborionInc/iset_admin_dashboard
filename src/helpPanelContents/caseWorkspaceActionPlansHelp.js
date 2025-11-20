@@ -10,6 +10,7 @@ const CaseWorkspaceActionPlansHelp = () => (
     <h3>Common actions</h3>
     <ul>
       <li><strong>View plan:</strong> Open the summary to edit the name, description, key dates, and outcome details.</li>
+      <li><strong>Client context:</strong> Update employment/education, NOC version/code, childcare, and barrier/priority answers. Edits save to the case-level context and are shared across every plan for the client.</li>
       <li><strong>Activate:</strong> Move a draft into service when work begins. Only one plan can be active per case.</li>
       <li><strong>Close:</strong> Record the result code and completion date once every intervention is finished.</li>
       <li><strong>Archive:</strong> Hide closed or unused drafts from the main list while preserving the history.</li>

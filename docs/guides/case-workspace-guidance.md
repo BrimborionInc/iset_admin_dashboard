@@ -47,6 +47,7 @@ Use this note when spinning up a fresh chat so the LLM has the context it needs 
 ## 5. Recent Fixes & Behavioural Updates
 - Action plan editing bug: sending ISO timestamps caused DB errors; now we convert to `YYYY-MM-DD`.
 - Action plan table default selection: sorts by recency and picks the newest plan.
+- Client context now lives in `iset_case.case_context_json`. The Action Plan details modal exposes those client-centric fields (employment status, education, NOC version/code lookup, childcare, barriers/priorities, previous ISET) for editing; saves PATCH `/api/cases/:id` and the values are shared across all plans in the workspace payload.
 - Action plan review dates now drive reminders: creating or updating a plan with a review date upserts an open reminder via `/api/reminders` (case + action_plan scoped, assigned to the plan owner when available). Clearing the review date cancels the reminder. Reminders are set to 8:00 AM local so they surface at the start of the day and trigger `case-reminders-refresh` for the calendar.
 - Interventions table cost column: picks up persisted totals even after editing, thanks to new metadata merge logic.
 - CR-0011 is complete (both persistence and hydration).

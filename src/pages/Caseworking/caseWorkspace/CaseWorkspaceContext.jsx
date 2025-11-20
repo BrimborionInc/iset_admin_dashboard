@@ -397,6 +397,7 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
       openInterventions: normaliseCount(counts.openInterventions),
       totalInterventions: normaliseCount(counts.totalInterventions),
     },
+    caseContext: payload.caseContext ?? payload.case_context ?? null,
     actionPlans,
     documents: Array.isArray(payload.documents) ? payload.documents : [],
     notes: Array.isArray(payload.notes) ? payload.notes : [],
@@ -425,6 +426,7 @@ const CaseWorkspaceContext = createContext({
   prepareIlmpExport: () => Promise.resolve({}),
   fetchActionPlanContext: () => Promise.resolve({}),
   upsertActionPlanReviewReminder: () => Promise.resolve(),
+  saveCaseContext: () => Promise.resolve(),
   interventionCodes: [],
   interventionCodesLoading: false,
   loadInterventionCodes: () => Promise.resolve([]),
@@ -1198,6 +1200,48 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     return response.json();
   }, [caseId]);
 
+  const saveCaseContext = useCallback(
+    async (payload) => {
+      if (!caseId) {
+        const err = new Error("Case not loaded.");
+        err.status = 400;
+        throw err;
+      }
+      const response = await apiFetch(`/api/cases/${caseId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caseContext: payload ?? null }),
+      });
+      if (!response.ok) {
+        let details = null;
+        try {
+          details = await response.json();
+        } catch (_) {
+          details = null;
+        }
+        const message =
+          details?.message ||
+          details?.error ||
+          `Failed to save client context (${response.status})`;
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+      }
+      setState(prev => {
+        if (!prev.caseData) return prev;
+        return {
+          ...prev,
+          caseData: {
+            ...prev.caseData,
+            caseContext: payload ?? null,
+          },
+        };
+      });
+      return payload ?? null;
+    },
+    [apiFetch, caseId]
+  );
+
   const contextValue = useMemo(() => ({
     caseId,
     caseData: state.caseData,
@@ -1213,6 +1257,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     prepareIlmpExport,
     fetchActionPlanContext,
     upsertActionPlanReviewReminder,
+    saveCaseContext,
     interventionCodes,
     interventionCodesLoading,
     loadInterventionCodes,
@@ -1231,7 +1276,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     archiveActionPlan,
     selectedActionPlanId,
     setSelectedActionPlanId,
-  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, fetchActionPlanContext, upsertActionPlanReviewReminder, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, archiveActionPlan, selectedActionPlanId]);
+  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, archiveActionPlan, selectedActionPlanId]);
 
   return (
     <CaseWorkspaceContext.Provider value={contextValue}>

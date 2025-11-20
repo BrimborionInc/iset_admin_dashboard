@@ -11,6 +11,7 @@ import ActionPlansWidget from "./caseWorkspace/widgets/ActionPlansWidget.jsx";
 import InterventionsWidget from "./caseWorkspace/widgets/InterventionsWidget.jsx";
 import FinancePanelWidget from "./caseWorkspace/widgets/FinancePanelWidget.jsx";
 import CompliancePanelWidget from "./caseWorkspace/widgets/CompliancePanelWidget.jsx";
+import ParticipantDetailsWidget from "./caseWorkspace/widgets/ParticipantDetailsWidget.jsx";
 import ExportPreviewWidget from "./caseWorkspace/widgets/ExportPreviewWidget.jsx";
 import CaseWorkspaceCaseHeaderHelp from "../../helpPanelContents/caseWorkspaceCaseHeaderHelp.js";
 import SupportingDocumentsHelp from "../../helpPanelContents/supportingDocumentsHelp.js";
@@ -21,6 +22,7 @@ import CaseWorkspaceActionPlansHelp from "../../helpPanelContents/caseWorkspaceA
 import CaseWorkspaceInterventionsHelp from "../../helpPanelContents/caseWorkspaceInterventionsHelp.js";
 import CaseWorkspaceFinancePanelHelp from "../../helpPanelContents/caseWorkspaceFinancePanelHelp.js";
 import CaseWorkspaceCompliancePanelHelp from "../../helpPanelContents/caseWorkspaceCompliancePanelHelp.js";
+import CaseWorkspaceParticipantDetailsHelp from "../../helpPanelContents/caseWorkspaceParticipantDetailsHelp.js";
 import CaseWorkspaceExportPreviewHelp from "../../helpPanelContents/caseWorkspaceExportPreviewHelp.js";
 import CaseWorkspaceHelp from "../../helpPanelContents/caseWorkspaceHelp.js";
 import { CaseWorkspaceProvider } from "./caseWorkspace/CaseWorkspaceContext.jsx";
@@ -138,10 +140,23 @@ const widgetRegistry = {
     helpTitle: "Export preview",
     aiContext: CaseWorkspaceExportPreviewHelp.aiContext,
   },
+  participantDetails: {
+    id: "participantDetails",
+    defaultRowSpan: 3,
+    defaultColumnSpan: 4,
+    component: ParticipantDetailsWidget,
+    title: "Participant details",
+    description:
+      "Refer to the application form for the original submission. Caseworkers must keep these details current based on participant updates. Handle this sensitive personal data carefully and avoid duplicating it elsewhere.",
+    helpComponent: CaseWorkspaceParticipantDetailsHelp,
+    helpTitle: "Participant details",
+    aiContext: CaseWorkspaceParticipantDetailsHelp.aiContext,
+  },
 };
 
 const defaultLayout = [
   { id: "caseHeader", rowSpan: 2, columnSpan: 4 },
+  { id: "participantDetails", rowSpan: 3, columnSpan: 2 },
   { id: "actionPlans", rowSpan: 4, columnSpan: 2 },
   { id: "interventions", rowSpan: 4, columnSpan: 2 },
   { id: "case-calendar", rowSpan: 4, columnSpan: 2 },

@@ -46,6 +46,7 @@ function ensureDirectoryExists(dirPath) {
       console.warn('[admin:uploads] failed to ensure directory %s: %s', dirPath, err.message);
       throw err;
     }
+
   }
 }
 
@@ -653,8 +654,12 @@ function extractGender(context) {
   const personal = payload.personal || {};
   const candidates = [
     personal.gender,
+    personal.gender_identity,
+    personal.genderIdentity,
     personal.sex,
     answers.gender,
+    answers.gender_identity,
+    answers.genderIdentity,
     answers['personal-gender'],
     answers['sex'],
     answers['gender-identity'],
@@ -1728,6 +1733,26 @@ function runIlmpValidation(context) {
   extracted.addressProvince = address.province ? String(address.province).toUpperCase() : null;
   extracted.postalCode = address.postalCode || null;
 
+  // Project intake answers / case context onto extracted gender if assessment or context lacked it.
+  if (!extracted.gender) {
+    const answers = context?.answers || {};
+    const fromAnswers =
+      normaliseString(answers.gender) ||
+      normaliseString(answers.gender_identity) ||
+      normaliseString(answers.genderIdentity) ||
+      normaliseString(answers['personal-gender']) ||
+      normaliseString(answers['gender-identity']) ||
+      normaliseString(answers['what-is-your-gender-identity']) ||
+      normaliseString(answers['sex']);
+    if (fromAnswers) {
+      const mapped = GENDER_VALUE_MAP[fromAnswers.toLowerCase()];
+      extracted.gender = mapped || fromAnswers.toLowerCase();
+    } else if (context?.caseContext?.gender) {
+      const mapped = GENDER_VALUE_MAP[String(context.caseContext.gender).toLowerCase()];
+      extracted.gender = mapped || String(context.caseContext.gender).toLowerCase();
+    }
+  }
+
   const fieldKeys = Object.keys(ILMP_PARTICIPANT_RULES.fields);
   fieldKeys.forEach(key => {
     const fieldDef = ILMP_PARTICIPANT_RULES.fields[key];
@@ -2131,6 +2156,15 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   const childcareFunding = assessmentRow.childcare_funding_details
     ? String(assessmentRow.childcare_funding_details).trim()
     : null;
+  const previousIsetValue = assessmentRow.previous_iset;
+  const previousIsetBoolean =
+    previousIsetValue === null || typeof previousIsetValue === 'undefined'
+      ? null
+      : Number(previousIsetValue) === 1
+        ? true
+        : Number(previousIsetValue) === 0
+          ? false
+          : null;
 
   const programName = assessmentRow.program_name ? String(assessmentRow.program_name).trim() : null;
   const institution = assessmentRow.institution ? String(assessmentRow.institution).trim() : null;
@@ -2229,6 +2263,144 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       planMetadata ? JSON.stringify(planMetadata) : null,
     ]
   );
+
+  // Seed case_context_json from assessment if empty
+  try {
+    const [contextRows] = await connection.query(
+      'SELECT case_context_json FROM iset_case WHERE id = ? FOR UPDATE',
+      [caseId]
+    );
+    const existingContext = contextRows && contextRows[0] ? contextRows[0].case_context_json : null;
+    if (!existingContext) {
+      const parseArrayLocal = (value) => {
+        if (!value) return [];
+        if (Array.isArray(value)) return value;
+        if (typeof value === 'string') {
+          try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) return parsed;
+          } catch (_) {}
+          return value
+            .split(',')
+            .map(entry => String(entry).trim())
+            .filter(Boolean);
+        }
+        return [];
+      };
+      let applicationAnswers = {};
+      let applicationPayloadObj = {};
+      let applicationPersonal = {};
+      if (caseRow.application_id) {
+        try {
+          const appPayload = await readApplicationPayload(connection, caseRow.application_id, { forUpdate: false });
+          applicationPayloadObj = appPayload?.payload || {};
+          applicationPersonal = applicationPayloadObj.personal || {};
+          applicationAnswers = sanitiseAnswersPayload(applicationPayloadObj.answers || {});
+        } catch (_) {
+          applicationAnswers = {};
+        }
+      }
+      const readAnswer = key => {
+        if (!applicationAnswers || typeof applicationAnswers !== 'object') return null;
+        const raw = applicationAnswers[key];
+        if (raw === null || typeof raw === 'undefined') return null;
+        if (Array.isArray(raw)) return raw;
+        if (typeof raw === 'object') return raw;
+        return String(raw).trim();
+      };
+      const readFirstAnswer = (...keys) => {
+        for (const key of keys) {
+          if (!key) continue;
+          const value = readAnswer(key);
+          if (value !== null && typeof value !== 'undefined') {
+            return value;
+          }
+        }
+        return null;
+      };
+      const normaliseYesNo = value => {
+        if (value === null || typeof value === 'undefined') return null;
+        const trimmed = String(value).trim().toLowerCase();
+        if (['1', 'yes', 'true', 'y', 'on'].includes(trimmed)) return 'yes';
+        if (['0', 'no', 'false', 'n', 'off'].includes(trimmed)) return 'no';
+        return null;
+      };
+      const normaliseGenderValue = value => {
+        if (value === null || typeof value === 'undefined') return null;
+        const trimmed = normaliseString(value);
+        if (!trimmed) return null;
+        const mapped = GENDER_VALUE_MAP[trimmed.toLowerCase()];
+        return mapped || trimmed.toLowerCase();
+      };
+
+      const applicationEmploymentStatus = readFirstAnswer('employment-status', 'labour-force-status');
+      const applicationEducationLevel = readFirstAnswer('education-level', 'education-highest-level', 'example-radio-2');
+      const applicationSocialAssistance = normaliseYesNo(readFirstAnswer('social-assistance', 'receives-social-assistance'));
+      const applicationEmploymentInsurance = normaliseYesNo(
+        readFirstAnswer('employment-insurance-status', 'employment-insurance', 'ei-status', 'ei-benefits')
+      );
+      const applicationChildcareNeed = normaliseYesNo(readFirstAnswer('childcare-need', 'childcare-required'));
+      const applicationChildcareFunding = readFirstAnswer('childcare-funding', 'childcare-supported');
+      const applicationEmploymentGoals = readFirstAnswer('long-term-goal', 'short-term-goal', 'employment-goals');
+      const applicationEmploymentBarriers = parseArrayLocal(readFirstAnswer('barriers'));
+      const applicationLocalPriorities = parseArrayLocal(readFirstAnswer('local-area-priorities'));
+      const applicationPreviousIset = normaliseYesNo(readFirstAnswer('previous-iset', 'previously-funded'));
+      const applicationPreviousIsetDetails = readFirstAnswer('previous-iset-details', 'previously-funded-details');
+      const applicationOtherFunding = readFirstAnswer('other-funding-details', 'other-funding');
+      const applicationDob =
+        toDateOnlyString(applicationPersonal.date_of_birth || applicationPersonal.dateOfBirth || readFirstAnswer('date-of-birth')) || null;
+      const applicationGender =
+        normaliseGenderValue(applicationPersonal.gender || applicationPersonal.gender_identity || applicationPersonal.genderIdentity || applicationPersonal.sex) ||
+        normaliseGenderValue(
+          readFirstAnswer(
+            'gender',
+            'personal-gender',
+            'gender-identity',
+            'gender_identity',
+            'genderIdentity',
+            'what-is-your-gender-identity',
+            'sex'
+          )
+        ) ||
+        null;
+      const applicationAddress =
+        applicationPersonal.address ||
+        applicationPersonal.home_address ||
+        applicationPersonal.homeAddress ||
+        null;
+
+      const seedContext = pruneNullish({
+        employmentGoals: assessmentRow?.employment_goals || applicationEmploymentGoals || null,
+        employmentStatus: applicationEmploymentStatus || null,
+        educationLevel: applicationEducationLevel || null,
+        employmentNocVersion: nocVersion || null,
+        employmentNoc: noc || null,
+        socialAssistance: applicationSocialAssistance,
+        employmentInsurance: applicationEmploymentInsurance,
+        childcareNeed: applicationChildcareNeed || childcareNeed || null,
+        childcareFunding: applicationChildcareFunding || childcareFunding || null,
+        employmentBarriers: parseArrayLocal(assessmentRow?.employment_barriers) || applicationEmploymentBarriers || [],
+        localAreaPriorities: parseArrayLocal(assessmentRow?.local_area_priorities) || applicationLocalPriorities || [],
+        previousIset:
+          applicationPreviousIset ??
+          (previousIsetBoolean ? 'yes' : previousIsetBoolean === false ? 'no' : null),
+        previousIsetDetails: applicationPreviousIsetDetails || assessmentRow?.previous_iset_details || null,
+        otherFunding: assessmentRow?.other_funding_details || applicationOtherFunding || null,
+        gender: applicationGender || null,
+        dateOfBirth: applicationDob || null,
+        address: pruneNullish(applicationAddress) || undefined,
+        applicationPersonal: pruneNullish(applicationPersonal) || undefined,
+        applicationAnswers: Object.keys(applicationAnswers || {}).length ? applicationAnswers : undefined,
+        applicationPayload: pruneNullish(applicationPayloadObj) || undefined,
+      });
+      await connection.query(
+        'UPDATE iset_case SET case_context_json = ? WHERE id = ?',
+        [Object.keys(seedContext).length ? JSON.stringify(seedContext) : null, caseId]
+      );
+    }
+  } catch (seedErr) {
+    console.warn('[auto-plan] failed to seed case_context_json', seedErr?.message || seedErr);
+  }
 
   const planId = planInsert.insertId;
   const interventionTitleCandidates = [
@@ -2608,6 +2780,10 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       err.statusCode = 404;
       throw err;
     }
+    const caseContext =
+      caseRow.case_context_json && typeof caseRow.case_context_json === 'string'
+        ? safeJsonParse(caseRow.case_context_json, null)
+        : caseRow.case_context_json || null;
 
     let caseActionPlans = [];
     try {
@@ -2695,6 +2871,7 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       submissionId: numericId,
       submissionRow,
       caseRow,
+      caseContext,
       caseAssessmentRow,
       caseActionPlans,
       applicationId,
@@ -13973,6 +14150,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         c.closed_at,
         c.updated_at,
         c.next_action_due_at,
+        c.case_context_json,
         COALESCE(task_counts.open_task_count, 0) AS open_task_count,
         COALESCE(task_counts.overdue_task_count, 0) AS overdue_task_count,
         COALESCE(intervention_counts.open_intervention_count, 0) AS open_intervention_count,
@@ -14603,6 +14781,8 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       console.warn('[workspace] failed to load assessment for case', caseId, err);
     }
 
+    const caseContext = parseJsonField(row.case_context_json, null);
+
     const DEFAULT_ITP_PAYLOAD = { tuition: '', books: '', materials: '', living: '' };
     const DEFAULT_WAGE_PAYLOAD = { wages: '', mercs: '', nonwages: '', other: '' };
 
@@ -14632,10 +14812,10 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       firstDefined(assessmentRow?.intervention_cost_total, row.assessment_intervention_cost_total)
     );
     const interventionNocValue = toTrimmedStringOrNull(
-      firstDefined(assessmentRow?.intervention_related_noc, row.assessment_intervention_related_noc)
+      firstDefined(caseContext?.employmentNoc, assessmentRow?.intervention_related_noc, row.assessment_intervention_related_noc)
     );
     const interventionNocVersionValue = toTrimmedStringOrNull(
-      firstDefined(assessmentRow?.intervention_related_noc_version, row.assessment_intervention_related_noc_version)
+      firstDefined(caseContext?.employmentNocVersion, assessmentRow?.intervention_related_noc_version, row.assessment_intervention_related_noc_version)
     );
 
     const rawAssessmentItp = parseJsonField(
@@ -14674,15 +14854,16 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
 
     response.case_summary = assessmentRow?.overview ?? row.case_summary ?? null;
     response.assessment_date_of_assessment = toDateOnlyString(dateOfAssessmentRaw);
+    response.caseContext = caseContext || null;
     response.assessment_employment_goals =
-      assessmentRow?.employment_goals ?? row.assessment_employment_goals ?? null;
-    response.assessment_previous_iset = previousIsetNormalised;
+      firstDefined(caseContext?.employmentGoals, assessmentRow?.employment_goals, row.assessment_employment_goals) ?? null;
+    response.assessment_previous_iset = firstDefined(caseContext?.previousIset, previousIsetNormalised);
     response.assessment_previous_iset_details =
-      assessmentRow?.previous_iset_details ?? row.assessment_previous_iset_details ?? null;
+      firstDefined(caseContext?.previousIsetDetails, assessmentRow?.previous_iset_details, row.assessment_previous_iset_details) ?? null;
     response.assessment_employment_barriers = employmentBarriers;
     response.assessment_local_area_priorities = localAreaPriorities;
     response.assessment_other_funding_details =
-      assessmentRow?.other_funding_details ?? row.assessment_other_funding_details ?? null;
+      firstDefined(caseContext?.otherFunding, assessmentRow?.other_funding_details, row.assessment_other_funding_details) ?? null;
     response.assessment_esdc_eligibility =
       normaliseString(firstDefined(assessmentRow?.esdc_eligibility, row.assessment_esdc_eligibility)) || null;
     response.assessment_intervention_start_date = toDateOnlyString(startDateRaw);
@@ -14883,6 +15064,7 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
          c.application_id,
          c.assigned_to_user_id,
          c.portfolio_region_id,
+         c.case_context_json,
          sp.region_id AS owner_region_id
        FROM iset_case c
        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
@@ -14962,6 +15144,8 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
       [caseId]
     );
 
+    const caseContext = safeJsonParse(caseRow?.case_context_json, null) || null;
+
     let answers = {};
     if (caseRow.application_id) {
       const applicationPayload = await readApplicationPayload(connection, caseRow.application_id, { forUpdate: false });
@@ -15015,10 +15199,21 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
       return null;
     };
 
+    const firstDefined = (...values) => {
+      for (const value of values) {
+        if (value !== undefined && value !== null) return value;
+      }
+      return null;
+    };
+
     const employmentBarriers =
-      parseArray(assessmentRow?.employment_barriers) || parseArray(readAnswer('barriers'));
+      parseArray(caseContext?.employmentBarriers) ||
+      parseArray(assessmentRow?.employment_barriers) ||
+      parseArray(readAnswer('barriers'));
     const localAreaPriorities =
-      parseArray(assessmentRow?.local_area_priorities) || parseArray(readAnswer('local-area-priorities'));
+      parseArray(caseContext?.localAreaPriorities) ||
+      parseArray(assessmentRow?.local_area_priorities) ||
+      parseArray(readAnswer('local-area-priorities'));
 
     const normaliseYesNo = value => {
       if (value === null || typeof value === 'undefined') return null;
@@ -15028,9 +15223,13 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
       return null;
     };
 
-    const previousIsetNormalised = normaliseYesNo(assessmentRow?.previous_iset);
+    const previousIsetNormalised = normaliseYesNo(
+      caseContext?.previousIset ?? assessmentRow?.previous_iset
+    );
     const previousIsetBoolean = previousIsetNormalised === null ? null : previousIsetNormalised === 'yes';
-    const childcareNeedNormalised = normaliseYesNo(assessmentRow?.childcare_need);
+    const childcareNeedNormalised = normaliseYesNo(
+      caseContext?.childcareNeed ?? assessmentRow?.childcare_need
+    );
 
     const interventionCodeValue =
       assessmentRow && assessmentRow.intervention_code !== null && typeof assessmentRow.intervention_code !== 'undefined'
@@ -15048,31 +15247,32 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
       assessmentRow && assessmentRow.intervention_cost_total !== null && typeof assessmentRow.intervention_cost_total !== 'undefined'
         ? String(assessmentRow.intervention_cost_total)
         : null;
-    const interventionNocValue = assessmentRow?.intervention_related_noc
-      ? String(assessmentRow.intervention_related_noc).trim()
-      : null;
-    const interventionNocVersionValue = assessmentRow?.intervention_related_noc_version
-      ? String(assessmentRow.intervention_related_noc_version).trim()
-      : null;
+    const interventionNocValue =
+      caseContext?.employmentNoc ||
+      (assessmentRow?.intervention_related_noc ? String(assessmentRow.intervention_related_noc).trim() : null);
+    const interventionNocVersionValue =
+      caseContext?.employmentNocVersion ||
+      (assessmentRow?.intervention_related_noc_version ? String(assessmentRow.intervention_related_noc_version).trim() : null);
     const assessmentItp = safeJsonParse(assessmentRow?.itp_payload, assessmentRow?.itp_payload ?? null);
     const assessmentWage = safeJsonParse(assessmentRow?.wage_payload, assessmentRow?.wage_payload ?? null);
 
     const context = {
       eligibility: normaliseString(assessmentRow?.esdc_eligibility) || null,
       employmentGoals:
+        caseContext?.employmentGoals ||
         assessmentRow?.employment_goals ||
         normaliseString(readFirstAnswer('long-term-goal', 'short-term-goal', 'employment-goals')) ||
         null,
-      previousIset: previousIsetBoolean,
-      previousIsetDetails: assessmentRow?.previous_iset_details || null,
+      previousIset: caseContext?.previousIset ?? previousIsetBoolean,
+      previousIsetDetails: caseContext?.previousIsetDetails || assessmentRow?.previous_iset_details || null,
       employmentBarriers,
       localAreaPriorities,
-      otherFunding: assessmentRow?.other_funding_details || null,
-      labourForceStatus: readFirstAnswer('labour-force-status', 'employment-status') || null,
-      employmentNoc: readFirstAnswer('action-plan-result-related-noc', 'current-noc') || null,
-      employmentNocVersion:
-        readFirstAnswer('action-plan-result-related-noc-version', 'current-noc-version') || null,
+      otherFunding: caseContext?.otherFunding || assessmentRow?.other_funding_details || null,
+      labourForceStatus: caseContext?.employmentStatus || readFirstAnswer('labour-force-status', 'employment-status') || null,
+      employmentNoc: caseContext?.employmentNoc || interventionNocValue || readFirstAnswer('action-plan-result-related-noc', 'current-noc') || null,
+      employmentNocVersion: caseContext?.employmentNocVersion || interventionNocVersionValue || readFirstAnswer('action-plan-result-related-noc-version', 'current-noc-version') || null,
       educationLevel:
+        caseContext?.educationLevel ||
         readFirstAnswer(
           'action-plan-result-education-level',
           'example-radio-2',
@@ -15081,10 +15281,12 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
         ) ||
         null,
       childcareNeed:
+        caseContext?.childcareNeed ||
         childcareNeedNormalised ||
         readFirstAnswer('action-plan-childcare-need', 'childcare-need', 'childcare-required') ||
         null,
       childcareFunding:
+        caseContext?.childcareFunding ||
         assessmentRow?.childcare_funding_details ||
         readFirstAnswer(
           'action-plan-childcare-funded-code',
@@ -15093,8 +15295,9 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
           'childcare-supported'
         ) ||
         null,
-      socialAssistance: readFirstAnswer('social-assistance', 'receives-social-assistance') || null,
+      socialAssistance: caseContext?.socialAssistance || readFirstAnswer('social-assistance', 'receives-social-assistance') || null,
       employmentInsurance:
+        caseContext?.employmentInsurance ||
         readFirstAnswer(
           'employment-insurance-status',
           'employment-insurance',
@@ -15111,12 +15314,12 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
 
     const assessmentPayload = {
       case_summary: assessmentRow?.overview || null,
-      assessment_employment_goals: assessmentRow?.employment_goals || null,
-      assessment_previous_iset: normaliseYesNo(assessmentRow?.previous_iset),
-      assessment_previous_iset_details: assessmentRow?.previous_iset_details || null,
+      assessment_employment_goals: caseContext?.employmentGoals || assessmentRow?.employment_goals || null,
+      assessment_previous_iset: normaliseYesNo(firstDefined(caseContext?.previousIset, assessmentRow?.previous_iset)),
+      assessment_previous_iset_details: caseContext?.previousIsetDetails || assessmentRow?.previous_iset_details || null,
       assessment_employment_barriers: employmentBarriers,
       assessment_local_area_priorities: localAreaPriorities,
-      assessment_other_funding_details: assessmentRow?.other_funding_details || null,
+      assessment_other_funding_details: caseContext?.otherFunding || assessmentRow?.other_funding_details || null,
       assessment_esdc_eligibility: normaliseString(assessmentRow?.esdc_eligibility) || null,
       assessment_intervention_start_date: assessmentRow?.intervention_start_date ? toDateOnlyString(assessmentRow.intervention_start_date) : null,
       assessment_intervention_end_date: assessmentRow?.intervention_end_date ? toDateOnlyString(assessmentRow.intervention_end_date) : null,
@@ -15136,7 +15339,7 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
       assessment_justification: assessmentRow?.justification || null,
     };
 
-    res.json({ context, ...assessmentPayload });
+    res.json({ context, caseContext: caseContext || null, ...assessmentPayload });
   } catch (error) {
     console.error('GET /api/cases/:id/action-plan/context failed:', error);
     res.status(500).json({ error: 'action_plan_context_failed', detail: error?.message || String(error) });
@@ -15393,6 +15596,54 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
         metadata ? JSON.stringify(metadata) : null,
       ]
     );
+
+    // Seed case_context_json from assessment if empty
+    try {
+      const [contextRows] = await connection.query(
+        'SELECT case_context_json FROM iset_case WHERE id = ? FOR UPDATE',
+        [caseId]
+      );
+      const existingContext = contextRows && contextRows[0] ? contextRows[0].case_context_json : null;
+      if (!existingContext) {
+        const parseArrayLocal = (value) => {
+          if (!value) return [];
+          if (Array.isArray(value)) return value;
+          if (typeof value === 'string') {
+            try {
+              const parsed = JSON.parse(value);
+              if (Array.isArray(parsed)) return parsed;
+            } catch (_) {}
+            return value
+              .split(',')
+              .map(entry => String(entry).trim())
+              .filter(Boolean);
+          }
+          return [];
+        };
+        const seedContext = pruneNullish({
+          employmentGoals: assessmentRow?.employment_goals || null,
+          employmentStatus: null,
+          educationLevel: null,
+          employmentNocVersion: assessmentRow?.intervention_related_noc_version ? String(assessmentRow.intervention_related_noc_version).trim() : null,
+          employmentNoc: assessmentRow?.intervention_related_noc ? String(assessmentRow.intervention_related_noc).trim() : null,
+          socialAssistance: null,
+          employmentInsurance: null,
+          childcareNeed: childcareNeed || null,
+          childcareFunding: childcareFunding || null,
+          employmentBarriers: parseArrayLocal(assessmentRow?.employment_barriers) || [],
+          localAreaPriorities: parseArrayLocal(assessmentRow?.local_area_priorities) || [],
+          previousIset: previousIsetBoolean ? 'yes' : previousIsetBoolean === false ? 'no' : null,
+          previousIsetDetails: assessmentRow?.previous_iset_details || null,
+          otherFunding: assessmentRow?.other_funding_details || null,
+        });
+        await connection.query(
+          'UPDATE iset_case SET case_context_json = ? WHERE id = ?',
+          [Object.keys(seedContext).length ? JSON.stringify(seedContext) : null, caseId]
+        );
+      }
+    } catch (seedErr) {
+      console.warn('[action-plan] failed to seed case_context_json', seedErr?.message || seedErr);
+    }
 
     await connection.commit();
     await recomputeCaseStatus(caseId, connection);
@@ -21104,10 +21355,26 @@ app.put('/api/cases/:id', async (req, res) => {
 
   const lockConfig = await readLockConfig();
   const toNull = v => (v === undefined || v === null || v === '' ? null : v);
+  const toJsonParsed = (val) => {
+    if (typeof val === 'undefined') return undefined;
+    if (val === null) return null;
+    if (typeof val === 'string') {
+      const trimmed = val.trim();
+      if (!trimmed) return null;
+      try { return JSON.parse(trimmed); } catch { return null; }
+    }
+    if (typeof val === 'object') return val;
+    return null;
+  };
   const toJsonValue = (val, fallback) => {
     if (typeof val === 'undefined') return undefined;
     if (val === null) return null;
     try { return JSON.stringify(val); } catch { return JSON.stringify(fallback); }
+  };
+  const toParsedJsonValue = val => {
+    if (typeof val === 'undefined') return undefined;
+    if (val === null) return null;
+    return toJsonParsed(val);
   };
   const toTinyInt = (val) => {
     if (typeof val === 'undefined') return undefined;
@@ -21155,8 +21422,8 @@ app.put('/api/cases/:id', async (req, res) => {
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
-    const [[existingCase]] = await conn.query(
-      `SELECT c.status, c.application_id, c.client_id, c.assigned_to_user_id, a.row_version,
+  const [[existingCase]] = await conn.query(
+      `SELECT c.status, c.application_id, c.client_id, c.assigned_to_user_id, c.case_context_json, a.row_version,
               al.owner_user_id AS lock_owner_user_id,
               al.owner_display_name AS lock_owner_display_name,
               al.owner_email AS lock_owner_email,
@@ -21312,6 +21579,9 @@ app.put('/api/cases/:id', async (req, res) => {
 
     const conflictSignatureRequested = Object.prototype.hasOwnProperty.call(body, 'assessment_conflict_declaration_signed');
     const hasAssessmentPayload = assessmentKeys.some(key => Object.prototype.hasOwnProperty.call(body, key));
+    const hasCaseContextPayload =
+      Object.prototype.hasOwnProperty.call(body, 'caseContext') ||
+      Object.prototype.hasOwnProperty.call(body, 'case_context');
 
     if (hasAssessmentPayload) {
       const insertColumns = ['case_id'];
@@ -21363,6 +21633,19 @@ app.put('/api/cases/:id', async (req, res) => {
         );
         bumpApplicationRowVersion = true;
       }
+    }
+
+    if (hasCaseContextPayload) {
+      const providedContext =
+        Object.prototype.hasOwnProperty.call(body, 'caseContext') ? body.caseContext : body.case_context;
+      const parsedContext = toParsedJsonValue(providedContext);
+      const jsonValue =
+        typeof parsedContext === 'undefined'
+          ? null
+          : parsedContext === null
+            ? null
+            : JSON.stringify(parsedContext);
+      await conn.query('UPDATE iset_case SET case_context_json = ? WHERE id = ?', [jsonValue, caseId]);
     }
 
     if (conflictSignatureRequested) {
