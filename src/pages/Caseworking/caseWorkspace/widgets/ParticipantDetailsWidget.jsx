@@ -5,6 +5,7 @@ import {
   Autosuggest,
   Box,
   Button,
+  ButtonDropdown,
   ColumnLayout,
   CopyToClipboard,
   DatePicker,
@@ -12,6 +13,7 @@ import {
   Header,
   ExpandableSection,
   Input,
+  Link,
   Select,
   Textarea,
   SpaceBetween,
@@ -23,10 +25,60 @@ import { apiFetch } from "../../../../auth/apiClient.js";
 
 const genderOptions = [
   { value: "", label: "Not set" },
-  // ESDC expected values: male, female, unspecified
-  { value: "male", label: "Male" },
   { value: "female", label: "Female" },
-  { value: "unspecified", label: "Unspecified" },
+  { value: "male", label: "Male" },
+];
+
+const yesNoOptions = [
+  { value: "", label: "Not set" },
+  { value: "yes", label: "Yes" },
+  { value: "no", label: "No" },
+];
+
+const normalizeYesNo = value => {
+  if (value === null || typeof value === "undefined") return "";
+  const trimmed = String(value).trim().toLowerCase();
+  if (["yes", "y", "true", "1"].includes(trimmed)) return "yes";
+  if (["no", "n", "false", "0"].includes(trimmed)) return "no";
+  return trimmed || "";
+};
+
+const genderIdentityOptions = [
+  { value: "", label: "Not set" },
+  { value: "female", label: "Female" },
+  { value: "male", label: "Male" },
+  { value: "other", label: "Other" },
+];
+
+const legalIndigenousIdentityOptions = [
+  { value: "", label: "Not set" },
+  { value: "first_nations_status", label: "First Nations (Status)" },
+  { value: "first_nations_non_status", label: "First Nations (Non-Status)" },
+  { value: "inuit", label: "Inuit" },
+  { value: "metis", label: "Metis" },
+];
+
+const preferredLanguageOptions = [
+  { value: "", label: "Not set" },
+  { value: "en", label: "English" },
+  { value: "fr", label: "French" },
+];
+
+const maritalStatusOptions = [
+  { value: "", label: "Not set" },
+  { value: "married", label: "Married or equivalent" },
+  { value: "single", label: "Single" },
+  { value: "separated", label: "Separated" },
+  { value: "divorced", label: "Divorced" },
+  { value: "widowed", label: "Widowed" },
+];
+
+const eiStatusOptions = [
+  { value: "", label: "Not set" },
+  { value: "receiving", label: "Receiving EI" },
+  { value: "active_claim", label: "Active claim" },
+  { value: "not_receiving", label: "Not receiving EI" },
+  { value: "unknown", label: "Unknown" },
 ];
 
 const cleanSin = (raw = "") => {
@@ -66,7 +118,7 @@ const provinceOptions = [
   "OT",
 ].map(code => ({ value: code, label: code }));
 
-const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
+const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const { caseData, saveCaseContext } = useCaseWorkspace();
   const caseContext = caseData?.caseContext || {};
   const [editing, setEditing] = useState(false);
@@ -110,12 +162,30 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
     agesOfChildren: "",
     eiStatus: "",
     hasDisability: "",
-    disabilitySupport: "",
     disabilityDescription: "",
     homeCommunity: "",
   });
   const [bandSearchOptions, setBandSearchOptions] = useState({ home: [] });
   const [bandSearchLoading, setBandSearchLoading] = useState({ home: false });
+
+  const infoLink = metadata.helpComponent && toggleHelpPanel ? (
+    <Link
+      variant="info"
+      onFollow={event => {
+        event.preventDefault();
+        const helpContent = React.createElement(metadata.helpComponent);
+        toggleHelpPanel(helpContent, metadata.helpTitle ?? "Participant details", metadata.aiContext ?? "");
+      }}
+    >
+      Info
+    </Link>
+  ) : undefined;
+
+  const handleSettingsClick = ({ detail }) => {
+    if (detail?.id === "remove" && typeof actions.removeItem === "function") {
+      actions.removeItem();
+    }
+  };
 
   const searchIndigenousBands = useCallback(
     async (query, key = "home") => {
@@ -211,13 +281,6 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
       readAnswer("social-insurance-number") ||
       readAnswer("sin") ||
       "";
-    const normaliseYesNo = value => {
-      if (value === null || typeof value === "undefined") return "";
-      const trimmed = String(value).trim().toLowerCase();
-      if (["yes", "y", "true", "1"].includes(trimmed)) return "yes";
-      if (["no", "n", "false", "0"].includes(trimmed)) return "no";
-      return String(value);
-    };
     setForm({
       firstName: caseContext.firstName || personal.first_name || personal.firstName || readAnswer("first-name") || "",
       lastName: caseContext.lastName || personal.last_name || personal.lastName || readAnswer("last-name") || "",
@@ -263,13 +326,14 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
       registrationNumber:
         caseContext.registrationNumber || readAnswer("registration-number") || personal.registration_number || "",
       preferredLanguage: caseContext.preferredLanguage || readAnswer("preferred-language") || "",
-      visibleMinority: caseContext.visibleMinority || normaliseYesNo(readAnswer("visible-minority")) || "",
+      visibleMinority:
+        normalizeYesNo(caseContext.visibleMinority) || normalizeYesNo(readAnswer("visible-minority")) || "",
       maritalStatus: caseContext.maritalStatus || readAnswer("marital-status") || "",
       dependentChildren: caseContext.dependentChildren || readAnswer("dependent-children") || "",
       agesOfChildren: caseContext.agesOfChildren || readAnswer("ages-of-children") || "",
       eiStatus: caseContext.eiStatus || readAnswer("ei_status") || "",
-      hasDisability: caseContext.hasDisability || normaliseYesNo(readAnswer("has-disability")) || "",
-      disabilitySupport: caseContext.disabilitySupport || readAnswer("disability-support") || "",
+      hasDisability:
+        normalizeYesNo(caseContext.hasDisability) || normalizeYesNo(readAnswer("has-disability")) || "",
       disabilityDescription: caseContext.disabilityDescription || readAnswer("disability-description") || "",
       homeCommunity:
         caseContext.homeCommunity ||
@@ -289,11 +353,37 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
     () => provinceOptions.find(opt => opt.value === (form.addressProvince || "")) || null,
     [form.addressProvince]
   );
+  const selectedMailingProvince = useMemo(
+    () => provinceOptions.find(opt => opt.value === (form.mailingProvince || "")) || null,
+    [form.mailingProvince]
+  );
+  const selectedPreferredLanguage = useMemo(
+    () => preferredLanguageOptions.find(opt => opt.value === (form.preferredLanguage || "")) || preferredLanguageOptions[0],
+    [form.preferredLanguage]
+  );
+  const selectedVisibleMinority = useMemo(
+    () => yesNoOptions.find(opt => opt.value === (form.visibleMinority || "")) || yesNoOptions[0],
+    [form.visibleMinority]
+  );
+  const selectedHasDisability = useMemo(
+    () => yesNoOptions.find(opt => opt.value === (form.hasDisability || "")) || yesNoOptions[0],
+    [form.hasDisability]
+  );
+  const selectedMaritalStatus = useMemo(
+    () => maritalStatusOptions.find(opt => opt.value === (form.maritalStatus || "")) || maritalStatusOptions[0],
+    [form.maritalStatus]
+  );
+  const selectedEiStatus = useMemo(
+    () => eiStatusOptions.find(opt => opt.value === (form.eiStatus || "")) || eiStatusOptions[0],
+    [form.eiStatus]
+  );
 
   const handleSave = async () => {
     setError(null);
     setSuccess(null);
     const cleanedSin = cleanSin(form.sin || "");
+    const normalizedVisibleMinority = normalizeYesNo(form.visibleMinority);
+    const normalizedHasDisability = normalizeYesNo(form.hasDisability);
     if (cleanedSin && cleanedSin.length !== 9) {
       setError("Social Insurance Number must be 9 digits.");
       return;
@@ -337,13 +427,12 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
         indigenousAffiliation: form.indigenousAffiliation || null,
         registrationNumber: form.registrationNumber || null,
         preferredLanguage: form.preferredLanguage || null,
-        visibleMinority: form.visibleMinority || null,
+        visibleMinority: normalizedVisibleMinority || null,
         maritalStatus: form.maritalStatus || null,
         dependentChildren: form.dependentChildren || null,
         agesOfChildren: form.agesOfChildren || null,
         eiStatus: form.eiStatus || null,
-        hasDisability: form.hasDisability || null,
-        disabilitySupport: form.disabilitySupport || null,
+        hasDisability: normalizedHasDisability || null,
         disabilityDescription: form.disabilityDescription || null,
         homeCommunity: form.homeCommunity || null,
         applicationPersonal: {
@@ -409,13 +498,12 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
           "indigenous-affiliation-declaration": form.indigenousAffiliation || null,
           "registration-number": form.registrationNumber || null,
           "preferred-language": form.preferredLanguage || null,
-          "visible-minority": form.visibleMinority || null,
+          "visible-minority": normalizedVisibleMinority || null,
           "marital-status": form.maritalStatus || null,
           "dependent-children": form.dependentChildren || null,
           "ages-of-children": form.agesOfChildren || null,
           "ei_status": form.eiStatus || null,
-          "has-disability": form.hasDisability || null,
-          "disability-support": form.disabilitySupport || null,
+          "has-disability": normalizedHasDisability || null,
           "disability-description": form.disabilityDescription || null,
           "home-community": form.homeCommunity || null,
           "home-comminuty": form.homeCommunity || null,
@@ -465,6 +553,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
       header={
         <Header
           variant="h2"
+          info={infoLink}
           description={
             metadata.description ??
             "Refer to the application form for the original submission. Caseworkers must keep these details current based on participant updates. Handle this sensitive personal data carefully and avoid duplicating it elsewhere."
@@ -487,6 +576,16 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
           {metadata.title ?? "Participant details"}
         </Header>
       }
+      settings={
+        typeof actions.removeItem === "function" ? (
+          <ButtonDropdown
+            ariaLabel="Participant details settings"
+            variant="icon"
+            items={[{ id: "remove", text: "Remove widget" }]}
+            onItemClick={handleSettingsClick}
+          />
+        ) : undefined
+      }
       i18nStrings={boardItemI18nStrings}
     >
       <SpaceBetween size="m">
@@ -504,6 +603,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
           <ExpandableSection
             headerText="Participant identity"
             headerDescription="Core biographical details provided by the participant."
+            defaultExpanded
             defaultExpanded
           >
             <ColumnLayout columns={3} variant="text-grid">
@@ -572,12 +672,24 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
                 />
               </FormField>
               <FormField label="Gender identity" description="The gender identified with.">
-                <Input
-                  value={form.genderIdentity}
-                  onChange={({ detail }) => setForm(current => ({ ...current, genderIdentity: detail.value }))}
-                  readOnly={!editing}
-                  placeholder="Gender identity"
-                />
+                {editing ? (
+                  <Select
+                    options={genderIdentityOptions}
+                    selectedOption={genderIdentityOptions.find(option => option.value === form.genderIdentity) || genderIdentityOptions[0]}
+                    onChange={({ detail }) =>
+                      setForm(current => ({ ...current, genderIdentity: detail.selectedOption?.value || "" }))
+                    }
+                    placeholder="Select gender identity"
+                  />
+                ) : (
+                  <Input
+                    value={
+                      (genderIdentityOptions.find(option => option.value === form.genderIdentity) || genderIdentityOptions[0])
+                        .label
+                    }
+                    readOnly
+                  />
+                )}
               </FormField>
               <FormField label="Biological Sex" description="As recorded on the birth certificate">
                 {editing ? (
@@ -599,8 +711,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
           <ExpandableSection
             headerText="Contact details"
             headerDescription="Primary and alternate contact methods provided by the participant."
-            defaultExpanded
-          >
+        >
             <Tabs
               tabs={[
                 {
@@ -752,9 +863,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
                         {editing ? (
                           <Select
                             options={provinceOptions}
-                            selectedOption={
-                              provinceOptions.find(opt => opt.value === form.mailingProvince) || null
-                            }
+                            selectedOption={selectedMailingProvince}
                             onChange={({ detail }) =>
                               setForm(current => ({ ...current, mailingProvince: detail.selectedOption?.value || "" }))
                             }
@@ -813,19 +922,40 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
 
           <ExpandableSection
             headerText="Indigenous identity"
-            headerDescription="Self-identified nation/affiliation and registration details."
+            headerDescription="Legal Indigenous identity, community affiliation, home community, and registration details."
             defaultExpanded={false}
           >
             <ColumnLayout columns={3} variant="text-grid">
-              <FormField label="Legal Indigenous identity">
-                <Input
-                  value={form.indigenousIdentity}
-                  onChange={({ detail }) => setForm(current => ({ ...current, indigenousIdentity: detail.value }))}
-                  readOnly={!editing}
-                  placeholder="e.g., first_nations_status"
-                />
+              <FormField
+                label="Legal Indigenous identity"
+                description="Status/registration category as documented (e.g., First Nations status, Inuit, Métis)."
+              >
+                {editing ? (
+                  <Select
+                    options={legalIndigenousIdentityOptions}
+                    selectedOption={
+                      legalIndigenousIdentityOptions.find(option => option.value === form.indigenousIdentity) ||
+                      legalIndigenousIdentityOptions[0]
+                    }
+                    onChange={({ detail }) =>
+                      setForm(current => ({ ...current, indigenousIdentity: detail.selectedOption?.value || "" }))
+                    }
+                    placeholder="Select identity"
+                  />
+                ) : (
+                  <Input
+                    value={
+                      (legalIndigenousIdentityOptions.find(option => option.value === form.indigenousIdentity) ||
+                        legalIndigenousIdentityOptions[0]).label
+                    }
+                    readOnly
+                  />
+                )}
               </FormField>
-              <FormField label="Nation / community affiliation" description="As provided at intake.">
+              <FormField
+                label="Nation / community affiliation"
+                description="Recorded affiliation or treaty area name from intake."
+              >
                 <Input
                   value={form.indigenousAffiliation}
                   onChange={({ detail }) => setForm(current => ({ ...current, indigenousAffiliation: detail.value }))}
@@ -833,7 +963,10 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
                   placeholder="Affiliation"
                 />
               </FormField>
-              <FormField label="Home community">
+              <FormField
+                label="Home community"
+                description="Community search with band name/number where applicable."
+              >
                 {editing ? (
                   <Autosuggest
                     value={form.homeCommunity || ""}
@@ -859,7 +992,10 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
                   <Input value={form.homeCommunity || "Not set"} readOnly />
                 )}
               </FormField>
-              <FormField label="Registration number">
+              <FormField
+                label="Registration number"
+                description="Status/treaty registration number, if provided."
+              >
                 <Input
                   value={form.registrationNumber}
                   onChange={({ detail }) => setForm(current => ({ ...current, registrationNumber: detail.value }))}
@@ -867,13 +1003,21 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
                   placeholder="Registration #"
                 />
               </FormField>
-              <FormField label="Visible minority">
-                <Input
-                  value={form.visibleMinority}
-                  onChange={({ detail }) => setForm(current => ({ ...current, visibleMinority: detail.value }))}
-                  readOnly={!editing}
-                  placeholder="Yes/No"
-                />
+              <FormField
+                label="Visible minority"
+                description="Yes/No as captured at intake."
+              >
+                {editing ? (
+                  <Select
+                    options={yesNoOptions}
+                    selectedOption={selectedVisibleMinority}
+                    onChange={({ detail }) =>
+                      setForm(current => ({ ...current, visibleMinority: detail.selectedOption?.value || "" }))
+                    }
+                  />
+                ) : (
+                  <Input value={selectedVisibleMinority?.label || "Not set"} readOnly />
+                )}
               </FormField>
             </ColumnLayout>
           </ExpandableSection>
@@ -885,26 +1029,37 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
           >
             <ColumnLayout columns={3} variant="text-grid">
               <FormField label="Preferred language">
-                <Input
-                  value={form.preferredLanguage}
-                  onChange={({ detail }) => setForm(current => ({ ...current, preferredLanguage: detail.value }))}
-                  readOnly={!editing}
-                  placeholder="e.g., en / fr"
-                />
+                {editing ? (
+                  <Select
+                    options={preferredLanguageOptions}
+                    selectedOption={selectedPreferredLanguage}
+                    onChange={({ detail }) =>
+                      setForm(current => ({ ...current, preferredLanguage: detail.selectedOption?.value || "" }))
+                    }
+                  />
+                ) : (
+                  <Input value={selectedPreferredLanguage?.label || "Not set"} readOnly />
+                )}
               </FormField>
               <FormField label="Marital status">
-                <Input
-                  value={form.maritalStatus}
-                  onChange={({ detail }) => setForm(current => ({ ...current, maritalStatus: detail.value }))}
-                  readOnly={!editing}
-                  placeholder="Marital status"
-                />
+                {editing ? (
+                  <Select
+                    options={maritalStatusOptions}
+                    selectedOption={selectedMaritalStatus}
+                    onChange={({ detail }) =>
+                      setForm(current => ({ ...current, maritalStatus: detail.selectedOption?.value || "" }))
+                    }
+                  />
+                ) : (
+                  <Input value={selectedMaritalStatus?.label || "Not set"} readOnly />
+                )}
               </FormField>
               <FormField label="Dependent children">
                 <Input
                   value={form.dependentChildren}
                   onChange={({ detail }) => setForm(current => ({ ...current, dependentChildren: detail.value }))}
                   readOnly={!editing}
+                  inputMode="numeric"
                   placeholder="Count"
                 />
               </FormField>
@@ -917,37 +1072,39 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {} }) => {
                 />
               </FormField>
               <FormField label="EI status">
-                <Input
-                  value={form.eiStatus}
-                  onChange={({ detail }) => setForm(current => ({ ...current, eiStatus: detail.value }))}
-                  readOnly={!editing}
-                  placeholder="EI status"
-                />
+                {editing ? (
+                  <Select
+                    options={eiStatusOptions}
+                    selectedOption={selectedEiStatus}
+                    onChange={({ detail }) =>
+                      setForm(current => ({ ...current, eiStatus: detail.selectedOption?.value || "" }))
+                    }
+                  />
+                ) : (
+                  <Input value={selectedEiStatus?.label || "Not set"} readOnly />
+                )}
               </FormField>
             </ColumnLayout>
           </ExpandableSection>
 
           <ExpandableSection
             headerText="Disability"
-            headerDescription="Self-reported disability details and supports requested."
+            headerDescription="Self-reported disability details."
             defaultExpanded={false}
           >
             <ColumnLayout columns={2} variant="text-grid">
               <FormField label="Has disability">
-                <Input
-                  value={form.hasDisability}
-                  onChange={({ detail }) => setForm(current => ({ ...current, hasDisability: detail.value }))}
-                  readOnly={!editing}
-                  placeholder="Yes/No"
-                />
-              </FormField>
-              <FormField label="Disability support requested">
-                <Input
-                  value={form.disabilitySupport}
-                  onChange={({ detail }) => setForm(current => ({ ...current, disabilitySupport: detail.value }))}
-                  readOnly={!editing}
-                  placeholder="Support requested"
-                />
+                {editing ? (
+                  <Select
+                    options={yesNoOptions}
+                    selectedOption={selectedHasDisability}
+                    onChange={({ detail }) =>
+                      setForm(current => ({ ...current, hasDisability: detail.selectedOption?.value || "" }))
+                    }
+                  />
+                ) : (
+                  <Input value={selectedHasDisability?.label || "Not set"} readOnly />
+                )}
               </FormField>
               <FormField label="Disability description">
                 <Textarea
