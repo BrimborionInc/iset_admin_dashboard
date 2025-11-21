@@ -33,7 +33,7 @@ The current database supports initial case tracking (linking applications to cas
 | `iset_case_intervention` | Intervention scaffold tied to case/action plan | `case_id`, `action_plan_id`, `intervention_type`, `status`, `funding_stream`, amounts | FK → `iset_case`, `iset_case_action_plan` |
 | `iset_case_financial_snapshot` | Rolling totals per case | `allocated_amount`, `committed_amount`, `spent_amount`, `variance_amount` | FK → `iset_case.id` |
 | `iset_case_task`, `iset_case_note`, `iset_case_event`, `iset_case_watch`, `iset_case_action_item`, `iset_case_compliance_check` | Ancillary workflow activity spanning tasks, notes, timeline entries, watchers, action items, and compliance verifications | Standard audit columns + soft-delete timestamps where applicable | FK → `iset_case.id`, optional assignee FKs → `staff_profiles.id`/`user.id` |
-| `iset_application`, `iset_application_version` | Source application payloads | `payload_json` (answers, submission data) | FK from `iset_case.application_id` |
+| `iset_application`, `iset_application_version` | Source application payloads (immutable snapshot for audit) | `payload_json` (answers, submission data) | FK from `iset_case.application_id` |
 | `esdc_participant_submission` | Participant readiness + payload snapshot for ILMP exports | `case_id`, `application_id`, `readiness_status`, `submission_status`, `payload_snapshot`, `payload_checksum`, `rejection_reason` | FK → `iset_case.id`, `iset_application.id`, `user.id` (submitter) |
 | `esdc_participant_submission_history` | Timeline of validation/export events | `participant_submission_id`, `event_type`, `actor_user_id`, `event_details`, `occurred_at` | FK → `esdc_participant_submission.id`, `user.id` |
 | `esdc_reporting_package`, `esdc_reporting_note` | Reporting package lifecycle + internal collaboration | `reporting_period`, `due_date`, `status`, `checklist_state`, `note_text` | FK → `user.id` (submitter/author) |
@@ -41,15 +41,15 @@ The current database supports initial case tracking (linking applications to cas
 
 ### 2.2 Current API Payloads
 
-- `/api/cases/:id/workspace` returns: case header, client region, owner, counts, `actionPlans[]` (currently empty in dev), derived from SQL join of case + assessment + client + action plan tables.
-- `/api/cases/:id/action-plan/context` (new) synthesizes assessment values with application answers (eligibility, labour-force status, childcare, etc.) for UI defaults.
+- `/api/cases/:id/workspace` returns: case header, client region, owner, counts, `actionPlans[]` (currently empty in dev), derived from SQL join of case + assessment + client + action plan tables, and populated with participant identity/contact from `case_context_json`.
+- `/api/cases/:id/action-plan/context` (new) synthesizes assessment values with case context (eligibility, labour-force status, childcare, etc.) for UI defaults.
 - `/api/cases/:id/action-plans` (POST) inserts minimal record into `iset_case_action_plan` (name, dates, owner, metadata JSON).
 
 Financial APIs are not yet exposed; finance UI widgets use mocked data or rely on snapshots. ESDC submission endpoints exist (`/api/esdc/reporting-packages`) but operate separately from action plans/interventions.
 
 ### 2.3 Application Payload Insights
 
-Application answers (stored in `iset_application.payload_json.answers`) contain ILMP-aligned fields: labour force status, education level, social assistance, requested supports, barriers, childcare needs, etc. These answers must flow into case management (context, assessments) and downstream ESDC submissions. Payloads also include signatures and supporting document metadata.
+Application answers (stored in `iset_application.payload_json.answers`) are used only for initial seeding; `case_context_json` is now the canonical source for ILMP-aligned fields (labour force status, education level, social assistance, requested supports, barriers, childcare needs, etc.) that drive case management and ESDC submissions. Payloads also include signatures and supporting document metadata for audit/reference.
 
 ### 2.4 Recent schema changes (Oct 2025)
 

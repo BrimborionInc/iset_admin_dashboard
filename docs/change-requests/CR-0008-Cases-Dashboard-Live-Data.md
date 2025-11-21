@@ -129,7 +129,7 @@
 - **Demo toggle:** surface a “Use live case data” toggle in `DemoNavigation` (persisted to sessionStorage/localStorage) so developers can switch between mock and live responses while front-end integration iterates.
 6. **Inline modal flow:** render a case assignment modal inside the portfolio widget that pulls `/api/staff/assignable` options, posts to `/api/cases/:id/assign|reassign`, and refreshes the server-backed table on success. Disable actions when live mode is off to keep scaffolds intact.
 7. **User feedback:** show dismissible success alerts after assignment/reassignment and retain error messaging within the modal.
-8. **Backfill dependency:** `client` table currently empty; existing cases still rely on application payload fallback for names (shows “Unknown client”). Need migration/service to populate clients and ensure future approvals insert into `client`.
+8. **Backfill dependency:** Client records are now created at approval and Case Workspace reads identity from `case_context_json`; remove any remaining fallbacks to application payload and ensure new case creation always links a client.
 
 ### RBAC
 - Extend existing role matrix / middleware to expose `canAssignCases` and `canReassignCases` booleans in `/api/auth/me` response.
@@ -147,7 +147,7 @@
 
 ## Dependencies & Assumptions
 - Existing user directory or staff table provides assignable user IDs and region metadata.
-- `iset_application.payload_json` and `iset_application_submission.intake_payload` contain sufficient client fields; for missing data, placeholder values (e.g., "Unknown") are acceptable pending manual remediation.
+- `case_context_json` (seeded on approval) is the canonical source for participant identity/contact; avoid re-introducing fallbacks to application payload beyond initial seeding.
 - Audit/events pipeline is already configured (as used by other modules); new events reuse existing publisher utilities.
 - Network policies allow the frontend to reach `/api/cases` with standard credentials.
 

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ALMP:contentALMP xmlns:ALMP="http://servicecanada.gc.ca/ALMP/contentExchange"
+                  xmlns:p="http://servicecanada.gc.ca/ALMP/contentTypes"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <SchemaVersion>1.4</SchemaVersion>
+  <agreementHolderName>Example ISET Holder</agreementHolderName>
+  <client>
+    <socialInsuranceNumber>123456789</socialInsuranceNumber>
+    <lastName>Sample</lastName>
+    <firstName>Aiyana</firstName>
+    <dateOfBirth>1991-06-14</dateOfBirth>
+    <gender>2</gender>
+    <aboriginalGroup>1</aboriginalGroup>
+    <maritalStatus>2</maritalStatus>
+    <numberOfDependantChildren>0</numberOfDependantChildren>
+    <languageSpoken>2</languageSpoken>
+    <disability>0</disability>
+    <address>
+      <streetAddress>100 Example Street</streetAddress>
+      <municipality>Exampleville</municipality>
+      <province>9</province>
+      <postalZIPCode>T0C1N0</postalZIPCode>
+    </address>
+    <actionPlan>
+      <agreementNumber>1000001</agreementNumber>
+      <educationLevel>8</educationLevel>
+      <socialAssistanceRecipient>0</socialAssistanceRecipient>
+      <EIClaimant>3</EIClaimant>
+      <barrierToEmployment>7</barrierToEmployment>
+      <actionPlanPreviousEmployment>1</actionPlanPreviousEmployment>
+      <actionPlanStartDate>2025-11-26</actionPlanStartDate>
+      <intervention>
+        <interventionCode>2</interventionCode>
+        <interventionStartDate>2025-11-26</interventionStartDate>
+        <interventionEndDate>2025-11-30</interventionEndDate>
+        <interventionOutcome>1</interventionOutcome>
+        <interventionDuration>5</interventionDuration>
+        <interventionCost>1000</interventionCost>
+      </intervention>
+      <actionPlanResultCode>2</actionPlanResultCode>
+      <actionPlanResultRelatedNOC>21211</actionPlanResultRelatedNOC>
+      <actionPlanResultRelatedNOCVersion>2021</actionPlanResultRelatedNOCVersion>
+      <actionPlanResultEducationLevel>8</actionPlanResultEducationLevel>
+      <actionPlanResultDate>2025-12-05</actionPlanResultDate>
+    </actionPlan>
+  </client>
+</ALMP:contentALMP>

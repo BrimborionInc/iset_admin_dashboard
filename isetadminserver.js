@@ -608,9 +608,21 @@ function calculateAge(date) {
 }
 
 function extractSin(context) {
-  const { payload = {}, answers = {} } = context;
+  const { payload = {}, answers = {}, caseContext = {} } = context;
   const personal = payload.personal || {};
+  const ctx = caseContext || {};
+  const casePersonal = ctx.applicationPersonal || {};
+  const caseAnswers = ctx.applicationAnswers || {};
   const candidates = [
+    ctx.sin,
+    ctx.socialInsuranceNumber,
+    casePersonal.sin,
+    casePersonal.social_insurance_number,
+    casePersonal.socialInsuranceNumber,
+    caseAnswers['social-insurance-number'],
+    caseAnswers['social_insurance_number'],
+    caseAnswers['sin-number'],
+    caseAnswers['sin_number'],
     personal.sin,
     personal.social_insurance_number,
     personal.socialInsuranceNumber,
@@ -631,9 +643,20 @@ function extractSin(context) {
 }
 
 function extractDob(context) {
-  const { payload = {}, answers = {} } = context;
+  const { payload = {}, answers = {}, caseContext = {} } = context;
   const personal = payload.personal || {};
+  const ctx = caseContext || {};
+  const casePersonal = ctx.applicationPersonal || {};
+  const caseAnswers = ctx.applicationAnswers || {};
   const candidates = [
+    ctx.dateOfBirth,
+    casePersonal.date_of_birth,
+    casePersonal.dateOfBirth,
+    caseAnswers['date-of-birth'],
+    caseAnswers['dob'],
+    caseAnswers['birth-date'],
+    caseAnswers['birthdate'],
+    caseAnswers['personal-date-of-birth'],
     personal.date_of_birth,
     personal.dateOfBirth,
     answers['date-of-birth'],
@@ -650,9 +673,24 @@ function extractDob(context) {
 }
 
 function extractGender(context) {
-  const { payload = {}, answers = {} } = context;
+  const { payload = {}, answers = {}, caseContext = {} } = context;
   const personal = payload.personal || {};
+  const ctx = caseContext || {};
+  const casePersonal = ctx.applicationPersonal || {};
+  const caseAnswers = ctx.applicationAnswers || {};
   const candidates = [
+    ctx.gender,
+    casePersonal.gender,
+    casePersonal.gender_identity,
+    casePersonal.genderIdentity,
+    casePersonal.sex,
+    caseAnswers.gender,
+    caseAnswers.gender_identity,
+    caseAnswers.genderIdentity,
+    caseAnswers['personal-gender'],
+    caseAnswers['sex'],
+    caseAnswers['gender-identity'],
+    caseAnswers['what-is-your-gender-identity'],
     personal.gender,
     personal.gender_identity,
     personal.genderIdentity,
@@ -757,9 +795,23 @@ function extractMiddleInitials(context) {
 }
 
 function extractIndigenousIdentity(context) {
-  const { payload = {}, answers = {} } = context;
+  const { payload = {}, answers = {}, caseContext = {} } = context;
   const personal = payload.personal || {};
+  const ctx = caseContext || {};
+  const casePersonal = ctx.applicationPersonal || {};
+  const caseAnswers = ctx.applicationAnswers || {};
   const candidates = [
+    ctx.indigenousIdentity,
+    casePersonal.indigenous_identity,
+    casePersonal.indigenousIdentity,
+    casePersonal.indigenous_group,
+    casePersonal.indigenousGroup,
+    caseAnswers['indigenous-identity'],
+    caseAnswers['indigenous_identity'],
+    caseAnswers['indigenous-group'],
+    caseAnswers['indigenous_group'],
+    caseAnswers['identity-indigenous'],
+    caseAnswers['legal-indigenous-identity'],
     personal.indigenous_identity,
     personal.indigenousIdentity,
     personal.indigenous_group,
@@ -804,11 +856,22 @@ function extractAddressFromStructuredObject(object) {
 }
 
 function extractAddress(context) {
-  const { payload = {}, answers = {} } = context;
+  const { payload = {}, answers = {}, caseContext = {} } = context;
   const personal = payload.personal || {};
   const contact = payload.contact || {};
+  const ctx = caseContext || {};
+  const casePersonal = ctx.applicationPersonal || {};
+  const caseAnswers = ctx.applicationAnswers || {};
 
   const candidateObjects = [
+    ctx.address,
+    ctx.homeAddress,
+    casePersonal.address,
+    casePersonal.home_address,
+    casePersonal.homeAddress,
+    caseAnswers['address'],
+    caseAnswers['home-address'],
+    caseAnswers['home_address'],
     personal.address,
     personal.home_address,
     personal.homeAddress,
@@ -840,11 +903,72 @@ function extractAddress(context) {
   }
 
   const derived = {
-    line1: normaliseString(answers['home-address-line-1'] || answers['home_address_line_1'] || answers['home-address-line1'] || answers['address-line-1'] || answers['street-address']),
-    line2: normaliseString(answers['home-address-line-2'] || answers['home_address_line_2'] || answers['address-line-2']),
-    city: normaliseString(answers['home-address-city'] || answers['home_address_city'] || answers['address-city'] || answers['address_city'] || answers['city']),
-    province: normaliseString(answers['home-address-province'] || answers['home_address_province'] || answers['address-province'] || answers['address_province'] || answers['province'] || answers['territory'] || answers['state']),
-    postalCode: normaliseString(answers['home-address-postal-code'] || answers['home_address_postal_code'] || answers['address-postcode'] || answers['address_postcode'] || answers['postal-code'] || answers['postal_code'] || answers['postcode'] || answers['zip'])
+    line1: normaliseString(
+      answers['home-address-line-1'] ||
+      answers['home_address_line_1'] ||
+      answers['home-address-line1'] ||
+      answers['address-line-1'] ||
+      answers['street-address'] ||
+      caseAnswers['home-address-line-1'] ||
+      caseAnswers['home_address_line_1'] ||
+      caseAnswers['home-address-line1'] ||
+      caseAnswers['address-line-1'] ||
+      caseAnswers['street-address']
+    ),
+    line2: normaliseString(
+      answers['home-address-line-2'] ||
+      answers['home_address_line_2'] ||
+      answers['address-line-2'] ||
+      caseAnswers['home-address-line-2'] ||
+      caseAnswers['home_address_line_2'] ||
+      caseAnswers['address-line-2']
+    ),
+    city: normaliseString(
+      answers['home-address-city'] ||
+      answers['home_address_city'] ||
+      answers['address-city'] ||
+      answers['address_city'] ||
+      answers['city'] ||
+      caseAnswers['home-address-city'] ||
+      caseAnswers['home_address_city'] ||
+      caseAnswers['address-city'] ||
+      caseAnswers['address_city'] ||
+      caseAnswers['city']
+    ),
+    province: normaliseString(
+      answers['home-address-province'] ||
+      answers['home_address_province'] ||
+      answers['address-province'] ||
+      answers['address_province'] ||
+      answers['province'] ||
+      answers['territory'] ||
+      answers['state'] ||
+      caseAnswers['home-address-province'] ||
+      caseAnswers['home_address_province'] ||
+      caseAnswers['address-province'] ||
+      caseAnswers['address_province'] ||
+      caseAnswers['province'] ||
+      caseAnswers['territory'] ||
+      caseAnswers['state']
+    ),
+    postalCode: normaliseString(
+      answers['home-address-postal-code'] ||
+      answers['home_address_postal_code'] ||
+      answers['address-postcode'] ||
+      answers['address_postcode'] ||
+      answers['postal-code'] ||
+      answers['postal_code'] ||
+      answers['postcode'] ||
+      answers['zip'] ||
+      caseAnswers['home-address-postal-code'] ||
+      caseAnswers['home_address_postal_code'] ||
+      caseAnswers['address-postcode'] ||
+      caseAnswers['address_postcode'] ||
+      caseAnswers['postal-code'] ||
+      caseAnswers['postal_code'] ||
+      caseAnswers['postcode'] ||
+      caseAnswers['zip']
+    )
   };
 
   if (derived.line1 || derived.city || derived.province || derived.postalCode) {
@@ -970,16 +1094,22 @@ function extractVisibleMinority(context) {
 }
 
 function extractDisabilityInfo(context) {
-  const { answers = {} } = context;
-  const raw = answers['has-disability'] || answers['has_disability'] || answers['disability'];
+  const { answers = {}, caseContext = {} } = context;
+  const raw = (() => {
+    if (typeof caseContext.hasDisability !== 'undefined') return caseContext.hasDisability;
+    if (Object.prototype.hasOwnProperty.call(answers, 'has-disability')) return answers['has-disability'];
+    if (Object.prototype.hasOwnProperty.call(answers, 'has_disability')) return answers['has_disability'];
+    return answers['disability'];
+  })();
   const declared = coerceBoolean(raw);
   const description = normaliseString(
+    caseContext.disabilityDescription ||
     answers['disability-description'] ||
     answers['disability_description'] ||
     answers['disabilityDetails']
   );
   return {
-    declared: formatBooleanAsYesNo(declared),
+    declared,
     description: declared ? description || null : null
   };
 }
@@ -1036,26 +1166,43 @@ function extractEmergencyContactDetails(context) {
 }
 
 function extractAgreementNumber(context) {
-  const { answers = {}, submissionRow } = context;
-  const registration = normaliseString(
+  const { answers = {} } = context;
+  const rawAgreement = normaliseString(
     answers['agreement-number'] ||
-    answers['agreement_number'] ||
-    answers['registration-number'] ||
-    answers['registration_number']
+    answers['agreement_number']
   );
-  if (registration) return registration;
-  const snapshotRef = submissionRow?.reference_number || null;
-  return snapshotRef || null;
+
+  const digitsOnly = value => (value ? String(value).replace(/\D/g, '') : '');
+  const placeholder = '999999999'; // temporary until finance module supplies real agreement numbers
+
+  if (rawAgreement) {
+    const numeric = digitsOnly(rawAgreement);
+    if (numeric.length >= 7 && numeric.length <= 9) {
+      return numeric;
+    }
+  }
+
+  return placeholder;
 }
 
 function extractClientStatusDetails(context) {
-  const { answers = {} } = context;
+  const { answers = {}, caseContext = {} } = context;
   const rawStatus = normaliseString(
+    caseContext.employmentStatus ||
+    caseContext.labourForceStatus ||
     answers['client-status-at-intake'] ||
     answers['client_status_at_intake'] ||
     answers['labour-force-status'] ||
     answers['labour_force_status']
   );
+  const casePrevEmployment = caseContext.prevEmployment || caseContext.prevEmploymentCode;
+  const prevEmploymentCode = (() => {
+    if (casePrevEmployment === null || typeof casePrevEmployment === 'undefined') return null;
+    const str = String(casePrevEmployment).trim();
+    if (!str) return null;
+    if (['1', '2', '9'].includes(str)) return str;
+    return null;
+  })();
   const key = rawStatus ? rawStatus.toLowerCase() : null;
   const statusLabel = key ? (CLIENT_STATUS_MAP[key] || rawStatus) : null;
   const scheduleKey = key || '';
@@ -1074,8 +1221,18 @@ function extractClientStatusDetails(context) {
     status: statusLabel || null,
     scheduleType: scheduleType,
     noc: noc || null,
-    nocVersion: nocVersion || null
+    nocVersion: nocVersion || null,
+    prevEmployment: prevEmploymentCode
   };
+}
+
+function mapPrevEmploymentFromStatus(status) {
+  if (!status) return null;
+  const key = String(status).trim().toLowerCase();
+  if (key === 'unemployed' || key === 'underemployed') return 1;
+  if (key === 'student') return 9;
+  if (key.startsWith('employed') || key === 'self-employed' || key === 'self employed') return 2;
+  return null;
 }
 
 function extractEducationDetails(context) {
@@ -1113,11 +1270,15 @@ function extractEducationDetails(context) {
 }
 
 function extractSocialAssistanceStatus(context) {
-  const { answers = {} } = context;
-  const raw = answers['social-assistance'] ||
-    answers['social_assistance'] ||
-    answers['socialAssistance'];
-  return formatBooleanAsYesNo(coerceBoolean(raw));
+  const { answers = {}, caseContext = {} } = context;
+  const raw = (() => {
+    if (typeof caseContext.socialAssistance !== 'undefined') return caseContext.socialAssistance;
+    if (Object.prototype.hasOwnProperty.call(answers, 'social-assistance')) return answers['social-assistance'];
+    if (Object.prototype.hasOwnProperty.call(answers, 'social_assistance')) return answers['social_assistance'];
+    return answers['socialAssistance'];
+  })();
+  const coerced = coerceBoolean(raw);
+  return coerced === null ? null : formatBooleanAsYesNo(coerced);
 }
 
 function extractEiClaimant(context, clientStatus) {
@@ -1195,13 +1356,22 @@ function mapInterventionOutcome(value) {
   const normalised = normaliseString(value);
   if (!normalised) return null;
   const key = normalised.toLowerCase();
-  if (['completed', 'complete'].includes(key)) return 'Completed';
-  if (['in progress', 'in-progress', 'inprogress', 'ongoing'].includes(key)) return 'In progress';
-  if (['incomplete'].includes(key)) return 'Incomplete';
-  if (['failed', 'failed to report', 'failed-to-report'].includes(key)) return 'Failed to report';
-  if (['cancelled', 'canceled'].includes(key)) return 'Cancelled';
-  if (['rescheduled'].includes(key)) return 'Rescheduled';
-  return normalised;
+  const map = {
+    completed: '1',
+    complete: '1',
+    'in progress': '2',
+    'in-progress': '2',
+    inprogress: '2',
+    ongoing: '2',
+    incomplete: '3',
+    failed: '4',
+    'failed to report': '4',
+    'failed-to-report': '4',
+    cancelled: '5',
+    canceled: '5',
+    rescheduled: '6'
+  };
+  return map[key] || normalised;
 }
 
 function extractActionPlanDetails(context, clientStatus, requestedSupports) {
@@ -1280,6 +1450,9 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       }
     }
     if (!duration) {
+      if (Number.isFinite(intervention.durationDays)) {
+        duration = normaliseNumericString(intervention.durationDays, { min: 0, max: 999 });
+      } else
       if (Number.isFinite(metadata.durationDays)) {
         duration = normaliseNumericString(metadata.durationDays, { min: 0, max: 999 });
       } else if (Number.isFinite(metadata.durationWeeks)) {
@@ -1321,6 +1494,7 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       intervention.actualAmount,
       intervention.approvedAmount,
       intervention.budgetAmount,
+      intervention.intervention_cost,
       metadata.cost,
       ...metadataCostCandidates,
       intervention.cost
@@ -1362,8 +1536,8 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       });
     }
 
-    const relatedNoc = metadata.noc || intervention.noc || clientStatus?.noc || null;
-    const relatedNocVersion = metadata.nocVersion || intervention.nocVersion || clientStatus?.nocVersion || null;
+    const relatedNoc = intervention.related_noc || metadata.noc || intervention.noc || clientStatus?.noc || null;
+    const relatedNocVersion = intervention.related_noc_version || metadata.nocVersion || intervention.nocVersion || clientStatus?.nocVersion || null;
 
     if (!code && !startDate && !endDate && !outcome && !duration && !cost && !notes.length && !supports.length) {
       return null;
@@ -1387,7 +1561,11 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
   const casePlan = selectCasePlan(caseActionPlans);
   if (casePlan) {
     const metadata = casePlan.metadata || {};
-    const planStartDate = formatDateValue(casePlan.effectiveDate) || (casePlan.interventions?.length ? formatDateValue(casePlan.interventions[0].startDate) : null);
+    const planStartDate =
+      formatDateValue(casePlan.effectiveDate) ||
+      (casePlan.interventions?.length ? formatDateValue(casePlan.interventions[0].startDate) : null) ||
+      (casePlan.createdAt ? formatDateValue(casePlan.createdAt) : null) ||
+      (caseRow?.created_at ? formatDateValue(caseRow.created_at) : null);
     const planResultDate = formatDateValue(casePlan.resultDate);
     const planResultCode = normaliseString(casePlan.resultCode || metadata.resultCode || null);
 
@@ -1423,6 +1601,29 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       ? casePlan.interventions.map(mapCaseIntervention).filter(Boolean)
       : [];
 
+    // If no explicit interventions, try recommended intervention stored in plan metadata
+    if (!mappedInterventions.length && metadata.recommendedIntervention) {
+      const rec = metadata.recommendedIntervention || {};
+      const syntheticIntervention = {
+        startDate: rec.startDate || rec.start_date || null,
+        endDate: rec.endDate || rec.end_date || null,
+        durationDays: rec.durationDays || rec.duration_days || rec.duration || null,
+        cost: rec.cost || null,
+        code: rec.code || rec.interventionCode || null,
+        notes: rec.notes || null,
+        metadata: {
+          title: rec.label || rec.programName || rec.title || null,
+          durationDays: rec.durationDays || rec.duration_days || rec.duration || null,
+          durationWeeks: rec.durationWeeks || null,
+          cost: rec.cost || null,
+          noc: rec.noc || null,
+          nocVersion: rec.nocVersion || rec.noc_version || null,
+        },
+      };
+      const mapped = mapCaseIntervention(syntheticIntervention);
+      if (mapped) mappedInterventions.push(mapped);
+    }
+
     if (
       !planStartDate &&
       !planResultDate &&
@@ -1436,6 +1637,7 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
     } else {
       return {
         startDate: planStartDate,
+        eiClaimant: casePlan.eiClaimant || casePlan.EIClaimant || metadata.eiClaimant || null,
         resultDate: planResultDate,
         resultCode: planResultCode,
         childcareNeed: planChildcareNeed,
@@ -1709,6 +1911,31 @@ function evaluateFieldRule(fieldKey, fieldDef, extractedValue, context) {
 }
 
 function runIlmpValidation(context) {
+  const CODE_MAPS = {
+    gender: new Set(['1', '2', '3']),
+    aboriginal: new Set(['1', '2', '3', '4']),
+    marital: new Set(['1', '2', '4', '5', '6']),
+    language: new Set(['1', '2', '3', '4', '5', '6', '7', '8']),
+    province: new Set(['1','2','3','4','5','6','7','8','9','10','11','12','13','14','16']),
+    educationLevel: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
+    socialAssistance: new Set(['0','1']),
+    eiClaimant: new Set(['1','2','3']),
+    barrier: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
+    childcareNeed: new Set(['0','1']),
+    childcareFunding: new Set(['1','2','3','4','5','6','7']),
+    interventionOutcome: new Set(['1','2','3','4','5','6'])
+  };
+  const provinceCodeMap = {
+    NL: '1', NS: '2', NB: '3', PE: '4', QC: '5', ON: '6', MB: '7', SK: '8', AB: '9',
+    NT: '10', BC: '11', YT: '12', US: '13', OT: '14', NU: '16'
+  };
+  const toCode = (value, lookup) => {
+    if (value === null || typeof value === 'undefined') return null;
+    const key = String(value).trim().toLowerCase();
+    const map = lookup || {};
+    return map[key] || null;
+  };
+
   const ruleResults = [];
   const warnings = [];
   const blockingIssues = [];
@@ -1727,11 +1954,47 @@ function runIlmpValidation(context) {
     postalCode: null
   };
 
+  const selectCasePlan = plans => {
+    if (!Array.isArray(plans) || plans.length === 0) return null;
+    const priorities = { active: 0, draft: 1, closed: 2, archived: 3 };
+    return [...plans]
+      .sort((a, b) => {
+        const sa = (a.status || '').toLowerCase();
+        const sb = (b.status || '').toLowerCase();
+        const pa = priorities[sa] ?? 4;
+        const pb = priorities[sb] ?? 4;
+        if (pa !== pb) return pa - pb;
+        const dateA = a.activatedAt || a.effectiveDate || a.createdAt || null;
+        const dateB = b.activatedAt || b.effectiveDate || b.createdAt || null;
+        if (dateA && dateB) {
+          const diff = new Date(dateB).getTime() - new Date(dateA).getTime();
+          if (diff !== 0 && Number.isFinite(diff)) return diff < 0 ? -1 : 1;
+        }
+        return (b.id || 0) - (a.id || 0);
+      })[0];
+  };
+
   const address = extractAddress(context) || {};
   extracted.addressStreet = address.line1 || null;
   extracted.addressCity = address.city || null;
   extracted.addressProvince = address.province ? String(address.province).toUpperCase() : null;
   extracted.postalCode = address.postalCode || null;
+
+  const selectedPlan = selectCasePlan(context.caseActionPlans);
+
+  const genderCode = toCode(extracted.gender, { male:'1', female:'2', unspecified:'3' });
+  const indigenousCode = toCode(extracted.aboriginalGroup, {
+    'registered indian':'1','non-status indian':'2','metis':'3','métis':'3','inuit':'4'
+  });
+  const maritalCode = toCode(extracted.maritalStatus, {
+    married:'1','married or equivalent':'1',single:'2',divorced:'4',widowed:'5',separated:'6'
+  });
+  const languageCode = toCode(extracted.languageSpoken, {
+    'indigenous language(s) only':'1','indigenous only':'1','english only':'2','french only':'3',
+    'indigenous + english':'4','indigenous + french':'5','english + french':'6','indigenous + english + french':'7',
+    'none of the above':'8','none':'8'
+  });
+  const provinceNumeric = extracted.addressProvince ? provinceCodeMap[extracted.addressProvince] || null : null;
 
   // Project intake answers / case context onto extracted gender if assessment or context lacked it.
   if (!extracted.gender) {
@@ -1787,6 +2050,105 @@ function runIlmpValidation(context) {
     readinessStatus = 'blocked';
   } else if (warnings.length > 0 || (mandatoryTotal > 0 && mandatoryComplete < mandatoryTotal)) {
     readinessStatus = 'needs_review';
+  }
+
+  // Validate action plan & interventions (minimal ILMP checks)
+  if (selectedPlan && Array.isArray(selectedPlan.interventions)) {
+    selectedPlan.interventions.forEach(intervention => {
+      const id = intervention.id || 'intervention';
+      if (!intervention.code) {
+        const msg = 'Intervention code is required.';
+        blockingIssues.push(`[intervention-${id}] ${msg}`);
+        ruleResults.push({
+          id: `intervention-${id}-code`,
+          label: 'Intervention code',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
+      if ((intervention.startDate || intervention.endDate) && !intervention.durationDays && !intervention.duration) {
+        const msg = 'Intervention duration (days) is required when dates are provided.';
+        warnings.push(`[intervention-${id}] ${msg}`);
+        ruleResults.push({
+          id: `intervention-${id}-duration`,
+          label: 'Intervention duration',
+          category: 'mandatory',
+          severity: 'error',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
+      if ((intervention.startDate || intervention.endDate) && !intervention.cost) {
+        const msg = 'Intervention cost is required when dates are provided.';
+        warnings.push(`[intervention-${id}] ${msg}`);
+        ruleResults.push({
+          id: `intervention-${id}-cost`,
+          label: 'Intervention cost',
+          category: 'mandatory',
+          severity: 'error',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
+      if (intervention.endDate && !intervention.outcome) {
+        const msg = 'Intervention outcome code is required when end date is set.';
+        warnings.push(`[intervention-${id}] ${msg}`);
+        ruleResults.push({
+          id: `intervention-${id}-outcome`,
+          label: 'Intervention outcome',
+          category: 'mandatory',
+          severity: 'error',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
+    });
+  }
+
+  // Code-set checks for participant
+  const codeChecks = [
+    { key: 'gender', value: genderCode, allowed: CODE_MAPS.gender, label: 'Gender' },
+    { key: 'aboriginalGroup', value: indigenousCode, allowed: CODE_MAPS.aboriginal, label: 'Indigenous identity' },
+    { key: 'maritalStatus', value: maritalCode, allowed: CODE_MAPS.marital, label: 'Marital status' },
+    { key: 'languageSpoken', value: languageCode, allowed: CODE_MAPS.language, label: 'Language spoken' },
+    { key: 'province', value: provinceNumeric, allowed: CODE_MAPS.province, label: 'Province' },
+  ];
+  codeChecks.forEach(entry => {
+    if (!entry.value) return;
+    if (!entry.allowed.has(String(entry.value))) {
+      const msg = `${entry.label} code is invalid.`;
+      blockingIssues.push(`[${entry.key}] ${msg}`);
+      ruleResults.push({
+        id: `${entry.key}-codeset`,
+        label: entry.label,
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: entry.value
+      });
+    }
+  });
+
+  if (selectedPlan) {
+    const childcareNeedCode = toCode(selectedPlan.childcareNeed, { no:'0', yes:'1' });
+    if (childcareNeedCode && !CODE_MAPS.childcareNeed.has(childcareNeedCode)) {
+      const msg = 'Childcare need code is invalid.';
+      warnings.push(`[actionPlan-childcare] ${msg}`);
+    }
+    const childcareFundingCode = toCode(selectedPlan.childcareFunding, {
+      'not applicable':'1', fnicci:'2', 'ei/crf':'3', 'provincial funding / subsidy':'4', 'no funding received':'5', 'daycare space not available':'6', 'assisted by family / self-funded':'7'
+    });
+    if (childcareFundingCode && !CODE_MAPS.childcareFunding.has(childcareFundingCode)) {
+      const msg = 'Childcare funding code is invalid.';
+      warnings.push(`[actionPlan-childcare-funding] ${msg}`);
+    }
   }
 
   return {
@@ -2224,6 +2586,16 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   }
 
   const planStatus = 'draft';
+  const mapEiClaimant = value => {
+    if (!value) return null;
+    const key = String(value).trim().toLowerCase();
+    if (['ei active claim', 'employment insurance claimant', 'ei claimant', 'ei active'].includes(key)) return 1;
+    if (['ei reach back', 'reach-back', 'reach back', 'former claimant', 'reach-back client/former claimant'].includes(key)) return 2;
+    if (['crf', 'non-insured client', 'non insured client'].includes(key)) return 3;
+    return null;
+  };
+  const eiClaimantCode = mapEiClaimant(assessmentRow.esdc_eligibility);
+
   const planMetadata = pruneNullish({
     source: AUTO_PLAN_METADATA_SOURCE,
     generatedAt: now.toISOString(),
@@ -2246,14 +2618,20 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     }),
   });
 
+  const prevEmploymentCode = mapPrevEmploymentFromStatus(
+    assessmentRow.labour_force_status || assessmentRow.employment_status || caseRow?.employment_status
+  );
+
   const [planInsert] = await connection.query(
     `INSERT INTO iset_case_action_plan
-       (case_id, name, status, owner_staff_profile_id, owner_user_id, effective_date, review_date, activated_at, notes, metadata_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (case_id, name, status, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, activated_at, notes, metadata_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       caseId,
       planName,
       planStatus,
+      eiClaimantCode,
+      prevEmploymentCode,
       ownerStaffProfileId || null,
       ownerUserId || null,
       startDate || null,
@@ -2513,6 +2891,111 @@ function appendXmlElement(lines, level, tag, value) {
 }
 
 function buildIlmpParticipantPayload(context) {
+  const CODE_MAPS = {
+    gender: { male: '1', female: '2', unspecified: '3' },
+    aboriginal: {
+      'registered-indian': '1',
+      'non-status-indian': '2',
+      metis: '3',
+      inuit: '4'
+    },
+    marital: {
+      married: '1',
+      'married or equivalent': '1',
+      single: '2',
+      divorced: '4',
+      widowed: '5',
+      separated: '6'
+    },
+    language: {
+      'indigenous language(s) only': '1',
+      'english only': '2',
+      'french only': '3',
+      'indigenous + english': '4',
+      'indigenous + french': '5',
+      'english + french': '6',
+      'indigenous + english + french': '7',
+      'none of the above': '8'
+    },
+    provinceCode: {
+      NL: '1', NS: '2', NB: '3', PE: '4', QC: '5', ON: '6', MB: '7', SK: '8', AB: '9',
+      NT: '10', BC: '11', YT: '12', US: '13', OT: '14', NU: '16'
+    },
+    educationLevel: {
+      'no formal education': '1',
+      'up to grade 7-8': '2',
+      'grade 9-10': '3',
+      'grade 11-12': '4',
+      'secondary school diploma or ged': '5',
+      'some post-secondary training': '6',
+      'apprenticeship or trades certificate or diploma': '7',
+      'college, cegep, or other non-university certificate or diploma': '8',
+      'university certificate or diploma': '9',
+      "university - bachelor's degree": '10',
+      "university - master's degree": '11',
+      "university - doctorate": '12'
+    },
+    socialAssistance: { no: '0', yes: '1' },
+    eiClaimant: { 'ei claimant': '1', 'reach-back / former claimant': '2', 'non-insured client': '3' },
+    barrier: {
+      none: '1',
+      'lack of labour force attachment': '2',
+      'lack of work experience': '3',
+      'lack of transportation': '4',
+      remoteness: '5',
+      language: '6',
+      education: '7',
+      economic: '8',
+      'dependent care': '9',
+      'lack of marketable skills': '10',
+      'physical/emotional/mental health': '11',
+      'other barrier': '12'
+    },
+    prevEmployment: {
+      unemployed: '1',
+      'underemployed': '1',
+      'employed-full-time': '2',
+      'employed part-time': '2',
+      'employed-part-time': '2',
+      'self-employed': '2',
+      employed: '2',
+      student: '9'
+    },
+    schedule: { 'full-time': '1', fulltime: '1', 'part-time': '2', parttime: '2' },
+    resultCode: {
+      'unemployed but available for work': '1',
+      employed: '2',
+      'self-employed': '3',
+      'returned to school': '4',
+      'unspecified / could not be reached': '5',
+      'no longer in labour force': '6',
+      'stay in school': '7',
+      'ready for work': '9'
+    },
+    childcareNeed: { no: '0', yes: '1' },
+    childcareFunding: {
+      'not applicable': '1',
+      fnicci: '2',
+      'ei/crf': '3',
+      'provincial funding / subsidy': '4',
+      'no funding received': '5',
+      'daycare space not available': '6',
+      'assisted by family / self-funded': '7'
+    },
+    interventionOutcome: {
+      complete: '1',
+      'in progress': '2',
+      'in-progress': '2',
+      'inprogress': '2',
+      incomplete: '3',
+      'failed to report': '4',
+      failed: '4',
+      cancelled: '5',
+      canceled: '5',
+      rescheduled: '6'
+    },
+    nocVersion: { '2006': '2006', '2011': '2011', '2016': '2016', '2021': '2021' }
+  };
   const firstName = extractFirstName(context);
   const lastName = extractLastName(context);
   const middleInitials = extractMiddleInitials(context);
@@ -2536,8 +3019,9 @@ function buildIlmpParticipantPayload(context) {
   const requestedSupports = extractRequestedSupports(context);
   const actionPlanDetails = extractActionPlanDetails(context, clientStatus, requestedSupports);
   const barriers = extractEmploymentBarriers(context);
-  const eiClaimant = extractEiClaimant(context, clientStatus);
-
+  const eiClaimant =
+    (actionPlanDetails && actionPlanDetails.eiClaimant) ||
+    extractEiClaimant(context, clientStatus);
   const formatDate = dateObj => {
     if (!dateObj) return null;
     const iso = dateObj instanceof Date ? dateObj.toISOString() : new Date(dateObj).toISOString();
@@ -2545,10 +3029,55 @@ function buildIlmpParticipantPayload(context) {
     return iso.slice(0, 10);
   };
 
-  const genderLabel = gender ? (GENDER_LABEL_MAP[gender] || gender) : null;
-  const indigenousLabel = indigenousIdentity ? (INDIGENOUS_LABEL_MAP[indigenousIdentity] || indigenousIdentity) : null;
-  const provinceCode = address.province ? address.province : null;
+  const toCode = (value, map) => {
+    if (!value) return null;
+    const key = String(value).trim().toLowerCase();
+    return map[key] || null;
+  };
+
+  const socialAssistanceCode = (() => {
+    const coded = toCode(socialAssistanceStatus, CODE_MAPS.socialAssistance);
+    if (coded) return coded;
+    const coerced = coerceBoolean(socialAssistanceStatus);
+    if (coerced === null) return '0';
+    return coerced ? '1' : '0';
+  })();
+  const eiClaimantCode = eiClaimant ? toCode(eiClaimant, CODE_MAPS.eiClaimant) : null;
+  const barrierCodes = Array.isArray(barriers)
+    ? barriers
+        .map(entry => toCode(entry, CODE_MAPS.barrier))
+        .filter(Boolean)
+    : null;
+
+  const genderCode = toCode(gender, CODE_MAPS.gender);
+  const indigenousCode = toCode(indigenousIdentity, CODE_MAPS.aboriginal);
+  const maritalCode = toCode(maritalStatus, CODE_MAPS.marital);
+  const languageCode = toCode(languageSpoken, CODE_MAPS.language);
+  const disabilityCode = (() => {
+    if (!disabilityInfo) return '0';
+    if (typeof disabilityInfo.declared === 'boolean') {
+      return disabilityInfo.declared ? '1' : '0';
+    }
+    const coerced = coerceBoolean(disabilityInfo.declared);
+    if (coerced === null) return '0';
+    return coerced ? '1' : '0';
+  })();
+
+  const provinceCode = address.province ? address.province.toUpperCase() : null;
   const provinceName = provinceCode ? (PROVINCE_LABEL_MAP[provinceCode] || provinceCode) : null;
+  const provinceNumeric = provinceCode ? CODE_MAPS.provinceCode[provinceCode] || null : null;
+  const educationLevelCode = toCode(educationDetails?.level, CODE_MAPS.educationLevel);
+  const educationProvinceCode = educationDetails?.location
+    ? CODE_MAPS.provinceCode[String(educationDetails.location).toUpperCase()] || null
+    : null;
+  const formatPostalZip = value => {
+    if (!value) return null;
+    const trimmed = String(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (trimmed.length === 6) {
+      return `${trimmed.slice(0, 3)} ${trimmed.slice(3)}`;
+    }
+    return trimmed.length ? trimmed : null;
+  };
 
   const dependentChildrenNode = (() => {
     if (!dependentInfo) return null;
@@ -2563,9 +3092,9 @@ function buildIlmpParticipantPayload(context) {
 
   const disabilityNode = (() => {
     if (!disabilityInfo) return null;
-    if (!disabilityInfo.declared && !disabilityInfo.description) return null;
+    if (typeof disabilityInfo.declared === 'undefined' && !disabilityInfo.description) return null;
     return {
-      Declared: disabilityInfo.declared,
+      Declared: disabilityCode,
       Description: disabilityInfo.description
     };
   })();
@@ -2610,14 +3139,14 @@ function buildIlmpParticipantPayload(context) {
     const { level, yearCompleted, location } = educationDetails;
     if (!level && !yearCompleted && !location) return null;
     return {
-      EducationLevel: level || null,
+      EducationLevel: educationLevelCode || null,
       EducationYearCompleted: yearCompleted || null,
-      EducationLocation: location || null
+      EducationLocation: educationProvinceCode || null
     };
   })();
 
-  const barriersNode = barriers && barriers.length
-    ? { Barrier: barriers }
+  const barriersNode = barrierCodes && barrierCodes.length
+    ? { Barrier: barrierCodes }
     : null;
 
   const requestedSupportsNode = (() => {
@@ -2637,11 +3166,17 @@ function buildIlmpParticipantPayload(context) {
       startDate,
       resultDate,
       resultCode,
+      eiClaimant,
+      prevEmployment,
       childcareNeed,
       childcareFunding,
       goalDescription,
       interventions
     } = actionPlanDetails;
+    const childcareNeedCode = toCode(childcareNeed, CODE_MAPS.childcareNeed);
+    const childcareFundingCode = toCode(childcareFunding, CODE_MAPS.childcareFunding);
+    const actionPlanEiClaimantCode = toCode(eiClaimant, CODE_MAPS.eiClaimant) || (Number.isInteger(eiClaimant) ? String(eiClaimant) : null);
+    const mapOutcomeCode = value => toCode(value, CODE_MAPS.interventionOutcome);
     const hasInterventions = Array.isArray(interventions) && interventions.length > 0;
     const interventionNode = hasInterventions
       ? {
@@ -2650,7 +3185,7 @@ function buildIlmpParticipantPayload(context) {
             InterventionDescription: entry.description || null,
             InterventionStartDate: entry.startDate || null,
             InterventionEndDate: entry.endDate || null,
-            InterventionOutcome: entry.outcome || null,
+            InterventionOutcome: mapOutcomeCode(entry.outcome) || entry.outcome || null,
             InterventionDuration: entry.duration || null,
             InterventionRelatedNOC: entry.relatedNoc || null,
             InterventionRelatedNOCVersion: entry.relatedNocVersion || null,
@@ -2664,6 +3199,8 @@ function buildIlmpParticipantPayload(context) {
       !startDate &&
       !resultDate &&
       !resultCode &&
+      !actionPlanEiClaimantCode &&
+      !prevEmployment &&
       !childcareNeed &&
       !childcareFunding &&
       !goalDescription &&
@@ -2675,8 +3212,10 @@ function buildIlmpParticipantPayload(context) {
       ActionPlanStartDate: startDate || null,
       ActionPlanResultDate: resultDate || null,
       ActionPlanResultCode: resultCode || null,
-      ChildcareNeed: childcareNeed || null,
-      ChildcareFunding: childcareFunding || null,
+      EIClaimant: actionPlanEiClaimantCode || null,
+      actionPlanPreviousEmployment: toCode(prevEmployment, CODE_MAPS.prevEmployment) || null,
+      ChildcareNeed: childcareNeedCode || childcareNeed || null,
+      ChildcareFunding: childcareFundingCode || childcareFunding || null,
       GoalDescription: goalDescription || null,
       Interventions: interventionNode
     };
@@ -2684,12 +3223,13 @@ function buildIlmpParticipantPayload(context) {
 
   const addressNode = (() => {
     if (!address.line1 && !address.city && !address.province && !address.postalCode) return null;
+    const postal = formatPostalZip(address.postalCode);
     return {
       StreetAddress: address.line1 || null,
       Municipality: address.city || null,
-      Province: provinceCode || null,
+      Province: provinceNumeric || null,
       ProvinceName: provinceName || null,
-      PostalZIPCode: address.postalCode || null
+      PostalZIPCode: postal || null
     };
   })();
 
@@ -2704,35 +3244,141 @@ function buildIlmpParticipantPayload(context) {
       LastName: lastName || null,
       MiddleInitials: middleInitials || null,
       DateOfBirth: formatDate(dob) || null,
-      Gender: genderLabel || null,
-      AboriginalGroup: indigenousLabel || null,
-      MaritalStatus: maritalStatus || null,
+      Gender: genderCode || null,
+      AboriginalGroup: indigenousCode || null,
+      MaritalStatus: maritalCode || null,
       DependentChildren: dependentChildrenNode,
-      LanguageSpoken: languageSpoken || null,
+      LanguageSpoken: languageCode || null,
       VisibleMinority: visibleMinority || null,
       Disability: disabilityNode,
       Address: addressNode,
       ContactDetails: contactNode,
       EmergencyContact: emergencyNode,
       AgreementNumber: agreementNumber || null,
-      ClientStatusAtIntake: clientStatus?.status || null,
+      ClientStatusAtIntake: toCode(clientStatus?.status, CODE_MAPS.prevEmployment) || clientStatus?.status || null,
       EmploymentDetails: employmentDetailsNode,
       Education: educationNode,
-      SocialAssistanceRecipient: socialAssistanceStatus || null,
-      EIClaimant: eiClaimant || null,
+      SocialAssistanceRecipient: socialAssistanceCode || null,
+      EIClaimant: eiClaimantCode || null,
       BarrierToEmployment: barriersNode,
       RequestedSupports: requestedSupportsNode,
       ActionPlan: actionPlanNode
     }
   };
 
-  const lines = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<ILMPParticipantPayload>'
-  ];
-  appendXmlElement(lines, 1, 'GeneratedAt', canonical.GeneratedAt);
-  appendXmlElement(lines, 1, 'Client', canonical.Client);
-  lines.push('</ILMPParticipantPayload>');
+  const agreementHolderName = process.env.ESDC_AGREEMENT_HOLDER || 'NWAC ISET';
+  const schemaVersion = '1.4';
+
+  const lines = [];
+  const add = (indent, tag, value) => {
+    if (value === null || typeof value === 'undefined') return;
+    const pad = '  '.repeat(indent);
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      lines.push(`${pad}<${tag}>`);
+      Object.entries(value).forEach(([k, v]) => add(indent + 1, k, v));
+      lines.push(`${pad}</${tag}>`);
+    } else if (Array.isArray(value)) {
+      value.forEach(entry => add(indent, tag, entry));
+    } else {
+      lines.push(`${pad}<${tag}>${escapeHtml(value)}</${tag}>`);
+    }
+  };
+
+  const appendIntervention = (intervention, indent) => {
+    if (!intervention) return;
+    const pad = '  '.repeat(indent);
+    lines.push(`${pad}<intervention>`);
+    add(indent + 1, 'interventionCode', intervention.code || null);
+    add(indent + 1, 'interventionStartDate', intervention.startDate || null);
+    add(indent + 1, 'interventionEndDate', intervention.endDate || null);
+    add(indent + 1, 'interventionOutcome', intervention.outcome || null);
+    add(indent + 1, 'interventionDuration', intervention.duration || null);
+    add(indent + 1, 'interventionRelatedNOC', intervention.relatedNoc || null);
+    add(indent + 1, 'interventionRelatedNOCVersion', intervention.relatedNocVersion || null);
+    add(indent + 1, 'interventionCost', intervention.cost || null);
+    lines.push(`${pad}</intervention>`);
+  };
+
+  const appendActionPlan = (plan, indent) => {
+    if (!plan) return;
+    const pad = '  '.repeat(indent);
+    const resolveEiClaimant = value => {
+      const coded = toCode(value, CODE_MAPS.eiClaimant);
+      if (coded) return coded;
+      if (Number.isInteger(value)) return String(value);
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        if (CODE_MAPS.eiClaimant[trimmed.toLowerCase()]) return CODE_MAPS.eiClaimant[trimmed.toLowerCase()];
+        const numeric = Number(trimmed);
+        if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 3) return String(numeric);
+      }
+      return null;
+    };
+    const resolvedEiClaimant =
+      resolveEiClaimant(plan.eiClaimant) ||
+      resolveEiClaimant(plan.EIClaimant) ||
+      resolveEiClaimant(plan.EIClaimantCode) ||
+      resolveEiClaimant(plan.eiClaimantCode) ||
+      eiClaimantCode ||
+      null;
+    lines.push(`${pad}<actionPlan>`);
+    add(indent + 1, 'agreementNumber', plan.agreementNumber || agreementNumber || null);
+    add(indent + 1, 'educationLevel', educationLevelCode || null);
+    add(indent + 1, 'educationProvince', educationProvinceCode || null);
+    add(indent + 1, 'socialAssistanceRecipient', socialAssistanceCode || null);
+    add(indent + 1, 'EIClaimant', resolvedEiClaimant);
+    if (barrierCodes && barrierCodes.length) {
+      barrierCodes.forEach(code => add(indent + 1, 'barrierToEmployment', code));
+    }
+    add(indent + 1, 'actionPlanPreviousEmployment', toCode(clientStatus?.status, CODE_MAPS.prevEmployment) || null);
+    add(indent + 1, 'actionPlanPreviousEmploymentScheduleType', toCode(clientStatus?.scheduleType, CODE_MAPS.schedule) || null);
+    add(indent + 1, 'actionPlanStartDate', plan.startDate || null);
+    add(indent + 1, 'actionPlanResultCode', toCode(plan.resultCode, CODE_MAPS.resultCode) || null);
+    add(indent + 1, 'actionPlanResultDate', plan.resultDate || null);
+    add(indent + 1, 'actionPlanResultRelatedNOC', plan.interventions?.[0]?.relatedNoc || null);
+    add(indent + 1, 'actionPlanResultRelatedNOCVersion', plan.interventions?.[0]?.relatedNocVersion || null);
+    add(indent + 1, 'actionPlanResultEducationLevel', educationLevelCode || null);
+    add(indent + 1, 'actionPlanChildCareNeed', toCode(plan.childcareNeed, CODE_MAPS.childcareNeed) || null);
+    add(indent + 1, 'actionPlanChildCareFundedCode', toCode(plan.childcareFunding, CODE_MAPS.childcareFunding) || null);
+    if (plan.interventions && plan.interventions.length) {
+      plan.interventions.forEach(intervention => appendIntervention(intervention, indent + 1));
+    }
+    lines.push(`${pad}</actionPlan>`);
+  };
+
+  lines.push('<?xml version="1.0" encoding="UTF-8"?>');
+  lines.push(
+    '<ALMP:contentALMP xmlns:ALMP="http://servicecanada.gc.ca/ALMP/contentExchange" xmlns:p="http://servicecanada.gc.ca/ALMP/contentTypes" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+  );
+  add(1, 'SchemaVersion', schemaVersion);
+  add(1, 'agreementHolderName', agreementHolderName);
+  lines.push('  <client>');
+  add(2, 'socialInsuranceNumber', sin || null);
+  add(2, 'lastName', lastName || null);
+  add(2, 'initial', middleInitials || null);
+  add(2, 'firstName', firstName || null);
+  add(2, 'dateOfBirth', formatDate(dob) || null);
+  add(2, 'gender', genderCode || null);
+  add(2, 'aboriginalGroup', indigenousCode || null);
+  add(2, 'maritalStatus', maritalCode || null);
+  add(2, 'numberOfDependantChildren', dependentInfo?.count ?? null);
+  add(2, 'languageSpoken', languageCode || null);
+  add(2, 'disability', disabilityCode || null);
+  if (addressNode) {
+    lines.push('    <address>');
+    add(3, 'streetAddress', address.line1 || null);
+    add(3, 'municipality', address.city || null);
+    add(3, 'province', provinceNumeric || null);
+    add(3, 'postalZIPCode', addressNode.PostalZIPCode || null);
+    if (contactDetails?.phone) add(3, 'contactPhoneNumber', contactDetails.phone);
+    lines.push('    </address>');
+  }
+  if (actionPlanNode) {
+    appendActionPlan(actionPlanNode, 2);
+  }
+  lines.push('  </client>');
+  lines.push('</ALMP:contentALMP>');
 
   return {
     xml: lines.join('\n'),
@@ -2797,19 +3443,21 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
         [caseRow.id]
       );
       if (planRows && planRows.length) {
-        const planMap = new Map();
-        const planIds = [];
-        planRows.forEach(planRow => {
-          const metadata = safeJsonParse(planRow.metadata_json, {}) || {};
-          planIds.push(planRow.id);
-          planMap.set(planRow.id, {
+    const planMap = new Map();
+    const planIds = [];
+    planRows.forEach(planRow => {
+      const metadata = safeJsonParse(planRow.metadata_json, {}) || {};
+      planIds.push(planRow.id);
+      planMap.set(planRow.id, {
             id: planRow.id,
             caseId: planRow.case_id,
-            name: planRow.name,
-            status: planRow.status,
-            createdAt: planRow.created_at,
-            effectiveDate: planRow.effective_date,
-            reviewDate: planRow.review_date,
+        name: planRow.name,
+        status: planRow.status,
+        eiClaimant: planRow.EIClaimant || planRow.eiClaimant || null,
+        prevEmployment: planRow.prev_employment || null,
+        createdAt: planRow.created_at,
+        effectiveDate: planRow.effective_date,
+        reviewDate: planRow.review_date,
             activatedAt: planRow.activated_at,
             closedAt: planRow.closed_at,
             resultCode: planRow.result_code,
@@ -3259,6 +3907,7 @@ async function fetchActionPlanWithCase(planId) {
   const [[row]] = await pool.query(
     `SELECT
        ap.*,
+       ap.esdc_action_plan_json AS esdcActionPlanJson,
        c.assigned_to_user_id,
        c.portfolio_region_id,
        sp.region_id AS owner_region_id,
@@ -3762,6 +4411,13 @@ function mapIlmpComplianceFromSubmission(row) {
 function mapActionPlanRow(plan) {
   if (!plan) return null;
   const metadata = safeJsonParse(plan.metadata_json, null);
+  const esdcRaw =
+    plan.esdc_action_plan_json ??
+    plan.esdcActionPlanJson ??
+    plan.esdc ??
+    plan.esdcJson ??
+    null;
+  const esdc = safeJsonParse(esdcRaw, esdcRaw) || {};
   const toNumber = value => {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : 0;
@@ -3771,6 +4427,35 @@ function mapActionPlanRow(plan) {
     caseId: plan.case_id || plan.caseId || null,
     name: plan.name || null,
     status: plan.status || null,
+    eiClaimant: plan.EIClaimant || plan.eiClaimant || esdc.EIClaimant || null,
+    prevEmployment:
+      plan.prev_employment || plan.prevEmployment || esdc.actionPlanPreviousEmployment || null,
+    agreementNumber: plan.agreement_number || esdc.agreementNumber || null,
+    educationLevel: plan.education_level || esdc.educationLevel || null,
+    educationProvince: plan.education_province || esdc.educationProvince || null,
+    socialAssistanceRecipient:
+      plan.social_assistance_recipient || esdc.socialAssistanceRecipient || null,
+    childcareNeed:
+      plan.childcare_need ||
+      esdc.actionPlanChildcareNeed ||
+      esdc.actionPlanChildCareNeed ||
+      null,
+    childcareFunding:
+      plan.childcare_funding ||
+      esdc.actionPlanChildcareFundedCode ||
+      esdc.actionPlanChildCareFundedCode ||
+      null,
+    prevEmploymentNoc:
+      plan.prev_employment_noc || esdc.actionPlanPreviousEmploymentNoc || null,
+    prevEmploymentNocVersion:
+      plan.prev_employment_noc_version || esdc.actionPlanPreviousEmploymentNocVersion || null,
+    prevEmploymentScheduleType:
+      plan.prev_employment_schedule_type || esdc.actionPlanPreviousEmploymentScheduleType || null,
+    barriers: Array.isArray(esdc.BarrierToEmployment)
+      ? esdc.BarrierToEmployment
+      : Array.isArray(esdc.barrierToEmployment)
+      ? esdc.barrierToEmployment
+      : null,
     effectiveDate: toIsoDateTime(plan.effective_date),
     reviewDate: toIsoDateTime(plan.review_date),
     activatedAt: toIsoDateTime(plan.activated_at),
@@ -3778,6 +4463,10 @@ function mapActionPlanRow(plan) {
     archivedAt: toIsoDateTime(plan.archived_at),
     resultCode: plan.result_code || null,
     resultDate: toDateOnly(plan.result_date),
+    resultEducationLevel: esdc.actionPlanResultEducationLevel || null,
+    futureEducationLevel: esdc.actionPlanFutureEducationLevel || null,
+    resultNoc: esdc.actionPlanResultRelatedNOC || null,
+    resultNocVersion: esdc.actionPlanResultRelatedNOCVersion || null,
     outcomeSummary: plan.outcome_summary || null,
     closureNotes: plan.closure_notes || null,
     ownerStaffProfileId: plan.owner_staff_profile_id || null,
@@ -3971,6 +4660,7 @@ function mapInterventionRow(row) {
   if (!row) return null;
   const metadata = safeJsonParse(row.metadata_json, null) || {};
   const toNumber = value => {
+    if (value === null || typeof value === 'undefined' || value === '') return null;
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : null;
   };
@@ -3988,13 +4678,23 @@ function mapInterventionRow(row) {
   const startDate = toDateOnly(row.start_date);
   const endDate = toDateOnly(row.end_date);
   let durationWeeks = toNumber(metadata.durationWeeks);
-  if (!Number.isFinite(durationWeeks) && startDate && endDate) {
+  let durationDays = Number.isFinite(row.duration_days) ? Number(row.duration_days) : null;
+  if (!Number.isFinite(durationDays)) {
+    const durationDaysFromMeta = toNumber(metadata.durationDays);
+    if (Number.isFinite(durationDaysFromMeta)) {
+      durationDays = durationDaysFromMeta;
+    }
+  }
+  if ((!Number.isFinite(durationWeeks) || !Number.isFinite(durationDays)) && startDate && endDate) {
     const start = new Date(startDate);
     const end = new Date(endDate);
     if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end >= start) {
       const msPerDay = 24 * 60 * 60 * 1000;
       const diffDays = Math.round((end.getTime() - start.getTime()) / msPerDay) + 1;
-      durationWeeks = Math.max(1, Math.round(diffDays / 7));
+      durationDays = Number.isFinite(durationDays) ? durationDays : diffDays;
+      if (!Number.isFinite(durationWeeks)) {
+        durationWeeks = Math.max(1, Math.round(diffDays / 7));
+      }
     }
   }
 
@@ -4024,23 +4724,27 @@ function mapInterventionRow(row) {
     id: row.id,
     caseId: row.case_id || null,
     actionPlanId: row.action_plan_id || null,
-    code: metadata.code || row.intervention_type || null,
+    code: row.intervention_code ?? metadata.code ?? row.intervention_type ?? null,
     title: metadata.title || metadata.description || row.notes || null,
     description: metadata.description || null,
     status,
     startDate,
     endDate,
     durationWeeks: Number.isFinite(durationWeeks) ? durationWeeks : null,
+    durationDays: Number.isFinite(durationDays) ? durationDays : null,
     outcome: metadata.outcome || metadata.outcomeLabel || row.outcome_code || null,
     outcomeCode: row.outcome_code || null,
     fundingStream: row.funding_stream || metadata.fundingStream || null,
-    cost: Number.isFinite(resolvedCost) ? resolvedCost : null,
+    cost: Number.isFinite(row.intervention_cost) ? Number(row.intervention_cost) : (Number.isFinite(resolvedCost) ? resolvedCost : null),
     budgetAmount,
     approvedAmount,
     actualAmount,
     potId: metadata.potId || metadata.budgetPotId || null,
-    noc: metadata.noc || null,
-    nocVersion: metadata.nocVersion || null,
+    noc: row.related_noc || metadata.noc || null,
+    nocVersion: row.related_noc_version || metadata.nocVersion || null,
+    related_noc: row.related_noc || null,
+    related_noc_version: row.related_noc_version || null,
+    intervention_cost: Number.isFinite(row.intervention_cost) ? Number(row.intervention_cost) : null,
     notes,
     compliance,
     createdByStaffProfileId: row.created_by_staff_profile_id || null,
@@ -14171,16 +14875,8 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         cr.name_en AS region_name,
         owner_region.code AS owner_region_code,
         owner_region.name_en AS owner_region_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.first_name')) AS payload_personal_first_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.last_name')) AS payload_personal_last_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')) AS payload_personal_full_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"')) AS payload_answers_first_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."last-name"')) AS payload_answers_last_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers.dob')) AS payload_answers_dob,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS payload_preferred_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS payload_reference_number,
         s.reference_number AS submission_reference_number,
-        a.created_at AS application_created_at,
+        c.created_at AS case_created_at,
         COALESCE(
           applicant_submission.id,
           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id')), '')
@@ -14328,17 +15024,20 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
          ap.review_date,
          ap.activated_at,
          ap.closed_at,
-         ap.result_code,
-         ap.result_date,
-         ap.outcome_summary,
-         ap.closure_notes,
-         ap.owner_staff_profile_id,
-         ap.owner_user_id,
-         ap.notes,
-         ap.metadata_json,
-          ap.archived_at,
-         ap.created_at,
-         ap.updated_at,
+        ap.result_code,
+        ap.result_date,
+        ap.prev_employment,
+        ap.outcome_summary,
+        ap.closure_notes,
+        ap.owner_staff_profile_id,
+        ap.owner_user_id,
+        ap.notes,
+        ap.metadata_json,
+        ap.esdc_action_plan_json,
+        ap.esdc_action_plan_json AS esdcActionPlanJson,
+        ap.archived_at,
+        ap.created_at,
+        ap.updated_at,
          (
            SELECT COUNT(*)
            FROM iset_case_intervention ci
@@ -14567,35 +15266,73 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       }
     }
 
+    const parseJsonField = (value, fallback) => {
+      if (value === null || typeof value === 'undefined') return fallback;
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return fallback;
+        try {
+          const parsed = JSON.parse(trimmed);
+          return typeof parsed === 'object' && parsed !== null ? parsed : fallback;
+        } catch (_) {
+          return fallback;
+        }
+      }
+      if (typeof value === 'object') return value;
+      return fallback;
+    };
+
+    const caseContext = parseJsonField(row.case_context_json, null);
+    const contextPersonal = caseContext?.applicationPersonal || {};
+    const contextAnswers = caseContext?.applicationAnswers || {};
+
     const firstNameCandidates = [
+      contextPersonal.first_name,
+      contextPersonal.firstName,
+      contextPersonal.given_name,
+      contextPersonal.givenName,
+      caseContext?.firstName,
       row.client_first_name,
-      row.payload_personal_first_name,
-      row.payload_answers_first_name,
-      row.payload_preferred_name,
     ];
     const lastNameCandidates = [
+      contextPersonal.last_name,
+      contextPersonal.lastName,
+      contextPersonal.family_name,
+      contextPersonal.familyName,
+      caseContext?.lastName,
       row.client_last_name,
-      row.payload_personal_last_name,
-      row.payload_answers_last_name,
     ];
-    const firstName =
-      firstNameCandidates.map(value => normaliseString(value)).find(Boolean) || null;
-    const lastName =
-      lastNameCandidates.map(value => normaliseString(value)).find(Boolean) || null;
-    const fullNameFallback = normaliseString(row.payload_personal_full_name);
+    const preferredNameCandidates = [
+      contextPersonal.preferred_name,
+      contextPersonal.preferredName,
+      caseContext?.preferredName,
+      contextAnswers['preferred-name'],
+      contextAnswers['preferred_name'],
+    ];
+
+    const firstName = firstNameCandidates.map(value => normaliseString(value)).find(Boolean) || null;
+    const lastName = lastNameCandidates.map(value => normaliseString(value)).find(Boolean) || null;
+    const preferredName = preferredNameCandidates.map(value => normaliseString(value)).find(Boolean) || null;
     const clientFullName =
       [firstName, lastName].filter(Boolean).join(' ') ||
-      fullNameFallback ||
-      normaliseString(row.payload_preferred_name) ||
+      preferredName ||
       null;
 
-    const payloadDob = normaliseString(row.payload_answers_dob);
-    const dateOfBirth = toDateOnly(row.client_dob) || payloadDob || null;
+    const contextDob =
+      contextPersonal.date_of_birth ||
+      contextPersonal.dateOfBirth ||
+      caseContext?.dateOfBirth ||
+      contextAnswers['dob'] ||
+      contextAnswers['date-of-birth'] ||
+      contextAnswers['birth-date'] ||
+      contextAnswers['birthdate'] ||
+      null;
+    const dateOfBirth = toDateOnly(contextDob) || toDateOnly(row.client_dob) || null;
 
     const trackingId =
-      normaliseString(row.payload_reference_number) ||
       normaliseString(row.submission_reference_number) ||
-      null;
+      normaliseString(row.case_number) ||
+      (row.id ? `CASE-${row.id}` : null);
 
     const agreementNumber =
       trackingId ||
@@ -14680,7 +15417,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       nextActionDueAt: toIsoDateTime(row.next_action_due_at),
       trackingId,
       applicationId: row.application_id || null,
-      submittedAt: toIsoDateTime(row.application_created_at),
+      submittedAt: toIsoDateTime(row.case_created_at),
       client: {
         id: row.client_id || null,
         firstName,
@@ -14746,22 +15483,6 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       return [];
     };
 
-    const parseJsonField = (value, fallback) => {
-      if (value === null || typeof value === 'undefined') return fallback;
-      if (typeof value === 'string') {
-        const trimmed = value.trim();
-        if (!trimmed) return fallback;
-        try {
-          const parsed = JSON.parse(trimmed);
-          return typeof parsed === 'object' && parsed !== null ? parsed : fallback;
-        } catch (_) {
-          return fallback;
-        }
-      }
-      if (typeof value === 'object') return value;
-      return fallback;
-    };
-
     const toStringOrNull = value => (value === null || typeof value === 'undefined' ? null : String(value));
     const toTrimmedStringOrNull = value => {
       const result = toStringOrNull(value);
@@ -14780,8 +15501,6 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     } catch (err) {
       console.warn('[workspace] failed to load assessment for case', caseId, err);
     }
-
-    const caseContext = parseJsonField(row.case_context_json, null);
 
     const DEFAULT_ITP_PAYLOAD = { tuition: '', books: '', materials: '', living: '' };
     const DEFAULT_WAGE_PAYLOAD = { wages: '', mercs: '', nonwages: '', other: '' };
@@ -15508,7 +16227,6 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
        c.application_id,
        c.assigned_to_user_id,
        c.portfolio_region_id,
-       c.tracking_id,
        c.case_number,
        sp.region_id AS owner_region_id
      FROM iset_case c
@@ -15580,20 +16298,126 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
+    const CODE_SETS = {
+      educationLevel: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
+      educationProvince: new Set(['1','2','3','4','5','6','7','8','9','10','11','12','13','14','16']),
+      yesNo: new Set(['0','1']),
+      eiClaimant: new Set(['1','2','3']),
+      prevEmployment: new Set(['1','2','9']),
+      prevEmploymentSchedule: new Set(['1','2']),
+      childcareFunding: new Set(['1','2','3','4','5','6','7']),
+      prevEmploymentSchedule: new Set(['1','2']),
+      barrier: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
+      nocVersion: new Set(['2006','2011','2016','2021']),
+    };
+    const normaliseCode = (value, set) => {
+      if (value === null || typeof value === 'undefined') return null;
+      const str = String(value).trim();
+      if (!str) return null;
+      return set.has(str) ? str : null;
+    };
+    const requireCode = (value, set, field, res) => {
+      const code = normaliseCode(value, set);
+      if (!code) {
+        res.status(422).json({ error: `${field}_invalid`, message: `${field} is required and must be a valid code.` });
+        return null;
+      }
+      return code;
+    };
+
+    const agreementNumber = (() => {
+      if (!req.body?.agreementNumber) return '999999999';
+      const digits = String(req.body.agreementNumber).replace(/\D/g, '');
+      return digits.length >= 7 && digits.length <= 9 ? digits : null;
+    })();
+    if (!agreementNumber) {
+      res.status(422).json({ error: 'agreement_number_invalid', message: 'Agreement number must be 7–9 digits.' });
+      return;
+    }
+
+    const educationLevel = normaliseCode(req.body.educationLevel, CODE_SETS.educationLevel);
+    const educationProvince = educationLevel
+      ? normaliseCode(req.body.educationProvince, CODE_SETS.educationProvince)
+      : null;
+    if (educationLevel && !educationProvince) {
+      res.status(422).json({ error: 'education_province_required', message: 'Education province is required when education level is set.' });
+      return;
+    }
+
+    const socialAssistanceRecipient = requireCode(req.body.socialAssistanceRecipient, CODE_SETS.yesNo, 'social_assistance_recipient', res);
+    if (socialAssistanceRecipient === null) return;
+    const eiClaimantCode = requireCode(req.body.eiClaimant, CODE_SETS.eiClaimant, 'ei_claimant', res);
+    if (eiClaimantCode === null) return;
+    const prevEmployment = requireCode(req.body.prevEmployment, CODE_SETS.prevEmployment, 'previous_employment', res);
+    if (prevEmployment === null) return;
+
+    let prevEmploymentNoc = null;
+    let prevEmploymentNocVersion = null;
+    let prevEmploymentScheduleType = null;
+    if (prevEmployment === '2') {
+      prevEmploymentNoc = typeof req.body.prevEmploymentNoc === 'string' ? req.body.prevEmploymentNoc.trim() : null;
+      prevEmploymentNocVersion = normaliseCode(req.body.prevEmploymentNocVersion, CODE_SETS.nocVersion);
+      prevEmploymentScheduleType = normaliseCode(req.body.prevEmploymentScheduleType, CODE_SETS.prevEmploymentSchedule);
+      if (!prevEmploymentNoc || !prevEmploymentNocVersion) {
+        res.status(422).json({ error: 'previous_employment_noc_required', message: 'NOC code and version are required when employment status is Employed.' });
+        return;
+      }
+      if (!prevEmploymentScheduleType) {
+        res.status(422).json({ error: 'previous_employment_schedule_required', message: 'Schedule type is required when employment status is Employed.' });
+        return;
+      }
+    }
+
+    const childcareNeed = normaliseCode(req.body.childcareNeed, CODE_SETS.yesNo);
+    let childcareFunding = null;
+    if (childcareNeed === '1') {
+      childcareFunding = requireCode(req.body.childcareFunding, CODE_SETS.childcareFunding, 'childcare_funding', res);
+      if (childcareFunding === null) return;
+    }
+
+    const barrierCodes = (() => {
+      const incoming = Array.isArray(req.body.barriers)
+        ? req.body.barriers
+        : Array.isArray(req.body.barrierToEmployment)
+        ? req.body.barrierToEmployment
+        : [];
+      return incoming
+        .map(val => String(val).trim())
+        .filter(code => CODE_SETS.barrier.has(code));
+    })();
+
+    const esdcPayload = {
+      agreementNumber,
+      educationLevel,
+      educationProvince,
+      socialAssistanceRecipient,
+      EIClaimant: eiClaimantCode,
+      actionPlanPreviousEmployment: prevEmployment,
+      actionPlanPreviousEmploymentNoc: prevEmploymentNoc,
+      actionPlanPreviousEmploymentNocVersion: prevEmploymentNocVersion,
+      actionPlanPreviousEmploymentScheduleType: prevEmploymentScheduleType,
+      actionPlanChildcareNeed: childcareNeed,
+      actionPlanChildcareFundedCode: childcareFunding,
+      BarrierToEmployment: barrierCodes && barrierCodes.length ? barrierCodes : null,
+    };
+
     const [result] = await connection.query(
       `INSERT INTO iset_case_action_plan
-         (case_id, name, status, owner_staff_profile_id, owner_user_id, effective_date, review_date, notes, metadata_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (case_id, name, status, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, notes, metadata_json, esdc_action_plan_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         caseId,
         trimmedName || null,
         planStatus,
+        Number.isInteger(Number(eiClaimantCode)) ? Number(eiClaimantCode) : eiClaimantCode,
+        Number.isInteger(Number(prevEmployment)) ? Number(prevEmployment) : prevEmployment,
         resolvedOwnerStaffProfileId || null,
         null,
         startDate || null,
         reviewDate || null,
         summary || null,
         metadata ? JSON.stringify(metadata) : null,
+        JSON.stringify(esdcPayload),
       ]
     );
 
@@ -15861,7 +16685,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     const identity = getRequesterIdentity(req);
     const createdBy = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
 
-    const trimmedOutcome = typeof outcome === 'string' ? outcome.trim() : '';
+    const trimmedOutcomeCreate = typeof outcome === 'string' ? outcome.trim() : '';
     const trimmedPotId = typeof potId === 'string' ? potId.trim() : '';
     const trimmedFundingStream = typeof fundingStream === 'string' ? fundingStream.trim() : '';
     const trimmedNotes = typeof notes === 'string' ? notes.trim() : '';
@@ -15876,7 +16700,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     if (trimmedPotId) metadata.potId = trimmedPotId;
     if (trimmedFundingStream) metadata.fundingStream = trimmedFundingStream;
     if (trimmedNotes) metadata.notes = trimmedNotes;
-    if (trimmedOutcome) metadata.outcome = trimmedOutcome;
+    if (trimmedOutcomeCreate) metadata.outcome = trimmedOutcomeCreate;
     if (trimmedNoc) metadata.noc = trimmedNoc;
     if (trimmedNocVersion) metadata.nocVersion = trimmedNocVersion;
     metadata.compliance = { ilmp: 'pending', finance: 'pending' };
@@ -15895,30 +16719,40 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
          (case_id,
           action_plan_id,
           intervention_type,
+          intervention_code,
           status,
           start_date,
           end_date,
+          duration_days,
           funding_stream,
           budget_amount,
           approved_amount,
           actual_amount,
+          intervention_cost,
+          related_noc,
+          related_noc_version,
           outcome_code,
           notes,
           metadata_json,
           created_by_staff_profile_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         planRow.case_id,
         planId,
         trimmedCode,
+        trimmedCode || null,
         statusValue,
         startDateValue || null,
         endDateValue || null,
+        durationWeeksValue !== null ? Math.round(durationWeeksValue * 7) : null,
         trimmedFundingStream || null,
         Number.isFinite(plannedCostValue) ? plannedCostValue : null,
         Number.isFinite(approvedAmountValue) ? approvedAmountValue : null,
         Number.isFinite(actualAmountValue) ? actualAmountValue : null,
-        trimmedOutcome || null,
+        Number.isFinite(plannedCostValue) ? plannedCostValue : null,
+        trimmedNoc || null,
+        trimmedNocVersion || null,
+        trimmedOutcomeCreate || null,
         trimmedNotes || null,
         Object.keys(metadata).length ? JSON.stringify(metadata) : null,
         createdBy,
@@ -16082,6 +16916,8 @@ app.patch('/api/interventions/:id', async (req, res) => {
       }
       updates.push('intervention_type = ?');
       params.push(trimmedCode);
+      updates.push('intervention_code = ?');
+      params.push(trimmedCode);
       metadata.code = trimmedCode;
       metadataChanged = true;
     }
@@ -16112,14 +16948,20 @@ app.patch('/api/interventions/:id', async (req, res) => {
     if (durationProvided) {
       if (durationWeeksValue === null) {
         delete metadata.durationWeeks;
+        updates.push('duration_days = ?');
+        params.push(null);
       } else {
         metadata.durationWeeks = durationWeeksValue;
+        updates.push('duration_days = ?');
+        params.push(Math.round(durationWeeksValue * 7));
       }
       metadataChanged = true;
     }
 
     if (costProvided) {
       updates.push('budget_amount = ?');
+      params.push(plannedCostValue === null ? null : plannedCostValue);
+      updates.push('intervention_cost = ?');
       params.push(plannedCostValue === null ? null : plannedCostValue);
       if (plannedCostValue === null) {
         delete metadata.cost;
@@ -16140,11 +16982,11 @@ app.patch('/api/interventions/:id', async (req, res) => {
     }
 
     if (Object.prototype.hasOwnProperty.call(body, 'outcome')) {
-      const trimmedOutcome = typeof body.outcome === 'string' ? body.outcome.trim() : '';
+      const trimmedOutcomeUpdate = typeof body.outcome === 'string' ? body.outcome.trim() : '';
       updates.push('outcome_code = ?');
-      params.push(trimmedOutcome || null);
-      if (trimmedOutcome) {
-        metadata.outcome = trimmedOutcome;
+      params.push(trimmedOutcomeUpdate || null);
+      if (trimmedOutcomeUpdate) {
+        metadata.outcome = trimmedOutcomeUpdate;
       } else {
         delete metadata.outcome;
       }
@@ -16187,6 +17029,8 @@ app.patch('/api/interventions/:id', async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(body, 'noc')) {
       const trimmedNoc = typeof body.noc === 'string' ? body.noc.trim() : '';
+      updates.push('related_noc = ?');
+      params.push(trimmedNoc || null);
       if (trimmedNoc) {
         metadata.noc = trimmedNoc;
       } else {
@@ -16197,6 +17041,8 @@ app.patch('/api/interventions/:id', async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(body, 'nocVersion')) {
       const trimmedNocVersion = typeof body.nocVersion === 'string' ? body.nocVersion.trim() : '';
+      updates.push('related_noc_version = ?');
+      params.push(trimmedNocVersion || null);
       if (trimmedNocVersion) {
         metadata.nocVersion = trimmedNocVersion;
       } else {
@@ -16294,8 +17140,8 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     return res.status(422).json({ error: 'invalid_status', message: 'Status must be completed or cancelled.' });
   }
 
-  const trimmedOutcome = typeof outcome === 'string' ? outcome.trim() : '';
-  if (!trimmedOutcome) {
+  const trimmedOutcomeClose = typeof outcome === 'string' ? outcome.trim() : '';
+  if (!trimmedOutcomeClose) {
     return res.status(422).json({ error: 'outcome_required', message: 'Outcome code is required to close an intervention.' });
   }
 
@@ -16353,7 +17199,7 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     if (!metadata.compliance || typeof metadata.compliance !== 'object') {
       metadata.compliance = { ilmp: 'pending', finance: 'pending' };
     }
-    metadata.outcome = trimmedOutcome;
+    metadata.outcome = trimmedOutcomeClose;
     if (Number.isFinite(actualAmountValue)) {
       metadata.actualAmount = actualAmountValue;
       metadata.compliance.finance = 'ok';
@@ -16373,7 +17219,7 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     ];
     const params = [
       statusValue,
-      trimmedOutcome,
+      trimmedOutcomeClose,
       Number.isFinite(actualAmountValue) ? actualAmountValue : null,
     ];
 
@@ -16493,8 +17339,29 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
     return res.status(400).json({ error: 'invalid_action_plan_id' });
   }
 
-  const { resultCode, resultDate, outcomeSummary = null, closureNotes = null } = req.body || {};
-  const trimmedResultCode = typeof resultCode === 'string' ? resultCode.trim() : '';
+  const {
+    resultCode,
+    resultDate,
+    resultNoc,
+    resultNocVersion,
+    resultEducationLevel,
+    futureEducationLevel,
+    outcomeSummary = null,
+    closureNotes = null
+  } = req.body || {};
+  const CODE_SETS = {
+    resultCode: new Set(['1','2','3','4','5','6','7','9']),
+    nocVersion: new Set(['2016','2021']),
+    resultEducation: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
+    futureEducation: new Set(['5','8','9','10']),
+  };
+  const normCode = (value, set) => {
+    if (value === null || typeof value === 'undefined') return null;
+    const str = String(value).trim();
+    if (!str) return null;
+    return set.has(str) ? str : null;
+  };
+  const trimmedResultCode = normCode(resultCode, CODE_SETS.resultCode);
   if (!trimmedResultCode) {
     return res.status(422).json({ error: 'result_code_required', message: 'Result code is required to close an action plan.' });
   }
@@ -16548,14 +17415,68 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
       });
     }
 
+    const [[maxIntervention]] = await pool.query(
+      'SELECT MAX(end_date) AS latest_end FROM iset_case_intervention WHERE action_plan_id = ?',
+      [planId]
+    );
+    const latestInterventionEnd = maxIntervention?.latest_end ? toDateOnly(maxIntervention.latest_end) : null;
     if (planRow.effective_date && resultDateStr < toDateOnly(planRow.effective_date)) {
       return res.status(422).json({ error: 'result_date_before_start', message: 'Result date cannot be before the plan start date.' });
+    }
+    if (latestInterventionEnd && resultDateStr < latestInterventionEnd) {
+      return res.status(422).json({ error: 'result_date_before_intervention', message: 'Result date cannot be before the latest intervention end date.' });
+    }
+    if (resultDateStr > toDateOnly(new Date())) {
+      return res.status(422).json({ error: 'result_date_in_future', message: 'Result date cannot be in the future.' });
+    }
+
+    const resultEducationCode = normCode(resultEducationLevel, CODE_SETS.resultEducation);
+    if (!resultEducationCode) {
+      return res.status(422).json({ error: 'result_education_required', message: 'Action Plan Result Education Level is required.' });
+    }
+
+    let futureEducationCode = null;
+    if (trimmedResultCode === '4') {
+      futureEducationCode = normCode(futureEducationLevel, CODE_SETS.futureEducation);
+      if (!futureEducationCode) {
+        return res.status(422).json({ error: 'future_education_required', message: 'Future education level is required for Returned to school.' });
+      }
+    }
+
+    let resultNocVersionCode = null;
+    let resultNocCode = null;
+    if (trimmedResultCode === '2') {
+      resultNocVersionCode = normCode(resultNocVersion, CODE_SETS.nocVersion);
+      if (!resultNocVersionCode) {
+        return res.status(422).json({ error: 'result_noc_version_required', message: 'NOC version is required for Employed result.' });
+      }
+      const nocStr = typeof resultNoc === 'string' ? resultNoc.trim() : '';
+      if (!nocStr) {
+        return res.status(422).json({ error: 'result_noc_required', message: 'NOC code is required for Employed result.' });
+      }
+      const digits = nocStr.replace(/\\D/g, '');
+      const requiredLength = resultNocVersionCode === '2021' ? 5 : 4;
+      if (digits.length !== requiredLength) {
+        return res.status(422).json({ error: 'result_noc_invalid', message: `NOC code must be ${requiredLength} digits for version ${resultNocVersionCode}.` });
+      }
+      resultNocCode = digits;
     }
 
     const summaryValue =
       typeof outcomeSummary === 'string' ? outcomeSummary.trim() || null : null;
     const closureNotesValue =
       typeof closureNotes === 'string' ? closureNotes.trim() || null : null;
+
+    const existingEsdc = safeJsonParse(planRow.esdc_action_plan_json, {}) || {};
+    const esdcPayload = {
+      ...existingEsdc,
+      actionPlanResultCode: trimmedResultCode,
+      actionPlanResultDate: resultDateStr,
+      actionPlanResultEducationLevel: resultEducationCode,
+      actionPlanFutureEducationLevel: futureEducationCode,
+      actionPlanResultRelatedNOC: resultNocCode,
+      actionPlanResultRelatedNOCVersion: resultNocVersionCode,
+    };
 
     await pool.query(
       `UPDATE iset_case_action_plan
@@ -16566,9 +17487,10 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
              result_date = ?,
              outcome_summary = ?,
              closure_notes = ?,
+             esdc_action_plan_json = ?,
              updated_at = NOW()
        WHERE id = ?`,
-      [trimmedResultCode, resultDateStr, summaryValue, closureNotesValue, planId]
+      [trimmedResultCode, resultDateStr, summaryValue, closureNotesValue, JSON.stringify(esdcPayload), planId]
     );
 
     const updatedRow = await fetchActionPlanWithCase(planId);
@@ -16667,23 +17589,173 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       metadata.summary = summary || null;
     }
 
-    await pool.query(
-      `UPDATE iset_case_action_plan
-         SET name = ?,
-             effective_date = ?,
-             review_date = ?,
-             notes = ?,
-             metadata_json = ?
-       WHERE id = ?`,
-      [
-        trimmedName,
-        startDate || null,
-        reviewDate || null,
-        summary || null,
-        Object.keys(metadata).length ? JSON.stringify(metadata) : null,
-        planId,
-      ]
-    );
+    const claimantValue = (() => {
+      if (typeof req.body.eiClaimant === 'undefined') return undefined;
+      const raw = req.body.eiClaimant;
+      if (raw === null) return null;
+      const str = String(raw).trim();
+      if (!str) return null;
+      const num = Number(str);
+      if (Number.isInteger(num) && num >= 1 && num <= 3) return num;
+      return null;
+    })();
+    const CODE_SETS = {
+      educationLevel: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
+      educationProvince: new Set(['1','2','3','4','5','6','7','8','9','10','11','12','13','14','16']),
+      yesNo: new Set(['0','1']),
+      eiClaimant: new Set(['1','2','3']),
+      prevEmployment: new Set(['1','2','9']),
+      childcareFunding: new Set(['1','2','3','4','5','6','7']),
+      barrier: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
+      nocVersion: new Set(['2006','2011','2016','2021']),
+      resultCode: new Set(['1','2','3','4','5','6','7','9']),
+      resultEducation: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
+      futureEducation: new Set(['5','8','9','10']),
+    };
+    const normaliseCode = (value, set) => {
+      if (value === null || typeof value === 'undefined') return null;
+      const str = String(value).trim();
+      if (!str) return null;
+      return set.has(str) ? str : null;
+    };
+    const requireCode = (value, set, field) => {
+      const code = normaliseCode(value, set);
+      return code;
+    };
+
+    const esdcExisting = safeJsonParse(planRow.esdc_action_plan_json, {}) || {};
+
+    const agreementNumber = (() => {
+      if (typeof req.body.agreementNumber === 'undefined') return esdcExisting.agreementNumber || '999999999';
+      const digits = String(req.body.agreementNumber).replace(/\D/g, '');
+      return digits.length >= 7 && digits.length <= 9 ? digits : null;
+    })();
+    if (typeof req.body.agreementNumber !== 'undefined' && !agreementNumber) {
+      return res.status(422).json({ error: 'agreement_number_invalid', message: 'Agreement number must be 7–9 digits.' });
+    }
+
+    const educationLevel = typeof req.body.educationLevel !== 'undefined'
+      ? normaliseCode(req.body.educationLevel, CODE_SETS.educationLevel)
+      : esdcExisting.educationLevel || null;
+    const educationProvince = typeof req.body.educationProvince !== 'undefined'
+      ? normaliseCode(req.body.educationProvince, CODE_SETS.educationProvince)
+      : esdcExisting.educationProvince || null;
+    if (educationLevel && !educationProvince) {
+      return res.status(422).json({ error: 'education_province_required', message: 'Education province is required when education level is set.' });
+    }
+
+    const socialAssistanceRecipient = (() => {
+      if (typeof req.body.socialAssistanceRecipient === 'undefined') return esdcExisting.socialAssistanceRecipient || null;
+      const code = normaliseCode(req.body.socialAssistanceRecipient, CODE_SETS.yesNo);
+      if (!code) return null;
+      return code;
+    })();
+
+    const prevEmployment = (() => {
+      if (typeof req.body.prevEmployment === 'undefined') return esdcExisting.actionPlanPreviousEmployment || null;
+      return normaliseCode(req.body.prevEmployment, CODE_SETS.prevEmployment);
+    })();
+    let prevEmploymentNoc = typeof req.body.prevEmploymentNoc !== 'undefined' ? req.body.prevEmploymentNoc : esdcExisting.actionPlanPreviousEmploymentNoc || null;
+    let prevEmploymentNocVersion = typeof req.body.prevEmploymentNocVersion !== 'undefined'
+      ? normaliseCode(req.body.prevEmploymentNocVersion, CODE_SETS.nocVersion)
+      : normaliseCode(esdcExisting.actionPlanPreviousEmploymentNocVersion, CODE_SETS.nocVersion);
+    let prevEmploymentScheduleType = typeof req.body.prevEmploymentScheduleType !== 'undefined'
+      ? normaliseCode(req.body.prevEmploymentScheduleType, CODE_SETS.prevEmploymentSchedule)
+      : esdcExisting.actionPlanPreviousEmploymentScheduleType || null;
+    if (prevEmployment === '2') {
+      if (!prevEmploymentNoc || !prevEmploymentNocVersion) {
+        return res.status(422).json({ error: 'previous_employment_noc_required', message: 'NOC code and version are required when employment status is Employed.' });
+      }
+      if (!prevEmploymentScheduleType) {
+        return res.status(422).json({ error: 'previous_employment_schedule_required', message: 'Schedule type is required when employment status is Employed.' });
+      }
+    } else {
+      prevEmploymentNoc = null;
+      prevEmploymentNocVersion = null;
+      prevEmploymentScheduleType = null;
+    }
+
+    const childcareNeed = (() => {
+      if (typeof req.body.childcareNeed === 'undefined') return esdcExisting.actionPlanChildcareNeed || null;
+      return normaliseCode(req.body.childcareNeed, CODE_SETS.yesNo);
+    })();
+    const childcareFunding = (() => {
+      if (childcareNeed === '1') {
+        const code = normaliseCode(
+          typeof req.body.childcareFunding !== 'undefined'
+            ? req.body.childcareFunding
+            : esdcExisting.actionPlanChildcareFundedCode,
+          CODE_SETS.childcareFunding
+        );
+        return code;
+      }
+      return null;
+    })();
+    const barrierCodes = (() => {
+      const incoming = Array.isArray(req.body.barriers)
+        ? req.body.barriers
+        : Array.isArray(req.body.barrierToEmployment)
+        ? req.body.barrierToEmployment
+        : esdcExisting.BarrierToEmployment || [];
+      return incoming
+        .map(val => String(val).trim())
+        .filter(code => CODE_SETS.barrier.has(code));
+    })();
+
+    const setParts = [
+      'name = ?',
+      'effective_date = ?',
+      'review_date = ?',
+      'notes = ?',
+      'metadata_json = ?',
+    ];
+    const values = [
+      trimmedName,
+      startDate || null,
+      reviewDate || null,
+      summary || null,
+      Object.keys(metadata).length ? JSON.stringify(metadata) : null,
+    ];
+    if (claimantValue !== undefined) {
+      setParts.splice(4, 0, 'EIClaimant = ?');
+      values.splice(4, 0, claimantValue);
+    }
+    const prevEmploymentValue = (() => {
+      if (typeof req.body.prevEmployment === 'undefined') return undefined;
+      const raw = req.body.prevEmployment;
+      if (raw === null) return null;
+      const str = String(raw).trim();
+      if (!str) return null;
+      const num = Number(str);
+      if (Number.isInteger(num) && [1, 2, 9].includes(num)) return num;
+      return null;
+    })();
+    if (prevEmploymentValue !== undefined) {
+      setParts.splice(5, 0, 'prev_employment = ?');
+      values.splice(5, 0, prevEmploymentValue);
+    }
+    const esdcPayload = {
+      ...esdcExisting,
+      agreementNumber,
+      educationLevel,
+      educationProvince,
+      socialAssistanceRecipient,
+      EIClaimant: typeof claimantValue !== 'undefined' ? claimantValue : esdcExisting.EIClaimant || null,
+      actionPlanPreviousEmployment: prevEmployment,
+      actionPlanPreviousEmploymentNoc: prevEmploymentNoc,
+      actionPlanPreviousEmploymentNocVersion: prevEmploymentNocVersion,
+      actionPlanPreviousEmploymentScheduleType: prevEmploymentScheduleType,
+      actionPlanChildcareNeed: childcareNeed,
+      actionPlanChildcareFundedCode: childcareFunding,
+      BarrierToEmployment: barrierCodes && barrierCodes.length ? barrierCodes : null,
+    };
+    setParts.push('esdc_action_plan_json = ?');
+    values.push(JSON.stringify(esdcPayload));
+    setParts.push('updated_at = NOW()');
+    values.push(planId);
+
+    const sql = `UPDATE iset_case_action_plan SET ${setParts.join(', ')} WHERE id = ?`;
+    await pool.query(sql, values);
 
     const updatedRow = await fetchActionPlanWithCase(planId);
     res.status(200).json(mapActionPlanRow(updatedRow));
@@ -18904,20 +19976,13 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     // Resolve applicant user id
     const [[caseRow]] = await pool.query(
       `SELECT c.application_id,
-              COALESCE(applicant.id, s.user_id) AS applicant_user_id,
-              COALESCE(
-                s.reference_number,
-                JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))
-              ) AS tracking_reference,
-              COALESCE(
-                NULLIF(applicant.name, ''),
-                JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.applicant_signature.name')),
-                JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.applicant_name')),
-                applicant.email
-              ) AS applicant_name,
+              s.user_id AS applicant_user_id,
+              s.reference_number AS submission_reference,
+              c.case_number,
+              c.case_context_json,
               applicant.email AS applicant_email
          FROM iset_case c
-         JOIN iset_application a ON c.application_id = a.id
+         LEFT JOIN iset_application a ON c.application_id = a.id
          LEFT JOIN iset_application_submission s ON a.submission_id = s.id
          LEFT JOIN user applicant ON s.user_id = applicant.id
         WHERE c.id = ?
@@ -18962,9 +20027,33 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       req?.auth?.name ||
       null;
 
+    const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
+    const ctxPersonal = caseContext.applicationPersonal || {};
+    const ctxAnswers = caseContext.applicationAnswers || {};
+    const contextNameCandidates = [
+      ctxPersonal.preferred_name,
+      ctxPersonal.preferredName,
+      caseContext.preferredName,
+      ctxAnswers['preferred-name'],
+      ctxAnswers['preferred_name'],
+      ctxPersonal.first_name && ctxPersonal.last_name
+        ? `${ctxPersonal.first_name} ${ctxPersonal.last_name}`
+        : null,
+      ctxPersonal.firstName && ctxPersonal.lastName
+        ? `${ctxPersonal.firstName} ${ctxPersonal.lastName}`
+        : null,
+    ];
+    const contextApplicantName =
+      contextNameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
+
+    const trackingReference =
+      normaliseString(caseRow?.submission_reference) ||
+      normaliseString(caseRow?.case_number) ||
+      (caseId ? `CASE-${caseId}` : null);
+
     const effectiveApplicantName =
       toNameValue ||
-      caseRow?.applicant_name ||
+      contextApplicantName ||
       caseRow?.applicant_email ||
       null;
     const effectiveAssessorName = fromNameValue || assessorDisplayName || null;
@@ -18982,9 +20071,9 @@ app.post('/api/cases/:id/messages', async (req, res) => {
           from_display_name: fromNameValue || assessorDisplayName || null,
           assessor_name: effectiveAssessorName,
           applicant_name: effectiveApplicantName,
-          tracking_id: caseRow?.tracking_reference || null,
+          tracking_id: trackingReference || null,
         },
-        trackingId: caseRow?.tracking_reference || null,
+        trackingId: trackingReference || null,
         actorId: senderId,
         actorName: assessorDisplayName,
       });
@@ -19035,14 +20124,13 @@ app.get('/api/me/case-watches', async (req, res) => {
             c.status,
             c.assigned_to_user_id,
             c.updated_at,
-            sub.reference_number AS tracking_id,
-            applicant.name AS applicant_name,
-            applicant.email AS applicant_email,
+            c.case_number,
+            c.case_context_json,
+            sub.reference_number AS submission_reference,
             staff.email AS assigned_staff_email
          FROM iset_case c
          LEFT JOIN iset_application a ON a.id = c.application_id
          LEFT JOIN iset_application_submission sub ON sub.id = a.submission_id
-         LEFT JOIN user applicant ON applicant.id = sub.user_id
          LEFT JOIN staff_profiles staff ON staff.id = c.assigned_to_user_id
         WHERE c.id IN (${placeholders})`,
         caseIds
@@ -19060,6 +20148,30 @@ app.get('/api/me/case-watches', async (req, res) => {
           : Number(assignedRaw);
 
       const statusNormalised = normaliseCaseStatusValue(match.status);
+      const caseContext = safeJsonParse(match.case_context_json, null) || {};
+      const ctxPersonal = caseContext.applicationPersonal || {};
+      const ctxAnswers = caseContext.applicationAnswers || {};
+      const nameCandidates = [
+        ctxPersonal.preferred_name,
+        ctxPersonal.preferredName,
+        caseContext.preferredName,
+        ctxAnswers['preferred-name'],
+        ctxAnswers['preferred_name'],
+        ctxPersonal.first_name && ctxPersonal.last_name
+          ? `${ctxPersonal.first_name} ${ctxPersonal.last_name}`
+          : null,
+        ctxPersonal.firstName && ctxPersonal.lastName
+          ? `${ctxPersonal.firstName} ${ctxPersonal.lastName}`
+          : null,
+      ];
+      const applicantName =
+        nameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
+
+      const trackingId =
+        normaliseString(match.submission_reference) ||
+        normaliseString(match.case_number) ||
+        (match.id ? `CASE-${match.id}` : null);
+
       return {
         caseId,
         metadata: watch.metadata,
@@ -19067,9 +20179,9 @@ app.get('/api/me/case-watches', async (req, res) => {
         updatedAt: watch.updatedAt,
         status: statusNormalised || CASE_STATUS_DERIVED_VALUES.pendingApproval,
         statusRaw: match.status || null,
-        trackingId: match.tracking_id || null,
-        applicantName: match.applicant_name || match.applicant_email || null,
-        applicantEmail: match.applicant_email || null,
+        trackingId,
+        applicantName,
+        applicantEmail: null,
         assignedToStaffProfileId: Number.isFinite(assignedToStaffProfileId)
           ? assignedToStaffProfileId
           : null,
@@ -19111,14 +20223,13 @@ app.post('/api/cases/:caseId/watch', async (req, res) => {
           c.status,
           c.assigned_to_user_id,
           c.updated_at,
-          sub.reference_number AS tracking_id,
-          applicant.name AS applicant_name,
-          applicant.email AS applicant_email,
+          c.case_number,
+          c.case_context_json,
+          sub.reference_number AS submission_reference,
           staff.email AS assigned_staff_email
          FROM iset_case c
          LEFT JOIN iset_application a ON a.id = c.application_id
          LEFT JOIN iset_application_submission sub ON sub.id = a.submission_id
-         LEFT JOIN user applicant ON applicant.id = sub.user_id
          LEFT JOIN staff_profiles staff ON staff.id = c.assigned_to_user_id
         WHERE c.id = ?
         LIMIT 1`,
@@ -19157,15 +20268,39 @@ app.post('/api/cases/:caseId/watch', async (req, res) => {
       console.warn('[case-watch] failed to emit watch_added event', eventErr);
     }
 
+    const caseContext = safeJsonParse(caseRow.case_context_json, null) || {};
+    const ctxPersonal = caseContext.applicationPersonal || {};
+    const ctxAnswers = caseContext.applicationAnswers || {};
+    const nameCandidates = [
+      ctxPersonal.preferred_name,
+      ctxPersonal.preferredName,
+      caseContext.preferredName,
+      ctxAnswers['preferred-name'],
+      ctxAnswers['preferred_name'],
+      ctxPersonal.first_name && ctxPersonal.last_name
+        ? `${ctxPersonal.first_name} ${ctxPersonal.last_name}`
+        : null,
+      ctxPersonal.firstName && ctxPersonal.lastName
+        ? `${ctxPersonal.firstName} ${ctxPersonal.lastName}`
+        : null,
+    ];
+    const applicantName =
+      nameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
+
+    const trackingId =
+      normaliseString(caseRow.submission_reference) ||
+      normaliseString(caseRow.case_number) ||
+      (caseRow.id ? `CASE-${caseRow.id}` : null);
+
     res.status(200).json({
       watch,
       case: {
         id: Number(caseRow.id),
         status: normaliseCaseStatusValue(caseRow.status) || CASE_STATUS_DERIVED_VALUES.pendingApproval,
         statusRaw: caseRow.status || null,
-        trackingId: caseRow.tracking_id || null,
-        applicantName: caseRow.applicant_name || caseRow.applicant_email || null,
-        applicantEmail: caseRow.applicant_email || null,
+        trackingId,
+        applicantName,
+        applicantEmail: null,
         assignedToStaffProfileId:
           caseRow.assigned_to_user_id == null
             ? null

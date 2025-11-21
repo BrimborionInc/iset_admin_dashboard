@@ -6,416 +6,318 @@ import {
   Button,
   ColumnLayout,
   DatePicker,
+  ExpandableSection,
   FormField,
   Input,
-  Badge,
   Modal,
   Multiselect,
   Select,
   SpaceBetween,
-  Spinner,
   Textarea,
 } from "@cloudscape-design/components";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 
-const formatDateDisplay = value => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleDateString();
-};
-
-const formatDateTimeDisplay = value => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString();
-};
-
-const toDateInputValue = value => {
-  if (!value) return "";
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value;
-  }
-  const date = new Date(value);
-  const time = date.getTime();
-  if (!Number.isFinite(time)) return value || "";
-  return date.toISOString().slice(0, 10);
-};
-
-const toApiDateValue = value => {
-  if (!value) return null;
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value;
-  }
-  const date = new Date(value);
-  const time = date.getTime();
-  if (!Number.isFinite(time)) return value;
-  return date.toISOString().slice(0, 10);
-};
-
-const displayValue = (val) => (val === null || typeof val === "undefined" || val === "" ? "-" : String(val));
-
-const normaliseYesNoValue = (value) => {
-  if (value === null || typeof value === "undefined") return "";
-  if (value === true) return "yes";
-  if (value === false) return "no";
-  const str = String(value).trim().toLowerCase();
-  if (["yes", "y", "true", "1"].includes(str)) return "yes";
-  if (["no", "n", "false", "0"].includes(str)) return "no";
-  return "";
-};
-
-const parseList = (value) => {
-  if (!value) return [];
-  if (Array.isArray(value)) return value.filter(Boolean).map(item => String(item).trim()).filter(Boolean);
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) {
-        return parsed.filter(Boolean).map(item => String(item).trim()).filter(Boolean);
-      }
-    } catch (_) {
-      const split = value.split(",").map(item => item.trim()).filter(Boolean);
-      if (split.length) return split;
-    }
-  }
-  return [];
-};
-
-const yesNoOptions = [
-  { value: "", label: "Not set" },
-  { value: "yes", label: "Yes" },
-  { value: "no", label: "No" },
+const EI_CLAIMANT_OPTIONS = [
+  { value: "1", label: "Employment insurance claimant" },
+  { value: "2", label: "Reach-back client/former claimant" },
+  { value: "3", label: "Non-insured client" },
 ];
 
-const employmentStatusOptions = [
-  { value: "", label: "Not set" },
-  { value: "Unemployed", label: "Unemployed" },
-  { value: "Underemployed", label: "Underemployed" },
-  { value: "Employed Full-time", label: "Employed Full-time" },
-  { value: "Employed Part-time", label: "Employed Part-time" },
-  { value: "Self-employed", label: "Self-employed" },
-  { value: "Student", label: "Student" },
-  { value: "Other", label: "Other" },
+const PREV_EMPLOYMENT_OPTIONS = [
+  { value: "1", label: "Unemployed" },
+  { value: "2", label: "Employed" },
+  { value: "9", label: "Student" },
 ];
 
-const educationLevelOptions = [
-  { value: "", label: "Not set" },
-  { value: "No formal education", label: "No formal education" },
-  { value: "Up to Grade 7-8 (Secondaire I-II)", label: "Up to Grade 7-8 (Secondaire I-II)" },
-  { value: "Grade 9-10 (Secondaire III)", label: "Grade 9-10 (Secondaire III)" },
-  { value: "Grade 11-12 (Secondaire IV-V)", label: "Grade 11-12 (Secondaire IV-V)" },
-  { value: "Secondary School Diploma or GED", label: "Secondary School Diploma or GED" },
-  { value: "Some post-secondary training", label: "Some post-secondary training" },
-  { value: "Apprenticeship/trades certificate or diploma", label: "Apprenticeship/trades certificate or diploma" },
-  { value: "CEGEP or other non-university certificate/diploma", label: "CEGEP or other non-university certificate/diploma" },
-  { value: "College or other non-university certificate/diploma", label: "College or other non-university certificate/diploma" },
-  { value: "University certificate or diploma", label: "University certificate or diploma" },
-  { value: "University - Bachelor Degree", label: "University - Bachelor Degree" },
-  { value: "University - Master's Degree", label: "University - Master's Degree" },
-  { value: "University - Doctorate", label: "University - Doctorate" },
+const SCHEDULE_OPTIONS = [
+  { value: "1", label: "Full-time" },
+  { value: "2", label: "Part-time" },
 ];
 
-const employmentBarrierOptions = [
-  { value: "None", label: "None" },
-  { value: "Education", label: "Education" },
-  { value: "Lack of Marketable Skills", label: "Lack of Marketable Skills" },
-  { value: "Lack of Work Experience", label: "Lack of Work Experience" },
-  { value: "Remoteness", label: "Remoteness" },
-  { value: "Lack of Transportation", label: "Lack of Transportation" },
-  { value: "Economic", label: "Economic" },
-  { value: "Language", label: "Language" },
-  { value: "Lack of Labour Force Attachment", label: "Lack of Labour Force Attachment" },
-  { value: "Dependent Care", label: "Dependent Care" },
-  { value: "Physical, Emotional, or Mental Health", label: "Physical, Emotional, or Mental Health" },
-  { value: "Other", label: "Other" },
+const YES_NO_OPTIONS = [
+  { value: "1", label: "Yes" },
+  { value: "0", label: "No" },
 ];
 
-const localPriorityOptions = [
-  { value: "Off Reserve", label: "Off Reserve" },
-  { value: "Single Parent Family", label: "Single Parent Family" },
-  { value: "Woman over 45", label: "Woman over 45" },
-  { value: "Literacy", label: "Literacy" },
-  { value: "Youth", label: "Youth" },
-  { value: "Unskilled Clerical/Service Worker", label: "Unskilled Clerical/Service Worker" },
-  { value: "No Grade 12", label: "No Grade 12" },
-  { value: "Unskilled Labourer", label: "Unskilled Labourer" },
-  { value: "Non-Targeted", label: "Non-Targeted" },
+const CHILDCARE_FUNDING_OPTIONS = [
+  { value: "1", label: "Not applicable" },
+  { value: "2", label: "FNICCI" },
+  { value: "3", label: "EI/CRF" },
+  { value: "4", label: "Provincial funding / subsidy" },
+  { value: "5", label: "No funding received" },
+  { value: "6", label: "Daycare space not available" },
+  { value: "7", label: "Assisted by family / Self-funded" },
 ];
 
-const ReadOnlyField = ({ label, description, value, multiline = false, rows = 3 }) => (
-  <FormField
-    label={<Box fontWeight="bold">{label}</Box>}
-    description={description}
-  >
-    {multiline ? (
-      <Textarea value={displayValue(value)} readOnly rows={rows} />
-    ) : (
-      <Input value={displayValue(value)} readOnly />
-    )}
-  </FormField>
-);
+const EDUCATION_OPTIONS = [
+  { value: "1", label: "No formal education" },
+  { value: "2", label: "Up to grade 7–8" },
+  { value: "3", label: "Grade 9–10" },
+  { value: "4", label: "Grade 11–12" },
+  { value: "5", label: "Secondary diploma / GED" },
+  { value: "6", label: "Some post-secondary" },
+  { value: "7", label: "Apprenticeship / trades / vocational diploma" },
+  { value: "8", label: "College / CEGEP / non-university diploma" },
+  { value: "9", label: "University certificate/diploma" },
+  { value: "10", label: "Bachelor’s" },
+  { value: "11", label: "Master’s" },
+  { value: "12", label: "Doctorate" },
+];
+
+const PROVINCE_OPTIONS = [
+  { value: "1", label: "NL" },
+  { value: "2", label: "NS" },
+  { value: "3", label: "NB" },
+  { value: "4", label: "PE" },
+  { value: "5", label: "QC" },
+  { value: "6", label: "ON" },
+  { value: "7", label: "MB" },
+  { value: "8", label: "SK" },
+  { value: "9", label: "AB" },
+  { value: "10", label: "NT" },
+  { value: "11", label: "BC" },
+  { value: "12", label: "YT" },
+  { value: "13", label: "United States" },
+  { value: "14", label: "Other country" },
+  { value: "16", label: "Nunavut" },
+];
+
+const BARRIER_OPTIONS = [
+  { value: "1", label: "None" },
+  { value: "2", label: "Lack of labour force attachment" },
+  { value: "3", label: "Lack of work experience" },
+  { value: "4", label: "Lack of transportation" },
+  { value: "5", label: "Remoteness" },
+  { value: "6", label: "Language" },
+  { value: "7", label: "Education" },
+  { value: "8", label: "Economic" },
+  { value: "9", label: "Dependent care" },
+  { value: "10", label: "Lack of marketable skills" },
+  { value: "11", label: "Physical/emotional/mental health" },
+  { value: "12", label: "Other barrier" },
+];
+
+const RESULT_OPTIONS = [
+  { value: "1", label: "Unemployed but available for work" },
+  { value: "2", label: "Employed" },
+  { value: "3", label: "Self-employed" },
+  { value: "4", label: "Returned to school" },
+  { value: "5", label: "Unspecified – client could not be reached" },
+  { value: "6", label: "No longer in labour force" },
+  { value: "7", label: "Stay in school" },
+  { value: "9", label: "Ready for work" },
+];
+
+const RESULT_EDUCATION_OPTIONS = [
+  { value: "1", label: "No formal education" },
+  { value: "2", label: "Up to grade 7-8" },
+  { value: "3", label: "Grade 9-10" },
+  { value: "4", label: "Grade 11-12" },
+  { value: "5", label: "Secondary diploma / GED" },
+  { value: "6", label: "Some post-secondary" },
+  { value: "7", label: "Apprenticeship / trades / vocational diploma" },
+  { value: "8", label: "College / CEGEP / non-university diploma" },
+  { value: "9", label: "University certificate/diploma" },
+  { value: "10", label: "Bachelor’s" },
+  { value: "11", label: "Master’s" },
+  { value: "12", label: "Doctorate" },
+];
+
+const FUTURE_EDUCATION_OPTIONS = [
+  { value: "5", label: "Secondary diploma / GED" },
+  { value: "8", label: "College / CEGEP / non-university diploma" },
+  { value: "9", label: "University certificate/diploma" },
+  { value: "10", label: "Bachelor’s" },
+];
+
+const NOC_VERSION_OPTIONS = [
+  { value: "2016", label: "2016" },
+  { value: "2021", label: "2021" },
+];
+
+const defaultForm = {
+  name: "",
+  summary: "",
+  startDate: "",
+  reviewDate: "",
+  agreementNumber: "",
+  educationLevel: "",
+  educationProvince: "",
+  socialAssistanceRecipient: "",
+  eiClaimant: "",
+  prevEmployment: "",
+  prevEmploymentScheduleType: "",
+  prevEmploymentNocVersion: "",
+  prevEmploymentNoc: "",
+  childcareNeed: "",
+  childcareFunding: "",
+  barriers: [],
+  resultCode: "",
+  resultDate: "",
+  resultEducationLevel: "",
+  futureEducationLevel: "",
+  resultNocVersion: "",
+  resultNoc: "",
+  outcomeSummary: "",
+  closureNotes: "",
+};
+
+const displayValue = value => (value === null || typeof value === "undefined" || value === "" ? "-" : String(value));
 
 const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
-  const {
-    updateActionPlan,
-    fetchActionPlanContext,
-    upsertActionPlanReviewReminder,
-    caseData,
-    saveCaseContext,
-    loadNocVersions,
-    nocVersions,
-    searchNocCodes,
-  } = useCaseWorkspace();
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ name: "", summary: "", startDate: "", reviewDate: "" });
+  const { updateActionPlan, searchNocCodes, caseData } = useCaseWorkspace();
+  const [form, setForm] = useState(defaultForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [context, setContext] = useState(null);
-  const [contextLoading, setContextLoading] = useState(false);
-  const [caseContext, setCaseContext] = useState(null);
-  const [caseContextForm, setCaseContextForm] = useState({
-    employmentGoals: "",
-    employmentStatus: "",
-    educationLevel: "",
-    employmentNocVersion: "",
-    employmentNoc: "",
-    socialAssistance: "",
-    employmentInsurance: "",
-    childcareNeed: "",
-    childcareFunding: "",
-    employmentBarriers: [],
-    localAreaPriorities: [],
-    previousIset: "",
-    previousIsetDetails: "",
-    otherFunding: "",
-  });
-  const [nocOptions, setNocOptions] = useState([]);
-  const [nocSearching, setNocSearching] = useState(false);
-
-  const seedCaseContextForm = useCallback((source = {}) => {
-    const details = source || {};
-    setCaseContextForm({
-      employmentGoals: details.employmentGoals || details.longTermGoal || details.shortTermGoal || "",
-      employmentStatus: details.employmentStatus || details.labourForceStatus || "",
-      educationLevel: details.educationLevel || "",
-      employmentNocVersion: details.employmentNocVersion || "",
-      employmentNoc: details.employmentNoc || "",
-      socialAssistance: normaliseYesNoValue(details.socialAssistance),
-      employmentInsurance: normaliseYesNoValue(details.employmentInsurance),
-      childcareNeed: normaliseYesNoValue(details.childcareNeed),
-      childcareFunding: details.childcareFunding || "",
-      employmentBarriers: parseList(details.employmentBarriers || details.barriersFromApplication),
-      localAreaPriorities: parseList(details.localAreaPriorities),
-      previousIset: normaliseYesNoValue(details.previousIset),
-      previousIsetDetails: details.previousIsetDetails || "",
-      otherFunding: details.otherFunding || "",
-    });
-  }, []);
+  const [validationError, setValidationError] = useState(null);
+  const [prevNocOptions, setPrevNocOptions] = useState([]);
+  const [prevNocLoading, setPrevNocLoading] = useState(false);
+  const [resultNocOptions, setResultNocOptions] = useState([]);
+  const [resultNocLoading, setResultNocLoading] = useState(false);
 
   useEffect(() => {
-    if (!plan) return;
+    if (!visible || !plan) return;
     setForm({
       name: plan?.title || plan?.name || "",
       summary: plan?.summary || "",
-      startDate: toDateInputValue(plan?.startDate),
-      reviewDate: toDateInputValue(plan?.endDate),
+      startDate: plan?.startDate || "",
+      reviewDate: plan?.endDate || "",
+      agreementNumber: plan?.agreementNumber || "",
+      educationLevel: plan?.educationLevel ? String(plan.educationLevel) : "",
+      educationProvince: plan?.educationProvince ? String(plan.educationProvince) : "",
+      socialAssistanceRecipient: plan?.socialAssistanceRecipient !== null && plan?.socialAssistanceRecipient !== undefined ? String(plan.socialAssistanceRecipient) : "",
+      eiClaimant: plan?.eiClaimant ? String(plan.eiClaimant) : "",
+      prevEmployment: plan?.prevEmployment ? String(plan.prevEmployment) : "",
+      prevEmploymentScheduleType: plan?.prevEmploymentScheduleType ? String(plan.prevEmploymentScheduleType) : "",
+      prevEmploymentNocVersion: plan?.prevEmploymentNocVersion || "",
+      prevEmploymentNoc: plan?.prevEmploymentNoc || "",
+      childcareNeed: plan?.childcareNeed !== null && plan?.childcareNeed !== undefined ? String(plan.childcareNeed) : "",
+      childcareFunding: plan?.childcareFunding ? String(plan.childcareFunding) : "",
+      barriers: Array.isArray(plan?.barriers) ? plan.barriers.map(b => String(b)) : [],
+      resultCode: plan?.resultCode ? String(plan.resultCode) : "",
+      resultDate: plan?.resultDate || "",
+      resultEducationLevel: plan?.resultEducationLevel ? String(plan.resultEducationLevel) : "",
+      futureEducationLevel: plan?.futureEducationLevel ? String(plan.futureEducationLevel) : "",
+      resultNocVersion: plan?.resultNocVersion || "",
+      resultNoc: plan?.resultNoc || "",
+      outcomeSummary: plan?.outcomeSummary || "",
+      closureNotes: plan?.closureNotes || "",
     });
-    setEditing(false);
     setError(null);
-  }, [plan]);
+    setValidationError(null);
+    setPrevNocOptions([]);
+    setResultNocOptions([]);
+  }, [visible, plan]);
 
-  useEffect(() => {
-    if (!visible) return;
-    let cancelled = false;
-    setContextLoading(true);
-    fetchActionPlanContext()
-      .then(result => {
-        if (cancelled) return;
-        const payload = result?.context || result || {};
-        const nextCaseContext = result?.caseContext || payload?.caseContext || caseData?.caseContext || null;
-        const merged = { ...(payload || {}), ...(nextCaseContext || {}) };
-        setContext(merged);
-        setCaseContext(nextCaseContext);
-        seedCaseContextForm(nextCaseContext || merged);
-        setContextLoading(false);
-      })
-      .catch(err => {
-        if (cancelled) return;
-        setContext({});
-        setContextLoading(false);
-        setError(err?.message || "Unable to load client context.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [visible, fetchActionPlanContext, caseData, seedCaseContextForm]);
-
-  useEffect(() => {
-    if (!visible) return;
-    loadNocVersions().catch(() => {});
-  }, [visible, loadNocVersions]);
-
-  useEffect(() => {
-    if (!visible) return;
-    if (caseData?.caseContext && !caseContext) {
-      setCaseContext(caseData.caseContext);
-      seedCaseContextForm(caseData.caseContext);
-    }
-  }, [visible, caseData, caseContext, seedCaseContextForm]);
-
-  const handleNocSearch = useCallback(
-    async (filteringText = "") => {
-      if (!caseContextForm.employmentNocVersion) {
-        setNocOptions([]);
-        return;
-      }
-      setNocSearching(true);
-      try {
-        const results = await searchNocCodes({
-          version: caseContextForm.employmentNocVersion,
-          query: filteringText || caseContextForm.employmentNoc || "",
-        });
-        if (Array.isArray(results)) {
-          setNocOptions(results);
-        }
-      } catch (err) {
-        console.warn("[ActionPlanDetailsModal] noc search failed", err?.message || err);
-      } finally {
-        setNocSearching(false);
-      }
-    },
-    [caseContextForm.employmentNocVersion, caseContextForm.employmentNoc, searchNocCodes]
-  );
-
-  useEffect(() => {
-    if (!visible) return;
-    if (!caseContextForm.employmentNocVersion) {
-      setNocOptions([]);
+  const handlePrevNocSearch = useCallback(async query => {
+    if (!form.prevEmploymentNocVersion) {
+      setPrevNocOptions([]);
       return;
     }
-    if (caseContextForm.employmentNoc) {
-      handleNocSearch(caseContextForm.employmentNoc).catch(() => {});
+    setPrevNocLoading(true);
+    try {
+      const res = await searchNocCodes({ query, version: form.prevEmploymentNocVersion });
+      const opts = (res || []).map(item => ({
+        value: item.code,
+        label: `${item.code} — ${item.title}`,
+        description: item.title,
+      }));
+      setPrevNocOptions(opts);
+    } finally {
+      setPrevNocLoading(false);
     }
-  }, [visible, caseContextForm.employmentNocVersion, caseContextForm.employmentNoc, handleNocSearch]);
+  }, [form.prevEmploymentNocVersion, searchNocCodes]);
 
-  const nocVersionOptionsList = useMemo(() => {
-    const base = [{ value: "", label: "Not set" }];
-    if (!Array.isArray(nocVersions)) return base;
-    return base.concat(
-      nocVersions.map(item => ({
-        value: item.code || item.value || "",
-        label: item.label || item.code || "",
-        description: item.description || undefined,
-      }))
-    );
-  }, [nocVersions]);
-
-  const autosuggestOptions = useMemo(
-    () =>
-      Array.isArray(nocOptions)
-        ? nocOptions
-            .map(item => ({
-              value: item.code || item.value || "",
-              label: item.title ? `${item.code} — ${item.title}` : item.label || item.code || "",
-              description: item.title || item.label || null,
-            }))
-            .filter(item => item.value)
-        : [],
-    [nocOptions]
-  );
-
-  const handleDismiss = () => {
-    if (saving) return;
-    setEditing(false);
-    if (plan) {
-      setForm({
-        name: plan?.title || plan?.name || "",
-        summary: plan?.summary || "",
-        startDate: plan?.startDate || "",
-        reviewDate: plan?.endDate || "",
-      });
+  const handleResultNocSearch = useCallback(async query => {
+    if (!form.resultNocVersion) {
+      setResultNocOptions([]);
+      return;
     }
-    seedCaseContextForm(caseContext || context || {});
-    onDismiss();
+    setResultNocLoading(true);
+    try {
+      const res = await searchNocCodes({ query, version: form.resultNocVersion });
+      const opts = (res || []).map(item => ({
+        value: item.code,
+        label: `${item.code} — ${item.title}`,
+        description: item.title,
+      }));
+      setResultNocOptions(opts);
+    } finally {
+      setResultNocLoading(false);
+    }
+  }, [form.resultNocVersion, searchNocCodes]);
+
+  const validate = () => {
+    const digits = form.agreementNumber.replace(/\D/g, "");
+    if (!form.name.trim()) return "Plan name is required.";
+    if (!form.startDate) return "Start date is required.";
+    if (form.startDate && form.reviewDate && form.reviewDate < form.startDate) return "Review date cannot be before start date.";
+    if (!digits || digits.length < 7 || digits.length > 9) return "Agreement number must be 7–9 digits.";
+    if (!form.socialAssistanceRecipient) return "Social assistance recipient is required.";
+    if (!form.eiClaimant) return "EI claimant status is required.";
+    if (!form.prevEmployment) return "Employment status at plan start is required.";
+    if (form.prevEmployment === "2") {
+      if (!form.prevEmploymentScheduleType) return "Schedule type is required when employment status is Employed.";
+      if (!form.prevEmploymentNocVersion) return "NOC version is required when employment status is Employed.";
+      if (!form.prevEmploymentNoc) return "NOC code is required when employment status is Employed.";
+    }
+    if (form.childcareNeed === "1" && !form.childcareFunding) return "Childcare funding is required when childcare need is Yes.";
+    if (form.educationLevel && !form.educationProvince) return "Education province is required when education level is set.";
+    const anyCloseout = form.resultCode || form.resultDate || form.resultEducationLevel || form.futureEducationLevel || form.resultNoc || form.resultNocVersion || form.outcomeSummary;
+    if (anyCloseout) {
+      if (!form.resultCode) return "Result code is required.";
+      if (!form.resultDate) return "Result date is required.";
+      if (!form.resultEducationLevel) return "Action Plan Result Education Level is required.";
+      if (form.resultCode === "4" && !form.futureEducationLevel) return "Future education level is required for Returned to school.";
+      if (form.resultCode === "2") {
+        if (!form.resultNocVersion) return "Result NOC version is required for Employed.";
+        if (!form.resultNoc) return "Result NOC code is required for Employed.";
+        const len = form.resultNocVersion === "2021" ? 5 : 4;
+        const digitsNoc = form.resultNoc.replace(/\D/g, "");
+        if (digitsNoc.length !== len) return `Result NOC code must be ${len} digits for version ${form.resultNocVersion}.`;
+      }
+    }
+    return null;
   };
 
-  const handleCancelEdit = () => {
-    if (saving) return;
-    if (plan) {
-      setForm({
-        name: plan?.title || plan?.name || "",
-        summary: plan?.summary || "",
-        startDate: plan?.startDate || "",
-        reviewDate: plan?.endDate || "",
-      });
-    }
-    seedCaseContextForm(caseContext || context || {});
-    setEditing(false);
-    setError(null);
-  };
-
-  const handleSave = async () => {
-    if (!plan) return;
-    const trimmedName = form.name.trim();
-    if (!trimmedName) {
-      setError("Plan name is required.");
+  const handleSubmit = async () => {
+    const validation = validate();
+    if (validation) {
+      setValidationError(validation);
       return;
     }
-    if (!form.startDate) {
-      setError("Start date is required.");
-      return;
-    }
-    if (form.startDate && form.reviewDate && form.reviewDate < form.startDate) {
-      setError("Review date cannot be before start date.");
-      return;
-    }
+    setValidationError(null);
     setSaving(true);
     setError(null);
     try {
-      const updated = await updateActionPlan(plan.id, {
-        name: trimmedName,
-        startDate: toApiDateValue(form.startDate),
-        reviewDate: toApiDateValue(form.reviewDate),
+      const payload = {
+        name: form.name.trim(),
+        startDate: form.startDate || null,
+        reviewDate: form.reviewDate || null,
         summary: form.summary || null,
-      });
-      const toNullable = (value) => {
-        if (value === undefined || value === null) return null;
-        const str = String(value);
-        return str.trim().length ? value : null;
+        agreementNumber: form.agreementNumber || null,
+        educationLevel: form.educationLevel || null,
+        educationProvince: form.educationProvince || null,
+        socialAssistanceRecipient: form.socialAssistanceRecipient || null,
+        eiClaimant: form.eiClaimant || null,
+        prevEmployment: form.prevEmployment || null,
+        prevEmploymentScheduleType: form.prevEmployment === "2" ? form.prevEmploymentScheduleType || null : null,
+        prevEmploymentNocVersion: form.prevEmployment === "2" ? form.prevEmploymentNocVersion || null : null,
+        prevEmploymentNoc: form.prevEmployment === "2" ? form.prevEmploymentNoc || null : null,
+        childcareNeed: form.childcareNeed || null,
+        childcareFunding: form.childcareNeed === "1" ? form.childcareFunding || null : null,
+        barriers: Array.isArray(form.barriers) ? form.barriers : [],
+        resultCode: form.resultCode || null,
+        resultDate: form.resultDate || null,
+        resultEducationLevel: form.resultCode ? form.resultEducationLevel || null : null,
+        futureEducationLevel: form.resultCode === "4" ? form.futureEducationLevel || null : null,
+        resultNocVersion: form.resultCode === "2" ? form.resultNocVersion || null : null,
+        resultNoc: form.resultCode === "2" ? form.resultNoc || null : null,
+        outcomeSummary: form.outcomeSummary || null,
+        closureNotes: form.closureNotes || null,
       };
-      const nextContext = {
-        ...(caseContext || {}),
-        employmentGoals: toNullable(caseContextForm.employmentGoals?.trim() || ""),
-        employmentStatus: toNullable(caseContextForm.employmentStatus),
-        educationLevel: toNullable(caseContextForm.educationLevel),
-        employmentNocVersion: toNullable(caseContextForm.employmentNocVersion),
-        employmentNoc: toNullable(caseContextForm.employmentNoc),
-        socialAssistance: toNullable(caseContextForm.socialAssistance),
-        employmentInsurance: toNullable(caseContextForm.employmentInsurance),
-        childcareNeed: toNullable(caseContextForm.childcareNeed),
-        childcareFunding: toNullable(caseContextForm.childcareFunding?.trim() || ""),
-        employmentBarriers: Array.isArray(caseContextForm.employmentBarriers)
-          ? caseContextForm.employmentBarriers.filter(Boolean)
-          : [],
-        localAreaPriorities: Array.isArray(caseContextForm.localAreaPriorities)
-          ? caseContextForm.localAreaPriorities.filter(Boolean)
-          : [],
-        previousIset: toNullable(caseContextForm.previousIset),
-        previousIsetDetails: toNullable(caseContextForm.previousIsetDetails?.trim() || ""),
-        otherFunding: toNullable(caseContextForm.otherFunding?.trim() || ""),
-      };
-      await saveCaseContext(nextContext);
-      await upsertActionPlanReviewReminder({ ...plan, ...updated }, form.reviewDate || null);
-      setCaseContext(nextContext);
-      seedCaseContextForm(nextContext);
+      const updated = await updateActionPlan(plan.id, payload);
       setSaving(false);
-      setEditing(false);
       if (onSaved) onSaved(updated);
     } catch (err) {
       setSaving(false);
@@ -423,62 +325,63 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     }
   };
 
-  if (!visible || !plan) {
-    return null;
-  }
+  if (!visible || !plan) return null;
 
-  const findOption = (options, value) =>
-    (options || []).find(opt => opt.value === value) || (options && options[0]) || null;
+  const selectedPrevEmployment = PREV_EMPLOYMENT_OPTIONS.find(opt => opt.value === form.prevEmployment) || null;
+  const selectedEiClaimant = EI_CLAIMANT_OPTIONS.find(opt => opt.value === form.eiClaimant) || null;
+  const selectedEducationLevel = EDUCATION_OPTIONS.find(opt => opt.value === form.educationLevel) || null;
+  const selectedEducationProvince = PROVINCE_OPTIONS.find(opt => opt.value === form.educationProvince) || null;
+  const selectedSocialAssistance = YES_NO_OPTIONS.find(opt => opt.value === form.socialAssistanceRecipient) || null;
+  const selectedChildcareNeed = YES_NO_OPTIONS.find(opt => opt.value === form.childcareNeed) || null;
+  const selectedChildcareFunding = CHILDCARE_FUNDING_OPTIONS.find(opt => opt.value === form.childcareFunding) || null;
+  const selectedPrevEmploymentNocVersion = NOC_VERSION_OPTIONS.find(opt => opt.value === form.prevEmploymentNocVersion) || null;
+  const selectedResultCode = RESULT_OPTIONS.find(opt => opt.value === form.resultCode) || null;
+  const selectedResultEducation = RESULT_EDUCATION_OPTIONS.find(opt => opt.value === form.resultEducationLevel) || null;
+  const selectedFutureEducation = FUTURE_EDUCATION_OPTIONS.find(opt => opt.value === form.futureEducationLevel) || null;
+  const selectedResultNocVersion = NOC_VERSION_OPTIONS.find(opt => opt.value === form.resultNocVersion) || null;
+  const selectedBarriers = BARRIER_OPTIONS.filter(opt => (form.barriers || []).includes(opt.value));
 
-  const employmentStatusOption = findOption(employmentStatusOptions, caseContextForm.employmentStatus);
-  const educationLevelOption = findOption(educationLevelOptions, caseContextForm.educationLevel);
-  const socialAssistanceOption = findOption(yesNoOptions, caseContextForm.socialAssistance);
-  const employmentInsuranceOption = findOption(yesNoOptions, caseContextForm.employmentInsurance);
-  const childcareNeedOption = findOption(yesNoOptions, caseContextForm.childcareNeed);
-  const previousIsetOption = findOption(yesNoOptions, caseContextForm.previousIset);
-  const nocVersionOption = findOption(nocVersionOptionsList, caseContextForm.employmentNocVersion);
-  const selectedBarriers = employmentBarrierOptions.filter(opt =>
-    (caseContextForm.employmentBarriers || []).includes(opt.value)
-  );
-  const selectedPriorities = localPriorityOptions.filter(opt =>
-    (caseContextForm.localAreaPriorities || []).includes(opt.value)
-  );
-  const nocCodeOption =
-    autosuggestOptions.find(opt => opt.value === caseContextForm.employmentNoc) || null;
-  const nocDisplayValue = nocCodeOption
-    ? `${nocCodeOption.value} — ${nocCodeOption.description || nocCodeOption.label || ''}`.trim()
-    : displayValue(caseContextForm.employmentNoc);
-
-  const footer = editing ? (
-    <SpaceBetween size="xs" direction="horizontal">
-      <Button onClick={handleCancelEdit} disabled={saving}>
-        Cancel
-      </Button>
-      <Button variant="primary" onClick={handleSave} loading={saving}>
-        Save changes
-      </Button>
-    </SpaceBetween>
-  ) : (
-    <SpaceBetween size="xs" direction="horizontal">
-      <Button onClick={handleDismiss}>
-        Close
-      </Button>
-      <Button variant="primary" onClick={() => setEditing(true)}>
-        Edit plan
-      </Button>
-    </SpaceBetween>
-  );
+  const metadata = {
+    status: plan.status || null,
+    interventionCount: plan.interventionCount ?? plan.interventions?.length ?? null,
+    createdAt: plan.createdAt || null,
+    updatedAt: plan.updatedAt || null,
+    activatedAt: plan.activatedAt || null,
+    closedAt: plan.closedAt || null,
+    archivedAt: plan.archivedAt || null,
+    owner: caseData?.owner?.email || caseData?.owner?.name || "-",
+    caseId: plan.caseId || caseData?.caseNumber || caseData?.trackingId || "-",
+  };
 
   return (
     <Modal
       visible={visible}
       header="Action plan details"
-      onDismiss={handleDismiss}
+      onDismiss={saving ? null : onDismiss}
       closeAriaLabel="Close action plan details modal"
       size="large"
-      footer={footer}
+      footer={
+        <SpaceBetween size="xs" direction="horizontal">
+          <Button onClick={onDismiss} disabled={saving}>
+            Close
+          </Button>
+          <Button variant="primary" onClick={handleSubmit} loading={saving}>
+            Save changes
+          </Button>
+        </SpaceBetween>
+      }
     >
       <SpaceBetween size="l">
+        {validationError && (
+          <Alert
+            type="error"
+            dismissible
+            dismissAriaLabel="Dismiss validation message"
+            onDismiss={() => setValidationError(null)}
+          >
+            {validationError}
+          </Alert>
+        )}
         {error && (
           <Alert
             type="error"
@@ -490,406 +393,281 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
           </Alert>
         )}
 
-        <SpaceBetween size="s">
-          <Box fontSize="heading-m" fontWeight="bold">
-            Plan overview
-          </Box>
-          <ColumnLayout columns={3} variant="text-grid">
-            <FormField label="Plan name">
-              {editing ? (
-                <Input
-                  value={form.name}
-                  onChange={({ detail }) => setForm(current => ({ ...current, name: detail.value }))}
+        <ColumnLayout columns={3} variant="text-grid">
+          <FormField label="Plan name">
+            <Input value={form.name} onChange={({ detail }) => setForm(curr => ({ ...curr, name: detail.value }))} />
+          </FormField>
+          <FormField label="Plan summary" description="High-level objective for this plan.">
+            <Textarea
+              value={form.summary}
+              rows={3}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, summary: detail.value }))}
+              placeholder="High-level objective for this plan"
+            />
+          </FormField>
+          <FormField label="Start date" description="When the plan becomes active.">
+            <DatePicker
+              value={form.startDate}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, startDate: detail.value }))}
+              placeholder="YYYY-MM-DD"
+            />
+          </FormField>
+          <FormField
+            label="Review date"
+            description="This will trigger a reminder on this date in the calendar."
+          >
+            <DatePicker
+              value={form.reviewDate}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, reviewDate: detail.value }))}
+              placeholder="YYYY-MM-DD"
+            />
+          </FormField>
+          <FormField label="Agreement Number" description="Agreement number (EI or CRF).">
+            <Input
+              value={form.agreementNumber}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, agreementNumber: detail.value }))}
+              placeholder="e.g. 999999999"
+            />
+          </FormField>
+          <FormField label="EI claimant status" description="ESDC codes: claimant, reach-back, or non-insured.">
+            <Select
+              selectedOption={selectedEiClaimant}
+              options={EI_CLAIMANT_OPTIONS}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, eiClaimant: detail.selectedOption?.value || "" }))}
+              placeholder="Select EI status"
+            />
+          </FormField>
+          <FormField
+            label="Employment status at plan start"
+            description="The client’s employment status at the start of this action plan"
+          >
+            <Select
+              selectedOption={selectedPrevEmployment}
+              options={PREV_EMPLOYMENT_OPTIONS}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, prevEmployment: detail.selectedOption?.value || "" }))}
+              placeholder="Select status"
+            />
+          </FormField>
+          {form.prevEmployment === "2" && (
+            <>
+              <FormField label="NOC Version" description="The version of National Occupation Code to use for lookup.">
+                <Select
+                  selectedOption={selectedPrevEmploymentNocVersion}
+                  options={NOC_VERSION_OPTIONS}
+                  onChange={({ detail }) => setForm(curr => ({ ...curr, prevEmploymentNocVersion: detail.selectedOption?.value || "" }))}
+                  placeholder="Select NOC version"
                 />
-              ) : (
-                <Input value={form.name || "Untitled"} readOnly />
-              )}
-            </FormField>
-            <FormField label="Plan summary" description="High-level objective for this plan.">
-              {editing ? (
-                <Textarea
-                  value={form.summary}
-                  rows={3}
-                  onChange={({ detail }) => setForm(current => ({ ...current, summary: detail.value }))}
-                  placeholder="High-level objective for this plan"
+              </FormField>
+              <FormField label="NOC Code Lookup" description="Lookup the NOC Code for the client's employment.">
+                <Autosuggest
+                  value={form.prevEmploymentNoc || ""}
+                  onChange={({ detail }) => setForm(curr => ({ ...curr, prevEmploymentNoc: detail.value }))}
+                  onLoadItems={({ detail }) => handlePrevNocSearch(detail.filteringText)}
+                  options={prevNocOptions}
+                  placeholder={form.prevEmploymentNocVersion ? "Search NOC code" : "Select NOC version first"}
+                  empty="No matches"
+                  filteringType="manual"
+                  statusType={prevNocLoading ? "loading" : "finished"}
+                  loadingText="Searching NOC codes"
+                  disabled={!form.prevEmploymentNocVersion}
                 />
-              ) : (
-                <Textarea value={form.summary || "-"} readOnly rows={3} />
-              )}
-            </FormField>
-            <FormField label="Start date" description="When the plan becomes active.">
-              {editing ? (
+              </FormField>
+              <FormField label="Schedule type" description="Required when employment status is Employed.">
+                <Select
+                  selectedOption={SCHEDULE_OPTIONS.find(opt => opt.value === form.prevEmploymentScheduleType) || null}
+                  options={SCHEDULE_OPTIONS}
+                  onChange={({ detail }) => setForm(curr => ({ ...curr, prevEmploymentScheduleType: detail.selectedOption?.value || "" }))}
+                  placeholder="Select schedule type"
+                />
+              </FormField>
+            </>
+          )}
+          <FormField label="Education Level" description="Highest level of education attained at the time of creation of Action Plan.">
+            <Select
+              selectedOption={selectedEducationLevel}
+              options={EDUCATION_OPTIONS}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, educationLevel: detail.selectedOption?.value || "" }))}
+              placeholder="Select education level"
+            />
+          </FormField>
+          <FormField label="Education Province" description="Province (or area outside Canada) in which the highest level of education was attained.">
+            <Select
+              selectedOption={selectedEducationProvince}
+              options={PROVINCE_OPTIONS}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, educationProvince: detail.selectedOption?.value || "" }))}
+              placeholder="Select province/territory"
+            />
+          </FormField>
+          <FormField label="Social Assistance Recipient" description="Is the client a Social Assistance Recipient at the time of creation of the Action Plan?">
+            <Select
+              selectedOption={selectedSocialAssistance}
+              options={YES_NO_OPTIONS}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, socialAssistanceRecipient: detail.selectedOption?.value || "" }))}
+              placeholder="Select"
+            />
+          </FormField>
+          <FormField label="Childcare need" description="ESDC code 0 = No, 1 = Yes.">
+            <Select
+              selectedOption={selectedChildcareNeed}
+              options={YES_NO_OPTIONS}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, childcareNeed: detail.selectedOption?.value || "" }))}
+              placeholder="Select"
+            />
+          </FormField>
+          <FormField label="Childcare funding" description="ESDC code 1–7.">
+            <Select
+              selectedOption={selectedChildcareFunding}
+              options={CHILDCARE_FUNDING_OPTIONS}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, childcareFunding: detail.selectedOption?.value || "" }))}
+              placeholder="Select"
+            />
+          </FormField>
+        </ColumnLayout>
+        <FormField
+          label="Barriers to Employment"
+          description="A client may have more than one (1) barrier to employment. Choose all that apply."
+        >
+          <Multiselect
+            options={BARRIER_OPTIONS}
+            selectedOptions={selectedBarriers}
+            onChange={({ detail }) =>
+              setForm(current => ({
+                ...current,
+                barriers: (detail.selectedOptions || []).map(opt => opt.value),
+              }))
+            }
+            inlineTokens
+            tokenLimit={5}
+            deselectAriaLabel={e => `Remove ${e.option?.label || e.option?.value}`}
+            placeholder="Select barriers"
+          />
+        </FormField>
+
+        {(plan?.status === "closed" || form.resultCode || form.resultDate || form.outcomeSummary || form.closureNotes) && (
+          <ExpandableSection
+            headerText="Closeout details"
+            headerDescription="Result, education, and NOC details for closing this action plan."
+            defaultExpanded={false}
+          >
+          <SpaceBetween size="m">
+            <ColumnLayout columns={2} variant="text-grid">
+              <FormField label="Result code">
+                <Select
+                  selectedOption={selectedResultCode}
+                  options={RESULT_OPTIONS}
+                  onChange={({ detail }) => setForm(curr => ({ ...curr, resultCode: detail.selectedOption?.value || "" }))}
+                  placeholder="Select result"
+                />
+              </FormField>
+              <FormField label="Result date">
                 <DatePicker
-                  value={form.startDate}
-                  onChange={({ detail }) => setForm(current => ({ ...current, startDate: detail.value }))}
+                  value={form.resultDate}
+                  onChange={({ detail }) => setForm(curr => ({ ...curr, resultDate: detail.value }))}
                   placeholder="YYYY-MM-DD"
                 />
-              ) : (
-                <Input value={formatDateDisplay(form.startDate)} readOnly />
-              )}
-            </FormField>
-            <FormField label="Review date" description="Next scheduled review for this plan.">
-              {editing ? (
-                <DatePicker
-                  value={form.reviewDate}
-                  onChange={({ detail }) => setForm(current => ({ ...current, reviewDate: detail.value }))}
-                  placeholder="YYYY-MM-DD"
-                />
-              ) : (
-                <Input value={formatDateDisplay(form.reviewDate)} readOnly />
-              )}
-            </FormField>
-          </ColumnLayout>
-        </SpaceBetween>
-
-        <SpaceBetween size="s">
-          <Box fontSize="heading-m" fontWeight="bold">
-            Status & metrics
-          </Box>
-          <ColumnLayout columns={3} variant="text-grid">
-            <FormField label={<Box fontWeight="bold">Status</Box>} description="Current lifecycle state of the plan.">
-              <Input
-                value={displayValue(plan.status)}
-                readOnly
-                ariaLabel="Plan status"
-              />
-            </FormField>
-            <ReadOnlyField label="Interventions" description="Number of linked interventions." value={Number.isFinite(plan.interventionCount) ? plan.interventionCount : "-"} />
-            <ReadOnlyField label="Outcome summary" description="Summary recorded at closure." value={plan.outcomeSummary || "-"} multiline rows={2} />
-            <ReadOnlyField label="Closure notes" description="Notes captured when closing the plan." value={plan.closureNotes || "-"} multiline rows={2} />
-            <ReadOnlyField label="Result code" description="Outcome identifier for reporting." value={plan.resultCode || "-"} />
-            <ReadOnlyField label="Result date" description="Date the result was recorded." value={formatDateDisplay(plan.resultDate)} />
-            <ReadOnlyField label="Created at" description="When the plan was created." value={formatDateTimeDisplay(plan.createdAt)} />
-            <ReadOnlyField label="Last updated" description="Most recent update timestamp." value={formatDateTimeDisplay(plan.updatedAt)} />
-            <ReadOnlyField
-              label="Case ID"
-              description="Associated case identifier."
-              value={
-                caseData?.caseNumber ||
-                caseData?.trackingId ||
-                caseData?.tracking_id ||
-                caseData?.agreementNumber ||
-                plan.caseId ||
-                "-"
-              }
-            />
-            <ReadOnlyField
-              label="Assigned to"
-              description="Plan owner from the case header."
-              value={caseData?.owner?.email || caseData?.owner?.name || "-"}
-            />
-            <ReadOnlyField label="Activated at" description="When the plan was activated." value={formatDateTimeDisplay(plan.activatedAt)} />
-            <ReadOnlyField label="Closed at" description="When the plan was closed." value={formatDateTimeDisplay(plan.closedAt)} />
-            <ReadOnlyField label="Archived at" description="When the plan was archived." value={formatDateTimeDisplay(plan.archivedAt)} />
-          </ColumnLayout>
-        </SpaceBetween>
-
-        <SpaceBetween size="s">
-          <Box fontSize="heading-m" fontWeight="bold">
-            Client context
-          </Box>
-          {contextLoading ? (
-            <Box padding="m">
-              <Spinner />
-            </Box>
-          ) : (
-            <ColumnLayout columns={3} variant="text-grid">
-              <FormField
-                label={<Box fontWeight="bold">Employment goals</Box>}
-                description="Summarize the client's goals and request."
-              >
-                {editing ? (
-                  <Textarea
-                    value={caseContextForm.employmentGoals}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => ({ ...current, employmentGoals: detail.value }))
-                    }
-                    rows={4}
-                  />
-                ) : (
-                  <Textarea value={displayValue(caseContextForm.employmentGoals)} readOnly rows={4} />
-                )}
               </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Employment status</Box>}
-                description="Current employment situation."
-              >
-                {editing ? (
-                  <Select
-                    selectedOption={employmentStatusOption}
-                    options={employmentStatusOptions}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => ({
-                        ...current,
-                        employmentStatus: detail.selectedOption?.value || "",
-                      }))
-                    }
-                    selectedAriaLabel="Employment status"
-                  />
-                ) : (
-                  <Input value={displayValue(employmentStatusOption?.label || caseContextForm.employmentStatus)} readOnly />
-                )}
-              </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Education level</Box>}
-                description="Highest completed education."
-              >
-                {editing ? (
-                  <Select
-                    selectedOption={educationLevelOption}
-                    options={educationLevelOptions}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => ({
-                        ...current,
-                        educationLevel: detail.selectedOption?.value || "",
-                      }))
-                    }
-                    selectedAriaLabel="Education level"
-                  />
-                ) : (
-                  <Input value={displayValue(educationLevelOption?.label || caseContextForm.educationLevel)} readOnly />
-                )}
-              </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Employment NOC version</Box>}
-                description="Select a NOC version before searching for the code."
-              >
-                {editing ? (
-                  <Select
-                    selectedOption={nocVersionOption}
-                    options={nocVersionOptionsList}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => {
-                        const nextVersion = detail.selectedOption?.value || "";
-                        return {
-                          ...current,
-                          employmentNocVersion: nextVersion,
-                          employmentNoc: nextVersion === current.employmentNocVersion ? current.employmentNoc : "",
-                        };
-                      })
-                    }
-                    selectedAriaLabel="NOC version"
-                    placeholder="Select NOC version"
-                  />
-                ) : (
-                  <Input value={displayValue(nocVersionOption?.label || caseContextForm.employmentNocVersion)} readOnly />
-                )}
-              </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Employment NOC code</Box>}
-                description="Lookup the related NOC code."
-              >
-                {editing ? (
-                  <Autosuggest
-                    value={caseContextForm.employmentNoc || ""}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => ({ ...current, employmentNoc: detail.value }))
-                    }
-                    options={autosuggestOptions}
-                    onLoadItems={({ detail }) => handleNocSearch(detail.filteringText)}
-                    placeholder={
-                      caseContextForm.employmentNocVersion
-                        ? "Search NOC code"
-                        : "Select NOC version first"
-                    }
-                    empty="No matches"
-                    filteringType="manual"
-                    statusType={nocSearching ? "loading" : "finished"}
-                    loadingText="Searching NOC codes"
-                    disabled={!caseContextForm.employmentNocVersion}
-                  />
-                ) : (
-                  <Input value={displayValue(nocDisplayValue)} readOnly />
-                )}
-              </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Social assistance</Box>}
-                description="Whether the client receives social assistance."
-              >
-                {editing ? (
-                  <Select
-                    selectedOption={socialAssistanceOption}
-                    options={yesNoOptions}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => ({
-                        ...current,
-                        socialAssistance: detail.selectedOption?.value || "",
-                      }))
-                    }
-                    selectedAriaLabel="Social assistance"
-                  />
-                ) : (
-                  <Input value={displayValue(socialAssistanceOption?.label || caseContextForm.socialAssistance)} readOnly />
-                )}
-              </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Employment insurance</Box>}
-                description="Employment insurance status."
-              >
-                {editing ? (
-                  <Select
-                    selectedOption={employmentInsuranceOption}
-                    options={yesNoOptions}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => ({
-                        ...current,
-                        employmentInsurance: detail.selectedOption?.value || "",
-                      }))
-                    }
-                    selectedAriaLabel="Employment insurance"
-                  />
-                ) : (
-                  <Input value={displayValue(employmentInsuranceOption?.label || caseContextForm.employmentInsurance)} readOnly />
-                )}
-              </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Childcare need</Box>}
-                description="Whether childcare support is required."
-              >
-                {editing ? (
-                  <Select
-                    selectedOption={childcareNeedOption}
-                    options={yesNoOptions}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => ({
-                        ...current,
-                        childcareNeed: detail.selectedOption?.value || "",
-                      }))
-                    }
-                    selectedAriaLabel="Childcare need"
-                  />
-                ) : (
-                  <Input value={displayValue(childcareNeedOption?.label || caseContextForm.childcareNeed)} readOnly />
-                )}
-              </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Childcare funding</Box>}
-                description="Details on childcare funding."
-              >
-                {editing ? (
-                  <Input
-                    value={caseContextForm.childcareFunding}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => ({ ...current, childcareFunding: detail.value }))
-                    }
-                  />
-                ) : (
-                  <Input value={displayValue(caseContextForm.childcareFunding)} readOnly />
-                )}
-              </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Employment barriers</Box>}
-                description="Barriers identified by the client."
-              >
-                {editing ? (
-                  <Multiselect
-                    options={employmentBarrierOptions}
-                    selectedOptions={selectedBarriers}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => ({
-                        ...current,
-                        employmentBarriers: (detail.selectedOptions || []).map(opt => opt.value),
-                      }))
-                    }
-                    tokenLimit={3}
-                    placeholder="Select barriers"
-                    deselectAriaLabel={e => `Remove ${e.option?.label || e.option?.value}`}
-                  />
-                ) : (
-                  <SpaceBetween size="xs" direction="horizontal" wrap>
-                    {(selectedBarriers && selectedBarriers.length) ? (
-                      selectedBarriers.map(item => (
-                        <Badge key={item.value || item.label} color="blue">
-                          {item.label || item.value}
-                        </Badge>
-                      ))
-                    ) : (
-                      <Badge color="grey">Not set</Badge>
-                    )}
-                  </SpaceBetween>
-                )}
-              </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Local area priorities</Box>}
-                description="Priority categories relevant to this client."
-              >
-                {editing ? (
-                  <Multiselect
-                    options={localPriorityOptions}
-                    selectedOptions={selectedPriorities}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => ({
-                        ...current,
-                        localAreaPriorities: (detail.selectedOptions || []).map(opt => opt.value),
-                      }))
-                    }
-                    tokenLimit={3}
-                    placeholder="Select priorities"
-                    deselectAriaLabel={e => `Remove ${e.option?.label || e.option?.value}`}
-                  />
-                ) : (
-                  <SpaceBetween size="xs" direction="horizontal" wrap>
-                    {(selectedPriorities && selectedPriorities.length) ? (
-                      selectedPriorities.map(item => (
-                        <Badge key={item.value || item.label} color="blue">
-                          {item.label || item.value}
-                        </Badge>
-                      ))
-                    ) : (
-                      <Badge color="grey">Not set</Badge>
-                    )}
-                  </SpaceBetween>
-                )}
-              </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Previous ISET</Box>}
-                description="Has the client used ISET before?"
-              >
-                {editing ? (
-                  <Select
-                    selectedOption={previousIsetOption}
-                    options={yesNoOptions}
-                    onChange={({ detail }) =>
-                      setCaseContextForm(current => ({
-                        ...current,
-                        previousIset: detail.selectedOption?.value || "",
-                      }))
-                    }
-                    selectedAriaLabel="Previous ISET"
-                  />
-                ) : (
-                  <Input value={displayValue(previousIsetOption?.label || caseContextForm.previousIset)} readOnly />
-                )}
-              </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Previous ISET details</Box>}
-                description="Context about prior ISET participation."
-              >
-                <Textarea
-                  value={caseContextForm.previousIsetDetails}
-                  onChange={({ detail }) =>
-                    setCaseContextForm(current => ({ ...current, previousIsetDetails: detail.value }))
-                  }
-                  rows={3}
-                  readOnly={!editing}
+              <FormField label="Action Plan Result Education Level" description="ESDC code after completion.">
+                <Select
+                  selectedOption={selectedResultEducation}
+                  options={RESULT_EDUCATION_OPTIONS}
+                  onChange={({ detail }) => setForm(curr => ({ ...curr, resultEducationLevel: detail.selectedOption?.value || "" }))}
+                  placeholder="Select education level"
                 />
               </FormField>
-              <FormField
-                label={<Box fontWeight="bold">Other funding</Box>}
-                description="Additional funding noted for this client."
-              >
+              {form.resultCode === "4" && (
+                <FormField label="Action Plan Future Education Level" description="Required when Returned to school.">
+                  <Select
+                    selectedOption={selectedFutureEducation}
+                    options={FUTURE_EDUCATION_OPTIONS}
+                    onChange={({ detail }) => setForm(curr => ({ ...curr, futureEducationLevel: detail.selectedOption?.value || "" }))}
+                    placeholder="Select future education level"
+                  />
+                </FormField>
+              )}
+              {form.resultCode === "2" && (
+                <>
+                  <FormField label="Result NOC Version" description="Required when result is Employed.">
+                    <Select
+                      selectedOption={selectedResultNocVersion}
+                      options={NOC_VERSION_OPTIONS}
+                      onChange={({ detail }) => setForm(curr => ({ ...curr, resultNocVersion: detail.selectedOption?.value || "" }))}
+                      placeholder="Select NOC version"
+                    />
+                  </FormField>
+                  <FormField label="Result NOC code" description="Required when result is Employed.">
+                    <Autosuggest
+                      value={form.resultNoc}
+                      onChange={({ detail }) => setForm(curr => ({ ...curr, resultNoc: detail.value }))}
+                      onLoadItems={({ detail }) => handleResultNocSearch(detail.filteringText)}
+                      options={resultNocOptions}
+                      placeholder={form.resultNocVersion ? "Search NOC code" : "Select NOC version first"}
+                      empty="No matches"
+                      filteringType="manual"
+                      statusType={resultNocLoading ? "loading" : "finished"}
+                      loadingText="Searching NOC codes"
+                      disabled={!form.resultNocVersion}
+                    />
+                  </FormField>
+                </>
+              )}
+            </ColumnLayout>
+            <ColumnLayout columns={2} variant="text-grid">
+              <FormField label="Outcome summary (optional)">
                 <Textarea
-                  value={caseContextForm.otherFunding}
-                  onChange={({ detail }) =>
-                    setCaseContextForm(current => ({ ...current, otherFunding: detail.value }))
-                  }
+                  value={form.outcomeSummary}
                   rows={3}
-                  readOnly={!editing}
+                  onChange={({ detail }) => setForm(curr => ({ ...curr, outcomeSummary: detail.value }))}
+                  placeholder="Summarize the plan outcome"
+                />
+              </FormField>
+              <FormField label="Closure notes (optional)">
+                <Textarea
+                  value={form.closureNotes}
+                  rows={3}
+                  onChange={({ detail }) => setForm(curr => ({ ...curr, closureNotes: detail.value }))}
+                  placeholder="Internal notes"
                 />
               </FormField>
             </ColumnLayout>
-          )}
-        </SpaceBetween>
+          </SpaceBetween>
+          </ExpandableSection>
+        )}
+
+        <ExpandableSection
+          headerText="Metadata"
+          headerDescription="Read-only action plan metadata."
+          defaultExpanded={false}
+        >
+          <ColumnLayout columns={3} variant="text-grid">
+            <FormField label="Status">
+              <Input value={displayValue(plan.status)} readOnly />
+            </FormField>
+            <FormField label="Interventions">
+              <Input value={displayValue(metadata.interventionCount)} readOnly />
+            </FormField>
+            <FormField label="Case ID">
+              <Input value={displayValue(metadata.caseId)} readOnly />
+            </FormField>
+            <FormField label="Created at">
+              <Input value={displayValue(metadata.createdAt)} readOnly />
+            </FormField>
+            <FormField label="Last updated">
+              <Input value={displayValue(metadata.updatedAt)} readOnly />
+            </FormField>
+            <FormField label="Assigned to">
+              <Input value={displayValue(metadata.owner)} readOnly />
+            </FormField>
+            <FormField label="Activated at">
+              <Input value={displayValue(metadata.activatedAt)} readOnly />
+            </FormField>
+            <FormField label="Closed at">
+              <Input value={displayValue(metadata.closedAt)} readOnly />
+            </FormField>
+            <FormField label="Archived at">
+              <Input value={displayValue(metadata.archivedAt)} readOnly />
+            </FormField>
+          </ColumnLayout>
+        </ExpandableSection>
       </SpaceBetween>
     </Modal>
   );
