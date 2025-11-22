@@ -18,6 +18,7 @@ import { BoardItem } from '@cloudscape-design/board-components';
 import { devTasks as devTasksData } from '../devTasksData';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../auth/cognito';
 import ApplicationWorkQueueWidget from '../widgets/ApplicationWorkQueueWidget';
+import CaseWorkQueueWidget from '../widgets/CaseWorkQueueWidget';
 import RecentActivityWidget from '../widgets/RecentActivityWidget';
 import MyWatchlistWidget from '../widgets/MyWatchlistWidget';
 
@@ -27,15 +28,23 @@ const WIDGET_REGISTRY = {
         component: ApplicationWorkQueueWidget,
         title: 'Application Work Queue',
         description: 'Applications currently in your remit by status.',
-        defaultRowSpan: 5,
-        defaultColumnSpan: 2
+        defaultRowSpan: 2,
+        defaultColumnSpan: 4
+    },
+    'case-work-queue': {
+        id: 'case-work-queue',
+        component: CaseWorkQueueWidget,
+        title: 'Case Work Queue',
+        description: 'Case management workload by status.',
+        defaultRowSpan: 2,
+        defaultColumnSpan: 4
     },
     'recent-activity': {
         id: 'recent-activity',
         component: RecentActivityWidget,
         title: 'Recent Activity',
         description: 'Most recent submissions, assignments, and status changes.',
-        defaultRowSpan: 5,
+        defaultRowSpan: 4,
         defaultColumnSpan: 2
     },
     'my-watchlist': {
@@ -43,7 +52,7 @@ const WIDGET_REGISTRY = {
         component: MyWatchlistWidget,
         title: 'My Watchlist',
         description: 'Cases and applications you have flagged for follow-up.',
-        defaultRowSpan: 5,
+        defaultRowSpan: 4,
         defaultColumnSpan: 2
     },
     'dev-task-tracker': {
@@ -69,8 +78,9 @@ const filterWidgetsForRole = (role) => {
 const buildDefaultLayout = (role) => {
     const base = [
         { id: 'application-work-queue', rowSpan: 2, columnSpan: 4 },
-        { id: 'recent-activity', rowSpan: 5, columnSpan: 2 },
-        { id: 'my-watchlist', rowSpan: 5, columnSpan: 2 }
+        { id: 'case-work-queue', rowSpan: 2, columnSpan: 4 },
+        { id: 'recent-activity', rowSpan: 4, columnSpan: 2 },
+        { id: 'my-watchlist', rowSpan: 4, columnSpan: 2 }
     ];
     if (role === 'System Administrator') {
         base.push({ id: 'dev-task-tracker', rowSpan: 6, columnSpan: 4 });

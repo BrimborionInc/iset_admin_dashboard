@@ -45,8 +45,6 @@ const getStatusType = status => {
       return "info";
     case "closed":
       return "success";
-    case "archived":
-      return "stopped";
     default:
       return "info";
   }
@@ -58,14 +56,11 @@ const getPlanActions = status => {
     case "draft":
       actions.push(
         { id: "activate", text: "Activate plan" },
-        { id: "archive", text: "Archive plan" }
+        { id: "delete", text: "Delete plan" }
       );
       break;
     case "active":
       actions.push({ id: "close", text: "Close plan" });
-      break;
-    case "closed":
-      actions.push({ id: "archive", text: "Archive plan" });
       break;
     default:
       break;
@@ -217,7 +212,7 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
     refresh,
     activateActionPlan,
     closeActionPlan,
-    archiveActionPlan,
+    deleteActionPlan,
   } = useCaseWorkspace();
   const [modalVisible, setModalVisible] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
@@ -439,8 +434,8 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
         }
         setCloseError(null);
         setCloseModalPlan(plan);
-      } else if (actionId === "archive") {
-        setPendingConfirm({ type: "archive", plan });
+      } else if (actionId === "delete") {
+        setPendingConfirm({ type: "delete", plan });
       }
     },
     [buildOpenInterventionMessage]
@@ -455,16 +450,23 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
         const updated = await activateActionPlan(plan.id);
         handleActionFeedback(`Action plan "${updated?.name || plan.title}" activated.`);
         setSelectedActionPlanId(updated?.id || plan.id);
-      } else if (type === "archive") {
-        const updated = await archiveActionPlan(plan.id, {});
-        handleActionFeedback(`Action plan "${updated?.name || plan.title}" archived.`);
-        if ((updated?.status || "").toLowerCase() === "archived" && selectedActionPlanId === plan.id) {
+      } else if (type === "delete") {
+        await deleteActionPlan(plan.id);
+        handleActionFeedback(`Action plan "${plan.name || plan.title}" deleted.`);
+        if (selectedActionPlanId === plan.id) {
           setSelectedActionPlanId(null);
         }
       }
       await refresh().catch(() => {});
     } catch (error) {
-      setErrorMessage(error?.message || "Unable to update action plan.");
+      if (error?.code === "open_interventions_block_delete" && Array.isArray(error.interventions)) {
+        const message = buildOpenInterventionMessage(error.interventions, plan.id);
+        setErrorMessage(
+          message || "Delete the plan's interventions before deleting this action plan."
+        );
+      } else {
+        setErrorMessage(error?.message || "Unable to update action plan.");
+      }
     } finally {
       setActionSubmitting(false);
       setPendingConfirm(null);
@@ -762,15 +764,19 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
     if (pendingConfirm.type === "activate") {
       return {
         title: "Activate action plan",
-        message: `Activate "${planName}"? Only one action plan can be active at a time.`,
+        message: `Activate "${planName}"? Only one action plan can be active at a time. Active plans cannot be deleted; close them instead.`,
         confirmLabel: "Activate",
       };
     }
-    return {
-      title: "Archive action plan",
-      message: `Archive "${planName}"? Archived plans become read-only.`,
-      confirmLabel: "Archive",
-    };
+    if (pendingConfirm.type === "delete") {
+      return {
+        title: "Delete action plan",
+        message:
+          `Delete "${planName}"? Only draft plans without interventions can be deleted. This action will remove the draft and requires confirmation.`,
+        confirmLabel: "Delete",
+      };
+    }
+    return null;
   }, [pendingConfirm]);
 
   const handleDetailsSaved = async updated => {

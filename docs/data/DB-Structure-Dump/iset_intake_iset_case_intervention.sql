@@ -27,16 +27,22 @@ CREATE TABLE `iset_case_intervention` (
   `case_id` bigint unsigned NOT NULL,
   `action_plan_id` bigint unsigned DEFAULT NULL,
   `intervention_type` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `intervention_code` tinyint unsigned DEFAULT NULL,
+  `related_noc_version` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `related_noc` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'planned',
   `start_date` date DEFAULT NULL,
   `end_date` date DEFAULT NULL,
+  `duration_days` int DEFAULT NULL,
+  `intervention_cost` decimal(14,2) DEFAULT NULL,
   `funding_stream` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `budget_amount` decimal(14,2) DEFAULT NULL,
   `approved_amount` decimal(14,2) DEFAULT NULL,
   `actual_amount` decimal(14,2) DEFAULT NULL,
-  `outcome_code` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `outcome_code` tinyint unsigned DEFAULT NULL,
   `notes` text COLLATE utf8mb4_unicode_ci,
   `metadata_json` json DEFAULT NULL,
+  `esdc_intervention_json` json DEFAULT NULL,
   `created_by_staff_profile_id` bigint unsigned DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -48,7 +54,7 @@ CREATE TABLE `iset_case_intervention` (
   CONSTRAINT `fk_case_intervention_case` FOREIGN KEY (`case_id`) REFERENCES `iset_case` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_case_intervention_created_by` FOREIGN KEY (`created_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_case_intervention_plan` FOREIGN KEY (`action_plan_id`) REFERENCES `iset_case_action_plan` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -60,4 +66,4 @@ CREATE TABLE `iset_case_intervention` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-17 19:39:51
+-- Dump completed on 2025-11-22  8:06:02

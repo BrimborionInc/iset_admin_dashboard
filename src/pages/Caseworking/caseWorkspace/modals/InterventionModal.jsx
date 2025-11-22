@@ -197,6 +197,7 @@ const InterventionModal = ({
   canClose = false,
   startInCloseMode = false,
   readOnly = false,
+  planStartDate = "",
   codeOptions = [],
   codesLoading = false,
   outcomeOptions = [],
@@ -672,6 +673,20 @@ const InterventionModal = ({
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
       setError("End date cannot be before start date.");
       return;
+    }
+    if (planStartDate) {
+      const toDateOnly = value => {
+        if (!value) return null;
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return null;
+        return parsed.toISOString().slice(0, 10);
+      };
+      const planStart = toDateOnly(planStartDate);
+      const interventionStart = toDateOnly(form.startDate);
+      if (planStart && interventionStart && interventionStart < planStart) {
+        setError("Intervention start date cannot be before the action plan start date.");
+        return;
+      }
     }
     if (form.startDate && form.endDate) {
       const start = new Date(form.startDate);

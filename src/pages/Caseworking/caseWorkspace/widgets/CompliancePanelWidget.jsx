@@ -136,14 +136,14 @@ const CompliancePanelWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         <ColumnLayout columns={2} variant="text-grid">
           <Container
             header={
-              <Header
-                variant="h3"
-                description="Schema checks for ILMP export"
-                actions={
-                  <StatusIndicator type={normaliseStatusType(ilmpStatus)}>
-                    {ilmpStatus}
-                  </StatusIndicator>
-                }
+        <Header
+          variant="h3"
+          description="ILMP validation: blocked means export fails; warning means export is valid but needs attention."
+          actions={
+            <StatusIndicator type={normaliseStatusType(ilmpStatus)}>
+              {ilmpStatus}
+            </StatusIndicator>
+          }
               >
                 ILMP validation
               </Header>

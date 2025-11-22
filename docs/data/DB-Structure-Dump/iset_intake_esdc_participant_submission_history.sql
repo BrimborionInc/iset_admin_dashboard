@@ -35,7 +35,7 @@ CREATE TABLE `esdc_participant_submission_history` (
   KEY `fk_esdc_participant_history_user` (`actor_user_id`),
   CONSTRAINT `fk_esdc_participant_history_submission` FOREIGN KEY (`participant_submission_id`) REFERENCES `esdc_participant_submission` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_esdc_participant_history_user` FOREIGN KEY (`actor_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=24 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -47,4 +47,4 @@ CREATE TABLE `esdc_participant_submission_history` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-17 19:39:51
+-- Dump completed on 2025-11-22  8:05:50

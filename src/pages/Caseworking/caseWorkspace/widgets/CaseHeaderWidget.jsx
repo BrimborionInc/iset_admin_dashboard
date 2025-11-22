@@ -1,11 +1,13 @@
-import React, { useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { BoardItem } from "@cloudscape-design/board-components";
 import { Box, ButtonDropdown, ColumnLayout, Header, Link, SpaceBetween, StatusIndicator } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 
 const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
-  const { caseData, isLoading, error } = useCaseWorkspace();
+  const { caseData, isLoading, error, markReadyToClose, refresh } = useCaseWorkspace();
+  const [actionError, setActionError] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const DetailItem = ({ label, value }) => (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
@@ -40,7 +42,6 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     switch (normalizedStatus) {
       case "active":
       case "closed":
-      case "archived":
         return "success";
       case "ready_to_close":
         return "warning";
@@ -143,6 +144,25 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     }
   };
 
+  const handleQuickAction = useCallback(
+    async ({ detail }) => {
+      if (!detail?.id) return;
+      if (detail.id === "close") {
+        setActionError(null);
+        setActionLoading(true);
+        try {
+          await markReadyToClose();
+          await refresh();
+        } catch (err) {
+          setActionError(err?.message || "Failed to mark ready to close.");
+        } finally {
+          setActionLoading(false);
+        }
+      }
+    },
+    [markReadyToClose, refresh]
+  );
+
   return (
     <BoardItem
       header={
@@ -156,8 +176,8 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
               items={[
                 { id: "assign", text: "Assign / reassign" },
                 { id: "close", text: "Mark ready to close" },
-                { id: "archive", text: "Archive case" },
               ]}
+              onItemClick={handleQuickAction}
             >
               Quick actions
             </ButtonDropdown>
@@ -179,6 +199,8 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       i18nStrings={boardItemI18nStrings}
     >
       <SpaceBetween size="m">
+        {actionLoading ? <StatusIndicator type="loading">Updating case…</StatusIndicator> : null}
+        {actionError ? <StatusIndicator type="error">{actionError}</StatusIndicator> : null}
         {error ? (
           <StatusIndicator type="error">{error}</StatusIndicator>
         ) : null}

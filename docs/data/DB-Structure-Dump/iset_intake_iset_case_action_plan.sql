@@ -35,11 +35,14 @@ CREATE TABLE `iset_case_action_plan` (
   `activated_at` datetime DEFAULT NULL,
   `closed_at` datetime DEFAULT NULL,
   `result_code` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `EIClaimant` tinyint unsigned DEFAULT NULL,
+  `prev_employment` tinyint unsigned DEFAULT NULL,
   `result_date` date DEFAULT NULL,
   `outcome_summary` text COLLATE utf8mb4_unicode_ci,
   `closure_notes` text COLLATE utf8mb4_unicode_ci,
   `notes` text COLLATE utf8mb4_unicode_ci,
   `metadata_json` json DEFAULT NULL,
+  `esdc_action_plan_json` json DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `archived_at` datetime DEFAULT NULL,
@@ -51,8 +54,9 @@ CREATE TABLE `iset_case_action_plan` (
   CONSTRAINT `fk_case_action_plan_owner_profile` FOREIGN KEY (`owner_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_case_action_plan_owner_user` FOREIGN KEY (`owner_user_id`) REFERENCES `user` (`id`) ON DELETE SET NULL,
   CONSTRAINT `chk_case_action_plan_result_date` CHECK (((`result_date` is null) or (`effective_date` is null) or (`result_date` >= `effective_date`))),
-  CONSTRAINT `chk_case_action_plan_status` CHECK ((`status` in (_utf8mb4'draft',_utf8mb4'active',_utf8mb4'closed',_utf8mb4'archived')))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  CONSTRAINT `chk_case_action_plan_status` CHECK ((`status` in (_utf8mb4'draft',_utf8mb4'active',_utf8mb4'closed',_utf8mb4'archived'))),
+  CONSTRAINT `chk_esdc_action_plan_json` CHECK (json_valid(`esdc_action_plan_json`))
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -64,4 +68,4 @@ CREATE TABLE `iset_case_action_plan` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-17 19:39:52
+-- Dump completed on 2025-11-22  8:06:01

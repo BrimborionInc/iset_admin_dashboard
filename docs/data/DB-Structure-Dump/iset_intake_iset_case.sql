@@ -35,6 +35,7 @@ CREATE TABLE `iset_case` (
   `opened_at` datetime DEFAULT NULL,
   `closed_at` datetime DEFAULT NULL,
   `next_action_due_at` datetime DEFAULT NULL,
+  `case_context_json` json DEFAULT NULL,
   `risk_rating` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `portfolio_region_id` tinyint unsigned DEFAULT NULL,
   `open_task_count` int unsigned NOT NULL DEFAULT '0',
@@ -64,7 +65,7 @@ CREATE TABLE `iset_case` (
   CONSTRAINT `fk_iset_case_created_by_profile` FOREIGN KEY (`created_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_iset_case_portfolio_region` FOREIGN KEY (`portfolio_region_id`) REFERENCES `canada_region` (`region_id`) ON DELETE SET NULL,
   CONSTRAINT `fk_iset_case_updated_by_profile` FOREIGN KEY (`updated_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -76,4 +77,4 @@ CREATE TABLE `iset_case` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-17 19:39:57
+-- Dump completed on 2025-11-22  8:05:57

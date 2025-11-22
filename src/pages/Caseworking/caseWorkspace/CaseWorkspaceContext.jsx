@@ -493,6 +493,22 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     return "Case";
   }, [caseId, state.caseData]);
 
+  const markCompliancePending = useCallback(() => {
+    setState(prev => {
+      if (!prev.caseData) return prev;
+      return {
+        ...prev,
+        caseData: {
+          ...prev.caseData,
+          compliance: {
+            ...prev.caseData.compliance,
+            ilmp: { ...(prev.caseData.compliance?.ilmp || {}), status: "pending" },
+          },
+        },
+      };
+    });
+  }, []);
+
   const toReminderIso = (dateString) => {
     if (!dateString) return null;
     const date = new Date(`${dateString}T08:00:00`);
@@ -826,6 +842,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       if (!intervention) {
         return null;
       }
+      markCompliancePending();
       setState(prev => {
         if (!prev.caseData) return prev;
         const nextPlans = prev.caseData.actionPlans.map(plan => {
@@ -850,7 +867,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       });
       return intervention;
     },
-    [apiFetch]
+    [apiFetch, markCompliancePending]
   );
 
   const updateIntervention = useCallback(
@@ -881,6 +898,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       if (!intervention) {
         return null;
       }
+      markCompliancePending();
       setState(prev => {
         if (!prev.caseData) return prev;
         const nextPlans = prev.caseData.actionPlans.map(plan => {
@@ -905,7 +923,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       });
       return intervention;
     },
-    [apiFetch]
+    [apiFetch, markCompliancePending]
   );
 
   const closeIntervention = useCallback(
@@ -935,6 +953,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       if (!intervention) {
         return null;
       }
+      markCompliancePending();
       setState(prev => {
         if (!prev.caseData) return prev;
         const nextPlans = prev.caseData.actionPlans.map(plan => {
@@ -959,7 +978,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       });
       return intervention;
     },
-    [apiFetch]
+    [apiFetch, markCompliancePending]
   );
 
   const runComplianceChecks = useCallback(async () => {
@@ -1016,9 +1035,15 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
         },
       };
     });
+    // Refresh case data to pull updated intervention compliance statuses
+    try {
+      await loadCase();
+    } catch (_) {
+      // ignore refresh errors in UI flow
+    }
 
     return mappedCompliance;
-  }, [caseId, apiFetch]);
+  }, [caseId, apiFetch, loadCase]);
 
   const prepareIlmpExport = useCallback(async () => {
     if (!caseId) {
@@ -1082,6 +1107,61 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
 
     return { compliance: compliancePayload, payload: exportPayload };
   }, [caseId, apiFetch]);
+
+  const markReadyToClose = useCallback(async () => {
+    if (!caseId) {
+      const error = new Error("Case not loaded.");
+      error.status = 400;
+      throw error;
+    }
+    const response = await apiFetch(`/api/cases/${caseId}/ready-to-close`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    let detail = null;
+    try {
+      detail = await response.json();
+    } catch (_) {
+      detail = null;
+    }
+    if (!response.ok) {
+      const blockers = detail?.blockers;
+      const compliance = detail?.compliance;
+      const parts = [];
+      if (blockers) {
+        Object.entries(blockers).forEach(([key, value]) => {
+          parts.push(`${key}: ${value}`);
+        });
+      }
+      if (compliance?.ilmp?.messages?.length) {
+        parts.push(...compliance.ilmp.messages);
+      }
+      const message =
+        detail?.detail ||
+        detail?.message ||
+        detail?.error ||
+        (parts.length ? parts.join("; ") : `Failed to mark ready to close (${response.status})`);
+      const error = new Error(message);
+      error.status = response.status;
+      error.details = detail;
+      throw error;
+    }
+    const compliancePayload = detail?.compliance ?? null;
+    setState(prev => {
+      if (!prev.caseData) {
+        return prev;
+      }
+      return {
+        ...prev,
+        caseData: {
+          ...prev.caseData,
+          status: "ready_to_close",
+          compliance: compliancePayload ?? prev.caseData.compliance,
+        },
+      };
+    });
+    return detail;
+  }, [apiFetch, caseId]);
 
   const createActionPlan = useCallback(
     async plan => {
@@ -1170,29 +1250,62 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     return response.json();
   }, []);
 
-  const archiveActionPlan = useCallback(async (actionPlanId, payload = {}) => {
-    const response = await apiFetch(`/api/action-plans/${actionPlanId}/archive`, {
+  const deleteActionPlan = useCallback(async actionPlanId => {
+    const response = await apiFetch(`/api/action-plans/${actionPlanId}/delete`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
     });
+    let details = null;
+    try {
+      details = await response.json();
+    } catch (_) {
+      details = null;
+    }
     if (!response.ok) {
-      let details = null;
-      try {
-        details = await response.json();
-      } catch (_) {
-        details = null;
-      }
       const message =
         details?.message ||
+        details?.detail ||
         details?.error ||
-        `Failed to archive action plan (${response.status})`;
+        `Failed to delete action plan (${response.status})`;
       const error = new Error(message);
       error.status = response.status;
+      if (details) {
+        error.details = details;
+        error.code = details.error || null;
+        if (Array.isArray(details.interventions)) {
+          error.interventions = details.interventions;
+        }
+      }
       throw error;
     }
-    return response.json();
+    return details || {};
   }, []);
+
+  const deleteIntervention = useCallback(async interventionId => {
+    const response = await apiFetch(`/api/interventions/${interventionId}/delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    let details = null;
+    try {
+      details = await response.json();
+    } catch (_) {
+      details = null;
+    }
+      if (!response.ok) {
+        const message =
+          details?.message ||
+          details?.detail ||
+          details?.error ||
+          `Failed to delete intervention (${response.status})`;
+        const error = new Error(message);
+        error.status = response.status;
+        error.details = details;
+        throw error;
+      }
+    markCompliancePending();
+    return details || {};
+  }, [apiFetch, markCompliancePending]);
 
   const fetchActionPlanContext = useCallback(async () => {
     const response = await apiFetch(`/api/cases/${caseId}/action-plan/context`, {
@@ -1271,9 +1384,12 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     closeIntervention,
     runComplianceChecks,
     prepareIlmpExport,
+    markReadyToClose,
     fetchActionPlanContext,
     upsertActionPlanReviewReminder,
     saveCaseContext,
+    deleteActionPlan,
+    deleteIntervention,
     interventionCodes,
     interventionCodesLoading,
     loadInterventionCodes,
@@ -1289,10 +1405,9 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     searchNocCodes,
     activateActionPlan,
     closeActionPlan,
-    archiveActionPlan,
     selectedActionPlanId,
     setSelectedActionPlanId,
-  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, archiveActionPlan, selectedActionPlanId]);
+  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, markReadyToClose, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, deleteActionPlan, deleteIntervention, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, selectedActionPlanId]);
 
   return (
     <CaseWorkspaceContext.Provider value={contextValue}>

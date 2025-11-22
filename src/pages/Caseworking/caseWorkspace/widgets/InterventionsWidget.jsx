@@ -9,6 +9,7 @@ import {
   CollectionPreferences,
   Header,
   Link,
+  Modal,
   Pagination,
   SpaceBetween,
   StatusIndicator,
@@ -42,6 +43,7 @@ const formatDate = value => {
 const normaliseStatus = status => (status || "").toLowerCase();
 const isClosedStatus = status => ["completed", "cancelled"].includes(normaliseStatus(status));
 const isOpenStatus = status => !isClosedStatus(status);
+const isPlannedStatus = status => normaliseStatus(status) === "planned";
 
 const statusIndicatorType = status => {
   const value = (status || "").toLowerCase();
@@ -52,16 +54,11 @@ const statusIndicatorType = status => {
 };
 
 const renderComplianceBadge = status => {
-  switch ((status || "").toLowerCase()) {
-    case "ok":
-      return <Badge color="green">OK</Badge>;
-    case "warning":
-      return <Badge color="blue">Warning</Badge>;
-    case "error":
-      return <Badge color="red">Error</Badge>;
-    default:
-      return <Badge color="grey">Pending</Badge>;
-  }
+  const value = (status || "").toLowerCase();
+  if (value === "ok" || value === "clean") return <Badge color="green">OK</Badge>;
+  if (value === "warning") return <Badge color="blue">Warning</Badge>;
+  if (value === "error" || value === "blocked") return <Badge color="red">Error</Badge>;
+  return <Badge color="grey">Pending</Badge>;
 };
 
 const PREFERENCES_STORAGE_KEY = "caseworking-interventions-preferences-v1";
@@ -218,6 +215,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     createIntervention,
     updateIntervention,
     closeIntervention,
+    deleteIntervention,
     interventionCodes,
     interventionCodesLoading,
     loadInterventionCodes,
@@ -232,6 +230,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     loadNocVersions,
     searchNocCodes,
     setSelectedActionPlanId,
+    refresh,
   } = useCaseWorkspace();
   const [selectedInterventionId, setSelectedInterventionId] = useState(null);
   const [formMode, setFormMode] = useState(null);
@@ -239,6 +238,8 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [forceReadOnly, setForceReadOnly] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const pendingFocusRef = useRef(null);
   const selectedPlanRef = useRef(selectedActionPlanId);
 
@@ -538,8 +539,14 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     intervention => {
       if (!intervention) return [];
       const items = [{ id: "view", text: "View intervention" }];
-      if (canModify && isOpenStatus(intervention.status)) {
-        items.push({ id: "close", text: "Close intervention" });
+      const status = intervention.status;
+      if (canModify) {
+        if (isPlannedStatus(status)) {
+          items.push({ id: "activate", text: "Activate intervention" });
+          items.push({ id: "delete", text: "Delete intervention" });
+        } else if (isOpenStatus(status)) {
+          items.push({ id: "close", text: "Close intervention" });
+        }
       }
       return items;
     },
@@ -694,6 +701,57 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     return result;
   };
 
+  const handleActivate = async interventionToActivate => {
+    if (!activePlan?.id) {
+      setErrorMessage("Select an action plan before activating interventions.");
+      return;
+    }
+    const target = interventionToActivate || selectedIntervention;
+    if (!target) {
+      setErrorMessage("Select an intervention to activate.");
+      return;
+    }
+    if (!isPlannedStatus(target.status)) {
+      setErrorMessage("Only planned interventions can be activated.");
+      return;
+    }
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const updated = await updateIntervention(activePlan.id, target.id, { status: "in_progress" });
+      setSuccessMessage(
+        `Intervention "${updated?.title || updated?.code || target.id}" activated.`
+      );
+      await refresh().catch(() => {});
+      if (updated?.id) {
+        setSelectedInterventionId(updated.id);
+      }
+    } catch (err) {
+      setErrorMessage(err?.message || "Unable to activate intervention.");
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!pendingDelete) return;
+    setDeleteSubmitting(true);
+    setErrorMessage(null);
+    try {
+      await deleteIntervention(pendingDelete.id);
+      setSuccessMessage(
+        `Intervention "${pendingDelete.title || pendingDelete.code || pendingDelete.id}" deleted.`
+      );
+      if (selectedInterventionId === pendingDelete.id) {
+        setSelectedInterventionId(null);
+      }
+      await refresh().catch(() => {});
+    } catch (error) {
+      setErrorMessage(error?.message || "Unable to delete intervention.");
+    } finally {
+      setDeleteSubmitting(false);
+      setPendingDelete(null);
+    }
+  };
+
   const tableColumns = useMemo(() => {
     const baseColumns = [
       {
@@ -798,6 +856,10 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                   openViewModal(item);
                 } else if (detail?.id === "close") {
                   openCloseModal(item);
+                } else if (detail?.id === "activate") {
+                  handleActivate(item);
+                } else if (detail?.id === "delete") {
+                  setPendingDelete(item);
                 }
               }}
               disabled={formMode !== null}
@@ -1093,7 +1155,44 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         nocVersions={nocVersions}
         nocVersionsLoading={nocVersionsLoading}
         onSearchNocCodes={searchNocCodes}
+        planStartDate={activePlan?.startDate || activePlan?.effectiveDate || ""}
       />
+      <Modal
+        visible={!!pendingDelete}
+        onDismiss={() => {
+          if (deleteSubmitting) return;
+          setPendingDelete(null);
+        }}
+        closeAriaLabel="Cancel delete intervention"
+        header="Delete intervention"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button onClick={() => setPendingDelete(null)} disabled={deleteSubmitting}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              loading={deleteSubmitting}
+              disabled={deleteSubmitting}
+              onClick={handleDeleteConfirm}
+            >
+              Delete
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <Box>
+            Delete this intervention? Only planned interventions can be deleted. Completed or cancelled
+            interventions should be closed instead to maintain history.
+          </Box>
+          {pendingDelete ? (
+            <Box>
+              <strong>Intervention:</strong> {pendingDelete.title || pendingDelete.code || pendingDelete.id}
+            </Box>
+          ) : null}
+        </SpaceBetween>
+      </Modal>
     </BoardItem>
   );
 };
