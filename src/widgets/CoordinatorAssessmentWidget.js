@@ -91,7 +91,8 @@ const calculateDurationDays = (start, end) => {
   const startUtc = parseIsoDateToUtc(start);
   const endUtc = parseIsoDateToUtc(end);
   if (startUtc === null || endUtc === null) return null;
-  const diff = Math.round((endUtc - startUtc) / (1000 * 60 * 60 * 24));
+  // Inclusive day count; if start and end are the same day, duration is 1.
+  const diff = Math.round((endUtc - startUtc) / (1000 * 60 * 60 * 24)) + 1;
   if (!Number.isFinite(diff) || diff < 0) return null;
   return diff;
 };
@@ -1556,110 +1557,6 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
             {alert.content}
           </Alert>
         )}
-        {!showNWACSection && (
-          <Box color="text-status-inactive" margin={{ bottom: 's' }}>
-            Outcome notice will be available after the assessment is submitted.
-          </Box>
-        )}
-        {showNWACSection && (
-            <>
-              {sectionHeader('Outcome Notice')}
-              {lacksOutcomePermission && !lockedByAnotherUser && (
-                <Alert
-                  type="info"
-                  statusIconAriaLabel="Information"
-                >
-                  You do not have permission to complete the NWAC outcome notice. Contact an administrator if you need access.
-                </Alert>
-              )}
-              <Box
-                style={
-                  isNWACFieldsDisabled || isOutcomeNoticeDisabled
-                    ? { opacity: 0.6, pointerEvents: 'none' }
-                  : undefined
-              }
-              aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
-            >
-              <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
-                <FormField label="Funding Decision" errorText={hasSubmitted && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}>
-                  <SpaceBetween direction="horizontal" size="xs">
-                    <RadioGroup
-                      value={assessment.nwacReviewStatus || ''}
-                      onChange={({ detail }) => {
-                        if (isNWACFieldsDisabled) return;
-                        if (detail.value === 'approve' && assessment.nwacReason) {
-                          setShowApproveConfirmModal(true);
-                        } else {
-                          handleField('nwacReviewStatus', detail.value);
-                          if (detail.value === 'approve') handleField('nwacReason', '');
-                        }
-                      }}
-                      items={[
-                        { value: 'approve', label: 'Approve' },
-                        { value: 'reject', label: 'Reject' }
-                      ]}
-                      ariaLabel="NWAC Review Status"
-                      data-error-focus={hasSubmitted && fieldErrors.nwacReviewStatus ? 'true' : undefined}
-                      disabled={isNWACFieldsDisabled}
-                      style={isNWACFieldsDisabled ? { opacity: 0.6 } : undefined}
-                    />
-                  </SpaceBetween>
-                </FormField>
-                <FormField label="Assessment Assurance" errorText={hasSubmitted && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}>
-                    <Select
-                      selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
-                      onChange={({ detail }) => {
-                        if (isNWACFieldsDisabled) return;
-                        handleField('nwacReview', detail.selectedOption.value);
-                      }}
-                    options={[
-                      { label: 'Agree with Coordinator Recommendation', value: 'agree' },
-                      { label: 'Disagree with Coordinator Recommendation', value: 'disagree' }
-                    ]}
-                    placeholder="Select review outcome"
-                    data-error-focus={hasSubmitted && fieldErrors.nwacReview ? 'true' : undefined}
-                    disabled={isNWACFieldsDisabled}
-                  />
-                </FormField>
-              </Grid>
-              {/* Move Reason for Denial outside the 6-6 grid for full width */}
-              {assessment.nwacReviewStatus === 'reject' && (
-                <Grid gridDefinition={[{ colspan: 12 }]}> 
-                  <FormField label="Reason for Denial" stretch={true} >
-                    <Box width="100%">
-                      <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
-                        if (isNWACFieldsDisabled) return;
-                        handleField('nwacReason', detail.value);
-                      }} data-error-focus={hasSubmitted && fieldErrors.nwacReason ? 'true' : undefined} disabled={isNWACFieldsDisabled} />
-                    </Box>
-                  </FormField>
-                </Grid>
-              )}
-            </Box>
-            {/* Approve confirmation modal */}
-            <Modal
-              visible={showApproveConfirmModal}
-              onDismiss={() => setShowApproveConfirmModal(false)}
-              header="Clear Reason for Denial?"
-              footer={
-                <SpaceBetween direction="horizontal" size="xs">
-                  <Button variant="primary" onClick={() => {
-                    if (isNWACFieldsDisabled) {
-                      setShowApproveConfirmModal(false);
-                      return;
-                    }
-                    handleField('nwacReason', '');
-                    handleField('nwacReviewStatus', 'approve');
-                    setShowApproveConfirmModal(false);
-                  }}>Clear and Approve</Button>
-                  <Button variant="normal" onClick={() => setShowApproveConfirmModal(false)}>Cancel</Button>
-                </SpaceBetween>
-              }
-            >
-              <Box>Switching to "Approve" will clear the Reason for Denial. Do you want to continue?</Box>
-            </Modal>
-          </>
-        )}
         {sectionHeader('Assessment Overview')}
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
           <FormField label="Date of Assessment">
@@ -2069,6 +1966,108 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
             </Box>
           </FormField>
         </Grid>
+        {!showNWACSection && (
+          <Box color="text-status-inactive" margin={{ top: 'l', bottom: 's' }}>
+            Outcome notice will be available after the assessment is submitted.
+          </Box>
+        )}
+        {showNWACSection && (
+          <>
+            {sectionHeader('Outcome Notice')}
+            {lacksOutcomePermission && !lockedByAnotherUser && (
+              <Alert
+                type="info"
+                statusIconAriaLabel="Information"
+              >
+                You do not have permission to complete the NWAC outcome notice. Contact an administrator if you need access.
+              </Alert>
+            )}
+            <Box
+              style={
+                isNWACFieldsDisabled || isOutcomeNoticeDisabled
+                  ? { opacity: 0.6, pointerEvents: 'none' }
+                : undefined
+            }
+            aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
+          >
+            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
+              <FormField label="Funding Decision" errorText={hasSubmitted && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}>
+                <SpaceBetween direction="horizontal" size="xs">
+                  <RadioGroup
+                    value={assessment.nwacReviewStatus || ''}
+                    onChange={({ detail }) => {
+                      if (isNWACFieldsDisabled) return;
+                      if (detail.value === 'approve' && assessment.nwacReason) {
+                        setShowApproveConfirmModal(true);
+                      } else {
+                        handleField('nwacReviewStatus', detail.value);
+                        if (detail.value === 'approve') handleField('nwacReason', '');
+                      }
+                    }}
+                    items={[
+                      { value: 'approve', label: 'Approve' },
+                      { value: 'reject', label: 'Reject' }
+                    ]}
+                    ariaLabel="NWAC Review Status"
+                    data-error-focus={hasSubmitted && fieldErrors.nwacReviewStatus ? 'true' : undefined}
+                    disabled={isNWACFieldsDisabled}
+                    style={isNWACFieldsDisabled ? { opacity: 0.6 } : undefined}
+                  />
+                </SpaceBetween>
+              </FormField>
+              <FormField label="Assessment Assurance" errorText={hasSubmitted && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}>
+                  <Select
+                    selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
+                    onChange={({ detail }) => {
+                      if (isNWACFieldsDisabled) return;
+                      handleField('nwacReview', detail.selectedOption.value);
+                    }}
+                  options={[
+                    { label: 'Agree with Coordinator Recommendation', value: 'agree' },
+                    { label: 'Disagree with Coordinator Recommendation', value: 'disagree' }
+                  ]}
+                  placeholder="Select review outcome"
+                  data-error-focus={hasSubmitted && fieldErrors.nwacReview ? 'true' : undefined}
+                  disabled={isNWACFieldsDisabled}
+                />
+              </FormField>
+            </Grid>
+            {assessment.nwacReviewStatus === 'reject' && (
+              <Grid gridDefinition={[{ colspan: 12 }]}> 
+                <FormField label="Reason for Denial" stretch={true} >
+                  <Box width="100%">
+                    <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
+                      if (isNWACFieldsDisabled) return;
+                      handleField('nwacReason', detail.value);
+                    }} data-error-focus={hasSubmitted && fieldErrors.nwacReason ? 'true' : undefined} disabled={isNWACFieldsDisabled} />
+                  </Box>
+                </FormField>
+              </Grid>
+            )}
+          </Box>
+          <Modal
+            visible={showApproveConfirmModal}
+            onDismiss={() => setShowApproveConfirmModal(false)}
+            header="Clear Reason for Denial?"
+            footer={
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button variant="primary" onClick={() => {
+                  if (isNWACFieldsDisabled) {
+                    setShowApproveConfirmModal(false);
+                    return;
+                  }
+                  handleField('nwacReason', '');
+                  handleField('nwacReviewStatus', 'approve');
+                  setShowApproveConfirmModal(false);
+                }}>Clear and Approve</Button>
+                <Button variant="normal" onClick={() => setShowApproveConfirmModal(false)}>Cancel</Button>
+              </SpaceBetween>
+            }
+          >
+            <Box>Switching to "Approve" will clear the Reason for Denial. Do you want to continue?</Box>
+          </Modal>
+        </>
+      )}
         <Modal
           visible={showCancelModal}
           onDismiss={() => setShowCancelModal(false)}

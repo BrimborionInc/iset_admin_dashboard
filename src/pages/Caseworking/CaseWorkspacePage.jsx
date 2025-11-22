@@ -33,7 +33,7 @@ const widgetRegistry = {
   "supporting-documents": {
     id: "supporting-documents",
     defaultRowSpan: 4,
-    defaultColumnSpan: 4,
+    defaultColumnSpan: 2,
     component: SupportingDocumentsWidget,
     title: "Supporting documents",
     description: "Unified view of uploaded files and secure message attachments.",
@@ -44,7 +44,7 @@ const widgetRegistry = {
   "case-notes": {
     id: "case-notes",
     defaultRowSpan: 4,
-    defaultColumnSpan: 4,
+    defaultColumnSpan: 2,
     component: CaseNotesWidget,
     title: "Notes and tasks",
     description: "Keep internal notes and follow-ups visible to the case team.",
@@ -55,7 +55,7 @@ const widgetRegistry = {
   "case-calendar": {
     id: "case-calendar",
     defaultRowSpan: 4,
-    defaultColumnSpan: 4,
+    defaultColumnSpan: 2,
     component: CaseCalendarWidget,
     title: "Case calendar",
     description: "Timeline of reminders, deadlines, and milestones.",
@@ -65,8 +65,8 @@ const widgetRegistry = {
   },
   "secure-messaging": {
     id: "secure-messaging",
-    defaultRowSpan: 5,
-    defaultColumnSpan: 4,
+    defaultRowSpan: 4,
+    defaultColumnSpan: 2,
     component: SecureMessagingWidget,
     title: "Secure messaging",
     description: "Read and send case-linked messages, including attachments.",
@@ -88,7 +88,7 @@ const widgetRegistry = {
   actionPlans: {
     id: "actionPlans",
     defaultRowSpan: 4,
-    defaultColumnSpan: 4,
+    defaultColumnSpan: 2,
     component: ActionPlansWidget,
     title: "Action plans",
     description: "Manage action plans and select one to edit interventions.",
@@ -98,8 +98,8 @@ const widgetRegistry = {
   },
   interventions: {
     id: "interventions",
-    defaultRowSpan: 5,
-    defaultColumnSpan: 4,
+    defaultRowSpan: 4,
+    defaultColumnSpan: 2,
     component: InterventionsWidget,
     title: "Interventions",
     description: "Edit ILMP-compliant intervention records.",
@@ -110,7 +110,7 @@ const widgetRegistry = {
   financePanel: {
     id: "financePanel",
     defaultRowSpan: 4,
-    defaultColumnSpan: 4,
+    defaultColumnSpan: 2,
     component: FinancePanelWidget,
     title: "Finance panel",
     description: null,
@@ -120,8 +120,8 @@ const widgetRegistry = {
   },
   compliancePanel: {
     id: "compliancePanel",
-    defaultRowSpan: 3,
-    defaultColumnSpan: 4,
+    defaultRowSpan: 4,
+    defaultColumnSpan: 2,
     component: CompliancePanelWidget,
     title: "Compliance",
     description: "ILMP and finance validation status.",
@@ -131,8 +131,8 @@ const widgetRegistry = {
   },
   exportPreview: {
     id: "exportPreview",
-    defaultRowSpan: 3,
-    defaultColumnSpan: 4,
+    defaultRowSpan: 4,
+    defaultColumnSpan: 2,
     component: ExportPreviewWidget,
     title: "Export preview",
     description: "Review ILMP XML and finance postings before export.",
@@ -142,8 +142,8 @@ const widgetRegistry = {
   },
   participantDetails: {
     id: "participantDetails",
-    defaultRowSpan: 3,
-    defaultColumnSpan: 4,
+    defaultRowSpan: 4,
+    defaultColumnSpan: 2,
     component: ParticipantDetailsWidget,
     title: "Participant details",
     description:
@@ -156,12 +156,12 @@ const widgetRegistry = {
 
 const defaultLayout = [
   { id: "caseHeader", rowSpan: 2, columnSpan: 4 },
-  { id: "participantDetails", rowSpan: 3, columnSpan: 2 },
+  { id: "participantDetails", rowSpan: 8, columnSpan: 2 },
   { id: "actionPlans", rowSpan: 4, columnSpan: 2 },
+  { id: "case-calendar", rowSpan: 5, columnSpan: 2 },
   { id: "interventions", rowSpan: 4, columnSpan: 2 },
-  { id: "case-calendar", rowSpan: 4, columnSpan: 2 },
-  { id: "case-notes", rowSpan: 4, columnSpan: 2 },
-  { id: "supporting-documents", rowSpan: 4, columnSpan: 2 },
+  { id: "case-notes", rowSpan: 2, columnSpan: 2 },
+  { id: "supporting-documents", rowSpan: 3, columnSpan: 2 },
   { id: "secure-messaging", rowSpan: 4, columnSpan: 2 },
 ];
 

@@ -1387,9 +1387,13 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       archived: 3,
     };
     return [...plans]
+      .filter(plan => {
+        const status = (plan?.status || '').trim().toLowerCase();
+        return status !== 'draft';
+      })
       .sort((a, b) => {
-        const sa = (a.status || '').toLowerCase();
-        const sb = (b.status || '').toLowerCase();
+        const sa = (a.status || '').trim().toLowerCase();
+        const sb = (b.status || '').trim().toLowerCase();
         const pa = priorities[sa] ?? 4;
         const pb = priorities[sb] ?? 4;
         if (pa !== pb) return pa - pb;
@@ -1434,6 +1438,8 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
 
   const mapCaseIntervention = intervention => {
     if (!intervention) return null;
+    const statusNormalized = normaliseInterventionStatus(intervention.status);
+    if (statusNormalized === 'planned') return null;
     const metadata = intervention.metadata || {};
     const esdc = safeJsonParse(intervention.esdc_intervention_json || intervention.esdcInterventionJson, null) || {};
     const startDate = intervention.startDate ? formatDateValue(intervention.startDate) : null;
@@ -1576,7 +1582,13 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
   };
 
   const casePlan = selectCasePlan(caseActionPlans);
+  if (!casePlan) {
+    return null;
+  }
   if (casePlan) {
+    if ((casePlan.status || '').toLowerCase() === 'draft') {
+      return null;
+    }
     const metadata = casePlan.metadata || {};
     const planStartDate =
       formatDateValue(casePlan.effectiveDate) ||
@@ -1977,9 +1989,13 @@ function runIlmpValidation(context) {
     if (!Array.isArray(plans) || plans.length === 0) return null;
     const priorities = { active: 0, draft: 1, closed: 2, archived: 3 };
     return [...plans]
+      .filter(plan => {
+        const status = (plan?.status || '').trim().toLowerCase();
+        return status !== 'draft';
+      })
       .sort((a, b) => {
-        const sa = (a.status || '').toLowerCase();
-        const sb = (b.status || '').toLowerCase();
+        const sa = (a.status || '').trim().toLowerCase();
+        const sb = (b.status || '').trim().toLowerCase();
         const pa = priorities[sa] ?? 4;
         const pb = priorities[sb] ?? 4;
         if (pa !== pb) return pa - pb;
@@ -2000,6 +2016,43 @@ function runIlmpValidation(context) {
   extracted.postalCode = address.postalCode || null;
 
   const selectedPlan = selectCasePlan(context.caseActionPlans);
+  const planStatusCounts = (() => {
+    const plans = Array.isArray(context.caseActionPlans) ? context.caseActionPlans : [];
+    const normalise = status => (status ? String(status).trim().toLowerCase() : '');
+    let hasNonDraft = false;
+    let draftCount = 0;
+    plans.forEach(plan => {
+      const status = normalise(plan?.status);
+      if (status === 'draft') draftCount += 1;
+      if (status && status !== 'draft') hasNonDraft = true;
+    });
+    return { hasNonDraft, draftCount, total: plans.length };
+  })();
+  if (!planStatusCounts.hasNonDraft) {
+    const msg = 'At least one action plan must be active/closed for ESDC; only draft plans found.';
+    warnings.push(`[actionPlan] ${msg}`);
+    ruleResults.push({
+      id: 'actionplan-required',
+      label: 'Action plan',
+      category: 'mandatory',
+      severity: 'warning',
+      passed: false,
+      message: msg,
+      detail: planStatusCounts.total
+    });
+  } else if (planStatusCounts.draftCount > 0) {
+    const msg = 'One or more action plans are still in draft status; promote to active before submission.';
+    warnings.push(`[actionPlan] ${msg}`);
+    ruleResults.push({
+      id: 'actionplan-planned',
+      label: 'Action plan status',
+      category: 'mandatory',
+      severity: 'warning',
+      passed: false,
+      message: msg,
+      detail: planStatusCounts.draftCount
+    });
+  }
 
   const genderCode = toCode(extracted.gender, { male:'1', female:'2', unspecified:'3' });
   const indigenousCode = toCode(extracted.aboriginalGroup, {
@@ -2074,7 +2127,126 @@ function runIlmpValidation(context) {
   // Validate action plan & interventions (minimal ILMP checks)
   if (selectedPlan && Array.isArray(selectedPlan.interventions)) {
     selectedPlan.interventions.forEach(intervention => {
+      const statusNormalised = normaliseInterventionStatus(intervention.status);
+      if (statusNormalised === 'planned') return;
       const id = intervention.id || 'intervention';
+      const planStartRaw = selectedPlan.effectiveDate || selectedPlan.startDate || null;
+      const interventionStartRaw = intervention.startDate || null;
+      const interventionEndRaw = intervention.endDate || null;
+      const startIsoPattern = /^\d{4}-\d{2}-\d{2}$/;
+      const parsedStart = interventionStartRaw ? parseDate(interventionStartRaw) : null;
+      const planStartParsed = planStartRaw ? parseDate(planStartRaw) : null;
+      const toIsoDateOnly = value => {
+        const d = parseDate(value);
+        return d ? d.toISOString().slice(0, 10) : null;
+      };
+      const planStartDateStr = toIsoDateOnly(planStartRaw);
+      const interventionStartDateStr = toIsoDateOnly(interventionStartRaw);
+      if (!interventionStartRaw) {
+        const msg = 'Intervention start date is required.';
+        warnings.push(`[intervention-${id}] ${msg}`);
+        ruleResults.push({
+          id: `intervention-${id}-start`,
+          label: 'Intervention start date',
+          category: 'mandatory',
+          severity: 'warning',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      } else {
+        const formatted = startIsoPattern.test(String(interventionStartRaw).trim());
+        const yearOk = parsedStart && parsedStart.getFullYear() >= 2000;
+        if (!formatted || !parsedStart) {
+          const msg = 'Intervention start date must be in YYYY-MM-DD format.';
+          warnings.push(`[intervention-${id}] ${msg}`);
+          ruleResults.push({
+            id: `intervention-${id}-start-format`,
+            label: 'Intervention start date',
+            category: 'mandatory',
+            severity: 'warning',
+            passed: false,
+            message: msg,
+            detail: interventionStartRaw
+          });
+        } else if (!yearOk) {
+          const msg = 'Intervention start date must be after 2000-01-01.';
+          warnings.push(`[intervention-${id}] ${msg}`);
+          ruleResults.push({
+            id: `intervention-${id}-start-year`,
+            label: 'Intervention start date',
+            category: 'mandatory',
+            severity: 'warning',
+            passed: false,
+            message: msg,
+            detail: interventionStartRaw
+          });
+        }
+        if (planStartDateStr && interventionStartDateStr && interventionStartDateStr < planStartDateStr) {
+          const msg = 'Intervention start date must be on or after the action plan start date.';
+          warnings.push(`[intervention-${id}] ${msg}`);
+          ruleResults.push({
+            id: `intervention-${id}-start-before-plan`,
+            label: 'Intervention start date',
+            category: 'mandatory',
+            severity: 'warning',
+            passed: false,
+            message: msg,
+            detail: interventionStartRaw
+          });
+        }
+      }
+      if (interventionEndRaw) {
+        const endIsoPattern = /^\d{4}-\d{2}-\d{2}$/;
+        const parsedEnd = parseDate(interventionEndRaw);
+        const formattedEnd = endIsoPattern.test(String(interventionEndRaw).trim());
+        if (!formattedEnd || !parsedEnd) {
+          const msg = 'Intervention end date must be in YYYY-MM-DD format.';
+          warnings.push(`[intervention-${id}] ${msg}`);
+          ruleResults.push({
+            id: `intervention-${id}-end-format`,
+            label: 'Intervention end date',
+            category: 'mandatory',
+            severity: 'warning',
+            passed: false,
+            message: msg,
+            detail: interventionEndRaw
+          });
+        } else {
+          const startDateOnly = interventionStartDateStr;
+          const endDateOnly = toIsoDateOnly(interventionEndRaw);
+          if (startDateOnly && endDateOnly && endDateOnly < startDateOnly) {
+            const msg = 'Intervention end date must be on or after the start date.';
+            warnings.push(`[intervention-${id}] ${msg}`);
+            ruleResults.push({
+              id: `intervention-${id}-end-before-start`,
+              label: 'Intervention end date',
+              category: 'mandatory',
+              severity: 'warning',
+              passed: false,
+              message: msg,
+              detail: interventionEndRaw
+            });
+          }
+          if (parsedStart && parsedEnd) {
+            const maxEnd = new Date(parsedStart);
+            maxEnd.setMonth(maxEnd.getMonth() + 60);
+            if (parsedEnd > maxEnd) {
+              const msg = 'Intervention end date must be within 60 months of the start date.';
+              warnings.push(`[intervention-${id}] ${msg}`);
+              ruleResults.push({
+                id: `intervention-${id}-end-too-far`,
+                label: 'Intervention end date',
+                category: 'mandatory',
+                severity: 'warning',
+                passed: false,
+                message: msg,
+                detail: interventionEndRaw
+              });
+            }
+          }
+        }
+      }
       if (!intervention.code) {
         const msg = 'Intervention code is required.';
         blockingIssues.push(`[intervention-${id}] ${msg}`);
@@ -2614,6 +2786,98 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     return null;
   };
   const eiClaimantCode = mapEiClaimant(assessmentRow.esdc_eligibility);
+  const CODE_SETS = {
+    yesNo: new Set(['0', '1']),
+    childcareFunding: new Set(['1', '2', '3', '4', '5', '6', '7']),
+    barrier: new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']),
+  };
+  const CODE_MAPS_APP = {
+    educationLevel: {
+      'no formal education': '1',
+      'up to grade 7-8': '2',
+      'grade 9-10': '3',
+      'grade 11-12': '4',
+      'secondary school diploma or ged': '5',
+      'some post-secondary training': '6',
+      'apprenticeship or trades certificate or diploma': '7',
+      'college, cegep, or other non-university certificate or diploma': '8',
+      'university certificate or diploma': '9',
+      "university - bachelor's degree": '10',
+      "university - master's degree": '11',
+      "university - doctorate": '12'
+    },
+    provinceCode: {
+      NL: '1', NS: '2', NB: '3', PE: '4', QC: '5', ON: '6', MB: '7', SK: '8', AB: '9',
+      NT: '10', BC: '11', YT: '12', US: '13', OT: '14', NU: '16'
+    },
+    socialAssistance: { no: '0', yes: '1' },
+    childcareFunding: {
+      'not applicable': '1',
+      fnicci: '2',
+      'ei/crf': '3',
+      'provincial funding / subsidy': '4',
+      'no funding received': '5',
+      'daycare space not available': '6',
+      'assisted by family / self-funded': '7'
+    }
+  };
+  const toCodeApp = (value, map) => {
+    if (value === null || typeof value === 'undefined') return null;
+    const key = String(value).trim().toLowerCase();
+    return map[key] || null;
+  };
+  const normaliseCode = (value, set) => {
+    if (value === null || typeof value === 'undefined') return null;
+    const str = String(value).trim();
+    if (!str) return null;
+    return set.has(str) ? str : null;
+  };
+  const BARRIER_LABEL_TO_CODE = {
+    'none': '1',
+    'lack of labour force attachment': '2',
+    'lack of work experience': '3',
+    'lack of transportation': '4',
+    'remoteness': '5',
+    'language': '6',
+    'education': '7',
+    'economic': '8',
+    'dependent care': '9',
+    'lack of marketable skills': '10',
+    'physical, emotional, or mental health': '11',
+    'other': '12',
+  };
+  const mapBarrierLabelsToCodes = labels => {
+    if (!Array.isArray(labels) || !labels.length) return [];
+    return labels
+      .map(label => {
+        if (label === null || typeof label === 'undefined') return null;
+        const key = String(label).trim().toLowerCase();
+        return BARRIER_LABEL_TO_CODE[key] || null;
+      })
+      .filter(code => code && CODE_SETS.barrier.has(code));
+  };
+  let applicationAnswers = {};
+  let applicationPayloadObj = {};
+  if (caseRow.application_id) {
+    try {
+      const appPayload = await readApplicationPayload(connection, caseRow.application_id, { forUpdate: false });
+      applicationPayloadObj = appPayload?.payload || {};
+      applicationAnswers = sanitiseAnswersPayload(applicationPayloadObj.answers || {});
+    } catch (_) {
+      applicationAnswers = {};
+      applicationPayloadObj = {};
+    }
+  }
+  const educationDetails = extractEducationDetails({ answers: applicationAnswers }) || null;
+  const educationLevelCode = toCodeApp(educationDetails?.level, CODE_MAPS_APP.educationLevel);
+  const educationProvinceCode = (() => {
+    if (!educationDetails?.location) return null;
+    const provinceStr = String(educationDetails.location).trim().toLowerCase();
+    const provinceAbbrev = PROVINCE_CODE_MAP[provinceStr] || provinceStr.toUpperCase();
+    return CODE_MAPS_APP.provinceCode[provinceAbbrev] || null;
+  })();
+  const socialAssistanceStatus = extractSocialAssistanceStatus({ answers: applicationAnswers, caseContext: {} });
+  const socialAssistanceCode = toCodeApp(socialAssistanceStatus, CODE_MAPS_APP.socialAssistance);
 
   const planMetadata = pruneNullish({
     source: AUTO_PLAN_METADATA_SOURCE,
@@ -2638,13 +2902,62 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   });
 
   const prevEmploymentCode = mapPrevEmploymentFromStatus(
-    assessmentRow.labour_force_status || assessmentRow.employment_status || caseRow?.employment_status
+    assessmentRow.labour_force_status ||
+    assessmentRow.employment_status ||
+    caseRow?.employment_status ||
+    applicationAnswers['employment-status'] ||
+    applicationAnswers['labour-force-status'] ||
+    applicationPayloadObj?.personal?.employmentStatus ||
+    applicationPayloadObj?.personal?.labourForceStatus
   );
+  const childcareNeedCode = (() => {
+    if (childcareNeed === 'yes') return '1';
+    if (childcareNeed === 'no') return '0';
+    return null;
+  })();
+  const childcareFundingCode = (() => {
+    if (childcareNeedCode === '0') return '1'; // Not applicable when no childcare need.
+    const raw =
+      applicationAnswers['childcare-funding'] ||
+      applicationAnswers['childcare_funding'] ||
+      applicationAnswers['childcare-supported'] ||
+      applicationAnswers['childcare_supported'] ||
+      assessmentRow.childcare_funding_details ||
+      null;
+    return toCodeApp(raw, CODE_MAPS_APP.childcareFunding);
+  })();
+  const assessmentBarriers = (() => {
+    const raw = assessmentRow.employment_barriers;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (_) {}
+      return raw.split(',').map(entry => entry.trim()).filter(Boolean);
+    }
+    return [];
+  })();
+  const barrierCodes = mapBarrierLabelsToCodes(assessmentBarriers);
+  const esdcActionPlanPayload = pruneNullish({
+    EIClaimant: eiClaimantCode || null,
+    educationLevel: educationLevelCode || null,
+    educationProvince: educationProvinceCode || null,
+    socialAssistanceRecipient: socialAssistanceCode || null,
+    actionPlanPreviousEmployment: prevEmploymentCode || null,
+    actionPlanPreviousEmploymentNoc: null,
+    actionPlanPreviousEmploymentNocVersion: null,
+    actionPlanPreviousEmploymentScheduleType: null,
+    actionPlanChildcareNeed: normaliseCode(childcareNeedCode, CODE_SETS.yesNo),
+    actionPlanChildcareFundedCode: normaliseCode(childcareFundingCode, CODE_SETS.childcareFunding),
+    BarrierToEmployment: barrierCodes && barrierCodes.length ? barrierCodes : null,
+  });
 
   const [planInsert] = await connection.query(
     `INSERT INTO iset_case_action_plan
-       (case_id, name, status, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, activated_at, notes, metadata_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (case_id, name, status, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, activated_at, notes, metadata_json, esdc_action_plan_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       caseId,
       planName,
@@ -2658,6 +2971,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       null,
       justification || null,
       planMetadata ? JSON.stringify(planMetadata) : null,
+      Object.keys(esdcActionPlanPayload || {}).length ? JSON.stringify(esdcActionPlanPayload) : null,
     ]
   );
 
@@ -2826,37 +3140,59 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   const budgetAmount =
     computedCost !== null && Number.isFinite(computedCost) ? Number(computedCost) : null;
 
+  const esdcInterventionPayload = pruneNullish({
+    interventionCode: code || null,
+    interventionStartDate: startDate || null,
+    interventionEndDate: endDate || null,
+    interventionDuration: computedDuration !== null && Number.isFinite(computedDuration) ? computedDuration : null,
+    interventionCost: budgetAmount,
+    interventionRelatedNOC: noc || null,
+    interventionRelatedNOCVersion: nocVersion || null,
+  });
+
   await connection.query(
     `INSERT INTO iset_case_intervention
        (case_id,
         action_plan_id,
         intervention_type,
+        intervention_code,
         status,
         start_date,
         end_date,
+        duration_days,
         funding_stream,
         budget_amount,
         approved_amount,
         actual_amount,
+        intervention_cost,
+        related_noc,
+        related_noc_version,
         outcome_code,
         notes,
         metadata_json,
+        esdc_intervention_json,
         created_by_staff_profile_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       caseId,
       planId,
       code,
+      code || null,
       'planned',
       startDate || null,
       endDate || null,
+      computedDuration !== null && Number.isFinite(computedDuration) ? computedDuration : null,
       null,
       budgetAmount,
       null,
       null,
+      budgetAmount,
+      noc || null,
+      nocVersion || null,
       null,
       justification || null,
       interventionMetadata ? JSON.stringify(interventionMetadata) : null,
+      Object.keys(esdcInterventionPayload || {}).length ? JSON.stringify(esdcInterventionPayload) : null,
       ownerStaffProfileId || null,
     ]
   );
@@ -3191,6 +3527,7 @@ function buildIlmpParticipantPayload(context) {
       goalDescription,
       interventions
     } = actionPlanDetails;
+    if (actionPlanDetails.status === 'draft') return null;
     const childcareNeedCode = toCode(childcareNeed, CODE_MAPS.childcareNeed);
     const childcareFundingCode = toCode(childcareFunding, CODE_MAPS.childcareFunding);
     const actionPlanEiClaimantCode = toCode(eiClaimant, CODE_MAPS.eiClaimant) || (Number.isInteger(eiClaimant) ? String(eiClaimant) : null);

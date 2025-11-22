@@ -77,6 +77,29 @@ const requiresNocForCode = value => {
   return Number.isFinite(numeric) && numeric >= 6 && numeric <= 13;
 };
 
+const CANONICAL_INTERVENTION_LABELS = {
+  "1": "Career research and exploration",
+  "2": "Diagnostic assessment",
+  "3": "Employment counselling",
+  "4": "Skills development - Essential skills",
+  "5": "Skills development - Academic upgrading",
+  "6": "Work experience - Job creation partnerships",
+  "7": "Work experience - Wage subsidy",
+  "8": "Work experience - Student employment",
+  "9": "Occupational skills training - Certificate",
+  "10": "Occupational skills training - Diploma",
+  "11": "Occupational skills training - Degree",
+  "12": "Occupational skills training - Apprenticeship",
+  "13": "Occupational skills training - Vocational",
+  "14": "Self-employment",
+  "15": "Job search preparation strategies",
+  "16": "Job starts supports",
+  "17": "Employer referral",
+  "18": "Employment retention supports",
+  "19": "Referral to agencies",
+  "20": "Pre-career development",
+};
+
 const pickDefaultNocVersion = options => {
   if (!Array.isArray(options) || options.length === 0) return "";
   const preferred = options.find(option => option?.value === "2021");
@@ -90,7 +113,7 @@ const buildInitialForm = (mode, intervention) => {
   if (mode === "edit" && intervention) {
     const costSettings = intervention.metadata?.costSettings || {};
     return {
-      code: intervention.code || "",
+      code: intervention.code ? String(intervention.code) : "",
       title: intervention.title || "",
       status: normaliseStatus(intervention.status || "planned"),
       startDate: intervention.startDate || "",
@@ -258,9 +281,10 @@ const InterventionModal = ({
       })
       .filter(Boolean);
     if (form.code && !formatted.some(option => option.value === form.code)) {
+      const fallbackLabel = CANONICAL_INTERVENTION_LABELS[String(form.code)] || "(legacy value)";
       formatted.push({
         value: form.code,
-        label: `${form.code} – (legacy value)`,
+        label: `${form.code} – ${fallbackLabel}`,
         disabled: true,
       });
     }
@@ -603,7 +627,7 @@ const InterventionModal = ({
     }
     const statusNormalized = normaliseStatus(form.status);
     const outcomeValue = ensureOutcomeForStatus(statusNormalized, form.outcome);
-    const trimmedCode = form.code.trim();
+    const trimmedCode = (form.code ?? "").toString().trim();
     const trimmedTitle = form.title.trim();
     if (!trimmedCode) {
       setError("Intervention code is required.");
