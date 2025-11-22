@@ -96,6 +96,25 @@ const CloseActionPlanModal = ({
   }, [error, visible]);
 
   const planTitle = useMemo(() => plan?.title || plan?.name || "Action plan", [plan]);
+  const startEducationCode = useMemo(
+    () => (plan?.educationLevel ? String(plan.educationLevel) : ""),
+    [plan?.educationLevel]
+  );
+  const filteredEducationOptions = useMemo(() => {
+    if (!startEducationCode) return RESULT_EDUCATION_OPTIONS;
+    const startNum = Number(startEducationCode);
+    if (!Number.isFinite(startNum)) return RESULT_EDUCATION_OPTIONS;
+    return RESULT_EDUCATION_OPTIONS.filter(opt => {
+      const num = Number(opt.value);
+      if (!Number.isFinite(num)) return false;
+      return num >= startNum;
+    });
+  }, [startEducationCode]);
+  const startEducationLabel = useMemo(() => {
+    if (!startEducationCode) return "-";
+    const opt = RESULT_EDUCATION_OPTIONS.find(o => o.value === startEducationCode);
+    return opt ? opt.label : startEducationCode;
+  }, [startEducationCode]);
 
   const handleNocSearch = useCallback(
     async query => {
@@ -132,6 +151,16 @@ const CloseActionPlanModal = ({
     if (finalResult && !resultEducation) {
       setValidationError("Select Action Plan Result Education Level.");
       return;
+    }
+    if (startEducationCode && resultEducation) {
+      const startNum = Number(startEducationCode);
+      const resultNum = Number(resultEducation);
+      if (Number.isFinite(startNum) && Number.isFinite(resultNum) && resultNum < startNum) {
+        setValidationError(
+          `Result education cannot be lower than the starting level (${startEducationLabel}).`
+        );
+        return;
+      }
     }
     if (finalResult === "4" && !futureEducation) {
       setValidationError("Select Future Education Level for Returned to school.");
@@ -218,10 +247,13 @@ const CloseActionPlanModal = ({
             placeholder="YYYY-MM-DD"
           />
         </FormField>
-        <FormField label="Action Plan Result Education Level" description="ESDC code for education level after plan completion.">
+        <FormField
+          label="Action Plan Result Education Level"
+          description={`ESDC code for education level after plan completion. Starting level: ${startEducationLabel}. Cannot decrease.`}
+        >
           <Select
-            selectedOption={RESULT_EDUCATION_OPTIONS.find(opt => opt.value === resultEducation) || null}
-            options={RESULT_EDUCATION_OPTIONS}
+            selectedOption={filteredEducationOptions.find(opt => opt.value === resultEducation) || null}
+            options={filteredEducationOptions}
             onChange={({ detail }) => setResultEducation(detail.selectedOption?.value || "")}
             placeholder="Select education level"
           />

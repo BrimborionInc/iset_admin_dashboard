@@ -38,7 +38,7 @@ const OPEN_INTERVENTION_STATUSES = new Set(["planned", "in_progress", "suspended
 const IN_PROGRESS_OUTCOME = "2";
 const DEFAULT_CLOSED_OUTCOME = "1";
 
-const calculateDurationWeeks = (start, end) => {
+const calculateDurationDays = (start, end) => {
   if (!start || !end) return null;
   const startDate = new Date(start);
   const endDate = new Date(end);
@@ -47,8 +47,7 @@ const calculateDurationWeeks = (start, end) => {
   }
   const diffMs = endDate.getTime() - startDate.getTime();
   if (diffMs < 0) return null;
-  const diffDays = diffMs / (1000 * 60 * 60 * 24);
-  return Math.round(diffDays / 7);
+  return Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1;
 };
 
 const defaultForm = {
@@ -57,7 +56,7 @@ const defaultForm = {
   status: "planned",
   startDate: "",
   endDate: "",
-  durationWeeks: "",
+  durationDays: "",
   outcome: "",
   cost: "",
   potId: "",
@@ -96,7 +95,7 @@ const buildInitialForm = (mode, intervention) => {
       status: normaliseStatus(intervention.status || "planned"),
       startDate: intervention.startDate || "",
       endDate: intervention.endDate || "",
-      durationWeeks: normaliseFormNumbers(intervention.durationWeeks),
+      durationDays: normaliseFormNumbers(intervention.durationDays),
       outcome: intervention.outcome || "",
       cost: normaliseFormNumbers(intervention.cost),
       potId: intervention.potId || "",
@@ -467,14 +466,13 @@ const InterventionModal = ({
     }
 
     if (field === "startDate" || field === "endDate") {
-      const duration = calculateDurationWeeks(
-        field === "startDate" ? value : next.startDate,
-        field === "endDate" ? value : next.endDate
-      );
+      const start = field === "startDate" ? value : next.startDate;
+      const end = field === "endDate" ? value : next.endDate;
+      const duration = calculateDurationDays(start, end);
       if (duration !== null) {
-        next.durationWeeks = String(duration);
-      } else if (!next.durationWeeks) {
-        next.durationWeeks = "";
+        next.durationDays = String(duration);
+      } else if (!next.durationDays) {
+        next.durationDays = "";
       }
     }
 
@@ -566,13 +564,17 @@ const InterventionModal = ({
     if (actualAmountRaw) {
       const numeric = Number(actualAmountRaw);
       if (!Number.isFinite(numeric)) {
-        setError("Actual amount must be a number.");
+        setError("Actual amount must be a whole number between 0 and 999999.");
         return;
       }
-      if (numeric < 0) {
-        setError("Actual amount cannot be negative.");
+      if (!Number.isInteger(numeric) || numeric < 0 || numeric > 999999) {
+        setError("Actual amount must be a whole number between 0 and 999999.");
         return;
       }
+    }
+    if (!closeForm.completionDate) {
+      setError("Completion date is required to close this intervention.");
+      return;
     }
     setLoading(true);
     setError(null);
@@ -615,6 +617,10 @@ const InterventionModal = ({
       setError("Funding stream is required.");
       return;
     }
+    if (!form.startDate) {
+      setError("Start date is required.");
+      return;
+    }
     if (requiresNoc) {
       if (!form.nocVersion) {
         setError("Select a NOC version for this intervention.");
@@ -631,25 +637,62 @@ const InterventionModal = ({
         return;
       }
     }
+    if (form.startDate) {
+      const startDateObj = new Date(form.startDate);
+      const cutoff = new Date("2000-01-01");
+      if (startDateObj < cutoff) {
+        setError("Start date must be after 2000-01-01.");
+        return;
+      }
+    }
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
       setError("End date cannot be before start date.");
       return;
     }
+    if (form.startDate && form.endDate) {
+      const start = new Date(form.startDate);
+      const maxEnd = new Date(form.startDate);
+      maxEnd.setMonth(maxEnd.getMonth() + 60);
+      const end = new Date(form.endDate);
+      if (end > maxEnd) {
+        setError("End date must be within 60 months of start date.");
+        return;
+      }
+    }
 
     const durationValue =
-      form.durationWeeks === "" ? null : Number(form.durationWeeks.replace(/\s+/g, ""));
-    if (form.durationWeeks !== "" && !Number.isFinite(durationValue)) {
-      setError("Duration (weeks) must be a number.");
+      form.durationDays === "" ? null : Number(form.durationDays.replace(/\s+/g, ""));
+    if (form.durationDays !== "" && !Number.isFinite(durationValue)) {
+      setError("Duration (days) must be a number.");
       return;
     }
     if (Number.isFinite(durationValue) && durationValue < 0) {
-      setError("Duration (weeks) cannot be negative.");
+      setError("Duration (days) cannot be negative.");
       return;
+    }
+    if (form.endDate && durationValue === null) {
+      setError("Duration (days) is required when an end date is provided.");
+      return;
+    }
+    if (form.startDate && form.endDate && Number.isFinite(durationValue)) {
+      const rangeDays = calculateDurationDays(form.startDate, form.endDate);
+      if (rangeDays !== null && durationValue > rangeDays) {
+        setError("Duration (days) must not exceed the span between start and end date.");
+        return;
+      }
+      if (durationValue > 999) {
+        setError("Duration (days) must be 0–999.");
+        return;
+      }
     }
 
     const costValue = form.cost === "" ? null : Number(form.cost.replace(/\s+/g, ""));
     if (form.cost !== "" && !Number.isFinite(costValue)) {
       setError("Cost must be a number.");
+      return;
+    }
+    if (costValue !== null && (costValue < 0 || costValue > 999999 || !Number.isInteger(costValue))) {
+      setError("Cost must be a whole number between 0 and 999999.");
       return;
     }
 
@@ -680,7 +723,7 @@ const InterventionModal = ({
       status: statusNormalized,
       startDate: form.startDate || null,
       endDate: form.endDate || null,
-      durationWeeks: durationValue,
+      durationDays: durationValue,
       outcome: outcomeValue,
       cost: costValue,
       potId: form.potId.trim() || null,
@@ -908,11 +951,11 @@ const InterventionModal = ({
                   disabled={isReadOnly}
                 />
               </FormField>
-              <FormField label="Duration (weeks)">
+              <FormField label="Duration (days)" description="Must align with start/end; required when end date is set.">
                 <Input
-                  value={form.durationWeeks}
-                  onChange={({ detail }) => handleChange("durationWeeks", detail.value)}
-                  placeholder="e.g. 16"
+                  value={form.durationDays}
+                  onChange={({ detail }) => handleChange("durationDays", detail.value)}
+                  placeholder="e.g. 10"
                   readOnly={isReadOnly}
                   disabled={isReadOnly}
                 />
@@ -1102,7 +1145,7 @@ const InterventionModal = ({
                 </Alert>
               )}
             <ColumnLayout columns={3} variant="text-grid">
-              <FormField label="ESDC outcome">
+              <FormField label="ESDC outcome" description="Required to close.">
                 <Select
                   selectedOption={selectedCloseOutcomeOption}
                   onChange={({ detail }) =>
@@ -1123,17 +1166,17 @@ const InterventionModal = ({
                 </FormField>
                 <FormField
                   label="Completion date"
-                  description="Defaults to the planned end date if left blank."
+                  description="Required. Must match the final intervention end date."
                 >
                   <DatePicker
                     value={closeForm.completionDate}
                     onChange={({ detail }) => handleCloseChange("completionDate", detail.value)}
                     placeholder="YYYY-MM-DD"
-                  />
-                </FormField>
-                <FormField
+                />
+              </FormField>
+              <FormField
                   label="Actual amount"
-                  description="Leave blank if not applicable."
+                  description="Whole dollars 0–999999. Leave blank if not applicable."
                 >
                   <Input
                     value={closeForm.actualAmount}

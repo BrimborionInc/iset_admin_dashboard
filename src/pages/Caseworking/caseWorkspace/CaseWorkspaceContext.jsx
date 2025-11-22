@@ -36,7 +36,7 @@ const buildInterventionFromApi = (planId, payload = {}) => {
         }
       : { ilmp: "pending", finance: "pending" };
   const status = normaliseInterventionStatus(payload.status);
-  const durationWeeks = toNumberOrNull(payload.durationWeeks);
+  const durationDays = toNumberOrNull(payload.durationDays);
   const costCandidates = [
     payload.metadata?.cost,
     payload.metadata?.costSettings?.calculatedTotal,
@@ -81,7 +81,7 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     status,
     startDate: payload.startDate || null,
     endDate: payload.endDate || null,
-    durationWeeks,
+    durationDays,
     outcome: payload.outcome || payload.outcomeCode || null,
     cost: costValue,
     potId: payload.potId || payload.fundingStream || null,
@@ -307,6 +307,10 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
       archivedAt: plan.archivedAt || null,
       resultCode: plan.resultCode || null,
       resultDate: plan.resultDate || null,
+      resultEducationLevel: plan.resultEducationLevel || null,
+      futureEducationLevel: plan.futureEducationLevel || null,
+      resultNoc: plan.resultNoc || null,
+      resultNocVersion: plan.resultNocVersion || null,
       outcomeSummary: plan.outcomeSummary || null,
       closureNotes: plan.closureNotes || null,
       summary: plan.summary || null,

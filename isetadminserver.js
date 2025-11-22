@@ -1435,6 +1435,7 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
   const mapCaseIntervention = intervention => {
     if (!intervention) return null;
     const metadata = intervention.metadata || {};
+    const esdc = safeJsonParse(intervention.esdc_intervention_json || intervention.esdcInterventionJson, null) || {};
     const startDate = intervention.startDate ? formatDateValue(intervention.startDate) : null;
     const endDate = intervention.endDate ? formatDateValue(intervention.endDate) : null;
 
@@ -1452,9 +1453,10 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
     if (!duration) {
       if (Number.isFinite(intervention.durationDays)) {
         duration = normaliseNumericString(intervention.durationDays, { min: 0, max: 999 });
-      } else
-      if (Number.isFinite(metadata.durationDays)) {
+      } else if (Number.isFinite(metadata.durationDays)) {
         duration = normaliseNumericString(metadata.durationDays, { min: 0, max: 999 });
+      } else if (Number.isFinite(esdc.interventionDuration)) {
+        duration = normaliseNumericString(esdc.interventionDuration, { min: 0, max: 999 });
       } else if (Number.isFinite(metadata.durationWeeks)) {
         const days = Math.round(Number(metadata.durationWeeks) * 7);
         if (Number.isFinite(days) && days >= 0 && days <= 999) {
@@ -1496,6 +1498,7 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       intervention.budgetAmount,
       intervention.intervention_cost,
       metadata.cost,
+      esdc.interventionCost,
       ...metadataCostCandidates,
       intervention.cost
     ];
@@ -1509,10 +1512,12 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       }
     }
 
-    const codeCandidate = metadata.code ?? intervention.code ?? intervention.intervention_type ?? null;
-    const code = normaliseNumericString(codeCandidate, { min: 0, max: 99 });
+    const codeCandidate = metadata.code ?? intervention.code ?? esdc.interventionCode ?? intervention.intervention_type ?? null;
+    const code = normaliseNumericString(codeCandidate, { min: 1, max: 999 });
 
-    const outcome = mapInterventionOutcome(intervention.outcome ?? intervention.outcomeCode ?? metadata.outcome);
+    const outcome = mapInterventionOutcome(
+      intervention.outcome ?? intervention.outcomeCode ?? esdc.interventionOutcome ?? metadata.outcome
+    );
 
     const supports = Array.isArray(metadata.supports) && metadata.supports.length
       ? metadata.supports
@@ -1536,8 +1541,20 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       });
     }
 
-    const relatedNoc = intervention.related_noc || metadata.noc || intervention.noc || clientStatus?.noc || null;
-    const relatedNocVersion = intervention.related_noc_version || metadata.nocVersion || intervention.nocVersion || clientStatus?.nocVersion || null;
+    const relatedNoc =
+      intervention.related_noc ||
+      esdc.interventionRelatedNOC ||
+      metadata.noc ||
+      intervention.noc ||
+      clientStatus?.noc ||
+      null;
+    const relatedNocVersion =
+      intervention.related_noc_version ||
+      esdc.interventionRelatedNOCVersion ||
+      metadata.nocVersion ||
+      intervention.nocVersion ||
+      clientStatus?.nocVersion ||
+      null;
 
     if (!code && !startDate && !endDate && !outcome && !duration && !cost && !notes.length && !supports.length) {
       return null;
@@ -1566,8 +1583,8 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       (casePlan.interventions?.length ? formatDateValue(casePlan.interventions[0].startDate) : null) ||
       (casePlan.createdAt ? formatDateValue(casePlan.createdAt) : null) ||
       (caseRow?.created_at ? formatDateValue(caseRow.created_at) : null);
-    const planResultDate = formatDateValue(casePlan.resultDate);
-    const planResultCode = normaliseString(casePlan.resultCode || metadata.resultCode || null);
+    const planResultDate = formatDateValue(casePlan.resultDate) || formatDateValue(casePlan.actionPlanResultDate) || formatDateValue(metadata.resultDate || metadata.actionPlanResultDate);
+    const planResultCode = normaliseString(casePlan.resultCode || casePlan.actionPlanResultCode || metadata.resultCode || metadata.actionPlanResultCode || null);
 
     const resolveBoolean = value => {
       if (typeof value === "string") {
@@ -1640,6 +1657,8 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
         eiClaimant: casePlan.eiClaimant || casePlan.EIClaimant || metadata.eiClaimant || null,
         resultDate: planResultDate,
         resultCode: planResultCode,
+        resultNoc: casePlan.resultNoc || metadata.resultNoc || null,
+        resultNocVersion: casePlan.resultNocVersion || metadata.resultNocVersion || null,
         childcareNeed: planChildcareNeed,
         childcareFunding: planChildcareFunding,
         goalDescription: planGoalDescription || normaliseString(answers['long-term-goal'] || answers['long_term_goal']) || null,
@@ -3073,9 +3092,6 @@ function buildIlmpParticipantPayload(context) {
   const formatPostalZip = value => {
     if (!value) return null;
     const trimmed = String(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (trimmed.length === 6) {
-      return `${trimmed.slice(0, 3)} ${trimmed.slice(3)}`;
-    }
     return trimmed.length ? trimmed : null;
   };
 
@@ -3166,6 +3182,8 @@ function buildIlmpParticipantPayload(context) {
       startDate,
       resultDate,
       resultCode,
+      resultNoc,
+      resultNocVersion,
       eiClaimant,
       prevEmployment,
       childcareNeed,
@@ -3212,12 +3230,16 @@ function buildIlmpParticipantPayload(context) {
       ActionPlanStartDate: startDate || null,
       ActionPlanResultDate: resultDate || null,
       ActionPlanResultCode: resultCode || null,
+      ActionPlanResultRelatedNOC: resultNoc || null,
+      ActionPlanResultRelatedNOCVersion: resultNocVersion || null,
       EIClaimant: actionPlanEiClaimantCode || null,
       actionPlanPreviousEmployment: toCode(prevEmployment, CODE_MAPS.prevEmployment) || null,
       ChildcareNeed: childcareNeedCode || childcareNeed || null,
       ChildcareFunding: childcareFundingCode || childcareFunding || null,
       GoalDescription: goalDescription || null,
-      Interventions: interventionNode
+      Interventions: interventionNode,
+      // retain raw array for XML appender
+      interventions: Array.isArray(interventions) ? interventions : []
     };
   })();
 
@@ -3270,6 +3292,27 @@ function buildIlmpParticipantPayload(context) {
   const schemaVersion = '1.4';
 
   const lines = [];
+  const formatIlmpPhone = value => {
+    if (!value) return null;
+    const digits = String(value).replace(/\D+/g, '');
+    if (!digits || digits.length < 10) return null;
+    let numberDigits = digits;
+    let ext = '';
+    if (digits.length > 10) {
+      numberDigits = digits.slice(0, 10);
+      ext = digits.slice(10);
+    }
+    if (numberDigits.length === 11 && numberDigits.startsWith('1')) {
+      numberDigits = numberDigits.slice(1);
+    }
+    if (numberDigits.length !== 10) return null;
+    const area = numberDigits.slice(0, 3);
+    const prefix = numberDigits.slice(3, 6);
+    const line = numberDigits.slice(6);
+    const base = `1-${area}-${prefix}-${line}`;
+    return ext ? `${base}:${ext}` : base;
+  };
+
   const add = (indent, tag, value) => {
     if (value === null || typeof value === 'undefined') return;
     const pad = '  '.repeat(indent);
@@ -3331,19 +3374,51 @@ function buildIlmpParticipantPayload(context) {
     if (barrierCodes && barrierCodes.length) {
       barrierCodes.forEach(code => add(indent + 1, 'barrierToEmployment', code));
     }
-    add(indent + 1, 'actionPlanPreviousEmployment', toCode(clientStatus?.status, CODE_MAPS.prevEmployment) || null);
-    add(indent + 1, 'actionPlanPreviousEmploymentScheduleType', toCode(clientStatus?.scheduleType, CODE_MAPS.schedule) || null);
-    add(indent + 1, 'actionPlanStartDate', plan.startDate || null);
-    add(indent + 1, 'actionPlanResultCode', toCode(plan.resultCode, CODE_MAPS.resultCode) || null);
-    add(indent + 1, 'actionPlanResultDate', plan.resultDate || null);
-    add(indent + 1, 'actionPlanResultRelatedNOC', plan.interventions?.[0]?.relatedNoc || null);
-    add(indent + 1, 'actionPlanResultRelatedNOCVersion', plan.interventions?.[0]?.relatedNocVersion || null);
+    const prevEmploymentCode = toCode(clientStatus?.status, CODE_MAPS.prevEmployment) || null;
+    add(indent + 1, 'actionPlanPreviousEmployment', prevEmploymentCode);
+    if (prevEmploymentCode === '2') {
+      add(indent + 1, 'actionPlanPreviousEmploymentNOC', clientStatus?.noc || null);
+      add(indent + 1, 'actionPlanPreviousEmploymentNOCVersion', clientStatus?.nocVersion || null);
+      const scheduleCode = toCode(clientStatus?.scheduleType, CODE_MAPS.schedule) || null;
+      add(indent + 1, 'actionPlanPreviousEmploymentScheduleType', scheduleCode);
+    } else {
+      add(indent + 1, 'actionPlanPreviousEmploymentScheduleType', toCode(clientStatus?.scheduleType, CODE_MAPS.schedule) || null);
+    }
+    const planStart =
+      plan.startDate ||
+      plan.ActionPlanStartDate ||
+      plan.actionPlanStartDate ||
+      null;
+    const planResultDate =
+      plan.resultDate ||
+      plan.ActionPlanResultDate ||
+      plan.actionPlanResultDate ||
+      null;
+    const planResultCode =
+      toCode(plan.resultCode, CODE_MAPS.resultCode) ||
+      toCode(plan.ActionPlanResultCode, CODE_MAPS.resultCode) ||
+      (plan.resultCode ? String(plan.resultCode) : null) ||
+      (plan.ActionPlanResultCode ? String(plan.ActionPlanResultCode) : null) ||
+      null;
+    const planResultNoc = plan.resultNoc || plan.actionPlanResultRelatedNOC || plan.ActionPlanResultRelatedNOC || null;
+    const planResultNocVersion =
+      plan.resultNocVersion ||
+      plan.actionPlanResultRelatedNOCVersion ||
+      plan.ActionPlanResultRelatedNOCVersion ||
+      null;
+    add(indent + 1, 'actionPlanStartDate', planStart);
+    add(indent + 1, 'actionPlanResultCode', planResultCode);
+    add(indent + 1, 'actionPlanResultDate', planResultDate);
+    if (planResultCode === '2') {
+      add(indent + 1, 'actionPlanResultRelatedNOC', planResultNoc || plan.interventions?.[0]?.relatedNoc || null);
+      add(indent + 1, 'actionPlanResultRelatedNOCVersion', planResultNocVersion || plan.interventions?.[0]?.relatedNocVersion || null);
+    }
     add(indent + 1, 'actionPlanResultEducationLevel', educationLevelCode || null);
     add(indent + 1, 'actionPlanChildCareNeed', toCode(plan.childcareNeed, CODE_MAPS.childcareNeed) || null);
     add(indent + 1, 'actionPlanChildCareFundedCode', toCode(plan.childcareFunding, CODE_MAPS.childcareFunding) || null);
-    if (plan.interventions && plan.interventions.length) {
-      plan.interventions.forEach(intervention => appendIntervention(intervention, indent + 1));
-    }
+    const planInterventions = plan.interventions || plan.Interventions?.Intervention || [];
+    const list = Array.isArray(planInterventions) ? planInterventions : [planInterventions];
+    list.filter(Boolean).forEach(intervention => appendIntervention(intervention, indent + 1));
     lines.push(`${pad}</actionPlan>`);
   };
 
@@ -3371,7 +3446,8 @@ function buildIlmpParticipantPayload(context) {
     add(3, 'municipality', address.city || null);
     add(3, 'province', provinceNumeric || null);
     add(3, 'postalZIPCode', addressNode.PostalZIPCode || null);
-    if (contactDetails?.phone) add(3, 'contactPhoneNumber', contactDetails.phone);
+    const formattedPhone = formatIlmpPhone(contactDetails?.phone) || 'No Telephone';
+    add(3, 'contactPhoneNumber', formattedPhone);
     lines.push('    </address>');
   }
   if (actionPlanNode) {
@@ -3448,29 +3524,32 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
     planRows.forEach(planRow => {
       const metadata = safeJsonParse(planRow.metadata_json, {}) || {};
       planIds.push(planRow.id);
+      const esdc = safeJsonParse(planRow.esdc_action_plan_json, {}) || {};
       planMap.set(planRow.id, {
-            id: planRow.id,
-            caseId: planRow.case_id,
+        id: planRow.id,
+        caseId: planRow.case_id,
         name: planRow.name,
         status: planRow.status,
-        eiClaimant: planRow.EIClaimant || planRow.eiClaimant || null,
-        prevEmployment: planRow.prev_employment || null,
+        eiClaimant: planRow.EIClaimant || planRow.eiClaimant || esdc.EIClaimant || null,
+        prevEmployment: planRow.prev_employment || esdc.actionPlanPreviousEmployment || null,
         createdAt: planRow.created_at,
         effectiveDate: planRow.effective_date,
         reviewDate: planRow.review_date,
-            activatedAt: planRow.activated_at,
-            closedAt: planRow.closed_at,
-            resultCode: planRow.result_code,
-            resultDate: planRow.result_date,
-            outcomeSummary: planRow.outcome_summary || null,
-            closureNotes: planRow.closure_notes || null,
-            summary: metadata.summary || planRow.notes || null,
-            childcareNeed: metadata.childcareNeed ?? metadata.childcare_need ?? null,
-            childcareFunding: metadata.childcareFunding ?? metadata.childcare_funding ?? null,
-            goalDescription: metadata.goalDescription ?? metadata.goal ?? metadata.summary ?? null,
-            metadata,
-            interventions: [],
-          });
+        activatedAt: planRow.activated_at,
+        closedAt: planRow.closed_at,
+        resultCode: planRow.result_code || esdc.actionPlanResultCode || null,
+        resultDate: planRow.result_date || esdc.actionPlanResultDate || null,
+        resultNoc: esdc.actionPlanResultRelatedNOC || null,
+        resultNocVersion: esdc.actionPlanResultRelatedNOCVersion || null,
+        outcomeSummary: planRow.outcome_summary || null,
+        closureNotes: planRow.closure_notes || null,
+        summary: metadata.summary || planRow.notes || null,
+        childcareNeed: metadata.childcareNeed ?? metadata.childcare_need ?? esdc.actionPlanChildcareNeed ?? null,
+        childcareFunding: metadata.childcareFunding ?? metadata.childcare_funding ?? esdc.actionPlanChildcareFundedCode ?? null,
+        goalDescription: metadata.goalDescription ?? metadata.goal ?? metadata.summary ?? null,
+        metadata,
+        interventions: [],
+      });
         });
         if (planIds.length) {
           const placeholders = planIds.map(() => '?').join(', ');
@@ -3930,6 +4009,7 @@ async function fetchInterventionWithCase(interventionId) {
   const [[row]] = await pool.query(
     `SELECT
        ci.*,
+       ci.esdc_intervention_json AS esdcInterventionJson,
        ap.status AS action_plan_status,
        ap.case_id AS action_plan_case_id,
        ap.id AS action_plan_id,
@@ -4461,8 +4541,8 @@ function mapActionPlanRow(plan) {
     activatedAt: toIsoDateTime(plan.activated_at),
     closedAt: toIsoDateTime(plan.closed_at),
     archivedAt: toIsoDateTime(plan.archived_at),
-    resultCode: plan.result_code || null,
-    resultDate: toDateOnly(plan.result_date),
+    resultCode: plan.result_code || esdc.actionPlanResultCode || null,
+    resultDate: plan.result_date ? toDateOnly(plan.result_date) : (esdc.actionPlanResultDate || null),
     resultEducationLevel: esdc.actionPlanResultEducationLevel || null,
     futureEducationLevel: esdc.actionPlanFutureEducationLevel || null,
     resultNoc: esdc.actionPlanResultRelatedNOC || null,
@@ -4659,6 +4739,13 @@ function mergeRecurringCostMetadata(target, source, fallbackTotal) {
 function mapInterventionRow(row) {
   if (!row) return null;
   const metadata = safeJsonParse(row.metadata_json, null) || {};
+  const esdcRaw =
+    row.esdc_intervention_json ??
+    row.esdcInterventionJson ??
+    row.esdc ??
+    row.esdcJson ??
+    null;
+  const esdc = safeJsonParse(esdcRaw, esdcRaw) || {};
   const toNumber = value => {
     if (value === null || typeof value === 'undefined' || value === '') return null;
     const numeric = Number(value);
@@ -4674,11 +4761,14 @@ function mapInterventionRow(row) {
   const budgetAmount = toNumber(row.budget_amount);
   const actualAmount = toNumber(row.actual_amount);
   const costFromMeta = toNumber(metadata.cost);
-  const resolvedCost = approvedAmount ?? budgetAmount ?? costFromMeta;
+  const resolvedCost = approvedAmount ?? budgetAmount ?? costFromMeta ?? toNumber(esdc.interventionCost);
   const startDate = toDateOnly(row.start_date);
   const endDate = toDateOnly(row.end_date);
   let durationWeeks = toNumber(metadata.durationWeeks);
-  let durationDays = Number.isFinite(row.duration_days) ? Number(row.duration_days) : null;
+  let durationDays =
+    Number.isFinite(row.duration_days) && row.duration_days !== ''
+      ? Number(row.duration_days)
+      : toNumber(esdc.interventionDuration);
   if (!Number.isFinite(durationDays)) {
     const durationDaysFromMeta = toNumber(metadata.durationDays);
     if (Number.isFinite(durationDaysFromMeta)) {
@@ -4732,18 +4822,28 @@ function mapInterventionRow(row) {
     endDate,
     durationWeeks: Number.isFinite(durationWeeks) ? durationWeeks : null,
     durationDays: Number.isFinite(durationDays) ? durationDays : null,
-    outcome: metadata.outcome || metadata.outcomeLabel || row.outcome_code || null,
-    outcomeCode: row.outcome_code || null,
+    outcome:
+      metadata.outcome ||
+      metadata.outcomeLabel ||
+      row.outcome_code ||
+      esdc.interventionOutcome ||
+      null,
+    outcomeCode: row.outcome_code || esdc.interventionOutcome || null,
     fundingStream: row.funding_stream || metadata.fundingStream || null,
     cost: Number.isFinite(row.intervention_cost) ? Number(row.intervention_cost) : (Number.isFinite(resolvedCost) ? resolvedCost : null),
     budgetAmount,
     approvedAmount,
     actualAmount,
     potId: metadata.potId || metadata.budgetPotId || null,
-    noc: row.related_noc || metadata.noc || null,
-    nocVersion: row.related_noc_version || metadata.nocVersion || null,
-    related_noc: row.related_noc || null,
-    related_noc_version: row.related_noc_version || null,
+    noc: row.related_noc || metadata.noc || esdc.interventionRelatedNOC || null,
+    nocVersion:
+      row.related_noc_version ||
+      metadata.nocVersion ||
+      esdc.interventionRelatedNOCVersion ||
+      null,
+    related_noc: row.related_noc || esdc.interventionRelatedNOC || null,
+    related_noc_version:
+      row.related_noc_version || esdc.interventionRelatedNOCVersion || null,
     intervention_cost: Number.isFinite(row.intervention_cost) ? Number(row.intervention_cost) : null,
     notes,
     compliance,
@@ -16590,7 +16690,9 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     startDate = null,
     endDate = null,
     durationWeeks = null,
+    durationDays = null,
     outcome = null,
+    outcomeCode = null,
     cost = null,
     potId = null,
     fundingStream = null,
@@ -16605,6 +16707,12 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
   const trimmedCode = typeof code === 'string' ? code.trim() : '';
   if (!trimmedCode) {
     return res.status(422).json({ error: 'code_required', message: 'Intervention code is required.' });
+  }
+  const VALID_CODES = new Set([
+    '1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20'
+  ]);
+  if (!VALID_CODES.has(trimmedCode)) {
+    return res.status(422).json({ error: 'invalid_code', message: 'Intervention code must be one of the ESDC codes 1-20.' });
   }
 
   const trimmedTitle = typeof title === 'string' ? title.trim() : '';
@@ -16623,6 +16731,9 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
   };
 
   const startDateValue = normaliseDate(startDate);
+  if (!startDateValue) {
+    return res.status(422).json({ error: 'start_date_required', message: 'Start date is required.' });
+  }
   if (startDateValue === 'invalid') {
     return res.status(422).json({ error: 'invalid_start_date', message: 'Start date must be in YYYY-MM-DD format.' });
   }
@@ -16634,6 +16745,15 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
   if (startDateValue && endDateValue && endDateValue < startDateValue) {
     return res.status(422).json({ error: 'end_before_start', message: 'End date cannot be before start date.' });
   }
+  if (startDateValue && endDateValue) {
+    const startDt = new Date(startDateValue);
+    const endDt = new Date(endDateValue);
+    const maxEnd = new Date(startDateValue);
+    maxEnd.setMonth(maxEnd.getMonth() + 60);
+    if (endDt > maxEnd) {
+      return res.status(422).json({ error: 'end_too_far', message: 'End date must be within 60 months of start date.' });
+    }
+  }
 
   const parseNumeric = value => {
     if (value === null || typeof value === 'undefined' || value === '') return null;
@@ -16642,11 +16762,18 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
   };
 
   const durationWeeksValue = parseNumeric(durationWeeks);
+  const durationDaysValueRaw = parseNumeric(durationDays);
   if (Number.isNaN(durationWeeksValue)) {
     return res.status(422).json({ error: 'invalid_duration', message: 'Duration (weeks) must be a number.' });
   }
+  if (Number.isNaN(durationDaysValueRaw)) {
+    return res.status(422).json({ error: 'invalid_duration_days', message: 'Duration (days) must be a number.' });
+  }
   if (durationWeeksValue !== null && durationWeeksValue < 0) {
     return res.status(422).json({ error: 'invalid_duration', message: 'Duration (weeks) cannot be negative.' });
+  }
+  if (durationDaysValueRaw !== null && durationDaysValueRaw < 0) {
+    return res.status(422).json({ error: 'invalid_duration_days', message: 'Duration (days) cannot be negative.' });
   }
 
   const plannedCostValue = parseNumeric(cost);
@@ -16685,18 +16812,78 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     const identity = getRequesterIdentity(req);
     const createdBy = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
 
-    const trimmedOutcomeCreate = typeof outcome === 'string' ? outcome.trim() : '';
+    const trimmedOutcomeCreate =
+      typeof outcome === 'string' && outcome.trim()
+        ? outcome.trim()
+        : typeof outcomeCode === 'string'
+        ? outcomeCode.trim()
+        : '';
     const trimmedPotId = typeof potId === 'string' ? potId.trim() : '';
     const trimmedFundingStream = typeof fundingStream === 'string' ? fundingStream.trim() : '';
     const trimmedNotes = typeof notes === 'string' ? notes.trim() : '';
     const trimmedNoc = typeof noc === 'string' ? noc.trim() : '';
     const trimmedNocVersion = typeof nocVersion === 'string' ? nocVersion.trim() : '';
 
+    const requiresNoc = Number(trimmedCode) >= 6 && Number(trimmedCode) <= 13;
+    if (requiresNoc) {
+      if (!trimmedNocVersion) {
+        return res.status(422).json({ error: 'noc_version_required', message: 'NOC version is required for this intervention code.' });
+      }
+      if (!trimmedNoc) {
+        return res.status(422).json({ error: 'noc_required', message: 'NOC code is required for this intervention code.' });
+      }
+      const expectedLength = trimmedNocVersion === '2021' ? 5 : 4;
+      if (!/^\d+$/.test(trimmedNoc) || trimmedNoc.length !== expectedLength) {
+        return res.status(422).json({ error: 'invalid_noc', message: `NOC code must be a ${expectedLength}-digit number for version ${trimmedNocVersion}.` });
+      }
+    }
+
+    // Derive durationDays
+    let durationDaysValue = null;
+    if (durationDaysValueRaw !== null) {
+      durationDaysValue = Math.round(durationDaysValueRaw);
+    } else if (durationWeeksValue !== null) {
+      durationDaysValue = Math.round(durationWeeksValue * 7);
+    } else if (startDateValue && endDateValue) {
+      const start = new Date(startDateValue);
+      const end = new Date(endDateValue);
+      const diffDays = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+      durationDaysValue = diffDays;
+    }
+    if (durationDaysValue !== null) {
+      if (durationDaysValue < 0 || durationDaysValue > 999) {
+        return res.status(422).json({ error: 'invalid_duration_days', message: 'Duration (days) must be between 0 and 999.' });
+      }
+      if (startDateValue && endDateValue) {
+        const start = new Date(startDateValue);
+        const end = new Date(endDateValue);
+        const diffDays = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+        if (durationDaysValue > diffDays) {
+          return res.status(422).json({ error: 'duration_exceeds_range', message: 'Duration (days) must not exceed the date range.' });
+        }
+      }
+    }
+
+    // Cost validation per ESDC (integer 0-999999) when end date present
+    let plannedCostInt = null;
+    if (plannedCostValue !== null) {
+      plannedCostInt = Math.round(plannedCostValue);
+      if (!Number.isFinite(plannedCostInt) || plannedCostInt < 0 || plannedCostInt > 999999) {
+        return res.status(422).json({ error: 'invalid_cost_range', message: 'Cost must be between 0 and 999999.' });
+      }
+    }
+    if (endDateValue && plannedCostInt === null) {
+      return res.status(422).json({ error: 'cost_required', message: 'Intervention cost is required when an end date is provided.' });
+    }
+    if (endDateValue && durationDaysValue === null) {
+      return res.status(422).json({ error: 'duration_required', message: 'Duration (days) is required when an end date is provided.' });
+    }
+
     const metadata = {};
     metadata.code = trimmedCode;
     metadata.title = trimmedTitle;
     if (durationWeeksValue !== null) metadata.durationWeeks = durationWeeksValue;
-    if (Number.isFinite(plannedCostValue)) metadata.cost = plannedCostValue;
+    if (Number.isFinite(plannedCostInt)) metadata.cost = plannedCostInt;
     if (trimmedPotId) metadata.potId = trimmedPotId;
     if (trimmedFundingStream) metadata.fundingStream = trimmedFundingStream;
     if (trimmedNotes) metadata.notes = trimmedNotes;
@@ -16705,14 +16892,25 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     if (trimmedNocVersion) metadata.nocVersion = trimmedNocVersion;
     metadata.compliance = { ilmp: 'pending', finance: 'pending' };
 
-    const recurringFallbackTotal = Number.isFinite(plannedCostValue)
-      ? plannedCostValue
+    const recurringFallbackTotal = Number.isFinite(plannedCostInt)
+      ? plannedCostInt
       : normaliseRecurringNumber(metadata.cost);
     const metadataSource =
       metadataPayload && typeof metadataPayload === 'object' ? metadataPayload : null;
     if (metadataSource) {
       mergeRecurringCostMetadata(metadata, metadataSource, recurringFallbackTotal);
     }
+
+    const esdcPayload = pruneNullish({
+      interventionCode: trimmedCode,
+      interventionStartDate: startDateValue,
+      interventionEndDate: endDateValue || null,
+      interventionOutcome: trimmedOutcomeCreate || null,
+      interventionDuration: durationDaysValue,
+      interventionCost: plannedCostInt,
+      interventionRelatedNOC: trimmedNoc || null,
+      interventionRelatedNOCVersion: trimmedNocVersion || null,
+    });
 
     const [result] = await pool.query(
       `INSERT INTO iset_case_intervention
@@ -16734,8 +16932,9 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
           outcome_code,
           notes,
           metadata_json,
+          esdc_intervention_json,
           created_by_staff_profile_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         planRow.case_id,
         planId,
@@ -16744,17 +16943,18 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         statusValue,
         startDateValue || null,
         endDateValue || null,
-        durationWeeksValue !== null ? Math.round(durationWeeksValue * 7) : null,
+        durationDaysValue !== null ? durationDaysValue : null,
         trimmedFundingStream || null,
-        Number.isFinite(plannedCostValue) ? plannedCostValue : null,
+        Number.isFinite(plannedCostInt) ? plannedCostInt : null,
         Number.isFinite(approvedAmountValue) ? approvedAmountValue : null,
         Number.isFinite(actualAmountValue) ? actualAmountValue : null,
-        Number.isFinite(plannedCostValue) ? plannedCostValue : null,
+        Number.isFinite(plannedCostInt) ? plannedCostInt : null,
         trimmedNoc || null,
         trimmedNocVersion || null,
         trimmedOutcomeCreate || null,
         trimmedNotes || null,
         Object.keys(metadata).length ? JSON.stringify(metadata) : null,
+        Object.keys(esdcPayload).length ? JSON.stringify(esdcPayload) : null,
         createdBy,
       ]
     );
@@ -16816,20 +17016,60 @@ app.patch('/api/interventions/:id', async (req, res) => {
   ) {
     return res.status(422).json({ error: 'end_before_start', message: 'End date cannot be before start date.' });
   }
-
-  const durationProvided = Object.prototype.hasOwnProperty.call(body, 'durationWeeks');
-  const durationWeeksValue = durationProvided ? parseNumeric(body.durationWeeks) : undefined;
-  if (Number.isNaN(durationWeeksValue)) {
-    return res.status(422).json({ error: 'invalid_duration', message: 'Duration (weeks) must be a number.' });
+  if (typeof startDateValue === 'string' && startDateValue !== null) {
+    const startCutoff = new Date('2000-01-01');
+    const startVal = new Date(startDateValue);
+    if (startVal < startCutoff) {
+      return res.status(422).json({ error: 'invalid_start_date', message: 'Start date must be after 2000-01-01.' });
+    }
   }
-  if (durationWeeksValue !== undefined && durationWeeksValue !== null && durationWeeksValue < 0) {
-    return res.status(422).json({ error: 'invalid_duration', message: 'Duration (weeks) cannot be negative.' });
+  if (typeof startDateValue === 'string' && startDateValue && typeof endDateValue === 'string' && endDateValue) {
+    const startVal = new Date(startDateValue);
+    const maxEnd = new Date(startDateValue);
+    maxEnd.setMonth(maxEnd.getMonth() + 60);
+    const endVal = new Date(endDateValue);
+    if (endVal > maxEnd) {
+      return res.status(422).json({ error: 'end_too_far', message: 'End date must be within 60 months of start date.' });
+    }
+  }
+
+  const durationProvided = Object.prototype.hasOwnProperty.call(body, 'durationDays');
+  const durationDaysValueRaw = durationProvided ? parseNumeric(body.durationDays) : undefined;
+  if (Number.isNaN(durationDaysValueRaw)) {
+    return res.status(422).json({ error: 'invalid_duration', message: 'Duration (days) must be a number.' });
+  }
+  if (durationDaysValueRaw !== undefined && durationDaysValueRaw !== null && durationDaysValueRaw < 0) {
+    return res.status(422).json({ error: 'invalid_duration', message: 'Duration (days) cannot be negative.' });
+  }
+  if (durationDaysValueRaw !== undefined && durationDaysValueRaw !== null && durationDaysValueRaw > 999) {
+    return res.status(422).json({ error: 'invalid_duration', message: 'Duration (days) must be 0–999.' });
+  }
+  if (
+    durationDaysValueRaw !== undefined &&
+    durationDaysValueRaw !== null &&
+    typeof startDateValue === 'string' &&
+    typeof endDateValue === 'string' &&
+    startDateValue &&
+    endDateValue
+  ) {
+    const start = new Date(startDateValue);
+    const end = new Date(endDateValue);
+    const diffDays = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+    if (diffDays > 0 && durationDaysValueRaw > diffDays) {
+      return res.status(422).json({ error: 'duration_exceeds_range', message: 'Duration (days) must not exceed the date range.' });
+    }
   }
 
   const costProvided = Object.prototype.hasOwnProperty.call(body, 'cost');
   const plannedCostValue = costProvided ? parseNumeric(body.cost) : undefined;
   if (Number.isNaN(plannedCostValue)) {
     return res.status(422).json({ error: 'invalid_cost', message: 'Cost must be a number.' });
+  }
+  if (plannedCostValue !== undefined && plannedCostValue !== null) {
+    const costInt = Math.round(plannedCostValue);
+    if (!Number.isFinite(costInt) || costInt < 0 || costInt > 999999) {
+      return res.status(422).json({ error: 'invalid_cost_range', message: 'Cost must be between 0 and 999999.' });
+    }
   }
 
   const approvedProvided = Object.prototype.hasOwnProperty.call(body, 'approvedAmount');
@@ -16914,6 +17154,10 @@ app.patch('/api/interventions/:id', async (req, res) => {
       if (!trimmedCode) {
         return res.status(422).json({ error: 'code_required', message: 'Intervention code is required.' });
       }
+      const VALID_CODES = new Set(['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20']);
+      if (!VALID_CODES.has(trimmedCode)) {
+        return res.status(422).json({ error: 'invalid_code', message: 'Intervention code must be one of the ESDC codes 1-20.' });
+      }
       updates.push('intervention_type = ?');
       params.push(trimmedCode);
       updates.push('intervention_code = ?');
@@ -16945,28 +17189,48 @@ app.patch('/api/interventions/:id', async (req, res) => {
       params.push(endDateValue || null);
     }
 
+    let durationDaysValue = null;
     if (durationProvided) {
-      if (durationWeeksValue === null) {
+      if (durationDaysValueRaw === null) {
         delete metadata.durationWeeks;
         updates.push('duration_days = ?');
         params.push(null);
       } else {
-        metadata.durationWeeks = durationWeeksValue;
+        durationDaysValue = Math.round(durationDaysValueRaw);
+        if (durationDaysValue < 0 || durationDaysValue > 999) {
+          return res.status(422).json({ error: 'invalid_duration_days', message: 'Duration (days) must be between 0 and 999.' });
+        }
+        if (startDateValue && endDateValue) {
+          const start = new Date(startDateValue);
+          const end = new Date(endDateValue);
+          const diffDays = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+          if (durationDaysValue > diffDays) {
+            return res.status(422).json({ error: 'duration_exceeds_range', message: 'Duration (days) must not exceed the date range.' });
+          }
+        }
+        metadata.durationWeeks = durationDaysValue / 7;
         updates.push('duration_days = ?');
-        params.push(Math.round(durationWeeksValue * 7));
+        params.push(durationDaysValue);
       }
       metadataChanged = true;
     }
 
+    let plannedCostInt = null;
     if (costProvided) {
+      if (plannedCostValue !== null) {
+        plannedCostInt = Math.round(plannedCostValue);
+        if (!Number.isFinite(plannedCostInt) || plannedCostInt < 0 || plannedCostInt > 999999) {
+          return res.status(422).json({ error: 'invalid_cost_range', message: 'Cost must be between 0 and 999999.' });
+        }
+      }
       updates.push('budget_amount = ?');
-      params.push(plannedCostValue === null ? null : plannedCostValue);
+      params.push(plannedCostInt === null ? null : plannedCostInt);
       updates.push('intervention_cost = ?');
-      params.push(plannedCostValue === null ? null : plannedCostValue);
-      if (plannedCostValue === null) {
+      params.push(plannedCostInt === null ? null : plannedCostInt);
+      if (plannedCostInt === null) {
         delete metadata.cost;
       } else {
-        metadata.cost = plannedCostValue;
+        metadata.cost = plannedCostInt;
       }
       metadataChanged = true;
     }
@@ -17097,10 +17361,49 @@ app.patch('/api/interventions/:id', async (req, res) => {
       delete metadataCopy.compliance;
     }
 
+    const esdcExisting = safeJsonParse(interventionRow.esdc_intervention_json, {}) || {};
+    const esdcPayload = { ...esdcExisting };
+    if (Object.prototype.hasOwnProperty.call(body, 'code')) {
+      esdcPayload.interventionCode = typeof body.code === 'string' ? body.code.trim() : esdcPayload.interventionCode || null;
+    }
+    if (typeof startDateValue !== 'undefined') {
+      esdcPayload.interventionStartDate = startDateValue || null;
+    }
+    if (typeof endDateValue !== 'undefined') {
+      esdcPayload.interventionEndDate = endDateValue || null;
+    }
+    if (durationProvided) {
+      esdcPayload.interventionDuration =
+        durationDaysValueRaw === null || typeof durationDaysValueRaw === 'undefined'
+          ? null
+          : Math.round(durationDaysValueRaw);
+      if (typeof durationDaysValue !== 'undefined') {
+        esdcPayload.interventionDuration = durationDaysValue;
+      }
+    }
+    if (costProvided) {
+      esdcPayload.interventionCost =
+        plannedCostInt === null || typeof plannedCostInt === 'undefined' ? null : plannedCostInt;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'outcome')) {
+      const trimmedOutcomeUpdate = typeof body.outcome === 'string' ? body.outcome.trim() : '';
+      esdcPayload.interventionOutcome = trimmedOutcomeUpdate || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'noc')) {
+      const trimmedNoc = typeof body.noc === 'string' ? body.noc.trim() : '';
+      esdcPayload.interventionRelatedNOC = trimmedNoc || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'nocVersion')) {
+      const trimmedNocVersion = typeof body.nocVersion === 'string' ? body.nocVersion.trim() : '';
+      esdcPayload.interventionRelatedNOCVersion = trimmedNocVersion || null;
+    }
+
     if (metadataChanged) {
       updates.push('metadata_json = ?');
       params.push(Object.keys(metadataCopy).length ? JSON.stringify(metadataCopy) : null);
     }
+    updates.push('esdc_intervention_json = ?');
+    params.push(Object.keys(esdcPayload).length ? JSON.stringify(pruneNullish(esdcPayload)) : null);
 
     updates.push('updated_at = NOW()');
 
@@ -17141,8 +17444,12 @@ app.post('/api/interventions/:id/close', async (req, res) => {
   }
 
   const trimmedOutcomeClose = typeof outcome === 'string' ? outcome.trim() : '';
+  const VALID_OUTCOMES = new Set(['1','2','3','4','5','6']);
   if (!trimmedOutcomeClose) {
     return res.status(422).json({ error: 'outcome_required', message: 'Outcome code is required to close an intervention.' });
+  }
+  if (!VALID_OUTCOMES.has(trimmedOutcomeClose)) {
+    return res.status(422).json({ error: 'invalid_outcome', message: 'Outcome must be one of 1–6.' });
   }
 
   const parseNumeric = value => {
@@ -17153,6 +17460,12 @@ app.post('/api/interventions/:id/close', async (req, res) => {
   const actualAmountValue = parseNumeric(actualAmount);
   if (Number.isNaN(actualAmountValue)) {
     return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a number.' });
+  }
+  if (actualAmountValue !== null) {
+    const actualInt = Math.round(actualAmountValue);
+    if (!Number.isFinite(actualInt) || actualInt < 0 || actualInt > 999999) {
+      return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a whole number between 0 and 999999.' });
+    }
   }
 
   const normaliseDate = raw => {
@@ -17167,6 +17480,12 @@ app.post('/api/interventions/:id/close', async (req, res) => {
   const completionDateValue = normaliseDate(completionDate);
   if (completionDateValue === 'invalid') {
     return res.status(422).json({ error: 'invalid_completion_date', message: 'Completion date must be in YYYY-MM-DD format.' });
+  }
+  if (!completionDateValue) {
+    return res.status(422).json({ error: 'completion_date_required', message: 'Completion date is required to close an intervention.' });
+  }
+  if (!completionDateValue) {
+    return res.status(422).json({ error: 'completion_date_required', message: 'Completion date is required to close an intervention.' });
   }
 
   try {
@@ -17201,7 +17520,8 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     }
     metadata.outcome = trimmedOutcomeClose;
     if (Number.isFinite(actualAmountValue)) {
-      metadata.actualAmount = actualAmountValue;
+      const actualInt = Math.round(actualAmountValue);
+      metadata.actualAmount = actualInt;
       metadata.compliance.finance = 'ok';
     } else {
       delete metadata.actualAmount;
@@ -17210,17 +17530,29 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     metadata.compliance.ilmp = 'ok';
 
     const trimmedNotes = typeof notes === 'string' ? notes.trim() : '';
+    const esdcExisting = safeJsonParse(interventionRow.esdc_intervention_json, {}) || {};
+    const esdcPayload = pruneNullish({
+      ...esdcExisting,
+      interventionOutcome: trimmedOutcomeClose || esdcExisting.interventionOutcome || null,
+      interventionEndDate: completionDateValue || esdcExisting.interventionEndDate || null,
+      interventionCost:
+        Number.isFinite(actualAmountValue) && actualAmountValue !== null
+          ? Math.round(actualAmountValue)
+          : esdcExisting.interventionCost ?? null,
+    });
+
     const updates = [
       'status = ?',
       'outcome_code = ?',
       'actual_amount = ?',
       'closed_at = NOW()',
       'metadata_json = ?',
+      'esdc_intervention_json = ?',
     ];
     const params = [
       statusValue,
       trimmedOutcomeClose,
-      Number.isFinite(actualAmountValue) ? actualAmountValue : null,
+      Number.isFinite(actualAmountValue) ? Math.round(actualAmountValue) : null,
     ];
 
     Object.keys(metadata).forEach(key => {
@@ -17230,14 +17562,11 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     });
 
     params.push(JSON.stringify(metadata));
+    params.push(Object.keys(esdcPayload).length ? JSON.stringify(esdcPayload) : null);
 
-    if (completionDateValue !== null) {
-      updates.push('end_date = ?');
-      params.push(completionDateValue || null);
-    }
-    if (completionDateValue === null) {
-      // keep alignment with params
-    }
+    // Completion date becomes the end_date when closing
+    updates.push('end_date = ?');
+    params.push(completionDateValue || null);
 
     if (trimmedNotes) {
       updates.push('notes = ?');
@@ -17557,11 +17886,24 @@ app.patch('/api/action-plans/:id', async (req, res) => {
   }
 
   const { name, startDate = null, reviewDate = null, summary = null } = req.body || {};
+  const normaliseDateOnly = value => {
+    if (value === null || typeof value === 'undefined') return null;
+    const str = String(value).trim();
+    if (!str) return null;
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+      return str.slice(0, 10);
+    }
+    const parsed = new Date(str);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString().slice(0, 10);
+  };
+  const startDateOnly = normaliseDateOnly(startDate);
+  const reviewDateOnly = normaliseDateOnly(reviewDate);
   const trimmedName = typeof name === 'string' ? name.trim() : null;
   if (!trimmedName) {
     return res.status(422).json({ error: 'name_required', message: 'Action plan name is required.' });
   }
-  if (startDate && reviewDate && reviewDate < startDate) {
+  if (startDateOnly && reviewDateOnly && reviewDateOnly < startDateOnly) {
     return res.status(422).json({ error: 'invalid_dates', message: 'Review date cannot be before start date.' });
   }
 
@@ -17611,6 +17953,7 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       resultCode: new Set(['1','2','3','4','5','6','7','9']),
       resultEducation: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
       futureEducation: new Set(['5','8','9','10']),
+      prevEmploymentSchedule: new Set(['1','2']),
     };
     const normaliseCode = (value, set) => {
       if (value === null || typeof value === 'undefined') return null;
@@ -17711,8 +18054,8 @@ app.patch('/api/action-plans/:id', async (req, res) => {
     ];
     const values = [
       trimmedName,
-      startDate || null,
-      reviewDate || null,
+      startDateOnly || null,
+      reviewDateOnly || null,
       summary || null,
       Object.keys(metadata).length ? JSON.stringify(metadata) : null,
     ];

@@ -566,7 +566,10 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                   placeholder="YYYY-MM-DD"
                 />
               </FormField>
-              <FormField label="Action Plan Result Education Level" description="ESDC code after completion.">
+              <FormField
+                label="Action Plan Result Education Level"
+                description={`ESDC code after completion. Participant level at plan start: ${displayValue(plan.educationLevel) || "-"}. Result cannot be lower than start.`}
+              >
                 <Select
                   selectedOption={selectedResultEducation}
                   options={RESULT_EDUCATION_OPTIONS}
