@@ -19228,6 +19228,9 @@ app.patch('/api/action-plans/:id', async (req, res) => {
   }
 
   const { name, startDate = null, reviewDate = null, summary = null } = req.body || {};
+  const allowClosedEdit =
+    (typeof req.query.allowClosedEdit !== 'undefined' && req.query.allowClosedEdit !== '0') ||
+    req.body?.allowClosedEdit === true;
   const normaliseDateOnly = value => {
     if (value === null || typeof value === 'undefined') return null;
     const str = String(value).trim();
@@ -19264,7 +19267,7 @@ app.patch('/api/action-plans/:id', async (req, res) => {
     if (status === 'archived') {
       return res.status(409).json({ error: 'invalid_status', detail: 'archived_plan_read_only' });
     }
-    if (status === 'closed') {
+    if (status === 'closed' && !allowClosedEdit) {
       return res.status(409).json({ error: 'invalid_status', detail: 'closed_plan_read_only' });
     }
 
@@ -19443,6 +19446,7 @@ app.patch('/api/action-plans/:id', async (req, res) => {
     await pool.query(sql, values);
 
     const updatedRow = await fetchActionPlanWithCase(planId);
+    await markIlmpNeedsReviewForCase(planRow.case_id);
     res.status(200).json(mapActionPlanRow(updatedRow));
   } catch (error) {
     console.error('PATCH /api/action-plans/:id failed:', error);

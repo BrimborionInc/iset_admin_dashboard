@@ -7,6 +7,7 @@ import {
   ColumnLayout,
   DatePicker,
   ExpandableSection,
+  StatusIndicator,
   FormField,
   Input,
   Modal,
@@ -163,6 +164,12 @@ const defaultForm = {
 };
 
 const displayValue = value => (value === null || typeof value === "undefined" || value === "" ? "-" : String(value));
+const normaliseYesNoCode = value => {
+  const v = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (["1", "yes", "true", "y", "on"].includes(v)) return "1";
+  if (["0", "no", "false", "n", "off"].includes(v)) return "0";
+  return "";
+};
 
 const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
   const { updateActionPlan, searchNocCodes, caseData } = useCaseWorkspace();
@@ -174,9 +181,21 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
   const [prevNocLoading, setPrevNocLoading] = useState(false);
   const [resultNocOptions, setResultNocOptions] = useState([]);
   const [resultNocLoading, setResultNocLoading] = useState(false);
+  const [editEnabled, setEditEnabled] = useState(false);
+  const [showEditConfirm, setShowEditConfirm] = useState(false);
 
   useEffect(() => {
     if (!visible || !plan) return;
+    const status = (plan.status || "").toLowerCase();
+    setEditEnabled(status !== "closed");
+    setShowEditConfirm(false);
+    const childcareNeedCode = normaliseYesNoCode(plan?.childcareNeed);
+    const childcareFundingCode = (() => {
+      const val = plan?.childcareFunding;
+      if (val === null || typeof val === "undefined") return "";
+      const str = String(val).trim();
+      return CHILDCARE_FUNDING_OPTIONS.some(opt => opt.value === str) ? str : "";
+    })();
     setForm({
       name: plan?.title || plan?.name || "",
       summary: plan?.summary || "",
@@ -191,8 +210,8 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
       prevEmploymentScheduleType: plan?.prevEmploymentScheduleType ? String(plan.prevEmploymentScheduleType) : "",
       prevEmploymentNocVersion: plan?.prevEmploymentNocVersion || "",
       prevEmploymentNoc: plan?.prevEmploymentNoc || "",
-      childcareNeed: plan?.childcareNeed !== null && plan?.childcareNeed !== undefined ? String(plan.childcareNeed) : "",
-      childcareFunding: plan?.childcareFunding ? String(plan.childcareFunding) : "",
+      childcareNeed: childcareNeedCode || "",
+      childcareFunding: childcareFundingCode,
       barriers: Array.isArray(plan?.barriers) ? plan.barriers.map(b => String(b)) : [],
       resultCode: plan?.resultCode ? String(plan.resultCode) : "",
       resultDate: plan?.resultDate || "",
@@ -261,7 +280,8 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
       if (!form.prevEmploymentNocVersion) return "NOC version is required when employment status is Employed.";
       if (!form.prevEmploymentNoc) return "NOC code is required when employment status is Employed.";
     }
-    if (form.childcareNeed === "1" && !form.childcareFunding) return "Childcare funding is required when childcare need is Yes.";
+    const childcareNeedCode = normaliseYesNoCode(form.childcareNeed);
+    if (childcareNeedCode === "1" && !form.childcareFunding) return "Childcare funding is required when childcare need is Yes.";
     if (form.educationLevel && !form.educationProvince) return "Education province is required when education level is set.";
     const anyCloseout = form.resultCode || form.resultDate || form.resultEducationLevel || form.futureEducationLevel || form.resultNoc || form.resultNocVersion || form.outcomeSummary;
     if (anyCloseout) {
@@ -281,6 +301,10 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
   };
 
   const handleSubmit = async () => {
+    if (!editEnabled) {
+      setValidationError("Editing is disabled for closed action plans. Use Edit to enable changes.");
+      return;
+    }
     const validation = validate();
     if (validation) {
       setValidationError(validation);
@@ -290,6 +314,11 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     setSaving(true);
     setError(null);
     try {
+      const childcareNeedCode = normaliseYesNoCode(form.childcareNeed) || null;
+      const childcareFundingCode =
+        childcareNeedCode === "1" && CHILDCARE_FUNDING_OPTIONS.some(opt => opt.value === form.childcareFunding)
+          ? form.childcareFunding
+          : null;
       const payload = {
         name: form.name.trim(),
         startDate: form.startDate || null,
@@ -304,8 +333,8 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
         prevEmploymentScheduleType: form.prevEmployment === "2" ? form.prevEmploymentScheduleType || null : null,
         prevEmploymentNocVersion: form.prevEmployment === "2" ? form.prevEmploymentNocVersion || null : null,
         prevEmploymentNoc: form.prevEmployment === "2" ? form.prevEmploymentNoc || null : null,
-        childcareNeed: form.childcareNeed || null,
-        childcareFunding: form.childcareNeed === "1" ? form.childcareFunding || null : null,
+        childcareNeed: childcareNeedCode,
+        childcareFunding: childcareFundingCode,
         barriers: Array.isArray(form.barriers) ? form.barriers : [],
         resultCode: form.resultCode || null,
         resultDate: form.resultDate || null,
@@ -315,9 +344,11 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
         resultNoc: form.resultCode === "2" ? form.resultNoc || null : null,
         outcomeSummary: form.outcomeSummary || null,
         closureNotes: form.closureNotes || null,
+        allowClosedEdit: isClosed ? true : undefined,
       };
       const updated = await updateActionPlan(plan.id, payload);
       setSaving(false);
+      setEditEnabled(false);
       if (onSaved) onSaved(updated);
     } catch (err) {
       setSaving(false);
@@ -353,24 +384,65 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     caseId: plan.caseId || caseData?.caseNumber || caseData?.trackingId || "-",
   };
 
+  const isClosed = (plan.status || "").toLowerCase() === "closed";
+
   return (
-    <Modal
-      visible={visible}
-      header="Action plan details"
-      onDismiss={saving ? null : onDismiss}
-      closeAriaLabel="Close action plan details modal"
-      size="large"
-      footer={
-        <SpaceBetween size="xs" direction="horizontal">
-          <Button onClick={onDismiss} disabled={saving}>
-            Close
-          </Button>
-          <Button variant="primary" onClick={handleSubmit} loading={saving}>
-            Save changes
-          </Button>
-        </SpaceBetween>
-      }
-    >
+    <>
+      <Modal
+        visible={visible}
+        header="Action plan details"
+        onDismiss={
+          saving
+            ? null
+            : () => {
+                setEditEnabled(!isClosed);
+                setShowEditConfirm(false);
+                onDismiss();
+              }
+        }
+        closeAriaLabel="Close action plan details modal"
+        size="large"
+        footer={
+          <SpaceBetween size="xs" direction="horizontal">
+            {isClosed && !editEnabled && (
+              <StatusIndicator type="stopped">
+                Closed plans are read-only. Edit only to correct mistakes.
+              </StatusIndicator>
+            )}
+            <Button
+              onClick={
+                saving
+                  ? null
+                  : () => {
+                      setEditEnabled(!isClosed);
+                      setShowEditConfirm(false);
+                      onDismiss();
+                    }
+              }
+              disabled={saving}
+            >
+              Close
+            </Button>
+            {isClosed && (
+              <Button
+                variant="primary"
+                onClick={() => setShowEditConfirm(true)}
+                disabled={saving || editEnabled}
+              >
+                Edit
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              onClick={handleSubmit}
+              loading={saving}
+              disabled={isClosed && !editEnabled}
+            >
+              Save changes
+            </Button>
+          </SpaceBetween>
+        }
+      >
       <SpaceBetween size="l">
         {validationError && (
           <Alert
@@ -395,11 +467,16 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
 
         <ColumnLayout columns={3} variant="text-grid">
           <FormField label="Plan name">
-            <Input value={form.name} onChange={({ detail }) => setForm(curr => ({ ...curr, name: detail.value }))} />
+            <Input
+              value={form.name}
+              readOnly={isClosed && !editEnabled}
+              onChange={({ detail }) => setForm(curr => ({ ...curr, name: detail.value }))}
+            />
           </FormField>
           <FormField label="Plan summary" description="High-level objective for this plan.">
             <Textarea
               value={form.summary}
+              readOnly={isClosed && !editEnabled}
               rows={3}
               onChange={({ detail }) => setForm(curr => ({ ...curr, summary: detail.value }))}
               placeholder="High-level objective for this plan"
@@ -408,6 +485,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
           <FormField label="Start date" description="When the plan becomes active.">
             <DatePicker
               value={form.startDate}
+              disabled={isClosed && !editEnabled}
               onChange={({ detail }) => setForm(curr => ({ ...curr, startDate: detail.value }))}
               placeholder="YYYY-MM-DD"
             />
@@ -418,6 +496,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
           >
             <DatePicker
               value={form.reviewDate}
+              disabled={isClosed && !editEnabled}
               onChange={({ detail }) => setForm(curr => ({ ...curr, reviewDate: detail.value }))}
               placeholder="YYYY-MM-DD"
             />
@@ -425,6 +504,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
           <FormField label="Agreement Number" description="Agreement number (EI or CRF).">
             <Input
               value={form.agreementNumber}
+              readOnly={isClosed && !editEnabled}
               onChange={({ detail }) => setForm(curr => ({ ...curr, agreementNumber: detail.value }))}
               placeholder="e.g. 999999999"
             />
@@ -672,7 +752,36 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
           </ColumnLayout>
         </ExpandableSection>
       </SpaceBetween>
-    </Modal>
+      </Modal>
+
+      <Modal
+        visible={showEditConfirm}
+        header="Enable editing for closed plan?"
+        closeAriaLabel="Dismiss edit confirmation"
+        onDismiss={() => setShowEditConfirm(false)}
+        footer={
+          <SpaceBetween size="xs" direction="horizontal">
+            <Button onClick={() => setShowEditConfirm(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setEditEnabled(true);
+                setShowEditConfirm(false);
+              }}
+            >
+              Enable editing
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="m">
+          <Alert type="warning">
+            Closed action plans should only be edited to correct mistakes. Proceeding will enable editing for this
+            session; saving or leaving will return the plan to read-only.
+          </Alert>
+        </SpaceBetween>
+      </Modal>
+    </>
   );
 };
 

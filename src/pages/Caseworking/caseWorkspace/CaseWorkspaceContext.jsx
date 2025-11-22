@@ -718,7 +718,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
   );
 
   const updateActionPlan = useCallback(async (actionPlanId, payload) => {
-    const response = await apiFetch(`/api/action-plans/${actionPlanId}`, {
+    const response = await apiFetch(`/api/action-plans/${actionPlanId}?allowClosedEdit=1`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -738,8 +738,10 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       error.status = response.status;
       throw error;
     }
-    return response.json();
-  }, []);
+    const data = await response.json();
+    markCompliancePending();
+    return data;
+  }, [apiFetch, markCompliancePending]);
 
   const upsertActionPlanReviewReminder = useCallback(
     async (plan, reviewDate) => {
