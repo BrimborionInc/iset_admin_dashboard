@@ -274,13 +274,24 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
     }
   };
 
+  const parseEventDate = useCallback((value) => {
+    if (!value) return null;
+    const raw = String(value);
+    const direct = new Date(raw);
+    if (!Number.isNaN(direct.getTime())) return direct;
+    const withZ = new Date(`${raw}Z`);
+    if (!Number.isNaN(withZ.getTime())) return withZ;
+    return null;
+  }, []);
+
   const decoratedEvents = useMemo(() => events.map(decorateEvent), [events]);
 
   const filteredEvents = decoratedEvents.filter(item => {
     if (!filteringText) return true;
     const text = filteringText.toLowerCase();
+    const eventDate = parseEventDate(item.created_at);
     const parts = [
-      item.created_at ? new Date(item.created_at).toLocaleString().toLowerCase() : '',
+      eventDate ? eventDate.toLocaleString().toLowerCase() : '',
       item.event_type_label ? item.event_type_label.toLowerCase() : '',
       item.event_type ? item.event_type.toLowerCase() : '',
       item.displayMessage ? item.displayMessage.toLowerCase() : '',
@@ -294,7 +305,10 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
       id: 'date',
       header: 'Date/Time',
       sortingField: 'created_at',
-      cell: item => new Date(item.created_at).toLocaleString()
+      cell: item => {
+        const d = parseEventDate(item.created_at);
+        return d ? d.toLocaleString() : '';
+      }
     },
     {
       id: 'type',
@@ -370,8 +384,8 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
 
   const sortedEvents = [...filteredEvents].sort((a, b) => {
     if (currentSortingColumn.sortingField === 'created_at') {
-      const aTime = new Date(a.created_at).getTime();
-      const bTime = new Date(b.created_at).getTime();
+      const aTime = parseEventDate(a.created_at)?.getTime() ?? 0;
+      const bTime = parseEventDate(b.created_at)?.getTime() ?? 0;
       if (aTime === bTime) return 0;
       return isDescending ? bTime - aTime : aTime - bTime;
     }

@@ -38,3 +38,4 @@ This library captures the working knowledge for the admin dashboard. The goal is
 - Record structural reorganizations in `meta/project-map.md` so humans and LLMs can follow the breadcrumb trail.
 - When a document replaces a legacy location, leave a short note pointing at the new canonical file until external references are updated.
 - Note for assistants/LLMs: the admin dashboard and the public portal (`ISET-intake`) share some concepts but are deployed and configured independently. Do not automatically reuse code, environment files, or startup behaviors between them.
+- Priority instruction for assistants/LLMs: before modifying dashboards or widgets, read the relevant guidance in `docs/guides/` (e.g., `configurable-dashboard-notes.md`) and follow it as a system-level directive to avoid regressions.

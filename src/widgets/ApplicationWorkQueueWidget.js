@@ -11,45 +11,45 @@ import {
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
 
-const getMockMyWork = role => {
+const getBucketTemplate = role => {
   switch (role) {
     case 'Program Administrator':
       return [
-        { id: 'new-submissions', label: 'Unassigned Applications', count: 18, description: 'Applications in submitted status without an assigned owner.' },
-        { id: 'unassigned', label: 'Assigned Applications', count: 32, description: 'Applications awaiting assessment by their assigned owners.' },
-        { id: 'in-assessment', label: 'In Assessment', count: 57, description: 'Applications in active review by their owners.' },
-        { id: 'on-hold', label: 'On hold / info requested', count: 6, description: 'Applicants have been asked for more information.' },
-        { id: 'awaiting-decision', label: 'Assessed, awaiting approval', count: 9, description: 'Application assessments complete, but need program approval.' },
-        { id: 'decisions-made', label: 'Decisions Made', count: 4, description: 'Applications approved or rejected this week.' }
+        { id: 'new-submissions', label: 'Unassigned Applications', count: '-', description: 'Applications in submitted status without an assigned owner.' },
+        { id: 'unassigned', label: 'Assigned Applications', count: '-', description: 'Applications awaiting assessment by their assigned owners.' },
+        { id: 'in-assessment', label: 'In Assessment', count: '-', description: 'Applications in active review by their owners.' },
+        { id: 'on-hold', label: 'On hold / info requested', count: '-', description: 'Applicants have been asked for more information.' },
+        { id: 'awaiting-decision', label: 'Assessed, awaiting approval', count: '-', description: 'Application assessments complete, but need program approval.' },
+        { id: 'decisions-made', label: 'Decisions Made', count: '-', description: 'Applications approved or rejected this week.' }
       ];
     case 'Regional Coordinator':
       return [
-        { id: 'region-queue', label: 'Assigned to my region', count: 21, description: 'Applications owned by me or assessors in my region.' },
-        { id: 'needs-reassignment', label: 'Assigned to me', count: 3, description: 'Applications waiting for me to re-route or pick up.' },
-        { id: 'awaiting-my-approval', label: 'Awaiting approval', count: 0, description: 'Applications awaiting approval.' },
-        { id: 'awaiting-info', label: 'Awaiting info', count: 5, description: 'Applications awaiting applicant action.' },
-        { id: 'due-this-week', label: 'Due this week', count: 12, description: 'Applications approaching SLA within 7 days.' },
-        { id: 'overdue', label: 'Overdue', count: 1, description: 'Applications breaching SLA within my region.' }
+        { id: 'region-queue', label: 'Assigned to my region', count: '-', description: 'Applications owned by me or assessors in my region.' },
+        { id: 'needs-reassignment', label: 'Assigned to me', count: '-', description: 'Applications waiting for me to re-route or pick up.' },
+        { id: 'awaiting-my-approval', label: 'Awaiting approval', count: '-', description: 'Applications awaiting approval.' },
+        { id: 'awaiting-info', label: 'Awaiting info', count: '-', description: 'Applications awaiting applicant action.' },
+        { id: 'due-this-week', label: 'Due this week', count: '-', description: 'Applications approaching SLA within 7 days.' },
+        { id: 'overdue', label: 'Overdue', count: '-', description: 'Applications breaching SLA within my region.' }
       ];
     case 'Application Assessor':
       return [
-        { id: 'assigned-to-me', label: 'Assigned to me', count: 7, description: 'Your active assessment queue.' },
-        { id: 'due-today', label: 'Due today', count: 2, description: 'Assessments approaching their SLA window.' },
-        { id: 'due-soon', label: 'Due soon', count: 2, description: 'Assessments due within the next few days.' },
-        { id: 'awaiting-applicant', label: 'Awaiting applicant', count: 1, description: 'Cases paused while the applicant responds.' },
-        { id: 'overdue', label: 'Overdue', count: 0, description: 'Cases past SLA that need immediate attention.' }
+        { id: 'assigned-to-me', label: 'Assigned to me', count: '-', description: 'Your active assessment queue.' },
+        { id: 'due-today', label: 'Due today', count: '-', description: 'Assessments approaching their SLA window.' },
+        { id: 'due-soon', label: 'Due soon', count: '-', description: 'Assessments due within the next few days.' },
+        { id: 'awaiting-applicant', label: 'Awaiting applicant', count: '-', description: 'Cases paused while the applicant responds.' },
+        { id: 'overdue', label: 'Overdue', count: '-', description: 'Cases past SLA that need immediate attention.' }
       ];
     case 'System Administrator':
       return [
-        { id: 'workflow-drafts', label: 'Workflow drafts', count: 4, description: 'Draft workflows pending publish.' },
-        { id: 'release-prep', label: 'Release prep tasks', count: 3, description: 'Configuration or release items awaiting action.' },
-        { id: 'platform-alerts', label: 'Platform alerts', count: 2, description: 'Active platform alerts requiring follow-up.' }
+        { id: 'workflow-drafts', label: 'Workflow drafts', count: '-', description: 'Draft workflows pending publish.' },
+        { id: 'release-prep', label: 'Release prep tasks', count: '-', description: 'Configuration or release items awaiting action.' },
+        { id: 'platform-alerts', label: 'Platform alerts', count: '-', description: 'Active platform alerts requiring follow-up.' }
       ];
     default:
       return [
-        { id: 'assigned', label: 'Assigned cases', count: 0, description: 'Cases currently assigned to you.' },
-        { id: 'awaiting-review', label: 'Awaiting review', count: 0, description: 'Cases needing your review.' },
-        { id: 'overdue', label: 'Overdue', count: 0, description: 'Items past their target date.' }
+        { id: 'assigned', label: 'Assigned cases', count: '-', description: 'Cases currently assigned to you.' },
+        { id: 'awaiting-review', label: 'Awaiting review', count: '-', description: 'Cases needing your review.' },
+        { id: 'overdue', label: 'Overdue', count: '-', description: 'Items past their target date.' }
       ];
   }
 };
@@ -110,12 +110,12 @@ const buildRequestHeaders = role => {
 };
 
 const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
-  const [buckets, setBuckets] = useState(() => getMockMyWork(role));
+  const [buckets, setBuckets] = useState(() => getBucketTemplate(role));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    setBuckets(getMockMyWork(role));
+    setBuckets(getBucketTemplate(role));
   }, [role]);
 
   useEffect(() => {
@@ -141,10 +141,15 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
           return;
         }
         if (payload && Array.isArray(payload.buckets) && (!payload.role || payload.role === role)) {
-          setBuckets(mergeWorkQueueBuckets(getMockMyWork(role), payload.buckets));
+          setBuckets(mergeWorkQueueBuckets(getBucketTemplate(role), payload.buckets));
+        } else {
+          throw new Error('Unexpected response format while loading application counts.');
         }
       } catch (err) {
-        // Silently fall back to default buckets if the request fails.
+        if (!ignore) {
+          setError(err?.message || 'Unable to load application counts.');
+          setBuckets(getBucketTemplate(role));
+        }
       } finally {
         if (!ignore) {
           setLoading(false);
@@ -239,6 +244,7 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
     >
       <SpaceBetween size="s">
         {loading && <StatusIndicator type="loading">Loading latest counts</StatusIndicator>}
+        {error && !loading && <StatusIndicator type="error">{error}</StatusIndicator>}
         {content}
       </SpaceBetween>
     </BoardItem>

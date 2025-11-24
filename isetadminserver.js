@@ -5716,6 +5716,11 @@ const DEFAULT_LOCK_CONFIG = Object.freeze({
   lockTtlMinutes: 15,
   heartbeatMinutes: 2
 });
+const AUTO_ASSIGNMENT_SCOPE = 'workflow';
+const AUTO_ASSIGNMENT_KEY = 'autoAssignment';
+const AUTO_ASSIGNMENT_ALLOWED_FIELDS = new Set(['province', 'indigenous_group', 'any']);
+const AUTO_ASSIGNMENT_ALLOWED_OPS = new Set(['equals', 'in', 'not_in', 'exists', 'always']);
+const DEFAULT_AUTO_ASSIGNMENT_CONFIG = Object.freeze({ enabled: false, rules: [] });
 
 function normaliseLockConfig(raw) {
   const config = { ...DEFAULT_LOCK_CONFIG };
@@ -5782,6 +5787,115 @@ function resolveLockIdentity(req) {
 function lockingModeRequiresPessimistic(config) {
   const mode = (config?.mode || '').toLowerCase();
   return mode && mode !== 'optimistic';
+}
+
+function normaliseAutoAssignmentRule(rule, fallbackLabel) {
+  if (!rule || typeof rule !== 'object') return null;
+  const id = typeof rule.id === 'string' && rule.id.trim() ? rule.id.trim() : `rule-${Date.now()}-${Math.random()}`;
+  const label = typeof rule.label === 'string' && rule.label.trim() ? rule.label.trim() : fallbackLabel || id;
+  const priorityRaw = Number(rule.priority);
+  const priority = Number.isFinite(priorityRaw) ? priorityRaw : 1;
+  const assignee = typeof rule.assignee === 'string' && rule.assignee.trim() ? rule.assignee.trim() : null;
+  const assigneeId = rule.assigneeId ? String(rule.assigneeId) : null;
+  const conditions = Array.isArray(rule.conditions) ? rule.conditions : [];
+  const normalisedConditions = conditions
+    .map((cond, idx) => {
+      if (!cond || typeof cond !== 'object') return null;
+      const cid = typeof cond.id === 'string' && cond.id.trim() ? cond.id.trim() : `${id}-c${idx}`;
+      const field = AUTO_ASSIGNMENT_ALLOWED_FIELDS.has(cond.field) ? cond.field : 'any';
+      const op = AUTO_ASSIGNMENT_ALLOWED_OPS.has(cond.op) ? cond.op : 'always';
+      const needsValue = !(op === 'always' || op === 'exists' || field === 'any');
+      const valueArray = Array.isArray(cond.value) ? cond.value : [];
+      const cleanValues = needsValue ? valueArray.map(v => (typeof v === 'string' ? v.trim().toLowerCase() : null)).filter(Boolean) : [];
+      return { id: cid, field, op, value: cleanValues };
+    })
+    .filter(Boolean);
+  return { id, label, priority, assignee, assigneeId, conditions: normalisedConditions };
+}
+
+function normaliseAutoAssignmentConfig(raw) {
+  const config = { enabled: !!raw?.enabled, rules: [] };
+  const rules = Array.isArray(raw?.rules) ? raw.rules : [];
+  config.rules = rules
+    .map((rule, idx) => normaliseAutoAssignmentRule(rule, `Rule ${idx + 1}`))
+    .filter(Boolean)
+    .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+  return config;
+}
+
+async function readAutoAssignmentConfig() {
+  try {
+    const [[row]] = await pool.query(
+      "SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1",
+      [AUTO_ASSIGNMENT_SCOPE, AUTO_ASSIGNMENT_KEY]
+    );
+    if (!row) return { ...DEFAULT_AUTO_ASSIGNMENT_CONFIG, source: 'default' };
+    let value = row.v;
+    if (value && typeof value === 'string') {
+      try { value = JSON.parse(value); } catch { value = null; }
+    }
+    const normalised = normaliseAutoAssignmentConfig(value);
+    const ids = Array.from(new Set(normalised.rules.map(r => r.assigneeId).filter(Boolean)));
+    if (ids.length) {
+      try {
+        const [staffRows] = await pool.query(
+          `SELECT id, email, display_name FROM staff_profiles WHERE id IN (${ids.map(() => '?').join(',')})`,
+          ids
+        );
+        const staffMap = new Map();
+        (Array.isArray(staffRows) ? staffRows : []).forEach(row => {
+          staffMap.set(String(row.id), row.email || row.display_name || String(row.id));
+        });
+        normalised.rules = normalised.rules.map(rule => {
+          if (!rule.assignee && rule.assigneeId && staffMap.has(String(rule.assigneeId))) {
+            return { ...rule, assignee: staffMap.get(String(rule.assigneeId)) };
+          }
+          return rule;
+        });
+      } catch (lookupErr) {
+        console.warn('[auto-assignment] staff lookup failed:', lookupErr.message);
+      }
+    }
+    return { ...normalised, source: 'stored', updated_at: row.updated_at };
+  } catch (err) {
+    console.warn('[auto-assignment] read config failed:', err.message);
+    return { ...DEFAULT_AUTO_ASSIGNMENT_CONFIG, source: 'error' };
+  }
+}
+
+async function writeAutoAssignmentConfig(payload) {
+  const normalised = normaliseAutoAssignmentConfig(payload);
+  await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  await pool.query(
+    "INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP",
+    [AUTO_ASSIGNMENT_SCOPE, AUTO_ASSIGNMENT_KEY, JSON.stringify(normalised)]
+  );
+  return normalised;
+}
+
+function readAnswer(payload, keys = []) {
+  if (!payload || typeof payload !== 'object') return null;
+  for (const key of keys) {
+    if (!key) continue;
+    if (Object.prototype.hasOwnProperty.call(payload, key) && payload[key]) {
+      const val = payload[key];
+      if (typeof val === 'string') return val;
+    }
+    if (payload.answers && typeof payload.answers === 'object' && Object.prototype.hasOwnProperty.call(payload.answers, key)) {
+      const val = payload.answers[key];
+      if (typeof val === 'string') return val;
+    }
+  }
+  return null;
+}
+
+function extractAutoAssignmentFacts(intakePayload) {
+  if (!intakePayload || typeof intakePayload !== 'object') {
+    return { province: null, indigenous: null };
+  }
+  const province = (readAnswer(intakePayload, ['address-province', 'address_province', 'province']) || '').trim().toLowerCase() || null;
+  const indigenous = (readAnswer(intakePayload, ['legal-indigenous-identity', 'legal_indigenous_identity', 'indigenous-identity', 'indigenous_identity']) || '').trim().toLowerCase() || null;
+  return { province, indigenous };
 }
 
 // --- Backend jobs runtime config (reminder poll interval) -------------------
@@ -6905,6 +7019,7 @@ async function countInactiveCasesWithScope(pool, { regionId = null, ownerId = nu
   try {
     const filters = [];
     const params = [];
+    const statusExpr = 'LOWER(TRIM(COALESCE(c.status, "")))';
 
     if (Number.isInteger(ownerId) && ownerId > 0) {
       filters.push('c.assigned_to_user_id = ?');
@@ -6922,6 +7037,10 @@ async function countInactiveCasesWithScope(pool, { regionId = null, ownerId = nu
       filters.push(`(c.status IS NULL OR LOWER(c.status) NOT IN (${placeholders}))`);
       params.push(...CASE_STATUS_TERMINAL_VALUES_LOWER);
     }
+
+    // Only treat rows explicitly marked as active as cases for inactivity counting.
+    filters.push(`${statusExpr} = ?`);
+    params.push(CASE_STATUS_DERIVED_VALUES.active);
 
     const whereSql = filters.length ? `AND ${filters.join(' AND ')}` : '';
 
@@ -9312,6 +9431,28 @@ app.patch('/api/config/runtime/backend-jobs', async (req, res) => {
   }
 });
 
+app.get('/api/config/auto-assignment', async (req, res) => {
+  try {
+    if (!hasSlaAdminAccess(req)) return res.status(403).json({ error: 'forbidden' });
+    const config = await readAutoAssignmentConfig();
+    res.json(config);
+  } catch (err) {
+    console.error('[auto-assignment] config fetch failed:', err);
+    res.status(500).json({ error: 'auto_assignment_config_fetch_failed', message: err.message });
+  }
+});
+
+app.patch('/api/config/auto-assignment', async (req, res) => {
+  try {
+    if (!hasSlaAdminAccess(req)) return res.status(403).json({ error: 'forbidden' });
+    const saved = await writeAutoAssignmentConfig(req.body || {});
+    res.json(saved);
+  } catch (err) {
+    console.error('[auto-assignment] config update failed:', err);
+    res.status(500).json({ error: 'auto_assignment_config_update_failed', message: err.message });
+  }
+});
+
 // --- Runtime Configuration Introspection (non-secret) -----------------------
 // GET /api/config/runtime -> selected non-sensitive runtime configuration values
 // NOTE: Only exposes values safe for admin viewing; secrets go through /api/config/security
@@ -9590,7 +9731,7 @@ app.patch('/api/admin/event-capture-rules', async (req, res) => {
   }
 });
 
-const DUMMY_HISTORY_STEPS = Object.freeze([
+const DUMMY_STEP_ORDER = Object.freeze([
   'consent',
   'indigenous-declaration',
   'conflict-of-interest',
@@ -9608,6 +9749,7 @@ const DUMMY_HISTORY_STEPS = Object.freeze([
   'labour-force-and-education-history',
   'employment-goals-and-barriers',
   'financial-supports-requested',
+  'employment-insurance-status',
   'household-income',
   'household-expenses',
   'summary-page',
@@ -9615,80 +9757,15 @@ const DUMMY_HISTORY_STEPS = Object.freeze([
   'legal-and-submission'
 ]);
 
+const buildHistoryForStep = (stepCursor) => {
+  const index = DUMMY_STEP_ORDER.indexOf(stepCursor);
+  if (index >= 0) {
+    return DUMMY_STEP_ORDER.slice(0, index + 1);
+  }
+  return [...DUMMY_STEP_ORDER];
+};
+
 const DUMMY_DRAFTS = [
-  {
-    id: 'anne-applicant',
-    registrationPrefix: 'ABC',
-    payload: {
-      'consent': { name: 'Anne Applicant', signed: true },
-      'indigenous-affiliation-declaration': 'ABC Community',
-      'indigenous_declaration': { name: 'Anne Applicant', signed: true },
-      'conflict_of_interest': 'no_conflict',
-      'conflict_applicant_signature': { name: 'Anne Applicant', signed: true },
-      'social-insurance-number': '123 456 789',
-      'first-name': 'Anne',
-      'last-name': 'Applicant',
-      'middle-names': 'Jane',
-      'preferred-name': 'Anne',
-      'dob': '1990-01-01',
-      'biological_sex': 'female',
-      'gender_identity': 'female',
-      'address-street-address': '123 Main Street',
-      'address-city': 'Kimmirut',
-      'address-province': 'nu',
-      'address-postcode': 'X0A 0T0',
-      'telephone-day': '(514) 555-1234',
-      'contact-email-address': 'bill@sillery.co.uk',
-      'telephone-alt': '(514) 555-9876',
-      'address-mailing-address': '',
-      'emergency-contact-name': 'Carrie',
-      'emergency-contact-telephone': '(514) 924 6602',
-      'emergency-contact-relationship': 'Aunt',
-      'legal-indigenous-identity': 'metis',
-      'registration-number': 'QC-12345',
-      'home-comminuty': 'Kimmirut',
-      'preferred-language': 'en',
-      'visible-minority': 'true',
-      'marital-status': 'married',
-      'dependent-children': 1,
-      'has-disability': 1,
-      'social-assistance': 1,
-      'labour-force-status': 'underemployed',
-      'example-radio-2': 'post_secondary_training',
-      'education-year': '2010',
-      'education-location': 'ns',
-      'long-term-goal': 'Launch an online language mentorship program.',
-      'barriers': ['funding', 'lack-of-job-opportunities', 'other'],
-      'target-program': 'group',
-      'requested-supports': ['books', 'living', 'other'],
-      'disability-support': 1,
-      'income-employment': '1000',
-      'income-spousal': '2100',
-      'income-social-assist': '0',
-      'income-child-support': '100',
-      'income-child-benefit': '0',
-      'income-jordans': '10',
-      'income-band-funding': '0',
-      'income-alimony': '0',
-      'income-other': 'Seasonal craft sales',
-      'income-other-description': 'Arts co-op stipend',
-      'expenses-rent': 1234,
-      'expenses-groceries': 2314,
-      'expenses-utilities': 2134,
-      'expenses_transport': ['mileage', 'buss_pass'],
-      'expenses-other-list': 'School supplies',
-      'example-input-5': '500',
-      'status-card': [],
-      'govt-id': [],
-      'acceptance-letter': [],
-      'applicant-pay-stubs': [],
-      'spouse-pay-stubs': [],
-      'band-denial-letter': [],
-      'band-funding-letter': [],
-      'medical-documents': [],
-      'applicant_signature': { name: 'Anne Applicant', signed: true }
-    }
-  },
   {
     id: 'aiyana-bear',
     registrationPrefix: 'FN',
@@ -9727,7 +9804,7 @@ const DUMMY_DRAFTS = [
       'has-disability': 'no',
       'social-assistance': 'no',
       'labour-force-status': 'underemployed',
-      'example-radio-2': 'college',
+      'highest-education': 'college',
       'education-year': '2013',
       'education-location': 'ab',
       'long-term-goal': 'Launch a Cree language mentorship program for youth.',
@@ -9744,12 +9821,15 @@ const DUMMY_DRAFTS = [
       'income-band-funding': '150',
       'income-alimony': '0',
       'income-other': 'Seasonal beading workshops',
-      'income-other-description': 'artisan sales',
+      'income-other-description': '450',
+      'ei_status': 'planning',
       'expenses-rent': '880',
       'expenses-groceries': '430',
       'expenses-utilities': '190',
       'expenses_transport': ['buss_pass'],
+      'expenses_bus_pass': '55',
       'expenses-other-list': 'Workshop supplies',
+      'expenses-other-total': '85',
       'example-input-5': '55',
       'status-card': [],
       'govt-id': [],
@@ -9763,22 +9843,22 @@ const DUMMY_DRAFTS = [
     }
   },
   {
-    id: 'noah-whitecloud',
+    id: 'noella-whitecloud',
     registrationPrefix: 'OCN',
     payload: {
-      'consent': { name: 'Noah Whitecloud', signed: true },
+      'consent': { name: 'Noella Whitecloud', signed: true },
       'indigenous-affiliation-declaration': 'Opaskwayak Cree Nation',
-      'indigenous_declaration': { name: 'Noah Whitecloud', signed: true },
+      'indigenous_declaration': { name: 'Noella Whitecloud', signed: true },
       'conflict_of_interest': 'conflict',
-      'conflict_applicant_signature': { name: 'Noah Whitecloud', signed: true },
+      'conflict_applicant_signature': { name: 'Noella Whitecloud', signed: true },
       'social-insurance-number': '987 654 321',
-      'first-name': 'Noah',
+      'first-name': 'Noella',
       'last-name': 'Whitecloud',
       'middle-names': 'River',
-      'preferred-name': 'Noah',
+      'preferred-name': 'Noella',
       'dob': '1987-11-03',
-      'biological_sex': 'male',
-      'gender_identity': 'male',
+      'biological_sex': 'female',
+      'gender_identity': 'female',
       'address-street-address': '22 Cedar Lane',
       'address-city': 'Thompson',
       'address-province': 'mb',
@@ -9796,33 +9876,39 @@ const DUMMY_DRAFTS = [
       'preferred-language': 'en',
       'visible-minority': 'false',
       'marital-status': 'married',
-      'dependent-children': 2,
+      'spouses-name': 'Sage Whitecloud',
+      'dependent-children': 1,
+      'ages-of-children': '6, 9',
       'has-disability': 'no',
       'social-assistance': 'no',
       'labour-force-status': 'underemployed',
-      'example-radio-2': 'college',
+      'highest-education': 'college',
       'education-year': '2008',
       'education-location': 'mb',
       'long-term-goal': 'Expand community-based trades training.',
       'barriers': ['education', 'funding'],
       'target-program': 'group',
       'requested-supports': ['books', 'living', 'other'],
+      'other-requested-support': 'Travel support to reach apprenticeship sites',
       'disability-support': 'no',
       'income-employment': '1800',
-      'income-spousal': '0',
+      'income-spousal': '700',
       'income-social-assist': '0',
       'income-child-support': '0',
       'income-child-benefit': '0',
       'income-jordans': '0',
       'income-band-funding': '0',
       'income-alimony': '0',
-      'income-other': 'Seasonal construction',
-      'income-other-description': 'Snow removal',
+      'income-other': 'Seasonal construction contract',
+      'income-other-description': '1200',
+      'ei_status': 'planning',
       'expenses-rent': '950',
       'expenses-groceries': '520',
       'expenses-utilities': '210',
       'expenses_transport': ['buss_pass'],
+      'expenses_bus_pass': 75,
       'expenses-other-list': 'Tools',
+      'expenses-other-total': 300,
       'example-input-5': '75',
       'status-card': [],
       'govt-id': [],
@@ -9832,7 +9918,7 @@ const DUMMY_DRAFTS = [
       'band-denial-letter': [],
       'band-funding-letter': [],
       'medical-documents': [],
-      'applicant_signature': { name: 'Noah Whitecloud', signed: true }
+      'applicant_signature': { name: 'Noella Whitecloud', signed: true }
     }
   },
   {
@@ -9865,34 +9951,63 @@ const DUMMY_DRAFTS = [
       'emergency-contact-relationship': 'Sister',
       'home-comminuty': 'Whitehorse',
       'preferred-language': 'en',
+      'visible-minority': 'true',
+      'marital-status': 'single',
+      'dependent-children': 0,
+      'has-disability': 'no',
+      'social-assistance': 'no',
+      'labour-force-status': 'employed-part-time',
+      'highest-education': 'bachelors_degree',
+      'education-year': '2015',
+      'education-location': 'yt',
+      'barriers': ['funding'],
       'long-term-goal': 'Start a renewable energy coop.',
       'target-program': 'skills_development',
       'requested-supports': ['tuition', 'books'],
       'income-employment': '2400',
+      'income-spousal': '0',
+      'income-social-assist': '0',
+      'income-child-support': '0',
+      'income-child-benefit': '0',
+      'income-jordans': '0',
+      'income-band-funding': '0',
+      'income-alimony': '0',
       'income-other': 'Part-time tutoring',
+      'income-other-description': '450',
+      'ei_status': 'not_receiving',
       'expenses-rent': '1200',
       'expenses-groceries': '500',
       'expenses-utilities': '250',
+      'expenses-other-list': '',
+      'expenses-other-total': '0',
+      'status-card': [],
+      'govt-id': [],
+      'acceptance-letter': [],
+      'applicant-pay-stubs': [],
+      'spouse-pay-stubs': [],
+      'band-denial-letter': [],
+      'band-funding-letter': [],
+      'medical-documents': [],
       'applicant_signature': { name: 'Sophia Rain', signed: true }
     }
   },
   {
-    id: 'liam-rivers',
+    id: 'lia-rivers',
     registrationPrefix: 'BC',
     payload: {
-      'consent': { name: 'Liam Rivers', signed: true },
+      'consent': { name: 'Lia Rivers', signed: true },
       'indigenous-affiliation-declaration': 'Powell River',
-      'indigenous_declaration': { name: 'Liam Rivers', signed: true },
+      'indigenous_declaration': { name: 'Lia Rivers', signed: true },
       'conflict_of_interest': 'no_conflict',
-      'conflict_applicant_signature': { name: 'Liam Rivers', signed: true },
+      'conflict_applicant_signature': { name: 'Lia Rivers', signed: true },
       'social-insurance-number': '555 666 777',
-      'first-name': 'Liam',
+      'first-name': 'Lia',
       'last-name': 'Rivers',
-      'middle-names': 'James',
-      'preferred-name': 'Liam',
+      'middle-names': 'Jean',
+      'preferred-name': 'Lia',
       'dob': '1989-09-09',
-      'biological_sex': 'male',
-      'gender_identity': 'male',
+      'biological_sex': 'female',
+      'gender_identity': 'female',
       'address-street-address': '77 Cedar Point',
       'address-city': 'Powell River',
       'address-province': 'bc',
@@ -9906,30 +10021,292 @@ const DUMMY_DRAFTS = [
       'emergency-contact-relationship': 'Sibling',
       'home-comminuty': 'Powell River',
       'preferred-language': 'en',
+      'visible-minority': 'false',
+      'marital-status': 'single',
+      'dependent-children': 0,
+      'has-disability': 'no',
+      'social-assistance': 'no',
+      'labour-force-status': 'self-employed',
+      'highest-education': 'college',
+      'education-year': '2011',
+      'education-location': 'bc',
       'long-term-goal': 'Launch a cultural tourism venture.',
       'target-program': 'group',
       'requested-supports': ['tuition', 'living', 'other'],
+      'other-requested-support': 'Safety gear for tour season',
       'income-employment': '1900',
+      'income-spousal': '0',
+      'income-social-assist': '0',
+      'income-child-support': '0',
+      'income-child-benefit': '0',
+      'income-jordans': '0',
+      'income-band-funding': '0',
+      'income-alimony': '0',
       'income-other': 'Seasonal guiding',
-      'income-other-description': 'Cultural tours',
+      'income-other-description': '600',
+      'ei_status': 'unsure',
       'expenses-rent': '990',
       'expenses-groceries': '450',
       'expenses-utilities': '230',
-      'applicant_signature': { name: 'Liam Rivers', signed: true }
+      'expenses-other-list': '',
+      'expenses-other-total': '0',
+      'status-card': [],
+      'govt-id': [],
+      'acceptance-letter': [],
+      'applicant-pay-stubs': [],
+      'spouse-pay-stubs': [],
+      'band-denial-letter': [],
+      'band-funding-letter': [],
+      'medical-documents': [],
+      'applicant_signature': { name: 'Lia Rivers', signed: true }
+    }
+  },
+  {
+    id: 'mariah-cardinal',
+    registrationPrefix: 'SK',
+    payload: {
+      'consent': { name: 'Mariah Cardinal', signed: true },
+      'indigenous-affiliation-declaration': 'Saskatoon Tribal Council',
+      'indigenous_declaration': { name: 'Mariah Cardinal', signed: true },
+      'conflict_of_interest': 'no_conflict',
+      'conflict_applicant_signature': { name: 'Mariah Cardinal', signed: true },
+      'social-insurance-number': '654 321 987',
+      'first-name': 'Mariah',
+      'last-name': 'Cardinal',
+      'middle-names': 'Jade',
+      'preferred-name': 'Mariah',
+      'dob': '1992-08-18',
+      'biological_sex': 'female',
+      'gender_identity': 'female',
+      'address-street-address': '88 Willow Crescent',
+      'address-city': 'Saskatoon',
+      'address-province': 'sk',
+      'address-postcode': 'S7K 0A1',
+      'telephone-day': '(306) 555-4411',
+      'telephone-alt': '',
+      'contact-email-address': 'mariah.cardinal@example.com',
+      'address-mailing-address': '',
+      'emergency-contact-name': 'Jackson Cardinal',
+      'emergency-contact-telephone': '(306) 555-2211',
+      'emergency-contact-relationship': 'Spouse',
+      'legal-indigenous-identity': 'first_nations_status',
+      'registration-number': 'STC-778899',
+      'home-comminuty': 'Saskatoon',
+      'preferred-language': 'en',
+      'visible-minority': 'true',
+      'marital-status': 'married',
+      'spouses-name': 'Jackson Stonechild',
+      'dependent-children': 2,
+      'ages-of-children': '5, 12',
+      'has-disability': 'no',
+      'social-assistance': 'no',
+      'labour-force-status': 'employed-part-time',
+      'highest-education': 'bachelors_degree',
+      'education-year': '2014',
+      'education-location': 'sk',
+      'long-term-goal': 'Earn a Red Seal in carpentry and mentor youth.',
+      'barriers': ['funding', 'education'],
+      'target-program': 'skills_development',
+      'requested-supports': ['tuition', 'transportation', 'other'],
+      'other-requested-support': 'Laptop upgrade for online coursework',
+      'disability-support': 'no',
+      'income-employment': 1800,
+      'income-spousal': 2400,
+      'income-social-assist': '0',
+      'income-child-support': '0',
+      'income-child-benefit': 0,
+      'income-jordans': '0',
+      'income-band-funding': '0',
+      'income-alimony': '0',
+      'income-other': 'Seasonal beading sales',
+      'income-other-description': 300,
+      'ei_status': 'not_receiving',
+      'expenses-rent': 1450,
+      'expenses-groceries': 650,
+      'expenses-utilities': 260,
+      'expenses_transport': ['buss_pass'],
+      'expenses_bus_pass': 95,
+      'expenses-other-list': 'Childcare during evening classes',
+      'expenses-other-total': 200,
+      'example-input-5': '0',
+      'status-card': [],
+      'govt-id': [],
+      'acceptance-letter': [],
+      'applicant-pay-stubs': [],
+      'spouse-pay-stubs': [],
+      'band-denial-letter': [],
+      'band-funding-letter': [],
+      'medical-documents': [],
+      'applicant_signature': { name: 'Mariah Cardinal', signed: true }
+    }
+  },
+  {
+    id: 'tia-morin',
+    registrationPrefix: 'ALTA',
+    payload: {
+      'consent': { name: 'Tia Morin', signed: true },
+      'indigenous-affiliation-declaration': 'Treaty 6 Territory',
+      'indigenous_declaration': { name: 'Tia Morin', signed: true },
+      'conflict_of_interest': 'no_conflict',
+      'conflict_applicant_signature': { name: 'Tia Morin', signed: true },
+      'social-insurance-number': '741 852 963',
+      'first-name': 'Tia',
+      'last-name': 'Morin',
+      'middle-names': 'Rose',
+      'preferred-name': 'Tia',
+      'dob': '1998-02-05',
+      'biological_sex': 'female',
+      'gender_identity': 'female',
+      'address-street-address': '14 Prairie Sky Rd',
+      'address-city': 'Edmonton',
+      'address-province': 'ab',
+      'address-postcode': 'T5J 0A5',
+      'telephone-day': '(587) 555-9090',
+      'telephone-alt': '',
+      'contact-email-address': 'tia.morin@example.com',
+      'address-mailing-address': '',
+      'emergency-contact-name': 'Evelyn Morin',
+      'emergency-contact-telephone': '(587) 555-4545',
+      'emergency-contact-relationship': 'Mother',
+      'legal-indigenous-identity': 'first_nations_status',
+      'registration-number': 'AB-445566',
+      'home-comminuty': 'Edmonton',
+      'preferred-language': 'en',
+      'visible-minority': 'false',
+      'marital-status': 'single',
+      'dependent-children': 1,
+      'ages-of-children': '4',
+      'has-disability': 'no',
+      'social-assistance': 'no',
+      'labour-force-status': 'student',
+      'highest-education': 'secondary_school_diploma_or_ged',
+      'education-year': '2016',
+      'education-location': 'ab',
+      'long-term-goal': 'Complete an early childhood education diploma.',
+      'barriers': ['funding', 'lack-of-job-opportunities'],
+      'target-program': 'skills_development',
+      'requested-supports': ['living', 'transportation', 'other'],
+      'other-requested-support': 'Childcare subsidy during practicum',
+      'disability-support': 'no',
+      'income-employment': 900,
+      'income-spousal': '0',
+      'income-social-assist': '0',
+      'income-child-support': '0',
+      'income-child-benefit': 420,
+      'income-jordans': '0',
+      'income-band-funding': '0',
+      'income-alimony': '0',
+      'income-other': 'Craft market sales',
+      'income-other-description': 180,
+      'ei_status': 'planning',
+      'expenses-rent': 1100,
+      'expenses-groceries': 480,
+      'expenses-utilities': 190,
+      'expenses_transport': ['buss_pass'],
+      'expenses_bus_pass': 70,
+      'expenses-other-list': 'Laptop installment',
+      'expenses-other-total': 150,
+      'example-input-5': '0',
+      'status-card': [],
+      'govt-id': [],
+      'acceptance-letter': [],
+      'applicant-pay-stubs': [],
+      'spouse-pay-stubs': [],
+      'band-denial-letter': [],
+      'band-funding-letter': [],
+      'medical-documents': [],
+      'applicant_signature': { name: 'Tia Morin', signed: true }
+    }
+  },
+  {
+    id: 'keisha-larocque',
+    registrationPrefix: 'MB',
+    payload: {
+      'consent': { name: 'Keisha Larocque', signed: true },
+      'indigenous-affiliation-declaration': 'Lake Manitoba First Nation',
+      'indigenous_declaration': { name: 'Keisha Larocque', signed: true },
+      'conflict_of_interest': 'no_conflict',
+      'conflict_applicant_signature': { name: 'Keisha Larocque', signed: true },
+      'social-insurance-number': '369 258 147',
+      'first-name': 'Keisha',
+      'last-name': 'Larocque',
+      'middle-names': 'Marie',
+      'preferred-name': 'Keisha',
+      'dob': '1985-12-01',
+      'biological_sex': 'female',
+      'gender_identity': 'female',
+      'address-street-address': '5 Riverbend Ave',
+      'address-city': 'Winnipeg',
+      'address-province': 'mb',
+      'address-postcode': 'R3C 0A1',
+      'telephone-day': '(204) 555-1313',
+      'telephone-alt': '',
+      'contact-email-address': 'keisha.larocque@example.com',
+      'address-mailing-address': '',
+      'emergency-contact-name': 'Mara Larocque',
+      'emergency-contact-telephone': '(204) 555-1212',
+      'emergency-contact-relationship': 'Sister',
+      'legal-indigenous-identity': 'first_nations_status',
+      'registration-number': 'LMFN-334455',
+      'home-comminuty': 'Winnipeg',
+      'preferred-language': 'en',
+      'visible-minority': 'false',
+      'marital-status': 'single',
+      'dependent-children': 0,
+      'has-disability': 'no',
+      'social-assistance': 'no',
+      'labour-force-status': 'self-employed',
+      'highest-education': 'masters_degree',
+      'education-year': '2012',
+      'education-location': 'mb',
+      'long-term-goal': 'Scale a digital media consultancy supporting communities.',
+      'barriers': ['funding'],
+      'target-program': 'group',
+      'requested-supports': ['tuition', 'books', 'other'],
+      'other-requested-support': 'Software licenses and certifications',
+      'disability-support': 'no',
+      'income-employment': 0,
+      'income-spousal': '0',
+      'income-social-assist': '0',
+      'income-child-support': '0',
+      'income-child-benefit': '0',
+      'income-jordans': '0',
+      'income-band-funding': '0',
+      'income-alimony': '0',
+      'income-other': 'Consulting contracts',
+      'income-other-description': 3200,
+      'ei_status': 'not_receiving',
+      'expenses-rent': 1300,
+      'expenses-groceries': 520,
+      'expenses-utilities': 240,
+      'expenses_transport': [],
+      'expenses-other-list': 'Conference travel',
+      'expenses-other-total': 250,
+      'example-input-5': '0',
+      'status-card': [],
+      'govt-id': [],
+      'acceptance-letter': [],
+      'applicant-pay-stubs': [],
+      'spouse-pay-stubs': [],
+      'band-denial-letter': [],
+      'band-funding-letter': [],
+      'medical-documents': [],
+      'applicant_signature': { name: 'Keisha Larocque', signed: true }
     }
   }
 ];
 
-function buildDummyDraft() {
+function buildDummyDraft(stepCursor = 'summary-page') {
   const choice = DUMMY_DRAFTS[Math.floor(Math.random() * DUMMY_DRAFTS.length)];
-  const draftPayload = { ...choice.payload, history: [...DUMMY_HISTORY_STEPS] };
+  const history = buildHistoryForStep(stepCursor);
+  const draftPayload = { ...choice.payload, history: [...history] };
   const summary = {
     applicantName: `${choice.payload['first-name']} ${choice.payload['last-name']}`.trim(),
     profileId: choice.id,
     homeCommunity: draftPayload['home-comminuty'] || null,
     targetProgram: draftPayload['target-program'] || null
   };
-  return { draftPayload, history: DUMMY_HISTORY_STEPS, summary };
+  return { draftPayload, history, summary };
 }
 
 // POST /api/create-dummy-draft
@@ -9942,7 +10319,7 @@ app.post('/api/create-dummy-draft', async (req, res) => {
     const workflowId = String(body.workflowId || 'iset-v1');
     const stepCursor = String(body.stepCursor || 'summary-page');
 
-    const { draftPayload, history, summary } = buildDummyDraft();
+    const { draftPayload, history, summary } = buildDummyDraft(stepCursor);
 
     // Check existing row
     const [existingRows] = await pool.query(
@@ -15083,22 +15460,6 @@ app.post('/api/cases', async (req, res) => {
     const assignedUserId =
       assigned_to_user_id ?? assignedToUserId ?? null;
     let assignTargetId = null;
-    if (assignedUserId !== null && typeof assignedUserId !== 'undefined') {
-      const parsedAssignee = Number.parseInt(assignedUserId, 10);
-      if (!Number.isInteger(parsedAssignee) || parsedAssignee < 1) {
-        await conn.rollback();
-        return res.status(422).json({ error: 'invalid_assigned_user_id' });
-      }
-      const [[assigneeRow]] = await conn.query(
-        'SELECT id, display_name, name, email, primary_role, region_id FROM staff_profiles WHERE id = ? LIMIT 1',
-        [parsedAssignee]
-      );
-      if (!assigneeRow) {
-        await conn.rollback();
-        return res.status(404).json({ error: 'assigned_user_not_found' });
-      }
-      assignTargetId = parsedAssignee;
-    }
 
     let workingApplicationId = application_id || null;
 
@@ -15141,6 +15502,23 @@ app.post('/api/cases', async (req, res) => {
         await conn.rollback();
         return res.status(409).json({ error: 'case_already_exists', case_id: caseExists[0].id });
       }
+    }
+
+    if (assignedUserId !== null && typeof assignedUserId !== 'undefined') {
+      const parsedAssignee = Number.parseInt(assignedUserId, 10);
+      if (!Number.isInteger(parsedAssignee) || parsedAssignee < 1) {
+        await conn.rollback();
+        return res.status(422).json({ error: 'invalid_assigned_user_id' });
+      }
+      const [[assigneeRow]] = await conn.query(
+        'SELECT id, display_name, name, email, primary_role, region_id FROM staff_profiles WHERE id = ? LIMIT 1',
+        [parsedAssignee]
+      );
+      if (!assigneeRow) {
+        await conn.rollback();
+        return res.status(404).json({ error: 'assigned_user_not_found' });
+      }
+      assignTargetId = parsedAssignee;
     }
 
     const normalizedStatus = typeof status === 'string' && status.trim() ? status.trim() : 'open';
@@ -19620,6 +19998,7 @@ app.get('/api/cases/:id', async (req, res) => {
         if (r2 && r2.user_id) row.applicant_user_id = r2.user_id;
       } catch(_) {}
     }
+
     res.set('Cache-Control','no-store, max-age=0');
     res.status(200).json(row);
   } catch (error) {

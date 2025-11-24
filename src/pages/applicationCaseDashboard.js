@@ -418,7 +418,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
 
   return (
     <ContentLayout>
-      <SpaceBetween size="l">
+        <SpaceBetween size="l">
         <Board
           items={boardItems}
           onItemsChange={handleItemsChange}

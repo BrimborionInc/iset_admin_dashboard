@@ -25,6 +25,7 @@ import EnvironmentWidget from "../widgets/EnvironmentWidget";
 import SecretsWidget from "../widgets/SecretsWidget";
 import AppearanceWidget from "../widgets/AppearanceWidget";
 import BackendJobsWidget from "../widgets/BackendJobsWidget";
+import AutoAssignmentConfigWidget from "../widgets/AutoAssignmentConfigWidget";
 import AiConfigWidgetHelp from "../helpPanelContents/aiConfigWidgetHelp";
 import AuthWidgetHelp from "../helpPanelContents/authWidgetHelp";
 import SessionAuditWidgetHelp from "../helpPanelContents/sessionAuditWidgetHelp";
@@ -119,7 +120,7 @@ const LOCKING_HEADER_DESCRIPTION =
 
 // Bump the layout storage key whenever the default layout changes so new widgets
 // (like Backend jobs) appear on the board instead of lingering in the palette.
-const STORAGE_KEY = "configuration-dashboard-layout-v2";
+const STORAGE_KEY = "configuration-dashboard-layout-v3";
 
 const widgetRegistry = {
   ai: {
@@ -232,6 +233,17 @@ const widgetRegistry = {
     helpTitle: "Appearance settings",
     aiContext: AppearanceWidgetHelp?.aiContext,
   },
+  autoAssignment: {
+    id: "autoAssignment",
+    defaultRowSpan: 4,
+    defaultColumnSpan: 2,
+    component: AutoAssignmentConfigWidget,
+    title: "Automatic assignment",
+    description: "Configure auto-assignment rules for incoming applications.",
+    helpComponent: null,
+    helpTitle: "Automatic assignment",
+    aiContext: null,
+  },
 };
 
 const defaultLayout = [
@@ -242,6 +254,7 @@ const defaultLayout = [
   { id: "sessionAudit", rowSpan: 3, columnSpan: 2 },
   { id: "cors", rowSpan: 2, columnSpan: 2 },
   { id: "backend-jobs", rowSpan: 2, columnSpan: 2 },
+  { id: "autoAssignment", rowSpan: 4, columnSpan: 2 },
   { id: "env", rowSpan: 4, columnSpan: 2 },
   { id: "secrets", rowSpan: 3, columnSpan: 2 },
   { id: "appearance", rowSpan: 2, columnSpan: 2 },
@@ -345,6 +358,21 @@ export default function ConfigurationSettings({
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
   const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
   const paletteSignatureRef = useRef(JSON.stringify(paletteItems.map(item => item.id)));
+  useEffect(() => {
+    // Auto-inject newly added widgets (e.g., auto-assignment) if the current layout was missing them.
+    setLayout(current => {
+      const known = new Set((current || []).map(item => item.id));
+      let changed = false;
+      const next = [...(current || [])];
+      defaultLayout.forEach(item => {
+        if (!known.has(item.id)) {
+          next.push({ ...item });
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+  }, []);
 
   const [runtime, setRuntime] = useState(null);
   const [security, setSecurity] = useState(null);
@@ -1625,6 +1653,13 @@ export default function ConfigurationSettings({
               auditRecent={auditRecent}
               fetchAudit={fetchAudit}
               fetchJSON={fetchJSON}
+            />
+          );
+        case "autoAssignment":
+          return (
+            <AutoAssignmentConfigWidget
+              actions={actions}
+              role={role}
             />
           );
         case "cors":

@@ -9,6 +9,7 @@ import {
   CollectionPreferences,
   SpaceBetween,
   StatusIndicator,
+  Popover,
   Badge,
   Button,
   ButtonDropdown,
@@ -213,6 +214,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const [showWatchedOnly, setShowWatchedOnly] = useState(false);
   const [alerts, setAlerts] = useState([]);
   const [slaTargets, setSlaTargets] = useState(SLA_DEFAULT_DAYS);
+  const [autoAssignStatus, setAutoAssignStatus] = useState({ loading: true, enabled: null, error: null, rules: [] });
   const {
     userId: currentUserIdRaw,
     displayName: currentUserName,
@@ -430,6 +432,31 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     return cleanup;
   }, [loadWatchList, refreshKey, currentUserId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setAutoAssignStatus({ loading: true, enabled: null, error: null });
+    apiFetch('/api/config/auto-assignment')
+      .then(res => {
+        if (!res.ok) {
+          const err = new Error(`HTTP ${res.status}`);
+          err.status = res.status;
+          throw err;
+        }
+        return res.json();
+      })
+      .then(data => {
+        if (cancelled) return;
+        const rules = Array.isArray(data?.rules) ? data.rules : [];
+        setAutoAssignStatus({ loading: false, enabled: !!data?.enabled, error: null, rules });
+      })
+      .catch(err => {
+        if (cancelled) return;
+        console.error('[applications] auto-assignment status load failed', err);
+        setAutoAssignStatus({ loading: false, enabled: null, error: 'Unavailable', rules: [] });
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   const handleAssignSubmit = useCallback(async () => {
     if (!assignTargetCase || !selectedAssignee) return;
     if (!assignTargetCase.case_id) {
@@ -627,7 +654,10 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const actionsColumn = {
     id: 'actions', header: 'Actions', minWidth: 160, cell: item => {
       const caseStatusLower = (item.case_status || item.status || '').toLowerCase();
-      const unassigned = item.case_id && !item.assigned_user_id && ['open', 'submitted', 'pending_approval'].includes(caseStatusLower);
+      const unassigned =
+        item.case_id &&
+        !item.assigned_user_id &&
+        !COMPLETED_STATUSES.has(caseStatusLower);
       const reassignRoles = ['Program Administrator','Regional Coordinator','System Administrator'];
       const canReassign = item.case_id && item.assigned_user_id && reassignRoles.includes(normalizedUserRole);
       const lockOwnerId = item.lock_owner_id ? String(item.lock_owner_id) : null;
@@ -841,17 +871,62 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     { id: 'actions', label: 'Actions', alwaysVisible: true }
   ];
 
+  const autoAssignSummary = useMemo(() => {
+    if (!autoAssignStatus.rules || autoAssignStatus.rules.length === 0) {
+      return autoAssignStatus.enabled ? 'Auto assignment enabled, no rules configured.' : 'Auto assignment is off.';
+    }
+    const toText = (rule) => {
+      const label = rule?.label || 'Rule';
+      const assignee = rule?.assignee || rule?.assigneeId || 'Unspecified';
+      const conditions = Array.isArray(rule?.conditions) ? rule.conditions : [];
+      const conditionText = conditions.map(cond => {
+        const field = cond.field || 'any';
+        const op = cond.op || 'always';
+        const values = Array.isArray(cond.value) ? cond.value.join(', ') : '';
+        if (op === 'always' || field === 'any') return 'Always';
+        return `${field} ${op} ${values}`;
+      }).join(' AND ') || 'Always';
+      return `${label}: ${conditionText} → ${assignee}`;
+    };
+    return autoAssignStatus.rules.map(toText).join('\n');
+  }, [autoAssignStatus]);
+
+  const autoAssignBadge = useMemo(() => {
+    const badgeContent = (() => {
+      if (autoAssignStatus.loading) {
+        return <StatusIndicator type="loading">Auto assignment</StatusIndicator>;
+      }
+      if (autoAssignStatus.error) {
+        return <StatusIndicator type="stopped">Auto assignment unavailable</StatusIndicator>;
+      }
+      return autoAssignStatus.enabled
+        ? <Badge color="green">Auto assignment on</Badge>
+        : <Badge color="grey">Auto assignment off</Badge>;
+    })();
+    return (
+      <Popover
+        triggerType="hover"
+        size="medium"
+        header="Auto assignment"
+        content={<Box whiteSpace="pre-line">{autoAssignSummary}</Box>}
+      >
+        {badgeContent}
+      </Popover>
+    );
+  }, [autoAssignStatus, autoAssignSummary]);
+
   const headerContent = (
     <Header
       variant="h2"
       actions={
         <SpaceBetween direction="horizontal" size="xs">
+          {autoAssignBadge}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <Toggle
               checked={showWatchedOnly}
               onChange={({ detail }) => setShowWatchedOnly(detail.checked)}
             >
-              My watched cases
+              My watched applications
             </Toggle>
             {watchLoading && <Spinner size="small" />}
           </div>

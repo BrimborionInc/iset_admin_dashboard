@@ -2,6 +2,9 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2025-11-24
+- Feature: Manage ISET Applications dashboard now includes the Application Work Queue summary widget alongside the ISET Applications table; help content updated.
+
 ## 2025-10-22
 - Docs: Normalized the admin library layout (meta/, components/, features/, ops/), renamed file-upload conditional notes, and introduced a docs README for quick orientation.
 

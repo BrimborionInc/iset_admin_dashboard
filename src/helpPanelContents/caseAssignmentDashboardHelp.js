@@ -5,12 +5,16 @@ const CaseAssignmentDashboardHelp = () => (
   <h2>Manage ISET Applications workspace</h2>
     <p>
       Use this dashboard to triage newly submitted ISET applications, keep tabs on ageing caseloads, and direct work to the
-      right assessor or coordinator. The board currently ships with a single <strong>ISET Applications</strong> widget that can
-      be resized but not removed.
+      right assessor or coordinator. The board now ships with an <strong>Application Work Queue</strong> summary plus the
+      resizable <strong>ISET Applications</strong> table.
     </p>
 
     <h3>What you see</h3>
     <ul>
+      <li>
+        <strong>Application Work Queue</strong> shows counts by status that update automatically based on your role. Select a
+        bucket name to jump into this dashboard with the relevant view.
+      </li>
       <li>
         <strong>Case / Submission ID</strong> gives the tracking identifier linked to the intake submission. Select the inline
         <em>View</em> action to jump straight into the full application workspace.
@@ -65,7 +69,7 @@ const CaseAssignmentDashboardHelp = () => (
   </div>
 );
 
-CaseAssignmentDashboardHelp.aiContext = `You are assisting staff working on the "Manage ISET Applications" dashboard (route /case-assignment-dashboard) in the ISET Admin portal. The board currently contains the "ISET Applications" table widget which lists submissions with columns for tracking ID, status, SLA health, owner, and received date.
+CaseAssignmentDashboardHelp.aiContext = `You are assisting staff working on the "Manage ISET Applications" dashboard (route /case-assignment-dashboard) in the ISET Admin portal. The board contains an "Application Work Queue" summary widget plus the "ISET Applications" table widget which lists submissions with columns for tracking ID, status, SLA health, owner, and received date.
 
 The table supports inline actions: **View** opens /application-case/{case_id}, **Assign** is available when a submitted case has no owner, and **Reassign** shows up for Program Administrators and Regional Coordinators on already owned files. Selecting Assign/Reassign opens a modal with a search-able staff list loaded from /api/staff/assignable.
 

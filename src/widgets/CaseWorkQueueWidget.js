@@ -11,14 +11,14 @@ import {
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
 
-const getMockCaseWork = role => {
+const getCaseTemplate = role => {
   return [
-    { id: 'new-intakes', label: 'New Intakes', count: 12, description: 'New clients since Monday of this week.' },
-    { id: 'active-cases', label: 'Active Cases', count: 48, description: 'Clients currently in active action plans.' },
-    { id: 'follow-ups-due', label: 'Follow-ups due', count: 14, description: 'Tasks due in the next 7 days across the portfolio.' },
-    { id: 'inactive-cases', label: 'Inactive Cases', count: 8, description: 'No active plans or no activity in the last 30 days.' },
-    { id: 'ilmp-issues', label: 'ILMP Issues', count: 3, description: 'Cases failing ILMP 1.4 validation checks.' },
-    { id: 'ready-to-close', label: 'Ready to close', count: 5, description: 'Cases flagged as ready for closure review.' }
+    { id: 'new-intakes', label: 'New Intakes', count: '-', description: 'New clients since Monday of this week.' },
+    { id: 'active-cases', label: 'Active Cases', count: '-', description: 'Clients currently in active action plans.' },
+    { id: 'follow-ups-due', label: 'Follow-ups due', count: '-', description: 'Tasks due in the next 7 days across the portfolio.' },
+    { id: 'inactive-cases', label: 'Inactive Cases', count: '-', description: 'No active plans or no activity in the last 30 days.' },
+    { id: 'ilmp-issues', label: 'ILMP Issues', count: '-', description: 'Cases failing ILMP 1.4 validation checks.' },
+    { id: 'ready-to-close', label: 'Ready to close', count: '-', description: 'Cases flagged as ready for closure review.' }
   ];
 };
 
@@ -81,12 +81,12 @@ const buildRequestHeaders = role => {
 };
 
 const CaseWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
-  const [buckets, setBuckets] = useState(() => getMockCaseWork(role));
+  const [buckets, setBuckets] = useState(() => getCaseTemplate(role));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    setBuckets(getMockCaseWork(role));
+    setBuckets(getCaseTemplate(role));
   }, [role]);
 
   useEffect(() => {
@@ -112,11 +112,14 @@ const CaseWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
           return;
         }
         if (payload && Array.isArray(payload.buckets) && (!payload.role || payload.role === role)) {
-          setBuckets(mergeWorkQueueBuckets(getMockCaseWork(role), payload.buckets));
+          setBuckets(mergeWorkQueueBuckets(getCaseTemplate(role), payload.buckets));
+        } else {
+          throw new Error('Unexpected response format while loading case counts.');
         }
       } catch (err) {
         if (!ignore) {
-          setError(err?.message || 'Unable to load case counts');
+          setError(err?.message || 'Unable to load case counts.');
+          setBuckets(getCaseTemplate(role));
         }
       } finally {
         if (!ignore) {
