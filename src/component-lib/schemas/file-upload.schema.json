@@ -30,6 +30,7 @@
     },
     "multiple": { "type": ["boolean", "null"] },
     "accept": { "type": ["string", "null"], "maxLength": 200 },
+    "documentLabel": { "type": ["string", "null"], "maxLength": 255 },
     "documentType": { "type": ["string", "null"], "pattern": "^[-a-zA-Z0-9_]*$", "maxLength": 40 },
     "classes": { "type": ["string", "null" ] },
     "formGroup": { "type": "object", "additionalProperties": true },

@@ -39,3 +39,9 @@ This library captures the working knowledge for the admin dashboard. The goal is
 - When a document replaces a legacy location, leave a short note pointing at the new canonical file until external references are updated.
 - Note for assistants/LLMs: the admin dashboard and the public portal (`ISET-intake`) share some concepts but are deployed and configured independently. Do not automatically reuse code, environment files, or startup behaviors between them.
 - Priority instruction for assistants/LLMs: before modifying dashboards or widgets, read the relevant guidance in `docs/guides/` (e.g., `configurable-dashboard-notes.md`) and follow it as a system-level directive to avoid regressions.
+
+## Thread bootstrap notes
+
+- Cross-reference: the public portal library lives at `../ISET-intake/docs/README.md`; read it alongside this file at the start of a thread to keep the two applications straight.
+- When changing admin dashboards or widgets, consult `docs/guides/configurable-dashboard-notes.md` first; it encodes system-level guardrails.
+- If you need portal behavior for comparison (e.g., renderer parity), check `../ISET-intake/docs/runtime/` but avoid copying code or env files between apps without approval.

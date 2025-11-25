@@ -15779,6 +15779,7 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
 
     const labelRaw = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
     const label = labelRaw ? labelRaw.slice(0, 255) : null;
+    const metadata = label ? JSON.stringify({ label }) : null;
     const caseId = normalisePositiveInteger(req.body?.caseId);
     const applicationId = normalisePositiveInteger(req.body?.applicationId);
     const source = 'manual_upload';
@@ -15789,10 +15790,39 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
     const originalNameRaw = typeof file.originalname === 'string' ? file.originalname.trim() : '';
     const fileNameForDb = (originalNameRaw || file.filename || 'document').slice(0, 255);
 
-    const relativePath = toIntakeRelativePath(file.path);
-    if (!relativePath) {
-      cleanupUploadedFile();
-      return res.status(500).json({ error: 'path_resolution_failed' });
+    const storageModeEnv = (process.env.UPLOAD_MODE || process.env.UPLOAD_DRIVER || '').toLowerCase();
+    const storageMode = storageModeEnv === 's3' ? 's3' : 'local-direct';
+
+    let relativePath = null;
+    if (storageMode === 's3') {
+      try {
+        const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+        if (DRIVER !== 's3') {
+          throw new Error('s3 driver not configured');
+        }
+        const key = generateKey(applicantId || uploaderUserId || 'admin', originalNameRaw || fileNameForDb);
+        const contentType = mimeType || 'application/octet-stream';
+        const presigned = await presignPut({ key, contentType });
+        await axios.put(presigned.url, fs.createReadStream(file.path), {
+          headers: {
+            ...(presigned.headers || {}),
+            'Content-Type': contentType,
+            ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+          }
+        });
+        relativePath = key;
+        cleanupUploadedFile();
+      } catch (uploadErr) {
+        cleanupUploadedFile();
+        console.error('[admin:documents:upload:s3] upload failed', uploadErr);
+        return res.status(500).json({ error: 'object_store_upload_failed' });
+      }
+    } else {
+      relativePath = toIntakeRelativePath(file.path);
+      if (!relativePath) {
+        cleanupUploadedFile();
+        return res.status(500).json({ error: 'path_resolution_failed' });
+      }
     }
 
     let insertId = null;
@@ -15807,19 +15837,21 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
         relativePath,
         mimeType,
         label,
+        metadata,
         sizeBytes,
         checksum
       ];
       const [result] = await pool.query(
         `INSERT INTO iset_document
-           (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, size_bytes, checksum_sha256, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?, 'active')
+           (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'active')
          ON DUPLICATE KEY UPDATE
            applicant_user_id = VALUES(applicant_user_id),
            application_id = VALUES(application_id),
            case_id = VALUES(case_id),
            user_id = VALUES(user_id),
            label = VALUES(label),
+           metadata = VALUES(metadata),
            mime_type = VALUES(mime_type),
            size_bytes = VALUES(size_bytes),
            checksum_sha256 = VALUES(checksum_sha256),
@@ -15839,7 +15871,7 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
           ? ['id = ?', [insertId]]
           : ['file_path = ?', [relativePath]];
         const [rows] = await pool.query(
-        `SELECT id, case_id, application_id, applicant_user_id, file_name, file_path, label, source, mime_type, size_bytes, status, created_at AS uploaded_at
+        `SELECT id, case_id, application_id, applicant_user_id, file_name, file_path, label, metadata, source, mime_type, size_bytes, status, created_at AS uploaded_at
            FROM iset_document
          WHERE ${lookupKey[0]}
          LIMIT 1`,
@@ -15886,11 +15918,68 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
   });
 });
 
+app.put('/api/documents/:id', async (req, res) => {
+  const documentId = Number(req.params.id);
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return res.status(400).json({ error: 'invalid_document_id' });
+  }
+  const rawLabel = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
+  const label = rawLabel ? rawLabel.slice(0, 255) : null;
+  if (!label) {
+    return res.status(400).json({ error: 'label_required' });
+  }
+  const metadata = JSON.stringify({ label });
+  try {
+    const [result] = await pool.query(
+      `UPDATE iset_document
+         SET label = ?, metadata = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [label, metadata, documentId]
+    );
+    if (!result || result.affectedRows === 0) {
+      return res.status(404).json({ error: 'document_not_found' });
+    }
+    const [[row]] = await pool.query(
+      `SELECT id, case_id, application_id, applicant_user_id, file_name, file_path, label, metadata, source, mime_type, size_bytes, status, created_at AS uploaded_at
+         FROM iset_document
+        WHERE id = ?
+        LIMIT 1`,
+      [documentId]
+    );
+    return res.json({ ok: true, document: row });
+  } catch (err) {
+    console.error('[admin:documents:update] error', err);
+    return res.status(500).json({ error: 'failed_to_update_document' });
+  }
+});
+
+app.delete('/api/documents/:id', async (req, res) => {
+  const documentId = Number(req.params.id);
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return res.status(400).json({ error: 'invalid_document_id' });
+  }
+  try {
+    const [result] = await pool.query(
+      `UPDATE iset_document
+         SET status = 'deleted', updated_at = NOW()
+       WHERE id = ?`,
+      [documentId]
+    );
+    if (!result || result.affectedRows === 0) {
+      return res.status(404).json({ error: 'document_not_found' });
+    }
+    return res.json({ ok: true, deleted: true });
+  } catch (err) {
+    console.error('[admin:documents:delete] error', err);
+    return res.status(500).json({ error: 'failed_to_delete_document' });
+  }
+});
+
 app.get('/api/applicants/:id/documents', async (req, res) => {
   const applicantId = req.params.id;
   try {
     const [rows] = await pool.query(
-      `SELECT id, case_id, application_id, file_name, file_path, label, source, created_at AS uploaded_at
+      `SELECT id, case_id, application_id, file_name, file_path, label, metadata, source, created_at AS uploaded_at
        FROM iset_document
        WHERE applicant_user_id = ? AND status = 'active'
        ORDER BY created_at DESC`,

@@ -22,6 +22,10 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 - `widgets/`: Reusable complex UI building blocks embedded within pages (e.g., `WorkflowPreviewWidget.js` – interactive workflow step preview mirroring portal runtime logic for file upload visibility & messaging). Pages compose multiple widgets; widgets should not own routing.
 - `auth/`: Cognito helpers: `isIamOn`, `hasValidSession`, token parsing and role derivation.
 - (Future) `components/`: Smaller presentational or configuration components (to catalog as added).
+### Workflow Studio (authoring)
+- Manage Workflows page (`src/pages/manageWorkflows.js`) composes widgets: Workflow Library (lists `/api/workflows`), Workflow Properties, Workflow Preview, Runtime Schema.
+- Editor (`src/pages/modifyWorkflow.js`) wires IntakeStepLibrary, WorkflowCanvas, StepProperties, WorkflowPropertiesEditor; canvas draft persists in `sessionStorage` (`mw:steps-v1`); save/load via `/api/workflows`.
+- Templates live in `src/component-lib/` (+ schemas); server syncs them on startup; `StepPropertiesWidget` forms are driven by `prop_schema`. See `docs/guides/workflow-studio.md` for details.
 
 ## Auth & Role Simulation
 - Session detection via Cognito tokens; simulated roles stored in `sessionStorage.currentRole` with event `auth:session-changed` for reactive updates.

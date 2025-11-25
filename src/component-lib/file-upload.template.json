@@ -15,6 +15,7 @@
   "accept": ".pdf,.jpg,.jpeg,.png,.gif,.heic",
   "showMimeList": false,
   "showMaxSize": false,
+    "documentLabel": "",
     "documentType": "",
     "classes": "",
     "formGroup": { "classes": "" },
@@ -46,6 +47,7 @@
       { "label": "Yes", "value": true },
       { "label": "No", "value": false }
     ] },
+    { "key": "documentLabel", "path": "documentLabel", "type": "text", "label": "Document Label (display name)" },
     { "key": "documentType", "path": "documentType", "type": "text", "label": "Document Type (metadata)" },
     { "key": "classes", "path": "classes", "type": "text", "label": "CSS Classes" },
     { "key": "formGroup.classes", "path": "formGroup.classes", "type": "select", "label": "Form Group Classes", "options": [
@@ -59,5 +61,5 @@
   ],
   "has_options": false,
   "option_schema": null,
-  "export_njk_template": "{% set theId = props.id or props.name %}\n{% set labelObj = props.label %}\n{% set hintObj = props.hint %}\n{% set sizeMb = props.maxSizeMb or 10 %}\n{% set types = props.accept or '.pdf,.jpg,.jpeg,.png,.gif,.heic' %}\n<div class=\"govuk-form-group {{ props.formGroup.classes }}\">\n  {% if labelObj %}\n  <label class=\"govuk-label {{ labelObj.classes }}\" for=\"{{ theId }}\">{{ labelObj.text }}</label>\n  {% endif %}\n  {% if hintObj and hintObj.text %}<div class=\"govuk-hint\">{{ hintObj.text }}</div>{% endif %}\n  <input class=\"govuk-file-upload {{ props.classes }}\" id=\"{{ theId }}\" name=\"{{ props.name }}\" type=\"file\"{% if props.multiple %} multiple{% endif %}{% if props.accept %} accept=\"{{ props.accept }}\"{% endif %}{% if props.documentType %} data-document-type=\"{{ props.documentType }}\"{% endif %}{% if props.maxSizeMb is defined %} data-max-size-mb=\"{{ props.maxSizeMb }}\"{% endif %}{% if props.disabled %} disabled{% endif %}>\n  {% if props.showMimeList %}<div class=\"govuk-hint\">Allowed types: {{ types }}</div>{% endif %}\n  {% if props.showMaxSize %}<div class=\"govuk-hint\">Max size: {{ sizeMb }}MB.</div>{% endif %}\n</div>"
+  "export_njk_template": "{% set theId = props.id or props.name %}\n{% set labelObj = props.label %}\n{% set hintObj = props.hint %}\n{% set sizeMb = props.maxSizeMb or 10 %}\n{% set types = props.accept or '.pdf,.jpg,.jpeg,.png,.gif,.heic' %}\n<div class=\"govuk-form-group {{ props.formGroup.classes }}\">\n  {% if labelObj %}\n  <label class=\"govuk-label {{ labelObj.classes }}\" for=\"{{ theId }}\">{{ labelObj.text }}</label>\n  {% endif %}\n  {% if hintObj and hintObj.text %}<div class=\"govuk-hint\">{{ hintObj.text }}</div>{% endif %}\n  <input class=\"govuk-file-upload {{ props.classes }}\" id=\"{{ theId }}\" name=\"{{ props.name }}\" type=\"file\"{% if props.multiple %} multiple{% endif %}{% if props.accept %} accept=\"{{ props.accept }}\"{% endif %}{% if props.documentLabel %} data-document-label=\"{{ props.documentLabel }}\"{% endif %}{% if props.documentType %} data-document-type=\"{{ props.documentType }}\"{% endif %}{% if props.maxSizeMb is defined %} data-max-size-mb=\"{{ props.maxSizeMb }}\"{% endif %}{% if props.disabled %} disabled{% endif %}>\n  {% if props.showMimeList %}<div class=\"govuk-hint\">Allowed types: {{ types }}</div>{% endif %}\n  {% if props.showMaxSize %}<div class=\"govuk-hint\">Max size: {{ sizeMb }}MB.</div>{% endif %}\n</div>"
 }

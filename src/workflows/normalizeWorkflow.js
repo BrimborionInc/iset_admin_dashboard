@@ -437,6 +437,7 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
           if (!isNaN(n) && n > 0) component.maxSizeMb = n;
         }
         if (props?.documentType) component.documentType = String(props.documentType);
+        if (props?.documentLabel) component.documentLabel = props.documentLabel;
         if (typeof props?.showMimeList !== 'undefined') component.showMimeList = !!props.showMimeList;
         if (typeof props?.showMaxSize !== 'undefined') component.showMaxSize = !!props.showMaxSize;
         if (typeof props?.disabled !== 'undefined') component.disabled = !!props.disabled;
