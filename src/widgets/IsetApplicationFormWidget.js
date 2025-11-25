@@ -774,7 +774,6 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
     columns: 2,
     editable: true,
     items: [
-      { label: 'Long-term goal', field: 'long-term-goal', controlType: 'textarea', renderValue: answers => renderTextBlock(answers['long-term-goal']) },
       {
         label: 'Current barriers',
         field: 'barriers',
@@ -1910,6 +1909,18 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
     .trim()
     .toLowerCase();
   const isWithdrawnStatus = currentApplicationStatus === 'withdrawn';
+  const employmentGoalsIndex = useMemo(
+    () => sectionDefinitions.findIndex(section => section.id === 'employment-goals'),
+    [sectionDefinitions]
+  );
+  const sectionsBeforeEmploymentGoals = useMemo(
+    () => (employmentGoalsIndex >= 0 ? sectionDefinitions.slice(0, employmentGoalsIndex) : sectionDefinitions),
+    [employmentGoalsIndex, sectionDefinitions]
+  );
+  const sectionsAfterEmploymentGoals = useMemo(
+    () => (employmentGoalsIndex >= 0 ? sectionDefinitions.slice(employmentGoalsIndex) : []),
+    [employmentGoalsIndex, sectionDefinitions]
+  );
 
   const headerActions = (
     <SpaceBetween direction="horizontal" size="xs">
@@ -1987,7 +1998,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
             This view presents the applicant's submitted ISET application. Review each section for accuracy, capture clarifications when needed, and use edit mode to publish updates to the case file.
           </Box>
           <SpaceBetween size="l">
-            {sectionDefinitions.map(section => (
+            {sectionsBeforeEmploymentGoals.map(section => (
               <Section
                 key={section.id}
                 {...section}
@@ -2017,6 +2028,18 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
                 )}
               </ExpandableSection>
             )}
+            {sectionsAfterEmploymentGoals.map(section => (
+              <Section
+                key={section.id}
+                {...section}
+                isEditing={isEditing}
+                answers={answers}
+                editableAnswers={editableAnswers}
+                renderEditableField={renderEditableField}
+                onFieldChange={handleFieldChange}
+                saving={saving}
+              />
+            ))}
           </SpaceBetween>
         </>
       )}

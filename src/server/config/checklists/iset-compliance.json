@@ -1,0 +1,160 @@
+{
+  "id": "iset-compliance-v1",
+  "label": "ISET Compliance Checklist",
+  "version": "2025-11-25",
+  "items": [
+    {
+      "id": "client-application",
+      "label": "Completed Client Application (submitted)",
+      "required": true,
+      "documentTypes": ["application_form"],
+      "sources": ["application_form"]
+    },
+    {
+      "id": "ei-consent",
+      "label": "EI Consent Form",
+      "required": true,
+      "documentTypes": ["ei_consent"],
+      "sources": ["application_form"]
+    },
+    {
+      "id": "ei-verification",
+      "label": "EI Eligibility Verification (coordinator request)",
+      "required": true,
+      "documentTypes": ["ei_verification"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+      "notes": "Should accompany EI consent."
+    },
+    {
+      "id": "indigenous-declaration",
+      "label": "Indigenous Self-Declaration (intake form) and/or two reference letters",
+      "required": true,
+      "documentTypes": ["indigenous_declaration", "identity_document"],
+      "sources": ["application_form", "application_submission", "manual_upload", "secure_message_attachment"],
+      "notes": "Two reference letters acceptable when no Status/Treaty card."
+    },
+    {
+      "id": "conflict-of-interest",
+      "label": "Conflict of Interest Form",
+      "required": true,
+      "documentTypes": ["conflict_of_interest"],
+      "sources": ["application_form"]
+    },
+    {
+      "id": "identity-two-ids",
+      "label": "Two pieces of ID (front/back)",
+      "required": true,
+      "documentTypes": ["identity_document"],
+      "minCount": 2,
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "band-letter",
+      "label": "Band funding confirmation or denial letter",
+      "required": true,
+      "documentTypes": ["band_funding_confirmation", "band_funding_denial"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "acceptance-letter",
+      "label": "Letter of Acceptance (current year/term)",
+      "required": true,
+      "documentTypes": ["acceptance_letter"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "statement-of-account",
+      "label": "Statement of Account (tuition, books, fees, equipment)",
+      "required": true,
+      "documentTypes": ["statement_of_account"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "acknowledgement",
+      "label": "Client Acknowledgement of Funding Source (signed/dated)",
+      "required": true,
+      "documentTypes": ["client_acknowledgement"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "release-student-info",
+      "label": "Client Authorization for Release of Student Information",
+      "required": true,
+      "documentTypes": ["release_student_info"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "media-consent",
+      "label": "Client consent for use of image/video/audio (if applicable)",
+      "required": false,
+      "documentTypes": ["media_consent"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "financial-overview",
+      "label": "ISET Financial Overview (monthly budget)",
+      "required": true,
+      "documentTypes": ["financial_overview"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "income-evidence",
+      "label": "Income verification (self/spouse: last 3 pay stubs, CTB, ROE, T4s, etc.)",
+      "required": true,
+      "documentTypes": ["financial_records", "financial_evidence"],
+      "minCount": 3,
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "expense-evidence",
+      "label": "Expense verification (lease/mortgage; 3 months utilities; childcare, etc.)",
+      "required": true,
+      "documentTypes": ["financial_evidence"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "social-assistance-letter",
+      "label": "Social Assistance letter from caseworker (for top-up, if applicable)",
+      "required": false,
+      "documentTypes": ["supporting_evidence"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "resume",
+      "label": "Current resume",
+      "required": true,
+      "documentTypes": ["resume"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "case-manager-assessment",
+      "label": "Case Manager Assessment (summary/recommendation)",
+      "required": true,
+      "documentTypes": ["case_assessment"],
+      "sources": ["manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "funding-agreement",
+      "label": "Client Funding Agreement (signed/dated)",
+      "required": true,
+      "documentTypes": ["funding_agreement"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "attendance-forms",
+      "label": "Monthly Attendance Forms (one per living allowance month)",
+      "required": true,
+      "documentTypes": ["attendance_form"],
+      "minCount": 1,
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+      "notes": "Expect one per allowance month."
+    },
+    {
+      "id": "medical-documentation",
+      "label": "Medical documentation for disability support",
+      "required": true,
+      "documentTypes": ["medical_documentation"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    }
+  ]
+}

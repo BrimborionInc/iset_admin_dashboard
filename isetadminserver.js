@@ -37,6 +37,194 @@ const DEFAULT_BACKEND_JOBS_CONFIG = { reminderPollMinutes: 5 };
 const REMINDER_POLL_INTERVAL_MS = DEFAULT_BACKEND_JOBS_CONFIG.reminderPollMinutes * 60 * 1000;
 let reminderPollIntervalMsDynamic = REMINDER_POLL_INTERVAL_MS;
 let reminderPollTimer = null;
+const CHECKLIST_SCOPE = 'checklist';
+const CHECKLIST_KEY = 'checklist.compliance.iset';
+
+const CHECKLIST_CACHE_TTL_MS = 30 * 1000;
+let checklistCache = { ts: 0, data: null };
+
+async function loadChecklistConfig() {
+  const now = Date.now();
+  if (checklistCache.data && now - checklistCache.ts < CHECKLIST_CACHE_TTL_MS) {
+    return checklistCache.data;
+  }
+  try {
+    const [rows] = await pool.query(
+      'SELECT v FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      [CHECKLIST_SCOPE, CHECKLIST_KEY]
+    );
+    if (!rows || !rows.length) {
+      checklistCache = { ts: now, data: null };
+      return null;
+    }
+    const raw = rows[0].v;
+    const parsed = typeof raw === 'object' ? raw : JSON.parse(raw);
+    checklistCache = { ts: now, data: parsed || null };
+    return checklistCache.data;
+  } catch (err) {
+    console.warn('[checklist] load failed', err?.message || err);
+    checklistCache = { ts: now, data: null };
+    return null;
+  }
+}
+
+async function loadApplicationAnswers({ applicantId = null, applicationId = null }) {
+  try {
+    let row = null;
+    let caseRow = null;
+    let caseMeta = { status: null, application_status: null };
+    if (applicationId) {
+      const [[app]] = await pool.query(
+        `SELECT a.id, a.payload_json, a.submission_id, s.user_id, s.intake_payload, s.status AS submission_status, s.submitted_at
+           FROM iset_application a
+           LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+          WHERE a.id = ?
+          LIMIT 1`,
+        [applicationId]
+      );
+      if (app) row = app;
+      if (row) {
+        const [[c]] = await pool.query(
+          'SELECT id, status FROM iset_case WHERE application_id = ? LIMIT 1',
+          [row.id]
+        );
+        if (c) caseRow = c;
+      }
+    }
+    if (!row && applicantId) {
+      const [[app]] = await pool.query(
+        `SELECT a.id, a.payload_json, a.submission_id, s.user_id, s.intake_payload, s.status AS submission_status, s.submitted_at
+           FROM iset_application a
+           LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+          WHERE s.user_id = ?
+          ORDER BY a.created_at DESC
+          LIMIT 1`,
+        [applicantId]
+      );
+      if (app) row = app;
+      if (row) {
+        const [[c]] = await pool.query(
+          'SELECT id, status FROM iset_case WHERE application_id = ? LIMIT 1',
+          [row.id]
+        );
+        if (c) caseRow = c;
+      }
+    }
+    if (caseRow) {
+      caseMeta.status = caseRow.status || null;
+      caseMeta.application_status = caseRow.status || null;
+    }
+    if (!row) return { answers: null, applicationId: null, submissionStatus: null, submittedAt: null, caseId: null, assessmentSubmitted: false, assessmentComplete: false, caseStatus: null, applicationStatus: null };
+    let payload = row.payload_json;
+    if (typeof payload === 'string') {
+      try { payload = JSON.parse(payload); } catch { payload = {}; }
+    }
+    if (!payload || typeof payload !== 'object') payload = {};
+    let answers = payload.answers || payload.form_answers || payload.data || null;
+    if (!answers && row.intake_payload) {
+      let intake = row.intake_payload;
+      if (typeof intake === 'string') {
+        try { intake = JSON.parse(intake); } catch { intake = null; }
+      }
+      if (intake && typeof intake === 'object') {
+        answers = intake.answers || intake.form_answers || intake.data || intake;
+      }
+    }
+    const normalizedAnswers = answers && typeof answers === 'object' ? answers : null;
+    let assessmentSubmitted = false;
+    let assessmentComplete = false;
+    let assessmentLivingAllowance = 0;
+    let assessmentDurationDays = null;
+    let disabilitySupportRequested = false;
+    const caseId = caseRow?.id || null;
+    if (caseId) {
+      try {
+        const [[assess]] = await pool.query(
+          'SELECT recommendation, date_of_assessment, itp_payload, intervention_duration_days, itp_payload FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
+          [caseId]
+        );
+        assessmentSubmitted = !!assess;
+        if (assess) {
+          const hasRecommendation = assess.recommendation !== null && assess.recommendation !== undefined;
+          const hasDate = assess.date_of_assessment !== null && assess.date_of_assessment !== undefined;
+          assessmentComplete = hasRecommendation && hasDate;
+          assessmentDurationDays = Number(assess.intervention_duration_days) || null;
+          try {
+            let itp = assess.itp_payload;
+            if (typeof itp === 'string') {
+              try { itp = JSON.parse(itp); } catch { itp = null; }
+            }
+            if (Array.isArray(itp)) {
+              itp.forEach(entry => {
+                const cat = String(entry?.category || entry?.label || '').toLowerCase();
+                const amt = Number(entry?.amount || entry?.value || 0);
+                if (cat.includes('living') && cat.includes('allowance') && Number.isFinite(amt)) {
+                  assessmentLivingAllowance += amt;
+                }
+                if (cat.includes('disability') && Number.isFinite(amt) && amt > 0) {
+                  disabilitySupportRequested = true;
+                }
+              });
+            }
+          } catch (_) {
+            assessmentLivingAllowance = 0;
+            disabilitySupportRequested = false;
+          }
+        }
+      } catch (_) {
+        assessmentSubmitted = false;
+        assessmentComplete = false;
+        assessmentLivingAllowance = 0;
+        assessmentDurationDays = null;
+        disabilitySupportRequested = false;
+      }
+    }
+    return {
+      answers: normalizedAnswers,
+      applicationId: row.id || null,
+      submissionStatus: row.submission_status || null,
+      submittedAt: row.submitted_at || null,
+      caseId,
+      assessmentSubmitted,
+      assessmentComplete,
+      caseStatus: caseMeta.status || null,
+      applicationStatus: caseMeta.application_status || null,
+      assessmentLivingAllowance,
+      assessmentDurationDays,
+      disabilitySupportRequested
+    };
+  } catch (err) {
+    console.warn('[checklist] failed to load application answers', err?.message || err);
+    return { answers: null, applicationId: null, submissionStatus: null, submittedAt: null, caseId: null, assessmentSubmitted: false, assessmentComplete: false, caseStatus: null, applicationStatus: null };
+  }
+}
+
+function applicationDocTypeSatisfied(docType, answers) {
+  if (!answers || typeof answers !== 'object') return false;
+  switch (docType) {
+    case 'ei_consent':
+      return Boolean(answers?.consent && answers.consent.signed);
+    case 'indigenous_declaration':
+      return Boolean(answers?.indigenous_declaration && answers.indigenous_declaration.signed);
+    case 'conflict_of_interest':
+      return Boolean(answers?.conflict_applicant_signature && answers.conflict_applicant_signature.signed);
+    default:
+      return false;
+  }
+}
+
+function parseMetadata(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
 
 function ensureDirectoryExists(dirPath) {
   try {
@@ -15779,7 +15967,12 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
 
     const labelRaw = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
     const label = labelRaw ? labelRaw.slice(0, 255) : null;
-    const metadata = label ? JSON.stringify({ label }) : null;
+    const docTypeRaw = typeof req.body?.documentType === 'string' ? req.body.documentType.trim() : '';
+    const docType = docTypeRaw || null;
+    const metadataObj = {};
+    if (label) metadataObj.label = label;
+    if (docType) metadataObj.document_type = docType;
+    const metadata = Object.keys(metadataObj).length ? JSON.stringify(metadataObj) : null;
     const caseId = normalisePositiveInteger(req.body?.caseId);
     const applicationId = normalisePositiveInteger(req.body?.applicationId);
     const source = 'manual_upload';
@@ -15839,12 +16032,13 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
         label,
         metadata,
         sizeBytes,
-        checksum
+        checksum,
+        docType
       ];
       const [result] = await pool.query(
         `INSERT INTO iset_document
-           (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'active')
+           (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)
          ON DUPLICATE KEY UPDATE
            applicant_user_id = VALUES(applicant_user_id),
            application_id = VALUES(application_id),
@@ -15856,6 +16050,7 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
            size_bytes = VALUES(size_bytes),
            checksum_sha256 = VALUES(checksum_sha256),
            status = 'active',
+           document_category = VALUES(document_category),
            updated_at = NOW()`,
         insertPayload
       );
@@ -15871,7 +16066,7 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
           ? ['id = ?', [insertId]]
           : ['file_path = ?', [relativePath]];
         const [rows] = await pool.query(
-        `SELECT id, case_id, application_id, applicant_user_id, file_name, file_path, label, metadata, source, mime_type, size_bytes, status, created_at AS uploaded_at
+        `SELECT id, case_id, application_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
            FROM iset_document
          WHERE ${lookupKey[0]}
          LIMIT 1`,
@@ -15928,19 +16123,39 @@ app.put('/api/documents/:id', async (req, res) => {
   if (!label) {
     return res.status(400).json({ error: 'label_required' });
   }
-  const metadata = JSON.stringify({ label });
+  const rawDocType = typeof req.body?.documentType === 'string' ? req.body.documentType.trim() : '';
+  const docType = rawDocType || null;
+  let metadataObj = {};
+  try {
+    const [rows] = await pool.query('SELECT metadata, document_category FROM iset_document WHERE id = ? LIMIT 1', [documentId]);
+    if (rows && rows[0]) {
+      const existingMetadata = rows[0].metadata;
+      if (existingMetadata && typeof existingMetadata === 'object') {
+        metadataObj = { ...existingMetadata };
+      } else if (typeof existingMetadata === 'string' && existingMetadata.trim()) {
+        try { metadataObj = JSON.parse(existingMetadata); } catch (_) { metadataObj = {}; }
+      }
+      if (!docType && rows[0].document_category) metadataObj.document_type = rows[0].document_category;
+    }
+  } catch (_) {
+    metadataObj = {};
+  }
+  if (!metadataObj || typeof metadataObj !== 'object') metadataObj = {};
+  metadataObj.label = label;
+  if (docType) metadataObj.document_type = docType;
+  const metadata = JSON.stringify(metadataObj);
   try {
     const [result] = await pool.query(
       `UPDATE iset_document
-         SET label = ?, metadata = ?, updated_at = NOW()
+         SET label = ?, metadata = ?, document_category = COALESCE(?, document_category), updated_at = NOW()
        WHERE id = ?`,
-      [label, metadata, documentId]
+      [label, metadata, docType || null, documentId]
     );
     if (!result || result.affectedRows === 0) {
       return res.status(404).json({ error: 'document_not_found' });
     }
     const [[row]] = await pool.query(
-      `SELECT id, case_id, application_id, applicant_user_id, file_name, file_path, label, metadata, source, mime_type, size_bytes, status, created_at AS uploaded_at
+      `SELECT id, case_id, application_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
          FROM iset_document
         WHERE id = ?
         LIMIT 1`,
@@ -15975,11 +16190,208 @@ app.delete('/api/documents/:id', async (req, res) => {
   }
 });
 
+app.get('/api/applicants/:id/document-checklist', async (req, res) => {
+  const applicantId = Number(req.params.id);
+  const applicationId = Number.isFinite(Number(req.query.applicationId)) ? Number(req.query.applicationId) : null;
+  if (!Number.isFinite(applicantId) || applicantId <= 0) {
+    return res.status(400).json({ error: 'invalid_applicant_id' });
+  }
+  try {
+    const checklist = await loadChecklistConfig();
+    if (!checklist || !Array.isArray(checklist.items)) {
+      return res.status(200).json({ items: [], missingRequiredCount: 0 });
+    }
+    const [docs] = await pool.query(
+      `SELECT id, file_name, file_path, label, metadata, document_category, source, created_at AS uploaded_at
+        FROM iset_document
+       WHERE applicant_user_id = ? AND status = 'active'`,
+      [applicantId]
+    );
+    const applicationAnswerMeta = await loadApplicationAnswers({ applicantId, applicationId });
+    const applicationAnswers = applicationAnswerMeta.answers;
+    const applicationExists = Boolean(
+      applicationAnswerMeta.applicationId ||
+      applicationAnswerMeta.submissionStatus ||
+      applicationAnswerMeta.submittedAt
+    );
+    const assessmentSubmitted = Boolean(applicationAnswerMeta.assessmentSubmitted);
+    const assessmentComplete = Boolean(applicationAnswerMeta.assessmentComplete);
+    const caseStatusRaw = applicationAnswerMeta.caseStatus || '';
+    const applicationStatusRaw = applicationAnswerMeta.applicationStatus || applicationAnswerMeta.caseStatus || '';
+    const caseStatusLower = String(caseStatusRaw || '').toLowerCase();
+    const applicationStatusLower = String(applicationStatusRaw || '').toLowerCase();
+    const assessmentLivingAllowance = Number(applicationAnswerMeta.assessmentLivingAllowance || 0);
+    const assessmentDurationDays = Number.isFinite(Number(applicationAnswerMeta.assessmentDurationDays))
+      ? Number(applicationAnswerMeta.assessmentDurationDays)
+      : null;
+    const disabilitySupportRequested = Boolean(applicationAnswerMeta.disabilitySupportRequested);
+    const normalizedDocs = (docs || []).map(doc => {
+      const meta = parseMetadata(doc.metadata);
+      const docTypes = [];
+      if (doc.document_category) docTypes.push(String(doc.document_category));
+      if (meta && meta.document_type) docTypes.push(String(meta.document_type));
+      return {
+        id: doc.id,
+        file_name: doc.file_name,
+        label: doc.label,
+        source: doc.source,
+        uploaded_at: doc.uploaded_at,
+        docTypes,
+      };
+    });
+
+    const items = checklist.items.map(item => {
+      const baseRequired = item.required !== false;
+      const minCount = Number.isFinite(Number(item.minCount)) ? Number(item.minCount) : 1;
+      const aliases = Array.isArray(item.documentTypes) ? item.documentTypes.map(String) : [];
+      const matches = normalizedDocs.filter(d => {
+        if (!aliases.length) return false;
+        return d.docTypes.some(t => aliases.includes(t));
+      });
+      const sources = Array.isArray(item.sources) ? item.sources : [];
+      let appSatisfied = false;
+      let effectiveRequired = baseRequired;
+
+      if (item.id === 'acceptance-letter') {
+        const targetProgramRaw = applicationAnswers?.['target-program'];
+        const targetValue = Array.isArray(targetProgramRaw)
+          ? String(targetProgramRaw[0] || '').toLowerCase()
+          : String(targetProgramRaw || '').toLowerCase();
+        const needsAcceptance =
+          targetValue === 'skills_development' ||
+          targetValue === 'yes' ||
+          targetValue.includes('skills');
+        effectiveRequired = needsAcceptance;
+      }
+
+      if (item.id === 'statement-of-account') {
+        const targetProgramRaw = applicationAnswers?.['target-program'];
+        const targetValue = Array.isArray(targetProgramRaw)
+          ? String(targetProgramRaw[0] || '').toLowerCase()
+          : String(targetProgramRaw || '').toLowerCase();
+        const needsStatement =
+          targetValue === 'skills_development' ||
+          targetValue === 'yes' ||
+          targetValue.includes('skills');
+        effectiveRequired = needsStatement;
+      }
+
+      if (sources.includes('application_form')) {
+        if (aliases.includes('application_form')) {
+          appSatisfied = applicationExists;
+        } else {
+          appSatisfied = aliases.some(type => applicationDocTypeSatisfied(type, applicationAnswers));
+        }
+      }
+
+      if (item.id === 'case-manager-assessment') {
+        const statusAllows =
+          applicationStatusLower === 'pending_approval' ||
+          CASE_STATUS_FINAL_SET.has(caseStatusLower);
+        appSatisfied = assessmentSubmitted && assessmentComplete && statusAllows;
+        const matchedCount = appSatisfied ? 1 : 0;
+        const status = appSatisfied ? 'complete' : (effectiveRequired ? 'missing' : 'complete');
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount,
+          matchedCount,
+          status,
+          documentTypes: aliases,
+          sources
+        };
+      }
+
+      if (item.id === 'attendance-forms') {
+        const requiresAttendance = assessmentLivingAllowance > 0;
+        effectiveRequired = requiresAttendance;
+        const expectedMonths = (() => {
+          if (!requiresAttendance) return 0;
+          if (assessmentDurationDays && assessmentDurationDays > 0) {
+            return Math.max(1, Math.ceil(assessmentDurationDays / 30));
+          }
+          return 1;
+        })();
+        const matchedCount = matches.length;
+        let status = 'missing';
+        if (!effectiveRequired) {
+          status = 'complete';
+        } else if (matchedCount >= expectedMonths) {
+          status = 'complete';
+        } else if (matchedCount > 0) {
+          status = 'in_progress';
+        }
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: expectedMonths || 1,
+          matchedCount,
+          status,
+          documentTypes: aliases,
+          sources
+        };
+      }
+
+      if (item.id === 'medical-documentation') {
+        const requiresMedical = disabilitySupportRequested;
+        effectiveRequired = requiresMedical;
+        const matchedCount = matches.length + (appSatisfied ? 1 : 0);
+        let status = 'missing';
+        if (!effectiveRequired) {
+          status = 'complete';
+        } else if (matchedCount >= minCount) {
+          status = 'complete';
+        } else if (matchedCount > 0) {
+          status = 'in_progress';
+        }
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount,
+          matchedCount,
+          status,
+          documentTypes: aliases,
+          sources
+        };
+      }
+
+      const matchedCount = matches.length + (appSatisfied ? 1 : 0);
+      let status = 'missing';
+      if (!effectiveRequired) {
+        status = 'complete';
+      } else if (matchedCount >= minCount) {
+        status = 'complete';
+      } else if (matchedCount > 0) {
+        status = 'in_progress';
+      }
+      return {
+        id: item.id,
+        label: item.label,
+        required: effectiveRequired,
+        minCount,
+        matchedCount,
+        status,
+        documentTypes: aliases,
+        sources
+      };
+    });
+
+    const missingRequiredCount = items.filter(i => i.required && i.status !== 'complete').length;
+    return res.json({ items, missingRequiredCount });
+  } catch (err) {
+    console.error('[checklist] compute failed', err);
+    return res.status(500).json({ error: 'checklist_failed' });
+  }
+});
+
 app.get('/api/applicants/:id/documents', async (req, res) => {
   const applicantId = req.params.id;
   try {
     const [rows] = await pool.query(
-      `SELECT id, case_id, application_id, file_name, file_path, label, metadata, source, created_at AS uploaded_at
+      `SELECT id, case_id, application_id, file_name, file_path, label, metadata, document_category, source, created_at AS uploaded_at
        FROM iset_document
        WHERE applicant_user_id = ? AND status = 'active'
        ORDER BY created_at DESC`,

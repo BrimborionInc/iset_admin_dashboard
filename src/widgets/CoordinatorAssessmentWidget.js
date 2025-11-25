@@ -229,6 +229,10 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
   const [localAssessmentSubmitted, setLocalAssessmentSubmitted] = useState(false);
+  const [checklistWarningVisible, setChecklistWarningVisible] = useState(false);
+  const [checklistWarningItems, setChecklistWarningItems] = useState([]);
+  const [checklistCheckError, setChecklistCheckError] = useState(null);
+  const [checkingChecklist, setCheckingChecklist] = useState(false);
   const widgetRootRef = useRef(null);
   const alertAnchorRef = useRef(null);
   const previousAlertKeyRef = useRef(null);
@@ -279,6 +283,8 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
   const applicationStatusContext = getApplicationStatusContext(rawApplicationStatus);
   const canonicalApplicationStatus = applicationStatusContext.canonicalStatus || canonicalCaseStatusSnapshot;
   const isPendingApprovalStatus = canonicalApplicationStatus === 'pending_approval';
+  const applicantUserId = caseData?.applicant_user_id ?? caseData?.applicantUserId ?? null;
+  const applicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
 
   const isDecisionFinal = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
   const isLockedStatus = APPLICATION_LOCKED_STATUSES.has(canonicalApplicationStatus);
@@ -1377,6 +1383,37 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
     }
   };
 
+  const handleApproveClick = async () => {
+    if (!isPendingApprovalStatus || !canManageOutcomeReview) {
+      return handleComplete();
+    }
+    if (!applicantUserId) {
+      return handleComplete();
+    }
+    setChecklistCheckError(null);
+    setCheckingChecklist(true);
+    try {
+      const query = applicationId ? `?applicationId=${encodeURIComponent(applicationId)}` : '';
+      const res = await apiFetch(`/api/applicants/${applicantUserId}/document-checklist${query}`);
+      if (!res.ok) {
+        throw new Error('Failed to load document checklist.');
+      }
+      const payload = await res.json().catch(() => ({ items: [], missingRequiredCount: 0 }));
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      const missing = items.filter(i => i && i.required !== false && i.status !== 'complete');
+      if (missing.length > 0) {
+        setChecklistWarningItems(missing);
+        setChecklistWarningVisible(true);
+        setCheckingChecklist(false);
+        return;
+      }
+    } catch (err) {
+      setChecklistCheckError(err?.message || 'Checklist check failed. You may proceed.');
+    }
+    setCheckingChecklist(false);
+    await handleComplete();
+  };
+
   const headerElement = (
     <Header
       variant="h2"
@@ -1398,7 +1435,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
             <Button variant="primary" onClick={handleSubmit}>Submit</Button>
           )}
           {!isDeclarationGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && (
-            <Button variant="primary" onClick={handleComplete} disabled={!isPendingApprovalStatus || !canManageOutcomeReview}>Approve/Reject</Button>
+            <Button variant="primary" onClick={handleApproveClick} disabled={!isPendingApprovalStatus || !canManageOutcomeReview || checkingChecklist}>Approve/Reject</Button>
           )}
         </SpaceBetween>
       }
@@ -1434,6 +1471,33 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       variant="icon"
       onItemClick={() => actions && actions.removeItem && actions.removeItem()}
     />
+  );
+
+  const renderRecommendationSection = () => (
+    <>
+      {sectionHeader("Assessor's Recommendation")}
+      <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+        <FormField label="Recommendation" errorText={hasSubmitted && fieldErrors.recommendation ? fieldErrors.recommendation : undefined}
+          description="Select your recommendation for this application. If not recommending funding, provide an alternative or rationale below.">
+          <Select
+            selectedOption={RECOMMEND_OPTIONS.find(o => o.value === assessment.recommendation) || null}
+            onChange={({ detail }) => handleField('recommendation', detail.selectedOption.value)}
+            options={RECOMMEND_OPTIONS}
+            placeholder="Select recommendation"
+            ariaLabel="Recommendation"
+            data-error-focus={hasSubmitted && fieldErrors.recommendation ? 'true' : undefined}
+            tabIndex={-1}
+            disabled={isAssessmentDisabled}
+          />
+        </FormField>
+        <FormField label="Justification" stretch={true} errorText={hasSubmitted && fieldErrors.justification ? fieldErrors.justification : undefined}
+          description="Provide a clear justification for your recommendation, referencing the client's needs, goals, and eligibility.">
+          <Box width="100%">
+            <Textarea  value={assessment.justification} onChange={({ detail }) => handleField('justification', detail.value)} data-error-focus={hasSubmitted && fieldErrors.justification ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
+          </Box>
+        </FormField>
+      </Grid>
+    </>
   );
 
   if (isDeclarationGateActive) {
@@ -1557,6 +1621,109 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
             {alert.content}
           </Alert>
         )}
+        {sectionHeader('Outcome Notice')}
+        {!showNWACSection && (
+          <Box color="text-status-inactive" margin={{ top: 'm', bottom: 's' }}>
+            Outcome notice will be available after the assessment is submitted.
+          </Box>
+        )}
+        {showNWACSection && (
+          <>
+            {lacksOutcomePermission && !lockedByAnotherUser && (
+              <Alert
+                type="info"
+                statusIconAriaLabel="Information"
+              >
+                You do not have permission to complete the NWAC outcome notice. Contact an administrator if you need access.
+              </Alert>
+            )}
+            <Box
+              style={
+                isNWACFieldsDisabled || isOutcomeNoticeDisabled
+                  ? { opacity: 0.6, pointerEvents: 'none' }
+                  : undefined
+              }
+              aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
+            >
+              <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+                <FormField label="Funding Decision" errorText={hasSubmitted && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}>
+                  <SpaceBetween direction="horizontal" size="xs">
+                    <RadioGroup
+                      value={assessment.nwacReviewStatus || ''}
+                      onChange={({ detail }) => {
+                        if (isNWACFieldsDisabled) return;
+                        if (detail.value === 'approve' && assessment.nwacReason) {
+                          setShowApproveConfirmModal(true);
+                        } else {
+                          handleField('nwacReviewStatus', detail.value);
+                          if (detail.value === 'approve') handleField('nwacReason', '');
+                        }
+                      }}
+                      items={[
+                        { value: 'approve', label: 'Approve' },
+                        { value: 'reject', label: 'Reject' }
+                      ]}
+                      ariaLabel="NWAC Review Status"
+                      data-error-focus={hasSubmitted && fieldErrors.nwacReviewStatus ? 'true' : undefined}
+                      disabled={isNWACFieldsDisabled}
+                      style={isNWACFieldsDisabled ? { opacity: 0.6 } : undefined}
+                    />
+                  </SpaceBetween>
+                </FormField>
+                <FormField label="Assessment Assurance" errorText={hasSubmitted && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}>
+                  <Select
+                    selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
+                    onChange={({ detail }) => {
+                      if (isNWACFieldsDisabled) return;
+                      handleField('nwacReview', detail.selectedOption.value);
+                    }}
+                    options={[
+                      { label: 'Agree with Coordinator Recommendation', value: 'agree' },
+                      { label: 'Disagree with Coordinator Recommendation', value: 'disagree' }
+                    ]}
+                    placeholder="Select review outcome"
+                    data-error-focus={hasSubmitted && fieldErrors.nwacReview ? 'true' : undefined}
+                    disabled={isNWACFieldsDisabled}
+                  />
+                </FormField>
+              </Grid>
+              {assessment.nwacReviewStatus === 'reject' && (
+                <Grid gridDefinition={[{ colspan: 12 }]}>
+                  <FormField label="Reason for Denial" stretch={true} >
+                    <Box width="100%">
+                      <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
+                        if (isNWACFieldsDisabled) return;
+                        handleField('nwacReason', detail.value);
+                      }} data-error-focus={hasSubmitted && fieldErrors.nwacReason ? 'true' : undefined} disabled={isNWACFieldsDisabled} />
+                    </Box>
+                  </FormField>
+                </Grid>
+              )}
+            </Box>
+            <Modal
+              visible={showApproveConfirmModal}
+              onDismiss={() => setShowApproveConfirmModal(false)}
+              header="Clear Reason for Denial?"
+              footer={
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Button variant="primary" onClick={() => {
+                    if (isNWACFieldsDisabled) {
+                      setShowApproveConfirmModal(false);
+                      return;
+                    }
+                    handleField('nwacReason', '');
+                    handleField('nwacReviewStatus', 'approve');
+                    setShowApproveConfirmModal(false);
+                  }}>Clear and Approve</Button>
+                  <Button variant="normal" onClick={() => setShowApproveConfirmModal(false)}>Cancel</Button>
+                </SpaceBetween>
+              }
+            >
+              <Box>Switching to "Approve" will clear the Reason for Denial. Do you want to continue?</Box>
+            </Modal>
+          </>
+        )}
+        {assessmentSubmitted && renderRecommendationSection()}
         {sectionHeader('Assessment Overview')}
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
           <FormField label="Date of Assessment">
@@ -1944,131 +2111,8 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
             />
           </FormField>
         </Grid>
-        {sectionHeader('Outcome Notice')}
-        {!showNWACSection && (
-          <Box color="text-status-inactive" margin={{ top: 'm', bottom: 's' }}>
-            Outcome notice will be available after the assessment is submitted.
-          </Box>
-        )}
-        {showNWACSection && (
-          <>
-            {lacksOutcomePermission && !lockedByAnotherUser && (
-              <Alert
-                type="info"
-                statusIconAriaLabel="Information"
-              >
-                You do not have permission to complete the NWAC outcome notice. Contact an administrator if you need access.
-              </Alert>
-            )}
-            <Box
-              style={
-                isNWACFieldsDisabled || isOutcomeNoticeDisabled
-                  ? { opacity: 0.6, pointerEvents: 'none' }
-                  : undefined
-              }
-              aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
-            >
-              <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-                <FormField label="Funding Decision" errorText={hasSubmitted && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}>
-                  <SpaceBetween direction="horizontal" size="xs">
-                    <RadioGroup
-                      value={assessment.nwacReviewStatus || ''}
-                      onChange={({ detail }) => {
-                        if (isNWACFieldsDisabled) return;
-                        if (detail.value === 'approve' && assessment.nwacReason) {
-                          setShowApproveConfirmModal(true);
-                        } else {
-                          handleField('nwacReviewStatus', detail.value);
-                          if (detail.value === 'approve') handleField('nwacReason', '');
-                        }
-                      }}
-                      items={[
-                        { value: 'approve', label: 'Approve' },
-                        { value: 'reject', label: 'Reject' }
-                      ]}
-                      ariaLabel="NWAC Review Status"
-                      data-error-focus={hasSubmitted && fieldErrors.nwacReviewStatus ? 'true' : undefined}
-                      disabled={isNWACFieldsDisabled}
-                      style={isNWACFieldsDisabled ? { opacity: 0.6 } : undefined}
-                    />
-                  </SpaceBetween>
-                </FormField>
-                <FormField label="Assessment Assurance" errorText={hasSubmitted && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}>
-                  <Select
-                    selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
-                    onChange={({ detail }) => {
-                      if (isNWACFieldsDisabled) return;
-                      handleField('nwacReview', detail.selectedOption.value);
-                    }}
-                    options={[
-                      { label: 'Agree with Coordinator Recommendation', value: 'agree' },
-                      { label: 'Disagree with Coordinator Recommendation', value: 'disagree' }
-                    ]}
-                    placeholder="Select review outcome"
-                    data-error-focus={hasSubmitted && fieldErrors.nwacReview ? 'true' : undefined}
-                    disabled={isNWACFieldsDisabled}
-                  />
-                </FormField>
-              </Grid>
-              {assessment.nwacReviewStatus === 'reject' && (
-                <Grid gridDefinition={[{ colspan: 12 }]}>
-                  <FormField label="Reason for Denial" stretch={true} >
-                    <Box width="100%">
-                      <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
-                        if (isNWACFieldsDisabled) return;
-                        handleField('nwacReason', detail.value);
-                      }} data-error-focus={hasSubmitted && fieldErrors.nwacReason ? 'true' : undefined} disabled={isNWACFieldsDisabled} />
-                    </Box>
-                  </FormField>
-                </Grid>
-              )}
-            </Box>
-            <Modal
-              visible={showApproveConfirmModal}
-              onDismiss={() => setShowApproveConfirmModal(false)}
-              header="Clear Reason for Denial?"
-              footer={
-                <SpaceBetween direction="horizontal" size="xs">
-                  <Button variant="primary" onClick={() => {
-                    if (isNWACFieldsDisabled) {
-                      setShowApproveConfirmModal(false);
-                      return;
-                    }
-                    handleField('nwacReason', '');
-                    handleField('nwacReviewStatus', 'approve');
-                    setShowApproveConfirmModal(false);
-                  }}>Clear and Approve</Button>
-                  <Button variant="normal" onClick={() => setShowApproveConfirmModal(false)}>Cancel</Button>
-                </SpaceBetween>
-              }
-            >
-              <Box>Switching to "Approve" will clear the Reason for Denial. Do you want to continue?</Box>
-            </Modal>
-          </>
-        )}
 
-        {sectionHeader("Coordinator's Recommendation")}
-        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
-          <FormField label="Recommendation" errorText={hasSubmitted && fieldErrors.recommendation ? fieldErrors.recommendation : undefined}
-            description="Select your recommendation for this application. If not recommending funding, provide an alternative or rationale below.">
-            <Select
-              selectedOption={RECOMMEND_OPTIONS.find(o => o.value === assessment.recommendation) || null}
-              onChange={({ detail }) => handleField('recommendation', detail.selectedOption.value)}
-              options={RECOMMEND_OPTIONS}
-              placeholder="Select recommendation"
-              ariaLabel="Recommendation"
-              data-error-focus={hasSubmitted && fieldErrors.recommendation ? 'true' : undefined}
-              tabIndex={-1}
-              disabled={isAssessmentDisabled}
-            />
-          </FormField>
-          <FormField label="Justification" stretch={true} errorText={hasSubmitted && fieldErrors.justification ? fieldErrors.justification : undefined}
-            description="Provide a clear justification for your recommendation, referencing the client's needs, goals, and eligibility.">
-            <Box width="100%">
-              <Textarea  value={assessment.justification} onChange={({ detail }) => handleField('justification', detail.value)} data-error-focus={hasSubmitted && fieldErrors.justification ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
-            </Box>
-          </FormField>
-        </Grid>
+        {!assessmentSubmitted && renderRecommendationSection()}
         <Modal
           visible={showCancelModal}
           onDismiss={() => setShowCancelModal(false)}
@@ -2081,6 +2125,33 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
           }
         >
           <Box>Are you sure you want to discard your changes? This action cannot be undone.</Box>
+        </Modal>
+        <Modal
+          visible={checklistWarningVisible}
+          onDismiss={() => setChecklistWarningVisible(false)}
+          header="Checklist incomplete"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="primary" onClick={() => { setChecklistWarningVisible(false); handleComplete(); }}>
+                Continue anyway
+              </Button>
+              <Button variant="normal" onClick={() => setChecklistWarningVisible(false)}>Cancel</Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            <Box>
+              Some checklist items are still missing. You can proceed, but consider resolving these first.
+            </Box>
+            {checklistCheckError && <Alert type="warning">{checklistCheckError}</Alert>}
+            {checklistWarningItems.length > 0 && (
+              <Box as="ul" padding={{ left: 'm' }}>
+                {checklistWarningItems.map(item => (
+                  <li key={item.id}>{item.label || item.id}</li>
+                ))}
+              </Box>
+            )}
+          </SpaceBetween>
         </Modal>
         <Modal
           visible={showEditConfirmModal}

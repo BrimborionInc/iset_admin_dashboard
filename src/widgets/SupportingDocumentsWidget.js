@@ -13,7 +13,10 @@ import {
   Modal,
   FormField,
   Input,
-  CollectionPreferences
+  CollectionPreferences,
+  Tabs,
+  StatusIndicator,
+  Select
 } from '@cloudscape-design/components';
 import SupportingDocumentsHelp from '../helpPanelContents/supportingDocumentsHelp';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
@@ -26,6 +29,31 @@ const PREFERENCES_STORAGE_KEY = 'supporting-documents-table-preferences-v1';
 const COLUMN_WIDTHS_STORAGE_KEY = 'supporting-documents-table-widths-v1';
 const ALL_COLUMN_IDS = ['label', 'file_name', 'source', 'uploaded_at', 'actions'];
 const REQUIRED_COLUMN_IDS = ['file_name', 'actions'];
+const DOCUMENT_TYPE_OPTIONS = [
+  { value: '', label: 'Select document type' },
+  { value: 'application_form', label: 'Application form (legacy)' },
+  { value: 'ei_consent', label: 'EI Consent Form' },
+  { value: 'ei_verification', label: 'EI Eligibility Verification' },
+  { value: 'indigenous_declaration', label: 'Indigenous declaration' },
+  { value: 'conflict_of_interest', label: 'Conflict of Interest Form' },
+  { value: 'identity_document', label: 'Identity document' },
+  { value: 'supporting_evidence', label: 'Supporting evidence' },
+  { value: 'client_acknowledgement', label: 'Client acknowledgement' },
+  { value: 'release_student_info', label: 'Release of student info' },
+  { value: 'media_consent', label: 'Media consent' },
+  { value: 'financial_overview', label: 'Financial overview/budget' },
+  { value: 'financial_records', label: 'Income evidence' },
+  { value: 'financial_evidence', label: 'Expense evidence' },
+  { value: 'statement_of_account', label: 'Statement of Account' },
+  { value: 'acceptance_letter', label: 'Letter of Acceptance' },
+  { value: 'band_funding_confirmation', label: 'Band funding confirmation' },
+  { value: 'band_funding_denial', label: 'Band funding denial' },
+  { value: 'medical_documentation', label: 'Medical documentation' },
+  { value: 'resume', label: 'Resume' },
+  { value: 'case_assessment', label: 'Case manager assessment' },
+  { value: 'funding_agreement', label: 'Funding agreement' },
+  { value: 'attendance_form', label: 'Attendance form' }
+];
 
 const formatDate = value => {
   if (!value) return '';
@@ -57,6 +85,23 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [activeTabId, setActiveTabId] = useState('documents');
+  const [checklistItems, setChecklistItems] = useState([]);
+  const [checklistLoading, setChecklistLoading] = useState(false);
+  const [checklistError, setChecklistError] = useState(null);
+  const [missingRequiredCount, setMissingRequiredCount] = useState(0);
+  const visibleChecklistItems = useMemo(
+    () => checklistItems.filter(item => item.required !== false),
+    [checklistItems]
+  );
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editLabel, setEditLabel] = useState('');
+  const [editLabelError, setEditLabelError] = useState('');
+  const [editDocument, setEditDocument] = useState(null);
+  const [editCategory, setEditCategory] = useState('');
+  const [editCategoryError, setEditCategoryError] = useState('');
+  const [pendingCategory, setPendingCategory] = useState('');
+  const [pendingCategoryError, setPendingCategoryError] = useState('');
   const [visibleColumns, setVisibleColumns] = useState(() => {
     if (typeof window === 'undefined') return ALL_COLUMN_IDS;
     try {
@@ -98,6 +143,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   });
   const fileInputRef = useRef(null);
   const nextUploadLabelRef = useRef('');
+  const nextUploadCategoryRef = useRef('');
   const applicantUserId =
     caseData?.applicant_user_id ??
     caseData?.applicantUserId ??
@@ -193,15 +239,40 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     [applicantUserId]
   );
 
+  const loadChecklist = useCallback(async () => {
+    if (!applicantUserId) {
+      setChecklistItems([]);
+      setMissingRequiredCount(0);
+      return;
+    }
+    setChecklistLoading(true);
+    setChecklistError(null);
+    try {
+      const query = applicationId ? `?applicationId=${encodeURIComponent(applicationId)}` : '';
+      const res = await apiFetch(`/api/applicants/${applicantUserId}/document-checklist${query}`);
+      if (!res.ok) throw new Error('Failed to load checklist');
+      const payload = await res.json().catch(() => ({ items: [], missingRequiredCount: 0 }));
+      setChecklistItems(Array.isArray(payload.items) ? payload.items : []);
+      setMissingRequiredCount(Number(payload.missingRequiredCount) || 0);
+    } catch (err) {
+      setChecklistError(err?.message || 'Failed to load checklist');
+    } finally {
+      setChecklistLoading(false);
+    }
+  }, [applicantUserId, applicationId]);
+
   useEffect(() => {
     if (!applicantUserId) {
       setDocuments([]);
       setLoading(false);
       setRefreshing(false);
+      setChecklistItems([]);
+      setMissingRequiredCount(0);
       return;
     }
     loadDocuments();
-  }, [applicantUserId, loadDocuments]);
+    loadChecklist();
+  }, [applicantUserId, loadDocuments, loadChecklist]);
 
   useEffect(() => {
     if (!applicantUserId || typeof window === 'undefined') return;
@@ -275,17 +346,24 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   }, []);
   const handleLabelConfirm = useCallback(() => {
     const trimmed = (pendingLabel || '').trim();
+    const categoryTrimmed = (pendingCategory || '').trim();
     if (!trimmed) {
       setLabelError('Enter a document label.');
       return;
     }
+    if (!categoryTrimmed) {
+      setPendingCategoryError('Select a document type.');
+      return;
+    }
     nextUploadLabelRef.current = trimmed;
+    nextUploadCategoryRef.current = categoryTrimmed;
     setLabelError('');
+    setPendingCategoryError('');
     setLabelModalVisible(false);
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
-  }, [pendingLabel]);
+  }, [pendingLabel, pendingCategory]);
   const handleFileSelected = useCallback(
     async event => {
       const input = event?.target;
@@ -307,6 +385,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         if (applicationId) formData.append('applicationId', applicationId);
         const labelForUpload = (nextUploadLabelRef.current || '').trim() || file.name;
         formData.append('label', labelForUpload);
+        const categoryForUpload = (nextUploadCategoryRef.current || '').trim();
+        if (categoryForUpload) formData.append('documentType', categoryForUpload);
         const response = await apiFetch(`/api/applicants/${applicantUserId}/documents/upload`, {
           method: 'POST',
           body: formData
@@ -339,16 +419,19 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           throw new Error(payload?.message || 'Failed to upload document.');
         }
         await loadDocuments({ silent: true });
+        await loadChecklist();
       } catch (err) {
         const message = err?.message || 'Failed to upload document.';
         setError(message);
       } finally {
         setUploading(false);
         nextUploadLabelRef.current = '';
+        nextUploadCategoryRef.current = '';
         setPendingLabel('');
+        setPendingCategory('');
       }
     },
-    [applicantUserId, caseId, applicationId, loadDocuments]
+    [applicantUserId, caseId, applicationId, loadDocuments, loadChecklist]
   );
   const handleInlineEdit = useCallback(
     async (item, column, newValue) => {
@@ -438,9 +521,83 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       });
     }
   }, [deleteTarget, loadDocuments, handleDeleteCancel]);
+
+  const openEditModal = useCallback(item => {
+    if (!item || !item.id) return;
+    const parsedMeta = (() => {
+      const raw = item.metadata;
+      if (!raw) return null;
+      if (typeof raw === 'object') return raw;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    })();
+    const typeFromMeta = parsedMeta && typeof parsedMeta.document_type === 'string' ? parsedMeta.document_type : '';
+    const typeFromCategory = typeof item.document_category === 'string' ? item.document_category : '';
+    const nextType = typeFromCategory || typeFromMeta || '';
+    setEditDocument(item);
+    setEditLabel(item.label || item.file_name || '');
+    setEditLabelError('');
+    setEditCategory(nextType);
+    setEditCategoryError('');
+    setEditModalVisible(true);
+  }, []);
+
+  const handleEditDismiss = useCallback(() => {
+    setEditModalVisible(false);
+    setEditDocument(null);
+    setEditLabel('');
+    setEditLabelError('');
+    setEditCategory('');
+    setEditCategoryError('');
+  }, []);
+
+  const handleEditSave = useCallback(async () => {
+    const trimmedLabel = (editLabel || '').trim();
+    const trimmedType = (editCategory || '').trim();
+    if (!trimmedLabel) {
+      setEditLabelError('Enter a document label.');
+      return;
+    }
+    if (!trimmedType) {
+      setEditCategoryError('Select a document type.');
+      return;
+    }
+    if (!editDocument?.id) {
+      setEditLabelError('Missing document reference.');
+      return;
+    }
+    setEditLabelError('');
+    setEditCategoryError('');
+    try {
+      const res = await apiFetch(`/api/documents/${editDocument.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: trimmedLabel, documentType: trimmedType })
+      });
+      if (!res || !res.ok) {
+        let payload = null;
+        try {
+          payload = await res.json();
+        } catch (_) {
+          payload = null;
+        }
+        throw new Error(payload?.message || 'Failed to update document.');
+      }
+      await loadDocuments({ silent: true });
+      await loadChecklist();
+      handleEditDismiss();
+    } catch (err) {
+      setEditLabelError(err?.message || 'Failed to update document.');
+    }
+  }, [editLabel, editCategory, editDocument, loadDocuments, loadChecklist, handleEditDismiss]);
+
   const handleRefresh = () => {
     if (!applicantUserId) return;
     loadDocuments({ silent: true });
+    loadChecklist();
   };
 
   const baseColumnDefinitions = useMemo(
@@ -474,34 +631,37 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         header: 'Uploaded',
         cell: item => formatDate(item.uploaded_at)
       },
-      {
-        id: 'actions',
-        header: 'Actions',
-        cell: item => {
-          const isAvailable = Boolean(item?.id && item?.file_path);
-          if (!isAvailable) {
-            return <span style={{ color: '#888' }}>Unavailable</span>;
-          }
-          const inFlight = !!pendingDownloads[item.id];
-          const deleting = !!pendingDeletes[item.id];
-          return (
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button
-                variant="inline-link"
-                onClick={() => handleViewDocument(item)}
-                disabled={inFlight}
-                loading={inFlight}
-              >
-                View
-              </Button>
-              <Button
-                variant="inline-link"
-                disabled={deleting}
-                loading={deleting}
-                onClick={() => openDeleteModal(item)}
-              >
-                Delete
-              </Button>
+            {
+              id: 'actions',
+              header: 'Actions',
+              cell: item => {
+                const isAvailable = Boolean(item?.id && item?.file_path);
+                if (!isAvailable) {
+                  return <span style={{ color: '#888' }}>Unavailable</span>;
+                }
+                const inFlight = !!pendingDownloads[item.id];
+                const deleting = !!pendingDeletes[item.id];
+                return (
+                  <SpaceBetween direction="horizontal" size="xs">
+                    <Button variant="inline-link" onClick={() => openEditModal(item)}>
+                      Edit
+                    </Button>
+                    <Button
+                      variant="inline-link"
+                      onClick={() => handleViewDocument(item)}
+                      disabled={inFlight}
+                      loading={inFlight}
+                    >
+                      View
+                    </Button>
+                    <Button
+                      variant="inline-link"
+                      disabled={deleting}
+                      loading={deleting}
+                      onClick={() => openDeleteModal(item)}
+                    >
+                      Delete
+                    </Button>
             </SpaceBetween>
           );
         }
@@ -641,6 +801,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     />
   );
 
+
   return (
     <>
       <input
@@ -679,6 +840,19 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             autoFocus
           />
         </FormField>
+        <FormField
+          label="Document type"
+          description="Select the category for this document."
+          errorText={pendingCategoryError}
+      >
+          <Select
+            selectedOption={DOCUMENT_TYPE_OPTIONS.find(opt => opt.value === pendingCategory) || DOCUMENT_TYPE_OPTIONS[0]}
+            onChange={({ detail }) => setPendingCategory(detail.selectedOption.value || '')}
+            options={DOCUMENT_TYPE_OPTIONS}
+            selectedAriaLabel="Selected document type"
+            placeholder="Select document type"
+          />
+        </FormField>
       </Modal>
       <Modal
         visible={deleteModalVisible}
@@ -711,6 +885,37 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
               onChange={({ detail }) => setDeleteConfirm(detail.value)}
               autoFocus
               placeholder="delete"
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={editModalVisible}
+        onDismiss={handleEditDismiss}
+        closeAriaLabel="Close dialog"
+        header="Edit document details"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={handleEditDismiss}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleEditSave}>
+              Save
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <FormField label="Document label" errorText={editLabelError}>
+            <Input value={editLabel} onChange={({ detail }) => setEditLabel(detail.value)} autoFocus />
+          </FormField>
+          <FormField label="Document type" errorText={editCategoryError}>
+            <Select
+              selectedOption={DOCUMENT_TYPE_OPTIONS.find(opt => opt.value === editCategory) || DOCUMENT_TYPE_OPTIONS[0]}
+              onChange={({ detail }) => setEditCategory(detail.selectedOption.value || '')}
+              options={DOCUMENT_TYPE_OPTIONS}
+              selectedAriaLabel="Selected document type"
+              placeholder="Select document type"
             />
           </FormField>
         </SpaceBetween>
@@ -787,27 +992,84 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             {error}
           </Alert>
         )}
-        <Table
-          trackBy="id"
-          loading={loading || refreshing}
-          loadingText="Loading supporting documents"
-          variant="embedded"
-        items={documents}
-        columnDefinitions={columnDefinitionsForTable}
-        resizableColumns
-        stickyHeader
-        enableKeyboardNavigation
-        onColumnWidthsChange={handleColumnWidthsChange}
-        preferences={preferencesComponent}
-        submitEdit={handleInlineEdit}
-        ariaLabels={{
-          activateEditLabel: (column, item) => `Edit ${item?.label || item?.file_name || 'document'} ${column.header}`,
-          cancelEditLabel: column => `Cancel editing ${column.header}`,
-          submitEditLabel: column => `Submit editing ${column.header}`,
-          tableLabel: 'Supporting documents'
-        }}
-        empty={<Box textAlign="center">No supporting documents to display.</Box>}
-      />
+        <Tabs
+          activeTabId={activeTabId}
+          onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
+          tabs={[
+            {
+              id: 'documents',
+              label: 'Documents',
+              content: (
+                <Table
+                  trackBy="id"
+                  loading={loading || refreshing}
+                  loadingText="Loading supporting documents"
+                  variant="embedded"
+                  items={documents}
+                  columnDefinitions={columnDefinitionsForTable}
+                  resizableColumns
+                  stickyHeader
+                  enableKeyboardNavigation
+                  onColumnWidthsChange={handleColumnWidthsChange}
+                  preferences={preferencesComponent}
+                  submitEdit={handleInlineEdit}
+                  ariaLabels={{
+                    activateEditLabel: (column, item) => `Edit ${item?.label || item?.file_name || 'document'} ${column.header}`,
+                    cancelEditLabel: column => `Cancel editing ${column.header}`,
+                    submitEditLabel: column => `Submit editing ${column.header}`,
+                    tableLabel: 'Supporting documents'
+                  }}
+                  empty={<Box textAlign="center">No supporting documents to display.</Box>}
+                />
+              )
+            },
+            {
+              id: 'checklist',
+              label: (
+                <SpaceBetween direction="horizontal" size="xs">
+                  <span>Checklist</span>
+                  {missingRequiredCount > 0 ? (
+                    <StatusIndicator type="error">{`${missingRequiredCount} missing`}</StatusIndicator>
+                  ) : (
+                    <StatusIndicator type="success">Complete</StatusIndicator>
+                  )}
+                </SpaceBetween>
+              ),
+              content: (
+                <SpaceBetween size="s">
+                  {checklistError && (
+                    <Alert type="error" dismissible onDismiss={() => setChecklistError(null)}>
+                      {checklistError}
+                    </Alert>
+                  )}
+                  <Table
+                    trackBy="id"
+                    variant="embedded"
+                    loading={checklistLoading}
+                    loadingText="Loading checklist"
+                    items={visibleChecklistItems}
+                    resizableColumns
+                    columnDefinitions={[
+                      { id: 'label', header: 'Item', cell: item => item.label, minWidth: 220 },
+                      {
+                        id: 'status',
+                        header: 'Status',
+                        minWidth: 160,
+                        cell: item => {
+                          if (item.status === 'complete') return <StatusIndicator type="success">Complete</StatusIndicator>;
+                          if (item.status === 'missing') return <StatusIndicator type="error">Missing</StatusIndicator>;
+                          if (item.status === 'in_progress') return <StatusIndicator type="info">In progress</StatusIndicator>;
+                          return <StatusIndicator type="pending">Pending</StatusIndicator>;
+                        }
+                      }
+                    ]}
+                    empty={<Box textAlign="center">No checklist items required.</Box>}
+                  />
+                </SpaceBetween>
+              )
+            }
+          ]}
+        />
       </SpaceBetween>
       </BoardItem>
     </>
