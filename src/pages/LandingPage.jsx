@@ -43,20 +43,17 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.2.1 (17 Nov 2025)',
-      description: 'Release 0.2.1 adds status-transition hotfixes, admin home community lookup, and configurable reminder notifications.',
+      sectionTitle: 'Release Notes - v0.2.2 (25 Nov 2025)',
+      description: 'Release 0.2.2 ships the Document Checklist inside the Application Assessment workspace so assessors can track required files in one place.',
       features: {
         heading: 'Updates',
         sections: [
           {
-            title: 'Patch v0.2.1 — Notification templates',
+            title: 'Patch v0.2.2 — Document Checklist',
             paragraphs: [
-              'Hotfixes to status transitions that occasionally blocked or skipped expected statuses.',
-              'Home community lookup added in the admin console to speed data entry.',
-              'Reminder notifications are now configurable in Settings.',
-              'New Notification Template Editor lets administrators adjust submission confirmations, secure message alerts, and decision emails with inline formatting controls, placeholder hints, and preview—all inside the dashboard.',
-              'Notification Settings are now live: when an event/role is enabled and linked to a template, the applicant/staff emails use that exact copy with the appropriate placeholders.',
-              'Template helpers highlight the available tokens (tracking ID, applicant name, portal link, etc.) so the final email matches the data captured in intake.'
+              'Document Checklist now calculates itself automatically from the documents on file and the application details; only items that actually apply are shown.',
+              'Key rules are built in (e.g., acceptance and statement of account only when skills training applies; attendance only when living allowance applies; medical docs only when disability support is requested).',
+              'When you click Approve/Reject, a warning modal shows any missing items; you can still continue if you choose.'
             ]
           },
           {
@@ -164,6 +161,7 @@ const copy = {
       knownBugs: {
         heading: 'Known Bugs',
         sections: [
+          { title: 'Record Locking', paragraphs: ['Record locking still sometimes causes progress to be prevented.'] },
           { title: 'Workflow Studio', paragraphs: ['The "flowchart" views do not pan or zoom consistently, making drag interactions unreliable.'] },
           { title: 'Intake Step Editor', paragraphs: ['Dragging components within the workspace causes flicker and the insertion point is unclear.'] },
           { title: 'Template Editor (checkbox layout)', paragraphs: ['Checkbox options can overlap their labels in dense blocks; refresh or collapse the section to restore spacing while we patch the layout.'] },
@@ -234,19 +232,18 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.2.1 (17 novembre 2025)',
-      description: 'La version 0.2.1 ajoute des correctifs pour les statuts, la recherche de communauté d’origine dans la console admin et la configuration des rappels.',
+      sectionTitle: 'Notes de version - v0.2.2 (25 novembre 2025)',
+      description: 'La version 0.2.2 active la liste de contrôle des documents dans l’espace de travail Évaluation des demandes pour suivre tous les fichiers requis au même endroit.',
       features: {
         heading: 'Mises à jour',
         sections: [
           {
-            title: 'Correctif v0.2.1 — Maintenance et notifications',
+            title: 'Correctif v0.2.2 — Liste de contrôle des documents',
             paragraphs: [
-              'Correctifs rapides sur certaines transitions de statut qui pouvaient bloquer ou sauter une étape attendue.',
-              'Recherche de communauté d’origine ajoutée dans la console admin pour accélérer la saisie.',
-              'Les notifications de rappel sont maintenant configurables dans Paramètres.',
-              'Nouvel éditeur de modèles de notification pour ajuster les confirmations de dépôt, alertes de messagerie sécurisée et courriels de décision.',
-              'Les paramètres de notification sont actifs : lorsqu’un événement/rôle est activé et lié à un modèle, les courriels utilisent ce texte avec les bons espaces réservés.'
+              'La liste de contrôle des documents est disponible dans l’espace de travail Évaluation des demandes; les évaluatrices peuvent marquer les éléments comme requis, reçus ou dispensés directement dans le dossier.',
+              'Les statuts des éléments restent en place lorsque vous changez d’onglet pour éviter de perdre le travail en cours.',
+              'Des notes en ligne expliquent pourquoi un document est dispensé ou indiquent les suivis nécessaires avant une décision.',
+              'Les totaux requis vs complétés montrent rapidement ce qui bloque encore l’approbation.'
             ]
           },
           {
@@ -289,6 +286,7 @@ const copy = {
       knownBugs: {
         heading: 'Bugs connus',
         sections: [
+          { title: 'Verrouillage des dossiers', paragraphs: ['Le verrouillage des enregistrements empêche encore parfois la progression.'] },
           { title: 'Studio des parcours', paragraphs: ['Les vues « organigramme » ne gèrent pas correctement le déplacement ou le zoom, ce qui rend le glisser-déposer instable.'] },
           { title: 'Éditeur d’étapes', paragraphs: ['Le déplacement des composants dans l’aire de travail provoque un scintillement et le point d’insertion demeure flou.'] },
           { title: 'Chaînes françaises par défaut', paragraphs: ['Certains composants d’accueil contiennent un texte français par défaut qui perturbe la traduction pilotée par l’IA.'] },

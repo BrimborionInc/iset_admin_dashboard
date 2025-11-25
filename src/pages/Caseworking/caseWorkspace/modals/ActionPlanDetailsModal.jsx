@@ -549,6 +549,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                   filteringType="manual"
                   statusType={prevNocLoading ? "loading" : "finished"}
                   loadingText="Searching NOC codes"
+                  expandToViewport
                   disabled={!form.prevEmploymentNocVersion}
                 />
               </FormField>
@@ -678,19 +679,20 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                     />
                   </FormField>
                   <FormField label="Result NOC code" description="Required when result is Employed.">
-                    <Autosuggest
-                      value={form.resultNoc}
-                      onChange={({ detail }) => setForm(curr => ({ ...curr, resultNoc: detail.value }))}
-                      onLoadItems={({ detail }) => handleResultNocSearch(detail.filteringText)}
-                      options={resultNocOptions}
-                      placeholder={form.resultNocVersion ? "Search NOC code" : "Select NOC version first"}
-                      empty="No matches"
-                      filteringType="manual"
-                      statusType={resultNocLoading ? "loading" : "finished"}
-                      loadingText="Searching NOC codes"
-                      disabled={!form.resultNocVersion}
-                    />
-                  </FormField>
+                  <Autosuggest
+                    value={form.resultNoc}
+                    onChange={({ detail }) => setForm(curr => ({ ...curr, resultNoc: detail.value }))}
+                    onLoadItems={({ detail }) => handleResultNocSearch(detail.filteringText)}
+                    options={resultNocOptions}
+                    placeholder={form.resultNocVersion ? "Search NOC code" : "Select NOC version first"}
+                    empty="No matches"
+                    filteringType="manual"
+                    statusType={resultNocLoading ? "loading" : "finished"}
+                    loadingText="Searching NOC codes"
+                    expandToViewport
+                    disabled={!form.resultNocVersion}
+                  />
+                </FormField>
                 </>
               )}
             </ColumnLayout>

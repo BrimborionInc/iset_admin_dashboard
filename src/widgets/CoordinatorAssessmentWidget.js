@@ -1933,6 +1933,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
               }}
               options={nocSuggestions}
               statusType={nocSuggestionsLoading ? 'loading' : 'finished'}
+              expandToViewport
               placeholder={
                 requiresNoc
                   ? assessment.interventionNocVersion

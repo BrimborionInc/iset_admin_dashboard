@@ -1040,6 +1040,7 @@ const InterventionModal = ({
                   onSelect={({ detail }) => handleChange("noc", detail.value || "")}
                   options={nocSuggestions}
                   statusType={nocSuggestionsLoading ? "loading" : "finished"}
+                  expandToViewport
                   placeholder={
                     requiresNoc
                       ? nocVersionsLoading

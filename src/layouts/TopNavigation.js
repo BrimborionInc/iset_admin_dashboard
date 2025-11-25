@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { TopNavigation } from '@cloudscape-design/components';
 import { buildLoginUrl, buildLogoutUrl, clearSession, hasValidSession, loadSession } from '../auth/cognito';
+import AdminConsoleIntroHelp from '../helpPanelContents/adminConsoleIntroHelp';
 
 function getEmailForRole(role) {
   switch (role?.value || role) {
@@ -71,13 +72,26 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) =>
   }];
 
   const roleValue = currentRole?.value || currentRole;
+  const openHelpPanel = () => {
+    if (typeof window === 'undefined') return;
+    try {
+      const detail = {
+        title: 'Admin Console Help',
+        content: <AdminConsoleIntroHelp />,
+        context: AdminConsoleIntroHelp.aiContext || ''
+      };
+      window.dispatchEvent(new CustomEvent('help:open-topnav', { detail }));
+    } catch (error) {
+      console.error('Failed to open help panel', error);
+    }
+  };
 
   const simSignedOut = isSimSignedOut();
   if ((signedIn && !simSignedOut) || (bypass && !simSignedOut)) {
     if (roleValue === 'System Administrator') {
       utilities.push({ type: 'button', iconName: 'settings', ariaLabel: 'Settings', onClick: () => console.log('Settings clicked') });
     }
-    utilities.push({ type: 'button', iconName: 'support', ariaLabel: 'Support', onClick: () => console.log('Support clicked') });
+    utilities.push({ type: 'button', iconName: 'support', ariaLabel: 'Support', onClick: openHelpPanel });
     if (bypass) {
       utilities.push({
         type: 'menu-dropdown',

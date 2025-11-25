@@ -670,7 +670,20 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   const applicantName = caseData?.applicant_name || [answers['first-name'], answers['middle-names'], answers['last-name']].filter(Boolean).join(' ');
 
   const contactEmail = caseData?.applicant_email || answers['contact-email-address'] || answers.email;
-  if (contactEmail) overviewItems.push({ label: 'Email', value: contactEmail });
+  if (contactEmail) {
+    overviewItems.push({
+      label: 'Email',
+      value: (
+        <CopyToClipboard
+          copyButtonAriaLabel="Copy applicant email"
+          copyErrorText="Email failed to copy"
+          copySuccessText="Email copied"
+          textToCopy={contactEmail}
+          variant="inline"
+        />
+      )
+    });
+  }
 
   const phoneNumber = caseData?.applicant_phone || answers['telephone-day'] || answers['telephone-alt'];
   if (phoneNumber) overviewItems.push({ label: 'Phone', value: phoneNumber });

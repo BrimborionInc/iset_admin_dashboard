@@ -21,6 +21,7 @@ import { helpMessages } from './utils/helpMessages.js';
 import CustomSplitPanel from './layouts/CustomSplitPanel.js';
 import { LocationProvider } from './context/LocationContext';
 import AdminDashboardHelp from './helpPanelContents/adminDashboardHelp.js';
+import AdminConsoleIntroHelp from './helpPanelContents/adminConsoleIntroHelp.js';
 
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_STORED_MESSAGES = 24;
@@ -623,6 +624,18 @@ const AppContent = ({ currentRole }) => {
     try { setAvailableItems(items || []); } catch {}
     setSplitPanelOpen(true);
   }, [setSplitPanelOpen]);
+
+  useEffect(() => {
+    const handleTopNavHelp = (event) => {
+      const detail = event?.detail || {};
+      const content = detail.content || <AdminConsoleIntroHelp />;
+      const title = detail.title || 'Admin Console Help';
+      const context = detail.context || AdminConsoleIntroHelp.aiContext || AdminDashboardHelp.aiContext || '';
+      toggleHelpPanel(content, title, context);
+    };
+    window.addEventListener('help:open-topnav', handleTopNavHelp);
+    return () => window.removeEventListener('help:open-topnav', handleTopNavHelp);
+  }, []);
 
   // Listen for page requests to open the tools palette (avoids prop drilling)
   useEffect(() => {

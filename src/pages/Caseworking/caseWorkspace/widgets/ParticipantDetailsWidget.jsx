@@ -973,6 +973,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                     options={bandSearchOptions.home || []}
                     loadingText="Searching communities..."
                     statusType={bandSearchLoading.home ? "loading" : "finished"}
+                    expandToViewport
                     empty={bandSearchLoading.home ? "Searching communities..." : "No matches"}
                     placeholder="Search communities"
                     onChange={({ detail }) => {

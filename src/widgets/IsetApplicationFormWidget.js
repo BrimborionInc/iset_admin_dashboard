@@ -745,29 +745,6 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
     ]
   },
   {
-    id: 'employment-insurance',
-    title: 'Employment Insurance status',
-    description: 'Applicant-reported EI participation and supporting paperwork.',
-    columns: 2,
-    editable: true,
-    items: [
-      {
-        label: 'EI status',
-        field: 'ei_status',
-        controlType: 'select',
-        optionsKey: 'ei_status',
-        renderValue: answers => formatOption('ei_status', answers?.ei_status)
-      },
-      {
-        label: 'EI documents (held or expected)',
-        field: 'ei-documents-receiving',
-        controlType: 'multiselect',
-        optionsKey: 'ei-documents-receiving',
-        renderValue: answers => formatOptionList('ei-documents-receiving', answers?.['ei-documents-receiving'])
-      }
-    ]
-  },
-  {
     id: 'employment-goals',
     title: 'Employment goals & barriers',
     description: 'Self-identified goals and obstacles.',
@@ -1609,6 +1586,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
           options={optionsForKey}
           loadingText="Searching communities..."
           statusType={loadingForKey ? 'loading' : 'finished'}
+          expandToViewport
           empty={loadingForKey ? 'Searching communities...' : 'No matches'}
           placeholder={item.placeholder || 'Search communities'}
           onChange={({ detail }) => {

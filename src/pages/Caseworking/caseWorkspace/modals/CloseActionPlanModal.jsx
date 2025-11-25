@@ -289,6 +289,7 @@ const CloseActionPlanModal = ({
                 filteringType="manual"
                 statusType={nocLoading ? "loading" : "finished"}
                 loadingText="Searching NOC codes"
+                expandToViewport
                 disabled={!resultNocVersion}
               />
             </FormField>
