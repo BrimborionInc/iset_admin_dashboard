@@ -16,12 +16,19 @@ const SupportingDocumentsHelp = () => (
         and the date they were received.
       </li>
       <li>
+        <strong>Document labels:</strong> Use inline edit on “Document label” to give files a meaningful name (e.g., “Government ID”).
+        Manual uploads prompt for a label; multi-file uploads automatically suffix the label (Label, Label (1), Label (2), …).
+      </li>
+      <li>
         <strong>One-click download:</strong> Open a document in a new tab to review or save it locally. Downloads
         use secure, time-limited links.
       </li>
       <li>
         <strong>Auto-refresh:</strong> When a new attachment arrives through secure messaging, the list refreshes on
         its own so you do not miss new evidence.
+      </li>
+      <li>
+        <strong>Safe delete:</strong> Deleting requires typing <code>delete</code> to confirm. Use only when you are sure a document should be removed.
       </li>
     </ul>
 
@@ -49,8 +56,9 @@ const SupportingDocumentsHelp = () => (
 
 SupportingDocumentsHelp.aiContext = `
 You are assisting an ISET program staff member reviewing the Supporting Documents widget. Explain how to confirm the
-latest uploads, download evidence, and understand document sources. Offer practical advice for handling missing or
-outdated files.
+latest uploads, download evidence, and understand document sources. Clarify that document labels can be edited inline
+and that multi-file uploads suffix labels automatically; manual uploads prompt for labels. Note that delete is gated by
+typing “delete” and should be used sparingly. Offer practical advice for handling missing or outdated files.
 `;
 
 export default SupportingDocumentsHelp;

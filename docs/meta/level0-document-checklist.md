@@ -50,3 +50,4 @@ Working log for implementing document labeling and future checklist support acro
 - 2025-11-25: Admin manual uploads now respect UPLOAD_MODE/UPLOAD_DRIVER; in s3 mode files stream to object store via presigned PUT using shared s3Provider, with file_path set to the object key.
 - 2025-11-25: Intake authoring updated: file-upload template/schema includes `documentLabel` (display name) and emits data attribute; portal renderer passes `document_label` through presign/finalize; portal finalize writes label/metadata into `iset_document`.
 - 2025-11-25: Workflow publish normalization now emits `documentLabel` for file-upload components so published schemas deliver display labels to the portal.
+- 2025-11-25: Portal file-upload renderer suffixes document labels for multi-file uploads (label, label (1), label (2)...) and sends per-file labels to presign/finalize.

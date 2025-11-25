@@ -33,7 +33,7 @@ const SecureMessagesHelpPanelContent = () => (
         Mark a message as urgent when you need the applicant’s immediate attention.
       </li>
       <li>
-        Attachments you open here are also copied to the Supporting Documents widget for future reference.
+        Attachments you open here are also copied to the Supporting Documents widget for future reference. Labels remain editable in Supporting Documents if you need to rename them.
       </li>
       <li>
         Refresh the inbox after expecting new information or when another team member has replied.
@@ -51,8 +51,7 @@ const SecureMessagesHelpPanelContent = () => (
 
 SecureMessagesHelpPanelContent.aiContext = `
 You are assisting an ISET staff member using the Secure Messaging widget. Explain the purpose of each tab, how to
-compose and manage messages, and what happens to attachments. Highlight best practices for urgency flags and for
-emptying deleted items.
+compose and manage messages, and what happens to attachments. Clarify that attachments are adopted into Supporting Documents (labels can be edited there). Highlight best practices for urgency flags and for emptying deleted items.
 `;
 
 export default SecureMessagesHelpPanelContent;
