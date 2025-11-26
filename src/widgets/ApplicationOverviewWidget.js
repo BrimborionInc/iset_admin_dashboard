@@ -154,7 +154,14 @@ const formatStatusLabel = value => {
     .join(' ');
 };
 
-const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHelpPanel }) => {
+const ApplicationOverviewWidget = ({
+  actions,
+  application_id,
+  caseData,
+  toggleHelpPanel,
+  applicationRowVersion,
+  onRowVersionUpdate,
+}) => {
   const [application, setApplication] = useState(null);
   const [loading, setLoading] = useState(Boolean(application_id));
   const [error, setError] = useState(null);
@@ -163,6 +170,12 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
   const [statusFeedback, setStatusFeedback] = useState(null);
   const manualStatusRef = useRef(null);
   const [slaTargets, setSlaTargets] = useState(SLA_DEFAULT_DAYS);
+  const [rowVersion, setRowVersion] = useState(() => {
+    const fromProp = Number(applicationRowVersion || 0);
+    const fromCase = Number(caseData?.application_row_version || 0);
+    const fromApp = Number(application?.row_version || 0);
+    return Math.max(fromProp || 0, fromCase || 0, fromApp || 0, 0);
+  });
   const {
     userId: currentUserId,
     displayName: currentUserName,
@@ -230,6 +243,13 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
     setLockAlertDismissed(false);
   }, [lockAlertDismissed, lockHeldByCurrentUser, lockedByAnotherUser, lockAlertMessage]);
 
+  useEffect(() => {
+    const incoming = Number(applicationRowVersion || 0);
+    if (incoming && incoming > rowVersion) {
+      setRowVersion(incoming);
+    }
+  }, [applicationRowVersion, rowVersion]);
+
   const fetchLatestApplication = useCallback(async () => {
     if (!application_id) return null;
     try {
@@ -242,11 +262,18 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
       }
       data.__payload = payload || {};
       setApplication(data);
+      const incomingVersion = Number(data?.row_version || 0);
+      if (incomingVersion) {
+        setRowVersion(prev => (incomingVersion > prev ? incomingVersion : prev));
+        if (typeof onRowVersionUpdate === 'function') {
+          onRowVersionUpdate(incomingVersion);
+        }
+      }
       return data;
     } catch (_) {
       return null;
     }
-  }, [application_id]);
+  }, [application_id, onRowVersionUpdate]);
 
 
   useEffect(() => {
@@ -290,6 +317,13 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
         }
         data.__payload = payload || {};
         setApplication(data);
+        const incomingVersion = Number(data?.row_version || 0);
+        if (incomingVersion) {
+          setRowVersion(prev => (incomingVersion > prev ? incomingVersion : prev));
+          if (typeof onRowVersionUpdate === 'function') {
+            onRowVersionUpdate(incomingVersion);
+          }
+        }
       })
       .catch(err => {
         if (!cancelled) {
@@ -329,6 +363,21 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
       setStatusValue(nextStatus || '');
     }
   }, [applicationStatusFromCase, caseData?.status, application?.status, savingStatus, statusValue]);
+
+  // Keep the cached application row_version in sync with fresher caseData values to avoid stale optimistic tokens.
+  useEffect(() => {
+    const incomingVersion = Number(caseData?.application_row_version || 0);
+    if (!incomingVersion) return;
+    setRowVersion(prev => (incomingVersion > prev ? incomingVersion : prev));
+    setApplication(prev => {
+      if (!prev) return prev;
+      const currentVersion = Number(prev.row_version || 0);
+      if (incomingVersion > currentVersion) {
+        return { ...prev, row_version: incomingVersion };
+      }
+      return prev;
+    });
+  }, [caseData?.application_row_version]);
 
   useEffect(() => {
     let cancelled = false;
@@ -517,7 +566,7 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
         refreshLockHeartbeat().catch(() => {});
       }
 
-      const expectedRowVersion = Number(application?.row_version || 0);
+      const expectedRowVersion = Number(rowVersion || caseData?.application_row_version || application?.row_version || 0);
       const payload = { status: nextStatus, applicationStatus: nextStatus };
       if (expectedRowVersion > 0) {
         payload.expectedRowVersion = expectedRowVersion;
@@ -550,6 +599,10 @@ const ApplicationOverviewWidget = ({ actions, application_id, caseData, toggleHe
         setStatusValue(previousStatus);
         const currentRowVersion = Number(body?.currentRowVersion ?? body?.application_row_version);
         if (currentRowVersion) {
+          setRowVersion(prev => (currentRowVersion > prev ? currentRowVersion : prev));
+          if (typeof onRowVersionUpdate === 'function') {
+            onRowVersionUpdate(currentRowVersion);
+          }
           setApplication(prev => (prev ? { ...prev, row_version: currentRowVersion } : prev));
         }
         await fetchLatestApplication();

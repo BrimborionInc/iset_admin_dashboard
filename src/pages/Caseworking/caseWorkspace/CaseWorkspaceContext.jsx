@@ -1165,6 +1165,90 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     return detail;
   }, [apiFetch, caseId]);
 
+  const closeCase = useCallback(async () => {
+    if (!caseId) {
+      const error = new Error("Case not loaded.");
+      error.status = 400;
+      throw error;
+    }
+    const response = await apiFetch(`/api/cases/${caseId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "closed" }),
+    });
+    let detail = null;
+    try {
+      detail = await response.json();
+    } catch (_) {
+      detail = null;
+    }
+    if (!response.ok) {
+      const message =
+        detail?.detail ||
+        detail?.message ||
+        detail?.error ||
+        `Failed to close case (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      error.details = detail;
+      throw error;
+    }
+    setState(prev => {
+      if (!prev.caseData) return prev;
+      return {
+        ...prev,
+        caseData: {
+          ...prev.caseData,
+          status: "closed",
+          closedAt: detail?.closedAt || prev.caseData.closedAt || null,
+        },
+      };
+    });
+    return detail;
+  }, [apiFetch, caseId]);
+
+  const reopenCase = useCallback(async () => {
+    if (!caseId) {
+      const error = new Error("Case not loaded.");
+      error.status = 400;
+      throw error;
+    }
+    const response = await apiFetch(`/api/cases/${caseId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "active" }),
+    });
+    let detail = null;
+    try {
+      detail = await response.json();
+    } catch (_) {
+      detail = null;
+    }
+    if (!response.ok) {
+      const message =
+        detail?.detail ||
+        detail?.message ||
+        detail?.error ||
+        `Failed to reopen case (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      error.details = detail;
+      throw error;
+    }
+    setState(prev => {
+      if (!prev.caseData) return prev;
+      return {
+        ...prev,
+        caseData: {
+          ...prev.caseData,
+          status: "active",
+          closedAt: null,
+        },
+      };
+    });
+    return detail;
+  }, [apiFetch, caseId]);
+
   const createActionPlan = useCallback(
     async plan => {
       const response = await apiFetch(`/api/cases/${caseId}/action-plans`, {
@@ -1387,6 +1471,8 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     runComplianceChecks,
     prepareIlmpExport,
     markReadyToClose,
+    closeCase,
+    reopenCase,
     fetchActionPlanContext,
     upsertActionPlanReviewReminder,
     saveCaseContext,

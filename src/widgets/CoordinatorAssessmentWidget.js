@@ -54,12 +54,50 @@ const scrollToPageTop = () => {
   }
 };
 
+const SCROLL_DEBUG = true;
+const debugScroll = (...args) => {
+  if (SCROLL_DEBUG && typeof console !== 'undefined' && console.debug) {
+    console.debug('[assessment scroll]', ...args);
+  }
+};
+const isScrollable = (el) => {
+  if (!el || !(el instanceof HTMLElement)) return false;
+  const style = window.getComputedStyle(el);
+  const overflowY = style.overflowY;
+  const canScroll = ['auto', 'scroll'].includes(overflowY);
+  return canScroll && el.scrollHeight > el.clientHeight;
+};
+const findScrollableAncestor = (el) => {
+  let current = el;
+  while (current && current.parentElement) {
+    if (isScrollable(current)) return current;
+    current = current.parentElement;
+  }
+  return null;
+};
 const scrollElementToTop = (element) => {
-  if (!element) return;
+  if (!element) {
+    debugScroll('skip: no element');
+    return;
+  }
   try {
     element.scrollTo({ top: 0, behavior: 'smooth' });
-  } catch (_) {
+    debugScroll('element scrollTo smooth', !!element);
+  } catch (err) {
     element.scrollTop = 0;
+    debugScroll('element scrollTop fallback', err?.message);
+  }
+};
+const scrollWidgetAndPageTopOnce = (rootRef) => {
+  const rootEl = rootRef?.current || null;
+  const scrollTarget = rootEl ? findScrollableAncestor(rootEl) || rootEl : null;
+  debugScroll('scrollWidgetAndPageTopOnce start', !!rootEl, 'scrollTargetIsRoot?', scrollTarget === rootEl);
+  scrollElementToTop(scrollTarget);
+  try {
+    scrollToPageTop();
+    debugScroll('window scrollTo success');
+  } catch (err) {
+    debugScroll('window scrollTo failed', err?.message);
   }
 };
 
@@ -213,13 +251,30 @@ const buildEmptyAssessment = () => ({
   childcareFunding: ''
 });
 
-const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate }, ref) => {
+const CoordinatorAssessmentWidget = forwardRef(
+  ({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate, applicationRowVersion, onRowVersionUpdate }, ref) => {
   // State for form fields
   const [assessment, setAssessment] = useState(() => buildEmptyAssessment());
   const [initialAssessment, setInitialAssessment] = useState(() => buildEmptyAssessment());
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [alert, setAlert] = useState(null);
-  const [applicationRowVersion, setApplicationRowVersion] = useState(() => Number(caseData?.application_row_version || 0));
+  const [applicationRowVersionState, setApplicationRowVersion] = useState(() =>
+    Number(applicationRowVersion || caseData?.application_row_version || 0)
+  );
+  const updateRowVersion = useCallback(
+    (next) => {
+      const numeric = Number(next || 0);
+      if (!numeric) return;
+      setApplicationRowVersion(prev => {
+        const target = numeric > (prev || 0) ? numeric : prev || numeric;
+        if (target !== prev && typeof onRowVersionUpdate === 'function') {
+          onRowVersionUpdate(target);
+        }
+        return target;
+      });
+    },
+    [onRowVersionUpdate]
+  );
   const [isChanged, setIsChanged] = useState(false);
   const [showNWACSection, setShowNWACSection] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
@@ -271,10 +326,13 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
   const [isSigningDeclaration, setIsSigningDeclaration] = useState(false);
   const [declarationError, setDeclarationError] = useState(null);
   const scrollWidgetAndPageTop = useCallback(() => {
-    if (widgetRootRef.current) {
-      scrollElementToTop(widgetRootRef.current);
-    }
-    scrollToPageTop();
+    debugScroll('scrollWidgetAndPageTop');
+    scrollWidgetAndPageTopOnce(widgetRootRef);
+  }, []);
+  const scrollAfterAction = useCallback(() => {
+    // Scroll widget and page to top after save/submit actions.
+    debugScroll('scrollAfterAction');
+    scrollWidgetAndPageTopOnce(widgetRootRef);
   }, []);
 
   const rawApplicationStatus = caseData?.applicationStatus ?? caseData?.application_status ?? null;
@@ -400,18 +458,22 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
 
   useEffect(() => {
     const incoming = Number(caseData?.application_row_version || 0);
-    setApplicationRowVersion(prev => {
-      if (!incoming) return prev;
-      // Only move forward; ignore stale payloads that would decrement the version.
-      return incoming >= (Number(prev) || 0) ? incoming : prev;
-    });
-  }, [caseData?.application_row_version]);
+    if (incoming) {
+      updateRowVersion(incoming);
+    }
+  }, [caseData?.application_row_version, updateRowVersion]);
+  useEffect(() => {
+    const incoming = Number(applicationRowVersion || 0);
+    if (incoming && incoming > (Number(applicationRowVersionState) || 0)) {
+      updateRowVersion(incoming);
+    }
+  }, [applicationRowVersion, applicationRowVersionState, updateRowVersion]);
 
   // Pre-populate fields from application form as placeholders
   useEffect(() => {
     if (!caseData) return;
     const incomingVersion = Number(caseData?.application_row_version || 0);
-    if (incomingVersion && incomingVersion < (Number(applicationRowVersion) || 0)) {
+    if (incomingVersion && incomingVersion < (Number(applicationRowVersionState) || 0)) {
       // Ignore stale payloads so we don't overwrite newer local edits after a save.
       return;
     }
@@ -580,8 +642,8 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       validationAlert?.header ||
       declarationError ||
       null;
-    const shouldScroll = Boolean(alert || validationAlert || declarationError);
-    if (!shouldScroll) {
+    const hasAlert = Boolean(alert || validationAlert || declarationError);
+    if (!hasAlert) {
       previousAlertKeyRef.current = null;
       return;
     }
@@ -589,23 +651,19 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       return;
     }
     previousAlertKeyRef.current = alertKey;
-    try {
-      alertAnchorRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch (_) {
-      scrollWidgetAndPageTop();
-    }
-  }, [alert, validationAlert, declarationError, scrollWidgetAndPageTop]);
+    // Do not scroll the anchor into view; rely on post-action scrolls to top to avoid conflicting scrolls.
+  }, [alert, validationAlert, declarationError]);
 
   useEffect(() => {
     const nextVersion = Number(caseData?.application_row_version || 0);
     if (
       Number.isFinite(nextVersion) &&
       nextVersion > 0 &&
-      (applicationRowVersion === 0 || nextVersion > applicationRowVersion)
+      (applicationRowVersionState === 0 || nextVersion > applicationRowVersionState)
     ) {
-      setApplicationRowVersion(nextVersion);
+      updateRowVersion(nextVersion);
     }
-  }, [caseData?.application_row_version, applicationRowVersion]);
+  }, [caseData?.application_row_version, applicationRowVersionState, onRowVersionUpdate]);
 
   // Handlers
   // Enhanced handleField to clear error for the field if value is now valid
@@ -721,7 +779,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
         return;
       }
       const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
-      const versionToken = Number(applicationRowVersion || caseData?.application_row_version || 0);
+      const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
       const shouldPromoteToInReview = canonicalApplicationStatus === 'submitted';
       const payload = { assessment_conflict_declaration_signed: true };
       if (shouldPromoteToInReview) {
@@ -739,7 +797,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       const result = await res.json().catch(() => ({}));
       if (res.status === 409) {
         const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
-        if (latestVersion) setApplicationRowVersion(latestVersion);
+        if (latestVersion) updateRowVersion(latestVersion);
         if (typeof actions?.refreshCaseData === 'function') {
           try {
             await actions.refreshCaseData();
@@ -751,7 +809,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });
-        scrollWidgetAndPageTop();
+        scrollAfterAction();
         if (releaseAfterSuccess) {
           releaseLock({ silent: true }).catch(() => {});
         }
@@ -762,7 +820,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       }
       const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
       if (updatedRowVersion) {
-        setApplicationRowVersion(updatedRowVersion);
+        updateRowVersion(updatedRowVersion);
       }
       const signedAtIso = new Date().toISOString();
       setConflictDeclarationSigned(true);
@@ -777,7 +835,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
         statusIconAriaLabel: 'Success'
       };
       setAlert(successAlert);
-      scrollWidgetAndPageTop();
+      scrollAfterAction();
       if (typeof actions?.refreshCaseData === 'function') {
         try {
           await actions.refreshCaseData();
@@ -807,7 +865,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
         dismissible: true,
         statusIconAriaLabel: 'Error'
       });
-      scrollWidgetAndPageTop();
+      scrollAfterAction();
     } finally {
       setIsSigningDeclaration(false);
     }
@@ -823,7 +881,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
     lockHeldByCurrentUser,
     onCaseUpdate,
     releaseLock,
-    setApplicationRowVersion,
+    updateRowVersion,
     scrollWidgetAndPageTop
   ]);
   const validateAssessment = (assessment) => {
@@ -919,13 +977,16 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
     if (!lockCheck.ok) return;
     const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
     // Pull the freshest row_version before building the submit payload to avoid optimistic conflicts.
-    let latestRowVersion = applicationRowVersion;
+    let latestRowVersion = applicationRowVersionState;
     try {
       const latest = typeof actions?.refreshCaseData === 'function' ? await actions.refreshCaseData() : null;
       const refreshedVersion = Number(latest?.application_row_version || latest?.applicationRowVersion || 0);
       if (refreshedVersion > 0) {
         latestRowVersion = refreshedVersion;
-        setApplicationRowVersion(refreshedVersion);
+        updateRowVersion(refreshedVersion);
+        if (typeof onRowVersionUpdate === 'function') {
+          onRowVersionUpdate(refreshedVersion);
+        }
       }
     } catch (_) {}
 
@@ -1002,7 +1063,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       }
       if (res.status === 409) {
         const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
-        if (latestVersion) setApplicationRowVersion(latestVersion);
+        if (latestVersion) updateRowVersion(latestVersion);
         if (typeof actions?.refreshCaseData === 'function') {
           try {
             await actions.refreshCaseData();
@@ -1015,7 +1076,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });
-        scrollWidgetAndPageTop();
+        scrollAfterAction();
         releaseLock({ silent: true }).catch(() => {});
         return;
       }
@@ -1024,7 +1085,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       }
       const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
       if (updatedRowVersion) {
-        setApplicationRowVersion(updatedRowVersion);
+        updateRowVersion(updatedRowVersion);
       }
 
       // 3. Reload caseData (to update status, etc.)
@@ -1051,7 +1112,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       setLocalAssessmentSubmitted(true);
       setFieldErrors({});
       setHasSubmitted(false);
-      scrollWidgetAndPageTop();
+      scrollAfterAction();
       setAlert({
         type: 'success',
         content: 'Assessment submitted successfully. Application status moved to Pending Approval. Complete the outcome notice to finish the review.',
@@ -1064,7 +1125,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       }
     } catch (err) {
       setAlert({ type: 'error', content: err.message || 'Failed to submit assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
-      scrollWidgetAndPageTop();
+      scrollAfterAction();
     }
   };
 
@@ -1129,7 +1190,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       };
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return;
-      const versionToken = Number(applicationRowVersion || caseData?.application_row_version || 0);
+      const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
       const requestBody = { ...payload };
       if (versionToken > 0) {
         requestBody.expectedRowVersion = versionToken;
@@ -1153,7 +1214,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       }
       if (res.status === 409) {
         const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
-        if (latestVersion) setApplicationRowVersion(latestVersion);
+        if (latestVersion) updateRowVersion(latestVersion);
         if (typeof actions?.refreshCaseData === 'function') {
           try {
             await actions.refreshCaseData();
@@ -1166,39 +1227,38 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });
-        scrollWidgetAndPageTop();
+        scrollAfterAction();
         releaseLock({ silent: true }).catch(() => {});
         return;
       }
-      if (res.ok && result?.success) {
-        const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
-        const caseUpdatePayload = { ...payload };
-        if (updatedRowVersion) {
-          setApplicationRowVersion(updatedRowVersion);
-          caseUpdatePayload.application_row_version = updatedRowVersion;
+      if (!res.ok || !result?.success) {
+        throw new Error(result?.error || 'Failed to save assessment.');
+      }
+
+      const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
+      const caseUpdatePayload = { ...payload };
+      if (updatedRowVersion) {
+        updateRowVersion(updatedRowVersion);
+        caseUpdatePayload.application_row_version = updatedRowVersion;
+      }
+      if (typeof onCaseUpdate === 'function') {
+        onCaseUpdate(caseUpdatePayload);
+      }
+      setAlert({ type: 'success', content: 'Assessment saved successfully. All changes have been recorded.', dismissible: true, statusIconAriaLabel: 'Success' });
+      setInitialAssessment(assessment);
+      setIsChanged(false);
+      scrollAfterAction();
+      // Refresh caseData from backend to reflect latest changes
+      if (typeof actions?.refreshCaseData === 'function') {
+        try {
+          await actions.refreshCaseData();
+        } catch (_) {
+          // ignore refresh errors
         }
-        if (typeof onCaseUpdate === 'function') {
-          onCaseUpdate(caseUpdatePayload);
-        }
-        setAlert({ type: 'success', content: 'Assessment saved successfully. All changes have been recorded.', dismissible: true, statusIconAriaLabel: 'Success' });
-        setInitialAssessment(assessment);
-        setIsChanged(false);
-        // Refresh caseData from backend to reflect latest changes
-        if (typeof actions?.refreshCaseData === 'function') {
-          try {
-            await actions.refreshCaseData();
-          } catch (_) {
-            // ignore refresh errors
-          }
-        }
-        scrollWidgetAndPageTop();
-      } else {
-        setAlert({ type: 'error', content: result.error || 'Failed to save assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
-        scrollWidgetAndPageTop();
       }
     } catch (err) {
       setAlert({ type: 'error', content: err.message || 'Failed to save assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
-      scrollWidgetAndPageTop();
+      scrollAfterAction();
     }
   };
 
@@ -1265,7 +1325,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
     const lockCheck = await ensureLockForOperation();
     if (!lockCheck.ok) return;
     const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
-    const versionToken = Number(applicationRowVersion || caseData?.application_row_version || 0);
+    const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
     const payload = {
       assessment_date_of_assessment: formatDate(assessment.dateOfAssessment) || null,
       assessment_employment_goals: assessment.employmentGoals || null,
@@ -1314,7 +1374,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       const result = await res.json().catch(() => ({}));
       if (res.status === 409) {
         const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
-        if (latestVersion) setApplicationRowVersion(latestVersion);
+        if (latestVersion) updateRowVersion(latestVersion);
         if (typeof actions?.refreshCaseData === 'function') {
           try {
             await actions.refreshCaseData();
@@ -1326,13 +1386,13 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });
-        scrollWidgetAndPageTop();
+        scrollAfterAction();
         return;
       }
       if (!res.ok || !result?.success) throw new Error(result?.error || 'Failed to save NWAC review.');
       const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
       if (updatedRowVersion) {
-        setApplicationRowVersion(updatedRowVersion);
+        updateRowVersion(updatedRowVersion);
       }
       // Events emitted server-side; refresh caseData to reflect new status
       const fallbackUpdates = {
@@ -1362,7 +1422,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       setLocalAssessmentSubmitted(true);
       setFieldErrors({});
       setHasSubmitted(false);
-      scrollWidgetAndPageTop();
+      scrollAfterAction();
       setAlert({
         type: 'success',
         content: assessment.nwacReviewStatus === 'approve'
@@ -1379,7 +1439,7 @@ const CoordinatorAssessmentWidget = forwardRef(({ actions, toggleHelpPanel, case
       }
     } catch (err) {
       setAlert({ type: 'error', content: err.message || 'Failed to submit outcome notice.', dismissible: true, statusIconAriaLabel: 'Error' });
-      scrollWidgetAndPageTop();
+      scrollAfterAction();
     }
   };
 

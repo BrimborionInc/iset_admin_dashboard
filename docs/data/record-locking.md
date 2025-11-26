@@ -7,7 +7,7 @@ The dashboard now combines **pessimistic locks** with the existing optimistic co
 ## 1. High-level model
 
 1. **Optimistic guard**  
-   Every application row uses `row_version`. Save and restore endpoints require the client to send the version it last read and return `409 row_version_conflict` if another writer won the race.
+   Every application row uses `row_version`. Save and restore endpoints require the client to send the version it last read and return `409 row_version_conflict` if another writer won the race. The application workspace now shares a single forward-only `row_version` token across all widgets (Overview, Application Form, Assessment), updating it after any write/409 so widgets do not self-conflict with stale versions.
 
 2. **Pessimistic session lock**  
    When pessimistic mode is on, writers must acquire an entry in the `application_lock` table before mutating an application or case. API handlers respond with `423 Locked` when the caller does not own the row.
@@ -111,10 +111,10 @@ Features:
 ### 5.2 Widgets using the hook
 
 - **Application form (`IsetApplicationFormWidget`)**  
-  Acquires a lock before entering edit mode, keeps the heartbeat alive while editing, releases on save/cancel, and responds to `423/409` by showing flashbars and reloading.
+  Acquires a lock before entering edit mode, keeps the heartbeat alive while editing, releases on save/cancel, and responds to `423/409` by showing flashbars and reloading. Uses the shared workspace `row_version` token (from `applicationCaseDashboard`) for optimistic writes and bumps the shared token on success/409.
 
 - **Coordinator assessment (`CoordinatorAssessmentWidget`)**  
-  Blocks edit/submit actions when another user holds the lock, presents a banner while locked, and releases once the workflow finishes.
+  Blocks edit/submit actions when another user holds the lock, presents a banner while locked, and releases once the workflow finishes. Uses the shared workspace `row_version` token for all PUTs and refreshes it on success/409.
 
 - **Application overview (`ApplicationOverviewWidget`)**  
   Disables status changes when the lock belongs to someone else, and surfaces the lock holder in the info alert.
@@ -171,6 +171,7 @@ Path: `src/pages/configurationSettings.js`
 ## 8. Known fixes
 
 - Coordinator Assessment: resolved a false optimistic conflict that appeared right after signing the conflict-of-interest declaration. The client was overwriting its cached `application_row_version` with older `caseData` props, then sending a stale `expectedRowVersion` (e.g., 1 instead of 2) and hitting a 409. The widget now only updates the cached row version when the incoming value is newer, preventing spurious conflicts while keeping optimistic locking intact.
+- Application workspace: consolidated optimistic locking to a shared `row_version` token managed by `applicationCaseDashboard` and consumed by all edit-capable widgets, eliminating self-conflicts from stale tokens across widgets.
 
 ## 9. Follow-ups / ideas
 

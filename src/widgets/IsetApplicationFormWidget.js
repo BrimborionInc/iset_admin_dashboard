@@ -32,6 +32,22 @@ import useCurrentUser from '../hooks/useCurrentUser';
 
 const NOT_PROVIDED = <Box color="text-body-secondary">Not provided</Box>;
 
+const EDUCATION_LEVEL_OPTIONS = {
+  no_formal_education: 'No formal education',
+  grade_7_8: 'Up to Grade 7-8',
+  grade_9_10: 'Grade 9-10',
+  grade_11_12: 'Grade 11-12',
+  secondary_school_diploma_or_ged: 'Secondary School Diploma or GED',
+  post_secondary_training: 'Some post-secondary training',
+  apprenticeship_trades: 'Apprenticeship / trades certificate or diploma',
+  cegep: 'CEGEP or other non-university certificate / diploma',
+  college: 'College or other non-university certificate / diploma',
+  university_certificate: 'University certificate or diploma',
+  bachelors_degree: "Bachelor's degree",
+  masters_degree: "Master's degree",
+  doctorate: 'Doctorate'
+};
+
 const OPTION_LABELS = {
   'address-province': {
     ab: 'Alberta',
@@ -101,21 +117,7 @@ const OPTION_LABELS = {
     student: 'Student',
     other: 'Other'
   },
-  'example-radio-2': {
-    no_formal_education: 'No formal education',
-    grade_7_8: 'Up to Grade 7-8',
-    grade_9_10: 'Grade 9-10',
-    grade_11_12: 'Grade 11-12',
-    secondary_school_diploma_or_ged: 'Secondary School Diploma or GED',
-    post_secondary_training: 'Some post-secondary training',
-    apprenticeship_trades: 'Apprenticeship / trades certificate or diploma',
-    cegep: 'CEGEP or other non-university certificate / diploma',
-    college: 'College or other non-university certificate / diploma',
-    university_certificate: 'University certificate or diploma',
-    bachelors_degree: "Bachelor's degree",
-    masters_degree: "Master's degree",
-    doctorate: 'Doctorate'
-  },
+  'highest-education': { ...EDUCATION_LEVEL_OPTIONS },
   barriers: {
     education: 'Education',
     funding: 'Funding',
@@ -722,10 +724,10 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
       },
       {
         label: 'Highest education completed',
-        field: 'example-radio-2',
+        field: 'highest-education',
         controlType: 'select',
-        optionsKey: 'example-radio-2',
-        renderValue: answers => formatOption('example-radio-2', answers['example-radio-2'])
+        optionsKey: 'highest-education',
+        renderValue: answers => formatOption('highest-education', answers['highest-education'])
       },
       { label: 'Year completed', field: 'education-year', controlType: 'input', renderValue: answers => renderPlainText(answers['education-year']) },
       {
@@ -967,7 +969,16 @@ const Section = ({
     </ExpandableSection>
   );
 };
-const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHelpPanel }) => {
+const IsetApplicationFormWidget = ({
+  actions,
+  application_id,
+  caseData,
+  toggleHelpPanel,
+  refreshCaseData,
+  onCaseUpdate,
+  applicationRowVersion,
+  onRowVersionUpdate
+}) => {
   const [application, setApplication] = useState(null);
   const [loading, setLoading] = useState(Boolean(application_id));
   const [loadError, setLoadError] = useState(null);
@@ -1101,7 +1112,36 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
     };
   }, [application]);
 
-  const currentRowVersion = useMemo(() => Number(application?.row_version || 0), [application?.row_version]);
+  const [rowVersion, setRowVersion] = useState(() => {
+    const fromProp = Number(applicationRowVersion || 0);
+    const fromCase = Number(caseData?.application_row_version || 0);
+    const fromApp = Number(application?.row_version || 0);
+    return Math.max(fromProp || 0, fromCase || 0, fromApp || 0);
+  });
+  useEffect(() => {
+    const incoming = Number(applicationRowVersion || 0);
+    if (incoming && incoming > rowVersion) {
+      setRowVersion(incoming);
+    }
+  }, [applicationRowVersion, rowVersion]);
+  useEffect(() => {
+    const incoming = Number(caseData?.application_row_version || 0);
+    if (incoming && incoming > rowVersion) {
+      setRowVersion(incoming);
+      if (typeof onRowVersionUpdate === 'function') {
+        onRowVersionUpdate(incoming);
+      }
+    }
+  }, [caseData?.application_row_version, rowVersion, onRowVersionUpdate]);
+  useEffect(() => {
+    const incoming = Number(application?.row_version || 0);
+    if (incoming && incoming > rowVersion) {
+      setRowVersion(incoming);
+      if (typeof onRowVersionUpdate === 'function') {
+        onRowVersionUpdate(incoming);
+      }
+    }
+  }, [application?.row_version, rowVersion, onRowVersionUpdate]);
 
   const schemaSnapshot = useMemo(() => {
     let snapshot = payload?.schema_snapshot || payload?.submission_snapshot?.schema_snapshot;
@@ -1268,7 +1308,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
       pushFlash({ type: 'info', content: 'No changes to save' });
       return;
     }
-    if (!currentRowVersion) {
+    if (!rowVersion) {
       pushFlash({ type: 'error', content: 'Unable to determine the current application version. Reload and try again.' });
       return;
     }
@@ -1293,7 +1333,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
       const response = await apiFetch(`/api/applications/${application_id}/versions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers: changes, expectedRowVersion: currentRowVersion })
+        body: JSON.stringify({ answers: changes, expectedRowVersion: rowVersion })
       });
       let body = null;
       try {
@@ -1316,6 +1356,10 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
         if (response.status === 409) {
           const current = Number(body?.currentRowVersion ?? body?.application_row_version);
           if (Number.isFinite(current) && current > 0) {
+            setRowVersion(prev => (current > prev ? current : prev));
+            if (typeof onRowVersionUpdate === 'function') {
+              onRowVersionUpdate(current);
+            }
             setApplication(prev => (prev ? { ...prev, row_version: current } : prev));
           }
           pushFlash({
@@ -1340,6 +1384,24 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
       setVersionsLoaded(false);
       pushFlash({ type: 'success', content: 'Application updates saved' });
       await refreshApplication();
+      let refreshedVersion = null;
+      if (typeof refreshCaseData === 'function') {
+        try {
+          const refreshed = await refreshCaseData();
+          refreshedVersion = Number(refreshed?.application_row_version || refreshed?.applicationRowVersion || 0);
+          if (refreshedVersion) {
+            setRowVersion(prev => (refreshedVersion > prev ? refreshedVersion : prev));
+            if (typeof onRowVersionUpdate === 'function') {
+              onRowVersionUpdate(refreshedVersion);
+            }
+          }
+        } catch (_) {}
+      }
+      if (typeof onCaseUpdate === 'function') {
+        onCaseUpdate({
+          application_row_version: refreshedVersion || rowVersion || null
+        });
+      }
       if (releaseAfterSuccess) {
         releaseLock({ silent: true }).catch(() => {});
       }
@@ -1352,14 +1414,17 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
     acquireLock,
     answers,
     application_id,
-    currentRowVersion,
+    rowVersion,
     editableAnswers,
     lockHeldByCurrentUser,
     lockState.owned,
     pushFlash,
     refreshApplication,
     releaseLock,
-    refreshLockHeartbeat
+    refreshLockHeartbeat,
+    refreshCaseData,
+    onCaseUpdate,
+    onRowVersionUpdate
   ]);
   const fetchVersionsList = useCallback(async () => {
     if (!application_id) return;
@@ -1448,7 +1513,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
 
   const handleRestoreVersion = useCallback(async (versionRow) => {
     if (!application_id || !versionRow?.id || !versionRow?.canRestore) return;
-    if (!currentRowVersion) {
+    if (!rowVersion) {
       pushFlash({ type: 'error', content: 'Unable to determine the current application version. Reload and try again.' });
       return;
     }
@@ -1470,7 +1535,7 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
       const response = await apiFetch(`/api/applications/${application_id}/versions/${versionRow.id}/restore`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expectedRowVersion: currentRowVersion })
+        body: JSON.stringify({ expectedRowVersion: rowVersion })
       });
       let body = null;
       try {
@@ -1491,6 +1556,14 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
           return;
         }
         if (response.status === 409) {
+          const current = Number(body?.currentRowVersion ?? body?.application_row_version);
+          if (Number.isFinite(current) && current > 0) {
+            setRowVersion(prev => (current > prev ? current : prev));
+            if (typeof onRowVersionUpdate === 'function') {
+              onRowVersionUpdate(current);
+            }
+            setApplication(prev => (prev ? { ...prev, row_version: current } : prev));
+          }
           pushFlash({
             type: 'warning',
             content: 'Someone else updated this application while you were viewing history. We reloaded the latest data.'
@@ -1511,6 +1584,24 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
       const restoredVersion = Number(body?.version) || versionRow.version;
       pushFlash({ type: 'success', content: `Restored version ${restoredVersion}` });
       await refreshApplication();
+      let refreshedVersion = null;
+      if (typeof refreshCaseData === 'function') {
+        try {
+          const refreshed = await refreshCaseData();
+          refreshedVersion = Number(refreshed?.application_row_version || refreshed?.applicationRowVersion || 0);
+          if (refreshedVersion) {
+            setRowVersion(prev => (refreshedVersion > prev ? refreshedVersion : prev));
+            if (typeof onRowVersionUpdate === 'function') {
+              onRowVersionUpdate(refreshedVersion);
+            }
+          }
+        } catch (_) {}
+      }
+      if (typeof onCaseUpdate === 'function') {
+        onCaseUpdate({
+          application_row_version: refreshedVersion || rowVersion || null
+        });
+      }
       await fetchVersionsList();
       setVersionDetails(null);
       setIsEditing(false);
@@ -1523,14 +1614,17 @@ const IsetApplicationFormWidget = ({ actions, application_id, caseData, toggleHe
   }, [
     acquireLock,
     application_id,
-    currentRowVersion,
+    rowVersion,
     fetchVersionsList,
     lockHeldByCurrentUser,
     lockState.owned,
     pushFlash,
     refreshApplication,
     releaseLock,
-    refreshLockHeartbeat
+    refreshLockHeartbeat,
+    refreshCaseData,
+    onCaseUpdate,
+    onRowVersionUpdate
   ]);
 
   const renderEditableField = useCallback((item) => {

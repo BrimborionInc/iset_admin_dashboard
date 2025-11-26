@@ -8,7 +8,7 @@ const OPTION_LABELS = {
     student: "Student",
     other: "Other",
   },
-  "example-radio-2": {
+  "highest-education": {
     no_formal_education: "No formal education",
     grade_7_8: "Grade 7-8",
     grade_9_10: "Grade 9-10",
@@ -92,7 +92,7 @@ export const formatLabourForceStatus = value =>
   formatOptionValue("labour-force-status", value);
 
 export const formatEducationLevel = value =>
-  formatOptionValue("example-radio-2", value);
+  formatOptionValue("highest-education", value);
 
 export const formatLocalPriorities = values => {
   if (!values) return null;
@@ -104,4 +104,3 @@ export const formatLocalPriorities = values => {
   }
   return formatOptionValue("local-area-priorities", values);
 };
-

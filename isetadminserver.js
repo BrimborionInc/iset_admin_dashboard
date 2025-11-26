@@ -1257,12 +1257,19 @@ function extractDependentChildrenInfo(context) {
 }
 
 function extractLanguageSpoken(context) {
-  const { answers = {} } = context;
+  const { answers = {}, caseContext = {} } = context;
+  const directValue =
+    caseContext.languageSpoken ||
+    caseContext.preferredLanguage ||
+    caseContext['language-spoken'] ||
+    caseContext['preferred-language'] ||
+    null;
   const languageRaw = normaliseString(
-    answers['language-spoken'] ||
-    answers['language_spoken'] ||
-    answers['preferred-language'] ||
-    answers['preferred_language']
+    directValue ||
+      answers['language-spoken'] ||
+      answers['language_spoken'] ||
+      answers['preferred-language'] ||
+      answers['preferred_language']
   );
   if (!languageRaw) return null;
   const key = languageRaw.toLowerCase();
@@ -1303,18 +1310,21 @@ function extractDisabilityInfo(context) {
 }
 
 function extractContactDetails(context) {
-  const { answers = {} } = context;
+  const { answers = {}, caseContext = {} } = context;
   const email = normaliseString(
+    caseContext.emailPrimary ||
     answers['contact-email-address'] ||
     answers['contact_email_address'] ||
     answers['email']
   );
   const phone = normaliseString(
+    caseContext.phonePrimary ||
     answers['telephone-day'] ||
     answers['telephone_day'] ||
     answers['phone']
   );
   const alternatePhone = normaliseString(
+    caseContext.phoneAlt ||
     answers['telephone-alt'] ||
     answers['telephone_alt'] ||
     answers['alternate-phone']
@@ -1428,7 +1438,6 @@ function extractEducationDetails(context) {
   const levelRaw = normaliseString(
     answers['education-level'] ||
     answers['education_level'] ||
-    answers['example-radio-2'] ||
     answers['highest-education']
   );
   let level = null;
@@ -1745,6 +1754,8 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
     }
 
     return {
+      id: intervention.id || intervention.intervention_id || null,
+      status: statusNormalized,
       code,
       description: metadata.title || intervention.title || intervention.description || null,
       startDate,
@@ -1841,6 +1852,7 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       }
 
       return {
+        id: plan.id || plan.action_plan_id || null,
         status: normalisePlanStatus(plan.status),
         startDate: planStartDate,
         eiClaimant: plan.eiClaimant || plan.EIClaimant || metadata.eiClaimant || null,
@@ -2260,7 +2272,8 @@ function runIlmpValidation(context) {
   const languageCode = toCode(extracted.languageSpoken, {
     'indigenous language(s) only':'1','indigenous only':'1','english only':'2','french only':'3',
     'indigenous + english':'4','indigenous + french':'5','english + french':'6','indigenous + english + french':'7',
-    'none of the above':'8','none':'8'
+    'none of the above':'8','none':'8',
+    '1':'1','2':'2','3':'3','4':'4','5':'5','6':'6','7':'7','8':'8'
   });
   const provinceNumeric = extracted.addressProvince ? provinceCodeMap[extracted.addressProvince] || null : null;
 
@@ -2589,7 +2602,15 @@ const LANGUAGE_SPOKEN_MAP = {
   french: 'French only',
   'en-fr': 'English and French',
   'fr-en': 'English and French',
-  bilingual: 'English and French'
+  bilingual: 'English and French',
+  '1': 'Indigenous language(s) only',
+  '2': 'English only',
+  '3': 'French only',
+  '4': 'Indigenous language(s) and English',
+  '5': 'Indigenous language(s) and French',
+  '6': 'English and French',
+  '7': 'Indigenous language(s), English and French',
+  '8': 'None of the above'
 };
 
 const CLIENT_STATUS_MAP = {
@@ -3247,7 +3268,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       };
 
       const applicationEmploymentStatus = readFirstAnswer('employment-status', 'labour-force-status');
-      const applicationEducationLevel = readFirstAnswer('education-level', 'education-highest-level', 'example-radio-2');
+      const applicationEducationLevel = readFirstAnswer('highest-education', 'education-level', 'education-highest-level');
       const applicationSocialAssistance = normaliseYesNo(readFirstAnswer('social-assistance', 'receives-social-assistance'));
       const applicationEmploymentInsurance = normaliseYesNo(
         readFirstAnswer('employment-insurance-status', 'employment-insurance', 'ei-status', 'ei-benefits')
@@ -3581,6 +3602,7 @@ function buildIlmpParticipantPayload(context) {
   const eiClaimant =
     (primaryPlan && primaryPlan.eiClaimant) ||
     extractEiClaimant(context, clientStatus);
+  const caseIdValue = context?.caseRow?.id || context?.caseId || context?.submissionRow?.case_id || null;
   const formatDate = dateObj => {
     if (!dateObj) return null;
     const iso = dateObj instanceof Date ? dateObj.toISOString() : new Date(dateObj).toISOString();
@@ -3633,6 +3655,27 @@ function buildIlmpParticipantPayload(context) {
     if (!value) return null;
     const trimmed = String(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
     return trimmed.length ? trimmed : null;
+  };
+  const formatSysDate = dateVal => {
+    const d = dateVal ? new Date(dateVal) : new Date();
+    if (Number.isNaN(d.getTime())) return null;
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+  const normaliseStatusShort = value => {
+    const str = typeof value === 'string' ? value.toLowerCase() : '';
+    if (str === 'ready_to_close' || str === 'ready-to-close') return 'rdy_close';
+    if (str === 'in_progress' || str === 'in-progress') return 'in_prog';
+    if (str === 'planned') return 'planned';
+    if (str === 'suspended') return 'suspended';
+    if (str === 'completed' || str === 'complete') return 'completed';
+    if (str === 'cancelled' || str === 'canceled') return 'cancelled';
+    if (str === 'active') return 'active';
+    if (str === 'closed') return 'closed';
+    if (str === 'archived') return 'archived';
+    return str || 'unknown';
   };
 
   const dependentChildrenNode = (() => {
@@ -3751,6 +3794,8 @@ function buildIlmpParticipantPayload(context) {
                 InterventionRelatedNOC: entry.relatedNoc || null,
                 InterventionRelatedNOCVersion: entry.relatedNocVersion || null,
                 InterventionCost: entry.cost || null,
+                Status: entry.status || null,
+                id: entry.id || null,
                 RequestedSupports: entry.supports && entry.supports.length ? { Support: entry.supports } : null,
                 Notes: entry.notes && entry.notes.length ? { Note: entry.notes } : null
               }))
@@ -3781,7 +3826,9 @@ function buildIlmpParticipantPayload(context) {
           ChildcareFunding: childcareFundingCode || childcareFunding || null,
           GoalDescription: goalDescription || null,
           Interventions: interventionNode,
-          interventions: Array.isArray(interventions) ? interventions : []
+          interventions: Array.isArray(interventions) ? interventions : [],
+          status: plan.status || plan.Status || null,
+          id: plan.id || plan.action_plan_id || null
         };
       })
       .filter(Boolean);
@@ -3885,6 +3932,17 @@ function buildIlmpParticipantPayload(context) {
     add(indent + 1, 'interventionRelatedNOC', intervention.relatedNoc || null);
     add(indent + 1, 'interventionRelatedNOCVersion', intervention.relatedNocVersion || null);
     add(indent + 1, 'interventionCost', intervention.cost || null);
+    const intStatus = normaliseStatusShort(intervention.status || intervention.Status || '');
+    const intSysComment = (() => {
+      const idPart = intervention.id ? `id:${intervention.id}` : null;
+      const statusPart = intStatus ? `status:${intStatus}` : null;
+      const parts = [idPart, statusPart].filter(Boolean);
+      if (!parts.length) return null;
+      return parts.join(' ').slice(0, 30);
+    })();
+    if (intSysComment) {
+      add(indent + 1, 'sysComment', intSysComment);
+    }
     lines.push(`${pad}</intervention>`);
   };
 
@@ -3965,6 +4023,17 @@ function buildIlmpParticipantPayload(context) {
     const planInterventions = plan.interventions || plan.Interventions?.Intervention || [];
     const list = Array.isArray(planInterventions) ? planInterventions : [planInterventions];
     list.filter(Boolean).forEach(intervention => appendIntervention(intervention, indent + 1));
+    const planStatus = normaliseStatusShort(plan.status || plan.Status || '');
+    const planSysComment = (() => {
+      const idPart = plan.id ? `id:${plan.id}` : null;
+      const statusPart = planStatus ? `status:${planStatus}` : null;
+      const parts = [idPart, statusPart].filter(Boolean);
+      if (!parts.length) return null;
+      return parts.join(' ').slice(0, 30);
+    })();
+    if (planSysComment) {
+      add(indent + 1, 'sysComment', planSysComment);
+    }
     lines.push(`${pad}</actionPlan>`);
   };
 
@@ -3974,6 +4043,7 @@ function buildIlmpParticipantPayload(context) {
   );
   add(1, 'SchemaVersion', schemaVersion);
   add(1, 'agreementHolderName', agreementHolderName);
+  add(1, 'sysComment', 'Awentech nForm System');
   lines.push('  <client>');
   add(2, 'socialInsuranceNumber', sin || null);
   add(2, 'lastName', lastName || null);
@@ -3986,14 +4056,32 @@ function buildIlmpParticipantPayload(context) {
   add(2, 'numberOfDependantChildren', dependentInfo?.count ?? null);
   add(2, 'languageSpoken', languageCode || null);
   add(2, 'disability', disabilityCode || null);
+  const clientSysComment = (() => {
+    const idPart = caseIdValue ? `client id:${caseIdValue}` : null;
+    const datePart = formatSysDate();
+    const parts = [idPart, datePart].filter(Boolean);
+    const joined = parts.join(' ').slice(0, 30);
+    return joined || null;
+  })();
+  if (clientSysComment) {
+    add(2, 'sysComment', clientSysComment);
+  }
   if (addressNode) {
     lines.push('    <address>');
     add(3, 'streetAddress', address.line1 || null);
     add(3, 'municipality', address.city || null);
     add(3, 'province', provinceNumeric || null);
     add(3, 'postalZIPCode', addressNode.PostalZIPCode || null);
-    const formattedPhone = formatIlmpPhone(contactDetails?.phone) || 'No Telephone';
+    const formattedPhone = formatIlmpPhone(contactDetails?.phone || contactDetails?.alternatePhone) || null;
     add(3, 'contactPhoneNumber', formattedPhone);
+    const addrSysComment = (() => {
+      const datePart = formatSysDate(address.updatedAt || address.updated_at || null);
+      const joined = datePart ? `addr updated:${datePart}` : null;
+      return joined ? joined.slice(0, 30) : null;
+    })();
+    if (addrSysComment) {
+      add(3, 'sysComment', addrSysComment);
+    }
     lines.push('    </address>');
   }
   if (actionPlanNode) {
@@ -7613,14 +7701,16 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
     const futureReminders = Number(reminderRow?.total || 0);
 
     const blockers = {};
+    const warnings = {};
     if (blockingPlans.length) blockers.actionPlans = blockingPlans.length;
     if (blockingInterventions.length) blockers.interventions = blockingInterventions.length;
-    if (futureReminders > 0) blockers.reminders = futureReminders;
+    if (futureReminders > 0) warnings.reminders = futureReminders;
 
     if (Object.keys(blockers).length) {
       throw Object.assign(new Error('ready_to_close_blockers'), {
         statusCode: 409,
-        blockers
+        blockers,
+        warnings
       });
     }
 
@@ -7645,11 +7735,18 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
       [submissionRow.id]
     );
     const compliance = { ilmp: mapIlmpComplianceFromSubmission(updatedSubmission), finance: { status: 'pending', messages: [] } };
-    if (compliance.ilmp.status !== 'clean') {
+    const ilmpBlockingIssues = Array.isArray(compliance.ilmp.blockingIssues) ? compliance.ilmp.blockingIssues : [];
+    const hasIlmpBlocking = compliance.ilmp.status === 'blocked' || ilmpBlockingIssues.length > 0;
+    const ilmpWarnings = Array.isArray(compliance.ilmp.warnings) ? compliance.ilmp.warnings : [];
+    if (hasIlmpBlocking) {
       throw Object.assign(new Error('ilmp_validation_failed'), {
         statusCode: 409,
-        compliance
+        compliance,
+        warnings
       });
+    }
+    if (ilmpWarnings.length) {
+      warnings.ilmp = ilmpWarnings;
     }
 
     // Merge readyToClose flag into case_context_json
@@ -7667,7 +7764,7 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
     );
 
     await conn.commit();
-    return { compliance };
+    return { compliance, warnings };
   } catch (err) {
     if (conn) await conn.rollback();
     throw err;
@@ -17871,12 +17968,18 @@ app.post('/api/cases/:id/ready-to-close', async (req, res) => {
 
   try {
     const result = await markCaseReadyToClose({ caseId });
-    return res.json({ success: true, status: CASE_STATUS_READY_TO_CLOSE, compliance: result.compliance });
+    return res.json({
+      success: true,
+      status: CASE_STATUS_READY_TO_CLOSE,
+      compliance: result.compliance,
+      warnings: result.warnings || null
+    });
   } catch (err) {
     const status = err?.statusCode || err?.status || 500;
     const payload = { error: err?.message || 'ready_to_close_failed' };
     if (err?.blockers) payload.blockers = err.blockers;
     if (err?.compliance) payload.compliance = err.compliance;
+    if (err?.warnings) payload.warnings = err.warnings;
     return res.status(status).json(payload);
   }
 });
@@ -18171,7 +18274,7 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
         caseContext?.educationLevel ||
         readFirstAnswer(
           'action-plan-result-education-level',
-          'example-radio-2',
+          'highest-education',
           'education-level',
           'education-highest-level'
         ) ||
@@ -19961,7 +20064,7 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
       actionPlanResultRelatedNOCVersion: resultNocVersionCode,
     };
 
-    const metadata = safeJsonParse(interventionRow.metadata_json, null) || {};
+    const metadata = safeJsonParse(planRow.metadata_json, null) || {};
     metadata.compliance = metadata.compliance || {};
     metadata.compliance.ilmp = 'pending';
 

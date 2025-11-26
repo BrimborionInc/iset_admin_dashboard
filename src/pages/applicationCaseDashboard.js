@@ -190,6 +190,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   const location = useLocation();
   const [caseData, setCaseData] = useState(null);
   const [loadError, setLoadError] = useState(null);
+  const [appRowVersion, setAppRowVersion] = useState(0);
   const [layout, setLayout] = useState(() => loadLayoutFromStorage() ?? defaultLayout);
   const paletteSignatureRef = useRef(JSON.stringify(computePaletteItems(layout)));
   const cacheRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_CACHE || (window.__ISET_CASE_CACHE = new Map())) : new Map());
@@ -237,6 +238,12 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     setLayout(current => (areLayoutsEqual(current, nextLayout) ? current : nextLayout));
   };
 
+  const bumpRowVersion = useCallback((version) => {
+    const numeric = Number(version || 0);
+    if (!numeric) return;
+    setAppRowVersion(prev => (numeric > prev ? numeric : prev));
+  }, []);
+
   const resetLayout = useCallback(() => {
     setLayout(current => (areLayoutsEqual(current, defaultLayout) ? current : defaultLayout));
     const defaultPalette = computePaletteItems(defaultLayout);
@@ -277,6 +284,12 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     setCaseData(prev => {
       if (!prev) return prev;
       const next = { ...prev, ...updates };
+      if (updates && Object.prototype.hasOwnProperty.call(updates, 'application_row_version')) {
+        const incomingVersion = Number(updates.application_row_version || 0);
+        if (incomingVersion && incomingVersion > appRowVersion) {
+          setAppRowVersion(incomingVersion);
+        }
+      }
       const key = prev.id || id;
       if (key) {
         cacheRef.current.set(String(key), next);
@@ -294,6 +307,9 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       return current || nextData;
     }
     cacheRef.current.set(key, nextData);
+    if (nextVersion && nextVersion > appRowVersion) {
+      setAppRowVersion(nextVersion);
+    }
     return nextData;
   };
 
@@ -311,6 +327,10 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       const normalised = { ...data, applicationStatus, application_status: applicationStatus ?? data.application_status ?? null };
       const applied = applyCaseDataIfNewer(String(id), normalised);
       setCaseData(applied);
+      const incomingVersion = Number(normalised.application_row_version || 0);
+      if (incomingVersion && incomingVersion > appRowVersion) {
+        setAppRowVersion(incomingVersion);
+      }
       setLoadError(null);
       return applied;
     } catch (err) {
@@ -356,6 +376,10 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         const normalised = { ...hydrated, applicationStatus, application_status: applicationStatus ?? hydrated.application_status ?? null };
         const applied = applyCaseDataIfNewer(key, normalised);
         setCaseData(applied);
+        const incomingVersion = Number(normalised.application_row_version || 0);
+        if (incomingVersion && incomingVersion > appRowVersion) {
+          setAppRowVersion(incomingVersion);
+        }
         setLoadError(null);
         updateBreadcrumbs &&
           updateBreadcrumbs([
@@ -398,6 +422,8 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         assessorEmail={caseData?.assigned_user_email || null}
         refreshCaseData={refreshCaseData}
         onCaseUpdate={handleCaseUpdate}
+        applicationRowVersion={appRowVersion}
+        onRowVersionUpdate={bumpRowVersion}
       />
     );
   };

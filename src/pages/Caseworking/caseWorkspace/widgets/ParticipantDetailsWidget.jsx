@@ -58,10 +58,16 @@ const legalIndigenousIdentityOptions = [
   { value: "metis", label: "Metis" },
 ];
 
-const preferredLanguageOptions = [
+const languageSpokenOptions = [
   { value: "", label: "Not set" },
-  { value: "en", label: "English" },
-  { value: "fr", label: "French" },
+  { value: "1", label: "Indigenous language(s) only" },
+  { value: "2", label: "English only" },
+  { value: "3", label: "French only" },
+  { value: "4", label: "Indigenous language(s) and English" },
+  { value: "5", label: "Indigenous language(s) and French" },
+  { value: "6", label: "English and French" },
+  { value: "7", label: "Indigenous language(s), English and French" },
+  { value: "8", label: "None of the above" },
 ];
 
 const maritalStatusOptions = [
@@ -155,7 +161,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
     indigenousIdentity: "",
     indigenousAffiliation: "",
     registrationNumber: "",
-    preferredLanguage: "",
+    languageSpoken: "",
     visibleMinority: "",
     maritalStatus: "",
     dependentChildren: "",
@@ -325,7 +331,12 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
         "",
       registrationNumber:
         caseContext.registrationNumber || readAnswer("registration-number") || personal.registration_number || "",
-      preferredLanguage: caseContext.preferredLanguage || readAnswer("preferred-language") || "",
+      languageSpoken:
+        caseContext.languageSpoken ||
+        caseContext.preferredLanguage ||
+        readAnswer("language-spoken") ||
+        readAnswer("preferred-language") ||
+        "",
       visibleMinority:
         normalizeYesNo(caseContext.visibleMinority) || normalizeYesNo(readAnswer("visible-minority")) || "",
       maritalStatus: caseContext.maritalStatus || readAnswer("marital-status") || "",
@@ -357,10 +368,12 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
     () => provinceOptions.find(opt => opt.value === (form.mailingProvince || "")) || null,
     [form.mailingProvince]
   );
-  const selectedPreferredLanguage = useMemo(
-    () => preferredLanguageOptions.find(opt => opt.value === (form.preferredLanguage || "")) || preferredLanguageOptions[0],
-    [form.preferredLanguage]
+  const selectedLanguageSpoken = useMemo(
+    () => languageSpokenOptions.find(opt => opt.value === (form.languageSpoken || "")) || languageSpokenOptions[0],
+    [form.languageSpoken]
   );
+  // Back-compat guard for prior "preferred language" reference
+  const selectedPreferredLanguage = selectedLanguageSpoken;
   const selectedVisibleMinority = useMemo(
     () => yesNoOptions.find(opt => opt.value === (form.visibleMinority || "")) || yesNoOptions[0],
     [form.visibleMinority]
@@ -426,7 +439,8 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
         indigenousIdentity: form.indigenousIdentity || null,
         indigenousAffiliation: form.indigenousAffiliation || null,
         registrationNumber: form.registrationNumber || null,
-        preferredLanguage: form.preferredLanguage || null,
+        languageSpoken: form.languageSpoken || null,
+        preferredLanguage: form.languageSpoken || null,
         visibleMinority: normalizedVisibleMinority || null,
         maritalStatus: form.maritalStatus || null,
         dependentChildren: form.dependentChildren || null,
@@ -497,7 +511,8 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
           "legal-indigenous-identity": form.indigenousIdentity || null,
           "indigenous-affiliation-declaration": form.indigenousAffiliation || null,
           "registration-number": form.registrationNumber || null,
-          "preferred-language": form.preferredLanguage || null,
+          "language-spoken": form.languageSpoken || null,
+          "preferred-language": form.languageSpoken || null,
           "visible-minority": normalizedVisibleMinority || null,
           "marital-status": form.maritalStatus || null,
           "dependent-children": form.dependentChildren || null,
@@ -1029,17 +1044,17 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
             defaultExpanded={false}
           >
             <ColumnLayout columns={3} variant="text-grid">
-              <FormField label="Preferred language">
+              <FormField label="Language spoken" description="Aligns to ESDC ILMP languageSpoken codes.">
                 {editing ? (
                   <Select
-                    options={preferredLanguageOptions}
-                    selectedOption={selectedPreferredLanguage}
+                    options={languageSpokenOptions}
+                    selectedOption={selectedLanguageSpoken}
                     onChange={({ detail }) =>
-                      setForm(current => ({ ...current, preferredLanguage: detail.selectedOption?.value || "" }))
+                      setForm(current => ({ ...current, languageSpoken: detail.selectedOption?.value || "" }))
                     }
                   />
                 ) : (
-                  <Input value={selectedPreferredLanguage?.label || "Not set"} readOnly />
+                  <Input value={selectedLanguageSpoken?.label || "Not set"} readOnly />
                 )}
               </FormField>
               <FormField label="Marital status">

@@ -183,6 +183,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
   const [tableFilteringText, setTableFilteringText] = useState('');
   const [tableSorting, setTableSorting] = useState({ id: 'date', descending: true });
   const [remindersState, setRemindersState] = useState({ items: [], isLoading: false, error: null });
+  const [acknowledgingId, setAcknowledgingId] = useState(null);
 
   const caseId =
     caseData?.id ??
@@ -430,6 +431,13 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     reminders.forEach(reminder => {
       if (!reminder?.dueAt || reminder.status === 'cancelled') return;
       const severity = deriveReminderSeverity(reminder, todayMidnight);
+      const metadata = reminder.metadata || reminder.metadata_json || reminder.metadataJson || {};
+      const noteId =
+        metadata?.case_note_id ||
+        metadata?.caseNoteId ||
+        metadata?.noteId ||
+        metadata?.note_id ||
+        null;
       addEvent(reminder.dueAt, {
         id: `reminder-${reminder.id}`,
         title: reminder.title || 'Reminder',
@@ -438,7 +446,8 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
         severity,
         source: resolveReminderSource(reminder),
         reminderId: reminder.id,
-        reminderStatus: reminder.status || null
+        reminderStatus: reminder.status || null,
+        noteId
       });
     });
 
@@ -467,6 +476,50 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
   }, [useLiveData, days, selectedDayKey]);
 
   const selectedDay = selectedDayKey ? days.find(day => day.key === selectedDayKey) : null;
+
+  const acknowledgeReminder = useCallback(
+    async (reminderId, noteId = null) => {
+    if (!reminderId || !useLiveData) return;
+    if (acknowledgingId) return;
+    setAcknowledgingId(reminderId);
+    try {
+      const response = await apiFetch(`/api/reminders/${reminderId}/acknowledge`, { method: 'POST' });
+        if (!response.ok) {
+          let message = `Failed to acknowledge reminder (${response.status})`;
+          try {
+            const body = await response.json();
+            if (body?.error || body?.message) {
+              message = body.error || body.message;
+            }
+          } catch (_) {
+            // ignore
+          }
+          throw new Error(message);
+        }
+        setRemindersState(prev => ({
+          ...prev,
+          items: Array.isArray(prev.items) ? prev.items.filter(item => item.id !== reminderId) : []
+        }));
+        if (noteId && caseId) {
+          try {
+            await apiFetch(`/api/cases/${caseId}/notes/${noteId}`, { method: 'DELETE' });
+          } catch (noteErr) {
+            console.error('Failed to delete note after acknowledging reminder:', noteErr?.message || noteErr);
+          }
+        }
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId } }));
+          window.dispatchEvent(new CustomEvent('case-notes-refresh', { detail: { caseId } }));
+        }
+      } catch (err) {
+        console.error(err?.message || err);
+        setRemindersState(prev => ({ ...prev, error: err?.message || 'Failed to acknowledge reminder.' }));
+      } finally {
+        setAcknowledgingId(null);
+      }
+    },
+    [acknowledgingId, apiFetch, caseId, useLiveData]
+  );
 
   const adjustMonth = useCallback(delta => {
     setMonthAnchor(prev => {
@@ -749,6 +802,17 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
                     <Box fontSize='body-s' color='text-body-secondary'>
                       {event.description}
                     </Box>
+                    {event.reminderId ? (
+                      <Box margin={{ top: 'xs' }}>
+                        <Button
+                          size='small'
+                          onClick={() => acknowledgeReminder(event.reminderId, event.noteId)}
+                          loading={acknowledgingId === event.reminderId}
+                        >
+                          Acknowledge &amp; Close
+                        </Button>
+                      </Box>
+                    ) : null}
                   </Box>
                 );
               })}
