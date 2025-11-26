@@ -34,4 +34,9 @@ output "compute" {
   value = module.compute
 }
 
+output "openrouter_api_key_secret_arn" {
+  description = "Secrets Manager ARN for the admin OPENROUTER_API_KEY (test). Value set outside Terraform to keep state clean."
+  value       = aws_secretsmanager_secret.openrouter_api_key.arn
+}
+
 # Note: modules currently expose maps/objects. Adjust once module interfaces solidify.

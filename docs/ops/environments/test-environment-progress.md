@@ -85,3 +85,22 @@ aws securityhub get-enabled-standards
 
 Keep this document updated whenever significant progress is made.
 
+---
+
+## Secrets Migration Plan – OPENROUTER_API_KEY (Test → Prod)
+
+Purpose: move AI key handling into AWS-managed secrets so the key never lives in git or AMIs. Code already reads `process.env.OPENROUTER_API_KEY`, so changes are limited to deployment/bootstrap.
+
+### Plan
+1) Inventory current env render flow for admin (test/prod) to confirm where `.env` is built (SSM `/nwac/<env>/admin/env`, user data, CI).  
+2) Create SecureString parameter or secret: `/nwac/<env>/admin/openrouter_api_key` (Parameter Store) or a Secrets Manager secret if rotation is desired.  
+3) IAM: grant the admin instance/profile read-only access to that single path/ARN (`ssm:GetParameter` or `secretsmanager:GetSecretValue`).  
+4) Bootstrap/deploy update: fetch the secret during env render and write `OPENROUTER_API_KEY=<value>` into the runtime `.env` (server-side only; no `REACT_APP_*`).  
+5) Apply to test: create the test secret, update bootstrap script, redeploy/restart `nwac-admin`; verify logs no longer show the missing-key warning.  
+6) Apply to prod: repeat with a distinct prod secret path/key and matching IAM.  
+7) Rotation/ops: set rotation cadence (Secrets Manager rotation or manual) and document owner/location.
+
+### Status
+- Current: `.env.test` leaves `OPENROUTER_API_KEY` blank by design; admin logs show AI disabled warning. Env render confirmed via deploy scripts: `.env.test` is copied to instances and becomes `.env` (no secret fetch). Terraform now defines a Secrets Manager placeholder (`aws_secretsmanager_secret.openrouter_api_key`) using the general KMS key; value intentionally set out-of-band to avoid storing in state.  
+- Next action: (console path) secret created manually as `nwac-test-admin-openrouter-api-key` with OPENROUTER_API_KEY set. Admin and portal deploy scripts now fetch this secret via AWS CLI during deploy, parse JSON secrets that include `{"OPENROUTER_API_KEY": "..."}', and inject OPENROUTER_API_KEY into the runtime `.env` files before pm2 restart. Apply by rerunning `scripts/deploy-admin-test.ps1` and `../ISET-intake/scripts/deploy-portal-test.ps1` so instances pick up the secretised env. Terraform placeholder still exists; consider importing or reconciling later to avoid drift.
+
