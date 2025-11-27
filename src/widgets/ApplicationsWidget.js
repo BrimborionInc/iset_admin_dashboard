@@ -17,7 +17,6 @@ import {
   FormField,
   Select,
   Alert,
-  Toggle
 } from '@cloudscape-design/components';
 import Icon from '@cloudscape-design/components/icon';
 import { BoardItem } from '@cloudscape-design/board-components';
@@ -26,7 +25,7 @@ import { apiFetch } from '../auth/apiClient';
 import useCurrentUser from '../hooks/useCurrentUser';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
-const DEFAULT_VISIBLE_COLUMNS = ['watch','applicant_name','tracking_id','status','lock_state','sla_risk','assigned_user_email','submitted_at','actions'];
+const DEFAULT_VISIBLE_COLUMNS = ['watch','applicant_name','tracking_id','status','sla_risk','assigned_user_email','submitted_at','lock_state','actions'];
 const COLUMN_WIDTHS_STORAGE_KEY = 'applications-widget-column-widths';
 const SLA_STAGE_ALLOWLIST = new Set(['assignment', 'assessment', 'program_decision']);
 const SLA_DEFAULT_DAYS = {
@@ -198,6 +197,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const [filteringText, setFilteringText] = useState('');
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
+  const [sortingState, setSortingState] = useState({ columnId: 'submitted_at', isDescending: true });
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
   const [columnWidths, setColumnWidths] = useState(() => loadStoredColumnWidths());
   const [totalCount, setTotalCount] = useState(0);
@@ -223,6 +223,54 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const currentUserId = currentUserIdRaw ? String(currentUserIdRaw) : null;
   const userRole = currentUserRole || '';
   const normalizedUserRole = userRole.trim();
+
+  const getSortValue = useCallback((item, columnId) => {
+    switch (columnId) {
+      case 'watch':
+        return item.__isWatched ? 1 : 0;
+      case 'applicant_name':
+        return (item.applicant_name || '').toLowerCase();
+      case 'tracking_id':
+        return (item.tracking_id || '').toLowerCase();
+      case 'status': {
+        const statusInfo = getStatusInfo(item);
+        return statusInfo.statusLabel || '';
+      }
+      case 'sla_risk': {
+        const statusInfo = getStatusInfo(item);
+        const meta = computeSlaMeta(item, slaTargets, statusInfo.rawStatus, Boolean(item.assigned_user_id));
+        if (meta.deltaDays !== null && meta.deltaDays !== undefined) {
+          return meta.deltaDays;
+        }
+        if (meta.due) {
+          return meta.due.getTime();
+        }
+        return Number.POSITIVE_INFINITY;
+      }
+      case 'assigned_user_email':
+        return (item.assigned_user_email || '').toLowerCase();
+      case 'submitted_at': {
+        const date = toDate(item.submitted_at) || toDate(item.created_at);
+        return date ? date.getTime() : 0;
+      }
+      case 'lock_state':
+        return (item.lock_owner_name || item.lock_owner_email || '').toLowerCase();
+      default:
+        return '';
+    }
+  }, [slaTargets]);
+
+  const compareRows = useCallback((columnId, a, b) => {
+    const aVal = getSortValue(a, columnId);
+    const bVal = getSortValue(b, columnId);
+    if (aVal === bVal) return 0;
+    if (aVal === null || aVal === undefined) return 1;
+    if (bVal === null || bVal === undefined) return -1;
+    if (typeof aVal === 'number' && typeof bVal === 'number') {
+      return aVal - bVal;
+    }
+    return String(aVal).localeCompare(String(bVal));
+  }, [getSortValue]);
 
   const detailColumns = useMemo(() => {
     const lockCell = (row) => {
@@ -264,14 +312,16 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         id: 'applicant_name',
         header: 'Applicant',
         cell: i => renderCaseLink(i, redactApplicantDisplay(i.applicant_name)),
-        minWidth: 180
+        minWidth: 180,
+        sortingComparator: (a, b) => compareRows('applicant_name', a, b)
       },
       {
         id: 'tracking_id',
         header: 'Tracking ID',
         cell: i => renderCaseLink(i, i.tracking_id),
         minWidth: 140,
-        isRowHeader: true
+        isRowHeader: true,
+        sortingComparator: (a, b) => compareRows('tracking_id', a, b)
       },
       {
         id: 'status',
@@ -280,17 +330,12 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
           const statusInfo = getStatusInfo(i);
           return <StatusIndicator type={statusInfo.statusType}>{statusInfo.statusLabel}</StatusIndicator>;
         },
-        minWidth: 140
-      },
-      {
-        id: 'lock_state',
-        header: 'Lock Status',
-        cell: lockCell,
-        minWidth: 200
+        minWidth: 140,
+        sortingComparator: (a, b) => compareRows('status', a, b)
       },
       {
         id: 'sla_risk',
-        header: 'Overdue?',
+        header: 'Overdue',
         cell: i => {
           const statusInfo = getStatusInfo(i);
           const meta = computeSlaMeta(i, slaTargets, statusInfo.rawStatus, Boolean(i.assigned_user_id));
@@ -319,12 +364,34 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
             </span>
           );
         },
-        minWidth: 110
+        minWidth: 110,
+        sortingComparator: (a, b) => compareRows('sla_risk', a, b)
       },
-      { id: 'assigned_user_email', header: 'Owner', cell: i => i.case_id ? (i.assigned_user_email || '-') : 'Unassigned', minWidth: 200 },
-      { id: 'submitted_at', header: 'Received', cell: i => new Date(i.submitted_at).toLocaleDateString(), minWidth: 140 },
+      {
+        id: 'assigned_user_email',
+        header: 'Owner',
+        cell: i => i.case_id ? (i.assigned_user_email || '-') : 'Unassigned',
+        minWidth: 200,
+        sortingComparator: (a, b) => compareRows('assigned_user_email', a, b)
+      },
+      {
+        id: 'submitted_at',
+        header: 'Received',
+        cell: i => {
+          const date = toDate(i.submitted_at) || toDate(i.created_at);
+          return date ? date.toLocaleDateString() : '-';
+        },
+        minWidth: 140,
+        sortingComparator: (a, b) => compareRows('submitted_at', a, b)
+      },
+      {
+        id: 'lock_state',
+        header: 'Lock Status',
+        cell: lockCell,
+        minWidth: 200
+      },
     ];
-  }, [currentUserId, currentUserName, slaTargets]);
+  }, [currentUserId, currentUserName, slaTargets, compareRows]);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -622,10 +689,22 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     })
     .filter(i => !showWatchedOnly || i.__isWatched);
 
+  const sortedItems = useMemo(() => {
+    const { columnId, isDescending } = sortingState;
+    if (!columnId) return filteredItems;
+    const copy = [...filteredItems];
+    copy.sort((a, b) => {
+      const result = compareRows(columnId, a, b);
+      return isDescending ? -result : result;
+    });
+    return copy;
+  }, [filteredItems, sortingState, compareRows]);
+
   const watchColumn = useMemo(() => ({
     id: 'watch',
     header: 'Flag',
     minWidth: 45,
+    sortingComparator: (a, b) => compareRows('watch', a, b),
     cell: (item) => {
       const caseId = item.__caseIdNumeric ?? Number(item.case_id);
       const isWatchable = Number.isFinite(caseId) && caseId > 0;
@@ -649,7 +728,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         />
       );
     },
-  }), [handleToggleWatch, watchPending]);
+  }), [handleToggleWatch, watchPending, compareRows]);
 
   const actionsColumn = {
     id: 'actions', header: 'Actions', minWidth: 160, cell: item => {
@@ -854,7 +933,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     }
   }, [columnDefinitionsForTable, mergeColumnWidths]);
 
-  const effectiveTotal = showWatchedOnly ? filteredItems.length : totalCount;
+  const effectiveTotal = showWatchedOnly ? sortedItems.length : totalCount;
   const pagesCount = Math.max(1, Math.ceil(effectiveTotal / pageSize));
   const preferences = {
     pageSize,
@@ -870,6 +949,10 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     })),
     { id: 'actions', label: 'Actions', alwaysVisible: true }
   ];
+  const activeSortingColumn = useMemo(
+    () => columnDefinitionsForTable.find(c => c.id === sortingState.columnId),
+    [columnDefinitionsForTable, sortingState.columnId]
+  );
 
   const autoAssignSummary = useMemo(() => {
     if (!autoAssignStatus.rules || autoAssignStatus.rules.length === 0) {
@@ -921,15 +1004,6 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       actions={
         <SpaceBetween direction="horizontal" size="xs">
           {autoAssignBadge}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <Toggle
-              checked={showWatchedOnly}
-              onChange={({ detail }) => setShowWatchedOnly(detail.checked)}
-            >
-              My watched applications
-            </Toggle>
-            {watchLoading && <Spinner size="small" />}
-          </div>
           <Button
             iconName="refresh"
             onClick={() => { setCurrentPageIndex(1); load(); }}
@@ -975,11 +1049,19 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
             ) : (
               <Table
                 columnDefinitions={columnDefinitionsForTable}
-                items={filteredItems}
+                items={sortedItems}
                 loading={false}
                 variant="embedded"
                 wrapLines
                 resizableColumns
+                sortingColumn={activeSortingColumn || { id: sortingState.columnId }}
+                sortingDescending={sortingState.isDescending}
+                onSortingChange={({ detail }) => {
+                  const columnId = detail?.sortingColumn?.id;
+                  if (columnId) {
+                    setSortingState({ columnId, isDescending: detail.isDescending });
+                  }
+                }}
                 onColumnWidthsChange={handleColumnWidthsChange}
                 stickyHeader
                 stripedRows

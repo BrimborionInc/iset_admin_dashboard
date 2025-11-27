@@ -47,7 +47,6 @@ import CaseAssignmentDashboard from '../pages/caseAssignmentDashboard.js'; // Im
 import ApplicationCaseDashboard from '../pages/applicationCaseDashboard.js'; // Import the new component
 import CaseAssignmentDashboardHelp from '../helpPanelContents/caseAssignmentDashboardHelp.js';
 import ApplicationCaseDashboardHelp from '../helpPanelContents/applicationCaseDashboardHelp.js';
-import ArmsReportingDashboard from '../pages/armsReporting.js'; // Import the new component
 import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Import the NWAC Hub Management dashboard
 import AuthCallback from '../pages/AuthCallback.js';
 import UploadConfigDashboard from '../pages/uploadConfigDashboard.js';
@@ -790,17 +789,6 @@ const AppRoutes = ({
               </SpaceBetween>
             ),
             ApplicationCaseDashboardHelp.aiContext
-          )}
-        </Guard>
-      </Route>
-
-      <Route path="/arms-reporting">
-        <Guard path="/arms-reporting">
-          {renderContent(
-            ArmsReportingDashboard,
-            [{ text: 'Home', href: '/' }, { text: 'ARMS Reporting', href: '/arms-reporting' }],
-            'ARMS Reporting',
-            'armsReporting'
           )}
         </Guard>
       </Route>

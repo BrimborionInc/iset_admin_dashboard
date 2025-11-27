@@ -15,13 +15,7 @@
       "Regional Coordinator",
       "Application Assessor"
     ],
-    "/arms-reporting": [
-      "System Administrator"
-    ],
     "/audit-logs-dashboard": [
-      "System Administrator"
-    ],
-    "/capacity-planning-dashboard": [
       "System Administrator"
     ],
     "/case-assignment-dashboard": [
@@ -54,9 +48,6 @@
     "/configuration-settings": [
       "System Administrator",
       "Program Administrator"
-    ],
-    "/custom-dashboards-dashboard": [
-      "System Administrator"
     ],
     "/finance/overview": [
       "System Administrator",
@@ -153,15 +144,6 @@
       "System Administrator"
     ],
     "/reporting-and-monitoring-dashboard": [
-      "System Administrator"
-    ],
-    "/reporting-dashboard": [
-      "System Administrator"
-    ],
-    "/service-levels-dashboard": [
-      "System Administrator"
-    ],
-    "/system-performance-dashboard": [
       "System Administrator"
     ],
     "/tutorials-dashboard": [

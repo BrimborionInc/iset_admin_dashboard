@@ -90,16 +90,6 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
   const allNavItems = [
     {
       type: 'section',
-      text: 'ISET Administration',
-      items: [
-        { type: 'link', text: 'Application Assignment', href: '/case-assignment-dashboard?view=assignment' },
-        { type: 'link', text: 'NWAC Hub Management', href: '/nwac-hub-management' },
-        { type: 'link', text: 'PTMA Management', href: '/ptma-management' },
-        { type: 'link', text: 'ARMS Reporting', href: '/arms-reporting' },
-      ],
-    },
-    {
-      type: 'section',
       text: 'Intake and Assessment',
       items: [
         { type: 'link', text: 'Application Assessment', href: '/case-assignment-dashboard' },
@@ -139,13 +129,6 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
     },
     {
       type: 'section',
-      text: 'Other Dashboards',
-      items: [
-        { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },
-      ],
-    },
-    {
-      type: 'section',
       text: 'Intake Workflow Studio',
       items: [
         { type: 'link', text: 'Manage Intake Steps', href: '/manage-components' },
@@ -157,11 +140,15 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       text: 'Analytics Dashboard',
       defaultExpanded: false,
       items: [
-        { type: 'link', text: 'Service Levels', href: '/service-levels-dashboard' },
-        { type: 'link', text: 'Capacity Planning', href: '/capacity-planning-dashboard' },
-        { type: 'link', text: 'Reporting', href: '/reporting-dashboard' },
-        { type: 'link', text: 'System Performance', href: '/system-performance-dashboard' },
-        { type: 'link', text: 'Custom Dashboards', href: '/custom-dashboards-dashboard' },
+        { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },
+      ],
+    },
+    {
+      type: 'section',
+      text: 'ISET Administration',
+      items: [
+        { type: 'link', text: 'NWAC Hub Management', href: '/nwac-hub-management' },
+        { type: 'link', text: 'PTMA Management', href: '/ptma-management' },
       ],
     },
     {
