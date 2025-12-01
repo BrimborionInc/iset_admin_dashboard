@@ -194,12 +194,15 @@ const INCOME_FIELDS = [
 
 const EXPENSE_FIELDS = [
   { key: 'expenses-rent', label: 'Rent / Mortgage' },
-  { key: 'expenses-utilities', label: 'Utilities' },
   { key: 'expenses-groceries', label: 'Groceries' },
+  { key: 'expenses-electricity', label: 'Electricity/Hydro' },
+  { key: 'expenses-heating', label: 'Home Heating' },
+  { key: 'expenses-water', label: 'Water' },
+  { key: 'expenses-sewerage', label: 'Sewer / Wastewater' },
+  { key: 'expenses-garbage', label: 'Waste Management' },
   { key: 'expenses_bus_pass', label: 'Bus pass' },
   { key: 'expenses-parking', label: 'Parking charges' },
-  { key: 'expenses_transport_mileage', label: 'Mileage (home to school)' },
-  { key: 'example-input-5', label: 'Other expenses total' }
+  { key: 'expenses-other-total', label: 'Other expenses total' }
 ];
 
 const currencyFormatter = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 0 });
@@ -813,12 +816,25 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
       { label: 'Other income source(s)', field: 'income-other', controlType: 'textarea', renderValue: answers => renderTextBlock(answers['income-other']) },
       {
         label: 'Transport expense categories',
-        field: 'expenses_transport',
+        field: 'expenses-transport',
         controlType: 'multiselect',
         optionsKey: 'expenses_transport',
-        renderValue: answers => formatOptionList('expenses_transport', answers['expenses_transport'])
+        renderValue: answers => {
+          const vals = answers?.['expenses-transport'] ?? answers?.['expenses_transport'];
+          return formatOptionList('expenses_transport', vals);
+        }
       },
-      { label: 'Other expenses (list)', field: 'expenses-other-list', controlType: 'textarea', renderValue: answers => renderTextBlock(answers['expenses-other-list']) }
+      { label: 'Other expenses (list)', field: 'expenses-other-list', controlType: 'textarea', renderValue: answers => renderTextBlock(answers['expenses-other-list']) },
+      {
+        label: 'Mileage (home to school)',
+        field: 'expenses_transport_mileage',
+        controlType: 'text',
+        renderValue: answers => {
+          const val = answers?.['expenses_transport_mileage'];
+          if (val === undefined || val === null || val === '') return NOT_PROVIDED;
+          return `${val} km per month`;
+        }
+      }
     ]
   },
   {

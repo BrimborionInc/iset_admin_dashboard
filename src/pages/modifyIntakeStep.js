@@ -1123,7 +1123,7 @@ const ModifyComponent = () => {
   const condWorkflowsLoadedRef = useRef(false);
   useEffect(() => {
     if (!selectedComponent) return;
-    const t = String(selectedComponent.template_key || selectedComponent.type || '').toLowerCase();    const allowedTypes = new Set(['file-upload', 'radio', 'radios']);    if (!allowedTypes.has(t)) return;    if (condWorkflowsLoadedRef.current) return;
+    const t = String(selectedComponent.template_key || selectedComponent.type || '').toLowerCase();    const allowedTypes = new Set(['file-upload', 'radio', 'radios', 'input']);    if (!allowedTypes.has(t)) return;    if (condWorkflowsLoadedRef.current) return;
     setCondWfLoading(true);
     (async () => {
       try {
@@ -1999,9 +1999,9 @@ const ModifyComponent = () => {
                 );
               })()}
               {selectedComponent && (() => {
-                // Scaffold: Conditional visibility editor (beta) for selected component types (initially file-upload, now extends to radios)
+                // Scaffold: Conditional visibility editor (beta) for selected component types (initially file-upload, now extends to radios + input)
                 const t = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
-                const allowedTypes = new Set(['file-upload', 'radio', 'radios']);
+                const allowedTypes = new Set(['file-upload', 'radio', 'radios', 'input']);
                 if (!allowedTypes.has(t)) return null;
 
                 const idx = selectedComponent.index;

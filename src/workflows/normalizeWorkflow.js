@@ -443,7 +443,7 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         if (typeof props?.disabled !== 'undefined') component.disabled = !!props.disabled;
       }
       // Conditional visibility (v1): emit props.conditions for supported component types ({ all: [] })
-      if (['file-upload', 'radio'].includes(normalisedType)) {
+      if (['file-upload', 'radio', 'input'].includes(normalisedType)) {
         try {
           const conds = props && props.conditions;
           if (conds && typeof conds === 'object' && Array.isArray(conds.all) && conds.all.length) {
