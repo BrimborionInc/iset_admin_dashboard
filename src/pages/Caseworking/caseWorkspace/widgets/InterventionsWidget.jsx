@@ -530,6 +530,8 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     }
   };
 
+  const activePlanLabel = activePlan?.title || activePlan?.name || null;
+
   const planStatus = (activePlan?.status || "").toLowerCase();
   const canModify = !!activePlan && ["draft", "active"].includes(planStatus);
   const canCloseSelected =
@@ -1061,7 +1063,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             </Button>
           }
         >
-          {metadata.title ?? "Interventions"}
+          {`${metadata.title ?? "Interventions"}${activePlanLabel ? ` - ${activePlanLabel}` : ""}`}
         </Header>
       }
       settings={
@@ -1128,7 +1130,11 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                   : "No interventions defined for this action plan."}
               </Box>
             }
-            header={<Header variant="h3" counter={`(${totalMatches})`}>Interventions</Header>}
+            header={
+              <Header variant="h3" counter={`(${totalMatches})`}>
+                {`Interventions${activePlanLabel ? ` - ${activePlanLabel}` : ""}`}
+              </Header>
+            }
           />
         ) : (
           <Box padding="m">
