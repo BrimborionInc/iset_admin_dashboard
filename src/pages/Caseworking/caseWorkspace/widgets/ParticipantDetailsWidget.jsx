@@ -92,6 +92,47 @@ const cleanSin = (raw = "") => {
   return digits || "";
 };
 
+const REGISTRATION_KEYS = [
+  "sfn-registration-number",
+  "nsfn-registration-number",
+  "metis-registration-number",
+  "inuit-registration-number",
+  "registration-number",
+];
+
+const makeAnswerReader = answers => key => {
+  if (!answers || typeof answers !== "object") return "";
+  const value = answers[key];
+  if (value === null || typeof value === "undefined") return "";
+  if (typeof value === "object") {
+    if (value?.value) return String(value.value);
+    if (value?.text) return String(value.text);
+    return "";
+  }
+  return String(value);
+};
+
+const getRegistrationValueFromSources = (answers, caseContext, personal) => {
+  const readAnswer = makeAnswerReader(answers);
+  const candidates = [
+    caseContext?.registrationNumber,
+    personal?.registration_number,
+    personal?.registrationNumber,
+    ...REGISTRATION_KEYS.map(key => readAnswer(key)),
+  ];
+  const found = candidates.find(val => val !== undefined && val !== null && String(val).trim() !== "");
+  return found ? String(found) : "";
+};
+
+const getRegistrationTargetKey = answers => {
+  const readAnswer = makeAnswerReader(answers);
+  for (const key of REGISTRATION_KEYS) {
+    const val = readAnswer(key);
+    if (val && String(val).trim() !== "") return key;
+  }
+  return "sfn-registration-number";
+};
+
 const isValidSin = digits => {
   if (!/^\d{9}$/.test(digits)) return false;
   let sum = 0;
@@ -233,17 +274,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
       caseContext.applicationAnswers ||
       caseContext.applicationPayload?.answers ||
       {};
-    const readAnswer = key => {
-      if (!answers || typeof answers !== "object") return "";
-      const value = answers[key];
-      if (value === null || typeof value === "undefined") return "";
-      if (typeof value === "object") {
-        if (value?.value) return String(value.value);
-        if (value?.text) return String(value.text);
-        return "";
-      }
-      return String(value);
-    };
+    const readAnswer = makeAnswerReader(answers);
     const address = caseContext.address || personal.address || personal.home_address || personal.homeAddress || {};
     const mailingAddress = caseContext.mailingAddress || {};
     const addressFromAnswers = {
@@ -329,8 +360,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
         readAnswer("indigenous-affiliation-declaration") ||
         personal.indigenous_affiliation ||
         "",
-      registrationNumber:
-        caseContext.registrationNumber || readAnswer("registration-number") || personal.registration_number || "",
+      registrationNumber: getRegistrationValueFromSources(answers, caseContext, personal),
       languageSpoken:
         caseContext.languageSpoken ||
         caseContext.preferredLanguage ||
@@ -509,8 +539,10 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
           "emergency-contact-telephone": form.emergencyPhone || null,
           "emergency-contact-relationship": form.emergencyRelationship || null,
           "legal-indigenous-identity": form.indigenousIdentity || null,
-          "indigenous-affiliation-declaration": form.indigenousAffiliation || null,
-          "registration-number": form.registrationNumber || null,
+      "indigenous-affiliation-declaration": form.indigenousAffiliation || null,
+      "registration-number": form.registrationNumber || null,
+      [getRegistrationTargetKey(caseContext.applicationAnswers || caseContext.applicationPayload?.answers || {})]:
+        form.registrationNumber || null,
           "language-spoken": form.languageSpoken || null,
           "preferred-language": form.languageSpoken || null,
           "visible-minority": normalizedVisibleMinority || null,

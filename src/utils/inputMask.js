@@ -1,5 +1,5 @@
 // Lightweight input masking utilities (advisory formatting; value normalization on submit)
-// Supported masks: phone-na, sin-ca, postal-code-ca, postal-code-us, date-iso, time-hm, currency
+// Supported masks: phone-na, sin-ca, status-rn, postal-code-ca, postal-code-us, date-iso, time-hm, currency
 // Usage: attachMask(element, maskType)
 
 function formatPhoneNa(digits) {
@@ -15,6 +15,12 @@ function formatSinCa(digits) {
   if (d.length <= 3) return d;
   if (d.length <= 6) return `${d.slice(0,3)} ${d.slice(3)}`;
   return `${d.slice(0,3)} ${d.slice(3,6)} ${d.slice(6)}`;
+}
+
+function formatStatusRn(digits) { // 10 digits -> 123 4567890
+  const d = digits.slice(0,10);
+  if (d.length <= 3) return d;
+  return `${d.slice(0,3)} ${d.slice(3)}`;
 }
 
 function formatPostalCa(raw) {
@@ -56,6 +62,7 @@ export function applyMask(value, mask, opts={}) {
   switch(mask) {
     case 'phone-na': return formatPhoneNa(digits);
     case 'sin-ca': return formatSinCa(digits);
+    case 'status-rn': return formatStatusRn(digits);
     case 'postal-code-ca': return formatPostalCa(value);
     case 'postal-code-us': return formatPostalUs(digits);
     case 'date-iso': return formatDateIso(digits);
@@ -69,6 +76,7 @@ export function normalizeMasked(value, mask) {
   switch(mask) {
     case 'phone-na':
     case 'sin-ca':
+    case 'status-rn':
     case 'postal-code-us':
     case 'date-iso':
     case 'time-hm':

@@ -51,6 +51,20 @@ const ensureSentence = (text) => {
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 };
 
+const toUtcStartOfDay = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+};
+
+const daysBetweenUtc = (earlier, later) => {
+  const startA = toUtcStartOfDay(earlier);
+  const startB = toUtcStartOfDay(later);
+  if (startA === null || startB === null) return null;
+  return Math.floor((startB - startA) / (24 * 60 * 60 * 1000));
+};
+
 const truncate = (text, limit = 160) => {
   const value = trimValue(text);
   if (!value) return '';
@@ -160,7 +174,14 @@ const formatEventMessage = (event, actorDisplay) => {
     case 'reminder_overdue': {
       const title = trimValue(payload.title) || 'Reminder';
       const due = payload.due_at ? new Date(payload.due_at).toLocaleDateString() : 'previously';
-      const base = `Reminder overdue: ${title} (was due ${due})`;
+      const daysOverdue = (() => {
+        if (Number.isFinite(payload.overdue_days) && payload.overdue_days > 0) return Math.floor(payload.overdue_days);
+        const diff = daysBetweenUtc(payload.due_at, new Date());
+        if (diff === null) return null;
+        return diff > 0 ? diff : null;
+      })();
+      const overdueLabel = daysOverdue ? `${daysOverdue} day${daysOverdue === 1 ? '' : 's'} overdue` : null;
+      const base = `Reminder overdue: ${title} (was due ${due}${overdueLabel ? `, ${overdueLabel}` : ''})`;
       const detail = truncate(payload.description || payload.body || payload.note);
       const trackingId = payload.tracking_id || payload.application_id || event.tracking_id;
       const caseId = payload.case_id || event.case_id;

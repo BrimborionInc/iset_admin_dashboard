@@ -417,11 +417,31 @@ const answersDiff = (baseline = {}, updated = {}) => {
   const diff = {};
   const keys = new Set([...Object.keys(baseline || {}), ...Object.keys(updated || {})]);
   keys.forEach(key => {
+    if (key === 'registration-number') return; // derived UI-only key; ignore in diffs
     if (normaliseForCompare(baseline?.[key]) !== normaliseForCompare(updated?.[key])) {
       diff[key] = updated?.[key];
     }
   });
   return diff;
+};
+
+const REGISTRATION_KEYS = ['sfn-registration-number', 'nsfn-registration-number', 'metis-registration-number', 'inuit-registration-number', 'registration-number'];
+
+const getRegistrationValue = (answers = {}) => {
+  for (const key of REGISTRATION_KEYS) {
+    const val = answers?.[key];
+    if (val !== undefined && val !== null && String(val).trim() !== '') return String(val);
+  }
+  return '';
+};
+
+const getRegistrationTargetKey = (answers = {}) => {
+  for (const key of REGISTRATION_KEYS) {
+    if (answers && Object.prototype.hasOwnProperty.call(answers, key) && String(answers[key] ?? '').length > 0) {
+      return key;
+    }
+  }
+  return 'sfn-registration-number';
 };
 
 
@@ -582,7 +602,7 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
         optionsKey: 'legal-indigenous-identity',
         renderValue: answers => formatOption('legal-indigenous-identity', answers['legal-indigenous-identity'])
       },
-      { label: 'Registration number', field: 'registration-number', controlType: 'input', renderValue: answers => renderPlainText(answers['registration-number']) },
+      { label: 'Registration number', field: 'registration-number', controlType: 'input', renderValue: answers => renderPlainText(getRegistrationValue(answers)) },
       {
         label: 'Home community',
         field: 'home-comminuty',
@@ -1180,13 +1200,22 @@ const IsetApplicationFormWidget = ({
 
   useEffect(() => {
     if (!isEditing) {
-      setEditableAnswers(cloneAnswers(answers));
+      const next = cloneAnswers(answers);
+      next['registration-number'] = getRegistrationValue(answers);
+      setEditableAnswers(next);
     }
   }, [answers, isEditing]);
 
   const handleFieldChange = useCallback((field, value) => {
+    if (field === 'registration-number') {
+      setEditableAnswers(prev => {
+        const targetKey = getRegistrationTargetKey({ ...answers, ...prev });
+        return { ...prev, [field]: value, [targetKey]: value };
+      });
+      return;
+    }
     setEditableAnswers(prev => ({ ...prev, [field]: value }));
-  }, []);
+  }, [answers]);
 
   const searchIndigenousBands = useCallback(async (query, key = 'affiliation') => {
     const targetKey = key || 'affiliation';

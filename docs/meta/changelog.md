@@ -27,3 +27,7 @@ Format: YYYY-MM-DD - Category: Short description
 - Feature: AI settings widget now persists to shared DB (`iset_runtime_config`) so the public portal respects admin-chosen model/params/fallbacks.
 - Fix: Corrected SQL for fallbacks upsert (JSON array via CAST) and idempotent table creation.
 - Docs: Added `ai-runtime-config.md` and updated project map notes (cross-app config flow).
+
+## 2025-12-03
+- Admin application form: collapsed intake registration number variants (sfn/nsfn/metis/inuit) into a single Registration number field and ignore the UI-only key in diffs so saving updates the correct stored key.
+- Case workspace: Participant Details now reads/writes registration number across all variant keys, collapsing to a single value post-intake.

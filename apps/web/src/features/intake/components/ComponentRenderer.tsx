@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import { resolveText, type IntakeComponent, type IntakeComponentOption, type LanguageCode } from "../schema";
+import { applyMask } from "../../../shared/inputMask";
 import type { FieldErrors, FormValues, RendererComponentProps } from "./types";
 import { isComponentVisible, isOptionVisible } from "../conditions";
 
@@ -155,6 +156,7 @@ function inputRenderer(
   const hint = resolveText(component.hint, language);
   const value = normalizeStringValue(values[storageKey]);
   const inputType = typeof component.inputType === "string" ? component.inputType : "text";
+  const inputMode = typeof component.inputMode === "string" ? component.inputMode : undefined;
   const className = getClassName(component, "govuk-input");
   const required = Boolean(component.required);
   const errorMessage = errors[storageKey];
@@ -163,6 +165,8 @@ function inputRenderer(
     hint ? `${storageKey}-hint` : ""
   ]);
   const formGroupClass = `govuk-form-group${errorMessage ? " govuk-form-group--error" : ""}`;
+  const mask = typeof component.mask === "string" && component.mask.trim().length > 0 ? component.mask.trim() : undefined;
+  const pattern = typeof (component as any).pattern === "string" && (component as any).pattern.length > 0 ? (component as any).pattern : undefined;
 
   return (
     <div className={formGroupClass}>
@@ -190,9 +194,15 @@ function inputRenderer(
         value={value}
         aria-describedby={describedBy}
         autoComplete={typeof component.autocomplete === "string" ? component.autocomplete : undefined}
+        inputMode={inputMode}
+        pattern={pattern}
         placeholder={resolveText(component.placeholder, language) || undefined}
         required={required}
-        onChange={(event) => onValueChange(storageKey, event.target.value)}
+        data-mask={mask}
+        onChange={(event) => {
+          const nextValue = mask ? applyMask(event.target.value, mask) : event.target.value;
+          onValueChange(storageKey, nextValue);
+        }}
       />
     </div>
   );

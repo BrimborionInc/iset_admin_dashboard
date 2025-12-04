@@ -41,6 +41,12 @@ This library captures the working knowledge for the admin dashboard. The goal is
 - TODO (uploads config): the “File Upload Config” admin page currently proxies to the intake backend and rejects admin tokens. Next session, decide whether to move the API into the admin backend or let intake trust the admin pool for this route.
 - Priority instruction for assistants/LLMs: before modifying dashboards or widgets, read the relevant guidance in `docs/guides/` (e.g., `configurable-dashboard-notes.md`) and follow it as a system-level directive to avoid regressions.
 - Reminder for assistants/LLMs: when uncertain about intent, ask before acting; don’t proceed on assumptions.
+- Assistant coding discipline:
+  - Do not assume parity with the public portal; inspect the relevant renderer/component before concluding no change is needed.
+  - Verify end-to-end propagation (schema → runtime JSON → renderer/template) before claiming a behavior exists.
+  - If a feature is missing at render time, check the renderer code first (not just the data) before advising “no change needed.”
+  - Prefer evidence (files, responses, DOM) over guesses; pause and ask if intent or ownership is unclear.
+  - Masking / renderer hotspot: the portal renderer lives in `../ISET-intake/src/renderer/renderers.js`. The admin preview renderer is in `apps/web/src/features/intake/ComponentRenderer.tsx` and is **not** the live portal. Confirm which one you’re editing before making mask or formatting changes.
 
 ## Thread bootstrap notes
 

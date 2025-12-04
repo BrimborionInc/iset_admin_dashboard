@@ -544,6 +544,20 @@ const AppContent = ({ currentRole }) => {
     return 'info';
   }, []);
 
+  const daysSinceUtc = useCallback((from) => {
+    if (!from) return null;
+    const start = (value) => {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return null;
+      return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    };
+    const fromStart = start(from);
+    const todayStart = start(new Date());
+    if (fromStart === null || todayStart === null) return null;
+    const diff = Math.floor((todayStart - fromStart) / (24 * 60 * 60 * 1000));
+    return diff >= 0 ? diff : null;
+  }, []);
+
   const notificationFlashbarItems = useMemo(() =>
     notifications
       .filter(n => n && n.dismissible !== false)
@@ -554,6 +568,14 @@ const AppContent = ({ currentRole }) => {
         } catch (_) {
           metadata = {};
         }
+        const eventKey = n.event_key || metadata.event_key || metadata.eventKey || null;
+        const typeFromSeverity = mapSeverityToType(n.severity);
+        const flashType = eventKey === 'reminder_overdue' ? 'error' : typeFromSeverity;
+        const daysOverdue = (() => {
+          if (Number.isFinite(metadata.overdue_days) && metadata.overdue_days > 0) return Math.floor(metadata.overdue_days);
+          const days = daysSinceUtc(metadata.due_at || metadata.dueAt);
+          return days && days > 0 ? days : null;
+        })();
         const caseId = metadata.caseId || null;
         const trackingId = metadata.trackingId || null;
         const caseNumber = metadata.caseNumber || null;
@@ -565,6 +587,7 @@ const AppContent = ({ currentRole }) => {
             : trackingId
               ? `/application-case/${trackingId}`
               : null;
+        const linkColor = flashType === 'info' ? 'inverted' : 'normal';
         const linkLabel = isCaseManaged
           ? caseNumber
             ? `View case ${caseNumber}`
@@ -572,14 +595,17 @@ const AppContent = ({ currentRole }) => {
           : appReference
             ? `View application ${appReference}`
             : 'View application';
+        const overdueSuffix = eventKey === 'reminder_overdue' && daysOverdue
+          ? ` • ${daysOverdue} day${daysOverdue === 1 ? '' : 's'} overdue`
+          : '';
         const content = href ? (
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'baseline' }}>
-            <span>{n.message}</span>
-            <Link href={href}>{linkLabel}</Link>
+            <span>{n.message}{overdueSuffix}</span>
+            <Link href={href} color={linkColor}>{linkLabel}</Link>
           </div>
-        ) : n.message;
+        ) : `${n.message || ''}${overdueSuffix}`;
         return {
-          type: mapSeverityToType(n.severity),
+          type: flashType,
           header: n.title || undefined,
           content,
           dismissible: true,

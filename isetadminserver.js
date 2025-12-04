@@ -11985,6 +11985,7 @@ const emitReminderEvent = async ({ type, reminder, actorId, actorName }) => {
     status: reminder.status || null,
     due_at: reminder.dueAt || null,
     completed_at: reminder.completedAt || null,
+    overdue_days: reminder.daysOverdue || null,
     assigned_staff_profile_id: reminder.assignedStaffProfileId || null,
   };
   await captureCaseEvent({
@@ -12011,21 +12012,25 @@ const mapReminderMetadata = (row) => {
   return meta && typeof meta === 'object' ? meta : {};
 };
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const startOfUtcDay = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+};
+
 const isSameDay = (a, b) => {
-  if (!a || !b) return false;
-  const ad = new Date(a);
-  const bd = new Date(b);
-  if (Number.isNaN(ad.getTime()) || Number.isNaN(bd.getTime())) return false;
-  return (
-    ad.getUTCFullYear() === bd.getUTCFullYear() &&
-    ad.getUTCMonth() === bd.getUTCMonth() &&
-    ad.getUTCDate() === bd.getUTCDate()
-  );
+  const startA = startOfUtcDay(a);
+  const startB = startOfUtcDay(b);
+  if (startA === null || startB === null) return false;
+  return startA === startB;
 };
 
 function pollRemindersForDue() {
   return (async () => {
   const now = new Date();
+  const todayUtc = startOfUtcDay(now);
   let rows = [];
   try {
     const [result] = await pool.query(
@@ -12060,11 +12065,13 @@ function pollRemindersForDue() {
     const meta = reminder.metadata || {};
     const dueAt = reminder.dueAt ? new Date(reminder.dueAt) : null;
     if (!dueAt || Number.isNaN(dueAt.getTime())) continue;
+    const dueUtc = startOfUtcDay(dueAt);
+    if (dueUtc === null || todayUtc === null) continue;
 
     const dueEmitted = meta.due_emitted === true;
     const overdueEmitted = meta.overdue_emitted === true;
 
-    if (!dueEmitted && isSameDay(dueAt, now)) {
+    if (!dueEmitted && dueUtc === todayUtc) {
       try {
         await emitReminderEvent({ type: 'reminder_due', reminder, actorId: null, actorName: null });
         meta.due_emitted = true;
@@ -12075,10 +12082,13 @@ function pollRemindersForDue() {
       continue;
     }
 
-    if (!overdueEmitted && dueAt.getTime() < now.getTime()) {
+    if (!overdueEmitted && dueUtc < todayUtc) {
+      const daysOverdue = Math.max(1, Math.floor((todayUtc - dueUtc) / MS_PER_DAY));
+      reminder.daysOverdue = daysOverdue;
       try {
         await emitReminderEvent({ type: 'reminder_overdue', reminder, actorId: null, actorName: null });
         meta.overdue_emitted = true;
+        meta.overdue_days_on_emit = daysOverdue;
         await updateReminderMetadata(reminder.id, meta);
       } catch (eventErr) {
         console.warn('[reminders] failed to emit reminder_overdue', eventErr?.message || eventErr);

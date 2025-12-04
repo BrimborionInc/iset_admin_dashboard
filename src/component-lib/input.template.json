@@ -54,6 +54,7 @@
       { "label": "None", "value": "" },
       { "label": "Phone (North America)", "value": "phone-na" },
       { "label": "SIN (Canada)", "value": "sin-ca" },
+      { "label": "Status RN", "value": "status-rn" },
       { "label": "Postal Code (Canada)", "value": "postal-code-ca" },
       { "label": "ZIP Code (US)", "value": "postal-code-us" },
       { "label": "Date (YYYY-MM-DD)", "value": "date-iso" },

@@ -13,6 +13,7 @@ Single-line textual data entry supporting common HTML input `type` values (text,
   - Input Mode is an advisory override for on-screen keyboards (e.g. `numeric`, `decimal`, `tel`, `email`) without changing semantics.
 - Autocomplete: Provide a WHATWG autocomplete token when applicable (e.g. `given-name`, `email`, `postal-code`). Leave blank to disable.
 - Pattern (regex): Optional client regex (HTML `pattern`). Use when native type constraints are insufficient. Provide a user-friendly error server-side.
+- Input Mask: Optional formatting helper (Phone NA, SIN, **Status RN**, Postal/ZIP, Date YYYY-MM-DD, Time HH:MM, Currency). Status RN formats the 10-digit Secure Certificate of Indian Status registration number as `123 4567890` and restricts input to digits.
 - Spellcheck: Enabled by default for types where browsers honor it (`text`, `search`, etc.). Set to False for structured inputs like codes.
 - Default Value: Pre-populates the field (avoid for sensitive data).
 - CSS Classes: Always includes `govuk-input`; width modifiers append (e.g. `govuk-input--width-10`).
