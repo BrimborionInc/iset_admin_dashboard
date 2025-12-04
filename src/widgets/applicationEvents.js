@@ -15,7 +15,8 @@ const STATUS_LABELS = {
   approved: 'Approved',
   completed: 'Completed',
   rejected: 'Rejected',
-  withdrawn: 'Withdrawn',
+  closed: 'Closed',
+  withdrawn: 'Closed',
   archived: 'Archived'
 };
 

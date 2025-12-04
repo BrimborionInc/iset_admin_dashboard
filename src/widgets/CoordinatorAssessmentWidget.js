@@ -35,8 +35,8 @@ const requiresNocForCode = (value) => {
   return Number.isFinite(numeric) && numeric >= 6 && numeric <= 13;
 };
 
-const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'withdrawn', 'archived']);
-const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'withdrawn', 'archived']);
+const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
+const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
 const APPLICATION_OUTCOME_STATUSES = new Set(['pending_approval']);
 
 // Section header helper for consistent spacing
@@ -313,6 +313,8 @@ const CoordinatorAssessmentWidget = forwardRef(
     role: currentUserRole
   } = useCurrentUser();
   const userRole = currentUserRole || '';
+  const normalizedRole = (userRole || '').toString().trim().toLowerCase();
+  const isEligibilityAdmin = normalizedRole === 'system administrator' || normalizedRole === 'program administrator';
 
   const [interventionCodes, setInterventionCodes] = useState([]);
   const [interventionCodesLoading, setInterventionCodesLoading] = useState(false);
@@ -352,6 +354,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const lacksOutcomePermission = Boolean(userRole) && isPendingApprovalStatus && !canManageOutcomeReview;
   const requiresNoc = useMemo(() => requiresNocForCode(assessment.interventionCode), [assessment.interventionCode]);
   const isDeclarationGateActive = !conflictDeclarationSigned;
+  const eligibilitySet = Boolean(assessment.esdcEligibility);
+  const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet;
   const conflictDeclarationSignedDisplayDate = conflictDeclarationSignedAt
     ? formatDate(conflictDeclarationSignedAt)
     : null;
@@ -1266,9 +1270,11 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isAssessmentSubmitted = canonicalApplicationStatus === 'pending_approval';
   const isReviewComplete = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
   const assessmentSubmitted = localAssessmentSubmitted || isAssessmentSubmitted || isReviewComplete || isDecisionFinal || isLockedStatus || lockedByAnotherUser;
-  // Disable all fields (including NWAC) if review is complete, a final decision exists, or status is locked
-  const isAssessmentDisabled = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || (assessmentSubmitted && !isEditingAssessment);
-  const isNWACFieldsDisabled = lockedByAnotherUser || !showNWACSection || !isPendingApprovalStatus || isReviewComplete || isDecisionFinal || !canManageOutcomeReview;
+  // Disable all fields (including NWAC) if review is complete, a final decision exists, status is locked, conflict not signed, or eligibility not set
+  const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal;
+  const isAssessmentDisabled = baseAssessmentLocked || isEligibilityGateActive || (assessmentSubmitted && !isEditingAssessment);
+  const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canManageOutcomeReview;
+  const isEligibilityDisabled = baseAssessmentLocked || isDeclarationGateActive || !isEligibilityAdmin;
 
   // Lock editing state if final decision has been recorded
   useEffect(() => {
@@ -1479,22 +1485,22 @@ const CoordinatorAssessmentWidget = forwardRef(
       variant="h2"
       actions={
         <SpaceBetween direction="horizontal" size="s">
-          {!isDeclarationGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && isReviewComplete && (
+          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && isReviewComplete && (
             <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
           )}
-          {!isDeclarationGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && assessmentSubmitted && !isEditingAssessment && (
+          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && assessmentSubmitted && !isEditingAssessment && (
             <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
           )}
-          {!isDeclarationGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
             <Button variant="primary" disabled={!isChanged} onClick={handleSave}>Save</Button>
           )}
-          {!isDeclarationGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
             <Button variant="normal" disabled={!isChanged} onClick={handleCancel}>Cancel</Button>
           )}
-          {!isDeclarationGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
             <Button variant="primary" onClick={handleSubmit}>Submit</Button>
           )}
-          {!isDeclarationGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && (
+          {!isEligibilityGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && (
             <Button variant="primary" onClick={handleApproveClick} disabled={!isPendingApprovalStatus || !canManageOutcomeReview || checkingChecklist}>Approve/Reject</Button>
           )}
         </SpaceBetween>
@@ -1681,6 +1687,40 @@ const CoordinatorAssessmentWidget = forwardRef(
             {alert.content}
           </Alert>
         )}
+        {!eligibilitySet && (
+          <>
+            <Alert
+              type="info"
+              header="Employment insurance eligibility not checked"
+              statusIconAriaLabel="Info"
+            >
+              Assessment sections are locked until a System Administrator or Program Administrator checks ESDC eligibility.
+            </Alert>
+            <Box margin={{ bottom: 's' }} />
+          </>
+        )}
+        {sectionHeader('ESDC Eligibility')}
+        <Grid gridDefinition={[{ colspan: 12 }]}>
+          <FormField
+            label="Eligibility"
+            errorText={hasSubmitted && fieldErrors.esdcEligibility ? fieldErrors.esdcEligibility : undefined}
+            description="Select the client's eligibility category for ESDC funding. Only program admins may set this."
+          >
+            <Select
+              selectedOption={ESDC_OPTIONS.find(o => o.value === assessment.esdcEligibility) || null}
+              onChange={({ detail }) => handleField('esdcEligibility', detail.selectedOption.value)}
+              options={ESDC_OPTIONS}
+              placeholder="Select eligibility"
+              ariaLabel="Eligibility"
+              data-error-focus={hasSubmitted && fieldErrors.esdcEligibility ? 'true' : undefined}
+              tabIndex={-1}
+              disabled={isEligibilityDisabled}
+            />
+          </FormField>
+        </Grid>
+        {!eligibilitySet && <Box margin={{ bottom: 'l' }} />}
+        {isEligibilityGateActive ? null : (
+        <>
         {sectionHeader('Outcome Notice')}
         {!showNWACSection && (
           <Box color="text-status-inactive" margin={{ top: 'm', bottom: 's' }}>
@@ -1874,22 +1914,6 @@ const CoordinatorAssessmentWidget = forwardRef(
             <Box width="100%">
               <Textarea placeholder={initialAssessment.otherFunding} value={assessment.otherFunding} onChange={({ detail }) => handleField('otherFunding', detail.value)} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
             </Box>
-          </FormField>
-        </Grid>
-        {sectionHeader('ESDC Eligibility')}
-        <Grid gridDefinition={[{ colspan: 12 }]}> 
-          <FormField label="Eligibility" errorText={hasSubmitted && fieldErrors.esdcEligibility ? fieldErrors.esdcEligibility : undefined}
-            description="Select the client's eligibility category for ESDC funding. This is required for reporting and program compliance.">
-            <Select
-              selectedOption={ESDC_OPTIONS.find(o => o.value === assessment.esdcEligibility) || null}
-              onChange={({ detail }) => handleField('esdcEligibility', detail.selectedOption.value)}
-              options={ESDC_OPTIONS}
-              placeholder="Select eligibility"
-              ariaLabel="Eligibility"
-              data-error-focus={hasSubmitted && fieldErrors.esdcEligibility ? 'true' : undefined}
-              tabIndex={-1}
-              disabled={isAssessmentDisabled}
-            />
           </FormField>
         </Grid>
         {sectionHeader('Intervention Recommendation')}
@@ -2174,6 +2198,8 @@ const CoordinatorAssessmentWidget = forwardRef(
         </Grid>
 
         {!assessmentSubmitted && renderRecommendationSection()}
+        </>
+        )}
         <Modal
           visible={showCancelModal}
           onDismiss={() => setShowCancelModal(false)}

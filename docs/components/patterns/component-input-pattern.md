@@ -15,7 +15,7 @@ Single-line textual data entry supporting common HTML input `type` values (text,
 - Pattern (regex): Optional client regex (HTML `pattern`). Use when native type constraints are insufficient. Provide a user-friendly error server-side.
 - Input Mask: Optional formatting helper (Phone NA, SIN, **Status RN**, Postal/ZIP, Date YYYY-MM-DD, Time HH:MM, Currency). Status RN formats the 10-digit Secure Certificate of Indian Status registration number as `123 4567890` and restricts input to digits.
 - Spellcheck: Enabled by default for types where browsers honor it (`text`, `search`, etc.). Set to False for structured inputs like codes.
-- Default Value: Pre-populates the field (avoid for sensitive data).
+- Default Value: Pre-populates the field (avoid for sensitive data). Authors can pull from another field in the same workflow by entering `{data_key}` (uses that field’s stored value as the prefill; stops updating once the user edits this field).
 - CSS Classes: Always includes `govuk-input`; width modifiers append (e.g. `govuk-input--width-10`).
 - Form Group Classes: Add `govuk-form-group--error` only during error rendering (normally set automatically by validation, not manually).
 

@@ -26,7 +26,7 @@ Stored in `iset_application.status` (varchar). Canonical values:
 | `approved` | NWAC outcome marked as approved. | `CoordinatorAssessmentWidget.handleComplete` with `approve`. |
 | `completed` | Post-approval processing completed (future use). | Finance/closure flows. |
 | `rejected` | NWAC outcome rejected. | `CoordinatorAssessmentWidget.handleComplete` with `reject`. |
-| `withdrawn` | Applicant withdrew. | Manual status change or automation. |
+| `closed` | Application closed (e.g., applicant withdrew or file closed administratively). | Manual status change or automation. |
 | `archived` | Historical record retained, no further action. | Manual administrative action. |
 
 > **Canonicalisation:** `getApplicationStatusContext()` (in `src/utils/rbac.js`) lowercases and underscores incoming values; synonyms such as `"action_required"` and `"submitted"` are preserved. When comparing statuses always pass through this helper.

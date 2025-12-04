@@ -854,6 +854,22 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
           if (val === undefined || val === null || val === '') return NOT_PROVIDED;
           return `${val} km per month`;
         }
+      },
+      {
+        label: 'Student loans or grants?',
+        field: 'loan-grant',
+        controlType: 'select',
+        options: [
+          { value: 'yes', label: 'Yes' },
+          { value: 'no', label: 'No' }
+        ],
+        renderValue: answers => formatOption('loan-grant', answers['loan-grant'])
+      },
+      {
+        label: 'Student loan/grant details',
+        field: 'loan-grant-details',
+        controlType: 'textarea',
+        renderValue: answers => renderTextBlock(answers['loan-grant-details'])
       }
     ]
   },
@@ -2025,7 +2041,7 @@ const IsetApplicationFormWidget = ({
     .toString()
     .trim()
     .toLowerCase();
-  const isWithdrawnStatus = currentApplicationStatus === 'withdrawn';
+  const isClosedStatus = currentApplicationStatus === 'closed' || currentApplicationStatus === 'withdrawn';
   const employmentGoalsIndex = useMemo(
     () => sectionDefinitions.findIndex(section => section.id === 'employment-goals'),
     [sectionDefinitions]
@@ -2057,7 +2073,7 @@ const IsetApplicationFormWidget = ({
       ) : (
         <Button
           onClick={handleRequestEdit}
-          disabled={loading || !application || isDecisionFinal || lockedByAnotherUser || isWithdrawnStatus}
+          disabled={loading || !application || isDecisionFinal || lockedByAnotherUser || isClosedStatus}
           variant="primary"
         >
           Edit

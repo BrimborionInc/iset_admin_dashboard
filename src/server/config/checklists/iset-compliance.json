@@ -114,7 +114,7 @@
     },
     {
       "id": "social-assistance-letter",
-      "label": "Social Assistance letter from caseworker (for top-up, if applicable)",
+      "label": "Social Assistance letter from Case Manager (for top-up, if applicable)",
       "required": false,
       "documentTypes": ["supporting_evidence"],
       "sources": ["application_submission", "manual_upload", "secure_message_attachment"]

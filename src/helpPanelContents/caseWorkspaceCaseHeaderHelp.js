@@ -25,6 +25,6 @@ const CaseWorkspaceCaseHeaderHelp = () => (
   </div>
 );
 
-CaseWorkspaceCaseHeaderHelp.aiContext = `You are helping a caseworker using the case header widget in the Case Dashboard. It shows client details, agreement number, owner, and provides quick actions like reassign or mark ready to close.`;
+CaseWorkspaceCaseHeaderHelp.aiContext = `You are helping a case manager using the case header widget in the Case Dashboard. It shows client details, agreement number, owner, and provides quick actions like reassign or mark ready to close.`;
 
 export default CaseWorkspaceCaseHeaderHelp;

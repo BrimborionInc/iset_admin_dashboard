@@ -43,11 +43,29 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.2.2 (25 Nov 2025)',
-      description: 'Release 0.2.2 ships the Document Checklist inside the Application Assessment workspace so assessors can track required files in one place.',
+      sectionTitle: 'Release Notes - v0.2.3 (4 Dec 2025)',
+      description: 'Release 0.2.3 addresses the initial feedback from NWAC during the first demo review session.',
       features: {
         heading: 'Updates',
         sections: [
+          {
+            title: 'Patch v0.2.3 — NWAC review fixes pt 1',
+            paragraphs: [
+              'Registration Number is now mandatory for Status First Nations and must be 10 digits; Non-Status, Inuit, and Métis have their own free-text input with tailored guidance.',
+              'Home Community now defaults to the Indigenous declaration affiliation but can be edited when needed.',
+              'New intake step prompts applicants to detail any student loans or grants they are receiving.',
+              'Employment status now includes “Employed on approved leave”; the application form widget lists this under household incomes.',
+              'Bug fixes: clicking Back on an intake step with a validation error now clears the error.',
+              'Added a "Closed" status and quick action allowing admins to close an application.',
+              'Added a "Province" column to the application intake table showing the info entered by the applicant in the "Address" intake step.',
+              'Added "Resume" to the list of documents submittable by the applicant during intake.',
+              'Gated the assessment based on whether the EI status assessment has been completed by an admin.',
+              'Removed the EI status self-assessment question from the intake workflow.',
+              'Added a new sortable, filterable status "Awaiting EI Validation" to the application intake table so administrators can see which applications still need lookup.',
+              'Commenced normalising the use of "Case Manager" in the public portal.',
+              'Removed the placeholder "support" email link in the application card.'
+            ]
+          },
           {
             title: 'Patch v0.2.2 — Document Checklist',
             paragraphs: [
@@ -161,6 +179,12 @@ const copy = {
       knownBugs: {
         heading: 'Known Bugs',
         sections: [
+          {
+            title: 'Public Portal Runtime Error',
+            paragraphs: [
+              'Inactivity sometimes causes the public portal to throw a runtime error. This may be related to in-progress development changes, but the cause is still unknown.'
+            ]
+          },
           { title: 'Record Locking', paragraphs: ['Record locking still sometimes causes progress to be prevented.'] },
           { title: 'Workflow Studio', paragraphs: ['The "flowchart" views do not pan or zoom consistently, making drag interactions unreliable.'] },
           { title: 'Intake Step Editor', paragraphs: ['Dragging components within the workspace causes flicker and the insertion point is unclear.'] },
@@ -175,9 +199,9 @@ const copy = {
           {
             title: 'Up Next',
             paragraphs: [
-              'Home Community lookup integration into the public portal.',
-              'Ability to grant individual users approval rights (e.g., approve their own interventions).',
-              'Finance Module (currently still just dummy data).'
+              'Finance Module (currently still just dummy data).',
+              'Handling Recurrent Applications (e.g. multi-year study financing) Needs some more discussion next week.',
+              'Improving "Roles".  Curetnly we have Admins, Regional Coorinators and Assessors.  Do we need a special role for PTMAs?  Do there need to be two tiers of Assessor?  For discussion next week.'
             ]
           }
         ]
@@ -232,11 +256,21 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.2.2 (25 novembre 2025)',
-      description: 'La version 0.2.2 active la liste de contrôle des documents dans l’espace de travail Évaluation des demandes pour suivre tous les fichiers requis au même endroit.',
+      sectionTitle: 'Notes de version - v0.2.3 (4 décembre 2025)',
+      description: 'La version 0.2.3 répond aux premiers commentaires de l’AFAC lors de la première revue de démonstration.',
       features: {
         heading: 'Mises à jour',
         sections: [
+          {
+            title: 'Correctif v0.2.3 — Alignement du parcours et corrections',
+            paragraphs: [
+              'Le numéro d’inscription est désormais obligatoire pour les Premières Nations inscrites (10 chiffres). Les personnes sans statut, inuites et métisses ont leur propre champ libre avec consignes adaptées.',
+              'La communauté d’origine reprend par défaut l’affiliation fournie dans la déclaration autochtone, tout en restant modifiable.',
+              'Nouvelle étape d’admission demandant de détailler les prêts ou bourses d’études reçus.',
+              'Statut d’emploi : ajout de « Employé en congé approuvé » et affichage dans les revenus du ménage du widget du formulaire.',
+              'Correctif : cliquer sur Retour sur une étape avec erreur de validation efface désormais l’erreur.'
+            ]
+          },
           {
             title: 'Correctif v0.2.2 — Liste de contrôle des documents',
             paragraphs: [
@@ -286,6 +320,12 @@ const copy = {
       knownBugs: {
         heading: 'Bugs connus',
         sections: [
+          {
+            title: 'Erreur d’exécution du portail public',
+            paragraphs: [
+              'Une période d’inactivité peut parfois provoquer une erreur d’exécution sur le portail public. Cela pourrait être lié à des changements en cours de développement, la cause reste inconnue.'
+            ]
+          },
           { title: 'Verrouillage des dossiers', paragraphs: ['Le verrouillage des enregistrements empêche encore parfois la progression.'] },
           { title: 'Studio des parcours', paragraphs: ['Les vues « organigramme » ne gèrent pas correctement le déplacement ou le zoom, ce qui rend le glisser-déposer instable.'] },
           { title: 'Éditeur d’étapes', paragraphs: ['Le déplacement des composants dans l’aire de travail provoque un scintillement et le point d’insertion demeure flou.'] },

@@ -24520,6 +24520,11 @@ app.get('/api/applications', async (req, res) => {
       al.owner_email AS lock_owner_email,
       al.expires_at AS lock_expires_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+      COALESCE(
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."address-province"')),
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."address-province"'))
+      ) AS address_province,
+      ca.esdc_eligibility AS assessment_esdc_eligibility,
       a.created_at AS submitted_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS preferred_name,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"')) AS applicant_first_name,
@@ -24533,6 +24538,7 @@ app.get('/api/applications', async (req, res) => {
       0 AS is_unassigned_submission
       FROM iset_case c
       JOIN iset_application a ON c.application_id = a.id
+      LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
       LEFT JOIN application_lock al ON al.application_id = c.application_id AND al.expires_at > NOW()`;
@@ -24581,6 +24587,11 @@ app.get('/api/applications', async (req, res) => {
         NULL AS assigned_user_email, NULL AS assigned_user_role, NULL AS staff_profile_id,
         NULL AS lock_owner_id, NULL AS lock_owner_name, NULL AS lock_owner_email, NULL AS lock_expires_at,
   JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."address-province"')),
+          JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."address-province"'))
+        ) AS address_province,
+        NULL AS assessment_esdc_eligibility,
         a.created_at AS submitted_at,
         JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS preferred_name,
         JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"')) AS applicant_first_name,
@@ -24667,7 +24678,9 @@ app.get('/api/applications', async (req, res) => {
         lock_owner_email: lockOwnerEmail,
         lock_expires_at: r.lock_expires_at || null,
         is_locked: Boolean(lockOwnerId),
-        applicant_name: applicantName
+        applicant_name: applicantName,
+        address_province: r.address_province || null,
+        assessment_esdc_eligibility: r.assessment_esdc_eligibility || null
       };
     });
     res.json({ count, rows: rowsOut });

@@ -10,7 +10,7 @@ const PortfolioCasesTableHelp = () => (
     <h3>Columns</h3>
     <ul>
       <li><strong>Client</strong>: primary client name; click to open the case workspace.</li>
-      <li><strong>Owner</strong>: assigned caseworker or manager.</li>
+      <li><strong>Owner</strong>: assigned case manager.</li>
       <li><strong>Agreement #</strong>: CRF/EI identifier that links finance and intervention records.</li>
       <li><strong>Interventions</strong>: open vs total interventions for the current action plan.</li>
       <li><strong>Finance Status</strong>: badges highlighting mapping gaps or overspends.</li>
@@ -26,6 +26,6 @@ const PortfolioCasesTableHelp = () => (
   </div>
 );
 
-PortfolioCasesTableHelp.aiContext = `You are helping an NWAC caseworker using the ISET Portfolio dashboard. The cases table lists clients with owner, agreement number, intervention counts, finance status, fiscal actuals, and variance. Selecting a row opens the case workspace.`;
+PortfolioCasesTableHelp.aiContext = `You are helping an NWAC case manager using the ISET Portfolio dashboard. The cases table lists clients with owner, agreement number, intervention counts, finance status, fiscal actuals, and variance. Selecting a row opens the case workspace.`;
 
 export default PortfolioCasesTableHelp;

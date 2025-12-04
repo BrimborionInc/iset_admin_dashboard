@@ -2,6 +2,9 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2025-01-05
+- Authoring: Default Value fields now accept `{data_key}` placeholders to prefill from another field in the same workflow.
+
 ## 2025-11-24
 - Feature: Manage ISET Applications dashboard now includes the Application Work Queue summary widget alongside the ISET Applications table; help content updated.
 
@@ -31,3 +34,6 @@ Format: YYYY-MM-DD - Category: Short description
 ## 2025-12-03
 - Admin application form: collapsed intake registration number variants (sfn/nsfn/metis/inuit) into a single Registration number field and ignore the UI-only key in diffs so saving updates the correct stored key.
 - Case workspace: Participant Details now reads/writes registration number across all variant keys, collapsing to a single value post-intake.
+
+## 2025-12-04
+- Docs: Added auto-assignment notes (config in admin, execution in portal ingest) and clarified province sourcing from submission payload.

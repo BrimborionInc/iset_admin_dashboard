@@ -17,8 +17,12 @@ const REGIONAL_COORDINATOR_ROLES = new Set(REGIONAL_COORDINATOR_ROLE_VALUES);
 const APPLICATION_ASSESSOR_ROLES = new Set(APPLICATION_ASSESSOR_ROLE_VALUES);
 const OUTCOME_REVIEW_ROLES = new Set(OUTCOME_REVIEW_ROLE_VALUES);
 
-const FINAL_CASE_STATUSES = new Set(['ready_to_close', 'closed', 'archived', 'withdrawn', 'rejected']);
-const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'withdrawn', 'archived']);
+const FINAL_CASE_STATUSES = new Set(['ready_to_close', 'closed', 'archived', 'rejected']);
+const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
+
+const APPLICATION_STATUS_SYNONYMS = Object.freeze({
+  withdrawn: 'closed',
+});
 
 const STATUS_SYNONYMS = Object.freeze({
   action_required: 'docs_requested',
@@ -32,6 +36,7 @@ const STATUS_SYNONYMS = Object.freeze({
   in_review: 'pending_approval',
   submitted: 'pending_approval',
   rejected: 'archived',
+  withdrawn: 'closed',
 });
 
 const REGIONAL_COORDINATOR_ALLOWED_TRANSITIONS = Object.freeze({
@@ -90,7 +95,8 @@ export function getCaseStatusContext(status) {
 }
 
 export function getApplicationStatusContext(status) {
-  const canonicalStatus = canonicalizeStatus(status);
+  const base = canonicalizeStatus(status);
+  const canonicalStatus = APPLICATION_STATUS_SYNONYMS[base] || base;
   return {
     canonicalStatus,
     isFinalStatus: APPLICATION_FINAL_STATUSES.has(canonicalStatus),

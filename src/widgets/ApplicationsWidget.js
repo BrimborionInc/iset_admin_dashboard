@@ -25,7 +25,7 @@ import { apiFetch } from '../auth/apiClient';
 import useCurrentUser from '../hooks/useCurrentUser';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
-const DEFAULT_VISIBLE_COLUMNS = ['watch','applicant_name','tracking_id','status','sla_risk','assigned_user_email','submitted_at','lock_state','actions'];
+const DEFAULT_VISIBLE_COLUMNS = ['watch','applicant_name','address_province','tracking_id','status','sla_risk','assigned_user_email','submitted_at','lock_state','actions'];
 const COLUMN_WIDTHS_STORAGE_KEY = 'applications-widget-column-widths';
 const SLA_STAGE_ALLOWLIST = new Set(['assignment', 'assessment', 'program_decision']);
 const SLA_DEFAULT_DAYS = {
@@ -112,7 +112,28 @@ const toDate = value => {
   return d && !Number.isNaN(d.getTime()) ? d : null;
 };
 
-const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'withdrawn', 'cancelled', 'closed', 'archived']);
+const PROVINCE_LABELS = {
+  ab: 'Alberta',
+  bc: 'British Columbia',
+  mb: 'Manitoba',
+  nb: 'New Brunswick',
+  nl: 'Newfoundland and Labrador',
+  ns: 'Nova Scotia',
+  nt: 'Northwest Territories',
+  nu: 'Nunavut',
+  on: 'Ontario',
+  pe: 'Prince Edward Island',
+  qc: 'Quebec',
+  sk: 'Saskatchewan',
+  yt: 'Yukon Territory'
+};
+
+const normalizeClosedStatus = (status) => {
+  const key = (status || '').toString().trim().toLowerCase();
+  return key === 'withdrawn' ? 'closed' : key;
+};
+
+const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
 const DECISION_STATUSES = new Set(['pending_approval']);
 const ASSESSMENT_STATUSES = new Set([
   'in_review', 'in review',
@@ -124,19 +145,26 @@ const ASSESSMENT_STATUSES = new Set([
 
 const getStatusInfo = (row) => {
   const applicationStatusRaw = typeof row.application_status === 'string' ? row.application_status.trim() : '';
-  const rawStatus = (applicationStatusRaw || 'submitted').toLowerCase();
+  const rawStatus = normalizeClosedStatus(applicationStatusRaw || 'submitted');
   const label = rawStatus
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase());
   const isUnassignedCase = rawStatus === 'submitted' && !row.assigned_user_id;
+  const eligibilityMissing =
+    !row.assessment_esdc_eligibility &&
+    ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(rawStatus);
   const statusType = (() => {
     if (['approved', 'completed'].includes(rawStatus)) return 'success';
     if (['rejected', 'declined'].includes(rawStatus)) return 'error';
-    if (['withdrawn', 'cancelled'].includes(rawStatus)) return 'info';
+    if (['closed', 'cancelled'].includes(rawStatus)) return 'info';
+    if (eligibilityMissing) return 'warning';
     if (['docs_requested', 'action_required'].includes(rawStatus)) return 'warning';
     return isUnassignedCase || rawStatus === 'new' ? 'pending' : 'info';
   })();
-  const statusLabel = isUnassignedCase ? `${label} • Unassigned` : label;
+  const qualifiers = [];
+  if (isUnassignedCase) qualifiers.push('Unassigned');
+  if (eligibilityMissing) qualifiers.push('Awaiting EI Validation');
+  const statusLabel = qualifiers.length ? `${label} • ${qualifiers.join(' • ')}` : label;
   return { rawStatus, statusLabel, statusType, isUnassignedCase };
 };
 
@@ -146,7 +174,7 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
     return { ageDays: null, due: null, status: 'unknown', deltaDays: null, label: 'Unknown' };
   }
   const due = row.sla_due_at ? toDate(row.sla_due_at) : null;
-  const statusKey = (rawStatus || '').toLowerCase();
+  const statusKey = normalizeClosedStatus(rawStatus || '');
   if (COMPLETED_STATUSES.has(statusKey)) {
     return {
       ageDays: Math.floor((Date.now() - submitted.getTime()) / 86400000),
@@ -249,6 +277,8 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       }
       case 'assigned_user_email':
         return (item.assigned_user_email || '').toLowerCase();
+      case 'address_province':
+        return (item.address_province || '').toLowerCase();
       case 'submitted_at': {
         const date = toDate(item.submitted_at) || toDate(item.created_at);
         return date ? date.getTime() : 0;
@@ -314,6 +344,16 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         cell: i => renderCaseLink(i, redactApplicantDisplay(i.applicant_name)),
         minWidth: 180,
         sortingComparator: (a, b) => compareRows('applicant_name', a, b)
+      },
+      {
+        id: 'address_province',
+        header: 'Province',
+        cell: i => {
+          const code = (i.address_province || '').toLowerCase();
+          return PROVINCE_LABELS[code] || code.toUpperCase() || '-';
+        },
+        minWidth: 120,
+        sortingComparator: (a, b) => compareRows('address_province', a, b)
       },
       {
         id: 'tracking_id',
@@ -672,10 +712,12 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       const numericCaseId = Number(item.case_id);
       const caseId = Number.isFinite(numericCaseId) && numericCaseId > 0 ? numericCaseId : null;
       const watched = caseId ? watchMap.has(caseId) : false;
+      const province = item.address_province || item['address-province'] || '';
       return {
         ...item,
         __caseIdNumeric: caseId,
         __isWatched: watched,
+        address_province: province,
       };
     });
   }, [items, watchMap]);
@@ -684,7 +726,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const filteredItems = decoratedItems
     .filter(i => {
       const s = filteringText.toLowerCase();
-      return !s || [i.tracking_id, i.applicant_name, i.application_status, i.case_status, i.assigned_user_email, i.ptma_codes, i.lock_owner_name, i.lock_owner_email]
+      return !s || [i.tracking_id, i.applicant_name, i.application_status, i.case_status, i.assigned_user_email, i.ptma_codes, i.lock_owner_name, i.lock_owner_email, i.address_province]
         .some(v => v && String(v).toLowerCase().includes(s));
     })
     .filter(i => !showWatchedOnly || i.__isWatched);

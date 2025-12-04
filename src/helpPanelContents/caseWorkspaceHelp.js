@@ -31,6 +31,6 @@ const CaseWorkspaceHelp = () => (
   </div>
 );
 
-CaseWorkspaceHelp.aiContext = `You are guiding a caseworker through the Case Workspace board. Explain how to move widgets, add from the palette, and use the header, plans, notes, calendar, documents, and messaging panels together to progress a case.`;
+CaseWorkspaceHelp.aiContext = `You are guiding a case manager through the Case Workspace board. Explain how to move widgets, add from the palette, and use the header, plans, notes, calendar, documents, and messaging panels together to progress a case.`;
 
 export default CaseWorkspaceHelp;

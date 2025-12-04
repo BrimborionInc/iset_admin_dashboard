@@ -147,7 +147,7 @@ const widgetRegistry = {
     component: ParticipantDetailsWidget,
     title: "Participant details",
     description:
-      "Refer to the application form for the original submission. Caseworkers must keep these details current based on participant updates. Handle this sensitive personal data carefully and avoid duplicating it elsewhere.",
+      "Refer to the application form for the original submission. Case Managers must keep these details current based on participant updates. Handle this sensitive personal data carefully and avoid duplicating it elsewhere.",
     helpComponent: CaseWorkspaceParticipantDetailsHelp,
     helpTitle: "Participant details",
     aiContext: CaseWorkspaceParticipantDetailsHelp.aiContext,

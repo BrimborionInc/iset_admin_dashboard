@@ -50,17 +50,22 @@ function formatDateTime(value) {
   });
 }
 
+function normalizeClosedStatus(status) {
+  const key = (status || '').toString().trim().toLowerCase();
+  return key === 'withdrawn' ? 'closed' : key;
+}
+
 function statusColor(status = '') {
-  const normalized = (status || '').toLowerCase();
+  const normalized = normalizeClosedStatus(status);
   if (['approved', 'completed'].includes(normalized)) return 'green';
   if (['submitted', 'in review', 'in_review', 'in progress', 'pending', 'assigned', 'pending_approval'].includes(normalized)) return 'blue';
   if (['docs requested', 'docs_requested', 'action required', 'action required (docs requested)'].includes(normalized)) return 'severity-high';
   if (['rejected', 'declined', 'errored'].includes(normalized)) return 'red';
-  if (['withdrawn', 'closed', 'inactive', 'archived'].includes(normalized)) return 'grey';
+  if (['closed', 'inactive', 'archived'].includes(normalized)) return 'grey';
   return 'grey';
 }
 
-const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'withdrawn', 'cancelled', 'closed', 'archived']);
+const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
 const DECISION_STATUSES = new Set(['pending_approval']);
 const ASSESSMENT_STATUSES = new Set([
   'in_review', 'in review',
@@ -79,7 +84,7 @@ const getStatusInfo = (row) => {
   const applicationStatusRaw = typeof row.application_status === 'string' ? row.application_status.trim() : '';
   const caseStatusRaw = typeof row.case_status === 'string' ? row.case_status.trim() : '';
   const fallbackStatus = row.case_id ? 'submitted' : 'new';
-  const rawStatus = (applicationStatusRaw || caseStatusRaw || fallbackStatus).toLowerCase();
+  const rawStatus = normalizeClosedStatus(applicationStatusRaw || caseStatusRaw || fallbackStatus);
   const label = rawStatus
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase());
@@ -87,7 +92,7 @@ const getStatusInfo = (row) => {
   const statusType = (() => {
     if (['approved', 'completed'].includes(rawStatus)) return 'success';
     if (['rejected', 'declined'].includes(rawStatus)) return 'error';
-    if (['withdrawn', 'cancelled'].includes(rawStatus)) return 'info';
+    if (['closed', 'cancelled'].includes(rawStatus)) return 'info';
     if (['docs_requested', 'action_required'].includes(rawStatus)) return 'warning';
     return isUnassignedCase || rawStatus === 'new' ? 'pending' : 'info';
   })();
@@ -132,7 +137,7 @@ const APPLICATION_STATUS_OPTIONS = [
   { label: 'Approved', value: 'approved' },
   { label: 'Completed', value: 'completed' },
   { label: 'Rejected', value: 'rejected' },
-  { label: 'Withdrawn', value: 'withdrawn' },
+  { label: 'Closed', value: 'closed' },
   { label: 'Archived', value: 'archived' },
 ];
 
@@ -140,6 +145,7 @@ const APPLICATION_STATUS_LABEL_MAP = APPLICATION_STATUS_OPTIONS.reduce((acc, opt
   acc[option.value] = option.label;
   return acc;
 }, {});
+APPLICATION_STATUS_LABEL_MAP.withdrawn = 'Closed';
 
 const formatStatusLabel = value => {
   if (!value) return 'Unknown';
@@ -419,7 +425,8 @@ const ApplicationOverviewWidget = ({
     };
   }, [application]);
 
-  const fallbackStatus = statusValue || applicationStatusFromCase || application?.status || '';
+  const fallbackStatusRaw = statusValue || applicationStatusFromCase || application?.status || '';
+  const fallbackStatus = normalizeClosedStatus(fallbackStatusRaw);
   const statusContext = getCaseStatusContext(fallbackStatus);
   const roleAccess = getRoleGroups(userRole);
   const { canonicalStatus, isFinalStatus } = statusContext;
@@ -460,9 +467,9 @@ const ApplicationOverviewWidget = ({
     ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(normalizedStatusKey)
   ) {
     quickActionItems.push({
-      id: 'withdraw',
-      text: 'Withdraw Application',
-      description: 'Mark the application as withdrawn.'
+      id: 'close',
+      text: 'Close Application',
+      description: 'Mark the application as closed.'
     });
   }
 
@@ -512,15 +519,15 @@ const ApplicationOverviewWidget = ({
       return;
     }
 
-    if (actionId === 'withdraw') {
+    if (actionId === 'close') {
       setQuickActionConfirmInput('');
       setQuickActionConfirm({
         ...buildConfirm(
-          'Withdraw application',
-          'Withdrawing will move this application to Withdrawn. Once withdrawn it cannot be processed further. Use this when the applicant requests withdrawal or is no longer pursuing the application.',
-          'withdrawn'
+          'Close application',
+          'Closing will move this application to Closed. Once closed it cannot be processed further. Use this when the applicant requests closure or is no longer pursuing the application.',
+          'closed'
         ),
-        confirmWord: 'withdraw',
+        confirmWord: 'close',
       });
       return;
     }

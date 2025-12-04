@@ -52,15 +52,17 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
 
   const rawStatus = typeof caseData?.status === "string" ? caseData.status.trim().toLowerCase() : "";
   const normalizedStatus = rawStatus.replace(/-/g, "_");
-  const statusLabel = rawStatus
-    ? rawStatus
+  const statusKey = normalizedStatus === "withdrawn" ? "closed" : normalizedStatus;
+  const labelSource = statusKey || rawStatus;
+  const statusLabel = labelSource
+    ? labelSource
         .split(/[_-]/g)
         .filter(Boolean)
         .map(part => part.charAt(0).toUpperCase() + part.slice(1))
         .join(" ")
     : "Unknown";
   const statusType = (() => {
-    switch (normalizedStatus) {
+    switch (statusKey) {
       case "active":
       case "closed":
         return "success";
@@ -72,7 +74,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         return "info";
       case "cancelled":
       case "rejected":
-      case "withdrawn":
+      case "closed":
         return "error";
       default:
         return "info";
@@ -82,15 +84,15 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const clientName = caseData?.client?.name ?? "Unknown client";
   const quickActions = useMemo(() => {
     const items = [{ id: "assign", text: "Assign / reassign" }];
-    if (normalizedStatus === "ready_to_close") {
+    if (statusKey === "ready_to_close") {
       items.push({ id: "close-case", text: "Close case" });
-    } else if (normalizedStatus === "closed") {
+    } else if (statusKey === "closed") {
       items.push({ id: "reopen-case", text: "Re-open case" });
     } else {
       items.push({ id: "close", text: "Mark ready to close" });
     }
     return items;
-  }, [normalizedStatus]);
+  }, [statusKey]);
 
   const compliance = caseData?.compliance ?? {};
   const mapValidationStatus = status => {

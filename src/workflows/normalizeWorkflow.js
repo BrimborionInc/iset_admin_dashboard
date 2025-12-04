@@ -381,6 +381,19 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         required: !!(props?.validation && typeof props.validation === 'object' ? props.validation.required : props?.required),
         storageKey: chosenKey || id,
       };
+      // Preserve author-specified default value for defaultable fields so runtime can prefill (e.g., {data_key})
+      if (['input','textarea','character-count'].includes(normalisedType)) {
+        const rawVal = props?.value;
+        const hasDefault = (() => {
+          if (rawVal === undefined || rawVal === null) return false;
+          if (typeof rawVal === 'string') return rawVal.trim() !== '';
+          if (typeof rawVal === 'object') {
+            return Object.values(rawVal).some(v => typeof v === 'string' && v.trim() !== '');
+          }
+          return false;
+        })();
+        if (hasDefault) component.value = rawVal;
+      }
       if (props?.label?.classes) component.labelClass = String(props.label.classes).trim();
       if (props?.fieldset?.legend?.classes) component.legendClass = String(props.fieldset.legend.classes).trim();
       if (tplType === 'character-count') {

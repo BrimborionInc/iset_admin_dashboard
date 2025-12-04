@@ -603,7 +603,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
           info={infoLink}
           description={
             metadata.description ??
-            "Refer to the application form for the original submission. Caseworkers must keep these details current based on participant updates. Handle this sensitive personal data carefully and avoid duplicating it elsewhere."
+            "Refer to the application form for the original submission. Case Managers must keep these details current based on participant updates. Handle this sensitive personal data carefully and avoid duplicating it elsewhere."
           }
           actions={
             editing ? (

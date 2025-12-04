@@ -348,7 +348,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   if (p === 'maxlength') return 'Maximum character count enforced by the component.';
   if (p === 'threshold') return 'Percentage (0-100) when the counter starts showing (e.g., 75).';
   if (p === 'maxwords') return 'Optional maximum word count (leave blank to ignore).';
-  if (p === 'value') return 'Default pre-filled value (leave blank for none).';
+  if (p === 'value') return 'Default pre-filled value. Enter text or {data_key} to pull from another field in this workflow.';
   if (p === 'accept') return 'Comma-separated file types. Use extensions like .pdf,.jpg or MIME types like image/png, application/pdf. Leave blank to allow any.';
   if (p === 'multiple') return 'Allow selecting and uploading multiple files. If enabled, submission stores an array of file objects.';
   if (p === 'documenttype') return 'Optional document category tag (alphanumeric, dash, underscore). Sent to upload endpoint as metadata.';
