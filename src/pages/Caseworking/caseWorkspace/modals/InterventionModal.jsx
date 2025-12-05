@@ -15,6 +15,7 @@ import {
   SpaceBetween,
   Textarea,
 } from "@cloudscape-design/components";
+import { apiFetch } from "../../../../auth/apiClient.js";
 
 const STATUS_OPTIONS = [
   { value: "planned", label: "Planned" },
@@ -217,6 +218,9 @@ const InterventionModal = ({
   const [isClosing, setIsClosing] = useState(false);
   const [showCloseGuidance, setShowCloseGuidance] = useState(true);
   const [closeForm, setCloseForm] = useState(buildCloseForm(intervention));
+  const [potOptions, setPotOptions] = useState([]);
+  const [potLoading, setPotLoading] = useState(false);
+  const potFetchIdRef = useRef(0);
 
   useEffect(() => {
     if (!visible) {
@@ -229,6 +233,8 @@ const InterventionModal = ({
       setNocSuggestionsLoading(false);
       setIsClosing(false);
       setCloseForm(buildCloseForm(null));
+      setPotOptions([]);
+      setPotLoading(false);
       return;
     }
 
@@ -254,6 +260,43 @@ const InterventionModal = ({
     setIsClosing(Boolean(startInCloseMode && canClose && mode === "edit"));
     setCloseForm(buildCloseForm(intervention));
   }, [visible, mode, intervention, startInCloseMode, canClose]);
+
+  const loadPots = useMemo(
+    () => async query => {
+      const fetchId = ++potFetchIdRef.current;
+      setPotLoading(true);
+      try {
+        const resp = await apiFetch(`/api/finance/budget-pots/lookup${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+        if (!resp.ok) {
+          throw new Error(`Lookup failed (${resp.status})`);
+        }
+        const data = await resp.json();
+        if (fetchId !== potFetchIdRef.current) {
+          return;
+        }
+        const options = (Array.isArray(data) ? data : []).map(item => ({
+          value: item.value || item.id,
+          label: item.label || item.name || item.code || "",
+          description: item.code ? item.code : undefined,
+        }));
+        setPotOptions(options);
+      } catch (e) {
+        console.warn("[InterventionModal] pot lookup failed", e);
+        setPotOptions([]);
+      } finally {
+        if (fetchId === potFetchIdRef.current) {
+          setPotLoading(false);
+        }
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (visible) {
+      loadPots();
+    }
+  }, [visible, loadPots]);
 
   useEffect(() => {
     if (isClosing) {
@@ -376,6 +419,13 @@ const InterventionModal = ({
   const selectedFundingStreamOption = useMemo(
     () => fundingStreamSelectOptions.find(option => option.value === form.fundingStream) || null,
     [fundingStreamSelectOptions, form.fundingStream]
+  );
+
+  const selectedPotOption = useMemo(
+    () =>
+      potOptions.find(option => option.value === form.potId) ||
+      (form.potId ? { value: form.potId, label: form.potId } : null),
+    [potOptions, form.potId]
   );
 
   const nocVersionOptions = useMemo(() => {
@@ -1131,12 +1181,20 @@ const InterventionModal = ({
             )}
             <FormField
               label="Budget pot"
-              description="Budget pot lookup will be enabled in an upcoming patch."
             >
-              <Input
-                value={form.potId}
-                onChange={({ detail }) => handleChange("potId", detail.value)}
-                readOnly={isReadOnly}
+              <Select
+                selectedOption={selectedPotOption}
+                onChange={({ detail }) => handleChange("potId", detail.selectedOption?.value || "")}
+                options={potOptions}
+                filteringType="auto"
+                onLoadItems={({ detail }) => {
+                  if (detail?.filteringText !== undefined) {
+                    loadPots(detail.filteringText);
+                  }
+                }}
+                placeholder={potLoading ? "Loading budget pots" : "Select budget pot"}
+                statusType={potLoading ? "loading" : "finished"}
+                empty={potLoading ? undefined : "No budget pots found"}
                 disabled={isReadOnly}
               />
             </FormField>

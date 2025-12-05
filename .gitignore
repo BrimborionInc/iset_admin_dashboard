@@ -44,3 +44,6 @@ Thumbs.db
 *.swp
 *.swo
 *.code-workspace
+
+# Database structure dumps
+docs/data/DB-Structure-Dump/

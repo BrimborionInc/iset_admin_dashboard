@@ -15,6 +15,11 @@ import {
   CollectionPreferences,
   Pagination,
   Button,
+  Tabs,
+  Modal,
+  FormField,
+  Input,
+  Textarea,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
 import { useBudgetsData } from "./BudgetsDataContext.jsx";
@@ -181,12 +186,13 @@ const flattenTree = nodes => {
 };
 
 const findItemById = (items, id) => {
+  const target = id != null ? String(id) : null;
   for (const item of items) {
-    if (item.id === id) {
+    if (target !== null && String(item.id) === target) {
       return item;
     }
     if (item.children?.length) {
-      const match = findItemById(item.children, id);
+      const match = findItemById(item.children, target);
       if (match) {
         return match;
       }
@@ -207,6 +213,7 @@ const ALL_COLUMN_IDS = [
   "lifecycle",
   "risk",
 ];
+const DRAFT_COLUMN_IDS = ["pot", "approved", "adjusted"];
 
 const PREFERENCES_STORAGE_KEY = "finance-budget-hierarchy-preferences-v1";
 const defaultPreferences = {
@@ -280,8 +287,65 @@ const persistPreferences = preferences => {
 };
 
 const BudgetHierarchyWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
-  const { pots, selectedPotId, selectPot } = useBudgetsData();
-  const enrichedData = useMemo(() => pots.map(enrichMetrics), [pots]);
+  const {
+    pots,
+    drafts,
+    selectedPotId,
+    selectPot,
+    selectedDraftId,
+    setSelectedDraftId,
+    createDraft,
+    publishDraft,
+  } = useBudgetsData();
+  const [activeTab, setActiveTab] = useState("active");
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishSubmitting, setPublishSubmitting] = useState(false);
+  const [draftModalOpen, setDraftModalOpen] = useState(false);
+  const [draftModalLabel, setDraftModalLabel] = useState("");
+  const [draftModalNotes, setDraftModalNotes] = useState("");
+  const [draftCreateSubmitting, setDraftCreateSubmitting] = useState(false);
+
+  const draftOptions = useMemo(
+    () =>
+      (drafts || []).map(d => ({
+        label: d.label,
+        value: d.id,
+        description: d.notes || "",
+      })),
+    [drafts]
+  );
+
+  useEffect(() => {
+    if (activeTab === "drafts" && draftOptions.length && !selectedDraftId) {
+      setSelectedDraftId(draftOptions[0].value);
+    }
+  }, [activeTab, draftOptions, selectedDraftId]);
+
+  const selectedDraft = useMemo(
+    () => (drafts || []).find(d => d.id === selectedDraftId) || null,
+    [drafts, selectedDraftId]
+  );
+
+  const draftPots = useMemo(() => {
+    if (!selectedDraft) return [];
+    let payload = selectedDraft.payload;
+    if (typeof payload === "string") {
+      try {
+        payload = JSON.parse(payload);
+      } catch {
+        payload = null;
+      }
+    }
+    const potsFromPayload = payload?.pots;
+    if (!Array.isArray(potsFromPayload)) return [];
+    return potsFromPayload.map(p => ({
+      ...p,
+      status: p.status || "draft",
+    }));
+  }, [selectedDraft]);
+
+  const sourceData = activeTab === "drafts" ? draftPots : pots;
+  const enrichedData = useMemo(() => sourceData.map(enrichMetrics), [sourceData]);
   const activeData = useMemo(
     () => enrichedData.filter(item => item.status !== "archived"),
     [enrichedData]
@@ -335,16 +399,22 @@ const baseTree = useMemo(() => buildTree(activeData), [activeData]);
   }, [viewMode, riskFilter, filteringText, pageSize]);
 
   useEffect(() => {
+    if (activeTab !== "active") {
+      return;
+    }
     if (!flattenedTree.length) {
       if (selectedPotId !== null) {
+        console.log("[Budgets] clearing selection; no items in active view");
         selectPot(null);
       }
       return;
     }
-    if (!flattenedTree.some(item => item.id === selectedPotId)) {
+    const match = flattenedTree.some(item => String(item.id) === String(selectedPotId));
+    if (!match) {
+      console.log("[Budgets] active selection not found; defaulting to first item");
       selectPot(flattenedTree[0].id);
     }
-  }, [flattenedTree, selectedPotId, selectPot]);
+  }, [flattenedTree, selectedPotId, selectPot, activeTab]);
 
   useEffect(() => {
     const listener = event => {
@@ -422,15 +492,16 @@ useEffect(() => {
     }
   };
 
-const handleSelectionChange = ({ detail }) => {
-  const next = detail.selectedItems?.[0];
-  if (next?.id) {
-    selectPot(next.id);
-  }
-};
+  const handleSelectionChange = ({ detail }) => {
+    const next = detail.selectedItems?.[0];
+    if (next?.id) {
+      console.log("[Budgets] selecting pot", next.id, "in tab", activeTab);
+      selectPot(next.id);
+    }
+  };
 
   const headerActions = (
-  <SpaceBetween direction="horizontal" size="s">
+    <SpaceBetween direction="horizontal" size="s">
       <SegmentedControl
         selectedId={viewMode}
         onChange={({ detail }) => {
@@ -447,35 +518,6 @@ const handleSelectionChange = ({ detail }) => {
         placeholder="Filter pots"
         selectedAriaLabel="Risk filter"
       />
-      <Button
-        iconName="add-plus"
-        onClick={() => {
-          window.dispatchEvent(
-            new CustomEvent("financeBudgets:managePot", {
-              detail: { mode: "create", parentId: selectedPotId ?? null },
-            })
-          );
-        }}
-      >
-        New pot
-      </Button>
-      <Button
-        iconName="edit"
-        variant="link"
-        disabled={!selectedPotId}
-        onClick={() => {
-          if (!selectedPotId) {
-            return;
-          }
-          window.dispatchEvent(
-            new CustomEvent("financeBudgets:managePot", {
-              detail: { mode: "edit", potId: selectedPotId },
-            })
-          );
-        }}
-      >
-        Edit selected
-      </Button>
     </SpaceBetween>
   );
 
@@ -621,10 +663,12 @@ const handleSelectionChange = ({ detail }) => {
   );
 
   const columnDefinitionsForTable = useMemo(() => {
-    const allowed = new Set(visibleColumns);
+    const allowedIds =
+      activeTab === "drafts" ? DRAFT_COLUMN_IDS : visibleColumns;
+    const allowed = new Set(allowedIds);
     allowed.add("pot");
     return mergedColumnDefinitions.filter(column => allowed.has(column.id));
-  }, [mergedColumnDefinitions, visibleColumns]);
+  }, [mergedColumnDefinitions, visibleColumns, activeTab]);
 
   const preferencesState = useMemo(
     () => ({
@@ -662,11 +706,12 @@ const handleSelectionChange = ({ detail }) => {
     if (!selectedPotId) {
       return [];
     }
+    const target = String(selectedPotId);
     if (viewMode === "tree") {
-      const match = findItemById(tableItems, selectedPotId);
+      const match = findItemById(tableItems, target);
       return match ? [match] : [];
     }
-    const match = pagedFlatItems.find(item => item.id === selectedPotId);
+    const match = pagedFlatItems.find(item => String(item.id) === target);
     return match ? [match] : [];
   }, [selectedPotId, viewMode, tableItems, pagedFlatItems]);
 
@@ -784,25 +829,90 @@ const handleSelectionChange = ({ detail }) => {
     [columnDefinitionsForTable, applyColumnWidthUpdates]
   );
 
-  return (
-    <BoardItem
-      header={
-        <Header variant="h2" info={infoLink} actions={headerActions}>
-          Budget hierarchy
-        </Header>
+  const handleCreateDraft = async () => {
+    setDraftCreateSubmitting(true);
+    try {
+      const fallbackLabel = `Draft ${new Date().toISOString().slice(0, 19).replace("T", " ")}`;
+      const label = draftModalLabel.trim() || fallbackLabel;
+      const notes = draftModalNotes.trim() || "";
+      const newId = await createDraft({ label, notes });
+      if (newId) {
+        setSelectedDraftId(newId);
       }
-      settings={
-        typeof actions.removeItem === "function" ? (
-          <ButtonDropdown
-            ariaLabel="Budget hierarchy settings"
-            variant="icon"
-            items={[{ id: "remove", text: "Remove widget" }]}
-            onItemClick={handleSettingsClick}
-          />
-        ) : undefined
+      setDraftModalOpen(false);
+      setDraftModalLabel("");
+      setDraftModalNotes("");
+    } catch (err) {
+      console.error("Failed to create draft", err);
+    } finally {
+      setDraftCreateSubmitting(false);
+    }
+  };
+
+  const draftHeaderActions =
+    activeTab === "drafts" ? (
+      <SpaceBetween direction="horizontal" size="xs">
+        <Select
+          selectedOption={
+            selectedDraftId ? draftOptions.find(option => option.value === selectedDraftId) || null : null
+          }
+          onChange={({ detail }) => setSelectedDraftId(detail.selectedOption?.value ?? null)}
+          options={draftOptions}
+          placeholder="View draft"
+          empty="No drafts saved yet"
+        />
+        <Button
+          iconName="add-plus"
+          onClick={() => {
+            setDraftModalOpen(true);
+            setDraftModalLabel("");
+            setDraftModalNotes("");
+          }}
+        >
+          New draft
+        </Button>
+        <Button
+          iconName="upload"
+          disabled={!selectedDraftId}
+          onClick={() => setPublishOpen(true)}
+        >
+          Publish
+        </Button>
+      </SpaceBetween>
+    ) : null;
+
+  const tableHeader = (
+    <Header
+      variant="h3"
+      counter={`(${totalMatches})`}
+      actions={draftHeaderActions}
+      description={
+        activeTab === "drafts"
+          ? "View a saved draft hierarchy. Edits happen in Structure manager > Drafts & versions, then publish to replace the live hierarchy."
+          : "View the live budget hierarchy. To change it, work in a draft and publish."
       }
-      i18nStrings={boardItemI18nStrings}
     >
+      {activeTab === "drafts"
+        ? `Draft hierarchy${selectedDraft ? `: ${selectedDraft.label}` : ""}`
+        : "Budget pots"}
+    </Header>
+  );
+
+  const handlePublishDraft = async () => {
+    if (!selectedDraftId) return;
+    setPublishSubmitting(true);
+    try {
+      await publishDraft(selectedDraftId);
+      setPublishOpen(false);
+    } catch (err) {
+      console.error("Failed to publish draft", err);
+    } finally {
+      setPublishSubmitting(false);
+    }
+  };
+
+  const tableContent = (
+    <SpaceBetween size="m">
       <Table
         trackBy="id"
         items={tableItems}
@@ -819,16 +929,102 @@ const handleSelectionChange = ({ detail }) => {
         filter={filterComponent}
         preferences={preferencesComponent}
         pagination={paginationComponent}
-        header={
-          <Header
-            variant="h3"
-            counter={`(${totalMatches})`}
-            description="Select a pot to review history and supporting evidence."
-          >
-            Budget pots
-          </Header>
-        }
+        header={tableHeader}
       />
+    </SpaceBetween>
+  );
+
+  return (
+    <BoardItem
+      header={
+        <Header
+          variant="h2"
+          info={infoLink}
+          actions={headerActions}
+          description="Active Budget shows the live hierarchy. Draft Budgets is the staging area: select or create a draft, edit it in Structure manager, then publish to replace Active (a safety snapshot is taken first)."
+        >
+          Budget hierarchy
+        </Header>
+      }
+      settings={
+        typeof actions.removeItem === "function" ? (
+          <ButtonDropdown
+            ariaLabel="Budget hierarchy settings"
+            variant="icon"
+            items={[{ id: "remove", text: "Remove widget" }]}
+            onItemClick={handleSettingsClick}
+          />
+        ) : undefined
+      }
+      i18nStrings={boardItemI18nStrings}
+    >
+      <Tabs
+        activeTabId={activeTab}
+        onChange={({ detail }) => setActiveTab(detail.activeTabId)}
+        tabs={[
+          { id: "active", label: "Active Budget", content: tableContent },
+          { id: "drafts", label: "Draft Budgets", content: tableContent },
+        ]}
+      />
+      <Modal
+        visible={draftModalOpen}
+        onDismiss={() => setDraftModalOpen(false)}
+        header="New draft"
+        closeAriaLabel="Close"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={() => setDraftModalOpen(false)} disabled={draftCreateSubmitting}>
+              Cancel
+            </Button>
+            <Button variant="primary" loading={draftCreateSubmitting} onClick={handleCreateDraft}>
+              Create draft
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <FormField label="Draft name" description="Label to identify this draft version.">
+            <Input
+              value={draftModalLabel}
+              placeholder="e.g., FY2026 Refresh"
+              onChange={({ detail }) => setDraftModalLabel(detail.value)}
+            />
+          </FormField>
+          <FormField label="Notes" description="Optional context for this draft (scope, approvals, timing).">
+            <Textarea
+              value={draftModalNotes}
+              placeholder="Why this draft exists and when to publish it."
+              rows={3}
+              onChange={({ detail }) => setDraftModalNotes(detail.value)}
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={publishOpen}
+        onDismiss={() => setPublishOpen(false)}
+        header="Publish draft"
+        closeAriaLabel="Close"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={() => setPublishOpen(false)} disabled={publishSubmitting}>
+              Cancel
+            </Button>
+            <Button variant="primary" loading={publishSubmitting} onClick={handlePublishDraft}>
+              Publish now
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <StatusIndicator type="warning">
+            Publishing replaces the live budget hierarchy with the selected draft and archives any live pots not in the draft. A safety snapshot is taken first.
+          </StatusIndicator>
+          <Box variant="p">
+            Continue to publish the selected draft to production? Existing spend stays on the same pot IDs; new pot IDs will start fresh.
+          </Box>
+        </SpaceBetween>
+      </Modal>
     </BoardItem>
   );
 };

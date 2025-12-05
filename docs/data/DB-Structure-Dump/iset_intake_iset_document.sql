@@ -34,6 +34,7 @@ CREATE TABLE `iset_document` (
   `file_path` varchar(512) NOT NULL,
   `mime_type` varchar(128) DEFAULT NULL,
   `label` varchar(255) DEFAULT NULL,
+  `metadata` json DEFAULT NULL,
   `size_bytes` bigint unsigned DEFAULT NULL,
   `checksum_sha256` char(64) DEFAULT NULL,
   `status` enum('active','archived','deleted') NOT NULL DEFAULT 'active',
@@ -57,7 +58,7 @@ CREATE TABLE `iset_document` (
   KEY `idx_iset_document_linked_intervention` (`linked_intervention_id`),
   CONSTRAINT `fk_iset_document_intervention` FOREIGN KEY (`linked_intervention_id`) REFERENCES `iset_case_intervention` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_iset_document_task` FOREIGN KEY (`linked_task_id`) REFERENCES `iset_case_task` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -69,4 +70,4 @@ CREATE TABLE `iset_document` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-22  8:06:04
+-- Dump completed on 2025-12-05  9:10:10

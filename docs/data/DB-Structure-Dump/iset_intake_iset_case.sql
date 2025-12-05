@@ -24,8 +24,8 @@ DROP TABLE IF EXISTS `iset_case`;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `iset_case` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `case_number` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `application_id` bigint unsigned DEFAULT NULL,
+  `case_number` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `client_id` bigint unsigned DEFAULT NULL,
   `assigned_to_user_id` bigint unsigned DEFAULT NULL,
   `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'open',
@@ -48,7 +48,6 @@ CREATE TABLE `iset_case` (
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_iset_case_case_number` (`case_number`),
-  KEY `idx_iset_case_application_id` (`application_id`),
   KEY `idx_iset_case_assigned_to_user_id` (`assigned_to_user_id`),
   KEY `idx_iset_case_status` (`status`),
   KEY `idx_iset_case_client_id` (`client_id`),
@@ -60,12 +59,13 @@ CREATE TABLE `iset_case` (
   KEY `fk_iset_case_portfolio_region` (`portfolio_region_id`),
   KEY `fk_iset_case_created_by_profile` (`created_by_staff_profile_id`),
   KEY `fk_iset_case_updated_by_profile` (`updated_by_staff_profile_id`),
-  CONSTRAINT `fk_iset_case_application_id` FOREIGN KEY (`application_id`) REFERENCES `iset_application` (`id`) ON DELETE RESTRICT,
+  KEY `idx_iset_case_application_id` (`application_id`),
+  CONSTRAINT `fk_iset_case_application_id` FOREIGN KEY (`application_id`) REFERENCES `iset_application` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_iset_case_client_id` FOREIGN KEY (`client_id`) REFERENCES `client` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_iset_case_created_by_profile` FOREIGN KEY (`created_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_iset_case_portfolio_region` FOREIGN KEY (`portfolio_region_id`) REFERENCES `canada_region` (`region_id`) ON DELETE SET NULL,
   CONSTRAINT `fk_iset_case_updated_by_profile` FOREIGN KEY (`updated_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -77,4 +77,4 @@ CREATE TABLE `iset_case` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-22  8:05:57
+-- Dump completed on 2025-12-05  9:10:16

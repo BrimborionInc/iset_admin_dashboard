@@ -40,7 +40,7 @@ CREATE TABLE `staff_profiles` (
   KEY `idx_staff_profiles_primary_role` (`primary_role`),
   KEY `idx_staff_profiles_status` (`status`),
   KEY `idx_region` (`region_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=216682 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=235741 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -52,4 +52,4 @@ CREATE TABLE `staff_profiles` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-22  8:05:53
+-- Dump completed on 2025-12-05  9:10:16

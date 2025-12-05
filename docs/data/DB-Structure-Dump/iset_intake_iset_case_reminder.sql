@@ -59,7 +59,7 @@ CREATE TABLE `iset_case_reminder` (
   CONSTRAINT `fk_case_reminder_created_by` FOREIGN KEY (`created_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_case_reminder_intervention` FOREIGN KEY (`intervention_id`) REFERENCES `iset_case_intervention` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_case_reminder_updated_by` FOREIGN KEY (`updated_by_staff_profile_id`) REFERENCES `staff_profiles` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=29 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=40 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -71,4 +71,4 @@ CREATE TABLE `iset_case_reminder` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-22  8:05:50
+-- Dump completed on 2025-12-05  9:10:09

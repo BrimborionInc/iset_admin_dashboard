@@ -56,7 +56,7 @@ CREATE TABLE `iset_case_action_plan` (
   CONSTRAINT `chk_case_action_plan_result_date` CHECK (((`result_date` is null) or (`effective_date` is null) or (`result_date` >= `effective_date`))),
   CONSTRAINT `chk_case_action_plan_status` CHECK ((`status` in (_utf8mb4'draft',_utf8mb4'active',_utf8mb4'closed',_utf8mb4'archived'))),
   CONSTRAINT `chk_esdc_action_plan_json` CHECK (json_valid(`esdc_action_plan_json`))
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -68,4 +68,4 @@ CREATE TABLE `iset_case_action_plan` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-11-22  8:06:01
+-- Dump completed on 2025-12-05  9:10:07

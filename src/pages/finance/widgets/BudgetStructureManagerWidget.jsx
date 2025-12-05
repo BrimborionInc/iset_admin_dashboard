@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
+  Alert,
   Header,
   SpaceBetween,
   ButtonDropdown,
@@ -16,8 +17,10 @@ import {
   StatusIndicator,
   ColumnLayout,
   Table,
+  Modal,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
+import { apiFetch } from "../../../auth/apiClient.js";
 import { useBudgetsData } from "./BudgetsDataContext.jsx";
 
 const nodeTypeOptions = [
@@ -109,56 +112,105 @@ const snapshotColumns = [
 
 const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
-    pots,
     selectedPotId,
     selectPot,
-    createPot,
-    updatePot,
-    archivePot,
+    selectedDraftId,
+    setSelectedDraftId,
+    selectedDraft,
+    selectedDraftPots,
+    draftCreateOrUpdatePot,
+    draftArchivePot,
+    saveDraftPayload,
     draftChanges,
-    publishDraftChanges,
-    discardDraftChanges,
+    drafts,
+    createDraft,
+    deleteDraft,
+    publishDraft,
+    deleteSnapshot,
+    restoreSnapshotAsDraft,
     snapshots,
     createSnapshot,
     activeVersion,
+    reload,
   } = useBudgetsData();
 
-  const [activeTab, setActiveTab] = useState("create");
-  const [createForm, setCreateForm] = useState(blankCreateForm);
-  const [editForm, setEditForm] = useState(null);
+const [activeTab, setActiveTab] = useState("create");
+const [createForm, setCreateForm] = useState(blankCreateForm);
+const [editForm, setEditForm] = useState(null);
+const [createSubmitting, setCreateSubmitting] = useState(false);
+const [editSubmitting, setEditSubmitting] = useState(false);
+const [archiveSubmitting, setArchiveSubmitting] = useState(false);
+const [feedback, setFeedback] = useState(null);
+const [feedbackType, setFeedbackType] = useState(null);
+const [errorText, setErrorText] = useState(null);
+const [snapshotSubmitting, setSnapshotSubmitting] = useState(false);
+const [snapshotNotes, setSnapshotNotes] = useState("");
+const [draftSubmitting, setDraftSubmitting] = useState(false);
+const [publishSubmittingId, setPublishSubmittingId] = useState(null);
+const [draftLabel, setDraftLabel] = useState("");
+const [draftNotes, setDraftNotes] = useState("");
+const [copyDraftModalOpen, setCopyDraftModalOpen] = useState(false);
+const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
+const [inlineDraftLabel, setInlineDraftLabel] = useState("");
+const [inlineDraftSaving, setInlineDraftSaving] = useState(false);
+const [deleteSnapshotId, setDeleteSnapshotId] = useState(null);
+const [deleteDraftId, setDeleteDraftId] = useState(null);
+  const hasDraft = Boolean(selectedDraftId);
 
-  const parentOptions = useMemo(() => {
-    const map = new Map(pots.map(pot => [pot.id, pot]));
+  useEffect(() => {
+    if (!selectedDraftId && drafts?.length) {
+      setSelectedDraftId(drafts[0].id);
+    }
+  }, [drafts, selectedDraftId, setSelectedDraftId]);
+
+  useEffect(() => {
+    const match = drafts?.find(d => String(d.id) === String(selectedDraftId));
+    setInlineDraftLabel(match?.label || "");
+  }, [drafts, selectedDraftId]);
+
+  const ensureDraftSelected = async () => {
+    if (selectedDraftId) return selectedDraftId;
+    throw new Error("Select a draft before creating or editing pots.");
+  };
+
+const parentOptions = useMemo(() => {
+    const map = new Map((selectedDraftPots || []).map(pot => [String(pot.id), pot]));
     const depthCache = new Map();
     const getDepth = potId => {
-      if (!potId) {
+      const key = potId != null ? String(potId) : null;
+      if (!key) {
         return 0;
       }
-      if (depthCache.has(potId)) {
-        return depthCache.get(potId);
+      if (depthCache.has(key)) {
+        return depthCache.get(key);
       }
-      const pot = map.get(potId);
+      const pot = map.get(key);
       if (!pot || !pot.parentId) {
-        depthCache.set(potId, 0);
+        depthCache.set(key, 0);
         return 0;
       }
       const depth = 1 + getDepth(pot.parentId);
-      depthCache.set(potId, depth);
+      depthCache.set(key, depth);
       return depth;
     };
-    const options = pots
+    const options = (selectedDraftPots || [])
       .filter(pot => pot.status !== "archived")
       .map(pot => {
         const depth = getDepth(pot.id);
         const prefix = depth ? `${"\u2014 ".repeat(depth)}` : "";
         return { label: `${prefix}${pot.name}`, value: pot.id };
       });
+    // In edit mode, hide self as parent to avoid cycles
+    if (activeTab === "edit" && selectedPotId) {
+      return [topLevelOption, ...options.filter(opt => String(opt.value) !== String(selectedPotId))];
+    }
     return [topLevelOption, ...options];
-  }, [pots]);
+  }, [selectedDraftPots, activeTab, selectedPotId]);
 
   const selectedPot = useMemo(
-    () => pots.find(pot => pot.id === selectedPotId) ?? null,
-    [pots, selectedPotId]
+    () =>
+      (selectedDraftPots || []).find(pot => String(pot.id) === String(selectedPotId)) ?? null,
+    [selectedDraftPots, selectedPotId]
   );
 
   useEffect(() => {
@@ -176,7 +228,7 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
       if (mode === "create") {
         setActiveTab("create");
         if (parentId) {
-          const parent = pots.find(pot => pot.id === parentId);
+          const parent = (selectedDraftPots || []).find(pot => String(pot.id) === String(parentId));
           if (parent) {
             setCreateForm(form => ({
               ...form,
@@ -188,7 +240,7 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
     };
     window.addEventListener("financeBudgets:managePot", handler);
     return () => window.removeEventListener("financeBudgets:managePot", handler);
-  }, [pots, selectPot]);
+  }, [selectedDraftPots, selectPot]);
 
   const infoLink =
     metadata.helpComponent && toggleHelpPanel ? (
@@ -227,71 +279,169 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
     });
   };
 
-  const handleCreateSubmit = event => {
-    event.preventDefault();
-    createPot({
+const sanitizeNumber = value => {
+  if (value === "" || value === null || typeof value === "undefined") return undefined;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : undefined;
+};
+
+const handleCreateSubmit = async event => {
+  event.preventDefault();
+  setCreateSubmitting(true);
+  setErrorText(null);
+  setFeedback(null);
+  try {
+    const draftId = await ensureDraftSelected();
+    const newId = Date.now();
+    await draftCreateOrUpdatePot(newId, {
+      id: newId,
       name: createForm.name,
       code: createForm.code,
       parentId: createForm.parentOption?.value || null,
       nodeType: createForm.nodeType?.value,
       owner: createForm.owner,
-      approved: createForm.approved,
-      adjusted: createForm.adjusted,
-      committed: createForm.committed,
-      forecast: createForm.forecast,
-      adminPct: createForm.adminPct,
+      approved: sanitizeNumber(createForm.approved),
+      adjusted: sanitizeNumber(createForm.adjusted),
+      committed: undefined,
+      forecast: undefined,
+      adminTargetPct: sanitizeNumber(createForm.adminPct),
       description: createForm.description,
       policyNotes: createForm.policyNotes,
+      status: "draft",
     });
+    setSelectedDraftId(draftId);
     setCreateForm({
       ...blankCreateForm,
       nodeType: createForm.nodeType,
     });
-  };
+    setFeedback("Budget pot created in draft.");
+    setFeedbackType("success");
+  } catch (err) {
+    setErrorText(err?.message || "Failed to create pot. Select a draft first.");
+  } finally {
+    setCreateSubmitting(false);
+  }
+};
 
-  const handleEditSubmit = event => {
-    event.preventDefault();
-    if (!selectedPot) {
-      return;
-    }
-    updatePot(selectedPot.id, {
+const handleEditSubmit = async event => {
+  event.preventDefault();
+  if (!selectedPot) {
+    return;
+  }
+  setEditSubmitting(true);
+  setErrorText(null);
+  setFeedback(null);
+  try {
+    const parentIdValue =
+      editForm?.parentOption?.value && String(editForm.parentOption.value) !== String(selectedPot.id)
+        ? editForm.parentOption.value
+        : null;
+    await draftCreateOrUpdatePot(selectedPot.id, {
+      ...selectedPot,
       name: editForm?.name,
       code: editForm?.code,
-      parentId: editForm?.parentOption?.value || null,
+      parentId: parentIdValue,
       nodeType: editForm?.nodeType?.value,
       owner: editForm?.owner,
-      approved: editForm?.approved,
-      adjusted: editForm?.adjusted,
-      committed: editForm?.committed,
-      forecast: editForm?.forecast,
-      adminPct: editForm?.adminPct,
+      approved: sanitizeNumber(editForm?.approved),
+      adjusted: sanitizeNumber(editForm?.adjusted),
+      committed: undefined,
+      forecast: undefined,
+      adminTargetPct: sanitizeNumber(editForm?.adminPct),
       description: editForm?.description,
       policyNotes: editForm?.policyNotes,
     });
-  };
+    setFeedback("Budget pot updated in draft.");
+    setFeedbackType("success");
+  } catch (err) {
+    setErrorText(err?.message || "Failed to update pot.");
+  } finally {
+    setEditSubmitting(false);
+  }
+};
 
-  const handleArchive = () => {
-    if (!selectedPot) {
-      return;
+const handleArchive = async () => {
+  if (!selectedPot) {
+    return;
+  }
+  setArchiveSubmitting(true);
+  setErrorText(null);
+  setFeedback(null);
+  try {
+    await draftArchivePot(selectedPot.id);
+    setFeedback("Budget pot archived in draft.");
+    setFeedbackType("success");
+  } catch (err) {
+    setErrorText(err?.message || "Failed to archive pot.");
+  } finally {
+    setArchiveSubmitting(false);
+  }
+};
+
+  const handleSnapshot = async () => {
+    setSnapshotSubmitting(true);
+    setErrorText(null);
+    setFeedback(null);
+    try {
+      const resp = await apiFetch("/api/finance/budget-snapshots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: snapshotNotes || undefined }),
+      });
+      if (!resp.ok) {
+        throw new Error(`Snapshot failed (${resp.status})`);
+      }
+      await reload();
+      setFeedback("Snapshot captured.");
+      setFeedbackType("success");
+      setSnapshotNotes("");
+    } catch (err) {
+      setErrorText(err?.message || "Failed to capture snapshot.");
+    } finally {
+      setSnapshotSubmitting(false);
     }
-    archivePot(selectedPot.id);
   };
 
-  const handlePublishDraft = () => {
-    publishDraftChanges({});
+  const handleSaveDraft = async () => {
+    setDraftSubmitting(true);
+    setErrorText(null);
+    setFeedback(null);
+    try {
+      await createDraft({
+        label: draftLabel || `Draft ${new Date().toISOString().slice(0, 19).replace("T", " ")}`,
+        notes: draftNotes,
+      });
+      setFeedback("Draft saved.");
+      setFeedbackType("success");
+      setDraftLabel("");
+      setDraftNotes("");
+      setCopyDraftModalOpen(false);
+    } catch (err) {
+      setErrorText(err?.message || "Failed to save draft.");
+    } finally {
+      setDraftSubmitting(false);
+    }
   };
 
-  const handleDiscardDraft = () => {
-    discardDraftChanges();
-  };
-
-  const handleSnapshot = () => {
-    createSnapshot({});
+  const handlePublishDraft = async draftId => {
+    if (!draftId) return;
+    setPublishSubmittingId(draftId);
+    setErrorText(null);
+    setFeedback(null);
+    try {
+      await publishDraft(draftId);
+      setFeedback("Draft published to live pots.");
+      setFeedbackType("success");
+    } catch (err) {
+      setErrorText(err?.message || "Failed to publish draft.");
+    } finally {
+      setPublishSubmittingId(null);
+    }
   };
 
   const draftItems = useMemo(
     () =>
-      draftChanges.map(change => ({
+      (draftChanges && draftChanges.length ? draftChanges : []).map(change => ({
         ...change,
         timestamp: new Date(change.timestamp).toLocaleString(),
       })),
@@ -300,51 +450,63 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
 
   const infoBar = (
     <SpaceBetween size="xs">
-      <StatusIndicator type={draftItems.length ? "warning" : "success"}>
-        {draftItems.length
-          ? `${draftItems.length} draft change${draftItems.length === 1 ? "" : "s"} pending`
-          : "No draft changes"}
-      </StatusIndicator>
-      <StatusIndicator type="info">
-        Active version: {activeVersion?.label ?? "Unversioned"}
-      </StatusIndicator>
+      {feedback && (
+        <Alert
+          type={feedbackType === "success" ? "success" : "info"}
+          header="Status"
+          dismissible
+          onDismiss={() => setFeedback(null)}
+        >
+          {feedback}
+        </Alert>
+      )}
+      {errorText && (
+        <Alert type="error" header="Error" dismissible onDismiss={() => setErrorText(null)}>
+          {errorText}
+        </Alert>
+      )}
     </SpaceBetween>
   );
 
   const createTab = (
     <form onSubmit={handleCreateSubmit}>
       <SpaceBetween size="m">
+        {!hasDraft ? (
+          <Alert type="info" header="Select or create a draft first">
+            Create/edit is disabled until a draft is selected. Choose a draft in Drafts & versions or create one below.
+          </Alert>
+        ) : null}
         <ColumnLayout columns={2} variant="text-grid">
           <SpaceBetween size="s">
-            <FormField label="Pot name" stretch>
+            <FormField label="Pot name" stretch description="Human-friendly title shown in lists and searches.">
               <Input
                 value={createForm.name}
                 placeholder="e.g., Skills Training West"
                 onChange={({ detail }) => handleCreateChange("name", detail.value)}
               />
             </FormField>
-            <FormField label="Funding code" stretch>
+            <FormField label="Funding code" stretch description="Short code or GL string; must be unique within the draft.">
               <Input
                 value={createForm.code}
                 placeholder="e.g., STW-2024"
                 onChange={({ detail }) => handleCreateChange("code", detail.value)}
               />
             </FormField>
-            <FormField label="Parent pot" stretch>
+            <FormField label="Parent pot" stretch description="Where this pot sits in the hierarchy. Choose Top-level for roots.">
               <Select
                 selectedOption={createForm.parentOption}
                 options={parentOptions}
                 onChange={({ detail }) => handleCreateChange("parentOption", detail.selectedOption)}
               />
             </FormField>
-            <FormField label="Node type" stretch>
+            <FormField label="Node type" stretch description="Category label only; it does not drive calculations.">
               <Select
                 selectedOption={createForm.nodeType}
                 options={nodeTypeOptions}
                 onChange={({ detail }) => handleCreateChange("nodeType", detail.selectedOption)}
               />
             </FormField>
-            <FormField label="Owner">
+            <FormField label="Owner" description="Person/role accountable for this pot.">
               <Input
                 value={createForm.owner}
                 placeholder="e.g., Finance Officer"
@@ -353,7 +515,7 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
             </FormField>
           </SpaceBetween>
           <SpaceBetween size="s">
-            <FormField label="Approved amount">
+            <FormField label="Approved amount" description="Original authority for this pot (CAD).">
               <Input
                 type="number"
                 value={createForm.approved}
@@ -361,7 +523,7 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
                 onChange={({ detail }) => handleCreateChange("approved", detail.value)}
               />
             </FormField>
-            <FormField label="Adjusted amount">
+            <FormField label="Adjusted amount" description="Approved plus/minus amendments (CAD).">
               <Input
                 type="number"
                 value={createForm.adjusted}
@@ -369,23 +531,19 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
                 onChange={({ detail }) => handleCreateChange("adjusted", detail.value)}
               />
             </FormField>
-            <FormField label="Committed amount">
-              <Input
-                type="number"
-                value={createForm.committed}
-                placeholder="0"
-                onChange={({ detail }) => handleCreateChange("committed", detail.value)}
-              />
+            <FormField
+              label="Committed amount"
+              description="Calculated from draft spend; read-only."
+            >
+              <Input value={createForm.committed} disabled />
             </FormField>
-            <FormField label="Forecast amount">
-              <Input
-                type="number"
-                value={createForm.forecast}
-                placeholder="0"
-                onChange={({ detail }) => handleCreateChange("forecast", detail.value)}
-              />
+            <FormField
+              label="Forecast amount"
+              description="Calculated projection; read-only."
+            >
+              <Input value={createForm.forecast} disabled />
             </FormField>
-            <FormField label="Admin % target">
+            <FormField label="Admin % target" description="Target admin share of adjusted amount (percentage).">
               <Input
                 type="number"
                 value={createForm.adminPct}
@@ -395,7 +553,7 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
             </FormField>
           </SpaceBetween>
         </ColumnLayout>
-        <FormField label="Description">
+        <FormField label="Description" description="Short context shown in details; optional.">
           <Textarea
             value={createForm.description}
             placeholder="Short description shown in the pot detail panel."
@@ -403,7 +561,7 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
             onChange={({ detail }) => handleCreateChange("description", detail.value)}
           />
         </FormField>
-        <FormField label="Policy guardrails">
+        <FormField label="Policy guardrails" description="Key rules, approval limits, or restrictions for this pot.">
           <Textarea
             value={createForm.policyNotes}
             placeholder="Document policy notes, approval references, or usage guardrails."
@@ -412,7 +570,13 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
           />
         </FormField>
         <SpaceBetween direction="horizontal" size="xs">
-          <Button variant="primary" type="submit" iconName="add-plus">
+          <Button
+            variant="primary"
+            type="submit"
+            iconName="add-plus"
+            loading={createSubmitting}
+            disabled={createSubmitting || !hasDraft}
+          >
             Create pot
           </Button>
           <Button
@@ -429,35 +593,40 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
   const editTab = selectedPot ? (
     <form onSubmit={handleEditSubmit}>
       <SpaceBetween size="m">
+        {!hasDraft ? (
+          <Alert type="info" header="Select a draft to edit">
+            Editing is only available when a draft is selected in Drafts & versions.
+          </Alert>
+        ) : null}
         <ColumnLayout columns={2} variant="text-grid">
           <SpaceBetween size="s">
-            <FormField label="Pot name" stretch>
+            <FormField label="Pot name" stretch description="Human-friendly title shown in lists and searches.">
               <Input
                 value={editForm?.name ?? ""}
                 onChange={({ detail }) => handleEditChange("name", detail.value)}
               />
             </FormField>
-            <FormField label="Funding code" stretch>
+            <FormField label="Funding code" stretch description="Short code or GL string; must be unique within the draft.">
               <Input
                 value={editForm?.code ?? ""}
                 onChange={({ detail }) => handleEditChange("code", detail.value)}
               />
             </FormField>
-            <FormField label="Parent pot" stretch>
+            <FormField label="Parent pot" stretch description="Where this pot sits in the hierarchy. Choose Top-level for roots.">
               <Select
                 selectedOption={editForm?.parentOption ?? topLevelOption}
                 options={parentOptions}
                 onChange={({ detail }) => handleEditChange("parentOption", detail.selectedOption)}
               />
             </FormField>
-            <FormField label="Node type" stretch>
+            <FormField label="Node type" stretch description="Category label only; it does not drive calculations.">
               <Select
                 selectedOption={editForm?.nodeType ?? nodeTypeOptions[0]}
                 options={nodeTypeOptions}
                 onChange={({ detail }) => handleEditChange("nodeType", detail.selectedOption)}
               />
             </FormField>
-            <FormField label="Owner">
+            <FormField label="Owner" description="Person/role accountable for this pot.">
               <Input
                 value={editForm?.owner ?? ""}
                 onChange={({ detail }) => handleEditChange("owner", detail.value)}
@@ -465,35 +634,33 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
             </FormField>
           </SpaceBetween>
           <SpaceBetween size="s">
-            <FormField label="Approved amount">
+            <FormField label="Approved amount" description="Original authority for this pot (CAD).">
               <Input
                 type="number"
                 value={editForm?.approved ?? ""}
                 onChange={({ detail }) => handleEditChange("approved", detail.value)}
               />
             </FormField>
-            <FormField label="Adjusted amount">
+            <FormField label="Adjusted amount" description="Approved plus/minus amendments (CAD).">
               <Input
                 type="number"
                 value={editForm?.adjusted ?? ""}
                 onChange={({ detail }) => handleEditChange("adjusted", detail.value)}
               />
             </FormField>
-            <FormField label="Committed amount">
-              <Input
-                type="number"
-                value={editForm?.committed ?? ""}
-                onChange={({ detail }) => handleEditChange("committed", detail.value)}
-              />
+            <FormField
+              label="Committed amount"
+              description="Calculated from draft spend; read-only."
+            >
+              <Input value={editForm?.committed ?? ""} disabled />
             </FormField>
-            <FormField label="Forecast amount">
-              <Input
-                type="number"
-                value={editForm?.forecast ?? ""}
-                onChange={({ detail }) => handleEditChange("forecast", detail.value)}
-              />
+            <FormField
+              label="Forecast amount"
+              description="Calculated projection; read-only."
+            >
+              <Input value={editForm?.forecast ?? ""} disabled />
             </FormField>
-            <FormField label="Admin % target">
+            <FormField label="Admin % target" description="Target admin share of adjusted amount (percentage).">
               <Input
                 type="number"
                 value={editForm?.adminPct ?? ""}
@@ -502,14 +669,14 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
             </FormField>
           </SpaceBetween>
         </ColumnLayout>
-        <FormField label="Description">
+        <FormField label="Description" description="Short context shown in details; optional.">
           <Textarea
             value={editForm?.description ?? ""}
             rows={3}
             onChange={({ detail }) => handleEditChange("description", detail.value)}
           />
         </FormField>
-        <FormField label="Policy guardrails">
+        <FormField label="Policy guardrails" description="Key rules, approval limits, or restrictions for this pot.">
           <Textarea
             value={editForm?.policyNotes ?? ""}
             rows={3}
@@ -517,39 +684,8 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
           />
         </FormField>
         <SpaceBetween direction="horizontal" size="xs">
-          <Button variant="primary" type="submit">
+          <Button variant="primary" type="submit" loading={editSubmitting} disabled={editSubmitting}>
             Save changes
-          </Button>
-          <Button
-            iconName="add-plus"
-            onClick={() =>
-              window.dispatchEvent(
-                new CustomEvent("financeBudgets:managePot", {
-                  detail: { mode: "create", parentId: selectedPot.id },
-                })
-              )
-            }
-          >
-            Create child pot
-          </Button>
-          <Button
-            iconName="shuffle"
-            onClick={() =>
-              window.dispatchEvent(
-                new CustomEvent("financeBudgets:navigate", {
-                  detail: { target: "allocations", potId: selectedPot.id },
-                })
-              )
-            }
-          >
-            Start reallocation
-          </Button>
-          <Button
-            variant="link"
-            iconName="remove"
-            onClick={handleArchive}
-          >
-            Archive pot
           </Button>
         </SpaceBetween>
       </SpaceBetween>
@@ -561,38 +697,266 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
   const versionsTab = (
     <SpaceBetween size="m">
       {infoBar}
-      <Container header={<Header variant="h3">Draft changes</Header>}>
-        <Table
-          items={draftItems}
-          trackBy="id"
-          columnDefinitions={draftColumns}
-          variant="embedded"
-          empty={<Box variant="p">No draft changes captured.</Box>}
-        />
-        <SpaceBetween direction="horizontal" size="xs">
-          <Button variant="primary" disabled={!draftItems.length} onClick={handlePublishDraft}>
-            Publish draft
-          </Button>
-          <Button
-            variant="link"
-            disabled={!draftItems.length}
-            onClick={handleDiscardDraft}
+      <Container
+        header={
+          <Header
+            variant="h3"
+            actions={
+              <Button iconName="add-plus" onClick={() => setCopyDraftModalOpen(true)}>
+                Copy active hierarchy as new draft
+              </Button>
+            }
           >
-            Discard changes
-          </Button>
-        </SpaceBetween>
+            Drafts
+          </Header>
+        }
+      >
+        <Table
+          items={Array.isArray(drafts) ? drafts : []}
+          trackBy="id"
+          selectionType="single"
+          selectedItems={
+            selectedDraftId
+              ? (drafts || []).filter(d => String(d.id) === String(selectedDraftId))
+              : []
+          }
+          onSelectionChange={({ detail }) => {
+            const next = detail.selectedItems?.[0];
+            if (next?.id) {
+              setSelectedDraftId(next.id);
+            }
+          }}
+          columnDefinitions={[
+            {
+              id: "label",
+              header: "Label",
+              cell: item =>
+                String(item.id) === String(selectedDraftId) ? (
+                  <Input
+                    value={inlineDraftLabel}
+                    onChange={({ detail }) => setInlineDraftLabel(detail.value)}
+                    onBlur={async () => {
+                      if (!item.id || inlineDraftSaving) return;
+                      if (!inlineDraftLabel.trim() || inlineDraftLabel === item.label) return;
+                      try {
+                        setInlineDraftSaving(true);
+                        const payloadPots = item.id === selectedDraftId && selectedDraftPots ? selectedDraftPots : [];
+                        await saveDraftPayload(item.id, payloadPots, {
+                          label: inlineDraftLabel.trim(),
+                          notes: item.notes,
+                        });
+                        await reload();
+                      } catch (err) {
+                        console.error("Failed to update draft label", err);
+                        setErrorText("Failed to update draft label.");
+                      } finally {
+                        setInlineDraftSaving(false);
+                      }
+                    }}
+                    ariaLabel="Draft label"
+                  />
+                ) : (
+                  item.label
+                ),
+            },
+            { id: "createdAt", header: "Created", cell: item => item.createdAt ? new Date(item.createdAt).toLocaleString() : "-" },
+            {
+              id: "actions",
+              header: "Actions",
+              cell: item => (
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Button
+                    variant="link"
+                    onClick={() => setDeleteDraftId(item.id)}
+                  >
+                    ✕
+                  </Button>
+                </SpaceBetween>
+              ),
+            },
+          ]}
+          resizableColumns
+          variant="embedded"
+          empty={<Box variant="p">No drafts captured.</Box>}
+        />
       </Container>
-      <Container header={<Header variant="h3">Snapshots</Header>}>
+      <Modal
+        visible={copyDraftModalOpen}
+        onDismiss={() => setCopyDraftModalOpen(false)}
+        header="Copy active hierarchy as new draft"
+        closeAriaLabel="Close"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={() => setCopyDraftModalOpen(false)} disabled={draftSubmitting}>
+              Cancel
+            </Button>
+            <Button variant="primary" loading={draftSubmitting} onClick={handleSaveDraft}>
+              Create draft
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <FormField label="Draft label">
+            <Input
+              placeholder="e.g., FY2026 baseline"
+              value={draftLabel}
+              onChange={({ detail }) => setDraftLabel(detail.value)}
+            />
+          </FormField>
+          <FormField label="Notes (optional)">
+            <Textarea
+              placeholder="Why this draft? What changes does it contain?"
+              value={draftNotes}
+              rows={3}
+              onChange={({ detail }) => setDraftNotes(detail.value)}
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={deleteDraftId !== null}
+        onDismiss={() => setDeleteDraftId(null)}
+        header="Delete draft"
+        closeAriaLabel="Close"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={() => setDeleteDraftId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={async () => {
+                if (deleteDraftId) {
+                  await deleteDraft(deleteDraftId);
+                }
+                setDeleteDraftId(null);
+              }}
+            >
+              Delete
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <Box variant="p">Delete this draft? This cannot be undone.</Box>
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={snapshotModalOpen}
+        onDismiss={() => setSnapshotModalOpen(false)}
+        header="Capture snapshot"
+        closeAriaLabel="Close"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={() => setSnapshotModalOpen(false)} disabled={snapshotSubmitting}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              loading={snapshotSubmitting}
+              onClick={async () => {
+                await handleSnapshot();
+                setSnapshotModalOpen(false);
+              }}
+            >
+              Capture
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <FormField label="Notes (optional)">
+            <Textarea
+              placeholder="What this snapshot represents (e.g., pre-publish baseline)."
+              value={snapshotNotes}
+              rows={3}
+              onChange={({ detail }) => setSnapshotNotes(detail.value)}
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={deleteSnapshotId !== null}
+        onDismiss={() => setDeleteSnapshotId(null)}
+        header="Delete snapshot"
+        closeAriaLabel="Close"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={() => setDeleteSnapshotId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={async () => {
+                if (deleteSnapshotId) {
+                  await deleteSnapshot(deleteSnapshotId);
+                  await reload();
+                }
+                setDeleteSnapshotId(null);
+              }}
+            >
+              Delete
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <Box variant="p">
+            Delete this snapshot? This cannot be undone.
+          </Box>
+        </SpaceBetween>
+      </Modal>
+      <Container
+        header={
+          <Header
+            variant="h3"
+            actions={
+              <Button onClick={() => setSnapshotModalOpen(true)} iconName="file">
+                Capture snapshot
+              </Button>
+            }
+          >
+            Snapshots
+          </Header>
+        }
+      >
         <Table
           items={snapshots}
           trackBy="id"
-          columnDefinitions={snapshotColumns}
+          columnDefinitions={[
+            { id: "label", header: "Snapshot", cell: item => item.label },
+            { id: "capturedOn", header: "Captured", cell: item => item.snapshotAt ? new Date(item.snapshotAt).toLocaleString() : "-" },
+            {
+              id: "actions",
+              header: "Actions",
+              cell: item => (
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Button
+                    variant="link"
+                    onClick={() => setDeleteSnapshotId(item.id)}
+                  >
+                    ✕
+                  </Button>
+                  <Button
+                    variant="link"
+                    onClick={async () => {
+                      const data = await restoreSnapshotAsDraft(item.id);
+                      if (data?.id) {
+                        setSelectedDraftId(data.id);
+                      }
+                    }}
+                  >
+                    Restore as draft
+                  </Button>
+                </SpaceBetween>
+              ),
+            },
+          ]}
+          resizableColumns
           variant="embedded"
           empty={<Box variant="p">No snapshots captured yet.</Box>}
         />
-        <Button onClick={handleSnapshot}>
-          Capture draft snapshot
-        </Button>
       </Container>
     </SpaceBetween>
   );
@@ -600,7 +964,7 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
   const tabs = [
     { id: "create", label: "Create pot", content: createTab },
     { id: "edit", label: "Edit selected", content: editTab },
-    { id: "versions", label: "Drafts & versions", content: versionsTab },
+    { id: "versions", label: "Drafts and Snapshots", content: versionsTab },
   ];
 
   const handleSettingsClick = ({ detail }) => {
@@ -615,7 +979,7 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
         <Header
           variant="h2"
           info={infoLink}
-          description="Manage budget pots, capture draft changes, and publish structure updates."
+          description="Work inside the selected draft: create/edit pots, copy Active to a new draft, and manage snapshots. Publish from Draft Budgets to replace the live hierarchy."
         >
           Structure manager
         </Header>

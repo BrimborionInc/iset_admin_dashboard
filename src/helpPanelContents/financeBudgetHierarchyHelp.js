@@ -4,31 +4,37 @@ import { SpaceBetween, Box } from "@cloudscape-design/components";
 const FinanceBudgetHierarchyHelp = () => (
   <SpaceBetween size="m">
     <Box>
-      <strong>What this widget shows</strong>
       <p>
-        A configurable tree or flat list of budget pots. Each node surfaces approved, adjusted, committed, actual, and
-        remaining balances alongside forecast variance and administrative allocation.
+        Use this widget to see the live budget hierarchy (Active) and stage the next version (Draft Budgets) without
+        disrupting current spend. Active stays authoritative; Drafts are where you prepare and publish changes.
       </p>
     </Box>
     <Box>
-      <strong>How to use it</strong>
+      <strong>How to work</strong>
       <ul>
-        <li>Switch between tree and flat views to match the organisation&rsquo;s hierarchy complexity.</li>
-        <li>Filter for overruns, underspend, or admin attribution to focus on pots that need intervention.</li>
-        <li>Expand a pot to view children (funding streams, programs, delivery partners) with inline KPIs.</li>
+        <li>
+          Draft Budgets: Create a new empty draft or copy the current Active from “Drafts and Snapshots” in Structure
+          manager. Edit draft pots there; Active remains untouched.
+        </li>
+        <li>
+          Publish: When the draft is approved, publish it to replace Active. The prior Active is archived for reporting
+          and retained as a snapshot for rollback.
+        </li>
+        <li>Selection: Picking a pot in Draft Budgets drives Structure manager “Edit selected.” Active is read-only.</li>
       </ul>
     </Box>
     <Box>
-      <strong>Next steps</strong>
-      <p>
-        Select a pot to populate the detail panel, trigger reallocations, or open linked evidence in Monitoring and
-        Reconciliation workspaces.
-      </p>
+      <strong>When to use drafts</strong>
+      <ul>
+        <li>Mid-year replan: reshuffle regions/lines while live spend continues on the old structure.</li>
+        <li>New fiscal: build next-year hierarchy ahead of go-live.</li>
+        <li>Special initiatives: add temporary program pots and publish once approved.</li>
+      </ul>
     </Box>
   </SpaceBetween>
 );
 
-FinanceBudgetHierarchyHelp.aiContext = "Explain the Budgets hierarchy widget: tree vs. flat view, filters for overruns, underspend, admin attribution, and how selection feeds other widgets.";
+FinanceBudgetHierarchyHelp.aiContext =
+  "Explain the Budget hierarchy widget from a business perspective: Active is live/read-only; Draft Budgets is staging; copy Active to draft, edit in Structure manager, publish with safety snapshot; use drafts for replans, new fiscal, special initiatives; selection in Drafts feeds Structure manager.";
 
 export default FinanceBudgetHierarchyHelp;
-

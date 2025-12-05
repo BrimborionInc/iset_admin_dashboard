@@ -19154,6 +19154,24 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     const interventionId = result.insertId;
     const interventionRow = await fetchInterventionWithCase(interventionId);
     const payload = mapInterventionRow(interventionRow);
+    const amountForFinance =
+      Number.isFinite(actualAmountValue) && actualAmountValue !== null
+        ? actualAmountValue
+        : Number.isFinite(approvedAmountValue) && approvedAmountValue !== null
+        ? approvedAmountValue
+        : Number.isFinite(plannedCostInt)
+        ? plannedCostInt
+        : null;
+    if (trimmedPotId && amountForFinance !== null) {
+      await upsertFinanceTransactionForIntervention({
+        caseId: planRow.case_id,
+        interventionId,
+        potId: trimmedPotId,
+        amount: amountForFinance,
+        status: 'submitted',
+        transactionDate: startDateValue || null,
+      });
+    }
     await markIlmpNeedsReviewForCase(planRow.case_id);
     res.status(201).json(payload);
   } catch (error) {
@@ -19625,6 +19643,28 @@ app.patch('/api/interventions/:id', async (req, res) => {
 
     const updatedRow = await fetchInterventionWithCase(interventionId);
     const payload = mapInterventionRow(updatedRow);
+    const amountForFinance =
+      Number.isFinite(actualAmountValue) && actualAmountValue !== null
+        ? actualAmountValue
+        : Number.isFinite(approvedAmountValue) && approvedAmountValue !== null
+        ? approvedAmountValue
+        : Number.isFinite(plannedCostInt)
+        ? plannedCostInt
+        : null;
+    const potFromBody =
+      Object.prototype.hasOwnProperty.call(body, 'potId') && typeof body.potId === 'string'
+        ? body.potId.trim()
+        : payload.potId || null;
+    if (potFromBody && amountForFinance !== null) {
+      await upsertFinanceTransactionForIntervention({
+        caseId: payload.caseId || planRow?.case_id || interventionRow.case_id || null,
+        interventionId,
+        potId: potFromBody,
+        amount: amountForFinance,
+        status: 'submitted',
+        transactionDate: payload.startDate || null,
+      });
+    }
     await markIlmpNeedsReviewForCase(interventionRow.case_id || planRow?.case_id || null);
     res.status(200).json(payload);
   } catch (error) {
@@ -19796,6 +19836,18 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     const updatedRow = await fetchInterventionWithCase(interventionId);
     const payload = mapInterventionRow(updatedRow);
     await markIlmpNeedsReviewForCase(interventionRow.case_id);
+    const amountForFinance =
+      Number.isFinite(actualAmountValue) && actualAmountValue !== null
+        ? Math.round(actualAmountValue)
+        : payload.cost || null;
+    if (payload.potId && amountForFinance !== null) {
+      await updateFinanceTransactionStatusForIntervention({
+        interventionId,
+        amount: amountForFinance,
+        status: 'posted',
+        transactionDate: completionDateValue || payload.endDate || payload.startDate || null,
+      });
+    }
     res.status(200).json(payload);
   } catch (error) {
     console.error('POST /api/interventions/:id/close failed:', error);
@@ -20646,126 +20698,6 @@ app.post('/api/dev/backfill-documents', async (req, res) => {
 });
 
 
-/**
- * POST /api/counter-session
- * 
- * Starts a new counter session for a user at a given counter.
- * 
- * - Only one active session is allowed per counter at a time.
- * - If the counter is already in use (no logout_time recorded), the request will fail.
- * - A successful request creates a new row in the counter_session table.
- * 
- * Expected request body:
- * {
- *   "userId": 123,       // ID of the user (staff member)
- *   "counterId": 5       // ID of the counter they are logging into
- * }
- */
-app.post('/api/counter-session', async (req, res) => {
-  const { userId, counterId } = req.body;
-
-  try {
-    // Step 1: Check if there is an existing active session for this counter
-    const [existing] = await pool.query(
-      'SELECT id FROM counter_session WHERE counter_id = ? AND logout_time IS NULL',
-      [counterId]
-    );
-
-    // Step 2: If there is an active session, reject the request
-    if (existing.length > 0) {
-      return res.status(409).send({ message: 'This counter is already in use.' });
-    }
-
-    // Step 3: Insert new session into the counter_session table
-    await pool.query(
-      'INSERT INTO counter_session (counter_id, user_id) VALUES (?, ?)',
-      [counterId, userId]
-    );
-
-    // Step 4: Return success
-    res.status(201).send({ message: 'Counter session started successfully.' });
-  } catch (error) {
-    // Log the error for debugging
-    console.error('Error starting counter session:', error);
-    // Return error response
-    res.status(500).send({ message: 'Failed to start counter session', error: error.message });
-  }
-});
-
-/**
- * GET /api/counter-session/active?userId=1
- * 
- * Returns the currently active counter session for the given user, if one exists.
- * 
- * Response:
- * {
- *   counterId: 1,
- *   counterName: "Booth 1",
- *   locationId: 1,
- *   loginTime: "2025-04-03T14:18:00Z"
- * }
- */
-app.get('/api/counter-session/active', async (req, res) => {
-  const { userId } = req.query;
-
-  try {
-    const [rows] = await pool.query(`
-      SELECT cs.counter_id AS counterId, c.name AS counterName, c.location_id AS locationId, cs.login_time AS loginTime
-      FROM counter_session cs
-      JOIN counter c ON cs.counter_id = c.id
-      WHERE cs.user_id = ? AND cs.logout_time IS NULL
-      ORDER BY cs.login_time DESC
-      LIMIT 1
-    `, [userId]);
-
-    if (rows.length === 0) {
-      return res.status(404).send({ message: 'No active session found.' });
-    }
-
-    res.json(rows[0]);
-  } catch (error) {
-    console.error('Error fetching active session:', error);
-    res.status(500).send({ message: 'Failed to fetch session' });
-  }
-});
-
-
-/**
- * DELETE /api/counter-session/:counterId
- * 
- * Signs out the currently active session for the specified counter.
- * 
- * - Updates the latest active session (logout_time IS NULL) to mark it as ended.
- * - Safe to call even if no session is currently active.
- */
-
-/**
- * GET /api/counters
- * 
- * Fetches a list of all counters from the system.
- * 
- * Each counter has:
- * - id: the internal identifier
- * - name: display name (e.g. "Booth 1", "Counter A")
- * 
- * This endpoint is used by the Counter Sign-In widget to populate the dropdown
- * of available counters at a location.
- */
-app.get('/api/counters', async (req, res) => {
-  try {
-    // Query the database for all counters (id and name)
-    const [rows] = await pool.query('SELECT id, name FROM counter');
-
-    // Return the result as JSON
-    res.json(rows);
-  } catch (error) {
-    // Log any errors and return a 500 status
-    console.error('Error fetching counters:', error);
-    res.status(500).send({ message: 'Failed to fetch counters' });
-  }
-});
-
-
 // --- Basic Users and Roles for Admin UI pages (lightweight) ---------------
 // List basic users from the user table for demo/admin views
 app.get('/api/users', async (_req, res) => {
@@ -20861,42 +20793,6 @@ app.get('/api/notifications/summary', async (_req, res) => {
     // If anything fails, return an empty structure so UI keeps working
     console.warn('Notifications summary unavailable:', err?.message || err);
     res.status(200).json({ templatesSummary: [] });
-  }
-});
-
-
-app.delete('/api/counter-session/:counterId', async (req, res) => {
-  const counterId = req.params.counterId;
-
-  try {
-    // Step 1: Update the latest active session by setting logout_time
-    const [result] = await pool.query(`
-      UPDATE counter_session
-      SET logout_time = NOW()
-      WHERE counter_id = ? AND logout_time IS NULL
-    `, [counterId]);
-
-    if (result.affectedRows > 0) {
-      res.status(200).send({ message: 'Counter session ended successfully' });
-    } else {
-      res.status(200).send({ message: 'No active session to end' });
-    }
-
-  } catch (error) {
-    console.error('Error ending counter session:', error);
-    res.status(500).send({ message: 'Failed to end counter session', error: error.message });
-  }
-});
-
-
-// New endpoint to return list of option data sources
-app.get('/api/option-data-sources', async (req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT id, label, endpoint FROM option_data_sources ORDER BY label');
-    res.json(rows);
-  } catch (error) {
-    console.error('Failed to fetch option data sources:', error);
-    res.status(500).json({ error: 'Failed to retrieve option data sources' });
   }
 });
 
@@ -21112,34 +21008,6 @@ app.get('/api/search-users', async (req, res) => {
   }
 });
 
-
-// Save slot search criteria to a separate variable
-let slotSearchCriteria = {};
-let appointmentData = {};
-
-app.post('/api/save-slot-search-criteria', (req, res) => {
-  slotSearchCriteria = { ...req.body };
-  appointmentData = { ...appointmentData, ...req.body };
-  res.status(200).send({ message: 'Slot search criteria and appointment data saved successfully' });
-});
-
-app.get('/api/get-slot-search-criteria', (req, res) => {
-  res.status(200).send(slotSearchCriteria);
-});
-
-app.get('/api/get-appointment', (req, res) => {
-  res.status(200).send(appointmentData);
-});
-
-app.get('/api/services', async (req, res) => {
-  try {
-    const [services] = await pool.query('SELECT id, name FROM service_type');
-    res.status(200).send(services);
-  } catch (error) {
-    console.error('Error fetching services:', error);
-    res.status(500).send({ message: 'Failed to fetch services' });
-  }
-});
 
 // --- Notification Templates API (DB-backed) ---
 
@@ -23052,224 +22920,6 @@ app.delete('/api/cases/:caseId/watch', async (req, res) => {
   }
 });
 
-app.get('/api/location-services/:locationId', async (req, res) => {
-  const { locationId } = req.params;
-  try {
-    const [services] = await pool.query(`
-      SELECT st.id, st.name
-      FROM location_service_link ls
-      JOIN service_type st ON ls.service_id = st.id
-      WHERE ls.location_id = ?
-    `, [locationId]);
-    res.status(200).send(services);
-  } catch (error) {
-    console.error('Error fetching location services:', error);
-    res.status(500).send({ message: 'Failed to fetch location services' });
-  }
-});
-
-app.post('/api/location-services/:locationId', async (req, res) => {
-  const { locationId } = req.params;
-  const serviceIds = req.body;
-
-  try {
-    // Delete existing services for the location
-    await pool.query('DELETE FROM location_service_link WHERE location_id = ?', [locationId]);
-
-    // Insert new services for the location
-    const values = serviceIds.map(serviceId => [locationId, serviceId]);
-    await pool.query('INSERT INTO location_service_link (location_id, service_id) VALUES ?', [values]);
-
-    res.status(200).send({ message: 'Services updated successfully' });
-  } catch (error) {
-    console.error('Error updating location services:', error);
-    res.status(500).send({ message: 'Failed to update location services' });
-  }
-});
-
-app.put('/api/location-services/:locationId', async (req, res) => {
-  const { locationId } = req.params;
-  const serviceIds = req.body;
-
-  try {
-    // Delete existing services for the location
-    await pool.query('DELETE FROM location_service_link WHERE location_id = ?', [locationId]);
-
-    // Insert new services for the location
-    const values = serviceIds.map(serviceId => [locationId, serviceId]);
-    await pool.query('INSERT INTO location_service_link (location_id, service_id) VALUES ?', [values]);
-
-    res.status(200).send({ message: 'Services updated successfully' });
-  } catch (error) {
-    console.error('Error updating location services:', error);
-    res.status(500).send({ message: 'Failed to update location services' });
-  }
-});
-
-app.get('/api/appointments', async (req, res) => {
-  try {
-    const { country, location, service } = req.query;
-    console.log('Received query parameters:', req.query); // Debugging log
-
-    let query = `
-SELECT 
-    a.id, 
-    u.name, 
-    s.date, 
-    s.time, 
-    a.status, 
-    st.name AS serviceType, 
-    l.name AS location
-FROM appointment a
-JOIN user u ON a.user_id = u.id
-JOIN booking b ON a.id = b.appointment_id
-JOIN slot s ON b.slot_id = s.id  -- Direct join with slot using slot_id from booking
-JOIN service_type st ON a.serviceType = st.id
-JOIN location l ON s.location_id = l.id
-WHERE 1=1;
-    `;
-
-    if (country && country !== 'all') {
-      query += ` AND l.country_id = ${mysql.escape(country)}`;
-    }
-
-    if (location && location !== 'all') {
-      query += ` AND l.id = ${mysql.escape(location)}`;
-    }
-
-    if (service && service !== 'all') {
-      query += ` AND st.name = ${mysql.escape(service)}`;
-    }
-
-    console.log('Constructed SQL query:', query); // Debugging log
-
-    const [appointments] = await pool.query(query);
-
-    // Mask the name field
-    const maskedAppointments = appointments.map(appointment => {
-      const nameParts = appointment.name.split(' ');
-      const maskedName = nameParts.map(part => {
-        if (part.length <= 2) return part;
-        return part[0] + '*'.repeat(part.length - 2) + part[part.length - 1];
-      }).join(' ');
-      return { ...appointment, name: maskedName };
-    });
-
-    res.status(200).send(maskedAppointments);
-  } catch (error) {
-    console.error('Error fetching appointments:', error);
-    res.status(500).send({ message: 'Failed to fetch appointments' });
-  }
-});
-
-app.get('/api/appointments/:id', async (req, res) => {
-  const appointmentId = req.params.id;
-  try {
-    const [appointment] = await pool.query(`
-SELECT 
-    a.id, 
-    u.name, 
-    s.date, 
-    s.time, 
-    a.status, 
-    st.name AS serviceType, 
-    l.name AS location
-FROM appointment a
-JOIN user u ON a.user_id = u.id
-JOIN booking b ON a.id = b.appointment_id
-JOIN slot s ON b.slot_id = s.id  -- Direct join with slot using slot_id from booking
-JOIN service_type st ON a.serviceType = st.id
-JOIN location l ON s.location_id = l.id
-WHERE a.id = ?;
-    `, [appointmentId]);
-
-    if (appointment.length === 0) {
-      return res.status(404).send({ message: 'Appointment not found' });
-    }
-
-    res.status(200).send(appointment[0]);
-  } catch (error) {
-    console.error('Error fetching appointment:', error);
-    res.status(500).send({ message: 'Failed to fetch appointment' });
-  }
-});
-
-app.put('/api/appointments/:id', async (req, res) => {
-  const appointmentId = req.params.id;
-  const { status } = req.body;
-
-  try {
-    // Update the status in the appointment table
-    await pool.query('UPDATE appointment SET status = ? WHERE id = ?', [status, appointmentId]);
-
-    if (status === 'serving') {
-      // Update the service_start_time in the queue table
-      await pool.query('UPDATE queue SET service_start_time = ? WHERE appointment_id = ?', [new Date(), appointmentId]);
-    } else if (status === 'package' || status === 'complete') {
-      // Update the service_end_time in the queue table
-      await pool.query('UPDATE queue SET service_end_time = ? WHERE appointment_id = ?', [new Date(), appointmentId]);
-    } else if (status === 'booked') {
-      // Delete the record from the queue table
-      await pool.query('DELETE FROM queue WHERE appointment_id = ?', [appointmentId]);
-    }
-
-    res.status(200).send({ message: 'Appointment status updated successfully' });
-  } catch (error) {
-    console.error('Error updating appointment status:', error);
-    res.status(500).send({ message: 'Failed to update appointment status' });
-  }
-});
-
-app.delete('/api/queue/:appointmentId', async (req, res) => {
-  const { appointmentId } = req.params;
-
-  try {
-    const [result] = await pool.query('DELETE FROM queue WHERE appointment_id = ?', [appointmentId]);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).send({ message: 'Queue record not found' });
-    }
-
-    res.status(200).send({ message: 'Queue record deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting queue record:', error);
-    res.status(500).send({ message: 'Failed to delete queue record' });
-  }
-});
-
-const formatDateTime = (date) => {
-  if (!date) return null;
-  const d = new Date(date);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:${String(d.getUTCSeconds()).padStart(2, '0')}`;
-};
-
-app.put('/api/queue', async (req, res) => {
-  const { appointmentId, service_start_time, service_end_time, status } = req.body;
-
-  try {
-    const formattedStartTime = formatDateTime(service_start_time);
-    const formattedEndTime = formatDateTime(service_end_time);
-
-    const [result] = await pool.query(`
-      UPDATE queue 
-      SET 
-        service_start_time = COALESCE(?, service_start_time), 
-        service_end_time = COALESCE(?, service_end_time), 
-        status = COALESCE(?, status)
-      WHERE appointment_id = ?
-    `, [formattedStartTime, formattedEndTime, status, appointmentId]);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).send({ message: 'Queue record not found' });
-    }
-
-    res.status(200).send({ message: 'Queue record updated successfully' });
-  } catch (error) {
-    console.error('Error updating queue record:', error);
-    res.status(500).send({ message: 'Failed to update queue record' });
-  }
-});
-
 // --- PTMA Endpoints ---
 
 // List all PTMAs or Hubs (filter by type if provided)
@@ -23330,6 +22980,833 @@ app.get('/api/ptmas', async (req, res) => {
   } catch (error) {
     console.error('Error fetching PTMAs:', error);
     res.status(500).send({ message: 'Failed to fetch PTMAs' });
+  }
+});
+
+// --- Finance: Budget Pots ---
+
+function mapBudgetPotRow(row) {
+  let meta = {};
+  if (row && row.metadata) {
+    try { meta = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata; } catch { meta = {}; }
+  }
+  return {
+    id: String(row.id),
+    parentId: row.parent_id ? String(row.parent_id) : null,
+    agreementCode: row.agreement_code || null,
+    fiscalYear: row.fiscal_year || null,
+    name: row.name,
+    code: row.code,
+    nodeType: meta.nodeType || row.pot_type || 'budget',
+    owner: row.owner || null,
+    isAdminCap: !!row.is_admin_cap,
+    isActive: !!row.is_active,
+    approved: Number(row.approved_amount || 0),
+    adjusted: Number(row.adjusted_amount || 0),
+    committed: Number(row.committed_amount || 0),
+    actual: Number(row.actual_amount || 0),
+    forecast: Number(row.forecast_amount || 0),
+    adminShare: Number(row.admin_share_amount || 0),
+    metadata: meta,
+  };
+}
+
+function requireFinanceRole(req, res) {
+  const role = req.auth?.role || req.staffProfile?.primary_role || req.get('X-Dev-Role') || req.get('x-dev-role');
+  const allowed = new Set(['System Administrator', 'Program Administrator']);
+  if (role && allowed.has(role)) return null;
+  res.status(403).json({ error: 'forbidden', message: 'Insufficient role for finance operations.' });
+  return { denied: true };
+}
+
+async function refreshFinancePotSums() {
+  try {
+    // Reset committed/actual so pots without transactions don't retain stale values
+    await pool.query('UPDATE budget_pot SET committed_amount = 0, actual_amount = 0');
+    // Apply sums from finance transactions to leaf pots
+    await pool.query(
+      `UPDATE budget_pot bp
+       JOIN (
+         SELECT budget_pot_id,
+                SUM(CASE WHEN status IN ('draft','submitted','approved') THEN amount ELSE 0 END) AS committed,
+                SUM(CASE WHEN status = 'posted' THEN amount ELSE 0 END) AS actual
+         FROM finance_transaction
+         GROUP BY budget_pot_id
+       ) t ON bp.id = t.budget_pot_id
+       SET bp.committed_amount = t.committed,
+           bp.actual_amount = t.actual`
+    );
+    // Roll up committed/actual to parents (single pass; covers current depth)
+    await pool.query(
+      `UPDATE budget_pot p
+       JOIN (
+         SELECT parent_id,
+                SUM(committed_amount) AS committed,
+                SUM(actual_amount) AS actual
+         FROM budget_pot
+         WHERE parent_id IS NOT NULL
+         GROUP BY parent_id
+       ) c ON p.id = c.parent_id
+       SET p.committed_amount = c.committed,
+           p.actual_amount = c.actual`
+    );
+  } catch (err) {
+    console.warn('[finance] failed to refresh pot sums', err?.message || err);
+  }
+}
+
+async function upsertFinanceTransactionForIntervention({ caseId, interventionId, potId, amount, status = 'submitted', transactionDate = null }) {
+  try {
+    const potNumeric = Number(potId);
+    if (!Number.isFinite(potNumeric)) return;
+    const [[potExists] = []] = await pool.query('SELECT id FROM budget_pot WHERE id = ? LIMIT 1', [potNumeric]);
+    if (!potExists) return;
+    const amt = Number(amount);
+    const normalizedAmount = Number.isFinite(amt) ? amt : 0;
+    const txDate = transactionDate || null;
+    const [[existing] = []] = await pool.query(
+      'SELECT id FROM finance_transaction WHERE case_intervention_id = ? LIMIT 1',
+      [interventionId]
+    );
+    if (existing) {
+      await pool.query(
+        `UPDATE finance_transaction
+         SET budget_pot_id = ?, amount = ?, status = ?, transaction_date = ?, updated_at = NOW()
+         WHERE id = ?`,
+        [potNumeric, normalizedAmount, status, txDate, existing.id]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO finance_transaction
+           (case_id, case_intervention_id, budget_pot_id, amount, currency, status, transaction_date, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'CAD', ?, ?, NOW(), NOW())`,
+        [caseId, interventionId, potNumeric, normalizedAmount, status, txDate]
+      );
+    }
+    await refreshFinancePotSums();
+  } catch (err) {
+    console.warn('[finance] upsert transaction failed', err?.message || err);
+  }
+}
+
+async function updateFinanceTransactionStatusForIntervention({ interventionId, amount, status, transactionDate = null }) {
+  try {
+    const amt = Number(amount);
+    const normalizedAmount = Number.isFinite(amt) ? amt : null;
+    const [[existing] = []] = await pool.query(
+      'SELECT id FROM finance_transaction WHERE case_intervention_id = ? LIMIT 1',
+      [interventionId]
+    );
+    if (!existing) return;
+    await pool.query(
+      `UPDATE finance_transaction
+       SET status = ?, amount = COALESCE(?, amount), transaction_date = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [status, normalizedAmount, transactionDate || null, existing.id]
+    );
+    await refreshFinancePotSums();
+  } catch (err) {
+    console.warn('[finance] update transaction status failed', err?.message || err);
+  }
+}
+
+app.get('/api/finance/budget-pots', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const { agreement_code: agreementCode, fiscal_year: fiscalYear } = req.query || {};
+    const where = [];
+    const params = [];
+    if (agreementCode) {
+      where.push('agreement_code = ?');
+      params.push(agreementCode);
+    }
+    if (fiscalYear) {
+      where.push('fiscal_year = ?');
+      params.push(fiscalYear);
+    }
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')} ` : '';
+    const [rows] = await pool.query(
+      `SELECT * FROM budget_pot ${whereClause}ORDER BY parent_id IS NULL DESC, parent_id, id`
+      , params
+    );
+    res.status(200).json(rows.map(mapBudgetPotRow));
+  } catch (err) {
+    console.error('[finance] failed to list budget pots', err);
+    res.status(500).json({ error: 'failed_to_list_budget_pots' });
+  }
+});
+
+app.get('/api/finance/budget-pots/lookup', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const qRaw = (req.query.q || req.query.query || '').trim();
+    const limit = Math.min(Number(req.query.limit) || 25, 100);
+    const params = [];
+    let where = 'WHERE is_active = 1';
+    if (qRaw) {
+      where += ' AND (name LIKE ? OR code LIKE ?)';
+      const like = `%${qRaw}%`;
+      params.push(like, like);
+    }
+    const [rows] = await pool.query(
+      `SELECT id, name, code, parent_id FROM budget_pot ${where} ORDER BY parent_id IS NULL DESC, parent_id, name LIMIT ?`,
+      [...params, limit]
+    );
+    const options = rows.map(row => ({
+      id: String(row.id),
+      value: String(row.id),
+      code: row.code,
+      name: row.name,
+      parentId: row.parent_id ? String(row.parent_id) : null,
+      label: row.code ? `${row.name} (${row.code})` : row.name,
+    }));
+    res.status(200).json(options);
+  } catch (err) {
+    console.error('[finance] failed to lookup budget pots', err);
+    res.status(500).json({ error: 'failed_to_lookup_budget_pots' });
+  }
+});
+
+app.get('/api/finance/budget-pots/:id', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const potId = Number(req.params.id);
+    if (!Number.isFinite(potId)) {
+      return res.status(400).json({ error: 'invalid_pot_id' });
+    }
+    const [[row]] = await pool.query('SELECT * FROM budget_pot WHERE id = ? LIMIT 1', [potId]);
+    if (!row) {
+      return res.status(404).json({ error: 'pot_not_found' });
+    }
+    res.status(200).json(mapBudgetPotRow(row));
+  } catch (err) {
+    console.error('[finance] failed to fetch budget pot', err);
+    res.status(500).json({ error: 'failed_to_fetch_budget_pot' });
+  }
+});
+
+app.post('/api/finance/budget-pots', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const body = req.body || {};
+    if (!body.name || !body.code) {
+      return res.status(400).json({ error: 'name_and_code_required' });
+    }
+    const parentId = body.parentId ? Number(body.parentId) : null;
+    const insertSql = `
+      INSERT INTO budget_pot
+        (parent_id, agreement_code, fiscal_year, name, code, pot_type, owner, is_admin_cap, is_active,
+         approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `;
+    const params = [
+      Number.isFinite(parentId) ? parentId : null,
+      body.agreementCode || null,
+      body.fiscalYear || null,
+      body.name,
+      body.code,
+      body.nodeType || 'budget',
+      body.owner || null,
+      body.isAdminCap ? 1 : 0,
+      body.isActive === false ? 0 : 1,
+      Number(body.approved) || 0,
+      Number(body.adjusted ?? body.approved) || 0,
+      Number(body.committed) || 0,
+      Number(body.actual) || 0,
+      Number(body.forecast ?? body.adjusted ?? body.approved) || 0,
+      Number(body.adminShare) || 0,
+      body.metadata ? JSON.stringify(body.metadata) : JSON.stringify({ nodeType: body.nodeType || 'budget' }),
+    ];
+    const [result] = await pool.query(insertSql, params);
+    const [[row]] = await pool.query('SELECT * FROM budget_pot WHERE id = ? LIMIT 1', [result.insertId]);
+    res.status(201).json(mapBudgetPotRow(row));
+  } catch (err) {
+    console.error('[finance] failed to create budget pot', err);
+    res.status(500).json({ error: 'failed_to_create_budget_pot' });
+  }
+});
+
+app.put('/api/finance/budget-pots/:id', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const potId = Number(req.params.id);
+    if (!Number.isFinite(potId)) {
+      return res.status(400).json({ error: 'invalid_pot_id' });
+    }
+    const body = req.body || {};
+    const fields = [];
+    const params = [];
+    const assign = (col, val) => { fields.push(`${col} = ?`); params.push(val); };
+    if (body.name !== undefined) assign('name', body.name);
+    if (body.code !== undefined) assign('code', body.code);
+    if (body.pot_type !== undefined || body.nodeType !== undefined) assign('pot_type', body.nodeType || body.pot_type);
+    if (body.owner !== undefined) assign('owner', body.owner);
+    if (body.parentId !== undefined) assign('parent_id', body.parentId ? Number(body.parentId) : null);
+    if (body.agreementCode !== undefined) assign('agreement_code', body.agreementCode);
+    if (body.fiscalYear !== undefined) assign('fiscal_year', body.fiscalYear);
+    if (body.is_admin_cap !== undefined || body.isAdminCap !== undefined) assign('is_admin_cap', body.isAdminCap ? 1 : 0);
+    if (body.is_active !== undefined || body.isActive !== undefined) assign('is_active', body.isActive === false ? 0 : 1);
+    if (body.approved !== undefined) assign('approved_amount', Number(body.approved) || 0);
+    if (body.adjusted !== undefined) assign('adjusted_amount', Number(body.adjusted) || 0);
+    if (body.committed !== undefined) assign('committed_amount', Number(body.committed) || 0);
+    if (body.actual !== undefined) assign('actual_amount', Number(body.actual) || 0);
+    if (body.forecast !== undefined) assign('forecast_amount', Number(body.forecast) || 0);
+    if (body.adminShare !== undefined) assign('admin_share_amount', Number(body.adminShare) || 0);
+    if (body.metadata !== undefined || body.nodeType !== undefined) {
+      const currentMeta = body.metadata || {};
+      const nodeType = body.nodeType || body.pot_type;
+      const merged = { ...(typeof currentMeta === 'object' && currentMeta !== null ? currentMeta : {}), ...(nodeType ? { nodeType } : {}) };
+      assign('metadata', JSON.stringify(merged));
+    }
+    if (!fields.length) {
+      return res.status(400).json({ error: 'no_fields_to_update' });
+    }
+    params.push(potId);
+    await pool.query(`UPDATE budget_pot SET ${fields.join(', ')} WHERE id = ?`, params);
+    const [[row]] = await pool.query('SELECT * FROM budget_pot WHERE id = ? LIMIT 1', [potId]);
+    if (!row) {
+      return res.status(404).json({ error: 'pot_not_found' });
+    }
+    res.status(200).json(mapBudgetPotRow(row));
+  } catch (err) {
+    console.error('[finance] failed to update budget pot', err);
+    res.status(500).json({ error: 'failed_to_update_budget_pot' });
+  }
+});
+
+app.get('/api/finance/transactions', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const { potId, caseId, interventionId, limit = 100 } = req.query || {};
+    const where = [];
+    const params = [];
+    if (potId) {
+      where.push('ft.budget_pot_id = ?');
+      params.push(Number(potId));
+    }
+    if (caseId) {
+      where.push('ft.case_id = ?');
+      params.push(Number(caseId));
+    }
+    if (interventionId) {
+      where.push('ft.case_intervention_id = ?');
+      params.push(Number(interventionId));
+    }
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const cappedLimit = Math.min(Number(limit) || 100, 500);
+    const [rows] = await pool.query(
+      `SELECT ft.id, ft.case_id, ft.case_intervention_id, ft.budget_pot_id, ft.amount, ft.currency, ft.status, ft.transaction_date, ft.created_at, ft.updated_at,
+              bp.name AS pot_name, bp.code AS pot_code
+         FROM finance_transaction ft
+         LEFT JOIN budget_pot bp ON bp.id = ft.budget_pot_id
+        ${whereClause}
+        ORDER BY ft.updated_at DESC
+        LIMIT ?`,
+      [...params, cappedLimit]
+    );
+    const mapped = rows.map(row => ({
+      id: row.id,
+      caseId: row.case_id,
+      interventionId: row.case_intervention_id,
+      potId: row.budget_pot_id,
+      potName: row.pot_name,
+      potCode: row.pot_code,
+      amount: Number(row.amount || 0),
+      currency: row.currency || 'CAD',
+      status: row.status,
+      transactionDate: row.transaction_date,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+    res.status(200).json(mapped);
+  } catch (err) {
+    console.error('[finance] failed to list transactions', err);
+    res.status(500).json({ error: 'failed_to_list_transactions' });
+  }
+});
+
+app.post('/api/finance/recalculate', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    await refreshFinancePotSums();
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('[finance] recalc failed', err);
+    res.status(500).json({ error: 'failed_to_recalculate' });
+  }
+});
+
+app.get('/api/finance/budget-snapshots', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, label, snapshot_at, agreement_code, fiscal_year, created_by_user_id, notes, created_at
+         FROM budget_snapshot
+         ORDER BY snapshot_at DESC, id DESC`
+    );
+    res.status(200).json(rows.map(row => ({
+      id: row.id,
+      label: row.label,
+      snapshotAt: row.snapshot_at,
+      agreementCode: row.agreement_code,
+      fiscalYear: row.fiscal_year,
+      createdByUserId: row.created_by_user_id,
+      notes: row.notes,
+      createdAt: row.created_at,
+    })));
+  } catch (err) {
+    console.error('[finance] failed to list budget snapshots', err);
+    res.status(500).json({ error: 'failed_to_list_budget_snapshots' });
+  }
+});
+
+app.post('/api/finance/budget-snapshots', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const body = req.body || {};
+  const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim() : `Snapshot ${new Date().toISOString()}`;
+  const notes = typeof body.notes === 'string' ? body.notes : null;
+  const agreementCode = typeof body.agreementCode === 'string' ? body.agreementCode : null;
+  const fiscalYear = typeof body.fiscalYear === 'string' ? body.fiscalYear : null;
+  // Auth IDs are not guaranteed to exist in user table; store null to avoid FK issues.
+  const creator = null;
+  try {
+    const [pots] = await pool.query('SELECT * FROM budget_pot');
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [result] = await conn.query(
+        `INSERT INTO budget_snapshot (label, snapshot_at, agreement_code, fiscal_year, created_by_user_id, notes, created_at)
+         VALUES (?, NOW(), ?, ?, ?, ?, NOW())`,
+        [label, agreementCode, fiscalYear, creator, notes]
+      );
+      const snapshotId = result.insertId;
+      if (pots.length) {
+        const insertValues = pots.map(pot => [
+          snapshotId,
+          pot.id,
+          pot.parent_id,
+          pot.name,
+          pot.code,
+          pot.pot_type,
+          pot.is_admin_cap,
+          pot.approved_amount,
+          pot.adjusted_amount,
+          pot.committed_amount,
+          pot.actual_amount,
+          pot.forecast_amount,
+          pot.admin_share_amount,
+          pot.metadata ? JSON.stringify(pot.metadata) : null,
+        ]);
+        await conn.query(
+          `INSERT INTO budget_snapshot_pot
+           (snapshot_id, budget_pot_id, parent_pot_id, name, code, pot_type, is_admin_cap,
+            approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata)
+           VALUES ?`,
+          [insertValues]
+        );
+      }
+      await conn.commit();
+      res.status(201).json({ id: snapshotId, label, snapshotAt: new Date().toISOString(), notes, agreementCode, fiscalYear });
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  } catch (err) {
+    console.error('[finance] failed to create budget snapshot', err);
+    res.status(500).json({ error: 'failed_to_create_budget_snapshot' });
+  }
+});
+
+app.get('/api/finance/budget-snapshots/:id', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const snapshotId = Number(req.params.id);
+  if (!Number.isFinite(snapshotId)) {
+    return res.status(400).json({ error: 'invalid_snapshot_id' });
+  }
+  try {
+    const [[snapshot]] = await pool.query(
+      `SELECT id, label, snapshot_at, agreement_code, fiscal_year, created_by_user_id, notes, created_at
+         FROM budget_snapshot
+        WHERE id = ?
+        LIMIT 1`,
+      [snapshotId]
+    );
+    if (!snapshot) {
+      return res.status(404).json({ error: 'snapshot_not_found' });
+    }
+    const [pots] = await pool.query(
+      `SELECT * FROM budget_snapshot_pot WHERE snapshot_id = ? ORDER BY parent_pot_id IS NULL DESC, parent_pot_id, id`,
+      [snapshotId]
+    );
+    res.status(200).json({
+      id: snapshot.id,
+      label: snapshot.label,
+      snapshotAt: snapshot.snapshot_at,
+      agreementCode: snapshot.agreement_code,
+      fiscalYear: snapshot.fiscal_year,
+      createdByUserId: snapshot.created_by_user_id,
+      notes: snapshot.notes,
+      createdAt: snapshot.created_at,
+      pots: pots.map(row => ({
+        id: row.budget_pot_id,
+        parentId: row.parent_pot_id,
+        name: row.name,
+        code: row.code,
+        potType: row.pot_type,
+        isAdminCap: !!row.is_admin_cap,
+        approved: Number(row.approved_amount || 0),
+        adjusted: Number(row.adjusted_amount || 0),
+        committed: Number(row.committed_amount || 0),
+        actual: Number(row.actual_amount || 0),
+        forecast: Number(row.forecast_amount || 0),
+        adminShare: Number(row.admin_share_amount || 0),
+        metadata: row.metadata ? safeJsonParse(row.metadata, {}) : {},
+      })),
+    });
+  } catch (err) {
+    console.error('[finance] failed to fetch budget snapshot', err);
+    res.status(500).json({ error: 'failed_to_fetch_budget_snapshot' });
+  }
+});
+
+app.delete('/api/finance/budget-snapshots/:id', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const snapshotId = Number(req.params.id);
+  if (!Number.isFinite(snapshotId)) {
+    return res.status(400).json({ error: 'invalid_snapshot_id' });
+  }
+  try {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.query('DELETE FROM budget_snapshot_pot WHERE snapshot_id = ?', [snapshotId]);
+      const [result] = await conn.query('DELETE FROM budget_snapshot WHERE id = ? LIMIT 1', [snapshotId]);
+      await conn.commit();
+      res.status(200).json({ deleted: result.affectedRows > 0 });
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  } catch (err) {
+    console.error('[finance] failed to delete budget snapshot', err);
+    res.status(500).json({ error: 'failed_to_delete_budget_snapshot' });
+  }
+});
+
+app.post('/api/finance/budget-snapshots/:id/restore-draft', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const snapshotId = Number(req.params.id);
+  if (!Number.isFinite(snapshotId)) {
+    return res.status(400).json({ error: 'invalid_snapshot_id' });
+  }
+  try {
+    const [[snapshot]] = await pool.query(
+      `SELECT id, label, notes, agreement_code, fiscal_year FROM budget_snapshot WHERE id = ? LIMIT 1`,
+      [snapshotId]
+    );
+    if (!snapshot) {
+      return res.status(404).json({ error: 'snapshot_not_found' });
+    }
+    const [pots] = await pool.query(
+      `SELECT * FROM budget_snapshot_pot WHERE snapshot_id = ? ORDER BY parent_pot_id IS NULL DESC, parent_pot_id, id`,
+      [snapshotId]
+    );
+    const payloadPots = pots.map(p => ({
+      id: p.budget_pot_id,
+      parentId: p.parent_pot_id,
+      name: p.name,
+      code: p.code,
+      nodeType: p.pot_type,
+      isAdminCap: Boolean(p.is_admin_cap),
+      approved: Number(p.approved_amount || 0),
+      adjusted: Number(p.adjusted_amount || 0),
+      committed: Number(p.committed_amount || 0),
+      actual: Number(p.actual_amount || 0),
+      forecast: Number(p.forecast_amount || 0),
+      adminShare: Number(p.admin_share_amount || 0),
+      metadata: p.metadata ? safeJsonParse(p.metadata, {}) : {},
+      status: 'draft',
+    }));
+    const label = `${snapshot.label} (restored)`;
+    await pool.query(
+      `INSERT INTO budget_pot_draft (label, notes, payload_json, created_by_user_id, created_at)
+       VALUES (?, ?, ?, NULL, NOW())`,
+      [label, snapshot.notes || null, JSON.stringify({ pots: payloadPots })]
+    );
+    const [[draft]] = await pool.query(
+      `SELECT id, label, notes, created_at AS createdAt FROM budget_pot_draft WHERE label = ? ORDER BY id DESC LIMIT 1`,
+      [label]
+    );
+    res.status(201).json(draft || { success: true });
+  } catch (err) {
+    console.error('[finance] failed to restore draft from snapshot', err);
+    res.status(500).json({ error: 'failed_to_restore_draft' });
+  }
+});
+
+app.get('/api/finance/budget-drafts', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, label, notes, payload_json, created_by_user_id, created_at
+         FROM budget_pot_draft
+         ORDER BY created_at DESC, id DESC`
+    );
+    res.status(200).json(
+      rows.map(row => ({
+        id: row.id,
+        label: row.label,
+        notes: row.notes,
+        payload: row.payload_json,
+        createdByUserId: row.created_by_user_id,
+        createdAt: row.created_at,
+      }))
+    );
+  } catch (err) {
+    console.error('[finance] failed to list budget drafts', err);
+    res.status(500).json({ error: 'failed_to_list_budget_drafts' });
+  }
+});
+
+app.post('/api/finance/budget-drafts', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const body = req.body || {};
+  const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim() : `Draft ${new Date().toISOString()}`;
+  const notes = typeof body.notes === 'string' ? body.notes : null;
+  const payload = body.payload || null;
+  if (!payload || !Array.isArray(payload.pots)) {
+    return res.status(400).json({ error: 'invalid_payload', message: 'Payload must include pots array.' });
+  }
+  const creator = null; // avoid FK issues when auth context lacks a matching user row
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO budget_pot_draft (label, notes, payload_json, created_by_user_id, created_at)
+       VALUES (?, ?, ?, ?, NOW())`,
+      [label, notes, JSON.stringify(payload), creator]
+    );
+    res.status(201).json({ success: true, id: result.insertId });
+  } catch (err) {
+    console.error('[finance] failed to create budget draft', err);
+    res.status(500).json({ error: 'failed_to_create_budget_draft' });
+  }
+});
+
+app.delete('/api/finance/budget-drafts/:id', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const draftId = Number(req.params.id);
+  if (!Number.isFinite(draftId)) {
+    return res.status(400).json({ error: 'invalid_draft_id' });
+  }
+  try {
+    const [result] = await pool.query('DELETE FROM budget_pot_draft WHERE id = ? LIMIT 1', [draftId]);
+    res.status(200).json({ deleted: result.affectedRows > 0 });
+  } catch (err) {
+    console.error('[finance] failed to delete budget draft', err);
+    res.status(500).json({ error: 'failed_to_delete_budget_draft' });
+  }
+});
+
+app.put('/api/finance/budget-drafts/:id', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const draftId = Number(req.params.id);
+  if (!Number.isFinite(draftId)) {
+    return res.status(400).json({ error: 'invalid_draft_id' });
+  }
+  const body = req.body || {};
+  const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim() : null;
+  const notes = typeof body.notes === 'string' ? body.notes : null;
+  const payload = body.payload || null;
+  if (!payload || !Array.isArray(payload.pots)) {
+    return res.status(400).json({ error: 'invalid_payload', message: 'Payload must include pots array.' });
+  }
+  try {
+    const fields = [];
+    const params = [];
+    fields.push('payload_json = ?'); params.push(JSON.stringify(payload));
+    if (label !== null) { fields.push('label = ?'); params.push(label); }
+    if (notes !== undefined) { fields.push('notes = ?'); params.push(notes); }
+    params.push(draftId);
+    await pool.query(`UPDATE budget_pot_draft SET ${fields.join(', ')} WHERE id = ?`, params);
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('[finance] failed to update budget draft', err);
+    res.status(500).json({ error: 'failed_to_update_budget_draft' });
+  }
+});
+
+app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const draftId = Number(req.params.id);
+  if (!Number.isFinite(draftId)) {
+    return res.status(400).json({ error: 'invalid_draft_id' });
+  }
+  try {
+    const [[draft]] = await pool.query(
+      'SELECT id, label, payload_json, created_at FROM budget_pot_draft WHERE id = ? LIMIT 1',
+      [draftId]
+    );
+    if (!draft) {
+      return res.status(404).json({ error: 'draft_not_found' });
+    }
+    const payload = safeJsonParse(draft.payload_json, null);
+    if (!payload || !Array.isArray(payload.pots) || !payload.pots.length) {
+      return res.status(400).json({ error: 'invalid_draft_payload' });
+    }
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // Snapshot current live pots before applying the draft
+      const [currentPots] = await conn.query('SELECT * FROM budget_pot');
+      const [snapshotResult] = await conn.query(
+        `INSERT INTO budget_snapshot (label, snapshot_at, agreement_code, fiscal_year, created_by_user_id, notes, created_at)
+         VALUES (?, NOW(), ?, ?, ?, ?, NOW())`,
+        [`Pre-publish of ${draft.label}`, null, null, null, 'Draft publish rollback point']
+      );
+      const snapshotId = snapshotResult.insertId;
+      if (currentPots.length) {
+        const values = currentPots.map(pot => [
+          snapshotId,
+          pot.id,
+          pot.parent_id,
+          pot.name,
+          pot.code,
+          pot.pot_type,
+          pot.is_admin_cap,
+          pot.approved_amount,
+          pot.adjusted_amount,
+          pot.committed_amount,
+          pot.actual_amount,
+          pot.forecast_amount,
+          pot.admin_share_amount,
+          pot.metadata ? JSON.stringify(pot.metadata) : null,
+        ]);
+        await conn.query(
+          `INSERT INTO budget_snapshot_pot
+           (snapshot_id, budget_pot_id, parent_pot_id, name, code, pot_type, is_admin_cap,
+            approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata)
+           VALUES ?`,
+          [values]
+        );
+      }
+
+      // Apply draft pots (upsert by id/code)
+      const potsById = new Set();
+      const draftPots = payload.pots;
+      // Simple parent-first ordering: insert roots first, then children until all done.
+      const remaining = [...draftPots];
+      const prepared = [];
+      const canInsert = pot => !pot.parentId || potsById.has(Number(pot.parentId));
+      let guard = 0;
+      while (remaining.length && guard < 10000) {
+        const next = remaining.shift();
+        const parentOk = canInsert(next);
+        if (!parentOk) {
+          remaining.push(next);
+          guard += 1;
+          continue;
+        }
+        const idNum = Number(next.id);
+        const parentIdNum = next.parentId ? Number(next.parentId) : null;
+        const approved = Number(next.approved) || 0;
+        const adjusted = Number(next.adjusted ?? next.approved) || 0;
+        const committed = Number(next.committed) || 0;
+        const actual = Number(next.actual) || 0;
+        const forecast = Number(next.forecast ?? adjusted ?? approved) || 0;
+        const adminShare = Number(next.adminShare) || 0;
+        const meta = {
+          ...(typeof next.metadata === 'object' && next.metadata !== null ? next.metadata : {}),
+          ...(next.nodeType ? { nodeType: next.nodeType } : {}),
+          ...(next.description ? { description: next.description } : {}),
+          ...(next.policyNotes ? { policyNotes: next.policyNotes } : {}),
+          ...(next.adminTargetPct !== undefined ? { adminTargetPct: next.adminTargetPct } : {}),
+        };
+        prepared.push([
+          Number.isFinite(idNum) ? idNum : null,
+          Number.isFinite(parentIdNum) ? parentIdNum : null,
+          next.agreementCode || null,
+          next.fiscalYear || null,
+          next.name || '',
+          next.code || '',
+          next.nodeType || 'budget',
+          next.owner || null,
+          next.isAdminCap ? 1 : 0,
+          next.status === 'archived' ? 0 : 1,
+          approved,
+          adjusted,
+          committed,
+          actual,
+          forecast,
+          adminShare,
+          JSON.stringify(meta),
+        ]);
+        if (Number.isFinite(idNum)) {
+          potsById.add(idNum);
+        }
+        guard += 1;
+      }
+      if (remaining.length) {
+        throw new Error('failed_to_resolve_parent_order');
+      }
+
+      for (const values of prepared) {
+        const [result] = await conn.query(
+          `INSERT INTO budget_pot
+             (id, parent_id, agreement_code, fiscal_year, name, code, pot_type, owner, is_admin_cap, is_active,
+              approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+           ON DUPLICATE KEY UPDATE
+             parent_id = VALUES(parent_id),
+             agreement_code = VALUES(agreement_code),
+             fiscal_year = VALUES(fiscal_year),
+             name = VALUES(name),
+             code = VALUES(code),
+             pot_type = VALUES(pot_type),
+             owner = VALUES(owner),
+             is_admin_cap = VALUES(is_admin_cap),
+             is_active = VALUES(is_active),
+             approved_amount = VALUES(approved_amount),
+             adjusted_amount = VALUES(adjusted_amount),
+             committed_amount = VALUES(committed_amount),
+             actual_amount = VALUES(actual_amount),
+             forecast_amount = VALUES(forecast_amount),
+             admin_share_amount = VALUES(admin_share_amount),
+             metadata = VALUES(metadata),
+             updated_at = NOW()`,
+          values
+        );
+        const explicitId = Number(values[0]);
+        const effectiveId = Number.isFinite(explicitId) ? explicitId : Number(result.insertId);
+        if (Number.isFinite(effectiveId)) {
+          potsById.add(effectiveId);
+        }
+      }
+
+      // Archive pots not present in the draft to avoid breaking history
+      if (potsById.size) {
+        await conn.query(
+          `UPDATE budget_pot SET is_active = 0 WHERE id NOT IN (${Array.from(potsById).map(() => '?').join(',')})`,
+          Array.from(potsById)
+        );
+      }
+
+      await conn.commit();
+      res.status(200).json({ success: true, snapshotId });
+    } catch (err) {
+      await conn.rollback();
+      console.error('[finance] failed to publish draft', err);
+      return res.status(500).json({ error: 'failed_to_publish_draft' });
+    } finally {
+      conn.release();
+    }
+  } catch (err) {
+    console.error('[finance] publish draft error', err);
+    res.status(500).json({ error: 'failed_to_publish_draft' });
   }
 });
 

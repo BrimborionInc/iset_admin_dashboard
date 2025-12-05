@@ -5,50 +5,35 @@ const FinanceBudgetsHelp = () => (
   <SpaceBetween size="m">
     <Box>
       <strong>Purpose</strong>
-      <p>
-        Center for configuring and tracking agreement budgets across funding streams, programs, and regions. This view
-        keeps finance teams aligned on the current allocation story, upcoming pressure points, and required approvals.
-      </p>
+      <p>The Budgets dashboard lets admins view the live (Active) budget hierarchy, stage changes in Drafts, and publish a new hierarchy when ready.</p>
     </Box>
     <Box>
-      <strong>Concept</strong>
-      <p>
-        Provide a flexible tree or flat grid of budget pots showing allocations, adjustments, commitments, remaining
-        balance, burn-rate, and administrative attribution. Operators can drill into pot histories, annotate decisions,
-        and stage reallocations or forecast tweaks.
-      </p>
-    </Box>
-    <Box>
-      <strong>Key user goals</strong>
+      <strong>Key concepts</strong>
       <ul>
-        <li>Review approved vs. adjusted budgets and actual spend for every pot.</li>
-        <li>Toggle between simple and multi-level hierarchies based on organisation complexity.</li>
-        <li>Highlight overspend risk, underspend opportunity, and admin flat-rate utilisation.</li>
-        <li>Capture annotations for approvals (Board resolutions, ESDC confirmations) tied to each adjustment.</li>
+        <li><strong>Active Budget</strong>: Read-only view of the live hierarchy and amounts.</li>
+        <li><strong>Draft Budgets</strong>: Staging area to review drafts, publish them, or restore a draft from a snapshot.</li>
+        <li><strong>Structure manager</strong>: Edit the selected draft (create/update pots), copy Active to a new draft, and capture/restore snapshots.</li>
       </ul>
     </Box>
     <Box>
-      <strong>Key widgets</strong>
+      <strong>Typical flows</strong>
       <ul>
-        <li>Hierarchical budget tree with inline KPIs and quick filters (overrun risk, underspend, admin attribution).</li>
-        <li>Pot detail panel summarising adjustments, evidence, and proportional admin allocation.</li>
-        <li>Saved view selector by program, region, funding stream with export to CSV/PDF for governance packs.</li>
-        <li>Burn-rate micro charts indicating pace versus plan across the fiscal year.</li>
+        <li>Copy the Active hierarchy to a new draft, edit in Structure manager, then publish to replace Active.</li>
+        <li>Restore a new draft from a saved snapshot, adjust, and publish.</li>
+        <li>Use Active view for monitoring; all edits happen in Drafts/Structure manager.</li>
       </ul>
     </Box>
     <Box>
-      <strong>Dependencies &amp; notes</strong>
+      <strong>Notes</strong>
       <ul>
-        <li>Requires budget hierarchy metadata and terminology defined in Finance Settings.</li>
-        <li>Feeds Allocations, Reconciliation, and Forecasting workspaces with up-to-date pot balances.</li>
-        <li>Must respect eligibility rules and administrative flat-rate limits configured in Finance Settings.</li>
+        <li>Publishing takes a snapshot for rollback, then replaces the live hierarchy.</li>
+        <li>Active amounts reflect finance transactions; draft edits don’t affect spend until published.</li>
       </ul>
-      <Link href="/finance/settings">Review Finance Settings</Link>
     </Box>
   </SpaceBetween>
 );
 
 FinanceBudgetsHelp.aiContext =
-  "Summarise the Budgets dashboard: manage pot hierarchy, track approvals and balances, monitor admin caps, and feed allocations, reconciliation, and forecasting workflows.";
+  "Explain the Budgets dashboard: Active is read-only live hierarchy; Draft Budgets stages hierarchies and publishes; Structure manager edits drafts, copies Active to draft, captures/restores snapshots; publishing replaces Active after a safety snapshot.";
 
 export default FinanceBudgetsHelp;
