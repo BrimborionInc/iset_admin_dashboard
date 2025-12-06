@@ -14,7 +14,6 @@ import {
   SpaceBetween,
   StatusIndicator,
   Table,
-  TextFilter,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
@@ -84,7 +83,6 @@ const ALL_COLUMN_IDS = [
 const REQUIRED_COLUMN_IDS = new Set(["code", "title", "actions"]);
 
 const DEFAULT_PREFERENCES = {
-  search: "",
   pageSize: DEFAULT_PAGE_SIZE,
   visibleColumns: ALL_COLUMN_IDS,
 };
@@ -107,7 +105,6 @@ const loadStoredPreferences = () => {
     }
 
     const parsed = JSON.parse(raw);
-    const search = typeof parsed.search === "string" ? parsed.search : DEFAULT_PREFERENCES.search;
     const pageSize = PAGE_SIZE_OPTIONS.some(option => option.value === parsed.pageSize)
       ? parsed.pageSize
       : DEFAULT_PAGE_SIZE;
@@ -123,7 +120,6 @@ const loadStoredPreferences = () => {
     });
 
     return {
-      search,
       pageSize,
       visibleColumns: [...visibleColumns],
     };
@@ -244,7 +240,6 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const selectedPlanRef = useRef(selectedActionPlanId);
 
   const initialPreferences = useMemo(() => loadStoredPreferences(), []);
-  const [searchQuery, setSearchQuery] = useState(initialPreferences.search);
   const [pageSize, setPageSize] = useState(initialPreferences.pageSize);
   const [visibleColumns, setVisibleColumns] = useState(initialPreferences.visibleColumns);
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
@@ -274,16 +269,12 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   }, [activePlan?.id]);
 
   useEffect(() => {
-    persistPreferences({ search: searchQuery, pageSize, visibleColumns });
-  }, [searchQuery, pageSize, visibleColumns]);
+    persistPreferences({ pageSize, visibleColumns });
+  }, [pageSize, visibleColumns]);
 
   useEffect(() => {
     persistColumnWidths(columnWidths);
   }, [columnWidths]);
-
-  useEffect(() => {
-    setCurrentPageIndex(1);
-  }, [searchQuery, activePlan?.id]);
 
   useEffect(() => {
     selectedPlanRef.current = selectedActionPlanId;
@@ -471,28 +462,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     return map;
   }, [interventionOutcomes]);
 
-  const filteredInterventions = useMemo(() => {
-    const text = searchQuery.trim().toLowerCase();
-    if (!text) {
-      return interventions;
-    }
-    return interventions.filter(item => {
-      const codeLabel = codeLabelMap.get(String(item.code ?? "")) ?? String(item.code ?? "");
-      const outcomeLabel = outcomeLabelMap.get(String(item.outcome ?? "")) ?? String(item.outcome ?? "");
-      const haystack = [
-        codeLabel,
-        item.title,
-        item.description,
-        item.status,
-        outcomeLabel,
-        item.potId,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(text);
-    });
-  }, [interventions, searchQuery, codeLabelMap, outcomeLabelMap]);
+  const filteredInterventions = useMemo(() => interventions, [interventions]);
 
   const totalMatches = filteredInterventions.length;
   const pagesCount = totalMatches ? Math.ceil(totalMatches / pageSize) : 1;
@@ -979,17 +949,6 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     [visibleColumnDefinitions, applyColumnWidthUpdates]
   );
 
-  const countText = `${totalMatches} ${totalMatches === 1 ? "intervention" : "interventions"}`;
-
-  const filterComponent = (
-    <TextFilter
-      filteringText={searchQuery}
-      filteringPlaceholder="Search interventions"
-      countText={countText}
-      onChange={({ detail }) => setSearchQuery(detail.filteringText || "")}
-    />
-  );
-
   const preferencesComponent = (
     <CollectionPreferences
       title="Table preferences"
@@ -1049,10 +1008,6 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         <Header
           variant="h2"
           info={infoLink}
-          description={
-            metadata.description ??
-            "Manage ILMP-compliant intervention data, including budget pots and outcomes."
-          }
           actions={
             <Button
               iconName="add-plus"
@@ -1119,21 +1074,13 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               setSelectedInterventionId(item.id);
             }}
             columnDefinitions={visibleColumnDefinitions}
-            filter={filterComponent}
             preferences={preferencesComponent}
             pagination={paginationComponent}
             onColumnWidthsChange={handleColumnWidthsChange}
             empty={
               <Box padding="m">
-                {interventions.length
-                  ? "No interventions match your current filters."
-                  : "No interventions defined for this action plan."}
+                {"No interventions defined for this action plan."}
               </Box>
-            }
-            header={
-              <Header variant="h3" counter={`(${totalMatches})`}>
-                {`Interventions${activePlanLabel ? ` - ${activePlanLabel}` : ""}`}
-              </Header>
             }
           />
         ) : (
@@ -1145,6 +1092,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       <InterventionModal
         visible={formMode !== null}
         mode={formMode || "create"}
+        plan={activePlan}
         intervention={formMode === "edit" ? selectedIntervention : null}
         onDismiss={handleModalDismiss}
         onSubmit={handleModalSubmit}

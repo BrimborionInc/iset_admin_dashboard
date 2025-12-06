@@ -73,6 +73,7 @@ const CloseActionPlanModal = ({
   const [closureNotes, setClosureNotes] = useState("");
   const [validationError, setValidationError] = useState(null);
   const [visibleError, setVisibleError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
 
   useEffect(() => {
     if (!visible) return;
@@ -88,6 +89,7 @@ const CloseActionPlanModal = ({
     setClosureNotes(plan?.closureNotes || "");
     setValidationError(null);
     setVisibleError(error || null);
+    setFieldErrors({});
   }, [visible, plan]);
 
   useEffect(() => {
@@ -140,42 +142,61 @@ const CloseActionPlanModal = ({
 
   const handleSubmit = () => {
     const finalResult = selectedResult?.value || "";
+    const errors = {};
     if (!finalResult) {
-      setValidationError("Select a result code.");
-      return;
+      errors.result = "Select a result code.";
     }
     if (!resultDate) {
-      setValidationError("Select a result date.");
-      return;
+      errors.resultDate = "Select a result date.";
     }
     if (finalResult && !resultEducation) {
-      setValidationError("Select Action Plan Result Education Level.");
-      return;
+      errors.resultEducation = "Select Action Plan Result Education Level.";
     }
     if (startEducationCode && resultEducation) {
       const startNum = Number(startEducationCode);
       const resultNum = Number(resultEducation);
       if (Number.isFinite(startNum) && Number.isFinite(resultNum) && resultNum < startNum) {
-        setValidationError(
-          `Result education cannot be lower than the starting level (${startEducationLabel}).`
-        );
-        return;
+        errors.resultEducation = `Result education cannot be lower than the starting level (${startEducationLabel}).`;
       }
     }
     if (finalResult === "4" && !futureEducation) {
-      setValidationError("Select Future Education Level for Returned to school.");
-      return;
+      errors.futureEducation = "Select Future Education Level for Returned to school.";
     }
     if (finalResult === "2") {
       if (!resultNocVersion) {
-        setValidationError("Select NOC version for employed result.");
-        return;
+        errors.resultNocVersion = "Select NOC version for employed result.";
       }
       if (!resultNoc) {
-        setValidationError("Select NOC code for employed result.");
-        return;
+        errors.resultNoc = "Select NOC code for employed result.";
       }
     }
+    if (resultDate) {
+      const planStart = plan?.startDate || plan?.effectiveDate || null;
+      const latestInterventionEnd = Array.isArray(plan?.interventions)
+        ? plan.interventions
+            .map(item => item?.endDate || item?.end_date || null)
+            .filter(Boolean)
+            .sort()
+            .pop()
+        : null;
+      const resultDt = new Date(resultDate);
+      const today = new Date();
+      if (planStart && resultDt < new Date(planStart)) {
+        errors.resultDate = "Result date cannot be before the action plan start date.";
+      }
+      if (latestInterventionEnd && resultDt < new Date(latestInterventionEnd)) {
+        errors.resultDate = "Result date cannot be before the latest intervention end date.";
+      }
+      if (resultDt > today) {
+        errors.resultDate = "Result date cannot be in the future.";
+      }
+    }
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors);
+      setValidationError(Object.values(errors)[0]);
+      return;
+    }
+    setFieldErrors({});
     setValidationError(null);
     onSubmit({
       resultCode: finalResult,
@@ -232,56 +253,111 @@ const CloseActionPlanModal = ({
             {visibleError}
           </Alert>
         )}
-        <FormField label="Result">
+        <FormField label="Result" errorText={fieldErrors.result}>
           <Select
             selectedOption={selectedResult}
-            onChange={({ detail }) => setSelectedResult(detail.selectedOption)}
+            onChange={({ detail }) => {
+              setFieldErrors(prev => {
+                const next = { ...prev };
+                delete next.result;
+                return next;
+              });
+              setSelectedResult(detail.selectedOption);
+            }}
             options={RESULT_OPTIONS}
             placeholder="Select result"
           />
         </FormField>
-        <FormField label="Result date">
+        <FormField label="Result date" errorText={fieldErrors.resultDate}>
           <DatePicker
             value={resultDate}
-            onChange={({ detail }) => setResultDate(detail.value)}
+            onChange={({ detail }) => {
+              setFieldErrors(prev => {
+                const next = { ...prev };
+                delete next.resultDate;
+                return next;
+              });
+              setResultDate(detail.value);
+            }}
             placeholder="YYYY-MM-DD"
           />
         </FormField>
         <FormField
           label="Action Plan Result Education Level"
           description={`ESDC code for education level after plan completion. Starting level: ${startEducationLabel}. Cannot decrease.`}
+          errorText={fieldErrors.resultEducation}
         >
           <Select
             selectedOption={filteredEducationOptions.find(opt => opt.value === resultEducation) || null}
             options={filteredEducationOptions}
-            onChange={({ detail }) => setResultEducation(detail.selectedOption?.value || "")}
+            onChange={({ detail }) => {
+              setFieldErrors(prev => {
+                const next = { ...prev };
+                delete next.resultEducation;
+                return next;
+              });
+              setResultEducation(detail.selectedOption?.value || "");
+            }}
             placeholder="Select education level"
           />
         </FormField>
         {selectedResult?.value === "4" && (
-          <FormField label="Action Plan Future Education Level" description="Required when result is Returned to school.">
+          <FormField
+            label="Action Plan Future Education Level"
+            description="Required when result is Returned to school."
+            errorText={fieldErrors.futureEducation}
+          >
             <Select
               selectedOption={FUTURE_EDUCATION_OPTIONS.find(opt => opt.value === futureEducation) || null}
               options={FUTURE_EDUCATION_OPTIONS}
-              onChange={({ detail }) => setFutureEducation(detail.selectedOption?.value || "")}
+              onChange={({ detail }) => {
+                setFieldErrors(prev => {
+                  const next = { ...prev };
+                  delete next.futureEducation;
+                  return next;
+                });
+                setFutureEducation(detail.selectedOption?.value || "");
+              }}
               placeholder="Select future education level"
             />
           </FormField>
         )}
         {selectedResult?.value === "2" && (
           <>
-            <FormField label="Result NOC Version" description="Required when result is Employed.">
+            <FormField
+              label="Result NOC Version"
+              description="Required when result is Employed."
+              errorText={fieldErrors.resultNocVersion}
+            >
               <Select
                 selectedOption={NOC_VERSION_OPTIONS.find(opt => opt.value === resultNocVersion) || null}
                 options={NOC_VERSION_OPTIONS}
-                onChange={({ detail }) => setResultNocVersion(detail.selectedOption?.value || "")}
+                onChange={({ detail }) => {
+                  setFieldErrors(prev => {
+                    const next = { ...prev };
+                    delete next.resultNocVersion;
+                    return next;
+                  });
+                  setResultNocVersion(detail.selectedOption?.value || "");
+                }}
                 placeholder="Select NOC version"
               />
             </FormField>
-            <FormField label="Result NOC code" description="Required when result is Employed.">
+            <FormField
+              label="Result NOC code"
+              description="Required when result is Employed."
+              errorText={fieldErrors.resultNoc}
+            >
               <Autosuggest
                 value={resultNoc}
-                onChange={({ detail }) => setResultNoc(detail.value)}
+                onChange={({ detail }) => {
+                  setFieldErrors(prev => {
+                    const next = { ...prev };
+                    delete next.resultNoc;
+                    return next;
+                  });
+                  setResultNoc(detail.value);
+                }}
                 onLoadItems={({ detail }) => handleNocSearch(detail.filteringText)}
                 options={nocOptions}
                 placeholder={resultNocVersion ? "Search NOC code" : "Select NOC version first"}

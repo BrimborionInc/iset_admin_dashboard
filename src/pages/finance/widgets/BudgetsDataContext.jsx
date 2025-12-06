@@ -51,6 +51,7 @@ export const BudgetsDataProvider = ({ children }) => {
       forecast: Number(pot.forecast ?? pot.adjusted ?? pot.approved) || 0,
       adminShare: Number(pot.adminShare) || 0,
       adminTargetPct: adminPct,
+      adminPct,
       approvals,
       adjustments,
       evidence,

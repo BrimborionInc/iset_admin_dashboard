@@ -24,6 +24,7 @@ import {
   formatLabourForceStatus,
   formatLocalPriorities,
 } from "../utils/isetOptionLabels.js";
+import { apiFetch } from "../../../../auth/apiClient.js";
 
 const ReadOnlyItem = ({ label, value }) => (
   <div style={{ marginBottom: "0.5rem" }}>
@@ -73,6 +74,25 @@ const EI_CLAIMANT_OPTIONS = [
   { value: "2", label: "Reach-back client/former claimant" },
   { value: "3", label: "Non-insured client" },
 ];
+
+const AGREEMENT_BY_EI = {
+  "1": "16535866",
+  "2": "16535866",
+  "3": "16535841",
+};
+
+const deriveAgreementNumber = eiClaimantValue => {
+  const key = eiClaimantValue ? String(eiClaimantValue).trim() : "";
+  return AGREEMENT_BY_EI[key] || "999999999";
+};
+
+const deriveAgreementNumberFromFundingStream = fundingStream => {
+  if (!fundingStream) return "999999999";
+  const key = String(fundingStream).trim().toUpperCase();
+  if (key === "EI") return "16535866";
+  if (key === "CRF") return "16535841";
+  return "999999999";
+};
 
 const PREV_EMPLOYMENT_OPTIONS = [
   { value: "1", label: "Unemployed" },
@@ -154,6 +174,8 @@ const defaultForm = {
   reviewDate: "",
   summary: "",
   agreementNumber: "",
+  fundingStream: "",
+  budgetPot: "",
   educationLevel: "",
   educationProvince: "",
   socialAssistanceRecipient: "",
@@ -175,7 +197,17 @@ const NewActionPlanModal = ({
   onCreated,
   onSaved,
 }) => {
-  const { createActionPlan, updateActionPlan, fetchActionPlanContext, upsertActionPlanReviewReminder, caseData, searchNocCodes } = useCaseWorkspace();
+  const {
+    createActionPlan,
+    updateActionPlan,
+    fetchActionPlanContext,
+    upsertActionPlanReviewReminder,
+    caseData,
+    searchNocCodes,
+    fundingStreams,
+    fundingStreamsLoading,
+    loadFundingStreams,
+  } = useCaseWorkspace();
   const currentUser = useCurrentUser();
   const [form, setForm] = useState(defaultForm);
   const [loading, setLoading] = useState(false);
@@ -184,7 +216,67 @@ const NewActionPlanModal = ({
   const [error, setError] = useState(null);
   const [nocOptions, setNocOptions] = useState([]);
   const [nocLoading, setNocLoading] = useState(false);
+  const [potOptions, setPotOptions] = useState([]);
+  const [potLoading, setPotLoading] = useState(false);
   const isEdit = mode === "edit" && plan;
+  useEffect(() => {
+    setForm(current => ({
+      ...current,
+      agreementNumber: deriveAgreementNumberFromFundingStream(current.fundingStream),
+    }));
+  }, [form.fundingStream]);
+
+  useEffect(() => {
+    if (form.fundingStream) return;
+    if (form.eiClaimant === "1" || form.eiClaimant === "2") {
+      setForm(current => ({ ...current, fundingStream: "EI", agreementNumber: deriveAgreementNumberFromFundingStream("EI") }));
+    } else if (form.eiClaimant === "3") {
+      setForm(current => ({ ...current, fundingStream: "CRF", agreementNumber: deriveAgreementNumberFromFundingStream("CRF") }));
+    }
+  }, [form.eiClaimant]);
+  const loadPots = useMemo(
+    () => async query => {
+      setPotLoading(true);
+      try {
+        const resp = await apiFetch(`/api/finance/budget-pots/lookup${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+        if (!resp.ok) {
+          throw new Error(`Lookup failed (${resp.status})`);
+        }
+        const data = await resp.json();
+        const options = (Array.isArray(data) ? data : []).map(item => ({
+          value: item.value || item.id,
+          label: item.label || item.name || item.code || "",
+          description: item.code ? item.code : undefined,
+        }));
+        setPotOptions(options);
+      } catch (e) {
+        console.warn("[ActionPlan] pot lookup failed", e);
+        setPotOptions([]);
+      } finally {
+        setPotLoading(false);
+      }
+    },
+    []
+  );
+
+  const fundingStreamSelectOptions = useMemo(() => {
+    const formatted = (Array.isArray(fundingStreams) ? fundingStreams : []).map(item => {
+      if (!item) return null;
+      const value = item.code ? String(item.code).trim() : null;
+      const label = item.label ? String(item.label).trim() : value;
+      if (!value || !label) return null;
+      return { value, label };
+    }).filter(Boolean);
+    if (form.fundingStream && !formatted.some(opt => opt.value === form.fundingStream)) {
+      formatted.push({ value: form.fundingStream, label: `${form.fundingStream} (legacy)`, disabled: true });
+    }
+    return formatted;
+  }, [fundingStreams, form.fundingStream]);
+
+  const selectedFundingStream = useMemo(
+    () => fundingStreamSelectOptions.find(opt => opt.value === form.fundingStream) || null,
+    [fundingStreamSelectOptions, form.fundingStream]
+  );
 
   useEffect(() => {
     if (!visible) {
@@ -199,7 +291,9 @@ const NewActionPlanModal = ({
         startDate: plan?.startDate || "",
         reviewDate: plan?.endDate || "",
         summary: plan?.summary || "",
-        agreementNumber: plan?.agreement_number || plan?.agreementNumber || "",
+        fundingStream: plan?.fundingStream || plan?.funding_stream || "",
+        agreementNumber: deriveAgreementNumberFromFundingStream(plan?.fundingStream || plan?.funding_stream),
+        budgetPot: plan?.budgetPot || plan?.budget_pot || "",
         educationLevel: plan?.education_level ? String(plan.education_level) : "",
         educationProvince: plan?.education_province ? String(plan.education_province) : "",
         socialAssistanceRecipient: plan?.social_assistance_recipient !== null && plan?.social_assistance_recipient !== undefined
@@ -217,7 +311,11 @@ const NewActionPlanModal = ({
     } else {
       setForm(defaultForm);
     }
-  }, [visible, isEdit, plan]);
+    if (visible) {
+      loadPots();
+      loadFundingStreams().catch(() => {});
+    }
+  }, [visible, isEdit, plan, loadPots, loadFundingStreams]);
 
   const handleNocSearch = useCallback(
     async (query) => {
@@ -323,6 +421,14 @@ const NewActionPlanModal = ({
       setError("Education province is required when education level is set.");
       return;
     }
+    if (!form.fundingStream) {
+      setError("Funding stream is required.");
+      return;
+    }
+    if (!form.budgetPot) {
+      setError("Budget pot is required.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -332,6 +438,8 @@ const NewActionPlanModal = ({
           startDate: form.startDate || null,
           reviewDate: form.reviewDate || null,
           summary: form.summary || null,
+          budgetPot: form.budgetPot || null,
+          fundingStream: form.fundingStream || null,
           agreementNumber: form.agreementNumber || null,
           educationLevel: form.educationLevel || null,
           educationProvince: form.educationProvince || null,
@@ -355,6 +463,8 @@ const NewActionPlanModal = ({
           reviewDate: form.reviewDate || null,
           summary: form.summary || null,
           ownerStaffProfileId: currentUser?.userId || caseData?.owner?.id || null,
+          budgetPot: form.budgetPot || null,
+          fundingStream: form.fundingStream || null,
           agreementNumber: form.agreementNumber || null,
           educationLevel: form.educationLevel || null,
           educationProvince: form.educationProvince || null,
@@ -525,11 +635,42 @@ const NewActionPlanModal = ({
               placeholder="YYYY-MM-DD"
             />
           </FormField>
-          <FormField label="Agreement Number" description="Agreement number (EI or CRF).">
-            <Input
-              value={form.agreementNumber}
-              onChange={({ detail }) => setForm(current => ({ ...current, agreementNumber: detail.value }))}
-              placeholder="e.g. 999999999"
+          <FormField label="Funding stream" description="Select funding stream for this action plan.">
+            <Select
+              selectedOption={selectedFundingStream}
+              options={fundingStreamSelectOptions}
+              onChange={({ detail }) =>
+                setForm(current => ({
+                  ...current,
+                  fundingStream: detail.selectedOption?.value || "",
+                  agreementNumber: deriveAgreementNumberFromFundingStream(detail.selectedOption?.value || ""),
+                }))
+              }
+              placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
+              statusType={fundingStreamsLoading ? "loading" : "finished"}
+              empty={fundingStreamsLoading ? undefined : "No funding streams available"}
+            />
+          </FormField>
+          <FormField label="Agreement Number" description="Mapped automatically from funding stream (read-only).">
+            <Input value={form.agreementNumber} readOnly />
+          </FormField>
+          <FormField label="Budget pot" description="Select the budget pot for this action plan.">
+            <Select
+              selectedOption={
+                potOptions.find(opt => opt.value === form.budgetPot) ||
+                (form.budgetPot ? { value: form.budgetPot, label: form.budgetPot } : null)
+              }
+              options={potOptions}
+              onChange={({ detail }) => setForm(current => ({ ...current, budgetPot: detail.selectedOption?.value || "" }))}
+              filteringType="auto"
+              onLoadItems={({ detail }) => {
+                if (detail?.filteringText !== undefined) {
+                  loadPots(detail.filteringText);
+                }
+              }}
+              placeholder={potLoading ? "Loading budget pots" : "Select budget pot"}
+              statusType={potLoading ? "loading" : "finished"}
+              empty={potLoading ? undefined : "No budget pots found"}
             />
           </FormField>
           <FormField label="EI claimant status" description="ESDC codes: claimant, reach-back, or non-insured.">

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Autosuggest,
@@ -60,7 +60,6 @@ const defaultForm = {
   durationDays: "",
   outcome: "",
   cost: "",
-  potId: "",
   fundingStream: "",
   notes: "",
   noc: "",
@@ -122,7 +121,6 @@ const buildInitialForm = (mode, intervention) => {
       durationDays: normaliseFormNumbers(intervention.durationDays),
       outcome: intervention.outcome || "",
       cost: normaliseFormNumbers(intervention.cost),
-      potId: intervention.potId || "",
       fundingStream: intervention.fundingStream || "",
       notes: intervention.notes || "",
       noc: intervention.noc || "",
@@ -192,6 +190,7 @@ const InterventionModal = ({
   visible,
   mode = "create",
   intervention = null,
+  plan = null,
   onDismiss,
   onSubmit,
   onClose,
@@ -219,8 +218,8 @@ const InterventionModal = ({
   const [showCloseGuidance, setShowCloseGuidance] = useState(true);
   const [closeForm, setCloseForm] = useState(buildCloseForm(intervention));
   const [potOptions, setPotOptions] = useState([]);
-  const [potLoading, setPotLoading] = useState(false);
-  const potFetchIdRef = useRef(0);
+  const inheritedBudgetPot = plan?.budgetPot || plan?.budget_pot || "";
+  const inheritedFundingStream = plan?.fundingStream || plan?.funding_stream || "";
 
   useEffect(() => {
     if (!visible) {
@@ -233,8 +232,6 @@ const InterventionModal = ({
       setNocSuggestionsLoading(false);
       setIsClosing(false);
       setCloseForm(buildCloseForm(null));
-      setPotOptions([]);
-      setPotLoading(false);
       return;
     }
 
@@ -244,6 +241,10 @@ const InterventionModal = ({
       if (!requiresNocForCode(draft.code)) {
         draft.noc = "";
         draft.nocVersion = "";
+      }
+      // Inherit funding stream from plan (read-only) if provided.
+      if (plan) {
+        draft.fundingStream = inheritedFundingStream || "";
       }
       return draft;
     })();
@@ -259,44 +260,25 @@ const InterventionModal = ({
     setNocSuggestionsLoading(false);
     setIsClosing(Boolean(startInCloseMode && canClose && mode === "edit"));
     setCloseForm(buildCloseForm(intervention));
-  }, [visible, mode, intervention, startInCloseMode, canClose]);
-
-  const loadPots = useMemo(
-    () => async query => {
-      const fetchId = ++potFetchIdRef.current;
-      setPotLoading(true);
-      try {
-        const resp = await apiFetch(`/api/finance/budget-pots/lookup${query ? `?q=${encodeURIComponent(query)}` : ""}`);
-        if (!resp.ok) {
-          throw new Error(`Lookup failed (${resp.status})`);
-        }
-        const data = await resp.json();
-        if (fetchId !== potFetchIdRef.current) {
-          return;
-        }
-        const options = (Array.isArray(data) ? data : []).map(item => ({
-          value: item.value || item.id,
-          label: item.label || item.name || item.code || "",
-          description: item.code ? item.code : undefined,
-        }));
-        setPotOptions(options);
-      } catch (e) {
-        console.warn("[InterventionModal] pot lookup failed", e);
-        setPotOptions([]);
-      } finally {
-        if (fetchId === potFetchIdRef.current) {
-          setPotLoading(false);
-        }
-      }
-    },
-    []
-  );
+  }, [visible, mode, intervention, startInCloseMode, canClose, plan, inheritedFundingStream]);
 
   useEffect(() => {
-    if (visible) {
-      loadPots();
+    if (!visible || !inheritedBudgetPot) {
+      setPotOptions([]);
+      return;
     }
-  }, [visible, loadPots]);
+    apiFetch("/api/finance/budget-pots/lookup")
+      .then(resp => (resp.ok ? resp.json() : []))
+      .then(data => {
+        const opts = (Array.isArray(data) ? data : []).map(item => ({
+          value: item.value || item.id,
+          label: item.code || item.label || item.name || "",
+          description: item.name || item.label || undefined,
+        }));
+        setPotOptions(opts);
+      })
+      .catch(() => setPotOptions([]));
+  }, [visible, inheritedBudgetPot]);
 
   useEffect(() => {
     if (isClosing) {
@@ -392,42 +374,6 @@ const InterventionModal = ({
     return match ? match.label : form.outcome;
   }, [form.outcome, outcomeSelectOptions]);
 
-  const fundingStreamSelectOptions = useMemo(() => {
-    const formatted = (Array.isArray(fundingStreamOptions) ? fundingStreamOptions : [])
-      .map(item => {
-        if (!item) return null;
-        const value = item.code ? String(item.code).trim() : null;
-        const label = item.label ? String(item.label).trim() : null;
-        if (!value || !label) return null;
-        return {
-          value,
-          label: `${value} – ${label}`,
-          description: item.description || null,
-        };
-      })
-      .filter(Boolean);
-    if (form.fundingStream && !formatted.some(option => option.value === form.fundingStream)) {
-      formatted.push({
-        value: form.fundingStream,
-        label: `${form.fundingStream} – (legacy value)`,
-        disabled: true,
-      });
-    }
-    return formatted;
-  }, [fundingStreamOptions, form.fundingStream]);
-
-  const selectedFundingStreamOption = useMemo(
-    () => fundingStreamSelectOptions.find(option => option.value === form.fundingStream) || null,
-    [fundingStreamSelectOptions, form.fundingStream]
-  );
-
-  const selectedPotOption = useMemo(
-    () =>
-      potOptions.find(option => option.value === form.potId) ||
-      (form.potId ? { value: form.potId, label: form.potId } : null),
-    [potOptions, form.potId]
-  );
-
   const nocVersionOptions = useMemo(() => {
     const formatted = (Array.isArray(nocVersions) ? nocVersions : [])
       .map(item => {
@@ -457,6 +403,11 @@ const InterventionModal = ({
     [nocVersionOptions, form.nocVersion]
   );
 
+  const inheritedBudgetPotLabel = useMemo(() => {
+    const match = potOptions.find(opt => opt.value === inheritedBudgetPot);
+    return match?.label || inheritedBudgetPot || "Not set";
+  }, [potOptions, inheritedBudgetPot]);
+
   const isRecurringCost = form.costType === "recurring";
 
   const selectedRecurrencePeriodOption = useMemo(
@@ -475,6 +426,20 @@ const InterventionModal = ({
     if (!Number.isFinite(total)) return null;
     return total;
   }, [isRecurringCost, recurringAmountNumber, recurringOccurrencesNumber]);
+
+  const autoOccurrencesFromDates = useCallback((startDate, endDate, period) => {
+    if (!startDate || !endDate || !period) return null;
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    const ms = end.getTime() - start.getTime();
+    if (ms < 0) return null;
+    const days = ms / (1000 * 60 * 60 * 24);
+    if (!Number.isFinite(days)) return null;
+    const periodDays = period === "bi_weekly" ? 14 : period === "monthly" ? 30 : period === "quarterly" ? 90 : 7;
+    if (!periodDays) return null;
+    return Math.max(1, Math.ceil(days / periodDays));
+  }, []);
 
   useEffect(() => {
     if (!isRecurringCost) return;
@@ -503,6 +468,14 @@ const InterventionModal = ({
       return next;
     });
   }, [isRecurringCost, recurringTotal]);
+  useEffect(() => {
+    if (!isRecurringCost) return;
+    if (!form.startDate || !form.endDate || !form.recurringPeriod) return;
+    const nextOccurrences = autoOccurrencesFromDates(form.startDate, form.endDate, form.recurringPeriod);
+    if (nextOccurrences === null) return;
+    if (String(nextOccurrences) === String(form.recurringOccurrences || "")) return;
+    setForm(current => ({ ...current, recurringOccurrences: String(nextOccurrences) }));
+  }, [isRecurringCost, form.startDate, form.endDate, form.recurringPeriod, form.recurringOccurrences, autoOccurrencesFromDates]);
 
   const costInputValue = useMemo(() => {
     if (isRecurringCost) {
@@ -510,9 +483,26 @@ const InterventionModal = ({
     }
     return form.cost;
   }, [isRecurringCost, recurringTotal, form.cost]);
+  const formattedCostDisplay = useMemo(() => {
+    if (costInputValue === "" || costInputValue === null || typeof costInputValue === "undefined") {
+      return "";
+    }
+    const num = Number(costInputValue);
+    if (!Number.isFinite(num)) return costInputValue;
+    return `$${num.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }, [costInputValue]);
+  const [isCostFocused, setIsCostFocused] = useState(false);
+  const [isRecurringAmountFocused, setIsRecurringAmountFocused] = useState(false);
 
-  const applyFieldSideEffects = (draft, field, value) => {
-    const next = { ...draft, [field]: value };
+  const formattedRecurringAmount = useMemo(() => {
+    if (!form.recurringAmount) return "";
+    const num = Number(form.recurringAmount);
+    if (!Number.isFinite(num)) return form.recurringAmount;
+    return `$${num.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }, [form.recurringAmount]);
+
+const applyFieldSideEffects = (draft, field, value) => {
+  const next = { ...draft, [field]: value };
 
     if (field === "code") {
       if (!requiresNocForCode(value)) {
@@ -535,8 +525,10 @@ const InterventionModal = ({
         next.recurringPeriod = "";
         next.recurringAmount = "";
         next.recurringOccurrences = "";
-      } else if (value === "recurring" && !next.recurringPeriod) {
-        next.recurringPeriod = "weekly";
+      } else if (value === "recurring") {
+        if (!next.recurringPeriod) {
+          next.recurringPeriod = "weekly";
+        }
       }
     }
 
@@ -549,6 +541,12 @@ const InterventionModal = ({
       } else if (!next.durationDays) {
         next.durationDays = "";
       }
+      if (next.costType === "recurring") {
+        const occurrences = autoOccurrencesFromDates(start, end, next.recurringPeriod);
+        if (occurrences !== null) {
+          next.recurringOccurrences = String(occurrences);
+        }
+      }
     }
 
     if (next.costType !== "recurring") {
@@ -560,8 +558,8 @@ const InterventionModal = ({
     next.status = normaliseStatus(next.status);
     next.outcome = ensureOutcomeForStatus(next.status, next.outcome);
 
-    return next;
-  };
+  return next;
+};
 
   const handleChange = (field, value) => {
     if (isReadOnly) return;
@@ -688,10 +686,7 @@ const InterventionModal = ({
       setError("Intervention title is required.");
       return;
     }
-    if (!form.fundingStream) {
-      setError("Funding stream is required.");
-      return;
-    }
+    // Funding stream is inherited from the action plan; no intervention-level validation.
     if (!form.startDate) {
       setError("Start date is required.");
       return;
@@ -815,8 +810,8 @@ const InterventionModal = ({
       durationDays: durationValue,
       outcome: outcomeValue,
       cost: costValue,
-      potId: form.potId.trim() || null,
-      fundingStream: form.fundingStream.trim() || null,
+      potId: null,
+      fundingStream: inheritedFundingStream || null,
       notes: form.notes.trim() || null,
       noc: form.noc.trim() || null,
       nocVersion: form.nocVersion.trim() || null,
@@ -976,27 +971,13 @@ const InterventionModal = ({
             {error}
           </Alert>
         )}
+        <Box color="text-body-secondary" fontSize="body-s">
+          All fields can be updated while the intervention remains in a planned or in-progress state. Use "Close intervention" to record the final outcome and actual spend.
+        </Box>
         <SpaceBetween size="xl">
           <SpaceBetween size="s">
             <Header variant="h3">Intervention details</Header>
-            <ColumnLayout columns={3} variant="text-grid">
-              <FormField label="Intervention code" stretch>
-                <Select
-                  selectedOption={selectedCodeOption}
-                  onChange={({ detail }) => handleChange("code", detail.selectedOption?.value || "")}
-                  options={selectOptions}
-                  filteringType="auto"
-                  placeholder={codesLoading ? "Loading intervention codes" : "Select intervention code"}
-                  statusType={codesLoading ? "loading" : "finished"}
-                  empty={
-                    codesLoading
-                      ? undefined
-                      : "No intervention codes available. Please try again later."
-                  }
-                  disabled={isReadOnly || codesLoading}
-                  autoFocus={!isReadOnly}
-                />
-              </FormField>
+            <ColumnLayout columns={2} variant="text-grid">
               <FormField label="Title" stretch>
                 <Input
                   value={form.title}
@@ -1018,12 +999,6 @@ const InterventionModal = ({
                   <Input value={outcomeLabel} readOnly disabled />
                 </FormField>
               )}
-            </ColumnLayout>
-          </SpaceBetween>
-
-          <SpaceBetween size="s">
-            <Header variant="h3">Schedule &amp; NOC</Header>
-            <ColumnLayout columns={3} variant="text-grid">
               <FormField label="Start date">
                 <DatePicker
                   value={form.startDate}
@@ -1040,114 +1015,113 @@ const InterventionModal = ({
                   disabled={isReadOnly}
                 />
               </FormField>
-              <FormField label="Duration (days)" description="Must align with start/end; required when end date is set.">
+              <FormField label="Duration in days (calculated)">
                 <Input
                   value={form.durationDays}
-                  onChange={({ detail }) => handleChange("durationDays", detail.value)}
-                  placeholder="e.g. 10"
-                  readOnly={isReadOnly}
-                  disabled={isReadOnly}
+                  readOnly
+                  disabled
+                  type="number"
                 />
               </FormField>
-              <FormField label="NOC version">
+              <FormField label="Intervention code" stretch>
                 <Select
-                  selectedOption={selectedNocVersionOption}
-                  onChange={({ detail }) => {
-                    const value = detail.selectedOption?.value || "";
-                    setNocSuggestions([]);
-                    handleChange("nocVersion", value);
-                  }}
-                  options={nocVersionOptions}
+                  selectedOption={selectedCodeOption}
+                  onChange={({ detail }) => handleChange("code", detail.selectedOption?.value || "")}
+                  options={selectOptions}
                   filteringType="auto"
-                  placeholder={nocVersionsLoading ? "Loading NOC versions" : "Select NOC version"}
-                  statusType={nocVersionsLoading ? "loading" : "finished"}
+                  placeholder={codesLoading ? "Loading intervention codes" : "Select intervention code"}
+                  statusType={codesLoading ? "loading" : "finished"}
                   empty={
-                    nocVersionsLoading ? undefined : "No NOC versions available. Please try again later."
+                    codesLoading
+                      ? undefined
+                      : "No intervention codes available. Please try again later."
                   }
-                  disabled={isReadOnly || !requiresNoc || nocVersionsLoading}
+                  disabled={isReadOnly || codesLoading}
+                  autoFocus={!isReadOnly}
                 />
               </FormField>
-              <FormField
-                label="NOC code"
-                description={
-                  requiresNoc
-                    ? "Search by code or title to select the matching NOC entry."
-                    : "Not required for this intervention code."
-                }
-              >
-                <Autosuggest
-                  value={form.noc}
-                  onChange={({ detail }) => {
-                    const value = detail.value || "";
-                    handleChange("noc", value);
-                    if (!value) {
-                      setNocSuggestions([]);
-                      setNocSuggestionsLoading(false);
-                    } else if (value.length >= 2) {
-                      fetchNocSuggestions(value);
-                    }
-                  }}
-                  onSelect={({ detail }) => handleChange("noc", detail.value || "")}
-                  options={nocSuggestions}
-                  statusType={nocSuggestionsLoading ? "loading" : "finished"}
-                  expandToViewport
-                  placeholder={
-                    requiresNoc
-                      ? nocVersionsLoading
-                        ? "Select a NOC version first"
-                        : "Type to search NOC codes"
-                      : "Not required for this intervention"
-                  }
-                  empty={
-                    requiresNoc
-                      ? "No NOC matches found."
-                      : "NOC search not required for this intervention code."
-                  }
-                  disabled={isReadOnly || !requiresNoc || nocVersionsLoading || !form.nocVersion}
-                  enteredTextLabel={value => `Use "${value}"`}
-                  onLoadItems={({ detail }) => {
-                    fetchNocSuggestions(detail.filteringText);
-                  }}
-                />
-              </FormField>
+              {requiresNoc && (
+                <>
+                  <FormField label="NOC version">
+                    <Select
+                      selectedOption={selectedNocVersionOption}
+                      onChange={({ detail }) => {
+                        const value = detail.selectedOption?.value || "";
+                        setNocSuggestions([]);
+                        handleChange("nocVersion", value);
+                      }}
+                      options={nocVersionOptions}
+                      filteringType="auto"
+                      placeholder={nocVersionsLoading ? "Loading NOC versions" : "Select NOC version"}
+                      statusType={nocVersionsLoading ? "loading" : "finished"}
+                      empty={
+                        nocVersionsLoading ? undefined : "No NOC versions available. Please try again later."
+                      }
+                      disabled={isReadOnly || nocVersionsLoading}
+                    />
+                  </FormField>
+                  <FormField
+                    label="NOC code"
+                  >
+                    <Autosuggest
+                      value={form.noc}
+                      onChange={({ detail }) => {
+                        const value = detail.value || "";
+                        handleChange("noc", value);
+                        if (!value) {
+                          setNocSuggestions([]);
+                          setNocSuggestionsLoading(false);
+                        } else if (value.length >= 2) {
+                          fetchNocSuggestions(value);
+                        }
+                      }}
+                      onSelect={({ detail }) => handleChange("noc", detail.value || "")}
+                      options={nocSuggestions}
+                      statusType={nocSuggestionsLoading ? "loading" : "finished"}
+                      expandToViewport
+                      placeholder={
+                        nocVersionsLoading
+                          ? "Select a NOC version first"
+                          : "Type to search NOC codes"
+                      }
+                      empty="No NOC matches found."
+                      disabled={isReadOnly || nocVersionsLoading || !form.nocVersion}
+                      enteredTextLabel={value => `Use "${value}"`}
+                      onLoadItems={({ detail }) => {
+                        fetchNocSuggestions(detail.filteringText);
+                      }}
+                    />
+                  </FormField>
+                </>
+              )}
             </ColumnLayout>
           </SpaceBetween>
 
           <SpaceBetween size="s">
             <Header variant="h3">Financial details</Header>
             <ColumnLayout columns={3} variant="text-grid">
-            <FormField label="Cost type">
-              <RadioGroup
-                onChange={({ detail }) => handleChange("costType", detail.value)}
-                value={form.costType}
-                items={[
+              <FormField label="Funding Stream" description="Inherited. Adjust in parent Action Plan.">
+                <Input value={inheritedFundingStream || "Not set"} readOnly disabled />
+              </FormField>
+              <FormField label="Budget Pot" description="Inherited. Adjust in parent Action Plan.">
+                <Input value={inheritedBudgetPotLabel} readOnly disabled />
+              </FormField>
+              <FormField label="Cost type">
+                <RadioGroup
+                  onChange={({ detail }) => handleChange("costType", detail.value)}
+                  value={form.costType}
+                  items={[
                     { value: "one_time", label: "One-time total" },
                     { value: "recurring", label: "Recurring schedule" },
                   ]}
-                disabled={isReadOnly}
+                  disabled={isReadOnly}
                 />
               </FormField>
-              <FormField
-                label="Cost"
-                description={
-                  isRecurringCost
-                    ? "Total submitted to ESDC. Update the recurring schedule to adjust this amount."
-                    : undefined
-                }
-              >
-              <Input
-                value={costInputValue}
-                onChange={({ detail }) => handleChange("cost", detail.value)}
-                placeholder="e.g. 42000"
-                readOnly={isReadOnly || isRecurringCost}
-                disabled={isReadOnly}
-              />
-            </FormField>
-            {isRecurringCost && (
-              <>
-                <FormField label="Recurrence period">
-                  <Select
-                    selectedOption={selectedRecurrencePeriodOption}
+              {isRecurringCost && (
+                <>
+                  <FormField label="Recurrence period">
+                    <Select
+                      selectedOption={selectedRecurrencePeriodOption}
                       onChange={({ detail }) =>
                         handleChange("recurringPeriod", detail.selectedOption?.value || "")
                       }
@@ -1158,8 +1132,11 @@ const InterventionModal = ({
                   </FormField>
                   <FormField label="Amount per period">
                     <Input
-                      value={form.recurringAmount}
+                      value={isRecurringAmountFocused ? form.recurringAmount : formattedRecurringAmount}
                       onChange={({ detail }) => handleChange("recurringAmount", detail.value)}
+                      onFocus={() => setIsRecurringAmountFocused(true)}
+                      onBlur={() => setIsRecurringAmountFocused(false)}
+                      inputMode="decimal"
                       placeholder="e.g. 150.00"
                       readOnly={isReadOnly}
                       disabled={isReadOnly}
@@ -1167,55 +1144,44 @@ const InterventionModal = ({
                   </FormField>
                   <FormField
                     label="Number of occurrences"
-                    description="Defaults will align with start/end dates in a future update."
+                    description="Auto-calculated from dates and recurrence."
                   >
                     <Input
                       value={form.recurringOccurrences}
-                    onChange={({ detail }) => handleChange("recurringOccurrences", detail.value)}
-                    placeholder="e.g. 20"
+                      readOnly
+                      disabled
+                    />
+                  </FormField>
+                  <FormField
+                    label="Cost"
+                    description="Calculated total based on recurring schedule."
+                  >
+                    <Input
+                      value={formattedCostDisplay}
+                      onChange={({ detail }) => handleChange("cost", detail.value)}
+                      placeholder="e.g. 42000"
+                      readOnly
+                      disabled
+                    />
+                  </FormField>
+                </>
+              )}
+              {!isRecurringCost && (
+                <FormField label="Cost">
+                  <Input
+                    value={isReadOnly || isCostFocused ? costInputValue : formattedCostDisplay}
+                    onChange={({ detail }) => handleChange("cost", detail.value)}
+                    onFocus={() => setIsCostFocused(true)}
+                    onBlur={() => setIsCostFocused(false)}
+                    placeholder="e.g. 42000"
                     readOnly={isReadOnly}
                     disabled={isReadOnly}
                   />
                 </FormField>
-              </>
-            )}
-            <FormField
-              label="Budget pot"
-            >
-              <Select
-                selectedOption={selectedPotOption}
-                onChange={({ detail }) => handleChange("potId", detail.selectedOption?.value || "")}
-                options={potOptions}
-                filteringType="auto"
-                onLoadItems={({ detail }) => {
-                  if (detail?.filteringText !== undefined) {
-                    loadPots(detail.filteringText);
-                  }
-                }}
-                placeholder={potLoading ? "Loading budget pots" : "Select budget pot"}
-                statusType={potLoading ? "loading" : "finished"}
-                empty={potLoading ? undefined : "No budget pots found"}
-                disabled={isReadOnly}
-              />
-            </FormField>
-            <FormField label="Funding stream">
-              <Select
-                selectedOption={selectedFundingStreamOption}
-                onChange={({ detail }) => handleChange("fundingStream", detail.selectedOption?.value || "")}
-                options={fundingStreamSelectOptions}
-                filteringType="auto"
-                placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
-                statusType={fundingStreamsLoading ? "loading" : "finished"}
-                empty={
-                  fundingStreamsLoading ? undefined : "No funding streams available. Please try again later."
-                }
-                disabled={isReadOnly || fundingStreamsLoading}
-              />
-            </FormField>
-          </ColumnLayout>
-        </SpaceBetween>
+              )}
+            </ColumnLayout>
+          </SpaceBetween>
           <SpaceBetween size="s">
-            <Header variant="h3">Notes</Header>
             <FormField label="Notes">
               <Textarea
                 value={form.notes}
@@ -1285,9 +1251,6 @@ const InterventionModal = ({
               </ColumnLayout>
             </SpaceBetween>
           )}
-          <Box color="text-body-secondary" fontSize="body-s">
-            All fields can be updated while the intervention remains in a planned or in-progress state. Use "Close intervention" to record the final outcome and actual spend.
-          </Box>
         </SpaceBetween>
       </SpaceBetween>
     </Modal>

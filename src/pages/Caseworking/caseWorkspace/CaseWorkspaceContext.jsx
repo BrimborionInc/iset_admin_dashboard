@@ -305,6 +305,8 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
       activatedAt: plan.activatedAt || null,
       closedAt: plan.closedAt || null,
       archivedAt: plan.archivedAt || null,
+      budgetPot: plan.budgetPot || plan.budget_pot || null,
+      fundingStream: plan.fundingStream || plan.funding_stream || null,
       resultCode: plan.resultCode || null,
       resultDate: plan.resultDate || null,
       resultEducationLevel: plan.resultEducationLevel || null,

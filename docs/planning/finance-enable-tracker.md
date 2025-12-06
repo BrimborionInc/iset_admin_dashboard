@@ -1,6 +1,6 @@
 Purpose: Single source for Finance module enablement decisions, milestones, and next actions.  
 Audience: Finance/Casework engineers, product, ops.  
-Last Updated: 2025-02-06
+Last Updated: 2025-12-05
 
 # Finance Module Enablement Tracker
 
@@ -21,18 +21,19 @@ Last Updated: 2025-02-06
 - 2025-02-06: Finance pot API live (list/get/create/update + lookup); Budgets UI now consumes API instead of demo data; case Intervention modal uses lookup.
 - 2025-02-06: Intervention create/update now upserts `finance_transaction` for selected pot (amount from actual→approved→cost) and refreshes pot committed/actual rollups. Lookup route ordering fixed (was shadowed by `/:id`).
 - 2025-02-06: Structure Manager wired to live pot API; snapshots backed by `budget_snapshot`/`budget_snapshot_pot` with list/create/read endpoints; Budgets loads snapshots.
+- 2025-12-05: Draft workflows live in Budgets: Draft Budgets tab shows/controls drafts; Structure manager edits selected draft only; publish replaces Active after taking a safety snapshot; restore snapshot creates a new draft. Snapshots and drafts have delete/restore modals; draft labels inline-editable. Pot parent guard prevents self-parenting. Admin % column now reads `adminTargetPct`.
+- 2025-12-05: Roles for finance endpoints limited to `System Administrator` and `Program Administrator`. Snapshot creator stored as NULL to avoid FK issues.
+- 2025-12-05: Forecast column remains manual (placeholder); variance = forecast - adjusted. Auto-forecasting deferred.
 
 ## Current Focus
-- First slice: Budgets dashboard backed by pot hierarchy service (read/create/update) with seeded hierarchy; pot lookup wired for case tagging; intervention saves create finance transactions and roll up committed/actual.
+- Budgets dashboard now runs live: pot CRUD, draft/publish, snapshots, pot selection for case interventions. Case-linked finance transactions roll into committed/actual. Draft and snapshot UX refined.
 
 ## Next Actions (short)
-- Implement pot lookup endpoint for case tagging.
-- Add snapshot create/list endpoints once persistence is ready.
-- Wire role guards for finance APIs as needed.
-- Mark finance transactions as `posted` on intervention close and ensure rollups run on mutations.
-- Add read endpoint for pot transactions and tighten status transitions (draft→submitted→posted) for reconciliation.
-- Add guarded recalc endpoint to refresh pot rollups on demand.
-- Wire Budgets widgets off remaining demo state (saved views/burn rate) once persistence exists.
+- Add auto-forecasting (system-generated) and clarify variance vs adjusted; remove manual placeholder.
+- Wire Allocations/reallocation flows to draft/publish pattern; expose transfers and approvals.
+- Expose pot transaction history endpoint and UI; harden status transitions (draft→submitted→posted) for reconciliation.
+- Add guarded recalc endpoint for pot rollups and background consistency checks.
+- Update Budgets saved views/burn rate to live data once available.
 
 ## Links
 - Workflow map: `docs/planning/finance-workflow-map.md`

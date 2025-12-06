@@ -1364,8 +1364,34 @@ function extractEmergencyContactDetails(context) {
 }
 
 function extractAgreementNumber(context) {
-  const { answers = {} } = context;
+  const { answers = {}, actionPlan = {}, caseActionPlans = [] } = context || {};
+  const resolvedPlan = (() => {
+    if (actionPlan && Object.keys(actionPlan).length) return actionPlan;
+    if (!Array.isArray(caseActionPlans) || !caseActionPlans.length) return null;
+    const priorities = { active: 0, ready_to_close: 1, closed: 2, draft: 3 };
+    return [...caseActionPlans]
+      .sort((a, b) => {
+        const pa = priorities[(a.status || '').toLowerCase()] ?? 4;
+        const pb = priorities[(b.status || '').toLowerCase()] ?? 4;
+        if (pa !== pb) return pa - pb;
+        const da = a.activatedAt || a.effectiveDate || a.createdAt || null;
+        const db = b.activatedAt || b.effectiveDate || b.createdAt || null;
+        if (da && db) {
+          const diff = new Date(db).getTime() - new Date(da).getTime();
+          if (Number.isFinite(diff) && diff !== 0) return diff < 0 ? -1 : 1;
+        }
+        return (b.id || 0) - (a.id || 0);
+      })
+      [0];
+  })() || {};
+
+  const planAgreement =
+    resolvedPlan.agreementNumber ||
+    resolvedPlan.agreement_number ||
+    (resolvedPlan.esdc && resolvedPlan.esdc.agreementNumber) ||
+    null;
   const rawAgreement = normaliseString(
+    planAgreement ||
     answers['agreement-number'] ||
     answers['agreement_number']
   );
@@ -1380,8 +1406,36 @@ function extractAgreementNumber(context) {
     }
   }
 
+  const fundingStream =
+    resolvedPlan.fundingStream ||
+    resolvedPlan.funding_stream ||
+    (resolvedPlan.esdc && resolvedPlan.esdc.fundingStream) ||
+    null;
+  const derived = deriveAgreementNumberFromFundingStream(fundingStream);
+  if (derived && derived !== placeholder) return derived;
+
   return placeholder;
 }
+
+const deriveAgreementNumberFromEiClaimant = eiClaimantCode => {
+  const code = typeof eiClaimantCode === 'string' ? eiClaimantCode.trim() : eiClaimantCode;
+  if (code === '1' || code === 1 || code === '2' || code === 2) {
+    // EI-funded agreements
+    return '16535866';
+  }
+  if (code === '3' || code === 3) {
+    // CRF-funded agreements
+    return '16535841';
+  }
+  return '999999999';
+};
+
+const deriveAgreementNumberFromFundingStream = fundingStream => {
+  const key = typeof fundingStream === 'string' ? fundingStream.trim().toUpperCase() : '';
+  if (key === 'EI') return '16535866';
+  if (key === 'CRF') return '16535841';
+  return '999999999';
+};
 
 function extractClientStatusDetails(context) {
   const { answers = {}, caseContext = {} } = context;
@@ -1789,6 +1843,13 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
   const mappedPlans = eligiblePlans
     .map(plan => {
       const metadata = plan.metadata || {};
+      const planFundingStream = plan.fundingStream || plan.funding_stream || metadata.fundingStream || null;
+      const planAgreementNumber =
+        plan.agreementNumber ||
+        plan.agreement_number ||
+        metadata.agreementNumber ||
+        deriveAgreementNumberFromFundingStream(planFundingStream) ||
+        null;
       const planStartDate =
         formatDateValue(plan.effectiveDate) ||
         (plan.interventions?.length ? formatDateValue(plan.interventions[0].startDate) : null) ||
@@ -1856,6 +1917,8 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
         status: normalisePlanStatus(plan.status),
         startDate: planStartDate,
         eiClaimant: plan.eiClaimant || plan.EIClaimant || metadata.eiClaimant || null,
+        fundingStream: planFundingStream,
+        agreementNumber: planAgreementNumber,
         resultDate: planResultDate,
         resultCode: planResultCode,
         resultNoc: plan.resultNoc || metadata.resultNoc || null,
@@ -3009,6 +3072,12 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     return null;
   };
   const eiClaimantCode = mapEiClaimant(assessmentRow.esdc_eligibility);
+  const fundingStream = (() => {
+    if (eiClaimantCode === 1 || eiClaimantCode === 2 || eiClaimantCode === '1' || eiClaimantCode === '2') return 'EI';
+    if (eiClaimantCode === 3 || eiClaimantCode === '3') return 'CRF';
+    return null;
+  })();
+  const agreementNumber = deriveAgreementNumberFromFundingStream(fundingStream);
   const CODE_SETS = {
     yesNo: new Set(['0', '1']),
     childcareFunding: new Set(['1', '2', '3', '4', '5', '6', '7']),
@@ -3105,6 +3174,9 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   const planMetadata = pruneNullish({
     source: AUTO_PLAN_METADATA_SOURCE,
     generatedAt: now.toISOString(),
+    agreementNumber,
+    fundingStream,
+    budgetPot: null,
     assessmentSummary: overview || null,
     recommendation: recommendation || null,
     programName: programName || null,
@@ -3164,6 +3236,9 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   })();
   const barrierCodes = mapBarrierLabelsToCodes(assessmentBarriers);
   const esdcActionPlanPayload = pruneNullish({
+    agreementNumber,
+    fundingStream,
+    budgetPot: null,
     EIClaimant: eiClaimantCode || null,
     educationLevel: educationLevelCode || null,
     educationProvince: educationProvinceCode || null,
@@ -3179,12 +3254,15 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
 
   const [planInsert] = await connection.query(
     `INSERT INTO iset_case_action_plan
-       (case_id, name, status, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, activated_at, notes, metadata_json, esdc_action_plan_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (case_id, name, status, agreement_number, budget_pot, funding_stream, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, activated_at, notes, metadata_json, esdc_action_plan_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       caseId,
       planName,
       planStatus,
+      agreementNumber || null,
+      null,
+      fundingStream || null,
       eiClaimantCode,
       prevEmploymentCode,
       ownerStaffProfileId || null,
@@ -3383,7 +3461,6 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
         start_date,
         end_date,
         duration_days,
-        funding_stream,
         budget_amount,
         approved_amount,
         actual_amount,
@@ -3395,7 +3472,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
         metadata_json,
         esdc_intervention_json,
         created_by_staff_profile_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       caseId,
       planId,
@@ -3405,7 +3482,6 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       startDate || null,
       endDate || null,
       computedDuration !== null && Number.isFinite(computedDuration) ? computedDuration : null,
-      null,
       budgetAmount,
       null,
       null,
@@ -4165,6 +4241,15 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
         caseId: planRow.case_id,
         name: planRow.name,
         status: planRow.status,
+        fundingStream: planRow.funding_stream || planRow.fundingStream || metadata.fundingStream || null,
+        agreementNumber:
+          planRow.agreement_number ||
+          planRow.agreementNumber ||
+          metadata.agreementNumber ||
+          deriveAgreementNumberFromFundingStream(
+            planRow.funding_stream || planRow.fundingStream || metadata.fundingStream || null
+          ) ||
+          null,
         eiClaimant: planRow.EIClaimant || planRow.eiClaimant || esdc.EIClaimant || null,
         prevEmployment: planRow.prev_employment || esdc.actionPlanPreviousEmployment || null,
         createdAt: planRow.created_at,
@@ -5197,6 +5282,8 @@ function mapActionPlanRow(plan) {
     caseId: plan.case_id || plan.caseId || null,
     name: plan.name || null,
     status: plan.status || null,
+    budgetPot: plan.budget_pot || esdc.budgetPot || null,
+    fundingStream: plan.funding_stream || esdc.fundingStream || null,
     eiClaimant: plan.EIClaimant || plan.eiClaimant || esdc.EIClaimant || null,
     prevEmployment:
       plan.prev_employment || plan.prevEmployment || esdc.actionPlanPreviousEmployment || null,
@@ -17290,6 +17377,8 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
          ap.closed_at,
         ap.result_code,
         ap.result_date,
+        ap.EIClaimant,
+        ap.agreement_number,
         ap.prev_employment,
         ap.outcome_summary,
         ap.closure_notes,
@@ -17298,6 +17387,8 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         ap.notes,
         ap.metadata_json,
         ap.esdc_action_plan_json,
+        ap.budget_pot,
+        ap.funding_stream,
         ap.esdc_action_plan_json AS esdcActionPlanJson,
         ap.archived_at,
         ap.created_at,
@@ -18615,15 +18706,27 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       return code;
     };
 
-    const agreementNumber = (() => {
-      if (!req.body?.agreementNumber) return '999999999';
-      const digits = String(req.body.agreementNumber).replace(/\D/g, '');
-      return digits.length >= 7 && digits.length <= 9 ? digits : null;
+    const agreementNumber = derivedAgreementNumber;
+    const budgetPot = typeof req.body.budgetPot === 'string' ? req.body.budgetPot.trim() || null : null;
+    const fundingStream = (() => {
+      if (typeof req.body.fundingStream === 'string') {
+        const val = req.body.fundingStream.trim();
+        return val || null;
+      }
+      // Derive from EI claimant code as fallback
+      if (req.body.eiClaimant === '1' || req.body.eiClaimant === 1 || req.body.eiClaimant === '2' || req.body.eiClaimant === 2) {
+        return 'EI';
+      }
+      if (req.body.eiClaimant === '3' || req.body.eiClaimant === 3) {
+        return 'CRF';
+      }
+      return null;
     })();
-    if (!agreementNumber) {
-      res.status(422).json({ error: 'agreement_number_invalid', message: 'Agreement number must be 7–9 digits.' });
+    if (!fundingStream) {
+      res.status(422).json({ error: 'funding_stream_required', message: 'Funding stream is required for action plans.' });
       return;
     }
+    const derivedAgreementNumber = deriveAgreementNumberFromFundingStream(fundingStream);
 
     const educationLevel = normaliseCode(req.body.educationLevel, CODE_SETS.educationLevel);
     const educationProvince = educationLevel
@@ -18677,7 +18780,9 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     })();
 
     const esdcPayload = {
-      agreementNumber,
+      agreementNumber: derivedAgreementNumber,
+      fundingStream,
+      budgetPot,
       educationLevel,
       educationProvince,
       socialAssistanceRecipient,
@@ -18693,12 +18798,15 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
 
     const [result] = await connection.query(
       `INSERT INTO iset_case_action_plan
-         (case_id, name, status, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, notes, metadata_json, esdc_action_plan_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (case_id, name, status, agreement_number, budget_pot, funding_stream, EIClaimant, prev_employment, owner_staff_profile_id, owner_user_id, effective_date, review_date, notes, metadata_json, esdc_action_plan_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         caseId,
         trimmedName || null,
         planStatus,
+        derivedAgreementNumber,
+        budgetPot,
+        fundingStream,
         Number.isInteger(Number(eiClaimantCode)) ? Number(eiClaimantCode) : eiClaimantCode,
         Number.isInteger(Number(prevEmployment)) ? Number(prevEmployment) : prevEmployment,
         resolvedOwnerStaffProfileId || null,
@@ -19495,8 +19603,6 @@ app.patch('/api/interventions/:id', async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(body, 'fundingStream')) {
       const trimmedFundingStream = typeof body.fundingStream === 'string' ? body.fundingStream.trim() : '';
-      updates.push('funding_stream = ?');
-      params.push(trimmedFundingStream || null);
       if (trimmedFundingStream) {
         metadata.fundingStream = trimmedFundingStream;
       } else {
@@ -20357,14 +20463,24 @@ app.patch('/api/action-plans/:id', async (req, res) => {
 
     const esdcExisting = safeJsonParse(planRow.esdc_action_plan_json, {}) || {};
 
-    const agreementNumber = (() => {
-      if (typeof req.body.agreementNumber === 'undefined') return esdcExisting.agreementNumber || '999999999';
-      const digits = String(req.body.agreementNumber).replace(/\D/g, '');
-      return digits.length >= 7 && digits.length <= 9 ? digits : null;
+    const budgetPot = (() => {
+      if (typeof req.body.budgetPot === 'undefined') return esdcExisting.budgetPot || planRow.budget_pot || null;
+      if (req.body.budgetPot === null) return null;
+      return typeof req.body.budgetPot === 'string' ? req.body.budgetPot.trim() : req.body.budgetPot;
     })();
-    if (typeof req.body.agreementNumber !== 'undefined' && !agreementNumber) {
-      return res.status(422).json({ error: 'agreement_number_invalid', message: 'Agreement number must be 7–9 digits.' });
+    const fundingStream = (() => {
+      if (typeof req.body.fundingStream === 'string') {
+        const val = req.body.fundingStream.trim();
+        return val || null;
+      }
+      if (esdcExisting.fundingStream) return esdcExisting.fundingStream;
+      if (planRow.funding_stream) return planRow.funding_stream;
+      return null;
+    })();
+    if (!fundingStream) {
+      return res.status(422).json({ error: 'funding_stream_required', message: 'Funding stream is required for action plans.' });
     }
+    const agreementNumber = deriveAgreementNumberFromFundingStream(fundingStream);
 
     const educationLevel = typeof req.body.educationLevel !== 'undefined'
       ? normaliseCode(req.body.educationLevel, CODE_SETS.educationLevel)
@@ -20469,6 +20585,8 @@ app.patch('/api/action-plans/:id', async (req, res) => {
     const esdcPayload = {
       ...esdcExisting,
       agreementNumber,
+      fundingStream,
+      budgetPot,
       educationLevel,
       educationProvince,
       socialAssistanceRecipient,
@@ -20481,6 +20599,12 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       actionPlanChildcareFundedCode: childcareFunding,
       BarrierToEmployment: barrierCodes && barrierCodes.length ? barrierCodes : null,
     };
+    setParts.push('agreement_number = ?');
+    values.push(agreementNumber || null);
+    setParts.push('funding_stream = ?');
+    values.push(fundingStream || null);
+    setParts.push('budget_pot = ?');
+    values.push(budgetPot || null);
     setParts.push('esdc_action_plan_json = ?');
     values.push(JSON.stringify(esdcPayload));
     setParts.push('updated_at = NOW()');

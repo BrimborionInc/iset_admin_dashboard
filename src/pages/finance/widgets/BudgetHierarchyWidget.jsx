@@ -100,7 +100,14 @@ const enrichMetrics = pot => {
   const remaining = pot.adjusted - pot.actual;
   const variance = pot.forecast - pot.adjusted;
   const burnRate = pot.adjusted > 0 ? pot.actual / pot.adjusted : 0;
-  const adminPct = pot.adjusted > 0 ? pot.adminShare / pot.adjusted : 0;
+  const target = pot.adminTargetPct;
+  let adminPct = pot.adjusted > 0 ? pot.adminShare / pot.adjusted : 0;
+  if (target !== null && target !== undefined) {
+    const numeric = Number(target);
+    if (Number.isFinite(numeric)) {
+      adminPct = numeric > 1 ? numeric / 100 : numeric;
+    }
+  }
   let risk = "steady";
   if (variance > 0.05 * pot.adjusted) {
     risk = "overrun";
@@ -893,7 +900,7 @@ useEffect(() => {
       }
     >
       {activeTab === "drafts"
-        ? `Draft hierarchy${selectedDraft ? `: ${selectedDraft.label}` : ""}`
+        ? `Draft Budget Structure${selectedDraft ? `: ${selectedDraft.label}` : ""}`
         : "Budget pots"}
     </Header>
   );
@@ -929,6 +936,15 @@ useEffect(() => {
         filter={filterComponent}
         preferences={preferencesComponent}
         pagination={paginationComponent}
+        empty={
+          activeTab === "drafts" ? (
+            <Box variant="p">
+              No draft budget structure yet. Create a draft here (New draft) or copy Active via Structure manager &gt; Drafts and Snapshots, then return to edit and publish.
+            </Box>
+          ) : (
+            <Box variant="p">No pots to display.</Box>
+          )
+        }
         header={tableHeader}
       />
     </SpaceBetween>
