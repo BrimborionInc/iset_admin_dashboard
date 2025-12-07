@@ -11,39 +11,8 @@ import {
   StatusIndicator,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
-import { FINANCE_PEOPLE } from "./financeDemoData.js";
 
 const COLUMN_WIDTHS_STORAGE_KEY = "finance-allocations-snapshots-widths-v1";
-
-const snapshots = [
-  {
-    id: "SNAP-FY24-Q2",
-    capturedOn: "2024-09-30",
-    capturedBy: FINANCE_PEOPLE.programLead,
-    reason: "Quarterly close certification",
-    totalMovement: 285000,
-    adminRate: 12.4,
-    reference: "Quarterly Board Pack Oct 2024",
-  },
-  {
-    id: "SNAP-FY24-BRD",
-    capturedOn: "2024-08-15",
-    capturedBy: FINANCE_PEOPLE.ceo,
-    reason: "Board reallocation session",
-    totalMovement: 410000,
-    adminRate: 11.8,
-    reference: "Board Minutes NWAC-BRD-24-07",
-  },
-  {
-    id: "SNAP-FY24-ESDC",
-    capturedOn: "2024-07-31",
-    capturedBy: FINANCE_PEOPLE.seniorDirector,
-    reason: "ESDC variance response submission",
-    totalMovement: 195000,
-    adminRate: 12.1,
-    reference: "ESDC Response Package Aug 2024",
-  },
-];
 
 const loadColumnWidths = () => {
   if (typeof window === "undefined") {
@@ -92,9 +61,15 @@ const persistColumnWidths = widths => {
   }
 };
 
-const AllocationSnapshotsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
+const AllocationSnapshotsWidget = ({
+  actions = {},
+  metadata = {},
+  toggleHelpPanel,
+  items = [],
+}) => {
   const [selectedItems, setSelectedItems] = useState([]);
   const [columnWidths, setColumnWidths] = useState(loadColumnWidths);
+  const snapshotItems = Array.isArray(items) ? items : [];
 
   const infoLink =
     metadata.helpComponent && toggleHelpPanel ? (
@@ -145,17 +120,25 @@ const AllocationSnapshotsWidget = ({ actions = {}, metadata = {}, toggleHelpPane
         id: "totalMovement",
         header: "Total movement",
         width: widthMap.get("totalMovement"),
-        cell: item => `$${item.totalMovement.toLocaleString("en-CA")}`,
+        cell: item => {
+          const numeric = Number(item.totalMovement);
+          return Number.isFinite(numeric) ? `$${numeric.toLocaleString("en-CA")}` : "-";
+        },
       },
       {
         id: "adminRate",
         header: "Admin rate",
         width: widthMap.get("adminRate"),
-        cell: item => (
-          <StatusIndicator type={item.adminRate > 15 ? "warning" : "success"}>
-            {item.adminRate.toFixed(1)}%
-          </StatusIndicator>
-        ),
+        cell: item => {
+          const numeric = Number(item.adminRate);
+          const type = Number.isFinite(numeric) && numeric > 15 ? "warning" : "success";
+          const label = Number.isFinite(numeric) ? `${numeric.toFixed(1)}%` : "-";
+          return (
+            <StatusIndicator type={type}>
+              {label}
+            </StatusIndicator>
+          );
+        },
       },
     ],
     [widthMap]
@@ -222,7 +205,7 @@ const AllocationSnapshotsWidget = ({ actions = {}, metadata = {}, toggleHelpPane
     >
       <SpaceBetween size="m">
         <Table
-          items={snapshots}
+          items={snapshotItems}
           trackBy="id"
           selectionType="single"
           selectedItems={selectedItems}
@@ -232,10 +215,11 @@ const AllocationSnapshotsWidget = ({ actions = {}, metadata = {}, toggleHelpPane
           onColumnWidthsChange={handleColumnWidthsChange}
           variant="embedded"
           header={
-            <Header variant="h3" counter={`(${snapshots.length})`}>
+            <Header variant="h3" counter={`(${snapshotItems.length})`}>
               Saved snapshots
             </Header>
           }
+          empty={<Box padding="m">No allocation snapshots captured yet.</Box>}
         />
         <SpaceBetween size="xs" direction="horizontal">
           <Button

@@ -33,10 +33,18 @@ const ADMIN_UPLOAD_ALLOWED_MIME_TYPES = new Set([
   'image/tiff'
 ]);
 const ADMIN_UPLOAD_MAX_BYTES = Number(process.env.ADMIN_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
-const DEFAULT_BACKEND_JOBS_CONFIG = { reminderPollMinutes: 5 };
+const DEFAULT_BACKEND_JOBS_CONFIG = {
+  reminderPollMinutes: 5,
+  allocationPollMinutes: 60,
+  allocationApplyHour: 1,
+};
 const REMINDER_POLL_INTERVAL_MS = DEFAULT_BACKEND_JOBS_CONFIG.reminderPollMinutes * 60 * 1000;
 let reminderPollIntervalMsDynamic = REMINDER_POLL_INTERVAL_MS;
 let reminderPollTimer = null;
+let allocationPollTimer = null;
+let allocationPollIntervalMsDynamic =
+  DEFAULT_BACKEND_JOBS_CONFIG.allocationPollMinutes * 60 * 1000;
+let allocationApplyHourConfig = DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
 const CHECKLIST_SCOPE = 'checklist';
 const CHECKLIST_KEY = 'checklist.compliance.iset';
 
@@ -281,6 +289,11 @@ const adminDocumentUpload = multer({
   limits: { fileSize: ADMIN_UPLOAD_MAX_BYTES },
   fileFilter: adminUploadFileFilter
 });
+
+const resolveUploadStorageMode = () => {
+  const storageModeEnv = (process.env.UPLOAD_MODE || process.env.UPLOAD_DRIVER || '').toLowerCase();
+  return storageModeEnv === 's3' ? 's3' : 'local-direct';
+};
 
 function computeFileSha256(filePath) {
   return new Promise((resolve, reject) => {
@@ -4274,10 +4287,11 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
         if (planIds.length) {
           const placeholders = planIds.map(() => '?').join(', ');
           const [interventionRows] = await conn.query(
-            `SELECT *
-               FROM iset_case_intervention
-               WHERE action_plan_id IN (${placeholders})
-               ORDER BY start_date IS NULL, start_date ASC, id ASC`,
+            `SELECT ci.*, ap.funding_stream AS plan_funding_stream
+               FROM iset_case_intervention ci
+               LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+               WHERE ci.action_plan_id IN (${placeholders})
+               ORDER BY ci.start_date IS NULL, ci.start_date ASC, ci.id ASC`,
             planIds
           );
           interventionRows.forEach(row => {
@@ -4733,9 +4747,10 @@ async function fetchInterventionWithCase(interventionId) {
        ap.status AS action_plan_status,
        ap.case_id AS action_plan_case_id,
        ap.id AS action_plan_id,
+       ap.funding_stream AS plan_funding_stream,
        c.assigned_to_user_id,
        c.portfolio_region_id,
-       sp.region_id AS owner_region_id
+        sp.region_id AS owner_region_id
      FROM iset_case_intervention ci
      LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
      LEFT JOIN iset_case c ON c.id = ci.case_id
@@ -5516,6 +5531,7 @@ function mergeRecurringCostMetadata(target, source, fallbackTotal) {
 function mapInterventionRow(row) {
   if (!row) return null;
   const metadata = safeJsonParse(row.metadata_json, null) || {};
+  const planFundingStream = row.plan_funding_stream || row.planFundingStream || null;
   const esdcRaw =
     row.esdc_intervention_json ??
     row.esdcInterventionJson ??
@@ -5606,7 +5622,7 @@ function mapInterventionRow(row) {
       esdc.interventionOutcome ||
       null,
     outcomeCode: row.outcome_code || esdc.interventionOutcome || null,
-    fundingStream: row.funding_stream || metadata.fundingStream || null,
+    fundingStream: row.funding_stream || planFundingStream || metadata.fundingStream || null,
     cost: Number.isFinite(row.intervention_cost) ? Number(row.intervention_cost) : (Number.isFinite(resolvedCost) ? resolvedCost : null),
     budgetAmount,
     approvedAmount,
@@ -6263,8 +6279,20 @@ function extractAutoAssignmentFacts(intakePayload) {
 
 // --- Backend jobs runtime config (reminder poll interval) -------------------
 function normaliseBackendJobsConfig(raw) {
-  const minutes = clampReminderMinutes(raw?.reminderPollMinutes ?? raw?.reminder_poll_minutes);
-  return { reminderPollMinutes: minutes };
+  const reminderMinutes = clampReminderMinutes(raw?.reminderPollMinutes ?? raw?.reminder_poll_minutes);
+  const allocationMinutesRaw = Number(raw?.allocationPollMinutes ?? raw?.allocation_poll_minutes);
+  const allocationMinutes = Number.isFinite(allocationMinutesRaw) && allocationMinutesRaw > 0
+    ? allocationMinutesRaw
+    : DEFAULT_BACKEND_JOBS_CONFIG.allocationPollMinutes;
+  const allocationApplyHourRaw = Number(raw?.allocationApplyHour ?? raw?.allocation_apply_hour);
+  const allocationApplyHour = Number.isFinite(allocationApplyHourRaw) && allocationApplyHourRaw >= 0 && allocationApplyHourRaw <= 23
+    ? allocationApplyHourRaw
+    : DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
+  return {
+    reminderPollMinutes: reminderMinutes,
+    allocationPollMinutes: allocationMinutes,
+    allocationApplyHour,
+  };
 }
 
 async function readBackendJobsConfig() {
@@ -9796,6 +9824,8 @@ app.patch('/api/config/runtime/backend-jobs', async (req, res) => {
     if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
     const saved = await writeBackendJobsConfig(req.body || {});
     applyReminderPollInterval(saved.reminderPollMinutes);
+    applyAllocationPollInterval(saved.allocationPollMinutes);
+    allocationApplyHourConfig = saved.allocationApplyHour ?? DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
     res.json(saved);
   } catch (err) {
     console.error('[backend-jobs] config update failed:', err);
@@ -10211,7 +10241,7 @@ const DUMMY_DRAFTS = [
       'band-denial-letter': [],
       'band-funding-letter': [],
       'medical-documents': [],
-      'applicant_signature': { name: 'Aiyana Bear', signed: true }
+      'legal_submission_sig': { name: 'Aiyana Bear', signed: true }
     }
   },
   {
@@ -10290,7 +10320,7 @@ const DUMMY_DRAFTS = [
       'band-denial-letter': [],
       'band-funding-letter': [],
       'medical-documents': [],
-      'applicant_signature': { name: 'Noella Whitecloud', signed: true }
+      'legal_submission_sig': { name: 'Noella Whitecloud', signed: true }
     }
   },
   {
@@ -10360,7 +10390,7 @@ const DUMMY_DRAFTS = [
       'band-denial-letter': [],
       'band-funding-letter': [],
       'medical-documents': [],
-      'applicant_signature': { name: 'Sophia Rain', signed: true }
+      'legal_submission_sig': { name: 'Sophia Rain', signed: true }
     }
   },
   {
@@ -10430,7 +10460,7 @@ const DUMMY_DRAFTS = [
       'band-denial-letter': [],
       'band-funding-letter': [],
       'medical-documents': [],
-      'applicant_signature': { name: 'Lia Rivers', signed: true }
+      'legal_submission_sig': { name: 'Lia Rivers', signed: true }
     }
   },
   {
@@ -10509,7 +10539,7 @@ const DUMMY_DRAFTS = [
       'band-denial-letter': [],
       'band-funding-letter': [],
       'medical-documents': [],
-      'applicant_signature': { name: 'Mariah Cardinal', signed: true }
+      'legal_submission_sig': { name: 'Mariah Cardinal', signed: true }
     }
   },
   {
@@ -10587,7 +10617,7 @@ const DUMMY_DRAFTS = [
       'band-denial-letter': [],
       'band-funding-letter': [],
       'medical-documents': [],
-      'applicant_signature': { name: 'Tia Morin', signed: true }
+      'legal_submission_sig': { name: 'Tia Morin', signed: true }
     }
   },
   {
@@ -10663,7 +10693,7 @@ const DUMMY_DRAFTS = [
       'band-denial-letter': [],
       'band-funding-letter': [],
       'medical-documents': [],
-      'applicant_signature': { name: 'Keisha Larocque', signed: true }
+      'legal_submission_sig': { name: 'Keisha Larocque', signed: true }
     }
   }
 ];
@@ -11118,10 +11148,16 @@ hydrateAuthConfigFromDatabase().catch(err => {
 
 // Start reminder poller using stored runtime config (falls back to default on failure)
 readBackendJobsConfig()
-  .then(cfg => applyReminderPollInterval(cfg?.reminderPollMinutes))
+  .then(cfg => {
+    applyReminderPollInterval(cfg?.reminderPollMinutes);
+    applyAllocationPollInterval(cfg?.allocationPollMinutes);
+    allocationApplyHourConfig = cfg?.allocationApplyHour ?? DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
+  })
   .catch(err => {
     console.warn('[backend-jobs] bootstrap poller using default interval:', err?.message || err);
     applyReminderPollInterval(DEFAULT_BACKEND_JOBS_CONFIG.reminderPollMinutes);
+    applyAllocationPollInterval(DEFAULT_BACKEND_JOBS_CONFIG.allocationPollMinutes);
+    allocationApplyHourConfig = DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
   });
 
 app.get('/api/config/sla-targets', async (req, res) => {
@@ -11727,6 +11763,41 @@ const runReminderPoll = () => {
   pollRemindersForDue().catch(err => {
     console.warn('[reminders] due poll error', err?.message || err);
   });
+};
+
+const runAllocationApplyPoll = async () => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id FROM budget_allocation
+        WHERE status = 'approved'
+          AND JSON_EXTRACT(metadata, '$.scheduledApplyAt') IS NOT NULL
+          AND JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.scheduledApplyAt')) <= NOW()`
+    );
+    for (const row of rows) {
+      try {
+        const allocation = await fetchAllocationById(row.id);
+        if (!allocation || allocation.status !== 'approved') continue;
+        const scheduledAtRaw = allocation.metadata?.scheduledApplyAt;
+        const scheduledAt = scheduledAtRaw ? new Date(scheduledAtRaw) : null;
+        if (scheduledAt && scheduledAt > new Date()) {
+          continue;
+        }
+        await applyAllocationTransaction({ allocation, appliedAtOverride: scheduledAt || new Date() });
+      } catch (err) {
+        console.warn('[allocations] scheduled apply failed', row.id, err?.message || err);
+      }
+    }
+  } catch (err) {
+    console.warn('[allocations] apply poll error', err?.message || err);
+  }
+};
+
+const applyAllocationPollInterval = minutes => {
+  const ms = Math.max(60 * 1000, Math.min(24 * 60 * 60 * 1000, Number(minutes) * 60 * 1000 || ALLOCATION_POLL_INTERVAL_MS));
+  allocationPollIntervalMsDynamic = ms;
+  if (allocationPollTimer) clearInterval(allocationPollTimer);
+  allocationPollTimer = setInterval(runAllocationApplyPoll, ms);
+  return ms;
 };
 
 const applyReminderPollInterval = minutes => {
@@ -16307,6 +16378,146 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
   });
 });
 
+app.post('/api/allocations/evidence/upload', (req, res) => {
+  adminDocumentUpload.single('file')(req, res, async err => {
+    if (err) {
+      const isMulterError = err instanceof multer.MulterError;
+      if (err.code === 'LIMIT_FILE_SIZE' || (isMulterError && err.code === 'LIMIT_FILE_SIZE')) {
+        return res.status(400).json({
+          error: 'file_too_large',
+          maxBytes: ADMIN_UPLOAD_MAX_BYTES
+        });
+      }
+      if (err.code === 'UNSUPPORTED_FILE_TYPE' || err.message === 'unsupported_file_type') {
+        return res.status(400).json({ error: 'unsupported_file_type' });
+      }
+      console.error('[allocations:evidence:upload] multer error', err);
+      return res.status(400).json({ error: 'upload_failed', message: err.message || 'Upload failed' });
+    }
+
+    const cleanupUploadedFile = () => {
+      if (req.file && req.file.path) {
+        fs.unlink(req.file.path, unlinkErr => {
+          if (unlinkErr && unlinkErr.code !== 'ENOENT') {
+            console.warn('[allocations:evidence:upload] cleanup failed for %s: %s', req.file.path, unlinkErr.message);
+          }
+        });
+      }
+    };
+
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ error: 'file_required' });
+    }
+
+    const labelRaw = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
+    const docTypeRaw = typeof req.body?.documentType === 'string' ? req.body.documentType.trim() : '';
+    const mimeType = file.mimetype || null;
+    const sizeBytes = Number.isFinite(Number(file.size)) ? Number(file.size) : null;
+    const originalNameRaw = typeof file.originalname === 'string' ? file.originalname.trim() : '';
+    const fileNameForDb = (originalNameRaw || file.filename || 'document').slice(0, 255);
+    const storageMode = resolveUploadStorageMode();
+
+    let relativePath = null;
+    if (storageMode === 's3') {
+      try {
+        const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+        if (DRIVER !== 's3') {
+          throw new Error('s3 driver not configured');
+        }
+        const key = generateKey('allocations', originalNameRaw || fileNameForDb);
+        const contentType = mimeType || 'application/octet-stream';
+        const presigned = await presignPut({ key, contentType });
+        await axios.put(presigned.url, fs.createReadStream(file.path), {
+          headers: {
+            ...(presigned.headers || {}),
+            'Content-Type': contentType,
+            ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+          }
+        });
+        relativePath = key;
+        cleanupUploadedFile();
+      } catch (uploadErr) {
+        cleanupUploadedFile();
+        console.error('[allocations:evidence:upload:s3] upload failed', uploadErr);
+        return res.status(500).json({ error: 'object_store_upload_failed' });
+      }
+    } else {
+      relativePath = toIntakeRelativePath(file.path);
+      if (!relativePath) {
+        cleanupUploadedFile();
+        return res.status(500).json({ error: 'path_resolution_failed' });
+      }
+    }
+
+    return res.status(200).json({
+      ok: true,
+      key: relativePath,
+      url: storageMode === 'local-direct' ? `/uploads/${relativePath}` : null,
+      name: fileNameForDb,
+      size: sizeBytes,
+      type: mimeType,
+      label: labelRaw || null,
+      documentType: docTypeRaw || null
+    });
+  });
+});
+
+app.post('/api/allocations/evidence/delete', async (req, res) => {
+  const key = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
+  if (!key || key.includes('..')) {
+    return res.status(400).json({ error: 'key_required' });
+  }
+  const storageMode = resolveUploadStorageMode();
+  try {
+    if (storageMode === 's3') {
+      const { deleteObject, DRIVER } = require('../ISET-intake/s3Provider');
+      if (DRIVER === 's3' && typeof deleteObject === 'function') {
+        await deleteObject(key);
+      }
+    } else {
+      const absPath = path.join(INTAKE_ROOT, key);
+      if (absPath.startsWith(INTAKE_ROOT)) {
+        await fs.promises.unlink(absPath).catch(err => {
+          if (err && err.code !== 'ENOENT') throw err;
+        });
+      }
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[allocations:evidence:delete] failed', err);
+    return res.status(500).json({ error: 'delete_failed', message: err.message || 'Delete failed' });
+  }
+});
+
+app.post('/api/allocations/evidence/presign-download', async (req, res) => {
+  const keyRaw = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
+  const key = keyRaw.replace(/^\/+/, '');
+  if (!key || key.includes('..')) {
+    return res.status(400).json({ error: 'key_required' });
+  }
+  const storageMode = resolveUploadStorageMode();
+  try {
+    if (storageMode === 's3') {
+      const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
+      if (DRIVER !== 's3' || typeof presignGet !== 'function') {
+        return res.status(500).json({ error: 'presign_unavailable' });
+      }
+      const presigned = await presignGet({ key });
+      const url = presigned?.url || presigned?.signedUrl || null;
+      if (!url) {
+        return res.status(500).json({ error: 'presign_failed' });
+      }
+      return res.json({ ok: true, mode: 's3', url });
+    }
+    const normalized = key.startsWith('uploads/') ? `/${key}` : `/uploads/${key}`;
+    return res.json({ ok: true, mode: 'local-direct', url: normalized });
+  } catch (err) {
+    console.error('[allocations:evidence:presign] failed', err);
+    return res.status(500).json({ error: 'presign_failed', message: err.message || 'Presign failed' });
+  }
+});
+
 app.put('/api/documents/:id', async (req, res) => {
   const documentId = Number(req.params.id);
   if (!Number.isFinite(documentId) || documentId <= 0) {
@@ -17409,8 +17620,10 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     if (planIds.length > 0) {
       const [interventionRows] = await pool.query(
         `SELECT
-           ci.*
+           ci.*,
+           ap.funding_stream AS plan_funding_stream
          FROM iset_case_intervention ci
+         LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
          WHERE ci.action_plan_id IN (?)
          ORDER BY ci.start_date IS NULL, ci.start_date ASC, ci.id ASC`,
         [planIds]
@@ -18961,8 +19174,10 @@ app.get('/api/action-plans/:id/interventions', async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT
-         ci.*
+         ci.*,
+         ap.funding_stream AS plan_funding_stream
        FROM iset_case_intervention ci
+       LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
        WHERE ci.action_plan_id = ?
        ORDER BY ci.start_date IS NULL, ci.start_date ASC, ci.id ASC`,
       [planId]
@@ -19220,7 +19435,6 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
           start_date,
           end_date,
           duration_days,
-          funding_stream,
           budget_amount,
           approved_amount,
           actual_amount,
@@ -19232,17 +19446,16 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
           metadata_json,
           esdc_intervention_json,
           created_by_staff_profile_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         planRow.case_id,
         planId,
         trimmedCode,
         trimmedCode || null,
         statusValue,
-        startDateValue || null,
-        endDateValue || null,
-        durationDaysValue !== null ? durationDaysValue : null,
-        trimmedFundingStream || null,
+       startDateValue || null,
+       endDateValue || null,
+       durationDaysValue !== null ? durationDaysValue : null,
         Number.isFinite(plannedCostInt) ? plannedCostInt : null,
         Number.isFinite(approvedAmountValue) ? approvedAmountValue : null,
         Number.isFinite(actualAmountValue) ? actualAmountValue : null,
@@ -23135,6 +23348,54 @@ function mapBudgetPotRow(row) {
   };
 }
 
+function mapAllocationRow(row) {
+  const meta = safeJsonParse(row.metadata, {});
+  const requester =
+    row.proposed_by_name ||
+    row.proposed_by_email ||
+    row.proposed_by_user_id ||
+    meta.requestedBy ||
+    meta.requestor ||
+    null;
+  const approver =
+    row.approved_by_name ||
+    row.approved_by_email ||
+    row.approved_by_user_id ||
+    meta.approvedBy ||
+    null;
+  const rejector =
+    row.rejected_by_name ||
+    row.rejected_by_email ||
+    row.rejected_by_user_id ||
+    meta.rejectedBy ||
+    null;
+  const appliedBy = row.applied_by_name || row.applied_by_email || meta.appliedBy || null;
+  return {
+    id: String(row.id),
+    sourcePotId: row.source_pot_id ? String(row.source_pot_id) : null,
+    destPotId: row.dest_pot_id ? String(row.dest_pot_id) : null,
+    sourcePotName: row.source_pot_name || null,
+    destPotName: row.dest_pot_name || null,
+    amount: Number(row.amount || 0),
+    currency: row.currency || 'CAD',
+    justification: row.justification || '',
+    status: row.status || 'proposed',
+    proposedByUserId: row.proposed_by_user_id || null,
+    requestedBy: requester ? String(requester) : 'Unassigned',
+    approvedByUserId: row.approved_by_user_id || null,
+    approvedBy: approver ? String(approver) : null,
+    rejectedByUserId: row.rejected_by_user_id || null,
+    rejectedBy: rejector ? String(rejector) : null,
+    appliedBy: appliedBy ? String(appliedBy) : null,
+    approvedAt: row.approved_at || null,
+    rejectedAt: row.rejected_at || null,
+    appliedAt: row.applied_at || null,
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+    metadata: meta,
+  };
+}
+
 function requireFinanceRole(req, res) {
   const role = req.auth?.role || req.staffProfile?.primary_role || req.get('X-Dev-Role') || req.get('x-dev-role');
   const allowed = new Set(['System Administrator', 'Program Administrator']);
@@ -23233,6 +23494,48 @@ async function updateFinanceTransactionStatusForIntervention({ interventionId, a
     console.warn('[finance] update transaction status failed', err?.message || err);
   }
 }
+
+const parseJsonSafe = (raw, fallback = null) => {
+  if (raw === null || raw === undefined) return fallback;
+  if (typeof raw === 'object') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+};
+
+const mapSavedViewRow = row => ({
+  id: row.id,
+  budgetVersionId: row.budget_version_id,
+  name: row.name,
+  description: row.description || '',
+  audience: row.audience || '',
+  filters: parseJsonSafe(row.filters_json, {}),
+  exportFormats: parseJsonSafe(row.export_formats_json, []),
+  isShared: row.is_shared === 1,
+  ownerUserId: row.owner_user_id,
+  lastUsedAt: row.last_used_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const buildCsvResponse = (rows, headers) => {
+  const headerLine = headers.join(',');
+  const body = rows
+    .map(row =>
+      headers
+        .map(key => {
+          const value = row[key];
+          if (value === null || value === undefined) return "";
+          const s = String(value);
+          return `"${s.replace(/"/g, '""')}"`;
+        })
+        .join(',')
+    )
+    .join('\n');
+  return [headerLine, body].filter(Boolean).join('\n');
+};
 
 app.get('/api/finance/budget-pots', async (req, res) => {
   if (requireFinanceRole(req, res)) return;
@@ -23398,6 +23701,448 @@ app.put('/api/finance/budget-pots/:id', async (req, res) => {
   }
 });
 
+async function fetchAllocationById(allocationId) {
+  const [[row]] = await pool.query(
+    `SELECT ba.*,
+            sp.name AS source_pot_name,
+            dp.name AS dest_pot_name,
+            u.name AS proposed_by_name,
+            u.email AS proposed_by_email,
+            au.name AS approved_by_name,
+            au.email AS approved_by_email,
+            ru.name AS rejected_by_name,
+            ru.email AS rejected_by_email
+       FROM budget_allocation ba
+       LEFT JOIN budget_pot sp ON sp.id = ba.source_pot_id
+       LEFT JOIN budget_pot dp ON dp.id = ba.dest_pot_id
+       LEFT JOIN user u ON u.id = ba.proposed_by_user_id
+       LEFT JOIN user au ON au.id = ba.approved_by_user_id
+       LEFT JOIN user ru ON ru.id = ba.rejected_by_user_id
+      WHERE ba.id = ?
+      LIMIT 1`,
+    [allocationId]
+  );
+  return row ? mapAllocationRow(row) : null;
+}
+
+const resolveEffectiveDate = allocation => {
+  const raw =
+    allocation?.metadata?.effectiveDate ||
+    allocation?.metadata?.effective_date ||
+    allocation?.effectiveDate ||
+    allocation?.effective_date;
+  if (!raw) return null;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+};
+
+async function applyAllocationTransaction({ allocation, appliedAtOverride = null }) {
+  const amount = Number(allocation.amount || 0);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('invalid_amount');
+  }
+  const effectiveDate = resolveEffectiveDate(allocation);
+  const appliedAt = appliedAtOverride || effectiveDate || new Date();
+  // Capture before/after balances for audit; using adjusted - actual as available proxy.
+  const [[sourcePot]] = await pool.query(
+    'SELECT adjusted_amount, actual_amount, metadata FROM budget_pot WHERE id = ? LIMIT 1',
+    [allocation.sourcePotId]
+  );
+  const [[destPot]] = await pool.query(
+    'SELECT adjusted_amount, actual_amount, metadata FROM budget_pot WHERE id = ? LIMIT 1',
+    [allocation.destPotId]
+  );
+  const availableFor = pot =>
+    pot ? Number(pot.adjusted_amount || 0) - Number(pot.actual_amount || 0) : null;
+  const beforeBalances = {
+    source: availableFor(sourcePot),
+    destination: availableFor(destPot),
+  };
+  const afterBalances = {
+    source: Number.isFinite(beforeBalances.source) ? beforeBalances.source - amount : null,
+    destination: Number.isFinite(beforeBalances.destination)
+      ? beforeBalances.destination + amount
+      : null,
+  };
+  const meta = allocation.metadata || {};
+  const appliedByName =
+    allocation.appliedBy ||
+    allocation.approvedBy ||
+    meta.appliedBy ||
+    allocation.requestedBy ||
+    'Finance';
+  const approvalOwner =
+    (Array.isArray(meta.approvers) && meta.approvers.length ? meta.approvers.join(', ') : appliedByName) ||
+    appliedByName;
+  const allocationEvidence = Array.isArray(meta.evidence) ? meta.evidence : [];
+  const normalizeEvidenceEntry = (entry, index) => {
+    if (!entry) return null;
+    if (typeof entry === 'string') {
+      return { id: `alloc-${allocation.id}-ev-${index}`, label: entry, href: null, attachments: [] };
+    }
+    if (typeof entry === 'object') {
+      const label = entry.label || entry.id || String(entry);
+      const id = entry.id || `alloc-${allocation.id}-ev-${index}`;
+      const attachments = Array.isArray(entry.attachments) ? entry.attachments : [];
+      return { id, label, href: entry.href || null, type: entry.type || null, attachments };
+    }
+    return null;
+  };
+  const mergeEvidence = (metaObj, entries) => {
+    const existing =
+      Array.isArray(metaObj.evidence) && metaObj.evidence.length
+        ? metaObj.evidence
+            .map((entry, idx) => normalizeEvidenceEntry(entry, idx))
+            .filter(Boolean)
+        : [];
+    const incoming = entries
+      .map((entry, idx) => normalizeEvidenceEntry(entry, idx + existing.length))
+      .filter(Boolean);
+    metaObj.evidence = [...existing, ...incoming];
+  };
+
+  const sourceMeta = safeJsonParse(sourcePot?.metadata, {});
+  const destMeta = safeJsonParse(destPot?.metadata, {});
+  const applyAdjustment = (metaObj, entry) => {
+    const arr = Array.isArray(metaObj.adjustments) ? metaObj.adjustments.slice() : [];
+    arr.push(entry);
+    metaObj.adjustments = arr;
+  };
+  const applyApproval = (metaObj, entry) => {
+    const arr = Array.isArray(metaObj.approvals) ? metaObj.approvals.slice() : [];
+    arr.push(entry);
+    metaObj.approvals = arr;
+  };
+
+  const adjustmentDate = toDateOnly(appliedAt);
+  applyAdjustment(sourceMeta, {
+    id: `alloc-${allocation.id}-out`,
+    date: adjustmentDate,
+    type: 'Transfer out',
+    amount: -amount,
+    reason: `Transfer to ${allocation.destPotName || allocation.destPotId || 'destination pot'}`,
+    user: appliedByName,
+  });
+  applyAdjustment(destMeta, {
+    id: `alloc-${allocation.id}-in`,
+    date: adjustmentDate,
+    type: 'Transfer in',
+    amount,
+    reason: `Transfer from ${allocation.sourcePotName || allocation.sourcePotId || 'source pot'}`,
+    user: appliedByName,
+  });
+
+  applyApproval(sourceMeta, {
+    id: `alloc-${allocation.id}`,
+    type: 'Transfer approved',
+    date: toDateOnly(allocation.approvedAt || appliedAt),
+    owner: approvalOwner,
+  });
+  applyApproval(destMeta, {
+    id: `alloc-${allocation.id}`,
+    type: 'Transfer approved',
+    date: toDateOnly(allocation.approvedAt || appliedAt),
+    owner: approvalOwner,
+  });
+  mergeEvidence(sourceMeta, allocationEvidence);
+  mergeEvidence(destMeta, allocationEvidence);
+
+  const metadata = {
+    ...meta,
+    evidence: allocationEvidence.map((entry, idx) => normalizeEvidenceEntry(entry, idx)).filter(Boolean),
+    beforeBalances,
+    afterBalances,
+    appliedBy: appliedByName,
+    appliedAtEffective: appliedAt.toISOString(),
+    scheduledApplyAt: null,
+  };
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query(
+      `UPDATE budget_pot SET adjusted_amount = adjusted_amount - ?, metadata = ? WHERE id = ?`,
+      [amount, JSON.stringify(sourceMeta), allocation.sourcePotId]
+    );
+    await conn.query(
+      `UPDATE budget_pot SET adjusted_amount = adjusted_amount + ?, metadata = ? WHERE id = ?`,
+      [amount, JSON.stringify(destMeta), allocation.destPotId]
+    );
+    await conn.query(
+      `UPDATE budget_allocation
+          SET status = 'applied',
+              metadata = ?,
+              applied_at = ?,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [JSON.stringify(metadata), appliedAt, allocation.id]
+    );
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+  return fetchAllocationById(allocation.id);
+}
+app.get('/api/finance/allocations', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const statusesRaw = (req.query.status || req.query.statuses || '').split(',').map(s => s.trim()).filter(Boolean);
+    const statusFilter = statusesRaw.length ? statusesRaw : null;
+    const where = [];
+    const params = [];
+    if (statusFilter) {
+      where.push(`ba.status IN (${statusFilter.map(() => '?').join(',')})`);
+      params.push(...statusFilter);
+    }
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const limit = Math.min(Number(req.query.limit) || 200, 500);
+    const [rows] = await pool.query(
+      `SELECT ba.*,
+              sp.name AS source_pot_name,
+              dp.name AS dest_pot_name,
+              u.name AS proposed_by_name,
+              u.email AS proposed_by_email,
+              au.name AS approved_by_name,
+              au.email AS approved_by_email,
+              ru.name AS rejected_by_name,
+              ru.email AS rejected_by_email
+         FROM budget_allocation ba
+         LEFT JOIN budget_pot sp ON sp.id = ba.source_pot_id
+         LEFT JOIN budget_pot dp ON dp.id = ba.dest_pot_id
+         LEFT JOIN user u ON u.id = ba.proposed_by_user_id
+         LEFT JOIN user au ON au.id = ba.approved_by_user_id
+         LEFT JOIN user ru ON ru.id = ba.rejected_by_user_id
+        ${whereClause}
+        ORDER BY ba.updated_at DESC
+        LIMIT ?`,
+      [...params, limit]
+    );
+    res.status(200).json(rows.map(mapAllocationRow));
+  } catch (err) {
+    console.error('[finance] failed to list allocations', err);
+    res.status(500).json({ error: 'failed_to_list_allocations' });
+  }
+});
+
+app.post('/api/finance/allocations', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const body = req.body || {};
+    const sourcePotId = Number(body.sourcePotId || body.source_pot_id);
+    const destPotId = Number(body.destPotId || body.dest_pot_id);
+    const amount = Number(body.amount);
+    const justification = typeof body.justification === 'string' ? body.justification.trim() : '';
+    if (!Number.isFinite(sourcePotId) || !Number.isFinite(destPotId) || sourcePotId === destPotId) {
+      return res.status(400).json({ error: 'invalid_pot_ids' });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: 'invalid_amount' });
+    }
+    const currency = (body.currency || 'CAD').slice(0, 3);
+    const metadata = body.metadata ? safeJsonParse(body.metadata, {}) : {};
+    const userId = req.user?.id || req.auth?.id || null;
+    const requesterName =
+      req.user?.name ||
+      req.auth?.name ||
+      req.user?.email ||
+      req.auth?.email ||
+      null;
+    if (requesterName) {
+      metadata.requestedBy = requesterName;
+    }
+    const [result] = await pool.query(
+      `INSERT INTO budget_allocation
+        (source_pot_id, dest_pot_id, amount, currency, justification, status, proposed_by_user_id, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'proposed', ?, ?, NOW(), NOW())`,
+      [sourcePotId, destPotId, amount, currency, justification, userId, JSON.stringify(metadata)]
+    );
+    const allocation = await fetchAllocationById(result.insertId);
+    res.status(201).json(allocation);
+  } catch (err) {
+    console.error('[finance] failed to create allocation', err);
+    res.status(500).json({ error: 'failed_to_create_allocation' });
+  }
+});
+
+app.post('/api/finance/allocations/:id/approve', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const allocationId = Number(req.params.id);
+  if (!Number.isFinite(allocationId)) {
+    return res.status(400).json({ error: 'invalid_allocation_id' });
+  }
+  try {
+    const allocation = await fetchAllocationById(allocationId);
+    if (!allocation) {
+      return res.status(404).json({ error: 'allocation_not_found' });
+    }
+    if (allocation.status !== 'proposed') {
+      return res.status(400).json({ error: 'invalid_status_transition' });
+    }
+    const userId = req.user?.id || req.auth?.id || null;
+    const userName = req.user?.name || req.auth?.name || req.user?.email || req.auth?.email || null;
+    const metadata = { ...(allocation.metadata || {}) };
+    const approvers = Array.isArray(metadata.approvers) ? metadata.approvers.slice() : [];
+    if (userName) {
+      approvers.push(userName);
+    }
+    metadata.approvers = approvers;
+    const effectiveDate = resolveEffectiveDate(allocation);
+    if (effectiveDate && effectiveDate <= new Date()) {
+      // Auto-apply immediately when effective date is today/past
+      const applied = await applyAllocationTransaction({
+        allocation: { ...allocation, metadata },
+        appliedAtOverride: effectiveDate,
+      });
+      return res.status(200).json(applied);
+    }
+    // Otherwise approve and schedule apply at configured hour on effective date (if provided)
+    if (effectiveDate) {
+      const applyHour =
+        Number.isFinite(allocationApplyHourConfig) &&
+        allocationApplyHourConfig >= 0 &&
+        allocationApplyHourConfig <= 23
+          ? allocationApplyHourConfig
+          : DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
+      const scheduledAt = new Date(
+        effectiveDate.getFullYear(),
+        effectiveDate.getMonth(),
+        effectiveDate.getDate(),
+        applyHour,
+        0,
+        0,
+        0
+      );
+      metadata.scheduledApplyAt = scheduledAt.toISOString();
+    }
+    await pool.query(
+      `UPDATE budget_allocation
+          SET status = 'approved',
+              approved_by_user_id = ?,
+              metadata = ?,
+              approved_at = NOW(),
+              updated_at = NOW()
+        WHERE id = ?`,
+      [userId, JSON.stringify(metadata), allocationId]
+    );
+    const updated = await fetchAllocationById(allocationId);
+    res.status(200).json(updated);
+  } catch (err) {
+    console.error('[finance] failed to approve allocation', err);
+    res.status(500).json({ error: 'failed_to_approve_allocation' });
+  }
+});
+
+app.post('/api/finance/allocations/:id/reject', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const allocationId = Number(req.params.id);
+  if (!Number.isFinite(allocationId)) {
+    return res.status(400).json({ error: 'invalid_allocation_id' });
+  }
+  try {
+    const allocation = await fetchAllocationById(allocationId);
+    if (!allocation) {
+      return res.status(404).json({ error: 'allocation_not_found' });
+    }
+    if (allocation.status !== 'proposed') {
+      return res.status(400).json({ error: 'invalid_status_transition' });
+    }
+    const userId = req.user?.id || req.auth?.id || null;
+    const metadata = { ...(allocation.metadata || {}) };
+    if (req.body?.reason) {
+      metadata.rejectionReason = req.body.reason;
+    }
+    await pool.query(
+      `UPDATE budget_allocation
+          SET status = 'rejected',
+              rejected_by_user_id = ?,
+              rejected_at = NOW(),
+              metadata = ?,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [userId, JSON.stringify(metadata), allocationId]
+    );
+    const updated = await fetchAllocationById(allocationId);
+    res.status(200).json(updated);
+  } catch (err) {
+    console.error('[finance] failed to reject allocation', err);
+    res.status(500).json({ error: 'failed_to_reject_allocation' });
+  }
+});
+
+app.post('/api/finance/allocations/:id/schedule-apply', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const allocationId = Number(req.params.id);
+  if (!Number.isFinite(allocationId)) {
+    return res.status(400).json({ error: 'invalid_allocation_id' });
+  }
+  try {
+    const allocation = await fetchAllocationById(allocationId);
+    if (!allocation) {
+      return res.status(404).json({ error: 'allocation_not_found' });
+    }
+    if (allocation.status !== 'approved') {
+      return res.status(400).json({ error: 'invalid_status_transition' });
+    }
+    const effectiveDate = resolveEffectiveDate(allocation);
+    const applyHour =
+      Number.isFinite(allocationApplyHourConfig) && allocationApplyHourConfig >= 0 && allocationApplyHourConfig <= 23
+        ? allocationApplyHourConfig
+        : DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
+    const baseDate = effectiveDate || new Date();
+    const scheduledAt = new Date(
+      baseDate.getFullYear(),
+      baseDate.getMonth(),
+      baseDate.getDate(),
+      applyHour,
+      0,
+      0,
+      0
+    );
+    const metadata = {
+      ...(allocation.metadata || {}),
+      scheduledApplyAt: scheduledAt.toISOString(),
+    };
+    await pool.query(
+      `UPDATE budget_allocation SET metadata = ?, updated_at = NOW() WHERE id = ?`,
+      [JSON.stringify(metadata), allocationId]
+    );
+    const updated = await fetchAllocationById(allocationId);
+    res.status(200).json(updated);
+  } catch (err) {
+    console.error('[finance] failed to schedule allocation apply', err);
+    res.status(500).json({ error: 'failed_to_schedule_allocation' });
+  }
+});
+
+app.post('/api/finance/allocations/:id/apply', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const allocationId = Number(req.params.id);
+  if (!Number.isFinite(allocationId)) {
+    return res.status(400).json({ error: 'invalid_allocation_id' });
+  }
+  try {
+    const allocation = await fetchAllocationById(allocationId);
+    if (!allocation) {
+      return res.status(404).json({ error: 'allocation_not_found' });
+    }
+    if (allocation.status !== 'approved') {
+      return res.status(400).json({ error: 'invalid_status_transition' });
+    }
+    const effectiveDate = resolveEffectiveDate(allocation);
+    const appliedAt =
+      effectiveDate && effectiveDate <= new Date() ? effectiveDate : new Date();
+    const updated = await applyAllocationTransaction({ allocation, appliedAtOverride: appliedAt });
+    res.status(200).json(updated);
+  } catch (err) {
+    console.error('[finance] failed to apply allocation', err);
+    res.status(500).json({ error: 'failed_to_apply_allocation' });
+  }
+});
+
 app.get('/api/finance/transactions', async (req, res) => {
   if (requireFinanceRole(req, res)) return;
   try {
@@ -23446,6 +24191,175 @@ app.get('/api/finance/transactions', async (req, res) => {
   } catch (err) {
     console.error('[finance] failed to list transactions', err);
     res.status(500).json({ error: 'failed_to_list_transactions' });
+  }
+});
+
+app.get('/api/finance/saved-views', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const budgetVersionId = (req.query?.budgetVersionId || req.query?.budget_version_id || '').trim();
+    if (!budgetVersionId) {
+      return res.status(400).json({ error: 'budgetVersionId_required' });
+    }
+    const [rows] = await pool.query(
+      `SELECT * FROM finance_saved_view
+       WHERE budget_version_id = ?
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 500`,
+      [budgetVersionId]
+    );
+    res.status(200).json(rows.map(mapSavedViewRow));
+  } catch (err) {
+    console.error('[finance] failed to list saved views', err);
+    res.status(500).json({ error: 'failed_to_list_saved_views' });
+  }
+});
+
+app.post('/api/finance/saved-views', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const body = req.body || {};
+    const budgetVersionId = (body.budgetVersionId || body.budget_version_id || '').trim();
+    const name = (body.name || '').trim();
+    if (!budgetVersionId || !name) {
+      return res.status(400).json({ error: 'name_and_budgetVersion_required' });
+    }
+    const description = body.description || null;
+    const audience = body.audience || null;
+    const filtersJson = JSON.stringify(body.filters || {});
+    const exportFormatsJson = JSON.stringify(body.exportFormats || body.export_formats || []);
+    const isShared = body.isShared ? 1 : 0;
+    const ownerUserId = req.user?.id || null;
+    const [result] = await pool.query(
+      `INSERT INTO finance_saved_view
+        (budget_version_id, name, description, audience, filters_json, export_formats_json, is_shared, owner_user_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [budgetVersionId, name, description, audience, filtersJson, exportFormatsJson, isShared, ownerUserId]
+    );
+    const [[row]] = await pool.query('SELECT * FROM finance_saved_view WHERE id = ? LIMIT 1', [result.insertId]);
+    res.status(201).json(mapSavedViewRow(row));
+  } catch (err) {
+    console.error('[finance] failed to create saved view', err);
+    res.status(500).json({ error: 'failed_to_create_saved_view' });
+  }
+});
+
+app.put('/api/finance/saved-views/:id', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const viewId = Number(req.params.id);
+    if (!Number.isFinite(viewId)) {
+      return res.status(400).json({ error: 'invalid_view_id' });
+    }
+    const body = req.body || {};
+    const fields = [];
+    const params = [];
+    const assign = (col, val) => { fields.push(`${col} = ?`); params.push(val); };
+    if (body.name !== undefined) assign('name', body.name);
+    if (body.description !== undefined) assign('description', body.description);
+    if (body.audience !== undefined) assign('audience', body.audience);
+    if (body.budgetVersionId !== undefined || body.budget_version_id !== undefined) {
+      assign('budget_version_id', body.budgetVersionId || body.budget_version_id);
+    }
+    if (body.filters !== undefined) assign('filters_json', JSON.stringify(body.filters || {}));
+    if (body.exportFormats !== undefined || body.export_formats !== undefined) {
+      assign('export_formats_json', JSON.stringify(body.exportFormats || body.export_formats || []));
+    }
+    if (body.isShared !== undefined) assign('is_shared', body.isShared ? 1 : 0);
+    if (!fields.length) {
+      return res.status(400).json({ error: 'no_fields_to_update' });
+    }
+    params.push(viewId);
+    await pool.query(`UPDATE finance_saved_view SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ?`, params);
+    const [[row]] = await pool.query('SELECT * FROM finance_saved_view WHERE id = ? LIMIT 1', [viewId]);
+    if (!row) {
+      return res.status(404).json({ error: 'view_not_found' });
+    }
+    res.status(200).json(mapSavedViewRow(row));
+  } catch (err) {
+    console.error('[finance] failed to update saved view', err);
+    res.status(500).json({ error: 'failed_to_update_saved_view' });
+  }
+});
+
+app.delete('/api/finance/saved-views/:id', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const viewId = Number(req.params.id);
+    if (!Number.isFinite(viewId)) {
+      return res.status(400).json({ error: 'invalid_view_id' });
+    }
+    const [result] = await pool.query('DELETE FROM finance_saved_view WHERE id = ?', [viewId]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'view_not_found' });
+    }
+    res.status(204).end();
+  } catch (err) {
+    console.error('[finance] failed to delete saved view', err);
+    res.status(500).json({ error: 'failed_to_delete_saved_view' });
+  }
+});
+
+app.post('/api/finance/saved-views/:id/export', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const viewId = Number(req.params.id);
+    if (!Number.isFinite(viewId)) {
+      return res.status(400).json({ error: 'invalid_view_id' });
+    }
+    const format = (req.body?.format || req.body?.exportFormat || 'csv').toLowerCase();
+    const [[row]] = await pool.query('SELECT * FROM finance_saved_view WHERE id = ? LIMIT 1', [viewId]);
+    if (!row) {
+      return res.status(404).json({ error: 'view_not_found' });
+    }
+    const exportFormats = parseJsonSafe(row.export_formats_json, []);
+    if (Array.isArray(exportFormats) && exportFormats.length && !exportFormats.includes(format)) {
+      return res.status(400).json({ error: 'format_not_allowed_for_view' });
+    }
+    await pool.query('UPDATE finance_saved_view SET last_used_at = NOW(), updated_at = NOW() WHERE id = ?', [viewId]);
+    res.status(200).json({ status: 'queued', viewId, format });
+  } catch (err) {
+    console.error('[finance] failed to trigger saved view export', err);
+    res.status(500).json({ error: 'failed_to_export_saved_view' });
+  }
+});
+
+app.get('/api/finance/budget-pots/:id/export', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const potId = Number(req.params.id);
+    if (!Number.isFinite(potId)) {
+      return res.status(400).json({ error: 'invalid_pot_id' });
+    }
+    const format = (req.query?.format || req.query?.type || 'csv').toLowerCase();
+    const [[row]] = await pool.query('SELECT * FROM budget_pot WHERE id = ? LIMIT 1', [potId]);
+    if (!row) {
+      return res.status(404).json({ error: 'pot_not_found' });
+    }
+    if (format !== 'csv') {
+      return res.status(400).json({ error: 'unsupported_format' });
+    }
+    const mapped = mapBudgetPotRow(row);
+    const data = {
+      id: mapped.id,
+      name: mapped.name,
+      code: mapped.code,
+      owner: mapped.owner,
+      adjusted: mapped.adjusted,
+      actual: mapped.actual,
+      forecast: mapped.forecast,
+      remaining: mapped.remaining,
+      forecastVariance: mapped.forecastVariance,
+      pacing: mapped.pacing,
+    };
+    const headers = ['id', 'name', 'code', 'owner', 'adjusted', 'actual', 'forecast', 'remaining', 'forecastVariance', 'pacing'];
+    const csv = buildCsvResponse([data], headers);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="budget-pot-${mapped.id}.csv"`);
+    res.status(200).send(csv);
+  } catch (err) {
+    console.error('[finance] failed to export budget pot', err);
+    res.status(500).json({ error: 'failed_to_export_budget_pot' });
   }
 });
 

@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
   Header,
@@ -10,9 +10,12 @@ import {
   ColumnLayout,
   Badge,
   Button,
+  Tabs,
+  Table,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
 import { useBudgetsData } from "./BudgetsDataContext.jsx";
+import { apiFetch } from "../../../auth/apiClient";
 
 const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const { pots, selectedPotId } = useBudgetsData();
@@ -63,10 +66,406 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   const adjustments = useMemo(() => pot?.adjustments ?? [], [pot]);
   const approvals = useMemo(() => pot?.approvals ?? [], [pot]);
   const evidence = useMemo(() => pot?.evidence ?? [], [pot]);
+  const [activeTabId, setActiveTabId] = useState("financials");
+  const [evidenceError, setEvidenceError] = useState(null);
+
+  const openEvidenceAttachment = async att => {
+    if (!att) return;
+    const directUrl = att.url && /^https?:\/\//i.test(att.url) ? att.url : null;
+    if (directUrl) {
+      window.open(directUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (!att.key && !att.url) {
+      setEvidenceError("Attachment link is unavailable.");
+      return;
+    }
+    setEvidenceError(null);
+    try {
+      const res = await apiFetch("/api/allocations/evidence/presign-download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: att.key || att.url }),
+      });
+      if (!res || !res.ok) {
+        throw new Error("Unable to prepare download.");
+      }
+      const payload = await res.json().catch(() => null);
+      const target = payload?.url;
+      if (!target) {
+        throw new Error("Download link unavailable.");
+      }
+      const finalUrl = /^https?:\/\//i.test(target)
+        ? target
+        : `${process.env.REACT_APP_API_BASE_URL || ""}${target}`;
+      window.open(finalUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setEvidenceError(err?.message || "Failed to open attachment.");
+    }
+  };
 
   const handleSettingsClick = ({ detail }) => {
     if (detail?.id === "remove" && typeof actions.removeItem === "function") {
       actions.removeItem();
+    }
+  };
+
+  const renderFinancials = () => {
+    const rows = [
+      {
+        id: "approved",
+        label: "Approved amount",
+        description: "Original authority for this pot (CAD).",
+        value:
+          pot?.approved !== undefined && pot?.approved !== null
+            ? `$${Number(pot.approved).toLocaleString("en-CA", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`
+            : "—",
+      },
+      {
+        id: "adjusted",
+        label: "Adjusted amount",
+        description: "Approved plus/minus amendments (CAD).",
+        value:
+          pot?.adjusted !== undefined && pot?.adjusted !== null
+            ? `$${Number(pot.adjusted).toLocaleString("en-CA", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`
+            : "—",
+      },
+      {
+        id: "committed",
+        label: "Committed",
+        description: "Total commitments recorded for this pot (CAD).",
+        value:
+          pot?.committed !== undefined && pot?.committed !== null
+            ? `$${Number(pot.committed).toLocaleString("en-CA", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`
+            : "—",
+      },
+      {
+        id: "actual",
+        label: "Actual",
+        description: "Actual spend to date for this pot (CAD).",
+        value:
+          pot?.actual !== undefined && pot?.actual !== null
+            ? `$${Number(pot.actual).toLocaleString("en-CA", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`
+            : "—",
+      },
+      {
+        id: "remaining",
+        label: "Remaining",
+        description: "Available funds remaining (adjusted minus commitments/actuals).",
+        value:
+          pot?.remaining !== undefined && pot?.remaining !== null
+            ? `$${Number(pot.remaining).toLocaleString("en-CA", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`
+            : "—",
+      },
+      {
+        id: "forecastVariance",
+        label: "Forecast variance",
+        description: "Projected variance against adjusted amount.",
+        value:
+          pot?.forecastVariance !== undefined && pot?.forecastVariance !== null
+            ? `$${Number(pot.forecastVariance).toLocaleString("en-CA", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`
+            : "—",
+      },
+      {
+        id: "pacing",
+        label: "Pacing",
+        description: "Spend pace versus period target.",
+        value:
+          pot?.pacing !== undefined && pot?.pacing !== null
+            ? `${Number(pot.pacing).toLocaleString("en-CA", {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1,
+              })}%`
+            : "—",
+      },
+    ];
+
+    return (
+      <Table
+        variant="embedded"
+        stripedRows
+        columnDefinitions={[
+          {
+            id: "label",
+            header: "Metric",
+            cell: item => (
+              <SpaceBetween size="xxs">
+                <Box variant="strong">{item.label}</Box>
+                <Box variant="p" color="text-body-secondary">
+                  {item.description}
+                </Box>
+              </SpaceBetween>
+            ),
+          },
+          {
+            id: "value",
+            header: "Value",
+            cell: item => <Box>{item.value}</Box>,
+          },
+        ]}
+        items={rows}
+        trackBy="id"
+      />
+    );
+  };
+
+  const renderAdjustments = () => (
+    <Table
+      header={
+        <Header variant="h3" headingTagOverride="h3">
+          Adjustment timeline
+        </Header>
+      }
+      variant="embedded"
+      stripedRows
+      trackBy="id"
+      items={adjustments}
+      empty={<Box variant="p">No adjustments recorded for this pot.</Box>}
+      columnDefinitions={[
+        {
+          id: "date",
+          header: "Date",
+          cell: item => item.date || "—",
+        },
+        {
+          id: "type",
+          header: "Type",
+          cell: item => item.type || "—",
+        },
+        {
+          id: "amount",
+          header: "Amount",
+          cell: item => {
+            const numeric = Number(item.amount);
+            if (!Number.isFinite(numeric)) return "—";
+            const formatted = `$${Math.abs(numeric).toLocaleString("en-CA")}`;
+            return numeric >= 0 ? formatted : `-${formatted}`;
+          },
+        },
+        {
+          id: "reason",
+          header: "Reason",
+          cell: item => item.reason || "—",
+        },
+        {
+          id: "user",
+          header: "Submitted by",
+          cell: item => item.user || "—",
+        },
+      ]}
+    />
+  );
+
+  const renderApprovals = () => (
+    <Table
+      header={
+        <Header variant="h3" headingTagOverride="h3">
+          Approvals &amp; controls
+        </Header>
+      }
+      variant="embedded"
+      stripedRows
+      trackBy="id"
+      items={approvals}
+      empty={<Box variant="p">No approvals recorded yet.</Box>}
+      columnDefinitions={[
+        {
+          id: "date",
+          header: "Date",
+          cell: item => item.date || "—",
+        },
+        {
+          id: "type",
+          header: "Type",
+          cell: item => item.type || "—",
+        },
+        {
+          id: "owner",
+          header: "Owner",
+          cell: item => item.owner || "—",
+        },
+        {
+          id: "id",
+          header: "Reference",
+          cell: item => item.id || "—",
+        },
+      ]}
+    />
+  );
+
+  const renderEvidence = () => (
+    <SpaceBetween size="s">
+      <Header variant="h3" headingTagOverride="h3">
+        Evidence references
+      </Header>
+      <Table
+        variant="embedded"
+        compact
+        wrapLines
+        trackBy="id"
+        columnDefinitions={[
+          { id: "label", header: "Label", cell: item => item.label || "Evidence" },
+          { id: "type", header: "Type", cell: item => item.type || "Not set" },
+          {
+            id: "attachments",
+            header: "Attachments",
+            cell: item =>
+              item.attachments && item.attachments.length ? (
+                <SpaceBetween size="xxs">
+                  {item.attachments.map((att, idx) => (
+                    <Link
+                      key={`${item.id}-att-${idx}`}
+                      href={att.url || "#"}
+                      onFollow={event => {
+                        event.preventDefault();
+                        openEvidenceAttachment(att);
+                      }}
+                      target="_blank"
+                    >
+                      {att.name || att.key || "Attachment"}
+                    </Link>
+                  ))}
+                </SpaceBetween>
+              ) : (
+                <Box variant="p">-</Box>
+              ),
+          },
+        ]}
+        items={
+          Array.isArray(evidence)
+            ? evidence.map((entry, idx) => {
+                const isObject = entry && typeof entry === "object";
+                return {
+                  id: `evidence-${idx}`,
+                  label: isObject ? entry.label : entry,
+                  type: isObject ? entry.type : null,
+                  attachments:
+                    isObject && Array.isArray(entry.attachments) ? entry.attachments : [],
+                };
+              })
+            : []
+        }
+        empty={<Box variant="p">No evidence linked.</Box>}
+      />
+      {evidenceError ? (
+        <Box variant="p" color="text-status-error">
+          {evidenceError}
+        </Box>
+      ) : null}
+    </SpaceBetween>
+  );
+
+  const tabs = [
+    { id: "financials", label: "Financials", content: renderFinancials() },
+    { id: "adjustments", label: "Adjustments", content: renderAdjustments() },
+    { id: "approvals", label: "Approvals", content: renderApprovals() },
+    { id: "evidence", label: "Evidence", content: renderEvidence() },
+  ];
+
+  const quickActionsMenuItems = [
+    {
+      id: "edit",
+      text: "Edit pot",
+      disabled: !activePotId,
+      action: () => {
+        if (!activePotId) return;
+        window.dispatchEvent(
+          new CustomEvent("financeBudgets:managePot", {
+            detail: { mode: "edit", potId: activePotId },
+          })
+        );
+      },
+    },
+    {
+      id: "create-child",
+      text: "Create child",
+      disabled: !activePotId,
+      action: () => {
+        if (!activePotId) return;
+        window.dispatchEvent(
+          new CustomEvent("financeBudgets:managePot", {
+            detail: { mode: "create", parentId: activePotId },
+          })
+        );
+      },
+    },
+    {
+      id: "forecasting",
+      text: "Open forecasting",
+      disabled: !activePotId,
+      action: () =>
+        window.dispatchEvent(
+          new CustomEvent("financeBudgets:navigate", {
+            detail: { target: "forecasting", potId: activePotId },
+          })
+        ),
+    },
+    {
+      id: "reallocation",
+      text: "Start reallocation",
+      disabled: !activePotId,
+      action: () =>
+        window.dispatchEvent(
+          new CustomEvent("financeBudgets:navigate", {
+            detail: { target: "allocations", potId: activePotId },
+          })
+        ),
+    },
+  ];
+
+  const exportMenuItems = [
+    { id: "csv", text: "CSV snapshot", disabled: !activePotId },
+    { id: "pdf", text: "PDF board pack", disabled: !activePotId },
+    { id: "json", text: "JSON API payload", disabled: !activePotId },
+  ];
+
+  const handleExport = async format => {
+    if (!activePotId) return;
+    if (format !== "csv") {
+      window.dispatchEvent(
+        new CustomEvent("financeBudgets:export", {
+          detail: { format, potId: activePotId },
+        })
+      );
+      return;
+    }
+    try {
+      const resp = await apiFetch(`/api/finance/budget-pots/${activePotId}/export?format=csv`, {
+        method: "GET",
+        headers: { Accept: "text/csv" },
+      });
+      if (!resp.ok) {
+        throw new Error(`Export failed (${resp.status})`);
+      }
+      const blob = await resp.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `budget-pot-${activePotId}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("[PotDetail] CSV export failed", err);
     }
   };
 
@@ -77,6 +476,37 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
           variant="h2"
           info={infoLink}
           description="Review history, evidence, and policy guardrails for the selected pot."
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              <ButtonDropdown
+                variant="normal"
+                ariaLabel="Export pot"
+                disabled={!activePotId}
+                items={exportMenuItems}
+                onItemClick={({ detail }) => handleExport(detail.id)}
+              >
+                Export
+              </ButtonDropdown>
+              <ButtonDropdown
+                variant="normal"
+                ariaLabel="Pot actions"
+                disabled={!activePotId}
+                items={quickActionsMenuItems.map(item => ({
+                  id: item.id,
+                  text: item.text,
+                  disabled: item.disabled,
+                }))}
+                onItemClick={({ detail }) => {
+                  const item = quickActionsMenuItems.find(entry => entry.id === detail.id);
+                  if (item && typeof item.action === "function") {
+                    item.action();
+                  }
+                }}
+              >
+                Actions
+              </ButtonDropdown>
+            </SpaceBetween>
+          }
         >
           Pot detail
         </Header>
@@ -94,144 +524,40 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       i18nStrings={boardItemI18nStrings}
     >
       <SpaceBetween size="l">
-        <SpaceBetween size="xs">
-          <Box variant="awsui-key-label">Selected pot</Box>
+        <SpaceBetween size="s">
           {pot ? (
-            <SpaceBetween size="s">
-              <SpaceBetween size="xxs">
-                <Box variant="strong">{pot.name}</Box>
-                <SpaceBetween direction="horizontal" size="xxs">
-                  {pot.code ? <Badge color="blue">{pot.code}</Badge> : null}
-                  {pot.owner ? <Badge color="green">{pot.owner}</Badge> : null}
+            <ColumnLayout columns={2} variant="text-grid">
+              <SpaceBetween size="s">
+                <SpaceBetween size="xxs">
+                  <Box variant="strong">{pot.name}</Box>
+                  <SpaceBetween direction="horizontal" size="xxs">
+                    {pot.code ? <Badge color="blue">{pot.code}</Badge> : null}
+                    {pot.owner ? <Badge color="green">{pot.owner}</Badge> : null}
+                  </SpaceBetween>
+                  {pot.description ? <Box variant="p">{pot.description}</Box> : null}
                 </SpaceBetween>
-                {pot.description ? <Box variant="p">{pot.description}</Box> : null}
               </SpaceBetween>
-              <SpaceBetween direction="horizontal" size="xs">
-                <StatusIndicator type={lifecycleType}>{lifecycleLabel}</StatusIndicator>
-                <StatusIndicator type={adminPercentage > 15 ? "warning" : "info"}>
-                  Admin allocation {adminPercentage.toFixed(1)}%
-                </StatusIndicator>
+              <SpaceBetween size="s">
+                <Box variant="awsui-key-label">Owner</Box>
+                <Box variant="p">{pot?.owner ?? "Unassigned"}</Box>
               </SpaceBetween>
-            </SpaceBetween>
+            </ColumnLayout>
           ) : (
             <StatusIndicator type="pending">No pot selected</StatusIndicator>
           )}
         </SpaceBetween>
 
-        <ColumnLayout columns={2} variant="text-grid">
-          <SpaceBetween size="xxs">
-            <Box variant="awsui-key-label">Owner</Box>
-            <Box variant="p">{pot?.owner ?? "Unassigned"}</Box>
-            <Box variant="awsui-key-label">Policy guardrails</Box>
-            <Box variant="p">{pot?.policyNotes ?? "Policy notes not captured yet."}</Box>
-          </SpaceBetween>
-          <SpaceBetween size="xxs">
-            <Box variant="awsui-key-label">Quick actions</Box>
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button
-                iconName="edit"
-                disabled={!activePotId}
-                onClick={() => {
-                  if (!activePotId) {
-                    return;
-                  }
-                  window.dispatchEvent(
-                    new CustomEvent("financeBudgets:managePot", {
-                      detail: { mode: "edit", potId: activePotId },
-                    })
-                  );
-                }}
-              >
-                Edit pot
-              </Button>
-              <Button
-                iconName="add-plus"
-                disabled={!activePotId}
-                onClick={() => {
-                  if (!activePotId) {
-                    return;
-                  }
-                  window.dispatchEvent(
-                    new CustomEvent("financeBudgets:managePot", {
-                      detail: { mode: "create", parentId: activePotId },
-                    })
-                  );
-                }}
-              >
-                Create child
-              </Button>
-              <Button
-                iconName="tools"
-                disabled={!activePotId}
-                onClick={() =>
-                  window.dispatchEvent(
-                    new CustomEvent("financeBudgets:navigate", { detail: { target: "forecasting", potId: activePotId } })
-                  )
-                }
-              >
-                Open forecasting
-              </Button>
-              <Button
-                iconName="shuffle"
-                disabled={!activePotId}
-                onClick={() =>
-                  window.dispatchEvent(
-                    new CustomEvent("financeBudgets:navigate", { detail: { target: "allocations", potId: activePotId } })
-                  )
-                }
-              >
-                Start reallocation
-              </Button>
-            </SpaceBetween>
-          </SpaceBetween>
-        </ColumnLayout>
-
-        <SpaceBetween size="s">
-          <Box variant="awsui-key-label">Adjustment timeline</Box>
-          {adjustments.length ? (
-            adjustments.map(entry => (
-              <Box key={entry.id} padding={{ bottom: "xs" }}>
-                <SpaceBetween size="xxs">
-                  <Box variant="strong">
-                    {entry.date} - {entry.type} {entry.amount >= 0 ? "increase" : "decrease"} $
-                    {Math.abs(entry.amount).toLocaleString("en-CA")}
-                  </Box>
-                  <Box variant="p">{entry.reason}</Box>
-                  <Box variant="awsui-key-label">Submitted by {entry.user}</Box>
-                </SpaceBetween>
-              </Box>
-            ))
-          ) : (
-            <Box variant="p">No adjustments recorded for this pot.</Box>
-          )}
+        <Tabs
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
+        />
+        <SpaceBetween size="xxs">
+          <Box variant="awsui-key-label">Policy guardrails (not implemented yet)</Box>
+          <Box variant="p" fontStyle={pot?.policyNotes ? "normal" : "italic"}>
+            {pot?.policyNotes || "not set"}
+          </Box>
         </SpaceBetween>
-
-        <ColumnLayout columns={2} variant="text-grid">
-          <SpaceBetween size="xxs">
-            <Box variant="awsui-key-label">Approvals &amp; controls</Box>
-            {approvals.length ? (
-              approvals.map(approval => (
-                <Box key={approval.id} variant="p">
-                  <strong>{approval.type}</strong> ({approval.id}) - {approval.date} - {approval.owner}
-                </Box>
-              ))
-            ) : (
-              <Box variant="p">No approvals recorded yet.</Box>
-            )}
-          </SpaceBetween>
-          <SpaceBetween size="xxs">
-            <Box variant="awsui-key-label">Evidence references</Box>
-            {evidence.length ? (
-              evidence.map(doc => (
-                <Link key={doc.id} href={doc.href}>
-                  {doc.label}
-                </Link>
-              ))
-            ) : (
-              <Box variant="p">No evidence linked.</Box>
-            )}
-          </SpaceBetween>
-        </ColumnLayout>
       </SpaceBetween>
     </BoardItem>
   );

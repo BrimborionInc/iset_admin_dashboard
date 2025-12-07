@@ -8,13 +8,13 @@ import {
   Table,
   Box,
   Select,
+  ColumnLayout,
+  Button,
   StatusIndicator,
-  TagEditor,
   CollectionPreferences,
   Pagination,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
-import { FINANCE_PEOPLE } from "./financeDemoData.js";
 
 const COLUMN_WIDTHS_STORAGE_KEY = "finance-allocations-approvals-widths-v1";
 const PREFERENCES_STORAGE_KEY = "finance-allocations-approvals-preferences-v1";
@@ -24,62 +24,14 @@ const PAGE_SIZE_OPTIONS = [
   { label: "20 rows", value: 20 },
   { label: "50 rows", value: 50 },
 ];
-const ALL_COLUMN_IDS = ["title", "amount", "stage", "sla", "dueOn", "requestedBy", "actions"];
+const ALL_COLUMN_IDS = ["title", "amount", "status", "requestedBy"];
 
 const stageOptions = [
-  { value: "all", label: "All stages" },
-  { value: "program", label: "Program manager review" },
-  { value: "finance", label: "Finance approval" },
-  { value: "executive", label: "Executive certification" },
-];
-
-const slaOptions = [
-  { value: "any", label: "Any SLA" },
-  { value: "on-track", label: "On track" },
-  { value: "due-soon", label: "Due soon" },
-  { value: "breached", label: "Breached" },
-];
-
-const pendingApprovals = [
-  {
-    id: "TRF-24045",
-    stage: "finance",
-    title: "Reallocate $95K to Women in Trades Cohorts",
-    amount: 95000,
-    requestedBy: FINANCE_PEOPLE.programLead,
-    submittedOn: "2024-10-11",
-    sla: "due-soon",
-    dueOn: "2024-10-18",
-    potFrom: "Urban/Unaffiliated Envelope",
-    potTo: "Women in Trades Cohorts",
-    evidence: ["NWAC-BRD-24-07", "ESDC-WIT-2024"],
-  },
-  {
-    id: "TRF-24039",
-    stage: "executive",
-    title: "Shift $150K to Digital Skills Accelerator pilot",
-    amount: 150000,
-    requestedBy: FINANCE_PEOPLE.seniorDirector,
-    submittedOn: "2024-10-05",
-    sla: "on-track",
-    dueOn: "2024-10-21",
-    potFrom: "Capacity & Infrastructure",
-    potTo: "Digital Skills Accelerator",
-    evidence: ["NWAC-TRD-15"],
-  },
-  {
-    id: "TRF-24032",
-    stage: "program",
-    title: "Return $40K underspend to Capacity & Infrastructure",
-    amount: 40000,
-    requestedBy: FINANCE_PEOPLE.ceo,
-    submittedOn: "2024-09-30",
-    sla: "breached",
-    dueOn: "2024-10-07",
-    potFrom: "Employment Readiness Hubs",
-    potTo: "Capacity & Infrastructure",
-    evidence: ["HUB-FORECAST-Q3"],
-  },
+  { value: "all", label: "All statuses" },
+  { value: "proposed", label: "Proposed" },
+  { value: "approved", label: "Approved" },
+  { value: "applied", label: "Applied" },
+  { value: "rejected", label: "Rejected" },
 ];
 
 const loadColumnWidths = () => {
@@ -176,17 +128,18 @@ const persistPreferences = ({ pageSize, visibleColumns }) => {
   }
 };
 
-const SLA_BADGE = {
-  "on-track": { type: "success", label: "On track" },
-  "due-soon": { type: "warning", label: "Due soon" },
-  breached: { type: "error", label: "Breached" },
-};
-
-const AllocationApprovalsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
+const AllocationApprovalsWidget = ({
+  actions = {},
+  metadata = {},
+  toggleHelpPanel,
+  items = [],
+  onApprove,
+  onReject,
+  onApply,
+}) => {
   const initialPrefsRef = useRef(loadStoredPreferences());
   const initialPrefs = initialPrefsRef.current;
   const [stageFilter, setStageFilter] = useState(stageOptions[0]);
-  const [slaFilter, setSlaFilter] = useState(slaOptions[0]);
   const [selectedItems, setSelectedItems] = useState([]);
   const [columnWidths, setColumnWidths] = useState(loadColumnWidths);
   const [pageSize, setPageSize] = useState(initialPrefs.pageSize);
@@ -217,68 +170,21 @@ const AllocationApprovalsWidget = ({ actions = {}, metadata = {}, toggleHelpPane
       </Link>
     ) : undefined;
 
+  const approvalItems = Array.isArray(items) ? items : [];
+
   const filteredItems = useMemo(() => {
-    return pendingApprovals.filter(item => {
-      const stageMatch =
-        stageFilter.value === "all" ? true : item.stage === stageFilter.value;
-      const slaMatch =
-        slaFilter.value === "any" ? true : item.sla === slaFilter.value;
-      return stageMatch && slaMatch;
+    return approvalItems.filter(item => {
+      const statusMatch =
+        stageFilter.value === "all" ? true : item.status === stageFilter.value;
+      return statusMatch;
     });
-  }, [stageFilter, slaFilter]);
+  }, [approvalItems, stageFilter]);
 
   const baseColumnDefinitions = useMemo(
     () => [
       {
         id: "title",
         header: "Transfer",
-        cell: item => (
-          <SpaceBetween size="xxs">
-            <Box variant="strong">{item.title}</Box>
-            <Box variant="awsui-key-label">
-              {item.potFrom} → {item.potTo}
-            </Box>
-          </SpaceBetween>
-        ),
-      },
-      {
-        id: "amount",
-        header: "Amount",
-        cell: item => `$${item.amount.toLocaleString("en-CA")}`,
-      },
-      {
-        id: "stage",
-        header: "Stage",
-        cell: item => {
-          const map = {
-            program: "Program manager",
-            finance: "Finance review",
-            executive: "Executive certification",
-          };
-          return map[item.stage] ?? item.stage;
-        },
-      },
-      {
-        id: "sla",
-        header: "SLA status",
-        cell: item => {
-          const badge = SLA_BADGE[item.sla] ?? { type: "info", label: "Unknown" };
-          return <StatusIndicator type={badge.type}>{badge.label}</StatusIndicator>;
-        },
-      },
-      {
-        id: "dueOn",
-        header: "Due",
-        cell: item => item.dueOn,
-      },
-      {
-        id: "requestedBy",
-        header: "Requested by",
-        cell: item => item.requestedBy,
-      },
-      {
-        id: "actions",
-        header: "",
         cell: item => (
           <Link
             href="#"
@@ -291,9 +197,49 @@ const AllocationApprovalsWidget = ({ actions = {}, metadata = {}, toggleHelpPane
               );
             }}
           >
-            Open workflow
+            <SpaceBetween size="xxs">
+              <Box variant="strong">{item.title}</Box>
+              <Box variant="awsui-key-label">
+                {item.potFrom ?? "Unknown"} → {item.potTo ?? "Unknown"}
+              </Box>
+            </SpaceBetween>
           </Link>
         ),
+      },
+      {
+        id: "amount",
+        header: "Amount",
+        cell: item => {
+          const numeric = Number(item.amount);
+          return Number.isFinite(numeric) ? `$${numeric.toLocaleString("en-CA")}` : "-";
+        },
+      },
+      {
+        id: "status",
+        header: "Status",
+        cell: item => {
+          const status = item.status || "proposed";
+          const type =
+            status === "approved"
+              ? "success"
+              : status === "applied"
+              ? "success"
+              : status === "rejected"
+              ? "error"
+              : "info";
+          const labelMap = {
+            proposed: "Proposed",
+            approved: "Approved",
+            applied: "Applied",
+            rejected: "Rejected",
+          };
+          return <StatusIndicator type={type}>{labelMap[status] || status}</StatusIndicator>;
+        },
+      },
+      {
+        id: "requestedBy",
+        header: "Requested by",
+        cell: item => item.requestedBy ?? "-",
       },
     ],
     []
@@ -475,11 +421,6 @@ const AllocationApprovalsWidget = ({ actions = {}, metadata = {}, toggleHelpPane
                 options={stageOptions}
                 onChange={({ detail }) => setStageFilter(detail.selectedOption)}
               />
-              <Select
-                selectedOption={slaFilter}
-                options={slaOptions}
-                onChange={({ detail }) => setSlaFilter(detail.selectedOption)}
-              />
             </SpaceBetween>
           }
         >
@@ -498,56 +439,24 @@ const AllocationApprovalsWidget = ({ actions = {}, metadata = {}, toggleHelpPane
       }
       i18nStrings={boardItemI18nStrings}
     >
-      <SpaceBetween size="m">
-        <Table
-          selectionType="single"
-          trackBy="id"
-          items={pagedItems}
-          selectedItems={selectedItems}
-          onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
-          columnDefinitions={columnDefinitionsForTable}
-          resizableColumns
-          onColumnWidthsChange={handleColumnWidthsChange}
-          variant="embedded"
-          header={
-            <Header variant="h3" counter={`(${filteredItems.length})`}>
-              Approval queue
-            </Header>
-          }
-          empty={
-            <Box padding="m">No pending approvals matching the selected filters.</Box>
-          }
-          preferences={preferencesComponent}
-          pagination={paginationComponent}
-        />
-        {selected ? (
-          <SpaceBetween size="s">
-            <Box variant="awsui-key-label">Transfer ID</Box>
-            <Box variant="p">
-              {selected.id} — submitted {selected.submittedOn} by {selected.requestedBy}
-            </Box>
-            <Box variant="awsui-key-label">Evidence references</Box>
-            <TagEditor
-              i18nStrings={{
-                triggerLabel: "Evidence",
-                modalHeader: "Evidence references (read-only)",
-                modalDescription: "Links will open in a new tab in the future implementation.",
-                submitButton: "Close",
-                cancelButton: "Cancel",
-                inputPlaceholder: "Evidence reference",
-                removeButton: label => `Remove ${label}`,
-              }}
-              tags={selected.evidence.map(label => ({ label }))}
-              onSubmit={() => {}}
-              readOnly
-            />
-          </SpaceBetween>
-        ) : (
-          <Box variant="awsui-key-label">
-            Select a transfer to review justification and evidence references.
-          </Box>
-        )}
-      </SpaceBetween>
+      <Table
+        trackBy="id"
+        items={pagedItems}
+        selectedItems={selectedItems}
+        onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
+        columnDefinitions={columnDefinitionsForTable}
+        resizableColumns
+        onColumnWidthsChange={handleColumnWidthsChange}
+        variant="embedded"
+        header={
+          <Header variant="h3" counter={`(${filteredItems.length})`}>
+            Approval queue
+          </Header>
+        }
+        empty={<Box padding="m">No pending approvals matching the selected filters.</Box>}
+        preferences={preferencesComponent}
+        pagination={paginationComponent}
+      />
     </BoardItem>
   );
 };

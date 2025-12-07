@@ -138,7 +138,17 @@ const OPTION_LABELS = {
     books: 'Books or program materials',
     living: 'Living allowance',
     transportation: 'Transportation',
+    childcare: 'Childcare',
     other: 'Other'
+  },
+  'childcare-fuding-status': {
+    'no-funding-received': 'No funding received',
+    'ei-crf': 'EI/CRF',
+    'provincial-funding-subsidy': 'Provincial funding/subsidy',
+    fnicci: 'FNICCI',
+    'daycare-not-available': 'Daycare not available',
+    'assisted-by-family': 'Assisted by family',
+    'self-funded': 'Self-funded'
   },
   expenses_transport: {
     buss_pass: 'Bus pass',
@@ -801,6 +811,20 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
         renderValue: answers => formatOptionList('requested-supports', answers['requested-supports'])
       },
       {
+        label: 'Current childcare support status',
+        field: 'childcare-fuding-status',
+        controlType: 'multiselect',
+        optionsKey: 'childcare-fuding-status',
+        renderValue: answers => {
+          const selectedSupports = answers?.['requested-supports'] || [];
+          if (!Array.isArray(selectedSupports) || !selectedSupports.includes('childcare')) {
+            return NOT_PROVIDED;
+          }
+          const vals = answers?.['childcare-fuding-status'];
+          return formatOptionList('childcare-fuding-status', vals);
+        }
+      },
+      {
         label: 'Other support detail',
         field: 'other-requested-support',
         controlType: 'textarea',
@@ -893,7 +917,7 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
     items: [
       {
         label: 'Applicant signature',
-        renderValue: answers => signatureStatus(answers?.applicant_signature)
+        renderValue: answers => signatureStatus(answers?.legal_submission_sig)
       }
     ]
   }

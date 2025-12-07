@@ -5,7 +5,7 @@
   "description": "Captures an attested typed name that is explicitly locked by clicking a Sign action; stores { signed: true, name } object.",
   "status": "active",
   "default_props": {
-    "name": "applicant_signature",
+    "name": "legal_submission_sig",
     "id": "",
     "label": {
       "text": "Type your full name to sign",

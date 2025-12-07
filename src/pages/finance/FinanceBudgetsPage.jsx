@@ -18,7 +18,7 @@ import FinanceBudgetBurnRateHelp from "../../helpPanelContents/financeBudgetBurn
 import FinanceBudgetActiveViewHelp from "../../helpPanelContents/financeBudgetActiveViewHelp.js";
 import FinanceBudgetStructureManagerHelp from "../../helpPanelContents/financeBudgetStructureManagerHelp.js";
 
-const STORAGE_KEY = "finance-budgets-layout-v1";
+const STORAGE_KEY = "finance-budgets-layout-v2";
 
 const widgetRegistry = {
   hierarchy: {
@@ -93,9 +93,7 @@ const defaultLayout = [
   { id: "hierarchy", rowSpan: 6, columnSpan: 2 },
   { id: "potDetail", rowSpan: 6, columnSpan: 2 },
   { id: "structureManager", rowSpan: 4, columnSpan: 2 },
-  { id: "savedViews", rowSpan: 3, columnSpan: 2 },
   { id: "burnRate", rowSpan: 3, columnSpan: 2 },
-  { id: "activeView", rowSpan: 2, columnSpan: 4 },
 ];
 
 const exportLayout = items =>

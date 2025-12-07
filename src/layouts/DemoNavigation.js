@@ -19,6 +19,8 @@ const roleOptions = [
   { label: 'Application Assessor', value: 'Application Assessor' },
 ];
 
+const CONTENT_DENSITY_STORAGE_KEY = 'iset-demo-content-density';
+
 const CLEAR_TABLES = [
   'iset_internal_notification_dismissal',
   'iset_internal_notification',
@@ -156,6 +158,11 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
   const [clearResult, setClearResult] = useState(null);
   const [isCreatingDummy, setIsCreatingDummy] = useState(false);
   const [dummyResult, setDummyResult] = useState(null);
+  const [contentDensity, setContentDensity] = useState(() => {
+    if (typeof window === 'undefined') return 'comfortable';
+    const stored = window.localStorage?.getItem(CONTENT_DENSITY_STORAGE_KEY);
+    return stored === 'compact' ? 'compact' : 'comfortable';
+  });
   const [useLiveCases, setUseLiveCases] = useState(() => {
     if (typeof window === 'undefined') return false;
     try {
@@ -264,6 +271,23 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
       window.dispatchEvent(new CustomEvent('auth:session-changed', { detail: { session: null, action: 'simulate' } }));
     } catch {}
   }, [currentRole]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    try {
+      window.localStorage?.setItem(CONTENT_DENSITY_STORAGE_KEY, contentDensity);
+    } catch (_) {
+      // ignore persistence errors
+    }
+    try {
+      window.dispatchEvent(
+        new CustomEvent('app:content-density', { detail: { mode: contentDensity } })
+      );
+    } catch (_) {
+      // ignore dispatch errors in demo mode
+    }
+    return undefined;
+  }, [contentDensity]);
 
   const handleOpenClearModal = () => {
     setConfirmVisible(true);
@@ -379,6 +403,12 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
           }}
         >
           Use live case data
+        </Toggle>
+        <Toggle
+          checked={contentDensity === 'compact'}
+          onChange={({ detail }) => setContentDensity(detail.checked ? 'compact' : 'comfortable')}
+        >
+          Compact density
         </Toggle>
         <Button variant="primary" onClick={handleOpenClearModal}>
           Clear ISET test data

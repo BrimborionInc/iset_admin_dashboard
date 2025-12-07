@@ -24,6 +24,9 @@ Last Updated: 2025-12-05
 - 2025-12-05: Draft workflows live in Budgets: Draft Budgets tab shows/controls drafts; Structure manager edits selected draft only; publish replaces Active after taking a safety snapshot; restore snapshot creates a new draft. Snapshots and drafts have delete/restore modals; draft labels inline-editable. Pot parent guard prevents self-parenting. Admin % column now reads `adminTargetPct`.
 - 2025-12-05: Roles for finance endpoints limited to `System Administrator` and `Program Administrator`. Snapshot creator stored as NULL to avoid FK issues.
 - 2025-12-05: Forecast column remains manual (placeholder); variance = forecast - adjusted. Auto-forecasting deferred.
+- 2025-12-07: Saved views rewired to real API + DB table (`finance_saved_view`); UI now creates/edits/deletes views per active budget version. Loaded view/summary widgets moved to palette by default.
+- 2025-12-07: Pot detail widget refreshed (3-col overview, tabs, actions/export dropdown); CSV export endpoint added (`GET /api/finance/budget-pots/:id/export?format=csv`).
+- 2025-12-07: Burn-rate widget now reads live pot metrics (adjusted/actual/forecast/variance) with simple risk tagging; risk filter listens to loaded view presets.
 
 ## Current Focus
 - Budgets dashboard now runs live: pot CRUD, draft/publish, snapshots, pot selection for case interventions. Case-linked finance transactions roll into committed/actual. Draft and snapshot UX refined.
@@ -33,7 +36,7 @@ Last Updated: 2025-12-05
 - Wire Allocations/reallocation flows to draft/publish pattern; expose transfers and approvals.
 - Expose pot transaction history endpoint and UI; harden status transitions (draft→submitted→posted) for reconciliation.
 - Add guarded recalc endpoint for pot rollups and background consistency checks.
-- Update Budgets saved views/burn rate to live data once available.
+- Extend exports beyond CSV (PDF/JSON) and align with saved views filters.
 
 ## Links
 - Workflow map: `docs/planning/finance-workflow-map.md`

@@ -12,6 +12,7 @@ import {
   Link,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
+import { useBudgetsData } from "./BudgetsDataContext.jsx";
 
 const timeframeOptions = [
   { label: "FY2024-25", value: "fy24" },
@@ -20,78 +21,21 @@ const timeframeOptions = [
   { label: "FY2023-24", value: "fy23" },
 ];
 
-const baselineData = {
-  "nwac-master": [
-    {
-      id: "nwac-admin",
-      name: "NWAC Administration",
-      burn: 0.76,
-      forecastVariance: 0,
-      remaining: 55000,
-      guardrail: "Hold flat-rate at 15%. Escalate if headcount changes add more than $25K.",
-    },
-    {
-      id: "ptma-on-client",
-      name: "Ontario Client Services",
-      burn: 0.74,
-      forecastVariance: -2000,
-      remaining: 67000,
-      guardrail: "Toronto pilot draws down quickly—prep variance narrative if remaining < $40K.",
-    },
-  ],
-  "regional-west": [
-    {
-      id: "ptma-bc-client",
-      name: "BC Client Services",
-      burn: 0.81,
-      forecastVariance: 3000,
-      remaining: 45000,
-      guardrail: "Trigger top-up workflow once commitments reach 95% of the adjusted plan.",
-    },
-    {
-      id: "ptma-ab-client",
-      name: "Alberta Client Services",
-      burn: 0.78,
-      forecastVariance: -2000,
-      remaining: 51000,
-      guardrail: "Monitor stewardship spend; admin should stay inside the $70K envelope.",
-    },
-  ],
-  "northern-equity": [
-    {
-      id: "ptma-prairies-client",
-      name: "Prairies Client Services",
-      burn: 0.72,
-      forecastVariance: -1000,
-      remaining: 49000,
-      guardrail: "Mileage reimbursements spike in winter—pre-stage evidence bundles now.",
-    },
-    {
-      id: "ptma-northern-client",
-      name: "Northern Client Services",
-      burn: 0.78,
-      forecastVariance: -1000,
-      remaining: 29000,
-      guardrail: "Connectivity contracts renewing in Q3—confirm top-up reserve before August.",
-    },
-  ],
-};
-
-const defaultViewId = "nwac-master";
-
 const formatCurrency = value => {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? `$${numeric.toLocaleString("en-CA")}` : "—";
 };
 
 const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
+  const { pots } = useBudgetsData();
   const [timeframe, setTimeframe] = useState(timeframeOptions[0]);
-  const [viewId, setViewId] = useState(defaultViewId);
+  const [riskFilter, setRiskFilter] = useState("");
 
   useEffect(() => {
     const handleViewLoaded = event => {
-      if (event.detail?.viewId) {
-        setViewId(event.detail.viewId);
+      const risk = event?.detail?.presets?.riskFilter;
+      if (risk === "overrun" || risk === "underspend" || risk === "steady" || risk === "") {
+        setRiskFilter(risk || "");
       }
     };
     window.addEventListener("financeBudgets:viewLoaded", handleViewLoaded);
@@ -117,17 +61,50 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
     }
   };
 
-  const series = baselineData[viewId] ?? baselineData[defaultViewId];
+  const series = useMemo(() => {
+    const enriched = (pots || [])
+      .map(pot => {
+        const adjusted = Number(pot.adjusted) || 0;
+        const actual = Number(pot.actual) || 0;
+        const burn = adjusted > 0 ? actual / adjusted : 0;
+        const remaining = Number(pot.remaining);
+        const forecastVariance = Number(pot.forecastVariance);
+        const varianceType = forecastVariance > 0 ? "error" : forecastVariance < 0 ? "success" : "info";
+        const varianceLabel = forecastVariance > 0 ? "Forecast above budget" : forecastVariance < 0 ? "Forecast below budget" : "On plan";
+        const riskTag =
+          varianceType === "error" || burn > 1.05
+            ? "overrun"
+            : burn < 0.7
+              ? "underspend"
+              : "steady";
+        return {
+          id: pot.id,
+          name: pot.name,
+          burn,
+          forecastVariance,
+          remaining: Number.isFinite(remaining) ? remaining : adjusted - actual,
+          varianceType,
+          varianceLabel,
+          riskTag,
+          guardrail: pot.policyNotes || "Guardrails not documented.",
+        };
+      })
+      .filter(item => {
+        if (riskFilter === "overrun") return item.riskTag === "overrun";
+        if (riskFilter === "underspend") return item.riskTag === "underspend";
+        if (riskFilter === "steady") return item.riskTag === "steady";
+        return true;
+      })
+      .sort((a, b) => (b.burn || 0) - (a.burn || 0))
+      .slice(0, 4);
+    return enriched;
+  }, [pots, riskFilter]);
 
   const cards = useMemo(
     () =>
       series.map(item => {
-        const varianceType = item.forecastVariance > 0 ? "error" : item.forecastVariance < 0 ? "success" : "info";
-        const varianceLabel = item.forecastVariance > 0 ? "Forecast above budget" : "Forecast below budget";
         return {
           ...item,
-          varianceType,
-          varianceLabel,
         };
       }),
     [series]
@@ -140,7 +117,7 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
         setTimeframe(detail.selectedOption);
         window.dispatchEvent(
           new CustomEvent("financeBudgets:timeframeChange", {
-            detail: { timeframe: detail.selectedOption.value, viewId },
+            detail: { timeframe: detail.selectedOption.value },
           })
         );
       }}

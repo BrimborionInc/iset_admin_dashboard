@@ -35,6 +35,14 @@ export const BudgetsDataProvider = ({ children }) => {
     const approvals = Array.isArray(meta.approvals) ? meta.approvals : [];
     const adjustments = Array.isArray(meta.adjustments) ? meta.adjustments : [];
     const evidence = Array.isArray(meta.evidence) ? meta.evidence : [];
+    const approved = Number(pot.approved) || 0;
+    const adjusted = Number(pot.adjusted ?? pot.approved) || 0;
+    const committed = Number(pot.committed) || 0;
+    const actual = Number(pot.actual) || 0;
+    const forecast = Number(pot.forecast ?? pot.adjusted ?? pot.approved) || 0;
+    const remaining = adjusted - actual;
+    const forecastVariance = forecast - adjusted;
+    const pacing = adjusted > 0 ? (actual / adjusted) * 100 : null;
     return {
       id: pot.id,
       parentId: pot.parentId ?? null,
@@ -44,11 +52,14 @@ export const BudgetsDataProvider = ({ children }) => {
       owner: pot.owner || meta.owner || "Finance",
       description: meta.description || "",
       policyNotes: meta.policyNotes || "",
-      approved: Number(pot.approved) || 0,
-      adjusted: Number(pot.adjusted ?? pot.approved) || 0,
-      committed: Number(pot.committed) || 0,
-      actual: Number(pot.actual) || 0,
-      forecast: Number(pot.forecast ?? pot.adjusted ?? pot.approved) || 0,
+      approved,
+      adjusted,
+      committed,
+      actual,
+      forecast,
+      remaining,
+      forecastVariance,
+      pacing,
       adminShare: Number(pot.adminShare) || 0,
       adminTargetPct: adminPct,
       adminPct,

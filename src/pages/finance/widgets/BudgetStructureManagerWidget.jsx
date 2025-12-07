@@ -74,6 +74,13 @@ const mapPotToEditForm = (pot, parentOptions) => {
   };
 };
 
+const formatCurrencyDisplay = value => {
+  if (value === null || value === undefined || value === "") return "";
+  const num = Number(String(value).replace(/,/g, ""));
+  if (!Number.isFinite(num)) return value;
+  return `$${num.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
 const draftColumns = [
   {
     id: "summary",
@@ -149,12 +156,16 @@ const [draftSubmitting, setDraftSubmitting] = useState(false);
 const [publishSubmittingId, setPublishSubmittingId] = useState(null);
 const [draftLabel, setDraftLabel] = useState("");
 const [draftNotes, setDraftNotes] = useState("");
-const [copyDraftModalOpen, setCopyDraftModalOpen] = useState(false);
-const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
-const [inlineDraftLabel, setInlineDraftLabel] = useState("");
-const [inlineDraftSaving, setInlineDraftSaving] = useState(false);
-const [deleteSnapshotId, setDeleteSnapshotId] = useState(null);
-const [deleteDraftId, setDeleteDraftId] = useState(null);
+  const [copyDraftModalOpen, setCopyDraftModalOpen] = useState(false);
+  const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
+  const [inlineDraftLabel, setInlineDraftLabel] = useState("");
+  const [inlineDraftSaving, setInlineDraftSaving] = useState(false);
+  const [deleteSnapshotId, setDeleteSnapshotId] = useState(null);
+  const [deleteDraftId, setDeleteDraftId] = useState(null);
+  const [createApprovedFocused, setCreateApprovedFocused] = useState(false);
+  const [createAdjustedFocused, setCreateAdjustedFocused] = useState(false);
+  const [editApprovedFocused, setEditApprovedFocused] = useState(false);
+  const [editAdjustedFocused, setEditAdjustedFocused] = useState(false);
   const hasDraft = Boolean(selectedDraftId);
 
   useEffect(() => {
@@ -517,31 +528,41 @@ const handleArchive = async () => {
           <SpaceBetween size="s">
             <FormField label="Approved amount" description="Original authority for this pot (CAD).">
               <Input
-                type="number"
-                value={createForm.approved}
-                placeholder="0"
+                value={
+                  createApprovedFocused
+                    ? createForm.approved
+                    : formatCurrencyDisplay(createForm.approved)
+                }
+                placeholder="e.g., 0.00"
                 onChange={({ detail }) => handleCreateChange("approved", detail.value)}
+                onFocus={() => setCreateApprovedFocused(true)}
+                onBlur={() => setCreateApprovedFocused(false)}
               />
             </FormField>
             <FormField label="Adjusted amount" description="Approved plus/minus amendments (CAD).">
               <Input
-                type="number"
-                value={createForm.adjusted}
-                placeholder="0"
+                value={
+                  createAdjustedFocused
+                    ? createForm.adjusted
+                    : formatCurrencyDisplay(createForm.adjusted)
+                }
+                placeholder="e.g., 0.00"
                 onChange={({ detail }) => handleCreateChange("adjusted", detail.value)}
+                onFocus={() => setCreateAdjustedFocused(true)}
+                onBlur={() => setCreateAdjustedFocused(false)}
               />
             </FormField>
             <FormField
               label="Committed amount"
               description="Calculated from draft spend; read-only."
             >
-              <Input value={createForm.committed} disabled />
+              <Input value={formatCurrencyDisplay(createForm.committed)} disabled />
             </FormField>
             <FormField
               label="Forecast amount"
               description="Calculated projection; read-only."
             >
-              <Input value={createForm.forecast} disabled />
+              <Input value={formatCurrencyDisplay(createForm.forecast)} disabled />
             </FormField>
             <FormField label="Admin % target" description="Target admin share of adjusted amount (percentage).">
               <Input
@@ -636,29 +657,39 @@ const handleArchive = async () => {
           <SpaceBetween size="s">
             <FormField label="Approved amount" description="Original authority for this pot (CAD).">
               <Input
-                type="number"
-                value={editForm?.approved ?? ""}
+                value={
+                  editApprovedFocused
+                    ? editForm?.approved ?? ""
+                    : formatCurrencyDisplay(editForm?.approved ?? "")
+                }
                 onChange={({ detail }) => handleEditChange("approved", detail.value)}
+                onFocus={() => setEditApprovedFocused(true)}
+                onBlur={() => setEditApprovedFocused(false)}
               />
             </FormField>
             <FormField label="Adjusted amount" description="Approved plus/minus amendments (CAD).">
               <Input
-                type="number"
-                value={editForm?.adjusted ?? ""}
+                value={
+                  editAdjustedFocused
+                    ? editForm?.adjusted ?? ""
+                    : formatCurrencyDisplay(editForm?.adjusted ?? "")
+                }
                 onChange={({ detail }) => handleEditChange("adjusted", detail.value)}
+                onFocus={() => setEditAdjustedFocused(true)}
+                onBlur={() => setEditAdjustedFocused(false)}
               />
             </FormField>
             <FormField
               label="Committed amount"
               description="Calculated from draft spend; read-only."
             >
-              <Input value={editForm?.committed ?? ""} disabled />
+              <Input value={formatCurrencyDisplay(editForm?.committed ?? "")} disabled />
             </FormField>
             <FormField
               label="Forecast amount"
               description="Calculated projection; read-only."
             >
-              <Input value={editForm?.forecast ?? ""} disabled />
+              <Input value={formatCurrencyDisplay(editForm?.forecast ?? "")} disabled />
             </FormField>
             <FormField label="Admin % target" description="Target admin share of adjusted amount (percentage).">
               <Input

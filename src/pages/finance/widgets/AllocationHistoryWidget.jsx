@@ -12,9 +12,10 @@ import {
   ColumnLayout,
   CollectionPreferences,
   Pagination,
+  Tabs,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
-import { FINANCE_PEOPLE } from "./financeDemoData.js";
+import { apiFetch } from "../../../auth/apiClient";
 
 const COLUMN_WIDTHS_STORAGE_KEY = "finance-allocations-history-widths-v1";
 const PREFERENCES_STORAGE_KEY = "finance-allocations-history-preferences-v1";
@@ -24,43 +25,7 @@ const PAGE_SIZE_OPTIONS = [
   { label: "20 rows", value: 20 },
   { label: "50 rows", value: 50 },
 ];
-const ALL_COLUMN_IDS = ["approvedOn", "summary", "pots", "approvers"];
-
-const historyEntries = [
-  {
-    id: "HIST-24028",
-    approvedOn: "2024-09-22",
-    transferId: "TRF-24014",
-    summary: "Moved $120K to Employment Readiness Hubs",
-    potFrom: "Urban/Unaffiliated Envelope",
-    potTo: "Employment Readiness Hubs",
-    approvedBy: [FINANCE_PEOPLE.programLead, FINANCE_PEOPLE.seniorDirector, FINANCE_PEOPLE.ceo],
-    before: { source: 520000, destination: 1850000 },
-    after: { source: 400000, destination: 1970000 },
-  },
-  {
-    id: "HIST-24025",
-    approvedOn: "2024-08-19",
-    transferId: "TRF-23998",
-    summary: "Returned $65K underspend to Capacity & Infrastructure",
-    potFrom: "Women in Trades Cohorts",
-    potTo: "Capacity & Infrastructure",
-    approvedBy: [FINANCE_PEOPLE.programLead, FINANCE_PEOPLE.seniorDirector],
-    before: { source: 210000, destination: 360000 },
-    after: { source: 145000, destination: 425000 },
-  },
-  {
-    id: "HIST-24010",
-    approvedOn: "2024-07-04",
-    transferId: "TRF-23960",
-    summary: "Admin reserve draw for innovation pilot",
-    potFrom: "Capacity & Infrastructure",
-    potTo: "Digital Skills Accelerator",
-    approvedBy: [FINANCE_PEOPLE.seniorDirector, FINANCE_PEOPLE.ceo],
-    before: { source: 480000, destination: 120000 },
-    after: { source: 420000, destination: 180000 },
-  },
-];
+const ALL_COLUMN_IDS = ["approvedOn", "amount", "pots", "approvers"];
 
 const periodOptions = [
   { value: "fy24", label: "FY2024-25" },
@@ -163,8 +128,31 @@ const persistPreferences = ({ pageSize, visibleColumns }) => {
 };
 
 const formatCurrency = value => `$${value.toLocaleString("en-CA")}`;
+const parseDateOnly = raw => {
+  if (!raw || typeof raw !== "string") return null;
+  const parts = raw.split("-");
+  if (parts.length === 3) {
+    const [y, m, d] = parts.map(Number);
+    if (Number.isInteger(y) && Number.isInteger(m) && Number.isInteger(d)) {
+      const date = new Date(y, m - 1, d);
+      if (!Number.isNaN(date.getTime())) {
+        return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      }
+    }
+  }
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+};
 
-const AllocationHistoryWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
+const AllocationHistoryWidget = ({
+  actions = {},
+  metadata = {},
+  toggleHelpPanel,
+  items = [],
+  pendingItems = [],
+  onApply,
+}) => {
   const initialPrefsRef = useRef(loadStoredPreferences());
   const initialPrefs = initialPrefsRef.current;
   const [period, setPeriod] = useState(periodOptions[0]);
@@ -179,6 +167,7 @@ const AllocationHistoryWidget = ({ actions = {}, metadata = {}, toggleHelpPanel 
     return ordered.length ? ordered : ALL_COLUMN_IDS;
   });
   const preferencesRef = useRef(initialPrefs);
+  const [evidenceError, setEvidenceError] = useState(null);
 
   const infoLink =
     metadata.helpComponent && toggleHelpPanel ? (
@@ -198,36 +187,75 @@ const AllocationHistoryWidget = ({ actions = {}, metadata = {}, toggleHelpPanel 
       </Link>
     ) : undefined;
 
-  const baseColumnDefinitions = useMemo(
-    () => [
-      {
-        id: "approvedOn",
-        header: "Approved on",
-        cell: item => item.approvedOn,
+  const historyItems = Array.isArray(items) ? items : [];
+  const pending = Array.isArray(pendingItems)
+    ? pendingItems.filter(item => item.status === "approved")
+    : [];
+  const [activeTab, setActiveTab] = useState("applied");
+
+  const openEvidenceAttachment = async att => {
+    if (!att) return;
+    const directUrl = att.url && /^https?:\/\//i.test(att.url) ? att.url : null;
+    if (directUrl) {
+      window.open(directUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (!att.key && !att.url) {
+      setEvidenceError("Attachment link is unavailable.");
+      return;
+    }
+    setEvidenceError(null);
+    try {
+      const res = await apiFetch("/api/allocations/evidence/presign-download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: att.key || att.url }),
+      });
+      if (!res || !res.ok) {
+        throw new Error("Unable to prepare download.");
+      }
+      const payload = await res.json().catch(() => null);
+      const target = payload?.url;
+      if (!target) {
+        throw new Error("Download link unavailable.");
+      }
+      const finalUrl = /^https?:\/\//i.test(target)
+        ? target
+        : `${process.env.REACT_APP_API_BASE_URL || ""}${target}`;
+      window.open(finalUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setEvidenceError(err?.message || "Failed to open attachment.");
+    }
+  };
+
+const baseColumnDefinitions = useMemo(
+  () => [
+    {
+      id: "approvedOn",
+      header: "Approved on",
+      cell: item => item.approvedOn,
+    },
+    {
+      id: "amount",
+      header: "Amount",
+      cell: item => {
+        const numeric = Number(item.amount);
+        return Number.isFinite(numeric) ? formatCurrency(numeric) : "-";
       },
-      {
-        id: "summary",
-        header: "Summary",
-        cell: item => (
-          <SpaceBetween size="xxs">
-            <Box variant="strong">{item.summary}</Box>
-            <Box variant="awsui-key-label">{item.transferId}</Box>
-          </SpaceBetween>
-        ),
-      },
-      {
-        id: "pots",
-        header: "Pots",
-        cell: item => (
-          <Box variant="p">
-            {item.potFrom} → {item.potTo}
+    },
+    {
+      id: "pots",
+      header: "Pots",
+      cell: item => (
+        <Box variant="p">
+            {item.potFrom ?? "Unknown"} → {item.potTo ?? "Unknown"}
           </Box>
         ),
       },
       {
         id: "approvers",
         header: "Approval chain",
-        cell: item => item.approvedBy.join(" → "),
+        cell: item => (Array.isArray(item.approvedBy) ? item.approvedBy.join(" → ") : "-"),
       },
     ],
     []
@@ -243,7 +271,7 @@ const AllocationHistoryWidget = ({ actions = {}, metadata = {}, toggleHelpPanel 
 
   const columnDefinitionsForTable = useMemo(() => {
     const allowed = new Set(visibleColumns);
-    allowed.add("summary");
+    allowed.add("approvedOn");
     return mergedColumnDefinitions.filter(column => allowed.has(column.id));
   }, [mergedColumnDefinitions, visibleColumns]);
 
@@ -252,7 +280,7 @@ const AllocationHistoryWidget = ({ actions = {}, metadata = {}, toggleHelpPanel 
       mergedColumnDefinitions.map(column => ({
         id: column.id,
         label: typeof column.header === "string" ? column.header : column.id,
-        alwaysVisible: column.id === "summary",
+        alwaysVisible: column.id === "approvedOn",
       })),
     [mergedColumnDefinitions]
   );
@@ -318,7 +346,7 @@ const AllocationHistoryWidget = ({ actions = {}, metadata = {}, toggleHelpPanel 
     persistColumnWidths(ordered);
   };
 
-  const totalItems = historyEntries.length;
+  const totalItems = historyItems.length;
   const pagesCount = Math.max(1, Math.ceil(totalItems / pageSize));
   useEffect(() => {
     if (currentPageIndex > pagesCount) {
@@ -328,8 +356,8 @@ const AllocationHistoryWidget = ({ actions = {}, metadata = {}, toggleHelpPanel 
 
   const pagedItems = useMemo(() => {
     const start = (currentPageIndex - 1) * pageSize;
-    return historyEntries.slice(start, start + pageSize);
-  }, [historyEntries, currentPageIndex, pageSize]);
+    return historyItems.slice(start, start + pageSize);
+  }, [historyItems, currentPageIndex, pageSize]);
 
   const preferencesComponent = (
     <CollectionPreferences
@@ -397,6 +425,68 @@ const AllocationHistoryWidget = ({ actions = {}, metadata = {}, toggleHelpPanel 
     }
   }, [pageSize, visibleColumns]);
 
+  const pendingColumnDefinitions = [
+    {
+      id: "title",
+      header: "Transfer",
+      cell: item => (
+        <SpaceBetween size="xxs">
+          <Box variant="strong">{item.title || `Transfer ${item.id}`}</Box>
+          <Box variant="awsui-key-label">
+            {item.potFrom ?? "Source"} → {item.potTo ?? "Destination"}
+          </Box>
+        </SpaceBetween>
+      ),
+    },
+    {
+      id: "amount",
+      header: "Amount",
+      cell: item => {
+        const numeric = Number(item.amount);
+        return Number.isFinite(numeric) ? formatCurrency(numeric) : "-";
+      },
+    },
+    {
+      id: "effectiveDate",
+      header: "Effective",
+      cell: item => item.metadata?.effectiveDate || item.effectiveDate || "Not set",
+    },
+    {
+      id: "due",
+      header: "Due",
+      cell: item => {
+        const rawDate = item.metadata?.effectiveDate || item.effectiveDate;
+        if (!rawDate) return "Not set";
+        const date = parseDateOnly(rawDate);
+        if (!date) return rawDate;
+        const today = parseDateOnly(new Date().toISOString().slice(0, 10));
+        const diffMs = date.getTime() - today.getTime();
+        const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+        if (diffDays === 0) return "Today";
+        if (diffDays === 1) return "Tomorrow";
+        if (diffDays === -1) return "Yesterday";
+        return diffDays > 1 ? `In ${diffDays} days` : `${Math.abs(diffDays)} days ago`;
+      },
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      cell: item => (
+        <Link
+          href="#"
+          onFollow={event => {
+            event.preventDefault();
+            if (onApply) {
+              onApply(item.id);
+            }
+          }}
+        >
+          Apply now
+        </Link>
+      ),
+    },
+  ];
+
   return (
     <BoardItem
       header={
@@ -410,15 +500,15 @@ const AllocationHistoryWidget = ({ actions = {}, metadata = {}, toggleHelpPanel 
               onChange={({ detail }) => setPeriod(detail.selectedOption)}
             />
           }
-          description="Audit-ready trail of completed reallocations."
+          description="Track pending and applied transfers."
         >
-          Allocation history
+          Transfers
         </Header>
       }
       settings={
         typeof actions.removeItem === "function" ? (
           <ButtonDropdown
-            ariaLabel="Allocation history settings"
+            ariaLabel="Transfers widget settings"
             variant="icon"
             items={[{ id: "remove", text: "Remove widget" }]}
             onItemClick={handleSettingsClick}
@@ -427,46 +517,131 @@ const AllocationHistoryWidget = ({ actions = {}, metadata = {}, toggleHelpPanel 
       }
       i18nStrings={boardItemI18nStrings}
     >
-      <SpaceBetween size="m">
-        <Table
-          items={pagedItems}
-          trackBy="id"
-          selectionType="single"
-          selectedItems={selectedItems}
-          onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
-          columnDefinitions={columnDefinitionsForTable}
-          resizableColumns
-          onColumnWidthsChange={handleColumnWidthsChange}
-          variant="embedded"
-          header={
-            <Header variant="h3" counter={`(${historyEntries.length})`}>
-              Historical transfers
-            </Header>
-          }
-          preferences={preferencesComponent}
-          pagination={paginationComponent}
-        />
-        {selected ? (
-          <ColumnLayout columns={2} variant="text-grid">
-            <SpaceBetween size="xxs">
-              <Box variant="awsui-key-label">Source balance (before → after)</Box>
-              <StatusIndicator type="info">
-                {formatCurrency(selected.before.source)} → {formatCurrency(selected.after.source)}
-              </StatusIndicator>
-            </SpaceBetween>
-            <SpaceBetween size="xxs">
-              <Box variant="awsui-key-label">Destination balance (before → after)</Box>
-              <StatusIndicator type="info">
-                {formatCurrency(selected.before.destination)} → {formatCurrency(selected.after.destination)}
-              </StatusIndicator>
-            </SpaceBetween>
-          </ColumnLayout>
-        ) : (
-          <Box variant="awsui-key-label">
-            Select a row to compare before/after balances.
-          </Box>
-        )}
-      </SpaceBetween>
+      <Tabs
+        activeTabId={activeTab}
+        onChange={({ detail }) => setActiveTab(detail.activeTabId)}
+        tabs={[
+          {
+            id: "pending",
+            label: `Pending transfers (${pending.length})`,
+            content: (
+              <Table
+                items={pending}
+                trackBy="id"
+                variant="embedded"
+                stripedRows
+                empty={<Box padding="m">No pending transfers.</Box>}
+                columnDefinitions={pendingColumnDefinitions}
+              />
+            ),
+          },
+          {
+            id: "applied",
+            label: `Historical transfers (${historyItems.length})`,
+            content: (
+              <SpaceBetween size="m">
+                <Table
+                  items={pagedItems}
+                  trackBy="id"
+                  selectionType="single"
+                  selectedItems={selectedItems}
+                  onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
+                  columnDefinitions={columnDefinitionsForTable}
+                  resizableColumns
+                  onColumnWidthsChange={handleColumnWidthsChange}
+                  variant="embedded"
+                  empty={<Box padding="m">No historical transfers available.</Box>}
+                  preferences={preferencesComponent}
+                  pagination={paginationComponent}
+                />
+                {selected ? (
+                  <SpaceBetween size="s">
+                    <ColumnLayout columns={2} variant="text-grid">
+                      <SpaceBetween size="xxs">
+                        <Box variant="awsui-key-label">Source balance (before → after)</Box>
+                        <StatusIndicator type="info">
+                          {formatCurrency(selected.before?.source ?? 0)} → {formatCurrency(selected.after?.source ?? 0)}
+                        </StatusIndicator>
+                      </SpaceBetween>
+                      <SpaceBetween size="xxs">
+                        <Box variant="awsui-key-label">Destination balance (before → after)</Box>
+                        <StatusIndicator type="info">
+                          {formatCurrency(selected.before?.destination ?? 0)} →{" "}
+                          {formatCurrency(selected.after?.destination ?? 0)}
+                        </StatusIndicator>
+                      </SpaceBetween>
+                    </ColumnLayout>
+                    <Table
+                      variant="embedded"
+                      compact
+                      wrapLines
+                      trackBy="id"
+                      columnDefinitions={[
+                        { id: "label", header: "Label", cell: item => item.label || "Evidence" },
+                        { id: "type", header: "Type", cell: item => item.type || "Not set" },
+                        {
+                          id: "attachments",
+                          header: "Attachments",
+                          cell: item =>
+                            item.attachments && item.attachments.length ? (
+                              <SpaceBetween size="xxs">
+                                {item.attachments.map((att, idx) => (
+                                  <Link
+                                    key={`${item.id}-att-${idx}`}
+                                    href={att.url || "#"}
+                                    onFollow={event => {
+                                      event.preventDefault();
+                                      openEvidenceAttachment(att);
+                                    }}
+                                    target="_blank"
+                                  >
+                                    {att.name || att.key || "Attachment"}
+                                  </Link>
+                                ))}
+                              </SpaceBetween>
+                            ) : (
+                              <Box variant="p">-</Box>
+                            ),
+                        },
+                      ]}
+                      items={
+                        (() => {
+                          const evidenceList =
+                            (selected.metadata && Array.isArray(selected.metadata.evidence)
+                              ? selected.metadata.evidence
+                              : Array.isArray(selected.evidence)
+                              ? selected.evidence
+                              : []) || [];
+                          return evidenceList.map((entry, idx) => {
+                            const isObject = entry && typeof entry === "object";
+                            return {
+                              id: `evidence-${idx}`,
+                              label: isObject ? entry.label : entry,
+                              type: isObject ? entry.type : null,
+                              attachments:
+                                isObject && Array.isArray(entry.attachments) ? entry.attachments : [],
+                            };
+                          });
+                        })()
+                      }
+                      empty={<Box variant="p">No evidence linked.</Box>}
+                    />
+                    {evidenceError ? (
+                      <Box variant="p" color="text-status-error">
+                        {evidenceError}
+                      </Box>
+                    ) : null}
+                  </SpaceBetween>
+                ) : (
+                  <Box variant="awsui-key-label">
+                    Select a row to compare before/after balances.
+                  </Box>
+                )}
+              </SpaceBetween>
+            ),
+          },
+        ]}
+      />
     </BoardItem>
   );
 };

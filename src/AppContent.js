@@ -26,6 +26,7 @@ import AdminConsoleIntroHelp from './helpPanelContents/adminConsoleIntroHelp.js'
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_STORED_MESSAGES = 24;
 const MAX_PROMPT_CHARS = 1000;
+const CONTENT_DENSITY_STORAGE_KEY = "iset-demo-content-density";
 
 const CONTEXT_FACTS = {
   'iset-application-assessment': `
@@ -471,6 +472,11 @@ const AppContent = ({ currentRole }) => {
   const [splitPanelSize, setSplitPanelSize] = useState(360); // State for SplitPanel size
   const [splitPanelPreferences, setSplitPanelPreferences] = useState({ position: 'side' }); // State for SplitPanel preferences
   const [availableItems, setAvailableItems] = useState([]); // State for available items (palette)
+  const [contentDensity, setContentDensity] = useState(() => {
+    if (typeof window === "undefined") return "comfortable";
+    const stored = window.localStorage?.getItem(CONTENT_DENSITY_STORAGE_KEY);
+    return stored === "compact" ? "compact" : "comfortable";
+  });
 
   // Notifications state (moved inside component)
   const [notifications, setNotifications] = useState([]);
@@ -522,6 +528,28 @@ const AppContent = ({ currentRole }) => {
       window.removeEventListener('storage', handleAuthChange);
     };
   }, [loadNotifications]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handler = (event) => {
+      const mode = event?.detail?.mode;
+      if (mode === "compact" || mode === "comfortable") {
+        setContentDensity(mode);
+      }
+    };
+    window.addEventListener("app:content-density", handler);
+    return () => window.removeEventListener("app:content-density", handler);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    try {
+      window.localStorage?.setItem(CONTENT_DENSITY_STORAGE_KEY, contentDensity);
+    } catch (_) {
+      // ignore persistence failures
+    }
+    return undefined;
+  }, [contentDensity]);
 
   const handleDismissNotification = useCallback(async (notificationId) => {
     try {
@@ -755,6 +783,7 @@ const AppContent = ({ currentRole }) => {
 
           </SpaceBetween>
         }
+        contentDensity={contentDensity}
       />
     </LocationProvider>
   );

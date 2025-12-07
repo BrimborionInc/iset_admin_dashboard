@@ -810,7 +810,7 @@ const applyFieldSideEffects = (draft, field, value) => {
       durationDays: durationValue,
       outcome: outcomeValue,
       cost: costValue,
-      potId: null,
+      potId: inheritedBudgetPot || null,
       fundingStream: inheritedFundingStream || null,
       notes: form.notes.trim() || null,
       noc: form.noc.trim() || null,

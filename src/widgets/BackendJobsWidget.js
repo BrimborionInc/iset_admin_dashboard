@@ -6,6 +6,8 @@ import boardItemI18nStrings from "./common";
 
 const DEFAULT_CONFIG = {
   reminderPollMinutes: 5,
+  allocationPollMinutes: 60,
+  allocationApplyHour: 1,
 };
 
 const BackendJobsWidget = ({ actions, metadata, toggleHelpPanel }) => {
@@ -17,9 +19,16 @@ const BackendJobsWidget = ({ actions, metadata, toggleHelpPanel }) => {
   const [success, setSuccess] = useState(null);
 
   const dirty = useMemo(() => {
-    const current = Number(edit.reminderPollMinutes) || DEFAULT_CONFIG.reminderPollMinutes;
-    return current !== (config?.reminderPollMinutes ?? DEFAULT_CONFIG.reminderPollMinutes);
-  }, [config?.reminderPollMinutes, edit.reminderPollMinutes]);
+    const currentReminder = Number(edit.reminderPollMinutes) || DEFAULT_CONFIG.reminderPollMinutes;
+    const currentAllocation = Number(edit.allocationPollMinutes) || DEFAULT_CONFIG.allocationPollMinutes;
+    const currentHour = Number(edit.allocationApplyHour);
+    return (
+      currentReminder !== (config?.reminderPollMinutes ?? DEFAULT_CONFIG.reminderPollMinutes) ||
+      currentAllocation !== (config?.allocationPollMinutes ?? DEFAULT_CONFIG.allocationPollMinutes) ||
+      (Number.isFinite(currentHour) ? currentHour : DEFAULT_CONFIG.allocationApplyHour) !==
+        (config?.allocationApplyHour ?? DEFAULT_CONFIG.allocationApplyHour)
+    );
+  }, [config, edit]);
 
   const loadConfig = useCallback(async () => {
     setLoading(true);
@@ -33,6 +42,8 @@ const BackendJobsWidget = ({ actions, metadata, toggleHelpPanel }) => {
       const data = await res.json().catch(() => ({}));
       const next = {
         reminderPollMinutes: data?.reminderPollMinutes ?? DEFAULT_CONFIG.reminderPollMinutes,
+        allocationPollMinutes: data?.allocationPollMinutes ?? DEFAULT_CONFIG.allocationPollMinutes,
+        allocationApplyHour: data?.allocationApplyHour ?? DEFAULT_CONFIG.allocationApplyHour,
       };
       setConfig(next);
       setEdit(next);
@@ -54,6 +65,11 @@ const BackendJobsWidget = ({ actions, metadata, toggleHelpPanel }) => {
     try {
       const body = {
         reminderPollMinutes: Number(edit.reminderPollMinutes) || DEFAULT_CONFIG.reminderPollMinutes,
+        allocationPollMinutes: Number(edit.allocationPollMinutes) || DEFAULT_CONFIG.allocationPollMinutes,
+        allocationApplyHour:
+          Number.isFinite(Number(edit.allocationApplyHour))
+            ? Number(edit.allocationApplyHour)
+            : DEFAULT_CONFIG.allocationApplyHour,
       };
       const res = await apiFetch("/api/config/runtime/backend-jobs", {
         method: "PATCH",
@@ -160,6 +176,26 @@ const BackendJobsWidget = ({ actions, metadata, toggleHelpPanel }) => {
               type="number"
               value={String(edit.reminderPollMinutes ?? "")}
               onChange={({ detail }) => setEdit({ ...edit, reminderPollMinutes: detail.value })}
+            />
+          </FormField>
+          <FormField
+            label="Allocation apply poll interval (minutes)"
+            description="How often to auto-apply approved transfers scheduled for their effective date."
+          >
+            <Input
+              type="number"
+              value={String(edit.allocationPollMinutes ?? "")}
+              onChange={({ detail }) => setEdit({ ...edit, allocationPollMinutes: detail.value })}
+            />
+          </FormField>
+          <FormField
+            label="Default apply hour (24h)"
+            description="Hour of day to schedule future-dated transfers (e.g., 1 for 1:00 AM)."
+          >
+            <Input
+              type="number"
+              value={String(edit.allocationApplyHour ?? "")}
+              onChange={({ detail }) => setEdit({ ...edit, allocationApplyHour: detail.value })}
             />
           </FormField>
         </SpaceBetween>

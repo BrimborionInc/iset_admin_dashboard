@@ -31,7 +31,7 @@ Configurable properties:
 Example component JSON:
 ```json
 {
-  "key": "applicant_signature",
+  "key": "legal_submission_sig",
   "type": "signature-ack",
   "label": { "en": "Type your full name to acknowledge", "fr": "Tapez votre nom complet pour confirmer" },
   "actionLabel": { "en": "Sign Now", "fr": "Signer" },

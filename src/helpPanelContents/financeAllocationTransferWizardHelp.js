@@ -6,36 +6,37 @@ const FinanceAllocationTransferWizardHelp = () => (
     <Box>
       <strong>Workflow</strong>
       <p>
-        Use the transfer wizard to propose a reallocation between budget pots. Capture the source and destination
-        context, amount, effective date, and the justification the approvals chain will review.
+        Use the transfer wizard to propose a reallocation between budget pots. Capture source/destination, amount,
+        required effective date, and a clear justification before routing to approvals.
       </p>
     </Box>
     <Box>
       <strong>Policy checks</strong>
       <p>
-        As you complete the form the widget calculates key guardrails: available balance, admin flat-rate impact, and
-        forecast variance. Address warnings before submitting to keep processing smooth.
+        Live guardrails show available balance, admin cap impact, and forecast variance. Amount must be positive and
+        within source availability; effective date is mandatory. Inline validation highlights what to fix.
       </p>
     </Box>
     <Box>
       <strong>Evidence &amp; approvals</strong>
       <p>
-        Attach supporting documents (board minutes, ESDC approvals) and tag the request so the pending approvals queue
-        can route it to the right approvers.
+        Add evidence entries (label/type) and upload supporting files. Submitted requests go to Pending approvals. Once
+        approved, effective dates in the past/today auto-apply; future dates go to Pending transfers for scheduled
+        apply.
       </p>
     </Box>
     <Box>
       <strong>Next steps</strong>
       <ul>
-        <li>Submit the transfer to trigger the approval workflow.</li>
-        <li>Track progress in the Approvals queue and Timeline widgets.</li>
-        <li>Review updated balances in Budgets once the transfer is committed.</li>
+        <li>Submit to trigger approvals; review in Pending approvals.</li>
+        <li>After approval: if effective date is future, apply from Pending transfers; otherwise it applies immediately.</li>
+        <li>Review applied results and evidence in Transfers (Historical) and Budgets pot detail.</li>
       </ul>
     </Box>
   </SpaceBetween>
 );
 
 FinanceAllocationTransferWizardHelp.aiContext =
-  "Explain the allocations transfer wizard: required fields, live policy checks, evidence attachments, and how submitted requests flow into approvals and budgets.";
+  "Transfer wizard: fields (source/dest pot, amount>0 within availability, required effective date, justification, tags), live guardrails (availability, admin cap, forecast variance), evidence list with uploads. Submit sends to approvals; approved items auto-apply if effective date <= today, otherwise go to pending transfers for scheduled/manual apply. Applied transfers update budgets and retain evidence.";
 
 export default FinanceAllocationTransferWizardHelp;

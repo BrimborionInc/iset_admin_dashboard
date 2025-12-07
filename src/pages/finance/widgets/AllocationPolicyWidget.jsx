@@ -24,33 +24,6 @@ const PAGE_SIZE_OPTIONS = [
 ];
 const ALL_COLUMN_IDS = ["summary", "category", "risk", "action", "owner"];
 
-const policyIssues = [
-  {
-    id: "POL-ADM-001",
-    category: "Administration cap",
-    risk: "High",
-    summary: "Women in Trades Cohorts admin flat-rate projected at 18.9%.",
-    action: "Attach ESDC waiver reference before submission.",
-    owner: "Finance",
-  },
-  {
-    id: "POL-CAP-004",
-    category: "Capital restriction",
-    risk: "Medium",
-    summary: "Capacity & Infrastructure requires pre-approval for capital draws.",
-    action: "Include capital approval memo or retag to eligible operating pot.",
-    owner: "Program manager",
-  },
-  {
-    id: "POL-SOD-002",
-    category: "Segregation of duties",
-    risk: "Medium",
-    summary: "Requester and approver roles overlap for TRF-24032.",
-    action: "Reassign approver or add secondary reviewer.",
-    owner: "Executive",
-  },
-];
-
 const categoryOptions = [
   { label: "Administration cap", value: "Administration cap" },
   { label: "Capital restriction", value: "Capital restriction" },
@@ -151,7 +124,12 @@ const persistPreferences = ({ pageSize, visibleColumns }) => {
   }
 };
 
-const AllocationPolicyWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
+const AllocationPolicyWidget = ({
+  actions = {},
+  metadata = {},
+  toggleHelpPanel,
+  items = [],
+}) => {
   const initialPrefsRef = useRef(loadStoredPreferences());
   const initialPrefs = initialPrefsRef.current;
   const [categoryFilter, setCategoryFilter] = useState([]);
@@ -184,13 +162,15 @@ const AllocationPolicyWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
       </Link>
     ) : undefined;
 
+  const policyItems = Array.isArray(items) ? items : [];
+
   const selectedCategories = categoryFilter.map(option => option.value);
   const filteredItems = useMemo(() => {
     if (!selectedCategories.length) {
-      return policyIssues;
+      return policyItems;
     }
-    return policyIssues.filter(issue => selectedCategories.includes(issue.category));
-  }, [selectedCategories]);
+    return policyItems.filter(issue => selectedCategories.includes(issue.category));
+  }, [policyItems, selectedCategories]);
 
   const baseColumnDefinitions = useMemo(
     () => [
@@ -199,15 +179,15 @@ const AllocationPolicyWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
         header: "Policy warning",
         cell: item => (
           <SpaceBetween size="xxs">
-            <Box variant="strong">{item.summary}</Box>
-            <Box variant="awsui-key-label">{item.id}</Box>
+            <Box variant="strong">{item.summary ?? "Unspecified policy warning"}</Box>
+            <Box variant="awsui-key-label">{item.id ?? "N/A"}</Box>
           </SpaceBetween>
         ),
       },
       {
         id: "category",
         header: "Category",
-        cell: item => item.category,
+        cell: item => item.category ?? "-",
       },
       {
         id: "risk",
@@ -216,19 +196,19 @@ const AllocationPolicyWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
           <StatusIndicator
             type={item.risk === "High" ? "error" : item.risk === "Medium" ? "warning" : "info"}
           >
-            {item.risk}
+            {item.risk ?? "Unknown"}
           </StatusIndicator>
         ),
       },
       {
         id: "action",
         header: "Required action",
-        cell: item => item.action,
+        cell: item => item.action ?? "-",
       },
       {
         id: "owner",
         header: "Owner",
-        cell: item => item.owner,
+        cell: item => item.owner ?? "-",
       },
     ],
     []
