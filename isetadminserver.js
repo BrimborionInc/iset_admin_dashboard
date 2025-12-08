@@ -50,6 +50,34 @@ const CHECKLIST_KEY = 'checklist.compliance.iset';
 
 const CHECKLIST_CACHE_TTL_MS = 30 * 1000;
 let checklistCache = { ts: 0, data: null };
+let hasAssessmentBudgetPotColumn = null;
+
+async function ensureAssessmentBudgetPotColumn(executor = pool) {
+  if (!executor || typeof executor.query !== 'function') return false;
+  if (hasAssessmentBudgetPotColumn === true) return true;
+  try {
+    const [rows] = await executor.query(
+      `SELECT COUNT(*) AS cnt
+         FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'iset_case_assessment'
+          AND column_name = 'intervention_budget_pot_id'
+        LIMIT 1`
+    );
+    const exists = Array.isArray(rows) && rows.length && Number(rows[0].cnt) > 0;
+    if (exists) {
+      hasAssessmentBudgetPotColumn = true;
+      return true;
+    }
+    // Do not mutate schema here; simply mark missing so callers can fall back or raise a clear error.
+    hasAssessmentBudgetPotColumn = false;
+    return false;
+  } catch (err) {
+    console.warn('[assessment] failed to inspect assessment table columns:', err?.message || err);
+  }
+  hasAssessmentBudgetPotColumn = false;
+  return false;
+}
 
 async function loadChecklistConfig() {
   const now = Date.now();
@@ -2956,10 +2984,22 @@ async function fetchInterventionCodeLabel(connection, code) {
 async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   caseId,
   caseRow,
-  approvalUserId
+  approvalUserId,
+  budgetPotId
 }) {
   if (!Number.isInteger(caseId) || caseId <= 0) {
     return { createdPlan: false, createdIntervention: false };
+  }
+
+  const budgetPotIdNumeric = Number.isFinite(Number(budgetPotId)) && Number(budgetPotId) > 0
+    ? Number(budgetPotId)
+    : null;
+  let validatedBudgetPotId = budgetPotIdNumeric;
+  if (validatedBudgetPotId) {
+    const [[potExists] = []] = await connection.query('SELECT id FROM budget_pot WHERE id = ? LIMIT 1', [validatedBudgetPotId]);
+    if (!potExists) {
+      validatedBudgetPotId = null;
+    }
   }
 
   const [[assessmentRow]] = await connection.query(
@@ -2968,6 +3008,16 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   );
   if (!assessmentRow) {
     return { createdPlan: false, createdIntervention: false };
+  }
+
+  if (!validatedBudgetPotId) {
+    const storedBudgetPotId =
+      Number.isFinite(Number(assessmentRow.intervention_budget_pot_id)) && Number(assessmentRow.intervention_budget_pot_id) > 0
+        ? Number(assessmentRow.intervention_budget_pot_id)
+        : null;
+    if (storedBudgetPotId) {
+      validatedBudgetPotId = storedBudgetPotId;
+    }
   }
 
   const codeRaw = assessmentRow.intervention_code;
@@ -3189,7 +3239,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     generatedAt: now.toISOString(),
     agreementNumber,
     fundingStream,
-    budgetPot: null,
+    budgetPot: validatedBudgetPotId || null,
     assessmentSummary: overview || null,
     recommendation: recommendation || null,
     programName: programName || null,
@@ -3274,7 +3324,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       planName,
       planStatus,
       agreementNumber || null,
-      null,
+      validatedBudgetPotId || null,
       fundingStream || null,
       eiClaimantCode,
       prevEmploymentCode,
@@ -3447,6 +3497,8 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     childcareNeed: childcareNeed || null,
     childcareFunding: childcareFunding || null,
     cost: computedCost || null,
+    potId: validatedBudgetPotId || null,
+    budgetPotId: validatedBudgetPotId || null,
     compliance: { ilmp: 'pending', finance: 'pending' },
     generatedAt: now.toISOString(),
   });
@@ -3464,7 +3516,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     interventionRelatedNOCVersion: nocVersion || null,
   });
 
-  await connection.query(
+  const [interventionInsert] = await connection.query(
     `INSERT INTO iset_case_intervention
        (case_id,
         action_plan_id,
@@ -3508,6 +3560,20 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       ownerStaffProfileId || null,
     ]
   );
+
+  const interventionId = interventionInsert?.insertId || null;
+
+  if (validatedBudgetPotId && interventionId && budgetAmount !== null) {
+    await upsertFinanceTransactionForIntervention({
+      caseId,
+      interventionId,
+      potId: validatedBudgetPotId,
+      amount: budgetAmount,
+      status: 'submitted',
+      transactionDate: startDate || null,
+      connection,
+    });
+  }
 
   return {
     createdPlan: true,
@@ -18919,8 +18985,15 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       return code;
     };
 
-    const agreementNumber = derivedAgreementNumber;
-    const budgetPot = typeof req.body.budgetPot === 'string' ? req.body.budgetPot.trim() || null : null;
+    const budgetPotRaw = typeof req.body.budgetPot === 'string' ? req.body.budgetPot.trim() || null : req.body.budgetPot || null;
+    const parsedBudgetPotId = budgetPotRaw === null ? null : Number.isFinite(Number(budgetPotRaw)) ? Number(budgetPotRaw) : null;
+    if (parsedBudgetPotId !== null) {
+      const [[potExists]] = await connection.query('SELECT id FROM budget_pot WHERE id = ? LIMIT 1', [parsedBudgetPotId]);
+      if (!potExists) {
+        await connection.rollback();
+        return res.status(422).json({ error: 'budget_pot_not_found', message: 'Budget pot is required and must exist.' });
+      }
+    }
     const fundingStream = (() => {
       if (typeof req.body.fundingStream === 'string') {
         const val = req.body.fundingStream.trim();
@@ -18940,6 +19013,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       return;
     }
     const derivedAgreementNumber = deriveAgreementNumberFromFundingStream(fundingStream);
+    const agreementNumber = derivedAgreementNumber;
 
     const educationLevel = normaliseCode(req.body.educationLevel, CODE_SETS.educationLevel);
     const educationProvince = educationLevel
@@ -18995,7 +19069,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     const esdcPayload = {
       agreementNumber: derivedAgreementNumber,
       fundingStream,
-      budgetPot,
+      budgetPot: parsedBudgetPotId,
       educationLevel,
       educationProvince,
       socialAssistanceRecipient,
@@ -19018,7 +19092,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
         trimmedName || null,
         planStatus,
         derivedAgreementNumber,
-        budgetPot,
+        parsedBudgetPotId,
         fundingStream,
         Number.isInteger(Number(eiClaimantCode)) ? Number(eiClaimantCode) : eiClaimantCode,
         Number.isInteger(Number(prevEmployment)) ? Number(prevEmployment) : prevEmployment,
@@ -19491,6 +19565,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         amount: amountForFinance,
         status: 'submitted',
         transactionDate: startDateValue || null,
+        connection: null,
       });
     }
     await markIlmpNeedsReviewForCase(planRow.case_id);
@@ -19962,6 +20037,15 @@ app.patch('/api/interventions/:id', async (req, res) => {
 
     const updatedRow = await fetchInterventionWithCase(interventionId);
     const payload = mapInterventionRow(updatedRow);
+
+    // If intervention is activated and parent plan is still draft, activate the plan
+    if (planRow && (statusValue === 'in_progress' || statusValue === 'active')) {
+      const planStatusLower = String(planRow.status || '').toLowerCase();
+      if (planStatusLower === 'draft') {
+        await pool.query('UPDATE iset_case_action_plan SET status = ?, activated_at = NOW(), updated_at = NOW() WHERE id = ?', ['active', planId]);
+        await recomputeCaseStatus(planRow.case_id, null, { allowReopenFinal: true });
+      }
+    }
     const amountForFinance =
       Number.isFinite(actualAmountValue) && actualAmountValue !== null
         ? actualAmountValue
@@ -19982,6 +20066,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
         amount: amountForFinance,
         status: 'submitted',
         transactionDate: payload.startDate || null,
+        connection: null,
       });
     }
     await markIlmpNeedsReviewForCase(interventionRow.case_id || planRow?.case_id || null);
@@ -20201,13 +20286,6 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
     }
 
     const status = normaliseInterventionStatus(interventionRow.status);
-    if (status === 'planned') {
-      return res.status(409).json({
-        error: 'invalid_status',
-        detail: 'cannot_close_planned_intervention',
-        message: 'Activate the intervention before closing it.'
-      });
-    }
     if (status !== 'planned') {
       return res.status(409).json({
         error: 'invalid_status',
@@ -20216,7 +20294,10 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
       });
     }
 
+    // Remove linked finance transactions first so FK cascade (if any) cannot null out the link
+    await pool.query('DELETE FROM finance_transaction WHERE case_intervention_id = ?', [interventionId]);
     await pool.query('DELETE FROM iset_case_intervention WHERE id = ? LIMIT 1', [interventionId]);
+    await refreshFinancePotSums();
     if (interventionRow.action_plan_id) {
       await pool.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [interventionRow.action_plan_id]);
     }
@@ -20681,6 +20762,15 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       if (req.body.budgetPot === null) return null;
       return typeof req.body.budgetPot === 'string' ? req.body.budgetPot.trim() : req.body.budgetPot;
     })();
+    const parsedBudgetPotId = budgetPot === null || typeof budgetPot === 'undefined'
+      ? null
+      : Number.isFinite(Number(budgetPot)) ? Number(budgetPot) : null;
+    if (parsedBudgetPotId !== null) {
+      const [[potExists]] = await pool.query('SELECT id FROM budget_pot WHERE id = ? LIMIT 1', [parsedBudgetPotId]);
+      if (!potExists) {
+        return res.status(422).json({ error: 'budget_pot_not_found', message: 'Budget pot not found.' });
+      }
+    }
     const fundingStream = (() => {
       if (typeof req.body.fundingStream === 'string') {
         const val = req.body.fundingStream.trim();
@@ -20799,7 +20889,7 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       ...esdcExisting,
       agreementNumber,
       fundingStream,
-      budgetPot,
+      budgetPot: parsedBudgetPotId,
       educationLevel,
       educationProvince,
       socialAssistanceRecipient,
@@ -20817,7 +20907,7 @@ app.patch('/api/action-plans/:id', async (req, res) => {
     setParts.push('funding_stream = ?');
     values.push(fundingStream || null);
     setParts.push('budget_pot = ?');
-    values.push(budgetPot || null);
+    values.push(parsedBudgetPotId || null);
     setParts.push('esdc_action_plan_json = ?');
     values.push(JSON.stringify(esdcPayload));
     setParts.push('updated_at = NOW()');
@@ -20825,6 +20915,44 @@ app.patch('/api/action-plans/:id', async (req, res) => {
 
     const sql = `UPDATE iset_case_action_plan SET ${setParts.join(', ')} WHERE id = ?`;
     await pool.query(sql, values);
+
+    // If budget pot changed, migrate interventions and finance transactions
+    const oldBudgetPotId = planRow.budget_pot || null;
+    const newBudgetPotId = parsedBudgetPotId || null;
+    const budgetPotChanged = oldBudgetPotId !== newBudgetPotId;
+    if (budgetPotChanged) {
+      try {
+        await pool.query(
+          `UPDATE iset_case_intervention
+              SET metadata_json = JSON_SET(COALESCE(metadata_json, JSON_OBJECT()),
+                                           '$.potId', ?,
+                                           '$.budgetPotId', ?,
+                                           '$.budgetPot', ?),
+                  updated_at = NOW()
+            WHERE action_plan_id = ?`,
+          [newBudgetPotId, newBudgetPotId, newBudgetPotId, planId]
+        );
+        if (newBudgetPotId) {
+          await pool.query(
+            `UPDATE finance_transaction ft
+              JOIN iset_case_intervention i ON i.id = ft.case_intervention_id
+               SET ft.budget_pot_id = ?, ft.updated_at = NOW()
+             WHERE i.action_plan_id = ?`,
+            [newBudgetPotId, planId]
+          );
+        } else {
+          await pool.query(
+            `DELETE ft FROM finance_transaction ft
+              JOIN iset_case_intervention i ON i.id = ft.case_intervention_id
+             WHERE i.action_plan_id = ?`,
+            [planId]
+          );
+        }
+        await refreshFinancePotSums();
+      } catch (migrateErr) {
+        console.warn('[action-plan] failed to migrate interventions to new pot', migrateErr?.message || migrateErr);
+      }
+    }
 
     const updatedRow = await fetchActionPlanWithCase(planId);
     await markIlmpNeedsReviewForCase(planRow.case_id);
@@ -20841,6 +20969,7 @@ app.get('/api/cases/:id', async (req, res) => {
   const parsedStaffProfileId = staffProfileIdRaw != null ? Number.parseInt(staffProfileIdRaw, 10) : null;
   const conflictJoinStaffId = Number.isFinite(parsedStaffProfileId) ? parsedStaffProfileId : 0;
   try {
+    await ensureAssessmentBudgetPotColumn();
     // Fetch case core details + assessment snapshot
     const baseSql = `
       SELECT
@@ -20885,6 +21014,7 @@ app.get('/api/cases/:id', async (req, res) => {
         ca.intervention_cost_total AS assessment_intervention_cost_total,
         ca.intervention_related_noc AS assessment_intervention_related_noc,
         ca.intervention_related_noc_version AS assessment_intervention_related_noc_version,
+        ca.intervention_budget_pot_id AS assessment_intervention_pot_id,
         ca.childcare_need AS assessment_childcare_need,
         ca.childcare_funding_details AS assessment_childcare_funding_details,
         ca.action_plan_result_code AS assessment_action_plan_result_code,
@@ -23404,12 +23534,13 @@ function requireFinanceRole(req, res) {
   return { denied: true };
 }
 
-async function refreshFinancePotSums() {
+async function refreshFinancePotSums(connection = null) {
+  const runner = connection || pool;
   try {
     // Reset committed/actual so pots without transactions don't retain stale values
-    await pool.query('UPDATE budget_pot SET committed_amount = 0, actual_amount = 0');
+    await runner.query('UPDATE budget_pot SET committed_amount = 0, actual_amount = 0');
     // Apply sums from finance transactions to leaf pots
-    await pool.query(
+    await runner.query(
       `UPDATE budget_pot bp
        JOIN (
          SELECT budget_pot_id,
@@ -23422,7 +23553,7 @@ async function refreshFinancePotSums() {
            bp.actual_amount = t.actual`
     );
     // Roll up committed/actual to parents (single pass; covers current depth)
-    await pool.query(
+    await runner.query(
       `UPDATE budget_pot p
        JOIN (
          SELECT parent_id,
@@ -23440,35 +23571,36 @@ async function refreshFinancePotSums() {
   }
 }
 
-async function upsertFinanceTransactionForIntervention({ caseId, interventionId, potId, amount, status = 'submitted', transactionDate = null }) {
+async function upsertFinanceTransactionForIntervention({ caseId, interventionId, potId, amount, status = 'submitted', transactionDate = null, connection = null }) {
+  const runner = connection || pool;
   try {
     const potNumeric = Number(potId);
     if (!Number.isFinite(potNumeric)) return;
-    const [[potExists] = []] = await pool.query('SELECT id FROM budget_pot WHERE id = ? LIMIT 1', [potNumeric]);
+    const [[potExists] = []] = await runner.query('SELECT id FROM budget_pot WHERE id = ? LIMIT 1', [potNumeric]);
     if (!potExists) return;
     const amt = Number(amount);
     const normalizedAmount = Number.isFinite(amt) ? amt : 0;
     const txDate = transactionDate || null;
-    const [[existing] = []] = await pool.query(
+    const [[existing] = []] = await runner.query(
       'SELECT id FROM finance_transaction WHERE case_intervention_id = ? LIMIT 1',
       [interventionId]
     );
     if (existing) {
-      await pool.query(
+      await runner.query(
         `UPDATE finance_transaction
          SET budget_pot_id = ?, amount = ?, status = ?, transaction_date = ?, updated_at = NOW()
          WHERE id = ?`,
         [potNumeric, normalizedAmount, status, txDate, existing.id]
       );
     } else {
-      await pool.query(
+      await runner.query(
         `INSERT INTO finance_transaction
            (case_id, case_intervention_id, budget_pot_id, amount, currency, status, transaction_date, created_at, updated_at)
          VALUES (?, ?, ?, ?, 'CAD', ?, ?, NOW(), NOW())`,
         [caseId, interventionId, potNumeric, normalizedAmount, status, txDate]
       );
     }
-    await refreshFinancePotSums();
+    await refreshFinancePotSums(connection);
   } catch (err) {
     console.warn('[finance] upsert transaction failed', err?.message || err);
   }
@@ -24541,6 +24673,7 @@ app.post('/api/finance/budget-snapshots/:id/restore-draft', async (req, res) => 
   if (!Number.isFinite(snapshotId)) {
     return res.status(400).json({ error: 'invalid_snapshot_id' });
   }
+  const body = req.body || {};
   try {
     const [[snapshot]] = await pool.query(
       `SELECT id, label, notes, agreement_code, fiscal_year FROM budget_snapshot WHERE id = ? LIMIT 1`,
@@ -24569,11 +24702,14 @@ app.post('/api/finance/budget-snapshots/:id/restore-draft', async (req, res) => 
       metadata: p.metadata ? safeJsonParse(p.metadata, {}) : {},
       status: 'draft',
     }));
+    const payloadFiscalYear = typeof body.fiscalYear === 'string' && body.fiscalYear.trim()
+      ? body.fiscalYear.trim()
+      : snapshot.fiscal_year || null;
     const label = `${snapshot.label} (restored)`;
     await pool.query(
       `INSERT INTO budget_pot_draft (label, notes, payload_json, created_by_user_id, created_at)
        VALUES (?, ?, ?, NULL, NOW())`,
-      [label, snapshot.notes || null, JSON.stringify({ pots: payloadPots })]
+      [label, snapshot.notes || null, JSON.stringify({ fiscalYear: payloadFiscalYear, pots: payloadPots })]
     );
     const [[draft]] = await pool.query(
       `SELECT id, label, notes, created_at AS createdAt FROM budget_pot_draft WHERE label = ? ORDER BY id DESC LIMIT 1`,
@@ -24682,6 +24818,26 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
   if (!Number.isFinite(draftId)) {
     return res.status(400).json({ error: 'invalid_draft_id' });
   }
+  const body = req.body || {};
+
+  const normalizeFiscalYear = fy => {
+    if (typeof fy !== 'string') return null;
+    const trimmed = fy.trim();
+    const match = /^(\d{4})-(\d{4})$/.exec(trimmed);
+    if (!match) return null;
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end !== start + 1) return null;
+    return trimmed;
+  };
+
+  const replaceYear = (text, targetYear) => {
+    if (typeof text !== 'string') return text;
+    const yearPattern = /\b(19|20)\d{2}\b/;
+    if (!yearPattern.test(text)) return text;
+    return text.replace(yearPattern, String(targetYear));
+  };
+
   try {
     const [[draft]] = await pool.query(
       'SELECT id, label, payload_json, created_at FROM budget_pot_draft WHERE id = ? LIMIT 1',
@@ -24694,6 +24850,12 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
     if (!payload || !Array.isArray(payload.pots) || !payload.pots.length) {
       return res.status(400).json({ error: 'invalid_draft_payload' });
     }
+    const draftFiscalYear = normalizeFiscalYear(body.fiscalYear || payload.fiscalYear);
+    if (!draftFiscalYear) {
+      return res.status(400).json({ error: 'missing_fiscal_year' });
+    }
+    const targetYear = Number(draftFiscalYear.slice(0, 4));
+    const autoIncrementYear = Boolean(body.autoIncrementYear);
 
     const conn = await pool.getConnection();
     try {
@@ -24757,6 +24919,13 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
         const actual = Number(next.actual) || 0;
         const forecast = Number(next.forecast ?? adjusted ?? approved) || 0;
         const adminShare = Number(next.adminShare) || 0;
+        const potFiscalYear = normalizeFiscalYear(next.fiscalYear) || draftFiscalYear;
+        let name = next.name || '';
+        let code = next.code || '';
+        if (autoIncrementYear && targetYear) {
+          name = replaceYear(name, targetYear);
+          code = replaceYear(code, targetYear);
+        }
         const meta = {
           ...(typeof next.metadata === 'object' && next.metadata !== null ? next.metadata : {}),
           ...(next.nodeType ? { nodeType: next.nodeType } : {}),
@@ -24768,9 +24937,9 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
           Number.isFinite(idNum) ? idNum : null,
           Number.isFinite(parentIdNum) ? parentIdNum : null,
           next.agreementCode || null,
-          next.fiscalYear || null,
-          next.name || '',
-          next.code || '',
+          potFiscalYear,
+          name,
+          code,
           next.nodeType || 'budget',
           next.owner || null,
           next.isAdminCap ? 1 : 0,
@@ -24845,6 +25014,87 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
   } catch (err) {
     console.error('[finance] publish draft error', err);
     res.status(500).json({ error: 'failed_to_publish_draft' });
+  }
+});
+
+// --- Finance: Spend curve configuration ---
+
+app.get('/api/finance/spend-curve', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const fiscalYear = typeof req.query.fiscalYear === 'string' && req.query.fiscalYear.trim()
+    ? req.query.fiscalYear.trim()
+    : null;
+  const targetYear = fiscalYear || 'default';
+  try {
+    const [rows] = await pool.query(
+      'SELECT fiscal_year, month_num, pct_of_budget, rationale FROM budget_spend_curve WHERE fiscal_year IN (?, "default")',
+      [targetYear]
+    );
+    const forYear = rows.filter(r => r.fiscal_year === targetYear);
+    const defaults = rows.filter(r => r.fiscal_year === 'default');
+    const source = forYear.length ? forYear : defaults;
+    const response = source
+      .map(r => ({
+        fiscalYear: r.fiscal_year,
+        month: Number(r.month_num),
+        pct: Number(r.pct_of_budget),
+        rationale: r.rationale || null,
+      }))
+      .sort((a, b) => a.month - b.month);
+    res.status(200).json({ fiscalYear: targetYear, entries: response });
+  } catch (err) {
+    console.error('[finance] failed to load spend curve', err);
+    res.status(500).json({ error: 'failed_to_load_spend_curve' });
+  }
+});
+
+app.put('/api/finance/spend-curve', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const body = req.body || {};
+  const fiscalYear = typeof body.fiscalYear === 'string' && body.fiscalYear.trim()
+    ? body.fiscalYear.trim()
+    : null;
+  if (!fiscalYear) {
+    return res.status(400).json({ error: 'missing_fiscal_year' });
+  }
+  if (!Array.isArray(body.entries) || !body.entries.length) {
+    return res.status(400).json({ error: 'missing_entries' });
+  }
+  const entries = body.entries
+    .map(entry => ({
+      month: Number(entry.month),
+      pct: Number(entry.pct),
+      rationale: typeof entry.rationale === 'string' ? entry.rationale : null,
+    }))
+    .filter(entry => Number.isInteger(entry.month) && entry.month >= 1 && entry.month <= 12 && Number.isFinite(entry.pct));
+  if (!entries.length) {
+    return res.status(400).json({ error: 'invalid_entries' });
+  }
+  const sumPct = entries.reduce((acc, entry) => acc + entry.pct, 0);
+  if (sumPct < 99 || sumPct > 101) {
+    return res.status(400).json({ error: 'invalid_total_pct', message: 'Percentages must sum to ~100' });
+  }
+  try {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.query('DELETE FROM budget_spend_curve WHERE fiscal_year = ?', [fiscalYear]);
+      const values = entries.map(entry => [fiscalYear, entry.month, entry.pct, entry.rationale]);
+      await conn.query(
+        'INSERT INTO budget_spend_curve (fiscal_year, month_num, pct_of_budget, rationale) VALUES ?',
+        [values]
+      );
+      await conn.commit();
+      res.status(200).json({ success: true, fiscalYear });
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+  } catch (err) {
+    console.error('[finance] failed to save spend curve', err);
+    res.status(500).json({ error: 'failed_to_save_spend_curve' });
   }
 });
 
@@ -25665,6 +25915,7 @@ app.post('/api/conflict-declaration/pdf', async (req, res) => {
   const selectionBorderColor = isConflict ? '#f97316' : '#16a34a';
   const statusClass = isConflict ? 'status-warning' : 'status-success';
   const logoDataUri = getConsentLogoDataUri();
+  const signatureBoxClass = signed ? 'signature-box' : 'signature-box unsigned';
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -26759,6 +27010,8 @@ app.put('/api/cases/:id', async (req, res) => {
   let shouldMarkSubmissionNeedsReview = false;
   let shouldRecomputeCaseStatus = false;
   let autoPlanSuggestion = null;
+  let assessmentBudgetPotId = undefined;
+  let assessmentBudgetPotProvided = false;
   let previousConflictDeclarationSigned = null;
   let conflictDeclarationJustSigned = false;
   let conflictDeclarationSignedAt = null;
@@ -26766,6 +27019,7 @@ app.put('/api/cases/:id', async (req, res) => {
   try {
     conn = await pool.getConnection();
     await conn.beginTransaction();
+    await ensureAssessmentBudgetPotColumn(conn);
 
   const [[existingCase]] = await conn.query(
       `SELECT c.status, c.application_id, c.client_id, c.assigned_to_user_id, c.case_context_json, a.row_version,
@@ -26915,6 +27169,8 @@ app.put('/api/cases/:id', async (req, res) => {
       'assessment_intervention_cost_total',
       'assessment_intervention_related_noc',
       'assessment_intervention_related_noc_version',
+      'assessment_intervention_pot_id',
+      'assessment_budget_pot_id',
       'assessment_childcare_need',
       'assessment_childcare_funding_details',
       'assessment_action_plan_result_code',
@@ -26927,6 +27183,18 @@ app.put('/api/cases/:id', async (req, res) => {
     const hasCaseContextPayload =
       Object.prototype.hasOwnProperty.call(body, 'caseContext') ||
       Object.prototype.hasOwnProperty.call(body, 'case_context');
+
+    const rawAssessmentPotId =
+      body.assessment_intervention_pot_id ??
+      body.assessment_budget_pot_id ??
+      body.interventionPotId ??
+      body.potId ??
+      undefined;
+    if (typeof rawAssessmentPotId !== 'undefined') {
+      assessmentBudgetPotProvided = true;
+      const parsedPotId = toNumericRange(rawAssessmentPotId, { min: 1, max: null, stripNonDigits: true });
+      assessmentBudgetPotId = typeof parsedPotId === 'undefined' ? null : parsedPotId;
+    }
 
     if (hasAssessmentPayload) {
       const insertColumns = ['case_id'];
@@ -26968,6 +27236,7 @@ app.put('/api/cases/:id', async (req, res) => {
       add('childcare_funding_details', toNull(body.assessment_childcare_funding_details));
       add('action_plan_result_code', toNull(body.assessment_action_plan_result_code));
       add('action_plan_result_date', toNull(body.assessment_action_plan_result_date));
+      add('intervention_budget_pot_id', assessmentBudgetPotProvided ? assessmentBudgetPotId : undefined);
       if (updateAssignments.length) {
         const placeholders = insertColumns.map(() => '?').join(', ');
         const updateClause = updateAssignments.join(', ');
@@ -27067,6 +27336,7 @@ app.put('/api/cases/:id', async (req, res) => {
         caseId,
         caseRow: existingCase,
         approvalUserId: Number.isFinite(approvalUserId) ? approvalUserId : null,
+        budgetPotId: assessmentBudgetPotId,
       });
       if (autoPlanSuggestion.createdPlan || autoPlanSuggestion.createdIntervention) {
         shouldRecomputeCaseStatus = true;

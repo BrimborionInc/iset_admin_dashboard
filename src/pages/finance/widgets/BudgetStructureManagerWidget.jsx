@@ -124,9 +124,11 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
     selectedDraftId,
     setSelectedDraftId,
     selectedDraft,
+    selectedDraftFiscalYear,
     selectedDraftPots,
     draftCreateOrUpdatePot,
     draftArchivePot,
+    draftDeletePot,
     saveDraftPayload,
     draftChanges,
     drafts,
@@ -152,16 +154,33 @@ const [feedbackType, setFeedbackType] = useState(null);
 const [errorText, setErrorText] = useState(null);
 const [snapshotSubmitting, setSnapshotSubmitting] = useState(false);
 const [snapshotNotes, setSnapshotNotes] = useState("");
-const [draftSubmitting, setDraftSubmitting] = useState(false);
-const [publishSubmittingId, setPublishSubmittingId] = useState(null);
-const [draftLabel, setDraftLabel] = useState("");
-const [draftNotes, setDraftNotes] = useState("");
+  const [draftSubmitting, setDraftSubmitting] = useState(false);
+  const [deletePotModalOpen, setDeletePotModalOpen] = useState(false);
+  const [deletePotSubmitting, setDeletePotSubmitting] = useState(false);
+  const [publishSubmittingId, setPublishSubmittingId] = useState(null);
+  const [draftLabel, setDraftLabel] = useState("");
+  const [draftFiscalYear, setDraftFiscalYear] = useState("");
+  const [draftNotes, setDraftNotes] = useState("");
+  const fiscalYearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const start = currentYear;
+    const options = [];
+    for (let i = 0; i <= 10; i += 1) {
+      const startYear = start + i;
+      const label = `${startYear}-${startYear + 1}`;
+      options.push({ label, value: label });
+    }
+    return options;
+  }, []);
   const [copyDraftModalOpen, setCopyDraftModalOpen] = useState(false);
   const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
   const [inlineDraftLabel, setInlineDraftLabel] = useState("");
   const [inlineDraftSaving, setInlineDraftSaving] = useState(false);
+  const [inlineDraftFiscalYear, setInlineDraftFiscalYear] = useState("");
   const [deleteSnapshotId, setDeleteSnapshotId] = useState(null);
   const [deleteDraftId, setDeleteDraftId] = useState(null);
+  const [restoreSnapshotTarget, setRestoreSnapshotTarget] = useState(null);
+  const [restoreFiscalYear, setRestoreFiscalYear] = useState("");
   const [createApprovedFocused, setCreateApprovedFocused] = useState(false);
   const [createAdjustedFocused, setCreateAdjustedFocused] = useState(false);
   const [editApprovedFocused, setEditApprovedFocused] = useState(false);
@@ -175,8 +194,37 @@ const [draftNotes, setDraftNotes] = useState("");
   }, [drafts, selectedDraftId, setSelectedDraftId]);
 
   useEffect(() => {
+    if (!draftFiscalYear && activeVersion?.label) {
+      const match = fiscalYearOptions.find(opt => opt.label === activeVersion.label);
+      setDraftFiscalYear(match ? match.value : "");
+    }
+  }, [activeVersion, draftFiscalYear, fiscalYearOptions]);
+
+  useEffect(() => {
+    if (restoreSnapshotTarget && !restoreFiscalYear) {
+      const matchFromSnapshot = fiscalYearOptions.find(opt => opt.value === restoreSnapshotTarget.fiscalYear || opt.label === restoreSnapshotTarget.fiscalYear);
+      const matchFromActive = fiscalYearOptions.find(opt => opt.label === activeVersion?.label);
+      setRestoreFiscalYear((matchFromSnapshot || matchFromActive)?.value || "");
+    }
+  }, [restoreSnapshotTarget, restoreFiscalYear, fiscalYearOptions, activeVersion]);
+
+  useEffect(() => {
     const match = drafts?.find(d => String(d.id) === String(selectedDraftId));
     setInlineDraftLabel(match?.label || "");
+    // Prefill inline fiscal year from payload
+    if (match?.payload) {
+      let payload = match.payload;
+      if (typeof payload === "string") {
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          payload = null;
+        }
+      }
+      setInlineDraftFiscalYear(payload?.fiscalYear || "");
+    } else {
+      setInlineDraftFiscalYear("");
+    }
   }, [drafts, selectedDraftId]);
 
   const ensureDraftSelected = async () => {
@@ -389,6 +437,24 @@ const handleArchive = async () => {
   }
 };
 
+  const handleDeletePot = async () => {
+    if (!selectedPot) return;
+    setDeletePotSubmitting(true);
+    setErrorText(null);
+    setFeedback(null);
+    try {
+      await draftDeletePot(selectedPot.id);
+      setFeedback("Budget pot deleted from draft.");
+      setFeedbackType("success");
+      selectPot(null);
+      setDeletePotModalOpen(false);
+    } catch (err) {
+      setErrorText(err?.message || "Failed to delete pot.");
+    } finally {
+      setDeletePotSubmitting(false);
+    }
+  };
+
   const handleSnapshot = async () => {
     setSnapshotSubmitting(true);
     setErrorText(null);
@@ -420,11 +486,13 @@ const handleArchive = async () => {
     try {
       await createDraft({
         label: draftLabel || `Draft ${new Date().toISOString().slice(0, 19).replace("T", " ")}`,
+        fiscalYear: draftFiscalYear || null,
         notes: draftNotes,
       });
       setFeedback("Draft saved.");
       setFeedbackType("success");
       setDraftLabel("");
+      setDraftFiscalYear(activeVersion?.label || "");
       setDraftNotes("");
       setCopyDraftModalOpen(false);
     } catch (err) {
@@ -440,7 +508,7 @@ const handleArchive = async () => {
     setErrorText(null);
     setFeedback(null);
     try {
-      await publishDraft(draftId);
+      await publishDraft(draftId, { fiscalYear: selectedDraftFiscalYear || undefined, autoIncrementYear: true });
       setFeedback("Draft published to live pots.");
       setFeedbackType("success");
     } catch (err) {
@@ -718,6 +786,14 @@ const handleArchive = async () => {
           <Button variant="primary" type="submit" loading={editSubmitting} disabled={editSubmitting}>
             Save changes
           </Button>
+          <Button
+            variant="normal"
+            onClick={() => setDeletePotModalOpen(true)}
+            disabled={deletePotSubmitting}
+            iconName="remove"
+          >
+            Delete
+          </Button>
         </SpaceBetween>
       </SpaceBetween>
     </form>
@@ -790,6 +866,54 @@ const handleArchive = async () => {
                   item.label
                 ),
             },
+            {
+              id: "fiscalYear",
+              header: "Fiscal year",
+              cell: item => {
+                const isSelected = String(item.id) === String(selectedDraftId);
+                let payload = item.payload;
+                if (typeof payload === "string") {
+                  try {
+                    payload = JSON.parse(payload);
+                  } catch {
+                    payload = null;
+                  }
+                }
+                const value = isSelected ? inlineDraftFiscalYear : payload?.fiscalYear || "—";
+                if (!isSelected) {
+                  return value || "—";
+                }
+                return (
+                  <Select
+                    selectedOption={fiscalYearOptions.find(opt => opt.value === value) || null}
+                    options={fiscalYearOptions}
+                    expandToViewport
+                    placeholder="Select fiscal year"
+                    onChange={async ({ detail }) => {
+                      const nextFy = detail.selectedOption?.value || "";
+                      setInlineDraftFiscalYear(nextFy);
+                      if (!item.id || inlineDraftSaving) return;
+                      const payloadPots =
+                        item.id === selectedDraftId && selectedDraftPots ? selectedDraftPots : [];
+                      try {
+                        setInlineDraftSaving(true);
+                        await saveDraftPayload(item.id, payloadPots, {
+                          label: item.label,
+                          notes: item.notes,
+                          fiscalYear: nextFy,
+                        });
+                        await reload();
+                      } catch (err) {
+                        console.error("Failed to update draft fiscal year", err);
+                        setErrorText("Failed to update draft fiscal year.");
+                      } finally {
+                        setInlineDraftSaving(false);
+                      }
+                    }}
+                  />
+                );
+              },
+            },
             { id: "createdAt", header: "Created", cell: item => item.createdAt ? new Date(item.createdAt).toLocaleString() : "-" },
             {
               id: "actions",
@@ -821,7 +945,12 @@ const handleArchive = async () => {
             <Button variant="link" onClick={() => setCopyDraftModalOpen(false)} disabled={draftSubmitting}>
               Cancel
             </Button>
-            <Button variant="primary" loading={draftSubmitting} onClick={handleSaveDraft}>
+            <Button
+              variant="primary"
+              loading={draftSubmitting}
+              onClick={handleSaveDraft}
+              disabled={draftSubmitting || !draftFiscalYear?.trim()}
+            >
               Create draft
             </Button>
           </SpaceBetween>
@@ -833,6 +962,14 @@ const handleArchive = async () => {
               placeholder="e.g., FY2026 baseline"
               value={draftLabel}
               onChange={({ detail }) => setDraftLabel(detail.value)}
+            />
+          </FormField>
+          <FormField label="Fiscal year" description="Required; applies to all pots in this draft.">
+            <Select
+              selectedOption={fiscalYearOptions.find(opt => opt.value === draftFiscalYear) || null}
+              options={fiscalYearOptions}
+              placeholder="Select fiscal year"
+              onChange={({ detail }) => setDraftFiscalYear(detail.selectedOption?.value || "")}
             />
           </FormField>
           <FormField label="Notes (optional)">
@@ -938,6 +1075,68 @@ const handleArchive = async () => {
           </Box>
         </SpaceBetween>
       </Modal>
+      <Modal
+        visible={restoreSnapshotTarget !== null}
+        onDismiss={() => {
+          setRestoreSnapshotTarget(null);
+          setRestoreFiscalYear("");
+        }}
+        header="Restore snapshot as draft"
+        closeAriaLabel="Close"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="link"
+              onClick={() => {
+                setRestoreSnapshotTarget(null);
+                setRestoreFiscalYear("");
+              }}
+              disabled={snapshotSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              loading={snapshotSubmitting}
+              disabled={snapshotSubmitting || !restoreFiscalYear.trim()}
+              onClick={async () => {
+                if (!restoreSnapshotTarget?.id) return;
+                setSnapshotSubmitting(true);
+                try {
+                  const data = await restoreSnapshotAsDraft(restoreSnapshotTarget.id, {
+                    fiscalYear: restoreFiscalYear,
+                  });
+                  if (data?.id) {
+                    setSelectedDraftId(data.id);
+                  }
+                  setRestoreSnapshotTarget(null);
+                  setRestoreFiscalYear("");
+                } catch (err) {
+                  setErrorText(err?.message || "Failed to restore snapshot as draft.");
+                } finally {
+                  setSnapshotSubmitting(false);
+                }
+              }}
+            >
+              Restore
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <FormField label="Fiscal year" description="Required; applied to all pots in the restored draft.">
+            <Select
+              selectedOption={fiscalYearOptions.find(opt => opt.value === restoreFiscalYear) || null}
+              options={fiscalYearOptions}
+              placeholder="Select fiscal year"
+              onChange={({ detail }) => setRestoreFiscalYear(detail.selectedOption?.value || "")}
+            />
+          </FormField>
+          <Alert type="info">
+            The snapshot will be restored as a draft with this fiscal year. You can publish or edit it afterward.
+          </Alert>
+        </SpaceBetween>
+      </Modal>
       <Container
         header={
           <Header
@@ -971,11 +1170,9 @@ const handleArchive = async () => {
                   </Button>
                   <Button
                     variant="link"
-                    onClick={async () => {
-                      const data = await restoreSnapshotAsDraft(item.id);
-                      if (data?.id) {
-                        setSelectedDraftId(data.id);
-                      }
+                    onClick={() => {
+                      setRestoreSnapshotTarget({ id: item.id, fiscalYear: item.fiscalYear });
+                      setRestoreFiscalYear(item.fiscalYear || "");
                     }}
                   >
                     Restore as draft
@@ -1027,6 +1224,28 @@ const handleArchive = async () => {
       }
       i18nStrings={boardItemI18nStrings}
     >
+      <Modal
+        visible={deletePotModalOpen}
+        onDismiss={() => setDeletePotModalOpen(false)}
+        header="Delete pot and children"
+        closeAriaLabel="Close"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={() => setDeletePotModalOpen(false)} disabled={deletePotSubmitting}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleDeletePot} loading={deletePotSubmitting}>
+              Delete
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <Box variant="p">
+            Delete this draft pot and all of its child pots? This removes them from the draft permanently.
+          </Box>
+        </SpaceBetween>
+      </Modal>
       <Tabs
         tabs={tabs}
         activeTabId={activeTab}

@@ -214,6 +214,8 @@ const NewActionPlanModal = ({
   const [context, setContext] = useState(null);
   const [contextLoading, setContextLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [validationError, setValidationError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [nocOptions, setNocOptions] = useState([]);
   const [nocLoading, setNocLoading] = useState(false);
   const [potOptions, setPotOptions] = useState([]);
@@ -238,16 +240,43 @@ const NewActionPlanModal = ({
     () => async query => {
       setPotLoading(true);
       try {
-        const resp = await apiFetch(`/api/finance/budget-pots/lookup${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+        const resp = await apiFetch(`/api/finance/budget-pots`);
         if (!resp.ok) {
           throw new Error(`Lookup failed (${resp.status})`);
         }
         const data = await resp.json();
-        const options = (Array.isArray(data) ? data : []).map(item => ({
-          value: item.value || item.id,
-          label: item.label || item.name || item.code || "",
-          description: item.code ? item.code : undefined,
-        }));
+        const qLower = (query || "").toLowerCase();
+        const options = (Array.isArray(data) ? data : [])
+          .filter(item => {
+            const potType =
+              item?.pot_type ??
+              item?.potType ??
+              item?.type ??
+              item?.nodeType ??
+              item?.metadata?.pot_type ??
+              item?.metadata?.nodeType ??
+              "";
+            return String(potType).trim().toLowerCase() === "funding stream";
+          })
+          .filter(item => item?.isActive !== false)
+          .filter(item => {
+            if (!qLower) return true;
+            const name = String(item?.name || "").toLowerCase();
+            const code = String(item?.code || "").toLowerCase();
+            return name.includes(qLower) || code.includes(qLower);
+          })
+          .map(item => {
+            const value = item.id || item.value || item.code;
+            if (!value) return null;
+            const code = item.code || "";
+            const label = item.label || item.name || code || "";
+            return {
+              value: String(value),
+              label,
+              description: code || undefined,
+            };
+          })
+          .filter(Boolean);
         setPotOptions(options);
       } catch (e) {
         console.warn("[ActionPlan] pot lookup failed", e);
@@ -368,67 +397,67 @@ const NewActionPlanModal = ({
     return contextEligibility || caseData?.eligibility || "-";
   }, [context, caseData]);
 
-  const handleSubmit = async () => {
+  const validateForm = useCallback(() => {
+    const errors = {};
     const trimmedName = form.name.trim();
     if (!trimmedName) {
-      setError("Plan name is required.");
-      return;
+      errors.name = "Plan name is required.";
     }
     if (!form.startDate && !isEdit) {
-      setError("Start date is required.");
-      return;
+      errors.startDate = "Start date is required.";
     }
     if (form.startDate && form.reviewDate && form.reviewDate < form.startDate) {
-      setError("Review date cannot be before start date.");
-      return;
+      errors.reviewDate = "Review date cannot be before start date.";
     }
     const digits = form.agreementNumber.replace(/\D/g, "");
     if (!digits || digits.length < 7 || digits.length > 9) {
-      setError("Agreement number must be 7–9 digits.");
-      return;
+      errors.agreementNumber = "Agreement number must be 7–9 digits.";
     }
     if (!form.socialAssistanceRecipient) {
-      setError("Social assistance recipient is required (0/1).");
-      return;
+      errors.socialAssistanceRecipient = "Select Yes/No for social assistance.";
     }
     if (!form.eiClaimant) {
-      setError("EI claimant status is required.");
-      return;
+      errors.eiClaimant = "Select EI claimant status.";
     }
     if (!form.prevEmployment) {
-      setError("Employment status at plan start is required.");
-      return;
+      errors.prevEmployment = "Employment status at plan start is required.";
     }
     if (form.prevEmployment === "2") {
       if (!form.prevEmploymentNoc) {
-        setError("NOC code is required when employment status is Employed.");
-        return;
+        errors.prevEmploymentNoc = "NOC code is required when employment status is Employed.";
       }
       if (!form.prevEmploymentNocVersion) {
-        setError("NOC version is required when employment status is Employed.");
-        return;
+        errors.prevEmploymentNocVersion = "NOC version is required when employment status is Employed.";
       }
       if (!form.prevEmploymentScheduleType) {
-        setError("Schedule type is required when employment status is Employed.");
-        return;
+        errors.prevEmploymentScheduleType = "Schedule type is required when employment status is Employed.";
       }
     }
     if (form.childcareNeed === "1" && !form.childcareFunding) {
-      setError("Childcare funding is required when childcare need is Yes.");
-      return;
+      errors.childcareFunding = "Childcare funding is required when childcare need is Yes.";
     }
     if (form.educationLevel && !form.educationProvince) {
-      setError("Education province is required when education level is set.");
-      return;
+      errors.educationProvince = "Education province is required when education level is set.";
     }
     if (!form.fundingStream) {
-      setError("Funding stream is required.");
-      return;
+      errors.fundingStream = "Funding stream is required.";
     }
     if (!form.budgetPot) {
-      setError("Budget pot is required.");
+      errors.budgetPot = "Budget pot is required.";
+    }
+    return errors;
+  }, [form, isEdit]);
+
+  const handleSubmit = async () => {
+    setValidationError(null);
+    setFieldErrors({});
+    const errors = validateForm();
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors);
+      setValidationError("Please resolve the highlighted fields.");
       return;
     }
+    const trimmedName = form.name.trim();
     setLoading(true);
     setError(null);
     try {
@@ -495,6 +524,8 @@ const NewActionPlanModal = ({
     if (loading) return;
     setForm(defaultForm);
     setError(null);
+    setValidationError(null);
+    setFieldErrors({});
     onDismiss();
   };
 
@@ -591,18 +622,25 @@ const NewActionPlanModal = ({
       }
     >
       <SpaceBetween size="l">
-        {error && (
+        {(error || validationError) && (
           <Alert
             type="error"
             dismissible
             dismissAriaLabel="Dismiss error message"
-            onDismiss={() => setError(null)}
+            onDismiss={() => {
+              setError(null);
+              setValidationError(null);
+            }}
           >
-            {error}
+            {error || validationError}
           </Alert>
         )}
         <ColumnLayout columns={3} variant="text-grid">
-          <FormField label="Plan name" stretch>
+          <FormField
+            label="Plan name"
+            stretch
+            errorText={fieldErrors.name}
+          >
             <Input
               value={form.name}
               onChange={({ detail }) => setForm(current => ({ ...current, name: detail.value }))}
@@ -617,7 +655,7 @@ const NewActionPlanModal = ({
               placeholder="High-level objective for this plan"
             />
           </FormField>
-          <FormField label="Start date" stretch>
+          <FormField label="Start date" stretch errorText={fieldErrors.startDate}>
             <DatePicker
               value={form.startDate}
               onChange={({ detail }) => setForm(current => ({ ...current, startDate: detail.value }))}
@@ -628,6 +666,7 @@ const NewActionPlanModal = ({
             label="Review date"
             stretch
             description="This will trigger a reminder on this date in the calendar."
+            errorText={fieldErrors.reviewDate}
           >
             <DatePicker
               value={form.reviewDate}
@@ -635,7 +674,11 @@ const NewActionPlanModal = ({
               placeholder="YYYY-MM-DD"
             />
           </FormField>
-          <FormField label="Funding stream" description="Select funding stream for this action plan.">
+          <FormField
+            label="Funding stream"
+            description="Select funding stream for this action plan."
+            errorText={fieldErrors.fundingStream}
+          >
             <Select
               selectedOption={selectedFundingStream}
               options={fundingStreamSelectOptions}
@@ -651,10 +694,18 @@ const NewActionPlanModal = ({
               empty={fundingStreamsLoading ? undefined : "No funding streams available"}
             />
           </FormField>
-          <FormField label="Agreement Number" description="Mapped automatically from funding stream (read-only).">
+          <FormField
+            label="Agreement Number"
+            description="Mapped automatically from funding stream (read-only)."
+            errorText={fieldErrors.agreementNumber}
+          >
             <Input value={form.agreementNumber} readOnly />
           </FormField>
-          <FormField label="Budget pot" description="Select the budget pot for this action plan.">
+          <FormField
+            label="Budget pot"
+            description="Select the budget pot for this action plan."
+            errorText={fieldErrors.budgetPot}
+          >
             <Select
               selectedOption={
                 potOptions.find(opt => opt.value === form.budgetPot) ||
@@ -679,27 +730,42 @@ const NewActionPlanModal = ({
               options={EI_CLAIMANT_OPTIONS}
               onChange={({ detail }) => setForm(current => ({ ...current, eiClaimant: detail.selectedOption?.value || "" }))}
               placeholder="Select EI status"
+              invalid={Boolean(fieldErrors.eiClaimant)}
             />
           </FormField>
-            <FormField label="Employment status at plan start" description="The client’s employment status at the start of this action plan">
+            <FormField
+              label="Employment status at plan start"
+              description="The client’s employment status at the start of this action plan"
+              errorText={fieldErrors.prevEmployment}
+            >
               <Select
                 selectedOption={selectedPrevEmployment}
                 options={PREV_EMPLOYMENT_OPTIONS}
                 onChange={({ detail }) => setForm(current => ({ ...current, prevEmployment: detail.selectedOption?.value || "" }))}
                 placeholder="Select status"
+                invalid={Boolean(fieldErrors.prevEmployment)}
               />
             </FormField>
           {form.prevEmployment === "2" && (
             <>
-              <FormField label="NOC Version" description="The version of National Occupation Code to use for lookup.">
+              <FormField
+                label="NOC Version"
+                description="The version of National Occupation Code to use for lookup."
+                errorText={fieldErrors.prevEmploymentNocVersion}
+              >
                 <Select
                   selectedOption={selectedPrevEmploymentNocVersion}
                   options={NOC_VERSION_OPTIONS}
                   onChange={({ detail }) => setForm(current => ({ ...current, prevEmploymentNocVersion: detail.selectedOption?.value || "" }))}
                   placeholder="Select NOC version"
+                  invalid={Boolean(fieldErrors.prevEmploymentNocVersion)}
                 />
               </FormField>
-              <FormField label="NOC Code Lookup" description="Lookup the NOC Code for the client's employment.">
+              <FormField
+                label="NOC Code Lookup"
+                description="Lookup the NOC Code for the client's employment."
+                errorText={fieldErrors.prevEmploymentNoc}
+              >
                 <Autosuggest
                   value={form.prevEmploymentNoc || ""}
                   onChange={({ detail }) => setForm(current => ({ ...current, prevEmploymentNoc: detail.value }))}
@@ -712,9 +778,14 @@ const NewActionPlanModal = ({
                   loadingText="Searching NOC codes"
                   expandToViewport
                   disabled={!form.prevEmploymentNocVersion}
+                  invalid={Boolean(fieldErrors.prevEmploymentNoc)}
                 />
               </FormField>
-              <FormField label="Schedule type" description="Required when employment status is Employed.">
+              <FormField
+                label="Schedule type"
+                description="Required when employment status is Employed."
+                errorText={fieldErrors.prevEmploymentScheduleType}
+              >
                 <Select
                   selectedOption={SCHEDULE_OPTIONS.find(opt => opt.value === form.prevEmploymentScheduleType) || null}
                   options={SCHEDULE_OPTIONS}
@@ -722,11 +793,15 @@ const NewActionPlanModal = ({
                     setForm(current => ({ ...current, prevEmploymentScheduleType: detail.selectedOption?.value || "" }))
                   }
                   placeholder="Select schedule type"
+                  invalid={Boolean(fieldErrors.prevEmploymentScheduleType)}
                 />
               </FormField>
             </>
           )}
-          <FormField label="Education Level" description="Highest level of education attained at the time of creation of Action Plan.">
+          <FormField
+            label="Education Level"
+            description="Highest level of education attained at the time of creation of Action Plan."
+          >
             <Select
               selectedOption={selectedEducationLevel}
               options={EDUCATION_OPTIONS}
@@ -734,23 +809,36 @@ const NewActionPlanModal = ({
               placeholder="Select education level"
             />
           </FormField>
-          <FormField label="Education Province" description="Province (or area outside Canada) in which the highest level of education was attained.">
+          <FormField
+            label="Education Province"
+            description="Province (or area outside Canada) in which the highest level of education was attained."
+            errorText={fieldErrors.educationProvince}
+          >
             <Select
               selectedOption={selectedEducationProvince}
               options={PROVINCE_OPTIONS}
               onChange={({ detail }) => setForm(current => ({ ...current, educationProvince: detail.selectedOption?.value || "" }))}
               placeholder="Select province/territory"
+              invalid={Boolean(fieldErrors.educationProvince)}
             />
           </FormField>
-          <FormField label="Social Assistance Recipient" description="Is the client a Social Assistance Recipient at the time of creation of the Action Plan?">
+          <FormField
+            label="Social Assistance Recipient"
+            description="Is the client a Social Assistance Recipient at the time of creation of the Action Plan?"
+            errorText={fieldErrors.socialAssistanceRecipient}
+          >
             <Select
               selectedOption={selectedSocialAssistance}
               options={YES_NO_OPTIONS}
               onChange={({ detail }) => setForm(current => ({ ...current, socialAssistanceRecipient: detail.selectedOption?.value || "" }))}
               placeholder="Select"
+              invalid={Boolean(fieldErrors.socialAssistanceRecipient)}
             />
           </FormField>
-          <FormField label="Childcare need" description="ESDC code 0 = No, 1 = Yes.">
+          <FormField
+            label="Childcare need"
+            description="ESDC code 0 = No, 1 = Yes."
+          >
             <Select
               selectedOption={selectedChildcareNeed}
               options={YES_NO_OPTIONS}
@@ -758,12 +846,17 @@ const NewActionPlanModal = ({
               placeholder="Select"
             />
           </FormField>
-          <FormField label="Childcare funding" description="ESDC code 1–7.">
+          <FormField
+            label="Childcare funding"
+            description="ESDC code 1–7."
+            errorText={fieldErrors.childcareFunding}
+          >
             <Select
               selectedOption={selectedChildcareFunding}
               options={CHILDCARE_FUNDING_OPTIONS}
               onChange={({ detail }) => setForm(current => ({ ...current, childcareFunding: detail.selectedOption?.value || "" }))}
               placeholder="Select"
+              invalid={Boolean(fieldErrors.childcareFunding)}
             />
           </FormField>
         </ColumnLayout>

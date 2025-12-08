@@ -190,6 +190,7 @@ const mergeAssessmentState = (current, incoming) => {
     'interventionCode',
     'interventionDuration',
     'interventionCost',
+    'interventionPotId',
     'interventionNoc',
     'interventionNocVersion',
     'childcareNeed',
@@ -245,6 +246,7 @@ const buildEmptyAssessment = () => ({
   interventionCode: '',
   interventionDuration: '',
   interventionCost: '',
+  interventionPotId: '',
   interventionNoc: '',
   interventionNocVersion: '',
   childcareNeed: '',
@@ -286,6 +288,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [localAssessmentSubmitted, setLocalAssessmentSubmitted] = useState(false);
   const [checklistWarningVisible, setChecklistWarningVisible] = useState(false);
   const [checklistWarningItems, setChecklistWarningItems] = useState([]);
+  const [budgetPotOptions, setBudgetPotOptions] = useState([]);
+  const [budgetPotLoading, setBudgetPotLoading] = useState(false);
   const [checklistCheckError, setChecklistCheckError] = useState(null);
   const [checkingChecklist, setCheckingChecklist] = useState(false);
   const widgetRootRef = useRef(null);
@@ -338,24 +342,28 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, []);
 
   const rawApplicationStatus = caseData?.applicationStatus ?? caseData?.application_status ?? null;
+  const rawApplicationStatusNormalized = typeof rawApplicationStatus === 'string'
+    ? rawApplicationStatus.trim().toLowerCase()
+    : null;
   const rawCaseStatusSnapshot = caseData?.status ?? '';
   const canonicalCaseStatusSnapshot = getCaseStatusContext(rawCaseStatusSnapshot).canonicalStatus;
   const applicationStatusContext = getApplicationStatusContext(rawApplicationStatus);
   const canonicalApplicationStatus = applicationStatusContext.canonicalStatus || canonicalCaseStatusSnapshot;
-  const isPendingApprovalStatus = canonicalApplicationStatus === 'pending_approval';
+  const isPendingApprovalStatus = rawApplicationStatusNormalized === 'pending_approval';
   const applicantUserId = caseData?.applicant_user_id ?? caseData?.applicantUserId ?? null;
   const applicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
 
   const isDecisionFinal = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
   const isLockedStatus = APPLICATION_LOCKED_STATUSES.has(canonicalApplicationStatus);
-  const showOutcomeByStatus = APPLICATION_OUTCOME_STATUSES.has(canonicalApplicationStatus);
+  const showOutcomeByStatus = isPendingApprovalStatus;
   const isOutcomeNoticeDisabled = isDecisionFinal;
   const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus });
   const lacksOutcomePermission = Boolean(userRole) && isPendingApprovalStatus && !canManageOutcomeReview;
   const requiresNoc = useMemo(() => requiresNocForCode(assessment.interventionCode), [assessment.interventionCode]);
   const isDeclarationGateActive = !conflictDeclarationSigned;
   const eligibilitySet = Boolean(assessment.esdcEligibility);
-  const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet;
+  const potSelected = Boolean(assessment.interventionPotId);
+  const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet || !potSelected;
   const conflictDeclarationSignedDisplayDate = conflictDeclarationSignedAt
     ? formatDate(conflictDeclarationSignedAt)
     : null;
@@ -367,6 +375,16 @@ const CoordinatorAssessmentWidget = forwardRef(
     () => nocVersions.find(option => option.value === assessment.interventionNocVersion) || null,
     [nocVersions, assessment.interventionNocVersion]
   );
+  const selectedBudgetPotOption = useMemo(() => {
+    const match = budgetPotOptions.find(
+      option => String(option.value) === String(assessment.interventionPotId)
+    );
+    if (match) return match;
+    if (assessment.interventionPotId) {
+      return { value: assessment.interventionPotId, label: assessment.interventionPotId };
+    }
+    return null;
+  }, [budgetPotOptions, assessment.interventionPotId]);
   const selectedChildcareOption = useMemo(
     () => CHILDCARE_OPTIONS.find(option => option.value === assessment.childcareNeed) || null,
     [assessment.childcareNeed]
@@ -533,6 +551,16 @@ const CoordinatorAssessmentWidget = forwardRef(
       interventionCode: caseData.assessment_intervention_code != null ? String(caseData.assessment_intervention_code) : '',
       interventionDuration: caseData.assessment_intervention_duration_days != null ? String(caseData.assessment_intervention_duration_days) : '',
       interventionCost: caseData.assessment_intervention_cost_total != null ? String(caseData.assessment_intervention_cost_total) : '',
+      interventionPotId: (() => {
+        if (caseData.assessment_intervention_pot_id != null) {
+          return String(caseData.assessment_intervention_pot_id);
+        }
+        const firstPlan = Array.isArray(caseData?.actionPlans) && caseData.actionPlans.length
+          ? caseData.actionPlans[0]
+          : null;
+        const planPot = firstPlan?.budgetPot ?? firstPlan?.budget_pot ?? null;
+        return planPot != null ? String(planPot) : '';
+      })(),
       interventionNoc: caseData.assessment_intervention_related_noc ? String(caseData.assessment_intervention_related_noc).trim() : '',
       interventionNocVersion: caseData.assessment_intervention_related_noc_version ? String(caseData.assessment_intervention_related_noc_version).trim() : '',
       childcareNeed: (() => {
@@ -560,11 +588,11 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   // Show NWAC section after submission, review completion, final decision, or outcome-ready status
   useEffect(() => {
-    const pendingApproval = canonicalApplicationStatus === 'pending_approval';
-    const shouldShowOutcome = pendingApproval || isDecisionFinal || showOutcomeByStatus;
+    const pendingApproval = isPendingApprovalStatus;
+    const shouldShowOutcome = pendingApproval || isDecisionFinal;
     setShowNWACSection(shouldShowOutcome);
     setLocalAssessmentSubmitted(pendingApproval || isDecisionFinal);
-  }, [canonicalApplicationStatus, isDecisionFinal, showOutcomeByStatus]);
+  }, [isDecisionFinal, isPendingApprovalStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -619,8 +647,52 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
     };
 
+    const loadBudgetPots = async () => {
+      setBudgetPotLoading(true);
+      try {
+        // Use the full budget pot endpoint so we can filter by pot type.
+        const response = await apiFetch('/api/finance/budget-pots');
+        const data = response && response.ok ? await response.json() : [];
+        if (cancelled) return;
+        const options = (Array.isArray(data) ? data : [])
+          .filter(item => {
+            const potType =
+              item?.pot_type ??
+              item?.potType ??
+              item?.type ??
+              item?.nodeType ??
+              item?.metadata?.pot_type ??
+              item?.metadata?.nodeType ??
+              "";
+            return String(potType).trim().toLowerCase() === "funding stream";
+          })
+          .filter(item => item?.isActive !== false)
+          .map(item => {
+            const value = item?.id ?? item?.value ?? item?.code ?? null;
+            if (!value) return null;
+            const code = item?.code || "";
+            const name = item?.name || item?.description || "";
+            const label = code || name ? [code, name].filter(Boolean).join(' - ') : String(value);
+            return {
+              value: String(value),
+              label: label || String(value),
+              description: name || undefined,
+            };
+          })
+          .filter(Boolean);
+        setBudgetPotOptions(options);
+      } catch (_) {
+        if (!cancelled) {
+          setBudgetPotOptions([]);
+        }
+      } finally {
+        if (!cancelled) setBudgetPotLoading(false);
+      }
+    };
+
     loadInterventionCodes();
     loadNocVersions();
+    loadBudgetPots();
 
     return () => {
       cancelled = true;
@@ -830,16 +902,6 @@ const CoordinatorAssessmentWidget = forwardRef(
       setConflictDeclarationSigned(true);
       setConflictDeclarationSignedAt(signedAtIso);
       setDeclarationChecked(false);
-      const successAlert = {
-        type: 'success',
-        content: shouldPromoteToInReview
-          ? 'Declaration signed. Application status moved to In Review and assessment sections are now available.'
-          : 'Conflict of interest declaration signed. Assessment sections are now available.',
-        dismissible: true,
-        statusIconAriaLabel: 'Success'
-      };
-      setAlert(successAlert);
-      scrollAfterAction();
       if (typeof actions?.refreshCaseData === 'function') {
         try {
           await actions.refreshCaseData();
@@ -945,11 +1007,23 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (assessment.interventionDuration && !/^\d+$/.test(assessment.interventionDuration.trim())) {
       errors.interventionDuration = 'Duration must be a whole number of days.';
     }
+    let parsedInterventionCost = null;
     if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
-      const costNumber = parseCurrencyInput(assessment.interventionCost);
-      if (costNumber === null || !Number.isFinite(costNumber) || costNumber < 0) {
+      parsedInterventionCost = parseCurrencyInput(assessment.interventionCost);
+      if (parsedInterventionCost === null || !Number.isFinite(parsedInterventionCost) || parsedInterventionCost < 0) {
         errors.interventionCost = 'Enter a valid amount in dollars.';
       }
+    }
+    if (!assessment.interventionPotId) {
+      errors.interventionPotId = 'Select a budget pot.';
+    } else {
+      const potExists = budgetPotOptions.some(opt => opt?.value === assessment.interventionPotId);
+      if (!potExists) {
+        errors.interventionPotId = 'Select a valid budget pot.';
+      }
+    }
+    if (parsedInterventionCost !== null && Number.isFinite(parsedInterventionCost) && parsedInterventionCost !== 0 && !assessment.interventionPotId) {
+      errors.interventionPotId = 'Select a budget pot for the intervention cost.';
     }
     return errors;
   };
@@ -1031,6 +1105,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           const val = parseCurrencyInput(assessment.interventionCost);
           return val !== null ? String(val) : null;
         })(),
+      assessment_intervention_pot_id: assessment.interventionPotId || null,
       assessment_intervention_related_noc: assessment.interventionNoc || null,
       assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
       assessment_childcare_need: assessment.childcareNeed || null,
@@ -1186,6 +1261,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           const val = parseCurrencyInput(assessment.interventionCost);
           return val !== null ? String(val) : null;
         })(),
+        assessment_intervention_pot_id: assessment.interventionPotId || null,
         assessment_intervention_related_noc: assessment.interventionNoc || null,
         assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
         assessment_childcare_need: assessment.childcareNeed || null,
@@ -1267,7 +1343,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   };
 
   // UI logic: once status reaches pending approval or a final decision, lock assessment fields and surface NWAC review
-  const isAssessmentSubmitted = canonicalApplicationStatus === 'pending_approval';
+  const isAssessmentSubmitted = isPendingApprovalStatus;
   const isReviewComplete = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
   const assessmentSubmitted = localAssessmentSubmitted || isAssessmentSubmitted || isReviewComplete || isDecisionFinal || isLockedStatus || lockedByAnotherUser;
   // Disable all fields (including NWAC) if review is complete, a final decision exists, status is locked, conflict not signed, or eligibility not set
@@ -1313,6 +1389,16 @@ const CoordinatorAssessmentWidget = forwardRef(
     setHasSubmitted(true);
     setValidationAlert(null);
     const errors = validateNWACReview(assessment);
+    let costForPotValidation = null;
+    if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
+      costForPotValidation = parseCurrencyInput(assessment.interventionCost);
+      if (costForPotValidation === null || !Number.isFinite(costForPotValidation) || costForPotValidation < 0) {
+        errors.interventionCost = 'Enter a valid amount in dollars.';
+      }
+    }
+    if (costForPotValidation !== null && Number.isFinite(costForPotValidation) && costForPotValidation !== 0 && !assessment.interventionPotId) {
+      errors.interventionPotId = 'Select a budget pot for the intervention cost.';
+    }
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
       setValidationAlert([...new Set(Object.values(errors))]);
@@ -1357,6 +1443,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         const val = parseCurrencyInput(assessment.interventionCost);
         return val !== null ? String(val) : null;
       })(),
+      assessment_intervention_pot_id: assessment.interventionPotId || null,
       assessment_intervention_related_noc: assessment.interventionNoc || null,
       assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
       assessment_childcare_need: assessment.childcareNeed || null,
@@ -1670,12 +1757,6 @@ const CoordinatorAssessmentWidget = forwardRef(
             </ul>
           </Alert>
         )}
-        {conflictDeclarationSigned && (
-          <Box color="text-status-success" margin={{ bottom: 's' }}>
-            Conflict of interest declaration signed
-            {conflictDeclarationSignedDisplayDate ? ` on ${conflictDeclarationSignedDisplayDate}` : ''}.
-          </Box>
-        )}
         {alert && (
           <Alert
             type={alert.type}
@@ -1687,38 +1768,18 @@ const CoordinatorAssessmentWidget = forwardRef(
             {alert.content}
           </Alert>
         )}
-        {!eligibilitySet && (
+        {isEligibilityGateActive && (
           <>
             <Alert
               type="info"
               header="Employment insurance eligibility not checked"
               statusIconAriaLabel="Info"
             >
-              Assessment sections are locked until a System Administrator or Program Administrator checks ESDC eligibility.
+              Assessment sections are locked until a System Administrator or Program Administrator checks ESDC eligibility and assigns a budget pot.
             </Alert>
             <Box margin={{ bottom: 's' }} />
           </>
         )}
-        {sectionHeader('ESDC Eligibility')}
-        <Grid gridDefinition={[{ colspan: 12 }]}>
-          <FormField
-            label="Eligibility"
-            errorText={hasSubmitted && fieldErrors.esdcEligibility ? fieldErrors.esdcEligibility : undefined}
-            description="Select the client's eligibility category for ESDC funding. Only program admins may set this."
-          >
-            <Select
-              selectedOption={ESDC_OPTIONS.find(o => o.value === assessment.esdcEligibility) || null}
-              onChange={({ detail }) => handleField('esdcEligibility', detail.selectedOption.value)}
-              options={ESDC_OPTIONS}
-              placeholder="Select eligibility"
-              ariaLabel="Eligibility"
-              data-error-focus={hasSubmitted && fieldErrors.esdcEligibility ? 'true' : undefined}
-              tabIndex={-1}
-              disabled={isEligibilityDisabled}
-            />
-          </FormField>
-        </Grid>
-        {!eligibilitySet && <Box margin={{ bottom: 'l' }} />}
         {isEligibilityGateActive ? null : (
         <>
         {sectionHeader('Outcome Notice')}
@@ -1823,13 +1884,50 @@ const CoordinatorAssessmentWidget = forwardRef(
             </Modal>
           </>
         )}
-        {assessmentSubmitted && renderRecommendationSection()}
-        {sectionHeader('Assessment Overview')}
+        </>
+        )}
+        {sectionHeader('ESDC Eligibility')}
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+          <FormField
+            label="Eligibility"
+            errorText={hasSubmitted && fieldErrors.esdcEligibility ? fieldErrors.esdcEligibility : undefined}
+            description="Select the client's eligibility category for ESDC funding. Only program admins may set this."
+          >
+            <Select
+              selectedOption={ESDC_OPTIONS.find(o => o.value === assessment.esdcEligibility) || null}
+              onChange={({ detail }) => handleField('esdcEligibility', detail.selectedOption.value)}
+              options={ESDC_OPTIONS}
+              placeholder="Select eligibility"
+              ariaLabel="Eligibility"
+              data-error-focus={hasSubmitted && fieldErrors.esdcEligibility ? 'true' : undefined}
+              tabIndex={-1}
+              disabled={isEligibilityDisabled}
+            />
+          </FormField>
+          <FormField
+            label="Budget Pot"
+            description="Required to unlock the assessment. Assign the pot that will fund this intervention."
+            errorText={hasSubmitted && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
+          >
+            <Select
+              placeholder={budgetPotLoading ? 'Loading budget pots' : 'Select budget pot'}
+              selectedOption={selectedBudgetPotOption}
+              options={budgetPotOptions}
+              statusType={budgetPotLoading ? 'loading' : 'finished'}
+              loadingText="Loading budget pots"
+              onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
+              data-error-focus={hasSubmitted && fieldErrors.interventionPotId ? 'true' : undefined}
+              disabled={isEligibilityDisabled}
+            />
+          </FormField>
+        </Grid>
+        {!eligibilitySet && <Box margin={{ bottom: 'l' }} />}
+        {sectionHeader('Assessment Overview')}
+        <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}>
           <FormField label="Date of Assessment">
             <DatePicker onChange={({ detail }) => handleField('dateOfAssessment', detail.value)} value={assessment.dateOfAssessment} readOnly={assessmentSubmitted} disabled={isAssessmentDisabled} />
           </FormField>
-          <FormField label="Current Case Owner">
+          <FormField label="Current Case Manager">
             <Box padding={{ vertical: 'xs' }}>{assessment.clientName || 'Not assigned'}</Box>
           </FormField>
         </Grid>
@@ -2198,8 +2296,6 @@ const CoordinatorAssessmentWidget = forwardRef(
         </Grid>
 
         {!assessmentSubmitted && renderRecommendationSection()}
-        </>
-        )}
         <Modal
           visible={showCancelModal}
           onDismiss={() => setShowCancelModal(false)}
@@ -2266,7 +2362,3 @@ const CoordinatorAssessmentWidget = forwardRef(
 });
 
 export default CoordinatorAssessmentWidget;
-
-
-
-

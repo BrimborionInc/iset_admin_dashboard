@@ -45,6 +45,7 @@ export const BudgetsDataProvider = ({ children }) => {
     const pacing = adjusted > 0 ? (actual / adjusted) * 100 : null;
     return {
       id: pot.id,
+      fiscalYear: pot.fiscalYear || pot.fiscal_year || null,
       parentId: pot.parentId ?? null,
       name: pot.name,
       code: pot.code,
@@ -122,12 +123,12 @@ export const BudgetsDataProvider = ({ children }) => {
   }, []);
 
   const createDraft = useCallback(
-    async ({ label, notes } = {}) => {
+    async ({ label, notes, fiscalYear } = {}) => {
       try {
         const resp = await apiFetch("/api/finance/budget-drafts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ label, notes, payload: { pots } }),
+          body: JSON.stringify({ label, notes, payload: { fiscalYear: fiscalYear ?? null, pots } }),
         });
         if (!resp.ok) {
           throw new Error(`Draft save failed (${resp.status})`);
@@ -308,10 +309,7 @@ export const BudgetsDataProvider = ({ children }) => {
     loadPots();
   }, [loadPots]);
 
-  const selectedDraft = useMemo(
-    () => (drafts || []).find(d => d.id === selectedDraftId) || null,
-    [drafts, selectedDraftId]
-  );
+  const selectedDraft = useMemo(() => (drafts || []).find(d => d.id === selectedDraftId) || null, [drafts, selectedDraftId]);
 
   const selectedDraftPots = useMemo(() => {
     if (!selectedDraft) return [];
@@ -328,16 +326,30 @@ export const BudgetsDataProvider = ({ children }) => {
     return potsArray;
   }, [selectedDraft]);
 
+  const selectedDraftFiscalYear = useMemo(() => {
+    if (!selectedDraft) return null;
+    let payload = selectedDraft.payload;
+    if (typeof payload === "string") {
+      try {
+        payload = JSON.parse(payload);
+      } catch {
+        payload = null;
+      }
+    }
+    return payload?.fiscalYear ?? null;
+  }, [selectedDraft]);
+
   const saveDraftPayload = useCallback(
-    async (draftId, potsPayload, { label, notes } = {}) => {
+    async (draftId, potsPayload, { label, notes, fiscalYear } = {}) => {
       if (!draftId) throw new Error("Draft not selected");
+      const payloadFiscal = fiscalYear !== undefined ? fiscalYear : selectedDraftFiscalYear ?? null;
       const resp = await apiFetch(`/api/finance/budget-drafts/${draftId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           label: label ?? selectedDraft?.label,
           notes: notes ?? selectedDraft?.notes,
-          payload: { pots: potsPayload },
+          payload: { fiscalYear: payloadFiscal, pots: potsPayload },
         }),
       });
       if (!resp.ok) {
@@ -345,16 +357,17 @@ export const BudgetsDataProvider = ({ children }) => {
       }
       await loadDrafts();
     },
-    [selectedDraft, loadDrafts]
+    [selectedDraft, selectedDraftFiscalYear, loadDrafts]
   );
 
   const ensureDraftSelected = useCallback(async () => {
     if (selectedDraftId) return selectedDraftId;
     const newId = await createDraft({
       label: `Draft ${new Date().toISOString().slice(0, 19).replace("T", " ")}`,
+      fiscalYear: activeVersion?.label ?? null,
     });
     return newId;
-  }, [selectedDraftId, createDraft]);
+  }, [selectedDraftId, createDraft, activeVersion]);
 
   const draftCreateOrUpdatePot = useCallback(
     async (potId, payload) => {
@@ -375,6 +388,27 @@ export const BudgetsDataProvider = ({ children }) => {
       const nextPots = selectedDraftPots.map(p =>
         String(p.id) === String(potId) ? { ...p, status: "archived" } : p
       );
+      await saveDraftPayload(draftId, nextPots);
+    },
+    [ensureDraftSelected, selectedDraftPots, saveDraftPayload]
+  );
+
+  const draftDeletePot = useCallback(
+    async potId => {
+      if (!potId) return;
+      const draftId = await ensureDraftSelected();
+      const toRemove = new Set();
+      const walk = targetId => {
+        const targetKey = String(targetId);
+        toRemove.add(targetKey);
+        selectedDraftPots.forEach(p => {
+          if (String(p.parentId ?? "") === targetKey) {
+            walk(p.id);
+          }
+        });
+      };
+      walk(potId);
+      const nextPots = selectedDraftPots.filter(p => !toRemove.has(String(p.id)));
       await saveDraftPayload(draftId, nextPots);
     },
     [ensureDraftSelected, selectedDraftPots, saveDraftPayload]
@@ -409,9 +443,11 @@ export const BudgetsDataProvider = ({ children }) => {
   );
 
   const restoreSnapshotAsDraft = useCallback(
-    async snapshotId => {
+    async (snapshotId, { fiscalYear } = {}) => {
       const resp = await apiFetch(`/api/finance/budget-snapshots/${snapshotId}/restore-draft`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fiscalYear: fiscalYear ?? null }),
       });
       if (!resp.ok) {
         throw new Error(`Restore failed (${resp.status})`);
@@ -430,17 +466,22 @@ export const BudgetsDataProvider = ({ children }) => {
   }, [loadPots, loadSnapshots, loadDrafts]);
 
   const publishDraft = useCallback(
-    async draftId => {
+    async (draftId, { fiscalYear, autoIncrementYear } = {}) => {
       if (!draftId) return;
       const resp = await apiFetch(`/api/finance/budget-drafts/${draftId}/publish`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fiscalYear: fiscalYear ?? selectedDraftFiscalYear ?? null,
+          autoIncrementYear: autoIncrementYear ?? false,
+        }),
       });
       if (!resp.ok) {
         throw new Error(`Draft publish failed (${resp.status})`);
       }
       await reloadAll();
     },
-    [reloadAll]
+    [reloadAll, selectedDraftFiscalYear]
   );
 
   const value = useMemo(
@@ -454,10 +495,12 @@ export const BudgetsDataProvider = ({ children }) => {
       selectedDraftId,
       setSelectedDraftId,
       selectedDraft,
+      selectedDraftFiscalYear,
       selectedDraftPots,
       saveDraftPayload,
       draftCreateOrUpdatePot,
       draftArchivePot,
+      draftDeletePot,
       draftChanges,
       publishDraftChanges,
       discardDraftChanges,
@@ -486,10 +529,12 @@ export const BudgetsDataProvider = ({ children }) => {
       selectedDraftId,
       setSelectedDraftId,
       selectedDraft,
+      selectedDraftFiscalYear,
       selectedDraftPots,
       saveDraftPayload,
       draftCreateOrUpdatePot,
       draftArchivePot,
+      draftDeletePot,
       draftChanges,
       publishDraftChanges,
       discardDraftChanges,

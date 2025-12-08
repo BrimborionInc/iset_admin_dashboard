@@ -1,6 +1,6 @@
 Purpose: Single source for Finance module enablement decisions, milestones, and next actions.  
 Audience: Finance/Casework engineers, product, ops.  
-Last Updated: 2025-12-05
+Last Updated: 2025-12-07
 
 # Finance Module Enablement Tracker
 
@@ -29,7 +29,7 @@ Last Updated: 2025-12-05
 - 2025-12-07: Burn-rate widget now reads live pot metrics (adjusted/actual/forecast/variance) with simple risk tagging; risk filter listens to loaded view presets.
 
 ## Current Focus
-- Budgets dashboard now runs live: pot CRUD, draft/publish, snapshots, pot selection for case interventions. Case-linked finance transactions roll into committed/actual. Draft and snapshot UX refined.
+- Budgets dashboard now runs live: pot CRUD, draft/publish, snapshots, pot selection for case interventions. Case-linked finance transactions roll into committed/actual. Draft/snapshot UX refined; saved views and pot detail widgets now backed by API + CSV export; burn-rate widget uses live metrics with risk tagging.
 
 ## Next Actions (short)
 - Add auto-forecasting (system-generated) and clarify variance vs adjusted; remove manual placeholder.

@@ -715,7 +715,6 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       if (selectedInterventionId === pendingDelete.id) {
         setSelectedInterventionId(null);
       }
-      await refresh().catch(() => {});
     } catch (error) {
       setErrorMessage(error?.message || "Unable to delete intervention.");
     } finally {

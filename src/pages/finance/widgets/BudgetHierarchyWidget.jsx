@@ -20,6 +20,7 @@ import {
   FormField,
   Input,
   Textarea,
+  Checkbox,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
 import { useBudgetsData } from "./BudgetsDataContext.jsx";
@@ -303,14 +304,28 @@ const BudgetHierarchyWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     setSelectedDraftId,
     createDraft,
     publishDraft,
+    activeVersion,
   } = useBudgetsData();
   const [activeTab, setActiveTab] = useState("active");
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishSubmitting, setPublishSubmitting] = useState(false);
   const [draftModalOpen, setDraftModalOpen] = useState(false);
   const [draftModalLabel, setDraftModalLabel] = useState("");
+  const [draftModalFiscalYear, setDraftModalFiscalYear] = useState("");
   const [draftModalNotes, setDraftModalNotes] = useState("");
   const [draftCreateSubmitting, setDraftCreateSubmitting] = useState(false);
+  const [autoIncrementYear, setAutoIncrementYear] = useState(true);
+  const fiscalYearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const start = currentYear;
+    const options = [];
+    for (let i = 0; i <= 10; i += 1) {
+      const startYear = start + i;
+      const label = `${startYear}-${startYear + 1}`;
+      options.push({ label, value: label });
+    }
+    return options;
+  }, []);
 
   const draftOptions = useMemo(
     () =>
@@ -327,6 +342,13 @@ const BudgetHierarchyWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       setSelectedDraftId(draftOptions[0].value);
     }
   }, [activeTab, draftOptions, selectedDraftId]);
+
+  useEffect(() => {
+    if (!draftModalFiscalYear && activeVersion?.label) {
+      const match = fiscalYearOptions.find(opt => opt.label === activeVersion.label);
+      setDraftModalFiscalYear(match ? match.value : "");
+    }
+  }, [activeVersion, draftModalFiscalYear, fiscalYearOptions]);
 
   const selectedDraft = useMemo(
     () => (drafts || []).find(d => d.id === selectedDraftId) || null,
@@ -842,12 +864,14 @@ useEffect(() => {
       const fallbackLabel = `Draft ${new Date().toISOString().slice(0, 19).replace("T", " ")}`;
       const label = draftModalLabel.trim() || fallbackLabel;
       const notes = draftModalNotes.trim() || "";
-      const newId = await createDraft({ label, notes });
+      const fiscalYear = draftModalFiscalYear;
+      const newId = await createDraft({ label, notes, fiscalYear });
       if (newId) {
         setSelectedDraftId(newId);
       }
       setDraftModalOpen(false);
       setDraftModalLabel("");
+      setDraftModalFiscalYear(activeVersion?.label || "");
       setDraftModalNotes("");
     } catch (err) {
       console.error("Failed to create draft", err);
@@ -873,6 +897,9 @@ useEffect(() => {
           onClick={() => {
             setDraftModalOpen(true);
             setDraftModalLabel("");
+            setDraftModalFiscalYear(
+              fiscalYearOptions.find(opt => opt.label === activeVersion?.label)?.value || ""
+            );
             setDraftModalNotes("");
           }}
         >
@@ -909,7 +936,7 @@ useEffect(() => {
     if (!selectedDraftId) return;
     setPublishSubmitting(true);
     try {
-      await publishDraft(selectedDraftId);
+      await publishDraft(selectedDraftId, { fiscalYear: draftModalFiscalYear || undefined, autoIncrementYear });
       setPublishOpen(false);
     } catch (err) {
       console.error("Failed to publish draft", err);
@@ -992,7 +1019,12 @@ useEffect(() => {
             <Button variant="link" onClick={() => setDraftModalOpen(false)} disabled={draftCreateSubmitting}>
               Cancel
             </Button>
-            <Button variant="primary" loading={draftCreateSubmitting} onClick={handleCreateDraft}>
+            <Button
+              variant="primary"
+              loading={draftCreateSubmitting}
+              onClick={handleCreateDraft}
+              disabled={draftCreateSubmitting || !draftModalFiscalYear.trim()}
+            >
               Create draft
             </Button>
           </SpaceBetween>
@@ -1004,6 +1036,16 @@ useEffect(() => {
               value={draftModalLabel}
               placeholder="e.g., FY2026 Refresh"
               onChange={({ detail }) => setDraftModalLabel(detail.value)}
+            />
+          </FormField>
+          <FormField label="Fiscal year" description="Required; applied to all pots when published.">
+            <Select
+              selectedOption={
+                fiscalYearOptions.find(opt => opt.value === draftModalFiscalYear) || null
+              }
+              options={fiscalYearOptions}
+              placeholder="Select fiscal year"
+              onChange={({ detail }) => setDraftModalFiscalYear(detail.selectedOption?.value || "")}
             />
           </FormField>
           <FormField label="Notes" description="Optional context for this draft (scope, approvals, timing).">
@@ -1026,13 +1068,39 @@ useEffect(() => {
             <Button variant="link" onClick={() => setPublishOpen(false)} disabled={publishSubmitting}>
               Cancel
             </Button>
-            <Button variant="primary" loading={publishSubmitting} onClick={handlePublishDraft}>
+            <Button
+              variant="primary"
+              loading={publishSubmitting}
+              onClick={handlePublishDraft}
+              disabled={publishSubmitting || !draftModalFiscalYear}
+            >
               Publish now
             </Button>
           </SpaceBetween>
         }
       >
         <SpaceBetween size="s">
+          <FormField label="Fiscal year" description="Required; applied to all pots when published.">
+            <Select
+              selectedOption={
+                fiscalYearOptions.find(opt => opt.value === draftModalFiscalYear) || null
+              }
+              options={fiscalYearOptions}
+              placeholder="Select fiscal year"
+              onChange={({ detail }) => setDraftModalFiscalYear(detail.selectedOption?.value || "")}
+            />
+          </FormField>
+          <FormField
+            label="Auto increment year"
+            description="If your pot name or code includes a year this will automatically adjust to the published budget's fiscal year."
+          >
+            <Checkbox
+              checked={autoIncrementYear}
+              onChange={({ detail }) => setAutoIncrementYear(detail.checked)}
+            >
+              Auto increment year
+            </Checkbox>
+          </FormField>
           <StatusIndicator type="warning">
             Publishing replaces the live budget hierarchy with the selected draft and archives any live pots not in the draft. A safety snapshot is taken first.
           </StatusIndicator>

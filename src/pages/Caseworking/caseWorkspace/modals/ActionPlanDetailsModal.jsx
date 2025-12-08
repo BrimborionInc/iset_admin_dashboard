@@ -217,13 +217,40 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
   const loadPots = useCallback(async query => {
     setPotLoading(true);
     try {
-      const resp = await apiFetch(`/api/finance/budget-pots/lookup${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+      const resp = await apiFetch("/api/finance/budget-pots");
       const data = resp.ok ? await resp.json() : [];
-      const opts = (Array.isArray(data) ? data : []).map(item => ({
-        value: item.value || item.id,
-        label: item.label || item.name || item.code || "",
-        description: item.code ? item.code : undefined,
-      }));
+      const qLower = (query || "").toLowerCase();
+      const opts = (Array.isArray(data) ? data : [])
+        .filter(item => {
+          const potType =
+            item?.pot_type ??
+            item?.potType ??
+            item?.type ??
+            item?.nodeType ??
+            item?.metadata?.pot_type ??
+            item?.metadata?.nodeType ??
+            "";
+          return String(potType).trim().toLowerCase() === "funding stream";
+        })
+        .filter(item => item?.isActive !== false)
+        .filter(item => {
+          if (!qLower) return true;
+          const name = String(item?.name || "").toLowerCase();
+          const code = String(item?.code || "").toLowerCase();
+          return name.includes(qLower) || code.includes(qLower);
+        })
+        .map(item => {
+          const value = item.id || item.value || item.code;
+          if (!value) return null;
+          const code = item.code || "";
+          const label = item.label || item.name || code || "";
+          return {
+            value: String(value),
+            label,
+            description: code || undefined,
+          };
+        })
+        .filter(Boolean);
       setPotOptions(opts);
     } catch (err) {
       console.warn("[ActionPlan] budget pot lookup failed", err);

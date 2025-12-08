@@ -1380,20 +1380,41 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     } catch (_) {
       details = null;
     }
-      if (!response.ok) {
-        const message =
-          details?.message ||
-          details?.detail ||
-          details?.error ||
-          `Failed to delete intervention (${response.status})`;
-        const error = new Error(message);
-        error.status = response.status;
-        error.details = details;
-        throw error;
-      }
+    if (!response.ok) {
+      const message =
+        details?.message ||
+        details?.detail ||
+        details?.error ||
+        `Failed to delete intervention (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      error.details = details;
+      throw error;
+    }
     markCompliancePending();
+    setState(prev => {
+      if (!prev.caseData) return prev;
+      const nextPlans = (prev.caseData.actionPlans || []).map(plan => {
+        const current = Array.isArray(plan.interventions) ? plan.interventions : [];
+        const updated = current.filter(item => item.id !== interventionId);
+        return { ...plan, interventions: updated, interventionCount: updated.length };
+      });
+      const { open, total } = recomputeInterventionCounts(nextPlans);
+      return {
+        ...prev,
+        caseData: {
+          ...prev.caseData,
+          actionPlans: nextPlans,
+          counts: {
+            ...(prev.caseData.counts || {}),
+            openInterventions: open,
+            totalInterventions: total,
+          },
+        },
+      };
+    });
     return details || {};
-  }, [apiFetch, markCompliancePending]);
+  }, [apiFetch, markCompliancePending, setState]);
 
   const fetchActionPlanContext = useCallback(async () => {
     const response = await apiFetch(`/api/cases/${caseId}/action-plan/context`, {

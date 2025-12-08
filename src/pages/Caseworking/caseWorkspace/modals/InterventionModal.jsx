@@ -212,6 +212,8 @@ const InterventionModal = ({
   const initialFormRef = useRef({ ...defaultForm });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [validationError, setValidationError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [nocSuggestions, setNocSuggestions] = useState([]);
   const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
@@ -228,6 +230,8 @@ const InterventionModal = ({
       initialFormRef.current = { ...blankForm };
       setLoading(false);
       setError(null);
+      setValidationError(null);
+      setFieldErrors({});
       setNocSuggestions([]);
       setNocSuggestionsLoading(false);
       setIsClosing(false);
@@ -674,50 +678,45 @@ const applyFieldSideEffects = (draft, field, value) => {
       await handleCloseSubmit();
       return;
     }
+    setValidationError(null);
+    setFieldErrors({});
     const statusNormalized = normaliseStatus(form.status);
     const outcomeValue = ensureOutcomeForStatus(statusNormalized, form.outcome);
     const trimmedCode = (form.code ?? "").toString().trim();
     const trimmedTitle = form.title.trim();
+    const errors = {};
     if (!trimmedCode) {
-      setError("Intervention code is required.");
-      return;
+      errors.code = "Intervention code is required.";
     }
     if (!trimmedTitle) {
-      setError("Intervention title is required.");
-      return;
+      errors.title = "Intervention title is required.";
     }
     // Funding stream is inherited from the action plan; no intervention-level validation.
     if (!form.startDate) {
-      setError("Start date is required.");
-      return;
+      errors.startDate = "Start date is required.";
     }
     if (requiresNoc) {
       if (!form.nocVersion) {
-        setError("Select a NOC version for this intervention.");
-        return;
+        errors.nocVersion = "Select a NOC version for this intervention.";
       }
       if (!form.noc.trim()) {
-        setError("Select a NOC code for this intervention.");
-        return;
+        errors.noc = "Select a NOC code for this intervention.";
       }
       const expectedLength = form.nocVersion === "2021" ? 5 : 4;
       const nocValue = form.noc.trim();
       if (nocValue.length !== expectedLength || !/^\d+$/.test(nocValue)) {
-        setError(`NOC code must be a ${expectedLength}-digit numeric value for version ${form.nocVersion}.`);
-        return;
+        errors.noc = `NOC code must be a ${expectedLength}-digit numeric value for version ${form.nocVersion}.`;
       }
     }
     if (form.startDate) {
       const startDateObj = new Date(form.startDate);
       const cutoff = new Date("2000-01-01");
       if (startDateObj < cutoff) {
-        setError("Start date must be after 2000-01-01.");
-        return;
+        errors.startDate = "Start date must be after 2000-01-01.";
       }
     }
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
-      setError("End date cannot be before start date.");
-      return;
+      errors.endDate = "End date cannot be before start date.";
     }
     if (planStartDate) {
       const toDateOnly = value => {
@@ -729,8 +728,7 @@ const applyFieldSideEffects = (draft, field, value) => {
       const planStart = toDateOnly(planStartDate);
       const interventionStart = toDateOnly(form.startDate);
       if (planStart && interventionStart && interventionStart < planStart) {
-        setError("Intervention start date cannot be before the action plan start date.");
-        return;
+        errors.startDate = "Intervention start date cannot be before the action plan start date.";
       }
     }
     if (form.startDate && form.endDate) {
@@ -739,44 +737,41 @@ const applyFieldSideEffects = (draft, field, value) => {
       maxEnd.setMonth(maxEnd.getMonth() + 60);
       const end = new Date(form.endDate);
       if (end > maxEnd) {
-        setError("End date must be within 60 months of start date.");
-        return;
+        errors.endDate = "End date must be within 60 months of start date.";
       }
     }
 
     const durationValue =
       form.durationDays === "" ? null : Number(form.durationDays.replace(/\s+/g, ""));
     if (form.durationDays !== "" && !Number.isFinite(durationValue)) {
-      setError("Duration (days) must be a number.");
-      return;
+      errors.durationDays = "Duration (days) must be a number.";
     }
     if (Number.isFinite(durationValue) && durationValue < 0) {
-      setError("Duration (days) cannot be negative.");
-      return;
+      errors.durationDays = "Duration (days) cannot be negative.";
     }
     if (form.endDate && durationValue === null) {
-      setError("Duration (days) is required when an end date is provided.");
-      return;
+      errors.durationDays = "Duration (days) is required when an end date is provided.";
     }
     if (form.startDate && form.endDate && Number.isFinite(durationValue)) {
       const rangeDays = calculateDurationDays(form.startDate, form.endDate);
       if (rangeDays !== null && durationValue > rangeDays) {
-        setError("Duration (days) must not exceed the span between start and end date.");
-        return;
+        errors.durationDays = "Duration (days) must not exceed the span between start and end date.";
       }
       if (durationValue > 999) {
-        setError("Duration (days) must be 0–999.");
-        return;
+        errors.durationDays = "Duration (days) must be 0–999.";
       }
     }
 
     const costValue = form.cost === "" ? null : Number(form.cost.replace(/\s+/g, ""));
     if (form.cost !== "" && !Number.isFinite(costValue)) {
-      setError("Cost must be a number.");
-      return;
+      errors.cost = "Cost must be a number.";
     }
     if (costValue !== null && (costValue < 0 || costValue > 999999 || !Number.isInteger(costValue))) {
-      setError("Cost must be a whole number between 0 and 999999.");
+      errors.cost = "Cost must be a whole number between 0 and 999999.";
+    }
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors);
+      setValidationError("Please resolve the highlighted fields.");
       return;
     }
 
@@ -867,6 +862,8 @@ const applyFieldSideEffects = (draft, field, value) => {
     if (loading) return;
     setForm({ ...initialFormRef.current });
     setError(null);
+    setValidationError(null);
+    setFieldErrors({});
     setNocSuggestions([]);
     setNocSuggestionsLoading(false);
     setIsClosing(false);
@@ -961,24 +958,27 @@ const applyFieldSideEffects = (draft, field, value) => {
       }
     >
       <SpaceBetween size="l">
-        {error && (
+        {(error || validationError) && (
           <Alert
             type="error"
             dismissible
             dismissAriaLabel="Dismiss error message"
-            onDismiss={() => setError(null)}
+            onDismiss={() => {
+              setError(null);
+              setValidationError(null);
+            }}
           >
-            {error}
+            {error || validationError}
           </Alert>
         )}
         <Box color="text-body-secondary" fontSize="body-s">
-          All fields can be updated while the intervention remains in a planned or in-progress state. Use "Close intervention" to record the final outcome and actual spend.
+          All fields can be updated while the intervention remains in a planned or in-progress state. Use "Close intervention" to record the final outcome and actual spend. Activating an intervention will also activate its parent action plan if it is still in draft.
         </Box>
         <SpaceBetween size="xl">
           <SpaceBetween size="s">
             <Header variant="h3">Intervention details</Header>
             <ColumnLayout columns={2} variant="text-grid">
-              <FormField label="Title" stretch>
+              <FormField label="Title" stretch errorText={fieldErrors.title}>
                 <Input
                   value={form.title}
                   onChange={({ detail }) => handleChange("title", detail.value)}
@@ -999,7 +999,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                   <Input value={outcomeLabel} readOnly disabled />
                 </FormField>
               )}
-              <FormField label="Start date">
+              <FormField label="Start date" errorText={fieldErrors.startDate}>
                 <DatePicker
                   value={form.startDate}
                   onChange={({ detail }) => handleChange("startDate", detail.value)}
@@ -1007,7 +1007,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                   disabled={isReadOnly}
                 />
               </FormField>
-              <FormField label="End date">
+              <FormField label="End date" errorText={fieldErrors.endDate}>
                 <DatePicker
                   value={form.endDate}
                   onChange={({ detail }) => handleChange("endDate", detail.value)}
@@ -1015,7 +1015,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                   disabled={isReadOnly}
                 />
               </FormField>
-              <FormField label="Duration in days (calculated)">
+              <FormField label="Duration in days (calculated)" errorText={fieldErrors.durationDays}>
                 <Input
                   value={form.durationDays}
                   readOnly
@@ -1023,7 +1023,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                   type="number"
                 />
               </FormField>
-              <FormField label="Intervention code" stretch>
+              <FormField label="Intervention code" stretch errorText={fieldErrors.code}>
                 <Select
                   selectedOption={selectedCodeOption}
                   onChange={({ detail }) => handleChange("code", detail.selectedOption?.value || "")}
@@ -1038,11 +1038,12 @@ const applyFieldSideEffects = (draft, field, value) => {
                   }
                   disabled={isReadOnly || codesLoading}
                   autoFocus={!isReadOnly}
+                  invalid={Boolean(fieldErrors.code)}
                 />
               </FormField>
               {requiresNoc && (
                 <>
-                  <FormField label="NOC version">
+                  <FormField label="NOC version" errorText={fieldErrors.nocVersion}>
                     <Select
                       selectedOption={selectedNocVersionOption}
                       onChange={({ detail }) => {
@@ -1058,10 +1059,12 @@ const applyFieldSideEffects = (draft, field, value) => {
                         nocVersionsLoading ? undefined : "No NOC versions available. Please try again later."
                       }
                       disabled={isReadOnly || nocVersionsLoading}
+                      invalid={Boolean(fieldErrors.nocVersion)}
                     />
                   </FormField>
                   <FormField
                     label="NOC code"
+                    errorText={fieldErrors.noc}
                   >
                     <Autosuggest
                       value={form.noc}
@@ -1090,6 +1093,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                       onLoadItems={({ detail }) => {
                         fetchNocSuggestions(detail.filteringText);
                       }}
+                      invalid={Boolean(fieldErrors.noc)}
                     />
                   </FormField>
                 </>
@@ -1155,6 +1159,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                   <FormField
                     label="Cost"
                     description="Calculated total based on recurring schedule."
+                    errorText={fieldErrors.cost}
                   >
                     <Input
                       value={formattedCostDisplay}
@@ -1167,7 +1172,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                 </>
               )}
               {!isRecurringCost && (
-                <FormField label="Cost">
+                <FormField label="Cost" errorText={fieldErrors.cost}>
                   <Input
                     value={isReadOnly || isCostFocused ? costInputValue : formattedCostDisplay}
                     onChange={({ detail }) => handleChange("cost", detail.value)}
