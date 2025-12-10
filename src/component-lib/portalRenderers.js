@@ -4,8 +4,39 @@ import React from 'react';
 // Reason: CRA build disallows importing files outside src/. Keep this file in sync when portal changes.
 
 // Simple content renderers (static blocks)
-export function Paragraph(p){useGovUkInit();const{comp,lang='en'}=p;const cls=comp.class||comp.classes||comp.className||'govuk-body';const content=t(lang,comp.text||comp.label||comp.html||'');const isHeading=/govuk-heading-(xl|l|m|s)/.test(cls);const Tag=isHeading?'h2':'p';return(<Tag className={cls}>{content}</Tag>);}
-export function InsetText(p){useGovUkInit();const{comp,lang='en'}=p;const base='govuk-inset-text';const extra=[comp.class,comp.classes,comp.className].filter(Boolean).join(' ');const cls=extra?`${base} ${extra}`:base;return(<div className={cls}>{t(lang,comp.text||comp.label||comp.html||'')}</div>);}
+const resolveHtml = (lang, comp) => {
+  if (!comp) return null;
+  const raw = comp.html ?? comp.label ?? comp.text ?? null;
+  if (!raw) return null;
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object') return raw[lang] ?? raw.en ?? raw.fr ?? null;
+  return null;
+};
+export function Paragraph(p){
+  useGovUkInit();
+  const { comp, lang='en' } = p;
+  const cls = comp.class || comp.classes || comp.className || 'govuk-body';
+  const isHeading = /govuk-heading-(xl|l|m|s)/.test(cls);
+  const Tag = isHeading ? 'h2' : 'p';
+  const html = resolveHtml(lang, comp);
+  if (html) {
+    return <Tag className={cls} dangerouslySetInnerHTML={{ __html: html }} />;
+  }
+  const content = t(lang, comp.text || comp.label || '');
+  return (<Tag className={cls}>{content}</Tag>);
+}
+export function InsetText(p){
+  useGovUkInit();
+  const { comp, lang='en' } = p;
+  const base = 'govuk-inset-text';
+  const extra = [comp.class, comp.classes, comp.className].filter(Boolean).join(' ');
+  const cls = extra ? `${base} ${extra}` : base;
+  const html = resolveHtml(lang, comp);
+  if (html) {
+    return <div className={cls} dangerouslySetInnerHTML={{ __html: html }} />;
+  }
+  return (<div className={cls}>{t(lang, comp.text || comp.label || '')}</div>);
+}
 
 function useGovUkInit() {
   React.useEffect(() => {

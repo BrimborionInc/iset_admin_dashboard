@@ -150,6 +150,10 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
   const [showEmptyDeletedModal, setShowEmptyDeletedModal] = useState(false);
   const [emptyConfirmText, setEmptyConfirmText] = useState('');
   const [emptyDeleting, setEmptyDeleting] = useState(false);
+  const [workflowOptions, setWorkflowOptions] = useState([]);
+  const [workflowsLoading, setWorkflowsLoading] = useState(false);
+  const [workflowsError, setWorkflowsError] = useState(null);
+  const [selectedWorkflowIds, setSelectedWorkflowIds] = useState([]);
 
   useEffect(() => {
     setFilteringText('');
@@ -204,6 +208,31 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     }
     loadMessages();
   }, [caseId, loadMessages]);
+
+  // Load eligible workflows for attachments
+  const loadWorkflows = useCallback(async () => {
+    setWorkflowsLoading(true);
+    setWorkflowsError(null);
+    try {
+      const resp = await apiFetch('/api/workflows');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json().catch(() => []);
+      const rows = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+      const filtered = rows
+        .map(r => ({
+          id: r.id,
+          name: r.name || `Workflow ${r.id}`,
+          type: (r.workflow_type || r.workflowType || '').trim()
+        }))
+        .filter(r => r.type === 'consent-no-prefill' || r.type === 'consent-cm-prefill');
+      setWorkflowOptions(filtered);
+    } catch (e) {
+      setWorkflowsError(e?.message || 'Failed to load workflows');
+      setWorkflowOptions([]);
+    } finally {
+      setWorkflowsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -312,7 +341,11 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
       if (!message) return;
       setSelectedMessage(message);
       setViewModalOpen(true);
-      if (applicantUserId && message.sender_id === applicantUserId && isUnread(message)) {
+      const isFromApplicant =
+        applicantUserId &&
+        message.sender_id === applicantUserId &&
+        message.recipient_id !== applicantUserId;
+      if (isFromApplicant && isUnread(message)) {
         try {
           const response = await apiFetch(`/api/admin/messages/${message.id}/status`, {
             method: 'PUT',
@@ -390,6 +423,27 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
         minWidth: 120
       },
       {
+        id: 'forms',
+        header: 'Forms',
+        cell: item => {
+          const forms = Array.isArray(item?.attachments)
+            ? item.attachments.filter(a => a && a.workflow_id)
+            : [];
+          if (!forms.length) return '—';
+          const pending = forms.filter(f => (f.status || '').toLowerCase() === 'pending').length;
+          const viewed = forms.filter(f => (f.status || '').toLowerCase() === 'viewed').length;
+          const signed = forms.filter(f => (f.status || '').toLowerCase() === 'signed').length;
+          const cancelled = forms.filter(f => (f.status || '').toLowerCase() === 'cancelled').length;
+          const parts = [];
+          if (pending) parts.push(`${pending} pending`);
+          if (viewed) parts.push(`${viewed} viewed`);
+          if (signed) parts.push(`${signed} signed`);
+          if (cancelled) parts.push(`${cancelled} cancelled`);
+          return parts.length ? parts.join(' · ') : `${forms.length} attached`;
+        },
+        minWidth: 180
+      },
+      {
         id: 'urgent',
         header: 'Urgent',
         cell: item => (
@@ -461,6 +515,8 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     setComposeError(null);
     setComposeToName(applicantName || 'Applicant');
     setComposeFromName(currentEvaluatorName || 'Case Worker');
+    setSelectedWorkflowIds([]);
+    loadWorkflows();
     setComposeModalOpen(true);
   };
 
@@ -480,6 +536,8 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     setComposeError(null);
     setComposeToName(getSenderName(selectedMessage) || applicantName || 'Applicant');
     setComposeFromName(currentEvaluatorName || 'Case Worker');
+    setSelectedWorkflowIds([]);
+    loadWorkflows();
     setComposeModalOpen(true);
   };
 
@@ -500,6 +558,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     setComposeSending(true);
     setComposeError(null);
     try {
+      const attachmentsPayload = selectedWorkflowIds.map(id => ({ workflow_id: id }));
       const response = await apiFetch(`/api/cases/${caseId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -508,7 +567,8 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
           body,
           urgent: composeUrgent,
           toDisplayName: toName,
-          fromDisplayName: fromName
+          fromDisplayName: fromName,
+          attachments: attachmentsPayload
         })
       });
       if (!response.ok) {
@@ -521,12 +581,20 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
       setComposeToName(applicantName || 'Applicant');
       setComposeFromName(currentEvaluatorName || 'Case Worker');
       setComposeUrgent(false);
+      setSelectedWorkflowIds([]);
       await loadMessages({ silent: true });
     } catch (err) {
       setComposeError(err?.message || 'Failed to send message');
     } finally {
       setComposeSending(false);
     }
+  };
+
+  const toggleWorkflowSelection = (id) => {
+    setSelectedWorkflowIds(prev => {
+      if (prev.includes(id)) return prev.filter(x => x !== id);
+      return [...prev, id];
+    });
   };
 
   const handleDeleteMessage = async () => {
@@ -685,6 +753,16 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
 
   const renderMessageDetails = () => {
     if (!selectedMessage) return null;
+    const signingAttachments = Array.isArray(selectedMessage.attachments)
+      ? selectedMessage.attachments
+      : [];
+    const typeLabel = (raw) => {
+      const val = (raw || '').trim();
+      if (val === 'consent-cm-prefill') return 'Form (CM prefill)';
+      if (val === 'consent-no-prefill') return 'Form (No prefill)';
+      return val || 'Form';
+    };
+    const statusLabel = (raw) => normalizeStatus(raw || 'pending');
     return (
       <SpaceBetween size="s">
         <div>
@@ -711,6 +789,20 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
           <label style={{ fontWeight: 'bold' }}>Urgent:</label>
           <Input readOnly value={selectedMessage.urgent ? 'Yes' : 'No'} />
         </div>
+        {signingAttachments.length > 0 && (
+          <div>
+            <label style={{ fontWeight: 'bold' }}>Forms attached:</label>
+            <ul style={{ paddingLeft: 16, marginTop: 4, marginBottom: 4 }}>
+              {signingAttachments.map(att => (
+                <li key={att.id} style={{ marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600 }}>{att.workflow_name || `Form ${att.workflow_id || att.id}`}</span>{' '}
+                  <span style={{ color: '#687078' }}>({typeLabel(att.workflow_type)})</span>{' '}
+                  <span style={{ color: '#414d5c', fontSize: 12 }}>Status: {statusLabel(att.status)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {attachmentsLoading && <Spinner />}
         {attachmentsError && <Box color="text-status-critical">{attachmentsError}</Box>}
         {attachments.length > 0 && (
@@ -895,6 +987,29 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
               placeholder="Write your message"
               disabled={composeSending}
             />
+          </div>
+          <div>
+            <label style={{ fontWeight: 'bold' }}>Attach form(s) to send:</label>
+            {workflowsLoading ? (
+              <Box><Spinner size="normal" /> Loading forms…</Box>
+            ) : workflowsError ? (
+              <Box color="text-status-critical">{workflowsError}</Box>
+            ) : workflowOptions.length === 0 ? (
+              <Box color="text-body-secondary">No eligible forms (type “Form”) available.</Box>
+            ) : (
+              <SpaceBetween size="xxs">
+                {workflowOptions.map(wf => (
+                  <Checkbox
+                    key={wf.id}
+                    checked={selectedWorkflowIds.includes(wf.id)}
+                    onChange={() => toggleWorkflowSelection(wf.id)}
+                    disabled={composeSending}
+                  >
+                    {wf.name} <span style={{ color: '#687078' }}>({wf.type === 'consent-cm-prefill' ? 'Form (CM prefill)' : 'Form (No prefill)'})</span>
+                  </Checkbox>
+                ))}
+              </SpaceBetween>
+            )}
           </div>
           <Checkbox
             checked={!!composeUrgent}

@@ -4,6 +4,24 @@ import { BoardItem } from '@cloudscape-design/board-components';
 import { apiFetch } from '../auth/apiClient';
 import useWidgetDataLoader from '../hooks/useWidgetDataLoader';
 
+const typeLabel = (raw) => {
+  const val = (raw || '').trim();
+  if (val === 'intake-application') return 'Main Intake';
+  if (val === 'signature-request' || val === 'attachment-request') return 'Form (No prefill)';
+  if (val === 'main-intake') return 'Main Intake';
+  if (val === 'consent-no-prefill') return 'Form (No prefill)';
+  if (val === 'consent-cm-prefill') return 'Form (CM prefill)';
+  return val || 'Main Intake';
+};
+
+const normalizeTypeValue = (raw) => {
+  const val = (raw || '').trim();
+  if (val === 'intake-application') return 'main-intake';
+  if (val === 'signature-request' || val === 'attachment-request') return 'consent-no-prefill';
+  if (['main-intake', 'consent-no-prefill', 'consent-cm-prefill'].includes(val)) return val;
+  return 'main-intake';
+};
+
 const getColumnDefinitions = (onSelectWorkflow, onModify, onDelete) => [
   {
     id: 'id',
@@ -19,6 +37,12 @@ const getColumnDefinitions = (onSelectWorkflow, onModify, onDelete) => [
       <Button variant="inline-link" onClick={() => onSelectWorkflow(item)}>{item.name}</Button>
     ),
     sortingField: 'name'
+  },
+  {
+    id: 'workflow_type',
+    header: 'Type',
+    cell: item => typeLabel(item.workflow_type),
+    sortingField: 'workflow_type'
   },
   {
     id: 'lastModified',
@@ -55,11 +79,13 @@ const WorkflowListWidget = ({ actions, onSelectWorkflow, toggleHelpPanel }) => {
     return rows.map((r, index) => {
       const rawName = typeof r.name === 'string' ? r.name : (typeof r.title === 'string' ? r.title : '');
       const safeName = rawName && rawName.trim() ? rawName.trim() : `Untitled workflow ${r.id ?? index + 1}`;
+      const normalizedType = normalizeTypeValue(r.workflow_type || r.workflowType || '');
       return {
         id: r.id ?? `wf-${index}`,
         name: safeName,
         lastModified: formatDate(r.updated_at || r.created_at),
-        status: r.status || 'unknown'
+        status: r.status || 'unknown',
+        workflow_type: normalizedType
       };
     });
   }, []);

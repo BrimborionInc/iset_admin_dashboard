@@ -29,7 +29,7 @@ const PREFERENCES_STORAGE_KEY = 'supporting-documents-table-preferences-v1';
 const COLUMN_WIDTHS_STORAGE_KEY = 'supporting-documents-table-widths-v1';
 const ALL_COLUMN_IDS = ['label', 'file_name', 'source', 'uploaded_at', 'actions'];
 const REQUIRED_COLUMN_IDS = ['file_name', 'actions'];
-const DOCUMENT_TYPE_OPTIONS = [
+const DOCUMENT_TYPE_OPTIONS_FALLBACK = [
   { value: '', label: 'Select document type' },
   { value: 'application_form', label: 'Application form (legacy)' },
   { value: 'ei_consent', label: 'EI Consent Form' },
@@ -72,12 +72,36 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     }
     return null;
   }, [propCaseData, workspace]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await apiFetch('/api/document-types');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (cancelled) return;
+        const opts = Array.isArray(data?.items)
+          ? data.items
+              .filter(d => d && d.code)
+              .map(d => ({ value: d.code, label: d.label || d.code }))
+          : [];
+        const list = [{ value: '', label: 'Select document type' }, ...opts];
+        setDocumentTypeOptions(list);
+      } catch (_) {
+        // fall back to static options
+        setDocumentTypeOptions(DOCUMENT_TYPE_OPTIONS_FALLBACK);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [pendingDownloads, setPendingDownloads] = useState({});
+  const [documentTypeOptions, setDocumentTypeOptions] = useState(DOCUMENT_TYPE_OPTIONS_FALLBACK);
   const [labelModalVisible, setLabelModalVisible] = useState(false);
   const [pendingLabel, setPendingLabel] = useState('');
   const [labelError, setLabelError] = useState('');
@@ -846,9 +870,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           errorText={pendingCategoryError}
       >
           <Select
-            selectedOption={DOCUMENT_TYPE_OPTIONS.find(opt => opt.value === pendingCategory) || DOCUMENT_TYPE_OPTIONS[0]}
+            selectedOption={documentTypeOptions.find(opt => opt.value === pendingCategory) || documentTypeOptions[0]}
             onChange={({ detail }) => setPendingCategory(detail.selectedOption.value || '')}
-            options={DOCUMENT_TYPE_OPTIONS}
+            options={documentTypeOptions}
             selectedAriaLabel="Selected document type"
             placeholder="Select document type"
           />
@@ -911,9 +935,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           </FormField>
           <FormField label="Document type" errorText={editCategoryError}>
             <Select
-              selectedOption={DOCUMENT_TYPE_OPTIONS.find(opt => opt.value === editCategory) || DOCUMENT_TYPE_OPTIONS[0]}
+              selectedOption={documentTypeOptions.find(opt => opt.value === editCategory) || documentTypeOptions[0]}
               onChange={({ detail }) => setEditCategory(detail.selectedOption.value || '')}
-              options={DOCUMENT_TYPE_OPTIONS}
+              options={documentTypeOptions}
               selectedAriaLabel="Selected document type"
               placeholder="Select document type"
             />

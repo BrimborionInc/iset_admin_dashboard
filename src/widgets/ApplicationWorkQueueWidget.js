@@ -173,10 +173,10 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
         bucketId === 'awaiting-decision' ||
         bucketId === 'decisions-made')
     ) {
-      return 'http://localhost:3001/case-assignment-dashboard';
+      return '/case-assignment-dashboard';
     }
     if (currentRole === 'Regional Coordinator') {
-      return 'http://localhost:3001/case-assignment-dashboard';
+      return '/case-assignment-dashboard';
     }
     if (
       currentRole === 'Application Assessor' &&
@@ -186,7 +186,7 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
         bucketId === 'awaiting-applicant' ||
         bucketId === 'overdue')
     ) {
-      return 'http://localhost:3001/case-assignment-dashboard';
+      return '/case-assignment-dashboard';
     }
     return null;
   };

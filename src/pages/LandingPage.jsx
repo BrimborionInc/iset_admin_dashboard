@@ -43,135 +43,27 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.2.3 (4 Dec 2025)',
-      description: 'Release 0.2.3 addresses the initial feedback from NWAC during the first demo review session.',
+      sectionTitle: 'Release Notes - v0.3.0 (10 Dec 2025)',
+      description: 'Release 0.3.0 adds digital forms for completion and signature by participants.',
       features: {
         heading: 'Updates',
         sections: [
           {
-            title: 'Patch v0.2.3 — NWAC review fixes pt 1',
+            title: 'Release v0.3.0 — Digital Forms Signature',
             paragraphs: [
-              'Registration Number is now mandatory for Status First Nations and must be 10 digits; Non-Status, Inuit, and Métis have their own free-text input with tailored guidance.',
-              'Home Community now defaults to the Indigenous declaration affiliation but can be edited when needed.',
-              'New intake step prompts applicants to detail any student loans or grants they are receiving.',
-              'Employment status now includes “Employed on approved leave”; the application form widget lists this under household incomes.',
-              'Bug fixes: clicking Back on an intake step with a validation error now clears the error.',
-              'Added a "Closed" status and quick action allowing admins to close an application.',
-              'Added a "Province" column to the application intake table showing the info entered by the applicant in the "Address" intake step.',
-              'Added "Resume" to the list of documents submittable by the applicant during intake.',
-              'Gated the assessment based on whether the EI status assessment has been completed by an admin.',
-              'Removed the EI status self-assessment question from the intake workflow.',
-              'Added a new sortable, filterable status "Awaiting EI Validation" to the application intake table so administrators can see which applications still need lookup.',
-              'Commenced normalising the use of "Case Manager" in the public portal.',
-              'Removed the placeholder "support" email link in the application card.'
+              'Case Managers can now send digital documents for signature via Secure Messaging; applicants see and sign them in the public portal.',
+              'Sysadmins can author custom forms in the workflow studio, classify them with a document type, and reuse them as a library.',
+              'Applicants complete forms step by step (including branching when needed); submission deposits a signed PDF into Supporting Documents with the right category.',
+              'Inline improvements: attached forms show in message details; signed documents list with downloads; richer text/headings render correctly in portal and PDFs.'
             ]
           },
           {
-            title: 'Patch v0.2.2 — Document Checklist',
+            title: 'Path notes',
             paragraphs: [
-              'Document Checklist now calculates itself automatically from the documents on file and the application details; only items that actually apply are shown.',
-              'Key rules are built in (e.g., acceptance and statement of account only when skills training applies; attendance only when living allowance applies; medical docs only when disability support is requested).',
-              'When you click Approve/Reject, a warning modal shows any missing items; you can still continue if you choose.'
-            ]
-          },
-          {
-            title: 'Release v0.2.0 — Case management',
-            paragraphs: [
-              'This major release introduces the Caseworking module. When an application is approved in the Application assessment module it appears in Caseworking.',
-              'Caseworking is where you manage the case from first follow-up to closure. Open a case to a workspace with panels for the case header, secure messaging, supporting documents, notes and tasks, calendar, action plans, interventions, finance, compliance, and an export preview. Drag to reorder, resize, add or remove panels, and your layout is remembered.',
-              'Caseworking workspace:',
-              '- Create action plans, then activate, close, or archive them as the case progresses; keep plan dates and status up to date.',
-              '- Select the current plan to see and edit its interventions. Update status, dates, description, outcomes, and funding pot; add notes for team context.',
-              '- Use the calendar to schedule follow-ups and view upcoming reminders and plan milestones in one place; it highlights what’s due next.',
-              '- Read and send secure messages; any attachments you open also show up in Supporting documents for quick download.',
-              '- Add notes and simple tasks as you go; use follow‑up dates to place reminders on the calendar.',
-              '- Check finance totals and pot balances to catch overspend early and confirm funding mappings.',
-              '- Review compliance messages to resolve anything blocking export.',
-              '- Preview the export to confirm what will be sent before you proceed.',
-              '- Confirm the client, agreement, and owner in the case header; reassign ownership when needed.',
-              '- You can reset the layout to the default at any time, and each panel includes brief help for common actions.',
-              'Intake and assessment updates:',
-              '- Updated the Client EI consent step and signature to the new format. Submission is blocked until forms are signed.',
-              '- Added a Conflict of Interest step with signature to intake. Submission is blocked until forms are signed.',
-              'Printable applicant declarations:',
-              '- Client EI consent (PDF)',
-              '- Indigenous declaration (PDF)',
-              '- Conflict of Interest (PDF)',
-              'Assessment widget:',
-              '- Added the Assessor conflict of interest block and blocked access until it is checked.',
-              'Eligibility rules:',
-              '- Eligibility limited to Indigenous Women (First Nations, Métis, Inuit).',
-              '- Canadian citizenship required.',
-              '- Applicants must be unemployed, under-employed, or at risk.',
-              '- Removed age restriction (no age limit).',
-              '- Removed Eligibility Check step.',
-              'Form standardization and fields:',
-              '- Biological sex and gender identity fields standardized.',
-              '- Added self-declaration form and treaty/status number fields.',
-              '- Added province/territory drop-down for education section.',
-              '- Updated Employment Goal wording to align with ISET support.',
-              '- Added options for Group Training and Self-employment Supports.',
-              "- Corrected 'Band Denial Letter' label and added upload options — now requests a Denial or Approval letter based on whether a funding amount was entered earlier.",
-              '- Added disability identification and medical documentation fields, including file upload logic.',
-              '- Updated marital status to “Married or equivalent”.',
-              '- Removed Internet as an eligible expense.',
-              '- Removed “Other expenses” and added a catch-all training expense question.',
-              '- Updated transportation options to Bus Pass, Parking Pass, or Mileage.',
-              '- Added Alimony and Child Support to household income options.',
-              'Configuration and widgets:',
-              '- Patch list confirmed and applied to live configuration.',
-              '- Added lookup for Indigenous community field.',
-              '- Updated the application form widget with the new fields.',
-              '- Added an EI consent form modal and save function to the application form widget.'
-            ]
-          },
-          {
-            title: 'Patch v0.1.5 — Case portfolio scaffolding',
-            paragraphs: [
-              'New Dashboards:',
-              '- Scaffolded the Level 1 “ISET Case Portfolio” dashboard with persistent filters, finance overview, and case table widgets.',
-              '- Introduced the Level 2 “Case Workspace” dashboard, wrapping existing case widgets (supporting documents, secure messaging, application events, etc.) as configurable board items.',
-              '- Wired new API hook stubs for portfolio and case data, and updated access-control routes plus side-navigation badges.',
-              'UI Improvements:',
-              '- Added Cloudscape board controls to the case workspace header and surfaced contact message counts in the side-nav footer.',
-              '- Restyled the compliance panel into dual cards highlighting ILMP vs. finance checks.',
-              '- Ensured documents, messaging, and events widgets now share the case context scaffolding.',
-              'Notes:',
-              '- All new dashboards and widgets remain scaffolds pending live API integration, CRUD flows, and validation wiring.'
-            ]
-          },
-          {
-            title: 'Patch v0.1.4 — Bug fixes',
-            paragraphs: [
-              'Bug Fixes:',
-              '- Fixed a bug where the "Forgotten password" link was blocked in the public portal.',
-              '- Fixed a bug where "case_watch_removed" events were not being captured.',
-              '- Fixed a bug where characters with accents were rendered as question marks in the public portal messages module.',
-              '- Fixed a bug where regional coordinators could not approve or reject applications.',
-              '- Fixed a bug where assessors could sometimes approve or reject applications unexpectedly.',
-              'Minor Improvements:',
-              '- Changed the messaging for Social Insurance Numbers that fail checksum validation in the Participant Submissions dashboard.',
-              '- Extended the ESDC submission XML to cover the intervention. More work is needed in the assessment widget to collect the remaining ESDC-required information: Intervention Code (WG code 1-20), Intervention Start/End Date plus Intervention Duration (weeks/hours), Intervention Outcome, Intervention Cost as a plain number, Intervention Related NOC and NOC Version, Action Plan Result Code and Result Date, Childcare Need and related funding description, Requested Supports per intervention, and Optional Notes or goal narrative.'
-            ]
-          },
-          {
-            title: 'Patch v0.1.3 — ESDC submissions prep',
-            paragraphs: [
-              'You can test this by moving a submitted application to the "approved" status.',
-              'Prepared the upcoming ESDC submissions module with four dashboards: Overview, Participants, Participant Submission Workspace, and Reporting.',
-              'Participants dashboard now highlights readiness status, blocking issues, and export progress so coordinators can triage real submissions first.',
-              'Overview dashboard stays scaffolded while we wire in live submission KPIs, deadline tracking, and recent submissions summaries.',
-              'Participants dashboard queues approved applications for XML generation and links into the Participant Submission Workspace.',
-              'Participant Submission Workspace validates a single participant against the ESDC 1.4 schema, including checksum checks for Social Insurance Numbers.',
-              'Participant Submission Workspace now generates ILMP XML snapshots, stores checksums, and exposes an inline preview with download and copy actions.',
-              'Reporting dashboard remains a scaffold placeholder that will ultimately cover case, intervention, NOC, and finance-integrated reporting.'
-            ]
-          },
-          {
-            title: 'Patch v0.1.2 — Public portal updates',
-            paragraphs: [
-              'Refreshed public portal content (cookies, privacy, about, contact) and connected the Contact Messages dashboard.',
-              'Simplified the "ISET Application – Draft Incomplete" card to focus on completion counts.'
+              'Author and classify: new workflow types for forms plus document type selection.',
+              'Send for signature: attach forms when composing secure messages.',
+              'Participant journey: view “Documents to sign”, follow steps with validation, and submit.',
+              'Storage: signed PDFs saved to Supporting Documents with timestamps and document type.'
             ]
           }
         ]
@@ -199,9 +91,8 @@ const copy = {
           {
             title: 'Up Next',
             paragraphs: [
-              'Finance Module (currently still just dummy data).',
-              'Handling Recurrent Applications (e.g. multi-year study financing) Needs some more discussion next week.',
-              'Improving "Roles".  Curetnly we have Admins, Regional Coorinators and Assessors.  Do we need a special role for PTMAs?  Do there need to be two tiers of Assessor?  For discussion next week.'
+              'Expanding the digital forms library beyond the initial three examples.',
+              'Case Manager prefill for forms (e.g., EI Funding Agreement) so some fields arrive pre-populated before applicant signature.'
             ]
           }
         ]

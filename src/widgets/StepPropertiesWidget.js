@@ -17,6 +17,7 @@ const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, 
   const stepId = step?.stepId;
   const stepRouting = step?.routing;
   const stepOpts = useMemo(() => (selectedId ? stepOptionsFrom(steps, selectedId) : []), [steps, selectedId]);
+  const stepOptsWithNone = useMemo(() => [{ label: '(none / end)', value: null }, ...stepOpts], [stepOpts]);
   const routing = step?.routing || { mode: 'linear' };
 
   const [fieldChoices, setFieldChoices] = useState([]); // [{label,value}]
@@ -140,9 +141,9 @@ const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, 
             <FormField label="Next step">
               <Select
                 placeholder="(none / end)"
-                selectedOption={selectObj(routing.next, stepOpts)}
-                onChange={({ detail }) => setRouting({ mode: 'linear', next: detail.selectedOption?.value })}
-                options={stepOpts}
+                selectedOption={selectObj(routing.next, stepOptsWithNone)}
+                onChange={({ detail }) => setRouting({ mode: 'linear', next: detail.selectedOption?.value ?? null })}
+                options={stepOptsWithNone}
                 filteringType="auto"
               />
             </FormField>
@@ -170,12 +171,12 @@ const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, 
                       <FormField key={opt} label={labelByValue[opt] || opt}>
                         <Select
                           placeholder="Choose next step"
-                          selectedOption={selected}
+                          selectedOption={selected || selectObj(null, stepOptsWithNone)}
                           onChange={({ detail }) => {
-                            const next = detail.selectedOption?.value;
+                            const next = detail.selectedOption?.value ?? null;
                             setRouting({ ...routing, mapping: { ...(routing.mapping || {}), [opt]: next } });
                           }}
-                          options={stepOpts}
+                          options={stepOptsWithNone}
                           filteringType="auto"
                         />
                       </FormField>
@@ -186,9 +187,9 @@ const StepPropertiesWidget = ({ apiBase = '', steps = [], selectedId, onChange, 
               <FormField label="Default next (for unmapped options)">
                 <Select
                   placeholder="Choose default"
-                  selectedOption={selectObj(routing.defaultNext, stepOpts)}
-                  onChange={({ detail }) => setRouting({ ...routing, defaultNext: detail.selectedOption?.value })}
-                  options={stepOpts}
+                  selectedOption={selectObj(routing.defaultNext, stepOptsWithNone)}
+                  onChange={({ detail }) => setRouting({ ...routing, defaultNext: detail.selectedOption?.value ?? null })}
+                  options={stepOptsWithNone}
                   filteringType="auto"
                 />
               </FormField>

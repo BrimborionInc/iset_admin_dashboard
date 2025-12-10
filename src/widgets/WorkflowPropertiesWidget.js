@@ -21,17 +21,54 @@ import WorkflowPropertiesWidgetHelp from '../helpPanelContents/workflowPropertie
 export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated, actions, toggleHelpPanel }) {
   const [nameValue, setNameValue] = useState('');
   const [statusValue, setStatusValue] = useState('draft');
+  const [typeValue, setTypeValue] = useState('main-intake');
   const [saving, setSaving] = useState(false);
+  const [docTypeValue, setDocTypeValue] = useState('');
+  const [docTypeOptions, setDocTypeOptions] = useState([{ label: 'Select document type', value: '' }]);
   const [alert, setAlert] = useState(null); // { type, text }
+
+  const normalizeType = (raw) => {
+    const val = (raw || '').trim();
+    if (val === 'intake-application') return 'main-intake';
+    if (val === 'signature-request' || val === 'attachment-request') return 'consent-no-prefill';
+    if (['main-intake', 'consent-no-prefill', 'consent-cm-prefill'].includes(val)) return val;
+    return 'main-intake';
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await apiFetch('/api/document-types');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (cancelled) return;
+        const opts = Array.isArray(data?.items)
+          ? data.items
+              .filter(d => d && d.code)
+              .map(d => ({ value: d.code, label: d.label || d.code }))
+          : [];
+        const list = [{ label: 'Select document type', value: '' }, ...opts];
+        setDocTypeOptions(list);
+      } catch (e) {
+        // fallback to default option only
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (workflow) {
       setNameValue(workflow.name || '');
       setStatusValue(workflow.status || 'draft');
+      setTypeValue(normalizeType(workflow.workflow_type || workflow.workflowType || 'main-intake'));
+      setDocTypeValue(workflow.document_type || workflow.documentType || '');
       setAlert(null);
     } else {
       setNameValue('');
       setStatusValue('draft');
+      setTypeValue('main-intake');
+      setDocTypeValue('');
       setAlert(null);
     }
   }, [workflow]);
@@ -51,20 +88,55 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated, 
     [statusOptions, statusValue]
   );
 
+  const typeOptions = useMemo(
+    () => [
+      { label: 'Main Intake', value: 'main-intake' },
+      { label: 'Form (No prefill)', value: 'consent-no-prefill' },
+      { label: 'Form (CM prefill)', value: 'consent-cm-prefill' }
+    ],
+    []
+  );
+
+  const selectedType = useMemo(
+    () =>
+      typeOptions.find(o => o.value === typeValue) || { label: typeValue, value: typeValue },
+    [typeOptions, typeValue]
+  );
+
+  const selectedDocType = useMemo(
+    () =>
+      docTypeOptions.find(o => o.value === docTypeValue) || docTypeOptions[0],
+    [docTypeOptions, docTypeValue]
+  );
+
   const isDirty =
     !!workflow &&
     ((nameValue || '') !== (workflow.name || '') ||
-      (statusValue || '') !== (workflow.status || ''));
+      (statusValue || '') !== (workflow.status || '') ||
+      (typeValue || '') !== normalizeType(workflow.workflow_type || workflow.workflowType || 'main-intake') ||
+      (docTypeValue || '') !== (workflow.document_type || workflow.documentType || ''));
+
+  useEffect(() => {
+    if (typeValue === 'main-intake') {
+      setDocTypeValue('');
+    }
+  }, [typeValue]);
 
   const onCancel = () => {
     if (!workflow) return;
     setNameValue(workflow.name || '');
     setStatusValue(workflow.status || 'draft');
+    setTypeValue(normalizeType(workflow.workflow_type || workflow.workflowType || 'main-intake'));
+    setDocTypeValue(workflow.document_type || workflow.documentType || '');
     setAlert(null);
   };
 
   const onPublish = async () => {
     if (!workflow) { setAlert({ type: 'warning', text: 'No workflow selected.' }); return; }
+    if (typeValue !== 'main-intake') {
+      setAlert({ type: 'warning', text: 'Publish is only available for Main Intake workflows.' });
+      return;
+    }
     try {
       setSaving(true);
       setAlert(null);
@@ -96,6 +168,8 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated, 
       const payload = {
         name: nameValue || 'Untitled Workflow',
         status: statusValue || 'draft',
+        workflow_type: typeValue || 'main-intake',
+        document_type: typeValue === 'main-intake' ? null : (docTypeValue || null),
         steps,
         start_step_id: start ? start.id : null,
         routes
@@ -134,7 +208,7 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated, 
           actions={
             <SpaceBetween direction="horizontal" size="xs">
               {isDirty && <Badge color="blue">Unsaved</Badge>}
-              <Button onClick={onPublish} disabled={!workflow} iconAlign="right">
+              <Button onClick={onPublish} disabled={!workflow || typeValue !== 'main-intake'} iconAlign="right">
                 Publish
               </Button>
               <Button onClick={onCancel} disabled={!isDirty || !workflow}>
@@ -174,7 +248,7 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated, 
         {!workflow && <div style={{ color: '#888' }}>Select a workflow to see details</div>}
 
         {workflow && (
-          <ColumnLayout columns={5} variant="text-grid">
+          <ColumnLayout columns={6} variant="text-grid">
             <FormField
               label="Name"
               description="Display name shown to administrators"
@@ -198,12 +272,35 @@ export default function WorkflowPropertiesWidget({ workflow, onWorkflowUpdated, 
                 options={statusOptions}
                 placeholder="Select status"
               />
-            </FormField>
-            <FormField
-              label="Steps"
-              description="Total steps in this workflow"
-              constraintText="Read-only"
-            >
+          </FormField>
+          <FormField
+            label="Type"
+            description="Workflow type"
+          >
+            <Select
+              selectedOption={selectedType}
+              onChange={({ detail }) => setTypeValue(detail.selectedOption?.value || 'main-intake')}
+              options={typeOptions}
+              placeholder="Select type"
+            />
+          </FormField>
+          <FormField
+            label="Document type"
+            description="Used for generated artifacts and checklist categorization"
+          >
+            <Select
+              selectedOption={selectedDocType}
+              onChange={({ detail }) => setDocTypeValue(detail.selectedOption?.value || '')}
+              options={docTypeOptions}
+              placeholder="Select document type"
+              disabled={typeValue === 'main-intake'}
+            />
+          </FormField>
+          <FormField
+            label="Steps"
+            description="Total steps in this workflow"
+            constraintText="Read-only"
+          >
               <Input value={String(stepsCount)} disabled />
             </FormField>
             <FormField

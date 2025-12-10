@@ -471,6 +471,8 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_event_receipt',
   'iset_event_outbox',
   'iset_event_entry',
+  'message_signing_request',
+  'signing_request',
   'iset_intake.message_attachment',
   'iset_intake.messages',
   'iset_document',
@@ -4702,6 +4704,34 @@ function resolveRequestActor(req) {
   const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || req.auth?.userId || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
   const actorName = req.auth?.name || req.get('X-Dev-Username') || req.get('x-dev-username') || null;
   return { actorId, actorName };
+}
+
+async function resolveOrCreateUserIdFromAuth(req) {
+  const sub = req?.auth?.sub || null;
+  const email = req?.auth?.email || null;
+  if (!sub && !email) return null;
+  try {
+    let row;
+    if (sub) {
+      [[row]] = await pool.query('SELECT id FROM user WHERE cognito_sub = ? LIMIT 1', [sub]);
+    }
+    if (!row && email) {
+      [[row]] = await pool.query('SELECT id FROM user WHERE email = ? LIMIT 1', [email]);
+    }
+    if (row && row.id) return row.id;
+    const preferredLanguage = req?.auth?.locale || req?.auth?.preferredLanguage || 'en';
+    const name = req?.auth?.name || email || sub || 'User';
+    const safeEmail = email || `${sub || Date.now()}@placeholder.local`;
+    const [ins] = await pool.query(
+      `INSERT INTO user (name,email,cognito_sub,email_verified,suspended,preferred_language)
+       VALUES (?,?,?,?,0,?)`,
+      [name, safeEmail, sub || null, 1, preferredLanguage]
+    );
+    return ins.insertId;
+  } catch (err) {
+    console.error('[auth] resolveOrCreateUserIdFromAuth failed', err?.message || err);
+    return null;
+  }
 }
 
 const ASSIGN_ROLE_ALLOWLIST = new Set([
@@ -14961,6 +14991,47 @@ app.get('/api/steps', async (req, res) => {
 // - workflow_route_option(workflow_id, source_step_id, option_value, next_step_id)
 
 // Helpers
+const WORKFLOW_TYPES = ['main-intake', 'consent-no-prefill', 'consent-cm-prefill'];
+function normalizeWorkflowType(raw, { required = false } = {}) {
+  const mapLegacy = (v) => {
+    if (!v) return null;
+    if (v === 'intake-application') return 'main-intake';
+    if (v === 'signature-request' || v === 'attachment-request') return 'consent-no-prefill';
+    return v;
+  };
+  const mapped = mapLegacy(raw);
+  if (mapped == null || String(mapped).trim() === '') {
+    return required ? 'main-intake' : null;
+  }
+  const val = String(mapped).trim();
+  if (!WORKFLOW_TYPES.includes(val)) {
+    throw Object.assign(new Error('Invalid workflow_type'), { code: 400 });
+  }
+  return val;
+}
+
+function slugifyName(value) {
+  if (!value) return null;
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+async function validateDocumentType(code, conn) {
+  if (!code) return null;
+  const val = String(code).trim();
+  if (!val) return null;
+  const [[row]] = await conn.query(
+    `SELECT code FROM document_type WHERE code = ? AND is_active = 1 LIMIT 1`,
+    [val]
+  );
+  if (!row) {
+    throw Object.assign(new Error('Invalid document_type'), { code: 400 });
+  }
+  return row.code;
+}
+
 async function stepsExist(stepIds, conn) {
   if (!Array.isArray(stepIds) || stepIds.length === 0) return true;
   const [rows] = await conn.query(
@@ -14972,7 +15043,7 @@ async function stepsExist(stepIds, conn) {
 
 async function getWorkflowDetails(workflowId) {
   const [[wf]] = await pool.query(
-    `SELECT id, name, status, created_at, updated_at
+    `SELECT id, name, status, workflow_type, document_type, created_at, updated_at
        FROM iset_intake.workflow
       WHERE id = ?`,
     [workflowId]
@@ -15016,7 +15087,7 @@ async function getWorkflowDetails(workflowId) {
 app.get('/api/workflows', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT id, name, status, created_at, updated_at
+      `SELECT id, name, status, workflow_type, document_type, created_at, updated_at
          FROM iset_intake.workflow
         ORDER BY updated_at DESC, id DESC`
     );
@@ -15043,7 +15114,17 @@ app.get('/api/workflows/:id', async (req, res) => {
 // Create workflow
 // Body: { name: string, status?: 'draft'|'active'|'inactive', steps: number[], start_step_id: number, routes?: [ { source_step_id, mode, field_key?, default_next_step_id?, options?: [{ option_value, next_step_id }] } ] }
 app.post('/api/workflows', async (req, res) => {
-  const { name, status = 'draft', steps = [], start_step_id = null, routes = [] } = req.body || {};
+  const {
+    name,
+    status = 'draft',
+    steps = [],
+    start_step_id = null,
+    routes = [],
+    workflow_type: workflowTypeRaw,
+    workflowType: workflowTypeCamel,
+    document_type: documentTypeRaw,
+    documentType: documentTypeCamel
+  } = req.body || {};
   if (!name || !Array.isArray(steps) || steps.length === 0 || !start_step_id) {
     return res.status(400).json({ error: 'name, steps[], and start_step_id are required' });
   }
@@ -15051,13 +15132,15 @@ app.post('/api/workflows', async (req, res) => {
     return res.status(400).json({ error: 'start_step_id must be included in steps[]' });
   }
   try {
+    const workflowType = normalizeWorkflowType(workflowTypeRaw ?? workflowTypeCamel ?? 'main-intake', { required: true });
     const newId = await withTx(async (conn) => {
       if (!(await stepsExist(steps, conn))) {
         throw Object.assign(new Error('One or more step IDs are invalid'), { code: 400 });
       }
+      const documentType = await validateDocumentType(documentTypeRaw ?? documentTypeCamel ?? null, conn);
       const [ins] = await conn.query(
-        `INSERT INTO iset_intake.workflow (name, status) VALUES (?, ?)`,
-        [name, status]
+        `INSERT INTO iset_intake.workflow (name, status, workflow_type, document_type) VALUES (?, ?, ?, ?)`,
+        [name, status, workflowType, documentType]
       );
       const workflowId = ins.insertId;
 
@@ -15121,20 +15204,40 @@ app.post('/api/workflows', async (req, res) => {
 // Body: { name?: string, status?: string, steps?: number[], start_step_id?: number, routes?: [...] }
 app.put('/api/workflows/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, status, steps, start_step_id, routes } = req.body || {};
+  const {
+    name,
+    status,
+    steps,
+    start_step_id,
+    routes,
+    workflow_type: workflowTypeRaw,
+    workflowType: workflowTypeCamel,
+    document_type: documentTypeRaw,
+    documentType: documentTypeCamel
+  } = req.body || {};
   try {
+    const workflowType = normalizeWorkflowType(workflowTypeRaw ?? workflowTypeCamel ?? null, { required: false });
+    let documentType = null;
+    try {
+      documentType = await validateDocumentType(documentTypeRaw ?? documentTypeCamel ?? null, pool);
+    } catch (err) {
+      if (err && err.code === 400) throw err;
+      documentType = null;
+    }
     await withTx(async (conn) => {
       // ensure workflow exists
       const [[wf]] = await conn.query(`SELECT id FROM iset_intake.workflow WHERE id = ?`, [id]);
       if (!wf) throw Object.assign(new Error('Workflow not found'), { code: 404 });
 
-      if (name != null || status != null) {
+      if (name != null || status != null || workflowType != null || documentType !== undefined) {
         await conn.query(
           `UPDATE iset_intake.workflow SET
              name = COALESCE(?, name),
-             status = COALESCE(?, status)
+             status = COALESCE(?, status),
+             workflow_type = COALESCE(?, workflow_type),
+             document_type = COALESCE(?, document_type)
            WHERE id = ?`,
-          [name ?? null, status ?? null, id]
+          [name ?? null, status ?? null, workflowType ?? null, documentType ?? null, id]
         );
       }
 
@@ -16658,6 +16761,31 @@ app.delete('/api/documents/:id', async (req, res) => {
   } catch (err) {
     console.error('[admin:documents:delete] error', err);
     return res.status(500).json({ error: 'failed_to_delete_document' });
+  }
+});
+
+// Document types reference (shared by workflow forms and supporting documents)
+app.get('/api/document-types', async (req, res) => {
+  const includeInactive = String(req.query.includeInactive || '').toLowerCase() === 'true';
+  try {
+    const [rows] = await pool.query(
+      `SELECT code, label, description, sort_order, is_active
+         FROM document_type
+        WHERE is_active = 1 OR ?
+        ORDER BY sort_order, label`,
+      [includeInactive ? 1 : 0]
+    );
+    const items = rows.map(r => ({
+      code: r.code,
+      label: r.label,
+      description: r.description,
+      sortOrder: r.sort_order,
+      isActive: !!r.is_active
+    }));
+    res.json({ items });
+  } catch (err) {
+    console.error('[document-types] failed to load', err);
+    res.status(500).json({ error: 'failed_to_load_document_types' });
   }
 });
 
@@ -22962,7 +23090,37 @@ app.get('/api/cases/:id/messages', async (req, res) => {
         LIMIT ? OFFSET ?`,
       [applicantId, applicantId, limit, offset]
     );
-    res.json({ applicant_user_id: applicantId, items: rows });
+
+    const messageIds = rows.map(r => r.id);
+    let attachmentsByMsg = new Map();
+    if (messageIds.length) {
+      const placeholders = messageIds.map(() => '?').join(',');
+      const [attRows] = await pool.query(
+        `SELECT msr.message_id, sr.id AS signing_request_id, sr.workflow_id, sr.workflow_name, sr.workflow_type, sr.status
+           FROM message_signing_request msr
+           JOIN signing_request sr ON sr.id = msr.signing_request_id
+          WHERE msr.message_id IN (${placeholders})`,
+        messageIds
+      );
+      attachmentsByMsg = attRows.reduce((map, row) => {
+        if (!map.has(row.message_id)) map.set(row.message_id, []);
+        map.get(row.message_id).push({
+          id: row.signing_request_id,
+          workflow_id: row.workflow_id,
+          workflow_name: row.workflow_name,
+          workflow_type: row.workflow_type,
+          status: row.status
+        });
+        return map;
+      }, new Map());
+    }
+
+    const withAttachments = rows.map(r => ({
+      ...r,
+      attachments: attachmentsByMsg.get(r.id) || []
+    }));
+
+    res.json({ applicant_user_id: applicantId, items: withAttachments });
   } catch (e) {
     console.error('GET /api/cases/:id/messages failed:', e.message);
     res.status(500).json({ error: 'failed_to_fetch_messages' });
@@ -22970,7 +23128,7 @@ app.get('/api/cases/:id/messages', async (req, res) => {
 });
 
 // Secure messaging: send message to applicant for case
-// POST /api/cases/:id/messages  { subject, body, urgent }
+// POST /api/cases/:id/messages  { subject, body, urgent, attachments?: [{ workflow_id, due_at?, checklist_doc_type? }] }
 app.post('/api/cases/:id/messages', async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   const {
@@ -22978,7 +23136,8 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     body,
     urgent,
     toDisplayName,
-    fromDisplayName
+    fromDisplayName,
+    attachments
   } = req.body || {};
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
   const subjectValue = typeof subject === 'string' ? subject.trim() : '';
@@ -23031,11 +23190,83 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       senderId = row.id;
     }
 
+    // Resolve eligible workflow attachments (consent forms only)
+    let attachmentRows = [];
+    if (Array.isArray(attachments) && attachments.length) {
+      const wfIds = attachments
+        .map(a => parseInt(a?.workflow_id, 10))
+        .filter(n => Number.isInteger(n) && n > 0);
+      if (wfIds.length) {
+        const placeholders = wfIds.map(() => '?').join(',');
+        const [wfRows] = await pool.query(
+          `SELECT id, name, workflow_type, document_type FROM iset_intake.workflow WHERE id IN (${placeholders})`,
+          wfIds
+        );
+        attachmentRows = wfRows
+          .map(r => ({
+            id: r.id,
+            name: r.name || `Workflow ${r.id}`,
+            workflow_type: normalizeWorkflowType(r.workflow_type || 'consent-no-prefill', { required: true }),
+            document_type: r.document_type || null
+          }))
+          .filter(r => r.workflow_type === 'consent-no-prefill' || r.workflow_type === 'consent-cm-prefill');
+      }
+    }
+
     const [result] = await pool.query(
       `INSERT INTO messages (sender_id, recipient_id, case_id, application_id, subject, body, status, deleted, urgent, created_at)
        VALUES (?, ?, ?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
       [senderId, recipientId, caseId, caseRow?.application_id || null, subjectValue, bodyValue, !!urgent]
     );
+
+    // Create signing requests and link to message
+    if (attachmentRows.length) {
+      const schemaCache = new Map();
+      for (const wf of attachmentRows) {
+        let resolvedSchema = null;
+        if (buildWorkflowSchema) {
+          try {
+            if (schemaCache.has(wf.id)) {
+              resolvedSchema = schemaCache.get(wf.id);
+            } else {
+              const schema = await buildWorkflowSchema({ pool, workflowId: wf.id });
+              resolvedSchema = { steps: schema.steps, meta: schema.meta };
+              schemaCache.set(wf.id, resolvedSchema);
+            }
+          } catch (schemaErr) {
+            console.warn('[signing_request] failed to build schema for workflow', wf.id, schemaErr?.message || schemaErr);
+          }
+        }
+        const attachmentMeta = attachments.find(a => parseInt(a?.workflow_id, 10) === wf.id) || {};
+        const docType =
+          attachmentMeta.checklist_doc_type ||
+          wf.document_type ||
+          slugifyName(wf.name) ||
+          wf.workflow_type ||
+          'signing-form';
+        const [ins] = await pool.query(
+          `INSERT INTO signing_request
+             (workflow_id, workflow_name, workflow_type, case_id, participant_user_id, created_by_user_id, status, due_at, checklist_doc_type, resolved_schema_json)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+          [
+            wf.id,
+            wf.name,
+            wf.workflow_type,
+            caseId,
+            recipientId,
+            senderId,
+            attachmentMeta.due_at || null,
+            docType,
+            resolvedSchema ? JSON.stringify(resolvedSchema) : null
+          ]
+        );
+        const signingRequestId = ins.insertId;
+        await pool.query(
+          `INSERT INTO message_signing_request (message_id, signing_request_id) VALUES (?, ?)`,
+          [result.insertId, signingRequestId]
+        );
+      }
+    }
     const { actorName } = resolveRequestActor(req);
     const assessorDisplayName =
       req?.staffProfile?.display_name ||
@@ -26903,6 +27134,120 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
   } catch (error) {
     console.error('Error fetching message attachments:', error);
     res.status(500).json({ error: 'Failed to fetch message attachments' });
+  }
+});
+
+// --- Signing Requests (participant-facing) -----------------------------------
+// GET /api/signing-requests (participant) – list requests for current user
+app.get('/api/signing-requests', async (req, res) => {
+  try {
+    const userId = await resolveOrCreateUserIdFromAuth(req);
+    if (!userId) return res.status(401).json({ error: 'unauthorized' });
+    const [rows] = await pool.query(
+      `SELECT id, workflow_id, workflow_name, workflow_type, case_id, participant_user_id, created_by_user_id, status, due_at, artifact_url, checklist_doc_type, created_at, updated_at
+         FROM signing_request
+        WHERE participant_user_id = ?
+        ORDER BY created_at DESC`,
+      [userId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /api/signing-requests failed', err);
+    res.status(500).json({ error: 'failed_to_fetch_signing_requests' });
+  }
+});
+
+// GET /api/signing-requests/:id – participant fetch, marks viewed if pending
+app.get('/api/signing-requests/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid_id' });
+  try {
+    const userId = await resolveOrCreateUserIdFromAuth(req);
+    if (!userId) return res.status(401).json({ error: 'unauthorized' });
+    const [[row]] = await pool.query(
+      `SELECT * FROM signing_request WHERE id = ? LIMIT 1`,
+      [id]
+    );
+    if (!row) return res.status(404).json({ error: 'not_found' });
+    if (row.participant_user_id !== userId) return res.status(403).json({ error: 'forbidden' });
+
+    let steps = null;
+    let meta = null;
+    if (row.resolved_schema_json) {
+      try {
+        const parsed = typeof row.resolved_schema_json === 'object' ? row.resolved_schema_json : JSON.parse(row.resolved_schema_json);
+        steps = parsed?.steps || null;
+        meta = parsed?.meta || null;
+      } catch (_) {}
+    }
+    if (!steps && buildWorkflowSchema) {
+      try {
+        const schema = await buildWorkflowSchema({ pool, workflowId: row.workflow_id });
+        steps = schema.steps;
+        meta = schema.meta;
+        await pool.query(
+          `UPDATE signing_request SET resolved_schema_json = ? WHERE id = ?`,
+          [JSON.stringify({ steps, meta }), id]
+        );
+      } catch (e) {
+        console.error('Failed to build schema for signing request', e);
+      }
+    }
+
+    if (row.status === 'pending') {
+      try {
+        await pool.query(`UPDATE signing_request SET status = 'viewed', updated_at = NOW() WHERE id = ?`, [id]);
+        row.status = 'viewed';
+      } catch (_) {}
+    }
+
+    res.json({
+      id: row.id,
+      workflow_id: row.workflow_id,
+      workflow_name: row.workflow_name,
+      workflow_type: row.workflow_type,
+      status: row.status,
+      due_at: row.due_at,
+      artifact_url: row.artifact_url,
+      checklist_doc_type: row.checklist_doc_type,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      steps,
+      meta
+    });
+  } catch (err) {
+    console.error('GET /api/signing-requests/:id failed', err);
+    res.status(500).json({ error: 'failed_to_fetch_signing_request' });
+  }
+});
+
+// POST /api/signing-requests/:id/sign – participant submits/signs
+app.post('/api/signing-requests/:id/sign', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid_id' });
+  const payload = req.body || {};
+  try {
+    const userId = await resolveOrCreateUserIdFromAuth(req);
+    if (!userId) return res.status(401).json({ error: 'unauthorized' });
+    const [[row]] = await pool.query(`SELECT * FROM signing_request WHERE id = ? LIMIT 1`, [id]);
+    if (!row) return res.status(404).json({ error: 'not_found' });
+    if (row.participant_user_id !== userId) return res.status(403).json({ error: 'forbidden' });
+    if (row.status === 'cancelled' || row.status === 'expired') {
+      return res.status(409).json({ error: 'not_signable' });
+    }
+    await pool.query(
+      `UPDATE signing_request
+          SET status = 'signed',
+              signed_payload_json = ?,
+              artifact_url = COALESCE(?, artifact_url),
+              updated_at = NOW()
+        WHERE id = ?`,
+      [JSON.stringify(payload), payload.artifact_url || null, id]
+    );
+    res.json({ id, status: 'signed' });
+  } catch (err) {
+    console.error('POST /api/signing-requests/:id/sign failed', err);
+    res.status(500).json({ error: 'failed_to_sign' });
   }
 });
 

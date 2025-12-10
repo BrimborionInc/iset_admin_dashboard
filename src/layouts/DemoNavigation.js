@@ -46,6 +46,8 @@ const CLEAR_TABLES = [
   'iset_event_entry',
   'iset_intake.message_attachment',
   'iset_intake.messages',
+  'message_signing_request',
+  'signing_request',
   'iset_document',
   'iset_application_version',
   'iset_application_draft_dynamic',

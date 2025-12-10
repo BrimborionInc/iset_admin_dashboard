@@ -21,7 +21,15 @@ const STORAGE_KEY = 'mw:steps-v1';
 
 // (Step Properties UI moved to widgets/StepPropertiesWidget)
 
-const makeSnapshot = (steps, wfName, wfStatus, startUiId) => {
+const normalizeWorkflowTypeValue = (val) => {
+  const v = (val || '').trim();
+  if (v === 'intake-application') return 'main-intake';
+  if (v === 'signature-request' || v === 'attachment-request') return 'consent-no-prefill';
+  if (['main-intake', 'consent-no-prefill', 'consent-cm-prefill'].includes(v)) return v;
+  return 'main-intake';
+};
+
+const makeSnapshot = (steps, wfName, wfStatus, wfType, startUiId) => {
   const normSteps = steps.map(s => ({
     id: s.id,
     name: s.name,
@@ -45,6 +53,7 @@ const makeSnapshot = (steps, wfName, wfStatus, startUiId) => {
   return {
     wfName: wfName || '',
     wfStatus: wfStatus || 'draft',
+    wfType: wfType || 'main-intake',
     startUiId: startUiId || null,
     steps: normSteps
   };
@@ -58,6 +67,7 @@ export default function ModifyWorkflowEditorWidget() {
   const [wfId, setWfId] = useState(null); // numeric id or null
   const [wfName, setWfName] = useState('');
   const [wfStatus, setWfStatus] = useState('draft');
+  const [wfType, setWfType] = useState('main-intake');
   // (Summary step auto-toggle removed; authors must add a summary step manually as a normal intake step.)
   const [startUiId, setStartUiId] = useState(null); // UI step id for start
   const [saving, setSaving] = useState(false);
@@ -102,6 +112,7 @@ export default function ModifyWorkflowEditorWidget() {
       setWfId(null);
       setWfName('');
       setWfStatus('draft');
+      setWfType('main-intake');
       setStartUiId(null);
     }
   }, []);
@@ -120,8 +131,8 @@ export default function ModifyWorkflowEditorWidget() {
   const baselineReadyRef = useRef(false);
 
   const snapshot = useCallback(
-    () => makeSnapshot(steps, wfName, wfStatus, startUiId),
-    [steps, wfName, wfStatus, startUiId]
+    () => makeSnapshot(steps, wfName, wfStatus, wfType, startUiId),
+    [steps, wfName, wfStatus, wfType, startUiId]
   );
 
   // Track whether any user-initiated edit has occurred to avoid premature dirty flag
@@ -140,6 +151,7 @@ export default function ModifyWorkflowEditorWidget() {
         if (cancelled) return;
         const nextName = data.name || '';
         const nextStatus = data.status || 'draft';
+        const nextType = normalizeWorkflowTypeValue(data.workflow_type || data.workflowType || 'main-intake');
         const uiSteps = (data.steps || []).map((s, idx) => ({ id: `S${idx + 1}`, name: s.name, stepId: s.id, routing: { mode: 'linear' } }));
         const byDbToUi = new Map();
         uiSteps.forEach(u => byDbToUi.set(u.stepId, u.id));
@@ -165,9 +177,10 @@ export default function ModifyWorkflowEditorWidget() {
         const resolvedStart = start ? (byDbToUi.get(start.id) || null) : (uiSteps[0]?.id || null);
         setWfName(nextName);
         setWfStatus(nextStatus);
+        setWfType(nextType);
         setSteps(uiSteps);
         setStartUiId(resolvedStart);
-        const snap = makeSnapshot(uiSteps, nextName, nextStatus, resolvedStart);
+        const snap = makeSnapshot(uiSteps, nextName, nextStatus, nextType, resolvedStart);
         baselineRef.current = snap;
         baselineReadyRef.current = true;
         dirtyRef.current = false;
@@ -208,7 +221,7 @@ export default function ModifyWorkflowEditorWidget() {
   }, [wfId, snapshot]);
 
   // Recompute only after baseline established and on dependency change
-  useEffect(() => { recomputeDirty(); }, [recomputeDirty, steps, wfName, wfStatus, startUiId]);
+  useEffect(() => { recomputeDirty(); }, [recomputeDirty, steps, wfName, wfStatus, wfType, startUiId]);
   // (Removed auto placeholder summary step effect.)
   // Keyboard affordance: Esc clears selection
   useEffect(() => {
@@ -301,8 +314,15 @@ export default function ModifyWorkflowEditorWidget() {
         routes.push({ source_step_id: s.stepId, mode: 'by_option', field_key: r.fieldKey || null, default_next_step_id: (r.defaultNext && uiToDb.get(r.defaultNext)) ? uiToDb.get(r.defaultNext) : null, options });
       }
     }
-    return { name: wfName || 'Untitled Workflow', status: wfStatus || 'draft', steps: stepIds, start_step_id: startDbId, routes };
-  }, [steps, wfName, wfStatus, startUiId]);
+    return {
+      name: wfName || 'Untitled Workflow',
+      status: wfStatus || 'draft',
+      workflow_type: wfType || 'main-intake',
+      steps: stepIds,
+      start_step_id: startDbId,
+      routes
+    };
+  }, [steps, wfName, wfStatus, wfType, startUiId]);
 
   const publishWorkflow = useCallback(async () => {
     if (!wfId) return;
@@ -390,11 +410,13 @@ export default function ModifyWorkflowEditorWidget() {
           <WorkflowPropertiesEditorWidget
               name={wfName}
               status={wfStatus}
+              workflowType={wfType}
               startUiId={startUiId}
               startOptions={startOptions}
               onChange={(delta) => {
                 if (Object.prototype.hasOwnProperty.call(delta, 'name')) { markUserEdited(); setWfName(delta.name); }
                 if (Object.prototype.hasOwnProperty.call(delta, 'status')) { markUserEdited(); setWfStatus(delta.status); }
+                if (Object.prototype.hasOwnProperty.call(delta, 'workflowType')) { markUserEdited(); setWfType(delta.workflowType); }
                 if (Object.prototype.hasOwnProperty.call(delta, 'startUiId')) { markUserEdited(); setStartUiId(delta.startUiId); }
               }}
             onSave={saveWorkflow}

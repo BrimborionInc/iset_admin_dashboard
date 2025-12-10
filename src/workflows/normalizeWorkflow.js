@@ -50,6 +50,9 @@ function toI18nObject(raw, fallback) {
     if (en || fr) {
       return { en: en || fr || '', fr: fr || en || '' };
     }
+    // Plain object with no meaningful text/en/fr; fall back if provided, else undefined
+    if (typeof fallback !== 'undefined') return toI18nObject(fallback, undefined);
+    return undefined;
   }
   const str = String(raw).trim();
   if (!str) return toI18nObject(fallback, undefined);
@@ -308,10 +311,15 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
       // Content only components
       if (tplType === 'paragraph' || c.template_key === 'text-block') {
         const paraText = props?.text ?? labelText ?? '';
+        // Preserve author-supplied rich HTML content when provided (e.g., lists).
+        const paraHtml = props?.html ?? (typeof paraText === 'object' ? paraText.html : undefined);
+        const textObj = toI18nObject(paraText, '');
+        const htmlObj = toI18nObject(paraHtml, undefined);
         out.components.push({
           id: toIdSlug('paragraph', 'paragraph', i, usedIds),
           type: 'paragraph',
-          text: { en: asLang(paraText, 'en'), fr: asLang(paraText, 'fr') },
+          ...(textObj ? { text: textObj } : {}),
+          ...(htmlObj ? { html: htmlObj } : {}),
           class: props?.classes || undefined,
         });
         continue;
