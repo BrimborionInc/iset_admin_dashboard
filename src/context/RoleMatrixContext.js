@@ -14,6 +14,9 @@ const ROLE_ALIASES = {
   SysAdmin: 'System Administrator',
   'System Admin': 'System Administrator',
   'Program Admin': 'Program Administrator',
+  'Regional Manager': 'Regional Coordinator',
+  'ISET Coordinator': 'Application Assessor',
+  ISETCoordinator: 'Application Assessor',
   ProgramAdministrator: 'Program Administrator',
 };
 

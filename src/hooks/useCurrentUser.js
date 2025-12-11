@@ -11,7 +11,8 @@ function normaliseUserResponse(data) {
   const displayName = auth.name || profile.name || null;
   const email = auth.email || profile.email || null;
   const role = auth.role || auth.primary_role || profile.role || null;
-  return { userId: userId ? String(userId) : null, displayName, email, role };
+  const regionId = auth.regionId != null ? auth.regionId : (profile.region_id != null ? profile.region_id : null);
+  return { userId: userId ? String(userId) : null, displayName, email, role, regionId };
 }
 
 function readFallbackRole() {
@@ -45,6 +46,7 @@ export default function useCurrentUser() {
     displayName: null,
     email: null,
     role: null,
+    regionId: null,
     error: null,
   });
 
@@ -66,6 +68,7 @@ export default function useCurrentUser() {
           displayName: normalised.displayName,
           email: normalised.email,
           role: fallbackRole,
+          regionId: normalised.regionId ?? null,
           error: null,
         });
       } catch (error) {
@@ -78,6 +81,7 @@ export default function useCurrentUser() {
           displayName: null,
           email: null,
           role: fallbackRole,
+          regionId: null,
           error: error?.message || 'Unable to determine current user',
         });
       }

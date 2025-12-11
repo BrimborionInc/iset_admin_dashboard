@@ -6827,9 +6827,9 @@ const ASSIGNABLE_COGNITO_GROUPS = [
 const ASSIGNABLE_GROUP_LABEL = new Map(ASSIGNABLE_COGNITO_GROUPS.map(entry => [entry.group, entry.label]));
 const ASSIGNABLE_GROUP_NAMES = ASSIGNABLE_COGNITO_GROUPS.map(entry => entry.group);
 const PLACEHOLDER_ASSIGNABLE_STAFF = [
-  { id: 'placeholder-program-admin', email: 'admin@nwac.ca', role: 'Program Administrator', display_name: 'Admin (Program Administrator)' },
-  { id: 'placeholder-regional-coordinator', email: 'coordinator@nwac.ca', role: 'Regional Coordinator', display_name: 'Coordinator (Regional Coordinator)' },
-  { id: 'placeholder-adjudicator', email: 'user@nwac.ca', role: 'Application Assessor', display_name: 'Assessor (Application Assessor)' }
+  { id: 'placeholder-program-admin', email: 'admin@nwac.ca', role: 'Program Administrator', display_name: 'Admin (Program Administrator)', region_id: null },
+  { id: 'placeholder-regional-coordinator', email: 'coordinator@nwac.ca', role: 'Regional Coordinator', display_name: 'Coordinator (Regional Coordinator)', region_id: 1 },
+  { id: 'placeholder-adjudicator', email: 'user@nwac.ca', role: 'Application Assessor', display_name: 'Assessor (Application Assessor)', region_id: 1 }
 ];
 const PLACEHOLDER_ASSIGNABLE_LOOKUP = new Map(PLACEHOLDER_ASSIGNABLE_STAFF.map(entry => [entry.email.toLowerCase(), entry]));
 
@@ -7068,6 +7068,10 @@ const WORK_QUEUE_BUCKET_META = {
     label: 'Assigned Applications',
     description: 'Applications awaiting assessment by their assigned owners.'
   },
+  'awaiting-ei-validation': {
+    label: 'Awaiting EI Validation',
+    description: 'Assigned applications missing EI eligibility confirmation.'
+  },
   'in-assessment': {
     label: 'In Assessment',
     description: 'Applications in active review by their owners.'
@@ -7109,6 +7113,34 @@ async function countProgramAdminUnassignedBacklog(pool) {
     const [[row]] = await pool.query(sql);
     return Number(row?.total ?? 0);
   } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function countProgramAdminAwaitingEiValidation(pool) {
+  try {
+    const statuses = ['submitted', 'in_review', 'docs_requested', 'pending_approval'];
+    const placeholders = statuses.map(() => '?').join(',');
+    const sql = `SELECT COUNT(*) AS total
+         FROM iset_case c
+         JOIN iset_application a ON a.id = c.application_id
+         LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+        WHERE a.status IS NOT NULL
+          AND LOWER(a.status) IN (${placeholders})
+          AND (
+            (c.assigned_to_user_id IS NOT NULL AND c.assigned_to_user_id <> 0)
+            OR LOWER(a.status) = 'submitted'
+          )
+          AND (ca.esdc_eligibility IS NULL OR ca.esdc_eligibility = '')`;
+    const [[row]] = await pool.query(sql, statuses);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      return 0;
+    }
     if (isMissingTableErrorLocal(err)) {
       return 0;
     }
@@ -7525,10 +7557,6 @@ async function countInactiveCasesWithScope(pool, { regionId = null, ownerId = nu
       params.push(...CASE_STATUS_TERMINAL_VALUES_LOWER);
     }
 
-    // Only treat rows explicitly marked as active as cases for inactivity counting.
-    filters.push(`${statusExpr} = ?`);
-    params.push(CASE_STATUS_DERIVED_VALUES.active);
-
     const whereSql = filters.length ? `AND ${filters.join(' AND ')}` : '';
 
     const sql = `
@@ -7681,38 +7709,41 @@ function getMondayStartDateExpr() {
 }
 
 async function countNewIntakesWithScope(pool, { regionId = null, ownerId = null } = {}) {
-  const statusExpr = 'LOWER(TRIM(COALESCE(c.status, "")))';
-  const filters = [
-    'c.created_at IS NOT NULL',
-    `DATE(c.created_at) >= ${getMondayStartDateExpr()}`,
-  ];
-  const params = [];
+  try {
+    const filters = [
+      'cl.created_at IS NOT NULL',
+      `DATE(cl.created_at) >= ${getMondayStartDateExpr()}`,
+      "LOWER(TRIM(COALESCE(a.status, ''))) = 'approved'"
+    ];
+    const params = [];
 
-  if (READY_TO_CLOSE_EXCLUDED_STATUSES.length) {
-    const placeholders = READY_TO_CLOSE_EXCLUDED_STATUSES.map(() => '?').join(',');
-    filters.push(`(c.status IS NULL OR ${statusExpr} NOT IN (${placeholders}))`);
-    params.push(...READY_TO_CLOSE_EXCLUDED_STATUSES);
+    if (Number.isInteger(ownerId) && ownerId > 0) {
+      filters.push('c.assigned_to_user_id = ?');
+      params.push(ownerId);
+    }
+
+    if (Number.isInteger(regionId) && regionId > 0) {
+      filters.push('c.assigned_to_user_id IS NOT NULL');
+      filters.push('sp.region_id = ?');
+      params.push(regionId);
+    }
+
+    const sql = `
+      SELECT COUNT(DISTINCT cl.id) AS total
+        FROM client cl
+        JOIN iset_case c ON c.client_id = cl.id
+        JOIN iset_application a ON a.id = c.application_id
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+    `;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return 0;
+    }
+    throw err;
   }
-
-  if (Number.isInteger(ownerId) && ownerId > 0) {
-    filters.push('c.assigned_to_user_id = ?');
-    params.push(ownerId);
-  }
-
-  if (Number.isInteger(regionId) && regionId > 0) {
-    filters.push('c.assigned_to_user_id IS NOT NULL');
-    filters.push('sp.region_id = ?');
-    params.push(regionId);
-  }
-
-  const sql = `
-    SELECT COUNT(*) AS total
-      FROM iset_case c
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
-     WHERE ${filters.join(' AND ')}
-  `;
-  const [[row]] = await pool.query(sql, params);
-  return Number(row?.total ?? 0);
 }
 
 async function countNewIntakesAll(pool) {
@@ -8454,7 +8485,7 @@ function resolveActorLabel(req) {
   return 'admin-dashboard';
 }
 
-async function ensureStaffProfile(pool, cognitoSub, email, roleLabel, legacyKey) {
+async function ensureStaffProfile(pool, cognitoSub, email, roleLabel, legacyKey, regionId) {
   try {
     const subKey = cognitoSub || null;
     const legacy = legacyKey && legacyKey !== subKey ? legacyKey : null;
@@ -8475,15 +8506,30 @@ async function ensureStaffProfile(pool, cognitoSub, email, roleLabel, legacyKey)
 
     const finalSub = subKey || legacy || email || null;
     if (targetId) {
-      const updates = [];
-      const params = [];
-      if (finalSub) { updates.push('cognito_sub=?'); params.push(finalSub); }
-      if (email) { updates.push('email=?'); params.push(email); }
-      if (roleLabel) { updates.push('primary_role=?'); params.push(roleLabel); }
-      if (updates.length) {
-        const sql = `UPDATE staff_profiles SET ${updates.join(', ')} WHERE id=?`;
-        params.push(targetId);
-        await pool.query(sql, params);
+      const clauses = [];
+      const values = [];
+      if (finalSub) { clauses.push('cognito_sub=?'); values.push(finalSub); }
+      if (email) { clauses.push('email=?'); values.push(email); }
+      if (roleLabel) { clauses.push('primary_role=?'); values.push(roleLabel); }
+      const hasRegionClause = Number.isFinite(regionId);
+      if (hasRegionClause) { clauses.push('region_id=?'); values.push(regionId); }
+      if (clauses.length) {
+        const sql = `UPDATE staff_profiles SET ${clauses.join(', ')} WHERE id=?`;
+        const params = [...values, targetId];
+        try {
+          await pool.query(sql, params);
+        } catch (err) {
+          if (hasRegionClause && /unknown column 'region_id'|ER_BAD_FIELD_ERROR/i.test(err?.message || '')) {
+            const trimmedClauses = clauses.filter(c => c !== 'region_id=?');
+            const trimmedValues = values.filter((_, idx) => clauses[idx] !== 'region_id=?');
+            if (trimmedClauses.length) {
+              const retrySql = `UPDATE staff_profiles SET ${trimmedClauses.join(', ')} WHERE id=?`;
+              await pool.query(retrySql, [...trimmedValues, targetId]);
+            }
+          } else {
+            throw err;
+          }
+        }
       }
       return targetId;
     }
@@ -8492,8 +8538,19 @@ async function ensureStaffProfile(pool, cognitoSub, email, roleLabel, legacyKey)
     const insertKey = finalSub || email || legacy;
     if (!insertKey) return null;
     const insertEmail = email || `${insertKey}@placeholder.local`;
-    await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
-      ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`, [insertKey, insertEmail, roleLabel || null]);
+    if (Number.isFinite(regionId)) {
+      try {
+        await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role,region_id) VALUES (?,?,?,?)
+          ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role), region_id=VALUES(region_id)`, [insertKey, insertEmail, roleLabel || null, regionId]);
+      } catch (err) {
+        // fallback if region column missing
+        await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
+          ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`, [insertKey, insertEmail, roleLabel || null]);
+      }
+    } else {
+      await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
+        ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`, [insertKey, insertEmail, roleLabel || null]);
+    }
     const [[finalRow]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [insertKey]);
     return finalRow && finalRow.id ? finalRow.id : null;
   } catch (err) {
@@ -8517,16 +8574,19 @@ async function fetchAssignableFromCognito(pool) {
           if (seen.has(username)) continue;
           const attr = Object.fromEntries((user.Attributes || []).map(a => [a.Name, a.Value]));
           const email = attr.email || username;
+          const regionIdAttr = attr['custom:region_id'];
+          const regionId = regionIdAttr != null ? Number(regionIdAttr) : null;
           if (!email) continue;
           const canonicalSub = attr.sub || username;
-          const staffId = await ensureStaffProfile(pool, canonicalSub, email, ASSIGNABLE_GROUP_LABEL.get(groupName) || groupName, username);
+          const staffId = await ensureStaffProfile(pool, canonicalSub, email, ASSIGNABLE_GROUP_LABEL.get(groupName) || groupName, username, Number.isFinite(regionId) ? regionId : null);
           if (!staffId) continue;
           const displayName = attr.name || attr['custom:display_name'] || email;
           seen.set(username, {
             id: staffId,
             email,
             role: ASSIGNABLE_GROUP_LABEL.get(groupName) || groupName,
-            display_name: displayName
+            display_name: displayName,
+            region_id: Number.isFinite(regionId) ? regionId : null
           });
         }
         nextToken = resp.NextToken;
@@ -8595,11 +8655,11 @@ app.get('/api/staff/assignable', async (req, res) => {
 
     const roles = ['Program Administrator','Regional Coordinator','Application Assessor'];
     const [rows] = await pool.query(
-      `SELECT id, cognito_sub, email, primary_role AS role, email AS display_name
+      `SELECT id, cognito_sub, email, primary_role AS role, email AS display_name, region_id
          FROM staff_profiles
         WHERE primary_role IN (${roles.map(()=>'?').join(',')})
         ORDER BY primary_role, email`, roles);
-    res.json(rows.map(r => ({ id: r.id, email: r.email, role: r.role, display_name: r.display_name })));
+    res.json(rows.map(r => ({ id: r.id, email: r.email, role: r.role, display_name: r.display_name, region_id: r.region_id ?? null })));
   } catch (e) {
     console.error('GET /api/staff/assignable failed:', e.message);
     res.status(500).json({ error: 'assignable_fetch_failed' });
@@ -8736,6 +8796,152 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
   } catch (e) {
     console.error('PATCH /api/cases/:id/assign failed:', e.message);
     res.status(500).json({ error: 'assign_failed', message: e.message });
+  }
+});
+
+// POST /api/cases/:id/conflicts/revoke { staff_profile_id }
+app.post('/api/cases/:id/conflicts/revoke', async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  const { staff_profile_id } = req.body || {};
+  const role = inferUserRole(req) || 'Guest';
+  if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
+  if (!Number.isInteger(staff_profile_id) || staff_profile_id < 1) return res.status(400).json({ error: 'invalid_staff_profile_id' });
+  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  try {
+    if (role === 'Regional Coordinator') {
+      const regionCandidates = [req?.auth?.regionId, req?.staffProfile?.region_id];
+      let regionId = null;
+      for (const c of regionCandidates) {
+        const n = Number(c);
+        if (Number.isFinite(n)) { regionId = n; break; }
+      }
+      if (!Number.isFinite(regionId)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const [[staffRow]] = await pool.query('SELECT region_id FROM staff_profiles WHERE id=? LIMIT 1', [staff_profile_id]);
+      const staffRegion = staffRow?.region_id != null ? Number(staffRow.region_id) : null;
+      if (!Number.isFinite(staffRegion) || staffRegion !== regionId) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+    await pool.query(
+      `UPDATE iset_case_conflict_declaration
+         SET revoked_at = NOW(), revoked_reason = 'reassigned'
+       WHERE case_id = ? AND staff_profile_id = ? AND revoked_at IS NULL`,
+      [caseId, staff_profile_id]
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      return res.json({ ok: true, note: 'table_missing' });
+    }
+    console.error('POST /api/cases/:id/conflicts/revoke failed:', err.message);
+    return res.status(500).json({ error: 'conflict_revoke_failed', message: err.message });
+  }
+});
+
+// POST /api/cases/:id/conflicts/resolve { staff_profile_id } -> set declaration_choice to no_conflict, keep details
+app.post('/api/cases/:id/conflicts/resolve', async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  const { staff_profile_id } = req.body || {};
+  const role = inferUserRole(req) || 'Guest';
+  if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
+  if (!Number.isInteger(staff_profile_id) || staff_profile_id < 1) return res.status(400).json({ error: 'invalid_staff_profile_id' });
+  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  try {
+    const [[conflictRow]] = await pool.query(`
+      SELECT
+        cd.case_id,
+        cd.staff_profile_id,
+        cd.declaration_choice,
+        cd.conflict_details,
+        cd.signed_at,
+        sp.email AS staff_email,
+        sp.primary_role AS staff_role,
+        sp.display_name AS staff_display_name,
+        sp.region_id AS staff_region_id,
+        c.case_number,
+        a.id AS application_id,
+        s.reference_number
+      FROM iset_case_conflict_declaration cd
+      JOIN staff_profiles sp ON sp.id = cd.staff_profile_id
+      LEFT JOIN iset_case c ON c.id = cd.case_id
+      LEFT JOIN iset_application a ON a.id = c.application_id
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+     WHERE cd.case_id = ? AND cd.staff_profile_id = ? AND cd.revoked_at IS NULL
+     ORDER BY cd.signed_at DESC
+     LIMIT 1
+    `, [caseId, staff_profile_id]);
+
+    if (!conflictRow) {
+      return res.json({ ok: true, note: 'conflict_not_found' });
+    }
+
+    if (role === 'Regional Coordinator') {
+      const regionCandidates = [req?.auth?.regionId, req?.staffProfile?.region_id];
+      let regionId = null;
+      for (const c of regionCandidates) {
+        const n = Number(c);
+        if (Number.isFinite(n)) { regionId = n; break; }
+      }
+      const staffRegion = conflictRow?.staff_region_id != null ? Number(conflictRow.staff_region_id) : null;
+      if (!Number.isFinite(regionId) || !Number.isFinite(staffRegion) || staffRegion !== regionId) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    const [updateResult] = await pool.query(
+      `UPDATE iset_case_conflict_declaration
+         SET declaration_choice = 'no_conflict'
+       WHERE case_id = ? AND staff_profile_id = ? AND revoked_at IS NULL`,
+      [caseId, staff_profile_id]
+    );
+
+    const resolvedAt = new Date();
+    const trackingId = conflictRow?.reference_number || conflictRow?.case_number || `CASE-${caseId}`;
+    const { actorId, actorName } = resolveRequestActor(req);
+    const resolverEmail = req?.auth?.email || req?.staffProfile?.email || null;
+    const resolverDisplay = actorName || resolverEmail || (actorId ? `User ${actorId}` : 'Resolver');
+    const resolverRole = role || req?.auth?.role || req?.staffProfile?.primary_role || null;
+    const payload = {
+      tracking_id: trackingId,
+      reference_number: conflictRow?.reference_number || null,
+      case_number: conflictRow?.case_number || null,
+      conflicted_staff_profile_id: conflictRow?.staff_profile_id || null,
+      conflicted_staff_email: conflictRow?.staff_email || null,
+      conflicted_staff_role: conflictRow?.staff_role || null,
+      conflict_details: conflictRow?.conflict_details || null,
+      resolved_by_id: actorId || null,
+      resolved_by_email: resolverEmail || null,
+      resolved_by_role: resolverRole || null,
+      resolved_at: resolvedAt.toISOString(),
+      message: `${resolverDisplay} resolved conflict declaration for ${conflictRow?.staff_email || 'staff member'}.`
+    };
+
+    try {
+      await captureCaseEvent({
+        type: 'conflict_declaration_resolved',
+        caseId,
+        payload,
+        trackingId,
+        actorId,
+        actorName: resolverDisplay
+      });
+    } catch (_) {
+      // event capture failures should not block the API
+    }
+
+    return res.json({ ok: true, updated: updateResult?.affectedRows ?? 0 });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      return res.json({ ok: true, note: 'table_missing' });
+    }
+    console.error('POST /api/cases/:id/conflicts/resolve failed:', err.message);
+    return res.status(500).json({ error: 'conflict_resolve_failed', message: err.message });
   }
 });
 
@@ -11608,16 +11814,16 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
 
   try {
     if (role === 'Program Administrator') {
-      const [newSubmissionCount, unassignedCount, inAssessmentCount, awaitingDecisionCount, onHoldCount, overdueCount] = await Promise.all([
+      const [newSubmissionCount, awaitingEiCount, inAssessmentCount, awaitingDecisionCount, onHoldCount, overdueCount] = await Promise.all([
         countProgramAdminNewSubmissions(pool),
-        countProgramAdminUnassignedBacklog(pool),
+        countProgramAdminAwaitingEiValidation(pool),
         countProgramAdminInAssessment(pool),
         countProgramAdminAwaitingDecision(pool),
         countProgramAdminOnHold(pool),
         countProgramAdminDecisionsMade(pool)
       ]);
       const metaNew = WORK_QUEUE_BUCKET_META['new-submissions'];
-      const metaUnassigned = WORK_QUEUE_BUCKET_META['unassigned'];
+      const metaAwaitingEi = WORK_QUEUE_BUCKET_META['awaiting-ei-validation'];
       const metaAssessment = WORK_QUEUE_BUCKET_META['in-assessment'];
       const metaDecision = WORK_QUEUE_BUCKET_META['awaiting-decision'];
       const metaOnHold = WORK_QUEUE_BUCKET_META['on-hold'];
@@ -11633,10 +11839,10 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
             count: newSubmissionCount
           },
           {
-            id: 'unassigned',
-            label: metaUnassigned?.label || 'Assigned Applications',
-            description: metaUnassigned?.description || null,
-            count: unassignedCount
+            id: 'awaiting-ei-validation',
+            label: metaAwaitingEi?.label || 'Awaiting EI Validation',
+            description: metaAwaitingEi?.description || null,
+            count: awaitingEiCount
           },
           {
             id: 'in-assessment',
@@ -11835,8 +12041,78 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
     res.status(500).json({ error: 'application_work_queue_fetch_failed', message: e.message });
   }
 });
-
-
+ 
+// Conflict declarations visible to Program Admins (all) and Regional Coordinators (their region)
+app.get('/api/dashboard/conflict-declarations', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+    return res.json({ role, declarations: [] });
+  }
+  const regionCandidates = [
+    req?.auth?.regionId,
+    req?.staffProfile?.region_id
+  ];
+  let regionId = null;
+  for (const candidate of regionCandidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n)) { regionId = n; break; }
+  }
+  const params = ['conflict'];
+  const filters = ['cd.declaration_choice = ?', 'cd.revoked_at IS NULL'];
+  if (role === 'Regional Coordinator') {
+    if (!Number.isFinite(regionId)) {
+      return res.json({ role, declarations: [] });
+    }
+    filters.push('sp.region_id = ?');
+    params.push(regionId);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const sql = `
+    SELECT
+      cd.id,
+      cd.case_id,
+      cd.staff_profile_id,
+      cd.signed_at,
+      cd.declaration_choice,
+      cd.conflict_details,
+      sp.email AS staff_email,
+      sp.primary_role AS staff_role,
+      sp.region_id AS staff_region_id,
+      c.case_number,
+      s.reference_number
+    FROM iset_case_conflict_declaration cd
+    JOIN staff_profiles sp ON sp.id = cd.staff_profile_id
+    LEFT JOIN iset_case c ON c.id = cd.case_id
+    LEFT JOIN iset_application a ON a.id = c.application_id
+    LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+    ${where}
+    ORDER BY cd.signed_at DESC
+    LIMIT 200
+  `;
+  try {
+    const [rows] = await pool.query(sql, params);
+    const declarations = Array.isArray(rows) ? rows.map(r => ({
+      id: r.id,
+      caseId: r.case_id || null,
+      caseNumber: r.case_number || null,
+      referenceNumber: r.reference_number || null,
+      staffProfileId: r.staff_profile_id || null,
+      staffEmail: r.staff_email || null,
+      staffRole: r.staff_role || null,
+      staffRegionId: Number.isFinite(Number(r.staff_region_id)) ? Number(r.staff_region_id) : null,
+      choice: r.declaration_choice || 'conflict',
+      details: r.conflict_details || null,
+      signedAt: r.signed_at ? new Date(r.signed_at).toISOString() : null
+    })) : [];
+    return res.json({ role, regionId: regionId ?? null, declarations });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      return res.json({ role, regionId: regionId ?? null, declarations: [] });
+    }
+    console.error('[conflict-declarations] fetch failed:', err.message);
+    return res.status(500).json({ error: 'conflict_declarations_fetch_failed', message: err.message });
+  }
+});
 
 
 const eventService = createEventService({ pool, logger: console });
@@ -18373,6 +18649,27 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     response.assessment_action_plan_result_code =
       assessmentRow?.action_plan_result_code ?? row.assessment_action_plan_result_code ?? null;
     response.assessment_action_plan_result_date = toDateOnlyString(resultDateRaw);
+    const conflictSignedRaw = row.assessment_conflict_declaration_signed;
+    const conflictSignedValue =
+      conflictSignedRaw === null || typeof conflictSignedRaw === 'undefined'
+        ? null
+        : Number(conflictSignedRaw) === 1;
+    response.assessment_conflict_declaration_signed = conflictSignedValue === true;
+    response.assessment_conflict_declaration_signed_at = toIsoDateTime(row.assessment_conflict_declaration_signed_at);
+    response.assessment_conflict_declaration_signed_by =
+      row.assessment_conflict_declaration_signed_by === null ||
+      typeof row.assessment_conflict_declaration_signed_by === 'undefined'
+        ? null
+        : Number(row.assessment_conflict_declaration_signed_by);
+    const conflictChoiceRaw = typeof row.assessment_conflict_declaration_choice === 'string'
+      ? row.assessment_conflict_declaration_choice.trim().toLowerCase()
+      : null;
+    response.assessment_conflict_declaration_choice =
+      conflictChoiceRaw || (response.assessment_conflict_declaration_signed ? 'no_conflict' : null);
+    const conflictDetailsRaw = typeof row.assessment_conflict_declaration_details === 'string'
+      ? row.assessment_conflict_declaration_details.trim()
+      : null;
+    response.assessment_conflict_declaration_details = conflictDetailsRaw || null;
 
     response.eligibility = response.assessment_esdc_eligibility;
     response.finance = financeSummary;
@@ -21143,13 +21440,17 @@ app.get('/api/cases/:id', async (req, res) => {
         ca.intervention_related_noc AS assessment_intervention_related_noc,
         ca.intervention_related_noc_version AS assessment_intervention_related_noc_version,
         ca.intervention_budget_pot_id AS assessment_intervention_pot_id,
+        bp.code AS assessment_intervention_pot_code,
+        bp.name AS assessment_intervention_pot_name,
         ca.childcare_need AS assessment_childcare_need,
         ca.childcare_funding_details AS assessment_childcare_funding_details,
         ca.action_plan_result_code AS assessment_action_plan_result_code,
         ca.action_plan_result_date AS assessment_action_plan_result_date,
         CASE WHEN cd.id IS NULL THEN 0 ELSE 1 END AS assessment_conflict_declaration_signed,
         cd.signed_at AS assessment_conflict_declaration_signed_at,
-        cd.staff_profile_id AS assessment_conflict_declaration_signed_by
+        cd.staff_profile_id AS assessment_conflict_declaration_signed_by,
+        cd.declaration_choice AS assessment_conflict_declaration_choice,
+        cd.conflict_details AS assessment_conflict_declaration_details
       FROM iset_case c
       LEFT JOIN iset_application a ON c.application_id = a.id
       LEFT JOIN application_lock al ON al.application_id = c.application_id AND al.expires_at > NOW()
@@ -21160,6 +21461,7 @@ app.get('/api/cases/:id', async (req, res) => {
         ON cd.case_id = c.id
        AND cd.staff_profile_id = ?
        AND cd.revoked_at IS NULL
+      LEFT JOIN budget_pot bp ON bp.id = ca.intervention_budget_pot_id
       WHERE c.id = ?
     `;
 
@@ -23708,6 +24010,30 @@ function mapBudgetPotRow(row) {
     metadata: meta,
   };
 }
+
+// Lightweight budget pot list for non-finance users (code/name/id only)
+app.get('/api/reference/budget-pots-lite', async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT id, code, name, pot_type, is_active FROM budget_pot ORDER BY code IS NULL, code'
+    );
+    const list = (Array.isArray(rows) ? rows : []).map(r => ({
+      id: String(r.id),
+      value: String(r.id),
+      code: r.code || null,
+      name: r.name || null,
+      potType: r.pot_type || null,
+      isActive: r.is_active !== 0
+    }));
+    res.json(list);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.json([]);
+    }
+    console.error('[budget-pots-lite] failed to list budget pots', err?.message || err);
+    res.status(500).json({ error: 'failed_to_list_budget_pots' });
+  }
+});
 
 function mapAllocationRow(row) {
   const meta = safeJsonParse(row.metadata, {});
@@ -27339,6 +27665,20 @@ app.put('/api/cases/:id', async (req, res) => {
     if (max !== null && num > max) return null;
     return num;
   };
+  const normalizeConflictChoice = (val) => {
+    if (typeof val !== 'string') return null;
+    const normalized = val.trim().toLowerCase();
+    if (!normalized) return null;
+    if (['no_conflict', 'no-conflict', 'none', 'no'].includes(normalized)) return 'no_conflict';
+    if (['conflict', 'has_conflict', 'potential_conflict', 'possible_conflict', 'yes'].includes(normalized)) return 'conflict';
+    return null;
+  };
+  const sanitizeConflictDetails = (val) => {
+    if (typeof val !== 'string') return null;
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+    return trimmed.slice(0, 4000);
+  };
 
   let conn;
   let beforeStatus = null;
@@ -27360,6 +27700,8 @@ app.put('/api/cases/:id', async (req, res) => {
   let previousConflictDeclarationSigned = null;
   let conflictDeclarationJustSigned = false;
   let conflictDeclarationSignedAt = null;
+  let conflictDeclarationChoice = null;
+  let conflictDeclarationDetails = null;
 
   try {
     conn = await pool.getConnection();
@@ -27620,7 +27962,7 @@ app.put('/api/cases/:id', async (req, res) => {
           });
         }
         const [declarationRows] = await conn.query(
-          `SELECT id, revoked_at, signed_at
+          `SELECT id, revoked_at, signed_at, declaration_choice, conflict_details
              FROM iset_case_conflict_declaration
             WHERE case_id = ?
               AND staff_profile_id = ?
@@ -27631,8 +27973,41 @@ app.put('/api/cases/:id', async (req, res) => {
         const existingDeclaration = Array.isArray(declarationRows) && declarationRows.length ? declarationRows[0] : null;
         previousConflictDeclarationSigned =
           existingDeclaration && !existingDeclaration.revoked_at ? 1 : 0;
+        const normalizedChoiceInput =
+          normalizeConflictChoice(body.assessment_conflict_declaration_choice) ||
+          normalizeConflictChoice(body.conflict_declaration_choice) ||
+          null;
+        const existingChoiceNormalised =
+          normalizeConflictChoice(existingDeclaration?.declaration_choice) ||
+          (typeof existingDeclaration?.declaration_choice === 'string'
+            ? existingDeclaration.declaration_choice.trim().toLowerCase()
+            : null);
+        const resolvedConflictChoice = normalizedChoiceInput || existingChoiceNormalised || 'no_conflict';
+        const incomingConflictDetails =
+          Object.prototype.hasOwnProperty.call(body, 'assessment_conflict_declaration_details')
+            ? body.assessment_conflict_declaration_details
+            : body.conflict_declaration_details;
+        const existingConflictDetails =
+          typeof existingDeclaration?.conflict_details === 'string'
+            ? existingDeclaration.conflict_details
+            : null;
+        const resolvedConflictDetails = sanitizeConflictDetails(
+          typeof incomingConflictDetails === 'undefined' ? existingConflictDetails : incomingConflictDetails
+        );
+        const detailsRequired = resolvedConflictChoice === 'conflict';
+        const conflictDetailsForStorage = resolvedConflictChoice === 'conflict' ? resolvedConflictDetails : null;
+        if (conflictSigned === 1 && detailsRequired && !conflictDetailsForStorage) {
+          await conn.rollback();
+          return res.status(400).json({
+            success: false,
+            error: 'conflict_declaration_details_required',
+            lock: lockCheck.lock || null,
+          });
+        }
 
         if (conflictSigned === 1) {
+          conflictDeclarationChoice = resolvedConflictChoice;
+          conflictDeclarationDetails = conflictDetailsForStorage || null;
           if (Number(previousConflictDeclarationSigned) !== 1) {
             const forwardedFor = req.get('x-forwarded-for') || req.get('X-Forwarded-For') || null;
             const clientIpSource = forwardedFor || req.ip || null;
@@ -27646,14 +28021,28 @@ app.put('/api/cases/:id', async (req, res) => {
 
             await conn.query(
               `INSERT INTO iset_case_conflict_declaration
-                 (case_id, staff_profile_id, signed_at, signed_ip, signed_user_agent)
-               VALUES (?, ?, NOW(), ?, ?)`,
-              [caseId, signingStaffProfileId, clientIp || null, signedUserAgent || null]
+                 (case_id, staff_profile_id, signed_at, signed_ip, signed_user_agent, declaration_choice, conflict_details)
+               VALUES (?, ?, NOW(), ?, ?, ?, ?)`,
+              [
+                caseId,
+                signingStaffProfileId,
+                clientIp || null,
+                signedUserAgent || null,
+                resolvedConflictChoice,
+                conflictDetailsForStorage || null
+              ]
             );
             conflictDeclarationJustSigned = true;
             conflictDeclarationSignedAt = new Date();
           } else {
             conflictDeclarationSignedAt = existingDeclaration?.signed_at || null;
+            await conn.query(
+              `UPDATE iset_case_conflict_declaration
+                  SET declaration_choice = ?,
+                      conflict_details = ?
+                WHERE id = ?`,
+              [resolvedConflictChoice, conflictDetailsForStorage || null, existingDeclaration.id]
+            );
           }
         } else if (conflictSigned === 0) {
           if (Number(previousConflictDeclarationSigned) === 1 && existingDeclaration && !existingDeclaration.revoked_at) {
@@ -27666,6 +28055,8 @@ app.put('/api/cases/:id', async (req, res) => {
             );
             conflictDeclarationJustSigned = false;
             conflictDeclarationSignedAt = null;
+            conflictDeclarationChoice = null;
+            conflictDeclarationDetails = null;
           }
         }
       }
@@ -27778,7 +28169,9 @@ app.put('/api/cases/:id', async (req, res) => {
               ca.action_plan_result_date AS assessment_action_plan_result_date,
               CASE WHEN cd2.id IS NULL THEN 0 ELSE 1 END AS assessment_conflict_declaration_signed,
               cd2.signed_at AS assessment_conflict_declaration_signed_at,
-              cd2.staff_profile_id AS assessment_conflict_declaration_signed_by
+              cd2.staff_profile_id AS assessment_conflict_declaration_signed_by,
+              cd2.declaration_choice AS assessment_conflict_declaration_choice,
+              cd2.conflict_details AS assessment_conflict_declaration_details
          FROM iset_case c
          JOIN iset_application a ON c.application_id = a.id
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
@@ -27893,6 +28286,20 @@ app.put('/api/cases/:id', async (req, res) => {
         caseRow.assessment_conflict_declaration_signed_by = Number.isNaN(numericSignedBy) ? null : numericSignedBy;
       }
     }
+    if (Object.prototype.hasOwnProperty.call(caseRow, 'assessment_conflict_declaration_choice')) {
+      const rawChoice = caseRow.assessment_conflict_declaration_choice;
+      const normalized = typeof rawChoice === 'string' ? rawChoice.trim().toLowerCase() : '';
+      caseRow.assessment_conflict_declaration_choice = normalized || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(caseRow, 'assessment_conflict_declaration_details')) {
+      const rawDetails = caseRow.assessment_conflict_declaration_details;
+      if (typeof rawDetails === 'string') {
+        const trimmed = rawDetails.trim();
+        caseRow.assessment_conflict_declaration_details = trimmed || null;
+      } else {
+        caseRow.assessment_conflict_declaration_details = null;
+      }
+    }
 
     const afterStatus = (normalizedStatus !== undefined ? normalizedStatus : caseRow.status) || caseRow.status;
     const { actorId, actorName } = resolveRequestActor(req);
@@ -27987,6 +28394,8 @@ app.put('/api/cases/:id', async (req, res) => {
     }
     if (conflictDeclarationJustSigned) {
       const signedAtIso = (conflictDeclarationSignedAt || new Date()).toISOString();
+      const conflictChoiceForEvent = conflictDeclarationChoice || 'no_conflict';
+      const hasConflictDeclared = conflictChoiceForEvent === 'conflict';
       await captureCaseEvent({
         type: 'conflict_declaration_signed',
         caseId,
@@ -27995,9 +28404,14 @@ app.put('/api/cases/:id', async (req, res) => {
           actor_id: actorId || null,
           actor_name: actorName || null,
           tracking_id: trackingId,
+          declaration_choice: conflictChoiceForEvent,
+          has_conflict: hasConflictDeclared,
+          conflict_details: conflictDeclarationDetails || null,
           message: actorName
-            ? 'Conflict of interest declaration signed by ' + actorName + '.'
-            : 'Conflict of interest declaration signed.'
+            ? 'Conflict of interest declaration signed by ' + actorName + (hasConflictDeclared ? ' (conflict declared).' : '.')
+            : hasConflictDeclared
+              ? 'Conflict of interest declaration signed (conflict declared).'
+              : 'Conflict of interest declaration signed.'
         },
         trackingId,
         actorId,

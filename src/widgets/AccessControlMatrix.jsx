@@ -10,12 +10,13 @@ import SpaceBetween from '@cloudscape-design/components/space-between';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Button from '@cloudscape-design/components/button';
 import { useRoleMatrix } from '../context/RoleMatrixContext';
+import { getRoleDisplayName } from '../utils/roleDisplay';
 
 const ROLE_COLUMNS = [
-  { key: 'System Administrator', label: 'System Administrator', editable: false },
-  { key: 'Program Administrator', label: 'Program Admin', editable: true },
-  { key: 'Regional Coordinator', label: 'Regional Coordinator', editable: true },
-  { key: 'Application Assessor', label: 'Application Assessor', editable: true }
+  { key: 'System Administrator', label: getRoleDisplayName('System Administrator'), editable: false },
+  { key: 'Program Administrator', label: getRoleDisplayName('Program Administrator'), editable: true },
+  { key: 'Regional Coordinator', label: getRoleDisplayName('Regional Coordinator'), editable: true },
+  { key: 'Application Assessor', label: getRoleDisplayName('Application Assessor'), editable: true }
 ];
 
 const ROUTE_LABELS = {

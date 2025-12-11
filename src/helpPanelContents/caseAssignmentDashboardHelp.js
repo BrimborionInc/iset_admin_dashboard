@@ -5,7 +5,7 @@ const CaseAssignmentDashboardHelp = () => (
   <h2>Manage ISET Applications workspace</h2>
     <p>
       Use this dashboard to triage newly submitted ISET applications, keep tabs on ageing caseloads, and direct work to the
-      right assessor or coordinator. The board now ships with an <strong>Application Work Queue</strong> summary plus the
+      right coordinator or regional manager. The board now ships with an <strong>Application Work Queue</strong> summary plus the
       resizable <strong>ISET Applications</strong> table.
     </p>
 
@@ -50,9 +50,9 @@ const CaseAssignmentDashboardHelp = () => (
 
     <h3>Role-based visibility</h3>
     <ul>
-      <li><strong>Program Administrators</strong> can browse every application.</li>
-      <li><strong>Regional Coordinators</strong> see cases in their hub or region, plus any files assigned directly to them.</li>
-      <li><strong>Assessors</strong> only see applications assigned to them.</li>
+      <li><strong>Program Admins</strong> can browse every application.</li>
+      <li><strong>Regional Managers</strong> see cases in their hub or region, plus any files assigned directly to them.</li>
+      <li><strong>ISET Coordinators</strong> only see applications assigned to them.</li>
     </ul>
 
     <h3>Tips</h3>
@@ -71,11 +71,11 @@ const CaseAssignmentDashboardHelp = () => (
 
 CaseAssignmentDashboardHelp.aiContext = `You are assisting staff working on the "Manage ISET Applications" dashboard (route /case-assignment-dashboard) in the ISET Admin portal. The board contains an "Application Work Queue" summary widget plus the "ISET Applications" table widget which lists submissions with columns for tracking ID, status, SLA health, owner, and received date.
 
-The table supports inline actions: **View** opens /application-case/{case_id}, **Assign** is available when a submitted case has no owner, and **Reassign** shows up for Program Administrators and Regional Coordinators on already owned files. Selecting Assign/Reassign opens a modal with a search-able staff list loaded from /api/staff/assignable.
+The table supports inline actions: **View** opens /application-case/{case_id}, **Assign** is available when a submitted case has no owner, and **Reassign** shows up for Program Admins and Regional Managers on already owned files. Selecting Assign/Reassign opens a modal with a search-able staff list loaded from /api/staff/assignable.
 
 When an assignment succeeds and the prior status was Submitted, the frontend automatically attempts to PUT /api/cases/{case_id} with status "in_review". Surface a reminder to refresh the widget (using the refresh icon) if the user does not see the change immediately.
 
-Only Program Administrators can see every row. Regional Coordinators see their region's cases plus their own. Assessors only see cases assigned to them. Bring up these visibility rules when users ask why they cannot find a case.
+Only Program Admins can see every row. Regional Managers see their region's cases plus their own. ISET Coordinators only see cases assigned to them. Bring up these visibility rules when users ask why they cannot find a case.
 
 If assignment fails, advise the coordinator to check the alert above the table for follow-up instructions, or try again after refreshing data.
 

@@ -21,6 +21,7 @@ import ApplicationWorkQueueWidget from '../widgets/ApplicationWorkQueueWidget';
 import CaseWorkQueueWidget from '../widgets/CaseWorkQueueWidget';
 import RecentActivityWidget from '../widgets/RecentActivityWidget';
 import MyWatchlistWidget from '../widgets/MyWatchlistWidget';
+import ConflictDeclarationsWidget from '../widgets/ConflictDeclarationsWidget';
 
 const WIDGET_REGISTRY = {
     'application-work-queue': {
@@ -59,8 +60,16 @@ const WIDGET_REGISTRY = {
         id: 'dev-task-tracker',
         component: null, // bound after DevTaskTracker definition
         title: 'Development Tracker',
-        description: 'Track internal development tasks. Visible to System Administrators.',
+        description: 'Track internal development tasks. Visible to System Admins.',
         defaultRowSpan: 6,
+        defaultColumnSpan: 4
+    },
+    'conflict-declarations': {
+        id: 'conflict-declarations',
+        component: ConflictDeclarationsWidget,
+        title: 'Conflict Declarations',
+        description: 'Conflicts of interest declared by staff in your remit.',
+        defaultRowSpan: 4,
         defaultColumnSpan: 4
     }
 };
@@ -72,6 +81,9 @@ const filterWidgetsForRole = (role) => {
     if (role !== 'System Administrator') {
         delete allowed['dev-task-tracker'];
     }
+    if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+        delete allowed['conflict-declarations'];
+    }
     return allowed;
 };
 
@@ -82,6 +94,9 @@ const buildDefaultLayout = (role) => {
         { id: 'recent-activity', rowSpan: 4, columnSpan: 2 },
         { id: 'my-watchlist', rowSpan: 4, columnSpan: 2 }
     ];
+    if (role === 'Program Administrator' || role === 'Regional Coordinator') {
+        base.push({ id: 'conflict-declarations', rowSpan: 4, columnSpan: 4 });
+    }
     if (role === 'System Administrator') {
         base.push({ id: 'dev-task-tracker', rowSpan: 6, columnSpan: 4 });
     }

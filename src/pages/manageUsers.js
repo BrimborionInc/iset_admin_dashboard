@@ -21,13 +21,14 @@ import Tabs from '@cloudscape-design/components/tabs';
 import { apiFetch } from '../auth/apiClient';
 import Board from '@cloudscape-design/board-components/board';
 import BoardItem from '@cloudscape-design/board-components/board-item';
+import { getRoleDisplayName } from '../utils/roleDisplay';
 
 // Canonical (flexible) role keys – UI should adapt if list changes later
 const ROLE_OPTIONS = [
-  { value: 'SysAdmin', label: 'System Admin' },
-  { value: 'ProgramAdmin', label: 'Program Admin' },
-  { value: 'RegionalCoordinator', label: 'Regional Coordinator' },
-  { value: 'Adjudicator', label: 'Adjudicator' }
+  { value: 'SysAdmin', label: getRoleDisplayName('SysAdmin') },
+  { value: 'ProgramAdmin', label: getRoleDisplayName('ProgramAdmin') },
+  { value: 'RegionalCoordinator', label: getRoleDisplayName('RegionalCoordinator') },
+  { value: 'Adjudicator', label: getRoleDisplayName('Adjudicator') }
 ];
 
 // Users loaded from backend (mock fallback server-side if provider disabled)
@@ -490,9 +491,9 @@ function SecurityComplianceWidget({ metrics }) {
 function mapRoleToPermissions(role) {
   switch (role) {
     case 'SysAdmin': return 'All administrative actions';
-    case 'ProgramAdmin': return 'Manage regional coordinators & adjudicators';
-    case 'RegionalCoordinator': return 'Manage adjudicators within region';
-    case 'Adjudicator': return 'Review and adjudicate cases';
+    case 'ProgramAdmin': return 'Manage regional managers & ISET coordinators';
+    case 'RegionalCoordinator': return 'Manage ISET coordinators within region';
+    case 'Adjudicator': return 'Coordinate ISET cases assigned to you';
     default: return '—';
   }
 }

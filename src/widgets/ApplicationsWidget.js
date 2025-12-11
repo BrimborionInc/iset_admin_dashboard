@@ -20,9 +20,10 @@ import {
 } from '@cloudscape-design/components';
 import Icon from '@cloudscape-design/components/icon';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { useHistory } from 'react-router-dom';
+import { useHistory, useLocation } from 'react-router-dom';
 import { apiFetch } from '../auth/apiClient';
 import useCurrentUser from '../hooks/useCurrentUser';
+import { getRoleDisplayName } from '../utils/roleDisplay';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_VISIBLE_COLUMNS = ['watch','applicant_name','address_province','tracking_id','status','sla_risk','assigned_user_email','submitted_at','lock_state','actions'];
@@ -219,6 +220,7 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
 
 const ApplicationsWidget = ({ actions, refreshKey }) => {
   const history = useHistory();
+  const location = useLocation();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -247,10 +249,43 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     userId: currentUserIdRaw,
     displayName: currentUserName,
     role: currentUserRole,
+    regionId: currentUserRegionId,
   } = useCurrentUser();
   const currentUserId = currentUserIdRaw ? String(currentUserIdRaw) : null;
   const userRole = currentUserRole || '';
   const normalizedUserRole = userRole.trim();
+  const parsedRegion = currentUserRegionId != null ? Number(currentUserRegionId) : NaN;
+  const normalizedRegionId = Number.isFinite(parsedRegion) ? parsedRegion : null;
+
+  // Apply incoming query param filter (e.g., status=Awaiting EI Validation)
+  useEffect(() => {
+    if (!location) return;
+    const params = new URLSearchParams(location.search || '');
+    const statusFilter = params.get('status') || params.get('statusFilter');
+    if (statusFilter) {
+      const decoded = decodeURIComponent(statusFilter.replace(/\+/g, ' '));
+      if (decoded && decoded !== filteringText) {
+        setFilteringText(decoded);
+        setCurrentPageIndex(1);
+      }
+    }
+  }, [location, filteringText]);
+
+  const isStaffVisible = useCallback((staff) => {
+    if (!staff) return false;
+    if (normalizedUserRole === 'Regional Coordinator') {
+      if (currentUserId && String(staff.id) === String(currentUserId)) return true;
+      const staffRegion = staff.region_id != null ? Number(staff.region_id) : (staff.regionId != null ? Number(staff.regionId) : null);
+      return Number.isFinite(normalizedRegionId) && Number.isFinite(staffRegion) && staffRegion === normalizedRegionId;
+    }
+    return true;
+  }, [normalizedUserRole, normalizedRegionId, currentUserId]);
+
+  const filteredAssignableStaff = useMemo(() => {
+    return Array.isArray(assignableStaff)
+      ? assignableStaff.filter(isStaffVisible)
+      : [];
+  }, [assignableStaff, isStaffVisible]);
 
   const getSortValue = useCallback((item, columnId) => {
     switch (columnId) {
@@ -726,8 +761,22 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const filteredItems = decoratedItems
     .filter(i => {
       const s = filteringText.toLowerCase();
-      return !s || [i.tracking_id, i.applicant_name, i.application_status, i.case_status, i.assigned_user_email, i.ptma_codes, i.lock_owner_name, i.lock_owner_email, i.address_province]
-        .some(v => v && String(v).toLowerCase().includes(s));
+      if (!s) return true;
+      const statusInfo = getStatusInfo(i);
+      const fields = [
+        i.tracking_id,
+        i.applicant_name,
+        i.application_status,
+        i.case_status,
+        statusInfo?.statusLabel,
+        statusInfo?.rawStatus,
+        i.assigned_user_email,
+        i.ptma_codes,
+        i.lock_owner_name,
+        i.lock_owner_email,
+        i.address_province
+      ];
+      return fields.some(v => v && String(v).toLowerCase().includes(s));
     })
     .filter(i => !showWatchedOnly || i.__isWatched);
 
@@ -808,8 +857,9 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
             setAssignableStaff(list || []);
             if (preselectId) {
               const found = list.find(s => String(s.id) === String(preselectId) || s.email === caseItem.assigned_user_email);
-              if (found) {
-                setSelectedAssignee({ label: `${found.display_name || found.email} (${found.role || 'Staff'})`, value: String(found.id) });
+              if (found && isStaffVisible(found)) {
+                const roleLabel = getRoleDisplayName(found.role || 'Staff') || 'Staff';
+                setSelectedAssignee({ label: `${found.display_name || found.email} (${roleLabel})`, value: String(found.id) });
               } else if (caseItem.assigned_user_email) {
                 // Add current assignee if not in list
                 const tempOpt = { label: `${caseItem.assigned_user_email} (Current)`, value: String(preselectId) };
@@ -1081,7 +1131,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
             {alert.content}
           </Alert>
         ))}
-        <Box variant="small">The table shows applications in your purview.  Progam Admins can see all applications. Regional Coordinators can see applications assigned to them, or to assessors in their region.  Assessors can only see applications assigned to them.</Box>
+        <Box variant="small">The table shows applications in your purview. Program Admins can see all applications. Regional Managers can see applications assigned to them or to coordinators in their region. ISET Coordinators can only see applications assigned to them.</Box>
         <Box>
           <SpaceBetween direction="vertical" size="xs">
             {loading ? (
@@ -1167,7 +1217,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
           <Modal
             visible={assignModalVisible}
             onDismiss={() => { if(!assignSubmitting){ setAssignModalVisible(false); setAssignTargetCase(null);} }}
-            header={`Assign Case ${assignTargetCase?.tracking_id || ''}`}
+            header={`Assign Application ${assignTargetCase?.tracking_id || ''}`}
             footer={
               <SpaceBetween direction="horizontal" size="xs">
                 <Button onClick={() => { if(!assignSubmitting){ setAssignModalVisible(false); setAssignTargetCase(null);} }} disabled={assignSubmitting}>Cancel</Button>
@@ -1189,7 +1239,10 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
                   disabled={assignableLoading}
                   loadingText="Loading staff..."
                   placeholder={assignableLoading ? 'Loading...' : 'Select staff'}
-                  options={assignableStaff.map(s => ({ label: `${s.display_name || s.email} (${s.role || 'Staff'})`, value: String(s.id) }))}
+                  options={filteredAssignableStaff.map(s => {
+                    const roleLabel = getRoleDisplayName(s.role || 'Staff') || 'Staff';
+                    return { label: `${s.display_name || s.email} (${roleLabel})`, value: String(s.id) };
+                  })}
                   selectedOption={selectedAssignee}
                   onChange={({ detail }) => setSelectedAssignee(detail.selectedOption)}
                 />

@@ -162,6 +162,13 @@ const formatCurrencyDisplay = (value) => {
 
 const isEmptyString = (val) => val === null || val === undefined || val === '';
 const isEmptyArray = (val) => !Array.isArray(val) || val.length === 0;
+const normalizeConflictDeclarationChoice = (value) => {
+  if (value === null || value === undefined) return '';
+  const normalized = String(value).trim().toLowerCase();
+  if (['no_conflict', 'no-conflict', 'none', 'no'].includes(normalized)) return 'no_conflict';
+  if (['conflict', 'has_conflict', 'has-conflict', 'potential_conflict'].includes(normalized)) return 'conflict';
+  return '';
+};
 const mergeAssessmentState = (current, incoming) => {
   const next = { ...incoming };
   const takeIfNonEmpty = (key) => {
@@ -328,9 +335,12 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
   const [conflictDeclarationSigned, setConflictDeclarationSigned] = useState(Boolean(caseData?.assessment_conflict_declaration_signed));
   const [conflictDeclarationSignedAt, setConflictDeclarationSignedAt] = useState(caseData?.assessment_conflict_declaration_signed_at || null);
+  const [conflictDeclarationChoice, setConflictDeclarationChoice] = useState(caseData?.assessment_conflict_declaration_choice || '');
+  const [conflictDeclarationDetails, setConflictDeclarationDetails] = useState(caseData?.assessment_conflict_declaration_details || '');
   const [declarationChecked, setDeclarationChecked] = useState(false);
   const [isSigningDeclaration, setIsSigningDeclaration] = useState(false);
   const [declarationError, setDeclarationError] = useState(null);
+  const [conflictHoldModalVisible, setConflictHoldModalVisible] = useState(false);
   const scrollWidgetAndPageTop = useCallback(() => {
     debugScroll('scrollWidgetAndPageTop');
     scrollWidgetAndPageTopOnce(widgetRootRef);
@@ -360,7 +370,12 @@ const CoordinatorAssessmentWidget = forwardRef(
   const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus });
   const lacksOutcomePermission = Boolean(userRole) && isPendingApprovalStatus && !canManageOutcomeReview;
   const requiresNoc = useMemo(() => requiresNocForCode(assessment.interventionCode), [assessment.interventionCode]);
-  const isDeclarationGateActive = !conflictDeclarationSigned;
+  const normalizedConflictChoice = useMemo(
+    () => normalizeConflictDeclarationChoice(conflictDeclarationChoice),
+    [conflictDeclarationChoice]
+  );
+  const hasDeclaredConflict = normalizedConflictChoice === 'conflict';
+  const isDeclarationGateActive = !conflictDeclarationSigned || hasDeclaredConflict;
   const eligibilitySet = Boolean(assessment.esdcEligibility);
   const potSelected = Boolean(assessment.interventionPotId);
   const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet || !potSelected;
@@ -381,10 +396,14 @@ const CoordinatorAssessmentWidget = forwardRef(
     );
     if (match) return match;
     if (assessment.interventionPotId) {
-      return { value: assessment.interventionPotId, label: assessment.interventionPotId };
+      const labelParts = [];
+      if (caseData?.assessment_intervention_pot_code) labelParts.push(caseData.assessment_intervention_pot_code);
+      if (caseData?.assessment_intervention_pot_name) labelParts.push(caseData.assessment_intervention_pot_name);
+      const fallbackLabel = labelParts.length ? labelParts.join(' - ') : assessment.interventionPotId;
+      return { value: assessment.interventionPotId, label: fallbackLabel };
     }
     return null;
-  }, [budgetPotOptions, assessment.interventionPotId]);
+  }, [budgetPotOptions, assessment.interventionPotId, caseData]);
   const selectedChildcareOption = useMemo(
     () => CHILDCARE_OPTIONS.find(option => option.value === assessment.childcareNeed) || null,
     [assessment.childcareNeed]
@@ -477,6 +496,17 @@ const CoordinatorAssessmentWidget = forwardRef(
   const lockOwnerId = activeLock?.ownerUserId ? String(activeLock.ownerUserId) : null;
   const lockHeldByCurrentUser = Boolean(isLockedByMe || (currentUserId && lockOwnerId && String(currentUserId) === lockOwnerId));
   const lockedByAnotherUser = Boolean(lockOwnerId && !lockHeldByCurrentUser);
+  const hasDeclarationChoice = normalizedConflictChoice === 'no_conflict' || normalizedConflictChoice === 'conflict';
+  const conflictDetailsNormalized = useMemo(
+    () => (typeof conflictDeclarationDetails === 'string' ? conflictDeclarationDetails.trim() : ''),
+    [conflictDeclarationDetails]
+  );
+  const isDeclarationSubmissionDisabled =
+    !hasDeclarationChoice ||
+    (hasDeclaredConflict && !conflictDetailsNormalized) ||
+    !declarationChecked ||
+    lockedByAnotherUser ||
+    isSigningDeclaration;
 
   useEffect(() => {
     const incoming = Number(caseData?.application_row_version || 0);
@@ -507,6 +537,18 @@ const CoordinatorAssessmentWidget = forwardRef(
       } catch (e) { return def; }
       return def;
     };
+    const derivedOutcomeStatus = (() => {
+      if (caseData?.assessment_nwac_review_status) {
+        return String(caseData.assessment_nwac_review_status);
+      }
+      const statusNorm = typeof canonicalApplicationStatus === 'string'
+        ? canonicalApplicationStatus.trim().toLowerCase()
+        : '';
+      if (statusNorm === 'approved') return 'approve';
+      if (statusNorm === 'rejected') return 'reject';
+      return '';
+    })();
+
     const placeholders = {
       dateOfAssessment: caseData.assessment_date_of_assessment || '',
       clientName: caseData.assigned_user_email || '',
@@ -547,6 +589,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       recommendation: caseData.assessment_recommendation || '',
       justification: caseData.assessment_justification || '',
       nwacReview: caseData.assessment_nwac_review || '',
+      nwacReviewStatus: derivedOutcomeStatus,
       nwacReason: caseData.assessment_nwac_reason || '',
       interventionCode: caseData.assessment_intervention_code != null ? String(caseData.assessment_intervention_code) : '',
       interventionDuration: caseData.assessment_intervention_duration_days != null ? String(caseData.assessment_intervention_duration_days) : '',
@@ -582,6 +625,12 @@ const CoordinatorAssessmentWidget = forwardRef(
     setInitialAssessment(merged);
     setConflictDeclarationSigned(Boolean(caseData?.assessment_conflict_declaration_signed));
     setConflictDeclarationSignedAt(caseData?.assessment_conflict_declaration_signed_at || null);
+    const incomingConflictChoice = normalizeConflictDeclarationChoice(
+      caseData?.assessment_conflict_declaration_choice ||
+      (caseData?.assessment_conflict_declaration_signed ? 'no_conflict' : '')
+    );
+    setConflictDeclarationChoice(incomingConflictChoice);
+    setConflictDeclarationDetails(caseData?.assessment_conflict_declaration_details || '');
     setDeclarationChecked(false);
     setDeclarationError(null);
   }, [caseData]);
@@ -650,29 +699,21 @@ const CoordinatorAssessmentWidget = forwardRef(
     const loadBudgetPots = async () => {
       setBudgetPotLoading(true);
       try {
-        // Use the full budget pot endpoint so we can filter by pot type.
-        const response = await apiFetch('/api/finance/budget-pots');
-        const data = response && response.ok ? await response.json() : [];
+        let data = [];
+        let response = await apiFetch('/api/reference/budget-pots-lite');
+        if (!response || !response.ok) {
+          response = await apiFetch('/api/finance/budget-pots');
+        }
+        data = response && response.ok ? await response.json() : [];
         if (cancelled) return;
         const options = (Array.isArray(data) ? data : [])
-          .filter(item => {
-            const potType =
-              item?.pot_type ??
-              item?.potType ??
-              item?.type ??
-              item?.nodeType ??
-              item?.metadata?.pot_type ??
-              item?.metadata?.nodeType ??
-              "";
-            return String(potType).trim().toLowerCase() === "funding stream";
-          })
-          .filter(item => item?.isActive !== false)
           .map(item => {
             const value = item?.id ?? item?.value ?? item?.code ?? null;
             if (!value) return null;
             const code = item?.code || "";
             const name = item?.name || item?.description || "";
-            const label = code || name ? [code, name].filter(Boolean).join(' - ') : String(value);
+            const inactiveBadge = item?.isActive === false ? ' (inactive)' : '';
+            const label = code || name ? [code, name].filter(Boolean).join(' - ') + inactiveBadge : String(value);
             return {
               value: String(value),
               label: label || String(value),
@@ -842,8 +883,18 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (conflictDeclarationSigned || isSigningDeclaration) {
       return;
     }
+    const choice = normalizeConflictDeclarationChoice(conflictDeclarationChoice);
+    const detailsValue = typeof conflictDeclarationDetails === 'string' ? conflictDeclarationDetails.trim() : '';
+    if (!choice) {
+      setDeclarationError('Select whether you have a conflict of interest for this case.');
+      return;
+    }
+    if (choice === 'conflict' && !detailsValue) {
+      setDeclarationError('Provide details about the potential conflict or bias before proceeding.');
+      return;
+    }
     if (!declarationChecked) {
-      setDeclarationError('You must confirm the declaration before continuing.');
+      setDeclarationError('Confirm your declaration before continuing.');
       return;
     }
     setIsSigningDeclaration(true);
@@ -857,7 +908,11 @@ const CoordinatorAssessmentWidget = forwardRef(
       const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
       const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
       const shouldPromoteToInReview = canonicalApplicationStatus === 'submitted';
-      const payload = { assessment_conflict_declaration_signed: true };
+      const payload = {
+        assessment_conflict_declaration_signed: true,
+        assessment_conflict_declaration_choice: choice,
+        assessment_conflict_declaration_details: choice === 'conflict' ? detailsValue : ''
+      };
       if (shouldPromoteToInReview) {
         payload.status = 'in_review';
         payload.applicationStatus = 'in_review';
@@ -901,6 +956,8 @@ const CoordinatorAssessmentWidget = forwardRef(
       const signedAtIso = new Date().toISOString();
       setConflictDeclarationSigned(true);
       setConflictDeclarationSignedAt(signedAtIso);
+      setConflictDeclarationChoice(choice);
+      setConflictDeclarationDetails(choice === 'conflict' ? detailsValue : '');
       setDeclarationChecked(false);
       if (typeof actions?.refreshCaseData === 'function') {
         try {
@@ -911,7 +968,9 @@ const CoordinatorAssessmentWidget = forwardRef(
         const updates = {
           assessment_conflict_declaration_signed: true,
           assessment_conflict_declaration_signed_at: signedAtIso,
-          assessment_conflict_declaration_signed_by: currentUserId || null
+          assessment_conflict_declaration_signed_by: currentUserId || null,
+          assessment_conflict_declaration_choice: choice,
+          assessment_conflict_declaration_details: choice === 'conflict' ? detailsValue : ''
         };
         if (shouldPromoteToInReview) {
           updates.status = 'in_review';
@@ -919,6 +978,9 @@ const CoordinatorAssessmentWidget = forwardRef(
           updates.applicationStatus = 'in_review';
         }
         onCaseUpdate(updates);
+      }
+      if (choice === 'conflict') {
+        setConflictHoldModalVisible(true);
       }
       if (releaseAfterSuccess) {
         releaseLock({ silent: true }).catch(() => {});
@@ -941,14 +1003,19 @@ const CoordinatorAssessmentWidget = forwardRef(
     caseData?.application_row_version,
     caseData?.id,
     conflictDeclarationSigned,
+    conflictDeclarationChoice,
+    conflictDeclarationDetails,
     declarationChecked,
+    isSigningDeclaration,
     canonicalApplicationStatus,
     ensureLockForOperation,
     lockHeldByCurrentUser,
     onCaseUpdate,
     releaseLock,
+    scrollAfterAction,
     updateRowVersion,
-    scrollWidgetAndPageTop
+    applicationRowVersionState,
+    currentUserId
   ]);
   const validateAssessment = (assessment) => {
     const errors = {};
@@ -1660,7 +1727,9 @@ const CoordinatorAssessmentWidget = forwardRef(
           <div ref={alertAnchorRef} />
           <Box variant="small" margin={{ bottom: 's' }}>
             This form is used by the ISET admin team to assess the applicant's needs, eligibility, and funding recommendation.
-            Complete the conflict of interest declaration below to unlock the assessment.
+            {hasDeclaredConflict
+              ? ' A conflict of interest was declared; assessment is locked until the conflict is resolved or the case is reassigned.'
+              : ' Complete the conflict of interest declaration below to unlock the assessment.'}
           </Box>
           {alert && (
             <Alert
@@ -1676,15 +1745,14 @@ const CoordinatorAssessmentWidget = forwardRef(
           <Box padding={{ top: 'm' }}>
             <SpaceBetween size="m">
               <Box>
-              <Box fontWeight="bold">Conflict of Interest Declaration</Box>
-              <Box margin={{ top: 'xs' }}>
-                As the Client Case Manager, I confirm that I have no actual, potential, or perceived conflict of interest or bias in relation to this
-                client's application, assessment and funding, and I have not provided, or attempted to assign the client with priority or preferential
-                treatment outside of the established assessment process.
-              </Box>
-              <Box color="text-status-inactive">
-                This declaration is recorded per staff member. Even if a previous owner signed, you must complete it before continuing your assessment work.
-              </Box>
+                <Box fontWeight="bold">Conflict of Interest Declaration</Box>
+                <Box margin={{ top: 'xs' }}>
+                  As the Client Case Manager, declare whether you have any actual, potential, or perceived conflict of interest or bias related to this
+                  client's application or assessment. If a conflict exists, describe it so the file can be triaged appropriately.
+                </Box>
+                <Box color="text-status-inactive">
+                  This declaration is recorded per staff member. Even if a previous owner signed, you must complete it before continuing your assessment work.
+                </Box>
               </Box>
               {declarationError && (
                 <Alert
@@ -1695,6 +1763,49 @@ const CoordinatorAssessmentWidget = forwardRef(
                 >
                   {declarationError}
                 </Alert>
+              )}
+              <FormField
+                label="Select your declaration"
+                description="Choose the option that applies for this case."
+                errorText={!hasDeclarationChoice && declarationError ? declarationError : undefined}
+              >
+                <RadioGroup
+                  value={hasDeclarationChoice ? normalizedConflictChoice : null}
+                  items={[
+                    {
+                      value: 'no_conflict',
+                      label: 'I do not have any actual, potential, or perceived conflict of interest or bias for this case.'
+                    },
+                    {
+                      value: 'conflict',
+                      label: 'I may have an actual, potential, or perceived conflict or bias for this case.',
+                      description: 'Describe the relationship or circumstance below so the assessment can be routed appropriately.'
+                    }
+                  ]}
+                  onChange={({ detail }) => {
+                    setConflictDeclarationChoice(detail.value);
+                    setDeclarationError(null);
+                  }}
+                  disabled={lockedByAnotherUser || isSigningDeclaration}
+                />
+              </FormField>
+              {hasDeclaredConflict && (
+                <FormField
+                  label="Conflict details"
+                  description="Provide the relationship, organization, or circumstance that may create a conflict of interest."
+                  errorText={hasDeclaredConflict && !conflictDetailsNormalized && declarationError ? declarationError : undefined}
+                >
+                  <Textarea
+                    value={conflictDeclarationDetails}
+                    onChange={({ detail }) => {
+                      setConflictDeclarationDetails(detail.value);
+                      setDeclarationError(null);
+                    }}
+                    placeholder="Include names, roles, timelines, and any context needed for triage."
+                    rows={4}
+                    disabled={lockedByAnotherUser || isSigningDeclaration}
+                  />
+                </FormField>
               )}
               <Checkbox
                 checked={declarationChecked}
@@ -1713,7 +1824,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                   variant="primary"
                   onClick={handleSignDeclaration}
                   loading={isSigningDeclaration}
-                  disabled={!declarationChecked || lockedByAnotherUser || isSigningDeclaration}
+                  disabled={isDeclarationSubmissionDisabled}
                 >
                   Sign and Continue
                 </Button>
@@ -1741,6 +1852,23 @@ const CoordinatorAssessmentWidget = forwardRef(
         <Box variant="small" margin={{ bottom: 's' }}>
           This form is used by the ISET admin team to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, the final approval fields will become available.
         </Box>
+        {conflictDeclarationSigned && (
+          <Alert
+            type={hasDeclaredConflict ? 'warning' : 'info'}
+            header="Conflict of Interest Declaration"
+            statusIconAriaLabel={hasDeclaredConflict ? 'Warning' : 'Information'}
+          >
+              <Box margin={{ bottom: hasDeclaredConflict && conflictDetailsNormalized ? 'xs' : 'none' }}>
+                {hasDeclaredConflict
+                  ? 'You declared a potential conflict for this case.'
+                  : 'No active conflict: a declaration is on file. If a conflict was previously declared, it has been resolved so you may proceed.'}{' '}
+                {conflictDeclarationSignedDisplayDate ? `Signed on ${conflictDeclarationSignedDisplayDate}.` : 'Signed.'}
+              </Box>
+            {hasDeclaredConflict && conflictDetailsNormalized && (
+              <Box>{conflictDetailsNormalized}</Box>
+            )}
+          </Alert>
+        )}
         {validationAlert && (
           <Alert
             type="warning"
@@ -1775,7 +1903,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               header="Employment insurance eligibility not checked"
               statusIconAriaLabel="Info"
             >
-              Assessment sections are locked until a System Administrator or Program Administrator checks ESDC eligibility and assigns a budget pot.
+              Assessment sections are locked until a System Admin or Program Admin checks ESDC eligibility and assigns a budget pot.
             </Alert>
             <Box margin={{ bottom: 's' }} />
           </>
@@ -1827,7 +1955,8 @@ const CoordinatorAssessmentWidget = forwardRef(
                       ariaLabel="NWAC Review Status"
                       data-error-focus={hasSubmitted && fieldErrors.nwacReviewStatus ? 'true' : undefined}
                       disabled={isNWACFieldsDisabled}
-                      style={isNWACFieldsDisabled ? { opacity: 0.6 } : undefined}
+                      readOnly={isNWACFieldsDisabled}
+                      style={isNWACFieldsDisabled ? { opacity: 0.4 } : undefined}
                     />
                   </SpaceBetween>
                 </FormField>
@@ -2355,6 +2484,41 @@ const CoordinatorAssessmentWidget = forwardRef(
           }
         >
           <Box>Are you sure you want to edit the previously submitted assessment? This will allow you to make changes and resubmit. Your changes will not be saved until you click Save or Submit.</Box>
+        </Modal>
+        <Modal
+          visible={conflictHoldModalVisible}
+          onDismiss={() => {
+            setConflictHoldModalVisible(false);
+            if (typeof window !== 'undefined') {
+              window.location.assign('/');
+            }
+          }}
+          closeAriaLabel="Return to homepage"
+          header="Conflict of Interest Declared"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setConflictHoldModalVisible(false);
+                  if (typeof window !== 'undefined') {
+                    window.location.assign('/');
+                  }
+                }}
+              >
+                Return to homepage
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            <Box>
+              Thank you for declaring a potential conflict of interest. You won’t be able to assess this case while the conflict is reviewed.
+            </Box>
+            <Box>
+              A program admin or regional manager will review and reassign the case as needed. You’ll be redirected to your homepage now.
+            </Box>
+          </SpaceBetween>
         </Modal>
       </div>
     </BoardItem>

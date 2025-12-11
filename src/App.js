@@ -13,14 +13,15 @@ import { RoleMatrixProvider } from './context/RoleMatrixContext';
 import LandingPage from './pages/LandingPage.jsx';
 import { hasValidSession, isIamOn, getIdTokenClaims, getRoleFromClaims } from './auth/cognito';
 import { readDemoNavigationVisibility, subscribeToDemoNavigationVisibility } from './utils/demoNavigationVisibility';
+import { getRoleDisplayName } from './utils/roleDisplay';
 
 import '@cloudscape-design/global-styles/index.css';
 
 const roleOptions = [
-  { label: 'Program Administrator', value: 'Program Administrator' },
-  { label: 'Regional Coordinator', value: 'Regional Coordinator' },
-  { label: 'Application Assessor', value: 'Application Assessor' },
-  { label: 'System Administrator', value: 'System Administrator' },
+  { label: getRoleDisplayName('Program Administrator'), value: 'Program Administrator' },
+  { label: getRoleDisplayName('Regional Coordinator'), value: 'Regional Coordinator' },
+  { label: getRoleDisplayName('Application Assessor'), value: 'Application Assessor' },
+  { label: getRoleDisplayName('System Administrator'), value: 'System Administrator' },
 ];
 
 const getRoleKey = roleOption => {

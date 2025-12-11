@@ -5,7 +5,7 @@ import Alert from '@cloudscape-design/components/alert';
 import Button from '@cloudscape-design/components/button';
 import ExpandableSection from '@cloudscape-design/components/expandable-section';
 import SegmentedControl from '@cloudscape-design/components/segmented-control';
-import heroBackground from '../assets/images/awentech/alt-hero.png';
+import heroBackground from '../assets/images/awentech/nwac-hero.png';
 
 const portalUrl = process.env.REACT_APP_PORTAL_URL || 'http://localhost:3000/';
 
@@ -27,9 +27,9 @@ const copy = {
     },
     hero: {
       eyebrow: "Native Women’s Association of Canada (NWAC)",
-      title: 'NWAC ISET Program Case Management System',
-      lead: "Welcome to the NWAC ISET Program Case Management System. Sign in with your NWAC credentials to work securely on applications and cases. Need help? Contact the NWAC ISET program admin team.",
-      primaryCta: 'Sign in to manage NWAC programs',
+      title: 'ISET Program Case Management System',
+      lead: "Sign in with your NWAC credentials to work on applications and cases. Need help? Contact the NWAC ISET program admin team. Installed modules are listed below.",
+      primaryCta: 'Sign in to ISET',
       secondaryCta: "View the applicants' portal",
       meta: [
         'Digital Intake',
@@ -39,7 +39,7 @@ const copy = {
         'Case Management',
         'Budget Management',
         'Reporting',
-        'ARMS Input'
+        'ILMP Reporting'
       ]
     },
     releaseNotes: {

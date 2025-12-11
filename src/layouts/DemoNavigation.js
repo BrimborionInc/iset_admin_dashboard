@@ -9,14 +9,15 @@ import Input from "@cloudscape-design/components/input";
 import Box from "@cloudscape-design/components/box";
 import styles from './DemoNavigation.module.css';
 import { apiFetch } from '../auth/apiClient';
+import { getRoleDisplayName } from '../utils/roleDisplay';
 
 // Canonical simulated roles aligned with backend Cognito groups & middleware
 const roleOptions = [
   { label: 'Signed Out', value: '__signed_out__' },
-  { label: 'System Administrator', value: 'System Administrator' },
-  { label: 'Program Administrator', value: 'Program Administrator' },
-  { label: 'Regional Coordinator', value: 'Regional Coordinator' },
-  { label: 'Application Assessor', value: 'Application Assessor' },
+  { label: getRoleDisplayName('System Administrator'), value: 'System Administrator' },
+  { label: getRoleDisplayName('Program Administrator'), value: 'Program Administrator' },
+  { label: getRoleDisplayName('Regional Coordinator'), value: 'Regional Coordinator' },
+  { label: getRoleDisplayName('Application Assessor'), value: 'Application Assessor' },
 ];
 
 const CONTENT_DENSITY_STORAGE_KEY = 'iset-demo-content-density';
@@ -241,7 +242,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
     } else if (!iamOn && previous === 'on') {
       // Turning IAM OFF, restore a default role if none selected yet
       if (!sessionStorage.getItem('currentRole')) {
-        const defaultRole = { label: 'Program Administrator', value: 'Program Administrator' };
+        const defaultRole = { label: getRoleDisplayName('Program Administrator'), value: 'Program Administrator' };
         try {
           sessionStorage.setItem('currentRole', JSON.stringify(defaultRole));
         } catch {}

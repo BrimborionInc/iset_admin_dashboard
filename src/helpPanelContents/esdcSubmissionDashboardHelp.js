@@ -18,8 +18,8 @@ const EsdcSubmissionDashboardHelp = () => (
 
     <h3>Responsibilities</h3>
     <ul>
-      <li>Program Administrators ensure data corrections are complete before export.</li>
-      <li>System Administrators maintain validation rules and transport integrations.</li>
+      <li>Program Admins ensure data corrections are complete before export.</li>
+      <li>System Admins maintain validation rules and transport integrations.</li>
       <li>Submission actions should be logged in the history feed to support audits.</li>
     </ul>
 
@@ -34,7 +34,7 @@ const EsdcSubmissionDashboardHelp = () => (
 
 EsdcSubmissionDashboardHelp.aiContext = `
 Dedicated ESDC submission workspace for ISET. Focus on validating ILMP client schema fields, previewing XML payloads,
-and tracking export history. Audience: Program Administrators and System Administrators preparing compliant submissions.
+and tracking export history. Audience: Program Admins and System Admins preparing compliant submissions.
 `;
 
 export default EsdcSubmissionDashboardHelp;

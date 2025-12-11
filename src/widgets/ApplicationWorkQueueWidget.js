@@ -16,7 +16,7 @@ const getBucketTemplate = role => {
     case 'Program Administrator':
       return [
         { id: 'new-submissions', label: 'Unassigned Applications', count: '-', description: 'Applications in submitted status without an assigned owner.' },
-        { id: 'unassigned', label: 'Assigned Applications', count: '-', description: 'Applications awaiting assessment by their assigned owners.' },
+        { id: 'awaiting-ei-validation', label: 'Awaiting EI Validation', count: '-', description: 'Applications missing EI eligibility confirmation.' },
         { id: 'in-assessment', label: 'In Assessment', count: '-', description: 'Applications in active review by their owners.' },
         { id: 'on-hold', label: 'On hold / info requested', count: '-', description: 'Applicants have been asked for more information.' },
         { id: 'awaiting-decision', label: 'Assessed, awaiting approval', count: '-', description: 'Application assessments complete, but need program approval.' },
@@ -109,6 +109,17 @@ const buildRequestHeaders = role => {
   return headers;
 };
 
+const STATUS_FILTERS = {
+  'new-submissions': 'Submitted',
+  'awaiting-ei-validation': 'Awaiting EI Validation',
+  'in-assessment': 'In Review',
+  'on-hold': 'Docs Requested',
+  'awaiting-decision': 'Pending Approval',
+  'decisions-made': 'Approved', // best-effort; captures approvals even if rejections won't match
+  'awaiting-my-approval': 'Pending Approval',
+  'awaiting-info': 'Docs Requested'
+};
+
 const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
   const [buckets, setBuckets] = useState(() => getBucketTemplate(role));
   const [loading, setLoading] = useState(false);
@@ -164,19 +175,22 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
   }, [role, refreshKey]);
 
   const getBucketLink = (currentRole, bucketId) => {
+    const basePath = '/case-assignment-dashboard';
+    const statusFilter = STATUS_FILTERS[bucketId];
+    const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
     if (
       currentRole === 'Program Administrator' &&
       (bucketId === 'new-submissions' ||
-        bucketId === 'unassigned' ||
+        bucketId === 'awaiting-ei-validation' ||
         bucketId === 'in-assessment' ||
         bucketId === 'on-hold' ||
         bucketId === 'awaiting-decision' ||
         bucketId === 'decisions-made')
     ) {
-      return '/case-assignment-dashboard';
+      return `${basePath}${query}`;
     }
     if (currentRole === 'Regional Coordinator') {
-      return '/case-assignment-dashboard';
+      return `${basePath}${query}`;
     }
     if (
       currentRole === 'Application Assessor' &&
@@ -186,7 +200,7 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
         bucketId === 'awaiting-applicant' ||
         bucketId === 'overdue')
     ) {
-      return '/case-assignment-dashboard';
+      return `${basePath}${query}`;
     }
     return null;
   };

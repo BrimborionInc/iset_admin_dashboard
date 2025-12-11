@@ -418,7 +418,7 @@ const AutoAssignmentConfigWidget = ({ actions, role }) => {
       <SpaceBetween size="s">
         {!canConfigure && (
           <StatusIndicator type="stopped">
-            Only System Administrators and Program Administrators can configure automatic assignment.
+            Only System Admins and Program Admins can configure automatic assignment.
           </StatusIndicator>
         )}
         {configLoading && <StatusIndicator type="loading">Loading configuration</StatusIndicator>}

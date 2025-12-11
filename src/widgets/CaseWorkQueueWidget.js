@@ -167,7 +167,7 @@ const CaseWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
 
   return (
     <BoardItem
-      header={<Header variant="h2" description="Cases currently in your remit by status.">Case Work Queue</Header>}
+      header={<Header variant="h2" description="Cases currently in your remit by status. Client case files are only created when a client's first ISET application is approved.">Case Work Queue</Header>}
       settings={actions?.removeItem ? (
         <ButtonDropdown
           ariaLabel="Board item settings"

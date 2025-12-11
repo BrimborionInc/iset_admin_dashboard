@@ -9,7 +9,7 @@ const DEFAULT_LANGUAGE = 'en'; // Adjust as needed
 const NONE_TEMPLATE_OPTION = { label: 'No template', value: '__none__' };
 
 const APPLICATION_ASSESSOR_ROLE = 'ApplicationAssessor';
-const APPLICATION_ASSESSOR_LABEL = 'Application Assessor';
+const APPLICATION_ASSESSOR_LABEL = 'ISET Coordinator';
 const LEGACY_ROLE_VALUES = new Set(['PTMA Staff', 'PTMAStaff']);
 const APPLICANT_ROLE_VALUE = 'applicant';
 const APPLICANT_ROLE = Object.freeze({ value: APPLICANT_ROLE_VALUE, label: 'Applicant' });
