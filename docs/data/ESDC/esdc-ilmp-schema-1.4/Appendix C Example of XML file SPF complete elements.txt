@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ALMP:contentALMP xmlns:ALMP="http://servicecanada.gc.ca/ALMP/contentExchange" xmlns:p="http://servicecanada.gc.ca/ALMP/contentTypes" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <SchemaVersion>1.4</SchemaVersion>
+  <agreementHolderName>SPF organization</agreementHolderName>
+  <sysComment>System</sysComment>
+  <client>
+    <socialInsuranceNumber>123456789</socialInsuranceNumber>
+    <lastName>Untel</lastName>
+    <initial>JU</initial>
+    <firstName>John</firstName>
+    <dateOfBirth>1997-01-21</dateOfBirth>
+    <gender>1</gender>
+    <aboriginalGroup>1</aboriginalGroup>
+    <maritalStatus>1</maritalStatus>
+    <numberOfDependantChildren>0</numberOfDependantChildren>
+    <languageSpoken>1</languageSpoken>
+    <disability>0</disability>
+    <address>
+      <streetAddress>80 Wellington</streetAddress>
+      <municipality>Ottawa</municipality>
+      <province>6</province>
+      <postalZIPCode>K1A0A3</postalZIPCode>
+      <contactPhoneNumber>1-222-456-7891</contactPhoneNumber>
+      <sysComment>last update:2018-05-30</sysComment>
+    </address>
+    <actionPlan>
+      <agreementNumber>1234567</agreementNumber>
+      <educationLevel>1</educationLevel>
+      <educationProvince>6</educationProvince>
+      <socialAssistanceRecipient>0</socialAssistanceRecipient>
+      <EIClaimant>1</EIClaimant>
+      <barrierToEmployment>3</barrierToEmployment>
+      <barrierToEmployment>5</barrierToEmployment>
+      <actionPlanPreviousEmployment>1</actionPlanPreviousEmployment>
+      <actionPlanPreviousEmploymentNOC>21111</actionPlanPreviousEmploymentNOC>
+<actionPlanPreviousEmploymentNOCVersion>2021</actionPlanPreviousEmploymentNOCVersion>
+<actionPlanPreviousEmploymentScheduleType>1</actionPlanPreviousEmploymentScheduleType>
+      <actionPlanStartDate>2018-10-25</actionPlanStartDate>
+      <actionPlanResultCode>1</actionPlanResultCode>
+      <actionPlanResultRelatedNOC>21211</actionPlanResultRelatedNOC>
+      <actionPlanResultRelatedNOCVersion>2021</actionPlanResultRelatedNOCVersion>
+      <actionPlanResultEducationLevel>8</actionPlanResultEducationLevel>
+      <actionPlanResultDate>2018-12-17</actionPlanResultDate>
+      <actionPlanFutureEducationLevel>8</actionPlanFutureEducationLevel>
+      <actionPlanChildCareNeed>0</actionPlanChildCareNeed>
+      <actionPlanChildCareFundedCode>1</actionPlanChildCareFundedCode>
+      <intervention>
+        <interventionCode>1</interventionCode>
+        <interventionStartDate>2018-10-26</interventionStartDate>
+        <interventionEndDate>2018-11-29</interventionEndDate>
+        <interventionOutcome>1</interventionOutcome>
+        <interventionDuration>20</interventionDuration>
+        <interventionCost>1000</interventionCost>
+        <interventionRelatedNOC>4212</interventionRelatedNOC>
+        <interventionRelatedNOCVersion>2016</interventionRelatedNOCVersion>
+        <sysComment>date created:2018-10-25</sysComment>
+      </intervention>
+      <sysComment>total of intervention: 1</sysComment>
+    </actionPlan>
+    <sysComment>client ID: 12345</sysComment>
+  </client>
+</ALMP:contentALMP>

@@ -3,6 +3,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
 const puppeteer = require('puppeteer');
+const { XMLValidator } = require('fast-xml-parser');
 const { maskName } = require('./src/utils/utils');
 const { getInternalNotifications, dismissInternalNotification } = require('./src/internalNotifications');
 const {
@@ -51,6 +52,7 @@ const CHECKLIST_KEY = 'checklist.compliance.iset';
 const CHECKLIST_CACHE_TTL_MS = 30 * 1000;
 let checklistCache = { ts: 0, data: null };
 let hasAssessmentBudgetPotColumn = null;
+const ILMP_SCHEMA_VERSION = '1.4';
 
 async function ensureAssessmentBudgetPotColumn(executor = pool) {
   if (!executor || typeof executor.query !== 'function') return false;
@@ -465,6 +467,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_case_task',
   'iset_case_watch',
   'iset_case_conflict_declaration',
+  'application_lock',
   'contact_message_note',
   'contact_message_status_history',
   'contact_message',
@@ -475,7 +478,9 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'signing_request',
   'iset_intake.message_attachment',
   'iset_intake.messages',
+  'documents',
   'iset_document',
+  'pending_uploads',
   'iset_application_version',
   'iset_application_draft_dynamic',
   'iset_application_file',
@@ -604,14 +609,69 @@ async function ensureEsdcPreparedHistoryEventType(connection) {
   }
 }
 
-async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId) {
+async function findPreferredActionPlanIdForCase(executor, caseId) {
+  const db = executor && typeof executor.query === 'function' ? executor : pool;
+  if (!db || !Number.isInteger(Number(caseId)) || Number(caseId) <= 0) return null;
+  try {
+    const [[row]] = await db.query(
+      `
+      SELECT ap.id
+        FROM iset_case_action_plan ap
+       WHERE ap.case_id = ?
+       ORDER BY
+         (LOWER(COALESCE(ap.status, '')) = 'active') DESC,
+         (ap.archived_at IS NULL) DESC,
+         ap.updated_at DESC,
+         ap.id DESC
+       LIMIT 1
+      `,
+      [caseId]
+    );
+    return row?.id || null;
+  } catch (err) {
+    console.warn('[esdc] failed to find preferred action plan for case', caseId, err?.message || err);
+    return null;
+  }
+}
+
+async function findEsdcSubmissionIdForCase(executor, caseId) {
+  const db = executor && typeof executor.query === 'function' ? executor : pool;
+  if (!db || !Number.isInteger(Number(caseId)) || Number(caseId) <= 0) return null;
+  try {
+    const [[row]] = await db.query(
+      `
+      SELECT eps.id
+        FROM esdc_participant_submission eps
+        LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
+       WHERE eps.case_id = ?
+       ORDER BY
+         (LOWER(COALESCE(ap.status, '')) = 'active') DESC,
+         ap.updated_at DESC,
+         eps.updated_at DESC,
+         eps.id DESC
+       LIMIT 1
+      `,
+      [caseId]
+    );
+    return row?.id || null;
+  } catch (err) {
+    console.warn('[esdc] failed to find submission for case', caseId, err?.message || err);
+    return null;
+  }
+}
+
+async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId, actionPlanId) {
   if (!caseId) return;
   const executor = db && typeof db.query === 'function' ? db : pool;
   if (!executor) return;
+  const resolvedPlanId = Number.isInteger(Number(actionPlanId)) && Number(actionPlanId) > 0
+    ? Number(actionPlanId)
+    : await findPreferredActionPlanIdForCase(executor, Number(caseId));
   try {
     await executor.query(
       `INSERT INTO esdc_participant_submission (
          case_id,
+         action_plan_id,
          application_id,
          readiness_status,
          readiness_summary,
@@ -625,9 +685,10 @@ async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId) 
          payload_storage_key,
          payload_checksum,
          rejection_reason
-       ) VALUES (?, ?, 'needs_review', NULL, NULL, NULL, NULL, 'pending', NULL, NULL, NULL, NULL, NULL, NULL)
+       ) VALUES (?, ?, ?, 'needs_review', NULL, NULL, NULL, NULL, 'pending', NULL, NULL, NULL, NULL, NULL, NULL)
        ON DUPLICATE KEY UPDATE
          application_id = VALUES(application_id),
+         action_plan_id = VALUES(action_plan_id),
          readiness_status = 'needs_review',
          readiness_summary = NULL,
          warnings = NULL,
@@ -641,7 +702,7 @@ async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId) 
          payload_checksum = NULL,
          rejection_reason = NULL,
          updated_at = NOW()`,
-      [caseId, applicationId || null]
+      [caseId, resolvedPlanId || null, applicationId || null]
     );
   } catch (err) {
     console.error('[esdc] ensure participant submission failed', err);
@@ -1960,6 +2021,33 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
         status: normalisePlanStatus(plan.status),
         startDate: planStartDate,
         eiClaimant: plan.eiClaimant || plan.EIClaimant || metadata.eiClaimant || null,
+        educationLevel: plan.educationLevel || plan.education_level || metadata.educationLevel || null,
+        educationProvince: plan.educationProvince || plan.education_province || metadata.educationProvince || null,
+        prevEmployment: plan.prevEmployment || plan.prev_employment || metadata.prevEmployment || metadata.prev_employment || plan.actionPlanPreviousEmployment || null,
+        prevEmploymentNoc:
+          plan.prevEmploymentNoc ||
+          plan.prev_employment_noc ||
+          metadata.prevEmploymentNoc ||
+          metadata.prev_employment_noc ||
+          metadata.actionPlanPreviousEmploymentNoc ||
+          plan.actionPlanPreviousEmploymentNoc ||
+          null,
+        prevEmploymentNocVersion:
+          plan.prevEmploymentNocVersion ||
+          plan.prev_employment_noc_version ||
+          metadata.prevEmploymentNocVersion ||
+          metadata.prev_employment_noc_version ||
+          metadata.actionPlanPreviousEmploymentNocVersion ||
+          plan.actionPlanPreviousEmploymentNocVersion ||
+          null,
+        prevEmploymentScheduleType:
+          plan.prevEmploymentScheduleType ||
+          plan.prev_employment_schedule_type ||
+          metadata.prevEmploymentScheduleType ||
+          metadata.prev_employment_schedule_type ||
+          metadata.actionPlanPreviousEmploymentScheduleType ||
+          plan.actionPlanPreviousEmploymentScheduleType ||
+          null,
         fundingStream: planFundingStream,
         agreementNumber: planAgreementNumber,
         resultDate: planResultDate,
@@ -2256,7 +2344,75 @@ function runIlmpValidation(context) {
     barrier: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
     childcareNeed: new Set(['0','1']),
     childcareFunding: new Set(['1','2','3','4','5','6','7']),
-    interventionOutcome: new Set(['1','2','3','4','5','6'])
+    interventionOutcome: new Set(['1','2','3','4','5','6']),
+    resultCode: new Set(['1','2','3','4','5','6','7','9']),
+    prevEmployment: new Set(['1','2','9']),
+    nocVersion: new Set(['2006','2011','2016','2021'])
+  };
+  const CODE_LOOKUP = {
+    barrier: {
+      none: '1',
+      'lack of labour force attachment': '2',
+      'lack of work experience': '3',
+      'lack of transportation': '4',
+      remoteness: '5',
+      language: '6',
+      education: '7',
+      economic: '8',
+      'dependent care': '9',
+      'lack of marketable skills': '10',
+      'physical/emotional/mental health': '11',
+      'other barrier': '12'
+    },
+    prevEmployment: {
+      unemployed: '1',
+      underemployed: '1',
+      'employed-full-time': '2',
+      'employed part-time': '2',
+      'employed-part-time': '2',
+      employed: '2',
+      'self-employed': '2',
+      student: '9',
+      '1': '1',
+      '2': '2',
+      '9': '9'
+    },
+    childcareNeed: { no: '0', yes: '1', '0': '0', '1': '1' },
+    childcareFunding: {
+      'not applicable': '1',
+      fnicci: '2',
+      'ei/crf': '3',
+      'provincial funding / subsidy': '4',
+      'no funding received': '5',
+      'daycare space not available': '6',
+      'assisted by family / self-funded': '7',
+      '1': '1',
+      '2': '2',
+      '3': '3',
+      '4': '4',
+      '5': '5',
+      '6': '6',
+      '7': '7'
+    },
+    resultCode: {
+      'unemployed but available for work': '1',
+      employed: '2',
+      'self-employed': '3',
+      'returned to school': '4',
+      'unspecified / could not be reached': '5',
+      'no longer in labour force': '6',
+      'stay in school': '7',
+      'ready for work': '9',
+      '1': '1',
+      '2': '2',
+      '3': '3',
+      '4': '4',
+      '5': '5',
+      '6': '6',
+      '7': '7',
+      '9': '9'
+    },
+    nocVersion: { '2006': '2006', '2011': '2011', '2016': '2016', '2021': '2021' }
   };
   const provinceCodeMap = {
     NL: '1', NS: '2', NB: '3', PE: '4', QC: '5', ON: '6', MB: '7', SK: '8', AB: '9',
@@ -2266,6 +2422,9 @@ function runIlmpValidation(context) {
     if (value === null || typeof value === 'undefined') return null;
     const key = String(value).trim().toLowerCase();
     const map = lookup || {};
+    if (map instanceof Set) {
+      return map.has(key) ? key : null;
+    }
     return map[key] || null;
   };
 
@@ -2281,6 +2440,9 @@ function runIlmpValidation(context) {
     })(),
     gender: extractGender(context),
     aboriginalGroup: (extractIndigenousIdentity(context) || '').toLowerCase(),
+    maritalStatus: extractMaritalStatus(context),
+    languageSpoken: extractLanguageSpoken(context),
+    disability: null,
     addressStreet: null,
     addressCity: null,
     addressProvince: null,
@@ -2292,6 +2454,20 @@ function runIlmpValidation(context) {
   extracted.addressCity = address.city || null;
   extracted.addressProvince = address.province ? String(address.province).toUpperCase() : null;
   extracted.postalCode = address.postalCode || null;
+  const disabilityInfo = extractDisabilityInfo(context);
+  extracted.disability = (() => {
+    if (!disabilityInfo) return null;
+    if (typeof disabilityInfo.declared === 'boolean') return disabilityInfo.declared ? 'yes' : 'no';
+    const coerced = coerceBoolean(disabilityInfo.declared);
+    if (coerced === null) return null;
+    return coerced ? 'yes' : 'no';
+  })();
+
+  const clientStatus = extractClientStatusDetails(context);
+  const educationDetails = extractEducationDetails(context);
+  const requestedSupports = extractRequestedSupports(context);
+  const derivedPlans = extractActionPlanDetails(context, clientStatus, requestedSupports) || [];
+  const barriersRaw = extractEmploymentBarriers(context) || [];
 
   const planStatusCounts = (() => {
     const plans = Array.isArray(context.caseActionPlans) ? context.caseActionPlans : [];
@@ -2332,41 +2508,6 @@ function runIlmpValidation(context) {
       detail: planStatusCounts.draftCount
     });
   }
-
-  // Blockers for action plans lacking interventions
-  const plans = Array.isArray(context.caseActionPlans) ? context.caseActionPlans : [];
-  plans
-    .filter(plan => (plan?.status || '').toLowerCase() === 'active')
-    .forEach(plan => {
-      const interventions = Array.isArray(plan.interventions) ? plan.interventions : [];
-      const nonPlanned = interventions.filter(intv => normaliseInterventionStatus(intv?.status) !== 'planned');
-      const allPlanned = interventions.length > 0 && nonPlanned.length === 0;
-      if (interventions.length === 0) {
-        const msg = 'Active action plan must have at least one intervention.';
-        blockingIssues.push(`[actionPlan-${plan.id || 'active'}] ${msg}`);
-        ruleResults.push({
-          id: `actionplan-${plan.id || 'active'}-no-interventions`,
-          label: 'Action plan interventions',
-          category: 'mandatory',
-          severity: 'blocking',
-          passed: false,
-          message: msg,
-          detail: null
-        });
-      } else if (allPlanned) {
-        const msg = 'Active action plan must have at least one intervention in progress or completed.';
-        blockingIssues.push(`[actionPlan-${plan.id || 'active'}] ${msg}`);
-        ruleResults.push({
-          id: `actionplan-${plan.id || 'active'}-all-planned`,
-          label: 'Action plan interventions',
-          category: 'mandatory',
-          severity: 'blocking',
-          passed: false,
-          message: msg,
-          detail: interventions.length
-        });
-      }
-    });
 
   const genderCode = toCode(extracted.gender, { male:'1', female:'2', unspecified:'3' });
   const indigenousCode = toCode(extracted.aboriginalGroup, {
@@ -2416,6 +2557,856 @@ function runIlmpValidation(context) {
     extracted[key] = evaluation.value;
   });
 
+  // Additional validations applied after base field checks are added below.
+  const codeChecks = [
+    { key: 'gender', value: genderCode, allowed: CODE_MAPS.gender, label: 'Gender' },
+    { key: 'aboriginalGroup', value: indigenousCode, allowed: CODE_MAPS.aboriginal, label: 'Indigenous identity' },
+    { key: 'maritalStatus', value: maritalCode, allowed: CODE_MAPS.marital, label: 'Marital status' },
+    { key: 'languageSpoken', value: languageCode, allowed: CODE_MAPS.language, label: 'Language spoken' },
+    { key: 'province', value: provinceNumeric, allowed: CODE_MAPS.province, label: 'Province' }
+  ];
+  codeChecks.forEach(entry => {
+    if (!entry.value) return;
+    if (!entry.allowed.has(String(entry.value))) {
+      const msg = `${entry.label} code is invalid.`;
+      blockingIssues.push(`[${entry.key}] ${msg}`);
+      ruleResults.push({
+        id: `${entry.key}-codeset`,
+        label: entry.label,
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: entry.value
+      });
+    }
+  });
+
+  const streetLower = typeof extracted.addressStreet === 'string' ? extracted.addressStreet.trim().toLowerCase() : '';
+  if (streetLower === 'no address') {
+    const msg = 'Client has declared "No Address". Allowed but audit-sensitive.';
+    warnings.push(`[address] ${msg}`);
+    ruleResults.push({
+      id: 'address-no-address',
+      label: 'Postal Address - Street',
+      category: 'mandatory',
+      severity: 'warning',
+      passed: false,
+      message: msg,
+      detail: extracted.addressStreet
+    });
+  }
+  const postalLower = typeof extracted.postalCode === 'string' ? extracted.postalCode.trim().toLowerCase() : '';
+  if (postalLower === 'no postal code') {
+    const msg = '"No Postal Code" used; ensure this is intentional.';
+    warnings.push(`[address] ${msg}`);
+    ruleResults.push({
+      id: 'address-no-postal',
+      label: 'Postal Code',
+      category: 'mandatory',
+      severity: 'warning',
+      passed: false,
+      message: msg,
+      detail: extracted.postalCode
+    });
+  }
+
+  // Barrier validation (None exclusive, valid codes only)
+  const barrierCodes = [];
+  const invalidBarriers = [];
+  barriersRaw.forEach(barrier => {
+    const code = toCode(barrier, CODE_LOOKUP.barrier);
+    if (code) {
+      barrierCodes.push(code);
+    } else {
+      invalidBarriers.push(barrier);
+    }
+  });
+  if (invalidBarriers.length) {
+    const msg = 'Barrier codes must be valid enumerations.';
+    blockingIssues.push(`[barrier] ${msg}`);
+    ruleResults.push({
+      id: 'barrier-invalid',
+      label: 'Barrier to employment',
+      category: 'mandatory',
+      severity: 'blocking',
+      passed: false,
+      message: `${msg} Invalid: ${invalidBarriers.join(', ')}`,
+      detail: invalidBarriers
+    });
+  }
+  if (barrierCodes.includes('1') && barrierCodes.some(code => code !== '1')) {
+    const msg = '"None" cannot be combined with other barriers.';
+    blockingIssues.push(`[barrier] ${msg}`);
+    ruleResults.push({
+      id: 'barrier-none-exclusive',
+      label: 'Barrier to employment',
+      category: 'mandatory',
+      severity: 'blocking',
+      passed: false,
+      message: msg,
+      detail: barrierCodes
+    });
+  }
+  if (barrierCodes.length > 5) {
+    const msg = 'Large number of barriers selected; confirm accuracy.';
+    warnings.push(`[barrier] ${msg}`);
+    ruleResults.push({
+      id: 'barrier-many',
+      label: 'Barrier to employment',
+      category: 'optional',
+      severity: 'warning',
+      passed: false,
+      message: msg,
+      detail: barrierCodes.length
+    });
+  }
+  if (barrierCodes.includes('12')) {
+    const msg = '"Other barrier" used; ensure supporting notes are present.';
+    warnings.push(`[barrier] ${msg}`);
+    ruleResults.push({
+      id: 'barrier-other',
+      label: 'Barrier to employment',
+      category: 'optional',
+      severity: 'warning',
+      passed: false,
+      message: msg,
+      detail: null
+    });
+  }
+
+  // Validate action plan & interventions across derived (non-draft) plans
+  const eligiblePlans = Array.isArray(derivedPlans)
+    ? derivedPlans.filter(plan => (plan?.status || '').toLowerCase() !== 'draft')
+    : [];
+  const activeDerived = eligiblePlans.filter(plan => (plan?.status || '').toLowerCase() === 'active');
+  if (activeDerived.length > 1) {
+    const msg = 'More than one active action plan detected for this case.';
+    blockingIssues.push(`[actionPlan] ${msg}`);
+    ruleResults.push({
+      id: 'actionplan-overlap',
+      label: 'Action plan overlap',
+      category: 'mandatory',
+      severity: 'blocking',
+      passed: false,
+      message: msg,
+      detail: activeDerived.length
+    });
+  }
+
+  const now = new Date();
+  eligiblePlans.forEach(plan => {
+    const planId = plan.id || plan.action_plan_id || 'plan';
+    const planPrefix = `[actionPlan-${planId}]`;
+    const planStartStr = plan.startDate || plan.ActionPlanStartDate || plan.actionPlanStartDate || null;
+    const planResultStr = plan.resultDate || plan.ActionPlanResultDate || plan.actionPlanResultDate || null;
+    const planStart = planStartStr ? parseDate(planStartStr) : null;
+    const planResultDate = planResultStr ? parseDate(planResultStr) : null;
+    const planEducationLevelRaw = plan.educationLevel || plan.education_level || plan.resultEducationLevel || null;
+    const planEducationLevelCode = planEducationLevelRaw
+      ? toCode(planEducationLevelRaw, CODE_MAPS.educationLevel)
+      : null;
+    const planResultCodeRaw = plan.resultCode || plan.ActionPlanResultCode || null;
+    const planResultCode = planResultCodeRaw
+      ? toCode(planResultCodeRaw, CODE_LOOKUP.resultCode) || (CODE_MAPS.resultCode.has(String(planResultCodeRaw)) ? String(planResultCodeRaw) : null)
+      : null;
+    const interventions = Array.isArray(plan.interventions)
+      ? plan.interventions.filter(intv => normaliseInterventionStatus(intv?.status) !== 'planned')
+      : [];
+
+    const agreementNumber = plan.agreementNumber || extractAgreementNumber(context);
+    const cleanedAgreement = agreementNumber ? String(agreementNumber).replace(/\D/g, '') : '';
+    if (!cleanedAgreement || cleanedAgreement.length < 7 || cleanedAgreement.length > 9) {
+      const msg = 'Agreement number must be a valid EI/CRF number (7-9 digits).';
+      blockingIssues.push(`${planPrefix} ${msg}`);
+      ruleResults.push({
+        id: `${planPrefix}-agreement`,
+        label: 'Agreement number',
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: agreementNumber
+      });
+    }
+
+    if (!planStart) {
+      const msg = 'Action plan start date is required and cannot be empty.';
+      blockingIssues.push(`${planPrefix} ${msg}`);
+      ruleResults.push({
+        id: `${planPrefix}-start-missing`,
+        label: 'Action plan start date',
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: null
+      });
+    } else {
+      if (planStart.getFullYear() < 2000) {
+        const msg = 'Action plan start date must be on/after 2000-01-01.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-start-too-early`,
+          label: 'Action plan start date',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: planStartStr
+        });
+      }
+      if (planStart > now) {
+        const msg = 'Action plan start date must not be in the future.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-start-future`,
+          label: 'Action plan start date',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: planStartStr
+        });
+      }
+    }
+
+    if (!interventions.length) {
+      const msg = 'At least one intervention is required for an action plan.';
+      blockingIssues.push(`${planPrefix} ${msg}`);
+      ruleResults.push({
+        id: `${planPrefix}-no-interventions`,
+        label: 'Action plan interventions',
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: null
+      });
+    }
+
+    let earliestStart = null;
+    let latestEnd = null;
+    interventions.forEach(intv => {
+      const s = intv.startDate ? parseDate(intv.startDate) : null;
+      const e = intv.endDate ? parseDate(intv.endDate) : null;
+      if (s && (!earliestStart || s < earliestStart)) earliestStart = s;
+      if (e && (!latestEnd || e > latestEnd)) latestEnd = e;
+    });
+
+    if (earliestStart && planStart && earliestStart < planStart) {
+      const msg = 'Action plan start date must be on/before the first intervention start date.';
+      blockingIssues.push(`${planPrefix} ${msg}`);
+      ruleResults.push({
+        id: `${planPrefix}-start-before-intervention`,
+        label: 'Action plan start date',
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: { planStart: planStartStr, earliestInterventionStart: earliestStart.toISOString().slice(0, 10) }
+      });
+    }
+
+    if (earliestStart && planStart) {
+      const gapDays = Math.round((earliestStart - planStart) / (1000 * 60 * 60 * 24));
+      if (gapDays > 120) {
+        const msg = 'Long gap between action plan start and first intervention.';
+        warnings.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-gap-start`,
+          label: 'Action plan',
+          category: 'optional',
+          severity: 'warning',
+          passed: false,
+          message: msg,
+          detail: gapDays
+        });
+      }
+    }
+
+    const childcareNeedCode = toCode(plan.childcareNeed, CODE_LOOKUP.childcareNeed);
+    const childcareFundingCode = toCode(plan.childcareFunding, CODE_LOOKUP.childcareFunding);
+    if (childcareNeedCode && !CODE_MAPS.childcareNeed.has(childcareNeedCode)) {
+      const msg = 'Childcare need code is invalid.';
+      warnings.push(`${planPrefix} ${msg}`);
+    }
+    if (childcareFundingCode && !CODE_MAPS.childcareFunding.has(childcareFundingCode)) {
+      const msg = 'Childcare funding code is invalid.';
+      warnings.push(`${planPrefix} ${msg}`);
+    }
+    if (childcareNeedCode === '0' && childcareFundingCode && childcareFundingCode !== '1') {
+      const msg = 'Childcare funding must be "Not Applicable" when childcare need is No.';
+      blockingIssues.push(`${planPrefix} ${msg}`);
+      ruleResults.push({
+        id: `${planPrefix}-childcare-mismatch-none`,
+        label: 'Childcare funding',
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: childcareFundingCode
+      });
+    }
+    if (childcareNeedCode === '1' && childcareFundingCode === '1') {
+      const msg = 'Childcare funding cannot be "Not Applicable" when childcare need is Yes.';
+      blockingIssues.push(`${planPrefix} ${msg}`);
+      ruleResults.push({
+        id: `${planPrefix}-childcare-mismatch-yes`,
+        label: 'Childcare funding',
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: childcareFundingCode
+      });
+    }
+    if (childcareFundingCode === '5') {
+      const msg = '"No funding received" selected for childcare; confirm justification.';
+      warnings.push(`${planPrefix} ${msg}`);
+      ruleResults.push({
+        id: `${planPrefix}-childcare-funding-none`,
+        label: 'Childcare funding',
+        category: 'optional',
+        severity: 'warning',
+        passed: false,
+        message: msg,
+        detail: childcareFundingCode
+      });
+    }
+
+    const prevEmploymentCode =
+      toCode(plan.prevEmployment, CODE_LOOKUP.prevEmployment) ||
+      toCode(plan.actionPlanPreviousEmployment, CODE_LOOKUP.prevEmployment) ||
+      toCode(clientStatus?.prevEmployment, CODE_LOOKUP.prevEmployment) ||
+      toCode(clientStatus?.status, CODE_LOOKUP.prevEmployment) ||
+      null;
+    if (prevEmploymentCode === '2') {
+      const prevNoc =
+        plan.prevEmploymentNoc ||
+        plan.actionPlanPreviousEmploymentNoc ||
+        clientStatus?.noc ||
+        null;
+      const prevNocVersion =
+        plan.prevEmploymentNocVersion ||
+        plan.actionPlanPreviousEmploymentNocVersion ||
+        clientStatus?.nocVersion ||
+        null;
+      const prevSchedule =
+        plan.prevEmploymentScheduleType ||
+        plan.actionPlanPreviousEmploymentScheduleType ||
+        clientStatus?.scheduleType ||
+        null;
+      const prevNocStr = prevNoc ? String(prevNoc) : '';
+      const prevNocVersionStr = prevNocVersion ? String(prevNocVersion) : '';
+      const expectFiveDigitsPrev = prevNocVersionStr === '2021';
+      const expectFourDigitsPrev = prevNocVersionStr && prevNocVersionStr !== '2021';
+      if (
+        (expectFiveDigitsPrev && !/^\d{5}$/.test(prevNocStr)) ||
+        (expectFourDigitsPrev && !/^\d{4}$/.test(prevNocStr))
+      ) {
+        const msg =
+          prevNocVersionStr === '2021'
+            ? 'Previous employment NOC must be a 5-digit code for NOC 2021.'
+            : 'Previous employment NOC must be a 4-digit code for this NOC version.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-prev-noc`,
+          label: 'Previous employment NOC',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: prevNocStr || null
+        });
+      }
+      if (!prevNocVersion || !CODE_MAPS.nocVersion.has(String(prevNocVersion))) {
+        const msg = 'Previous employment NOC version is required when client was employed at intake.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-prev-noc-version`,
+          label: 'Previous employment NOC version',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: prevNocVersion
+        });
+      }
+      if (!prevSchedule) {
+        const msg = 'Previous employment schedule type is required when client was employed at intake.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-prev-schedule`,
+          label: 'Previous employment schedule type',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
+    }
+
+    if (planResultCode) {
+      if (!planResultStr || !planResultDate) {
+        const msg = 'Action plan result date is required when a result code is present.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-result-date-required`,
+          label: 'Action plan result date',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      } else {
+        if (planResultDate > now) {
+          const msg = 'Action plan result date must not be in the future.';
+          blockingIssues.push(`${planPrefix} ${msg}`);
+          ruleResults.push({
+            id: `${planPrefix}-result-future`,
+            label: 'Action plan result date',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: planResultStr
+          });
+        }
+        if (planStart && planResultDate < planStart) {
+          const msg = 'Action plan result date must be on/after the action plan start date.';
+          blockingIssues.push(`${planPrefix} ${msg}`);
+          ruleResults.push({
+            id: `${planPrefix}-result-before-start`,
+            label: 'Action plan result date',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: { result: planResultStr, start: planStartStr }
+          });
+        }
+        if (latestEnd && planResultDate < latestEnd) {
+          const msg = 'Action plan result date must be on/after the latest intervention end date.';
+          blockingIssues.push(`${planPrefix} ${msg}`);
+          ruleResults.push({
+            id: `${planPrefix}-result-before-intervention`,
+            label: 'Action plan result date',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: { result: planResultStr, latestInterventionEnd: latestEnd.toISOString().slice(0, 10) }
+          });
+        }
+      }
+
+      if (!educationDetails?.level) {
+        const msg = 'Result education level is required when closing an action plan.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-education-closeout`,
+          label: 'Action plan close-out education level',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
+
+      if (['2', '3'].includes(planResultCode)) {
+        const resultNoc = plan.resultNoc || plan.actionPlanResultRelatedNOC || null;
+        const resultNocVersion = plan.resultNocVersion || plan.actionPlanResultRelatedNOCVersion || null;
+        if (!resultNoc || !/^\d{4,5}$/.test(String(resultNoc))) {
+          const msg = 'Result NOC is required when employment is the outcome.';
+          blockingIssues.push(`${planPrefix} ${msg}`);
+          ruleResults.push({
+            id: `${planPrefix}-result-noc`,
+            label: 'Action plan result NOC',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: resultNoc
+          });
+        }
+        if (!resultNocVersion || !CODE_MAPS.nocVersion.has(String(resultNocVersion))) {
+          const msg = 'Result NOC version is required when employment is the outcome.';
+          blockingIssues.push(`${planPrefix} ${msg}`);
+          ruleResults.push({
+            id: `${planPrefix}-result-noc-version`,
+            label: 'Action plan result NOC version',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: resultNocVersion
+          });
+        }
+      }
+      if (planResultCode === '4' && !educationDetails?.level) {
+        const msg = 'Future education level must be present when result is Returned to School.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-result-education`,
+          label: 'Action plan result education level',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
+      if (planResultCode === '5') {
+        const msg = 'Result code "Unspecified / could not be reached" should be verified.';
+        warnings.push(`${planPrefix} ${msg}`);
+      }
+      if (planResultCode === '9' && !prevEmploymentCode) {
+        const msg = 'Result "Ready for work" without employment details; verify follow-up plan.';
+        warnings.push(`${planPrefix} ${msg}`);
+      }
+    }
+
+    if (planStart && planResultDate) {
+      const diffDays = Math.round((planResultDate - planStart) / (1000 * 60 * 60 * 24));
+      if (diffDays > 1095) {
+        const msg = 'Action plan duration is unusually long; confirm timelines.';
+        warnings.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-long-duration`,
+          label: 'Action plan duration',
+          category: 'optional',
+          severity: 'warning',
+          passed: false,
+          message: msg,
+          detail: diffDays
+        });
+      }
+    }
+
+    if (!planEducationLevelCode) {
+      const msg = 'Education level is required at action plan start.';
+      blockingIssues.push(`${planPrefix} ${msg}`);
+      ruleResults.push({
+        id: `${planPrefix}-education-level-missing`,
+        label: 'Education level',
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: null
+      });
+    }
+
+    interventions.forEach(intv => {
+      const intId = intv.id || 'intervention';
+      const prefix = `[intervention-${intId}]`;
+      const intStatus = normaliseInterventionStatus(intv.status);
+      const startStr = intv.startDate || null;
+      const endStr = intv.endDate || null;
+      const startDate = startStr ? parseDate(startStr) : null;
+      const endDate = endStr ? parseDate(endStr) : null;
+      const durationRaw = intv.duration || intv.durationDays || null;
+      const durationVal = durationRaw === 0 ? 0 : (durationRaw ? Number.parseInt(String(durationRaw), 10) : null);
+      const costRaw = typeof intv.cost === 'string' || typeof intv.cost === 'number' ? intv.cost : null;
+      const costParsed = costRaw !== null && typeof costRaw !== 'undefined'
+        ? Number.parseInt(String(costRaw).replace(/[^\d-]/g, ''), 10)
+        : null;
+
+      if (!startStr) {
+        const msg = 'Intervention start date is required.';
+        blockingIssues.push(`${prefix} ${msg}`);
+        ruleResults.push({
+          id: `${prefix}-start-missing`,
+          label: 'Intervention start date',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      } else if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(startStr).trim())) {
+        const msg = 'Intervention start date must be in YYYY-MM-DD format.';
+        blockingIssues.push(`${prefix} ${msg}`);
+        ruleResults.push({
+          id: `${prefix}-start-format`,
+          label: 'Intervention start date',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: startStr
+        });
+      } else {
+        if (startDate.getFullYear() < 2000) {
+          const msg = 'Intervention start date must be after 2000-01-01.';
+          blockingIssues.push(`${prefix} ${msg}`);
+          ruleResults.push({
+            id: `${prefix}-start-too-early`,
+            label: 'Intervention start date',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: startStr
+          });
+        }
+        if (startDate > now) {
+          const msg = 'Intervention start date must not be future-dated.';
+          blockingIssues.push(`${prefix} ${msg}`);
+          ruleResults.push({
+            id: `${prefix}-start-future`,
+            label: 'Intervention start date',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: startStr
+          });
+        }
+        if (planStart && startDate < planStart) {
+          const msg = 'Intervention start date must be on/after the action plan start date.';
+          blockingIssues.push(`${prefix} ${msg}`);
+          ruleResults.push({
+            id: `${prefix}-start-before-plan`,
+            label: 'Intervention start date',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: { start: startStr, planStart: planStartStr }
+          });
+        }
+      }
+
+      if (endStr) {
+        if (!endDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(endStr).trim())) {
+          const msg = 'Intervention end date must be in YYYY-MM-DD format.';
+          blockingIssues.push(`${prefix} ${msg}`);
+          ruleResults.push({
+            id: `${prefix}-end-format`,
+            label: 'Intervention end date',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: endStr
+          });
+        } else {
+          if (startDate && endDate < startDate) {
+            const msg = 'Intervention end date must be on or after the start date.';
+            blockingIssues.push(`${prefix} ${msg}`);
+            ruleResults.push({
+              id: `${prefix}-end-before-start`,
+              label: 'Intervention end date',
+              category: 'mandatory',
+              severity: 'blocking',
+              passed: false,
+              message: msg,
+              detail: { start: startStr, end: endStr }
+            });
+          }
+          if (planResultDate && endDate > planResultDate) {
+            const msg = 'Intervention end date must be on/before the action plan result date.';
+            blockingIssues.push(`${prefix} ${msg}`);
+            ruleResults.push({
+              id: `${prefix}-end-after-result`,
+              label: 'Intervention end date',
+              category: 'mandatory',
+              severity: 'blocking',
+              passed: false,
+              message: msg,
+              detail: { end: endStr, planResult: planResultStr }
+            });
+          }
+        }
+      }
+
+      if (!intv.code) {
+        const msg = 'Intervention code is required.';
+        blockingIssues.push(`${prefix} ${msg}`);
+      }
+
+      if ((planResultDate || endStr) && !Number.isFinite(durationVal)) {
+        const msg = 'Intervention duration (days) is required when end date or close-out exists.';
+        blockingIssues.push(`${prefix} ${msg}`);
+      }
+      if (Number.isFinite(durationVal) && durationVal >= 0) {
+        if (startDate && endDate) {
+          const expected = calculateDurationDaysFromDates(startDate, endDate);
+          if (expected !== null && Math.abs(durationVal - expected) > 2) {
+            const msg = 'Intervention duration must align with start and end dates.';
+            blockingIssues.push(`${prefix} ${msg}`);
+            ruleResults.push({
+              id: `${prefix}-duration-mismatch`,
+              label: 'Intervention duration',
+              category: 'mandatory',
+              severity: 'blocking',
+              passed: false,
+              message: msg,
+              detail: { duration: durationVal, expected }
+            });
+          }
+        }
+        if (durationVal > 1500) {
+          const msg = 'Intervention duration is unusually long; review.';
+          warnings.push(`${prefix} ${msg}`);
+        }
+      }
+
+      if ((planResultDate || endStr) && (costParsed === null || Number.isNaN(costParsed))) {
+        const msg = 'Intervention cost is required when end date or close-out exists.';
+        blockingIssues.push(`${prefix} ${msg}`);
+        ruleResults.push({
+          id: `${prefix}-cost-required`,
+          label: 'Intervention cost',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      } else if (costParsed !== null && !Number.isNaN(costParsed)) {
+        if (costParsed < 0 || costParsed > 999999) {
+          const msg = 'Intervention cost must be between 0 and 999999.';
+          blockingIssues.push(`${prefix} ${msg}`);
+          ruleResults.push({
+            id: `${prefix}-cost-range`,
+            label: 'Intervention cost',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: costParsed
+          });
+        }
+        if (intStatus === 'in_progress' && !endStr) {
+          const msg = 'Intervention cost on an in-progress intervention is treated as estimated.';
+          warnings.push(`${prefix} ${msg}`);
+          ruleResults.push({
+            id: `${prefix}-cost-estimated`,
+            label: 'Intervention cost',
+            category: 'optional',
+            severity: 'warning',
+            passed: false,
+            message: msg,
+            detail: costParsed
+          });
+        }
+      }
+
+      if (endStr && !intv.outcome) {
+        const msg = 'Intervention outcome code is required when end date is set.';
+        blockingIssues.push(`${prefix} ${msg}`);
+        ruleResults.push({
+          id: `${prefix}-outcome-required`,
+          label: 'Intervention outcome',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
+
+      const codeNumeric = Number.parseInt(intv.code, 10);
+      if (Number.isFinite(codeNumeric) && codeNumeric >= 6 && codeNumeric <= 13) {
+        if (!intv.relatedNoc || !intv.relatedNocVersion) {
+          const msg = 'Intervention related NOC and version are required for this code.';
+          blockingIssues.push(`${prefix} ${msg}`);
+          ruleResults.push({
+            id: `${prefix}-related-noc-missing`,
+            label: 'Intervention related NOC',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: null
+          });
+        } else {
+          const relatedVersion = String(intv.relatedNocVersion);
+          const expectFiveDigits = relatedVersion === '2021';
+          const expectFourDigits = relatedVersion && relatedVersion !== '2021';
+          if (
+            (expectFiveDigits && !/^\d{5}$/.test(String(intv.relatedNoc))) ||
+            (expectFourDigits && !/^\d{4}$/.test(String(intv.relatedNoc)))
+          ) {
+            const msg =
+              relatedVersion === '2021'
+                ? 'Intervention related NOC must be a 5-digit code for NOC 2021.'
+                : 'Intervention related NOC must be a 4-digit code for this NOC version.';
+            blockingIssues.push(`${prefix} ${msg}`);
+            ruleResults.push({
+              id: `${prefix}-related-noc-format`,
+              label: 'Intervention related NOC',
+              category: 'mandatory',
+              severity: 'blocking',
+              passed: false,
+              message: msg,
+              detail: intv.relatedNoc
+            });
+          }
+          if (!CODE_MAPS.nocVersion.has(String(intv.relatedNocVersion))) {
+            const msg = 'Intervention related NOC version is invalid.';
+            blockingIssues.push(`${prefix} ${msg}`);
+            ruleResults.push({
+              id: `${prefix}-related-noc-version`,
+              label: 'Intervention related NOC version',
+              category: 'mandatory',
+              severity: 'blocking',
+              passed: false,
+              message: msg,
+              detail: intv.relatedNocVersion
+            });
+          }
+        }
+      }
+    });
+  });
+
+  // File-level validations (schema version, namespaces, well-formed XML)
+  if (ILMP_SCHEMA_VERSION !== '1.4') {
+    const msg = 'SchemaVersion must equal 1.4.';
+    blockingIssues.push(`[file] ${msg}`);
+    ruleResults.push({
+      id: 'file-schema-version',
+      label: 'Schema version',
+      category: 'mandatory',
+      severity: 'blocking',
+      passed: false,
+      message: msg,
+      detail: ILMP_SCHEMA_VERSION
+    });
+  }
+  try {
+    const payload = buildIlmpParticipantPayload(context);
+    if (!payload || !payload.xml) {
+      throw new Error('XML payload is empty');
+    }
+    const xmlCheck = XMLValidator.validate(payload.xml, { allowBooleanAttributes: true });
+    if (xmlCheck !== true) {
+      const msg = `XML is not well-formed: ${xmlCheck?.err?.msg || 'validation error'}`;
+      blockingIssues.push(`[file] ${msg}`);
+    }
+    const hasNamespaces =
+      payload.xml.includes('xmlns:ALMP="http://servicecanada.gc.ca/ALMP/contentExchange"') &&
+      payload.xml.includes('xmlns:p="http://servicecanada.gc.ca/ALMP/contentTypes"');
+    if (!hasNamespaces) {
+      const msg = 'Required XML namespaces are missing.';
+      blockingIssues.push(`[file] ${msg}`);
+    }
+    if (!payload.xml.includes('<SchemaVersion>1.4</SchemaVersion>')) {
+      const msg = 'SchemaVersion element missing or incorrect.';
+      blockingIssues.push(`[file] ${msg}`);
+    }
+  } catch (err) {
+    const msg = `XML generation/schema validation failed: ${err?.message || err}`;
+    blockingIssues.push(`[file] ${msg}`);
+  }
+
   const mandatoryResults = ruleResults.filter(rule => rule.category === 'mandatory');
   const optionalResults = ruleResults.filter(rule => rule.category === 'optional');
 
@@ -2438,230 +3429,6 @@ function runIlmpValidation(context) {
   } else if (warnings.length > 0 || (mandatoryTotal > 0 && mandatoryComplete < mandatoryTotal)) {
     readinessStatus = 'needs_review';
   }
-
-  // Validate action plan & interventions (minimal ILMP checks) across all non-draft plans
-  const eligiblePlans = (Array.isArray(context.caseActionPlans) ? context.caseActionPlans : []).filter(
-    plan => (plan?.status || '').toLowerCase() !== 'draft'
-  );
-  eligiblePlans.forEach(plan => {
-    const planStartRaw = plan.effectiveDate || plan.startDate || null;
-    (Array.isArray(plan.interventions) ? plan.interventions : []).forEach(intervention => {
-      const statusNormalised = normaliseInterventionStatus(intervention.status);
-      if (statusNormalised === 'planned') return;
-      const id = intervention.id || 'intervention';
-      const interventionStartRaw = intervention.startDate || null;
-      const interventionEndRaw = intervention.endDate || null;
-      const startIsoPattern = /^\d{4}-\d{2}-\d{2}$/;
-      const parsedStart = interventionStartRaw ? parseDate(interventionStartRaw) : null;
-      const planStartParsed = planStartRaw ? parseDate(planStartRaw) : null;
-      const toIsoDateOnly = value => {
-        const d = parseDate(value);
-        return d ? d.toISOString().slice(0, 10) : null;
-      };
-      const planStartDateStr = toIsoDateOnly(planStartRaw);
-      const interventionStartDateStr = toIsoDateOnly(interventionStartRaw);
-      if (!interventionStartRaw) {
-        const msg = 'Intervention start date is required.';
-        warnings.push(`[intervention-${id}] ${msg}`);
-        ruleResults.push({
-          id: `intervention-${id}-start`,
-          label: 'Intervention start date',
-          category: 'mandatory',
-          severity: 'warning',
-          passed: false,
-          message: msg,
-          detail: null
-        });
-      } else {
-        const formatted = startIsoPattern.test(String(interventionStartRaw).trim());
-        const yearOk = parsedStart && parsedStart.getFullYear() >= 2000;
-        if (!formatted || !parsedStart) {
-          const msg = 'Intervention start date must be in YYYY-MM-DD format.';
-          warnings.push(`[intervention-${id}] ${msg}`);
-          ruleResults.push({
-            id: `intervention-${id}-start-format`,
-            label: 'Intervention start date',
-            category: 'mandatory',
-            severity: 'warning',
-            passed: false,
-            message: msg,
-            detail: interventionStartRaw
-          });
-        } else if (!yearOk) {
-          const msg = 'Intervention start date must be after 2000-01-01.';
-          warnings.push(`[intervention-${id}] ${msg}`);
-          ruleResults.push({
-            id: `intervention-${id}-start-year`,
-            label: 'Intervention start date',
-            category: 'mandatory',
-            severity: 'warning',
-            passed: false,
-            message: msg,
-            detail: interventionStartRaw
-          });
-        }
-        if (planStartDateStr && interventionStartDateStr && interventionStartDateStr < planStartDateStr) {
-          const msg = 'Intervention start date must be on or after the action plan start date.';
-          warnings.push(`[intervention-${id}] ${msg}`);
-          ruleResults.push({
-            id: `intervention-${id}-start-before-plan`,
-            label: 'Intervention start date',
-            category: 'mandatory',
-            severity: 'warning',
-            passed: false,
-            message: msg,
-            detail: interventionStartRaw
-          });
-        }
-      }
-      if (interventionEndRaw) {
-        const endIsoPattern = /^\d{4}-\d{2}-\d{2}$/;
-        const parsedEnd = parseDate(interventionEndRaw);
-        const formattedEnd = endIsoPattern.test(String(interventionEndRaw).trim());
-        if (!formattedEnd || !parsedEnd) {
-          const msg = 'Intervention end date must be in YYYY-MM-DD format.';
-          warnings.push(`[intervention-${id}] ${msg}`);
-          ruleResults.push({
-            id: `intervention-${id}-end-format`,
-            label: 'Intervention end date',
-            category: 'mandatory',
-            severity: 'warning',
-            passed: false,
-            message: msg,
-            detail: interventionEndRaw
-          });
-        } else {
-          const startDateOnly = interventionStartDateStr;
-          const endDateOnly = toIsoDateOnly(interventionEndRaw);
-          if (startDateOnly && endDateOnly && endDateOnly < startDateOnly) {
-            const msg = 'Intervention end date must be on or after the start date.';
-            blockingIssues.push(`[intervention-${id}] ${msg}`);
-            ruleResults.push({
-              id: `intervention-${id}-end-before-start`,
-              label: 'Intervention end date',
-              category: 'mandatory',
-              severity: 'error',
-              passed: false,
-              message: msg,
-              detail: interventionEndRaw
-            });
-          }
-          if (parsedStart && parsedEnd) {
-            const maxEnd = new Date(parsedStart);
-            maxEnd.setMonth(maxEnd.getMonth() + 60);
-            if (parsedEnd > maxEnd) {
-              const msg = 'Intervention end date must be within 60 months of the start date.';
-              warnings.push(`[intervention-${id}] ${msg}`);
-              ruleResults.push({
-                id: `intervention-${id}-end-too-far`,
-                label: 'Intervention end date',
-                category: 'mandatory',
-                severity: 'warning',
-                passed: false,
-                message: msg,
-                detail: interventionEndRaw
-              });
-            }
-          }
-        }
-      }
-      if (!intervention.code) {
-        const msg = 'Intervention code is required.';
-        blockingIssues.push(`[intervention-${id}] ${msg}`);
-        ruleResults.push({
-          id: `intervention-${id}-code`,
-          label: 'Intervention code',
-          category: 'mandatory',
-          severity: 'blocking',
-          passed: false,
-          message: msg,
-          detail: null
-        });
-      }
-      if ((intervention.startDate || intervention.endDate) && !intervention.durationDays && !intervention.duration) {
-        const msg = 'Intervention duration (days) is required when dates are provided.';
-        warnings.push(`[intervention-${id}] ${msg}`);
-        ruleResults.push({
-          id: `intervention-${id}-duration`,
-          label: 'Intervention duration',
-          category: 'mandatory',
-          severity: 'error',
-          passed: false,
-          message: msg,
-          detail: null
-        });
-      }
-      if ((intervention.startDate || intervention.endDate) && !intervention.cost) {
-        const msg = 'Intervention cost is required when dates are provided.';
-        warnings.push(`[intervention-${id}] ${msg}`);
-        ruleResults.push({
-          id: `intervention-${id}-cost`,
-          label: 'Intervention cost',
-          category: 'mandatory',
-          severity: 'error',
-          passed: false,
-          message: msg,
-          detail: null
-        });
-      }
-      if (intervention.endDate && !intervention.outcome) {
-        const msg = 'Intervention outcome code is required when end date is set.';
-        warnings.push(`[intervention-${id}] ${msg}`);
-        ruleResults.push({
-          id: `intervention-${id}-outcome`,
-          label: 'Intervention outcome',
-          category: 'mandatory',
-          severity: 'error',
-          passed: false,
-          message: msg,
-          detail: null
-        });
-      }
-    });
-  });
-
-  // Code-set checks for participant
-  const codeChecks = [
-    { key: 'gender', value: genderCode, allowed: CODE_MAPS.gender, label: 'Gender' },
-    { key: 'aboriginalGroup', value: indigenousCode, allowed: CODE_MAPS.aboriginal, label: 'Indigenous identity' },
-    { key: 'maritalStatus', value: maritalCode, allowed: CODE_MAPS.marital, label: 'Marital status' },
-    { key: 'languageSpoken', value: languageCode, allowed: CODE_MAPS.language, label: 'Language spoken' },
-    { key: 'province', value: provinceNumeric, allowed: CODE_MAPS.province, label: 'Province' },
-  ];
-  codeChecks.forEach(entry => {
-    if (!entry.value) return;
-    if (!entry.allowed.has(String(entry.value))) {
-      const msg = `${entry.label} code is invalid.`;
-      blockingIssues.push(`[${entry.key}] ${msg}`);
-      ruleResults.push({
-        id: `${entry.key}-codeset`,
-        label: entry.label,
-        category: 'mandatory',
-        severity: 'blocking',
-        passed: false,
-        message: msg,
-        detail: entry.value
-      });
-    }
-  });
-
-  const validationPlans = Array.isArray(context.caseActionPlans)
-    ? context.caseActionPlans.filter(plan => (plan?.status || '').toLowerCase() !== 'draft')
-    : [];
-  validationPlans.forEach(plan => {
-    const childcareNeedCode = toCode(plan.childcareNeed, { no:'0', yes:'1' });
-    if (childcareNeedCode && !CODE_MAPS.childcareNeed.has(childcareNeedCode)) {
-      const msg = 'Childcare need code is invalid.';
-      warnings.push(`[actionPlan-${plan.id || 'childcare'}] ${msg}`);
-    }
-    const childcareFundingCode = toCode(plan.childcareFunding, {
-      'not applicable':'1', fnicci:'2', 'ei/crf':'3', 'provincial funding / subsidy':'4', 'no funding received':'5', 'daycare space not available':'6', 'assisted by family / self-funded':'7'
-    });
-    if (childcareFundingCode && !CODE_MAPS.childcareFunding.has(childcareFundingCode)) {
-      const msg = 'Childcare funding code is invalid.';
-      warnings.push(`[actionPlan-${plan.id || 'childcare-funding'}] ${msg}`);
-    }
-  });
 
   return {
     readinessStatus,
@@ -3480,6 +4247,11 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   }
 
   const planId = planInsert.insertId;
+  try {
+    await ensureEsdcParticipantSubmissionRecord(connection, caseId, caseRow.application_id || null, planId);
+  } catch (err) {
+    console.warn('[auto-plan] failed to seed participant submission for plan', planId, err?.message || err);
+  }
   const interventionTitleCandidates = [
     programName,
     interventionLabel ? `${interventionLabel} Intervention` : null,
@@ -3770,7 +4542,12 @@ function buildIlmpParticipantPayload(context) {
   const toCode = (value, map) => {
     if (!value) return null;
     const key = String(value).trim().toLowerCase();
-    return map[key] || null;
+    if (map[key]) return map[key];
+    // Allow numeric code passthrough when already valid
+    if (/^\d+$/.test(key) && Object.values(map).includes(key)) {
+      return key;
+    }
+    return null;
   };
 
   const socialAssistanceCode = (() => {
@@ -3929,7 +4706,13 @@ function buildIlmpParticipantPayload(context) {
           resultNoc,
           resultNocVersion,
           eiClaimant,
+          educationLevel,
+          educationProvince,
+          agreementNumber: planAgreementNumber,
           prevEmployment,
+          prevEmploymentNoc,
+          prevEmploymentNocVersion,
+          prevEmploymentScheduleType,
           childcareNeed,
           childcareFunding,
           goalDescription,
@@ -3972,6 +4755,9 @@ function buildIlmpParticipantPayload(context) {
           return null;
         }
         return {
+          educationLevel: educationLevel || null,
+          educationProvince: educationProvince || null,
+          agreementNumber: planAgreementNumber || null,
           ActionPlanStartDate: startDate || null,
           ActionPlanResultDate: resultDate || null,
           ActionPlanResultCode: resultCode || null,
@@ -3979,6 +4765,9 @@ function buildIlmpParticipantPayload(context) {
           ActionPlanResultRelatedNOCVersion: resultNocVersion || null,
           EIClaimant: actionPlanEiClaimantCode || null,
           actionPlanPreviousEmployment: toCode(prevEmployment, CODE_MAPS.prevEmployment) || null,
+          actionPlanPreviousEmploymentNoc: prevEmploymentNoc || null,
+          actionPlanPreviousEmploymentNocVersion: prevEmploymentNocVersion || null,
+          actionPlanPreviousEmploymentScheduleType: prevEmploymentScheduleType || null,
           ChildcareNeed: childcareNeedCode || childcareNeed || null,
           ChildcareFunding: childcareFundingCode || childcareFunding || null,
           GoalDescription: goalDescription || null,
@@ -4127,20 +4916,49 @@ function buildIlmpParticipantPayload(context) {
       eiClaimantCode ||
       null;
     lines.push(`${pad}<actionPlan>`);
+    const planEducationLevelCode =
+      toCode(plan.educationLevel, CODE_MAPS.educationLevel) ||
+      toCode(plan.education_level, CODE_MAPS.educationLevel) ||
+      (plan.educationLevel ? String(plan.educationLevel).trim() : null) ||
+      null;
+    const planEducationProvinceCode =
+      toCode(plan.educationProvince, CODE_MAPS.provinceCode) ||
+      toCode(plan.education_province, CODE_MAPS.provinceCode) ||
+      (plan.educationProvince ? String(plan.educationProvince).trim() : null) ||
+      null;
+
     add(indent + 1, 'agreementNumber', plan.agreementNumber || agreementNumber || null);
-    add(indent + 1, 'educationLevel', educationLevelCode || null);
-    add(indent + 1, 'educationProvince', educationProvinceCode || null);
+    add(indent + 1, 'educationLevel', planEducationLevelCode);
+    add(indent + 1, 'educationProvince', planEducationProvinceCode);
     add(indent + 1, 'socialAssistanceRecipient', socialAssistanceCode || null);
     add(indent + 1, 'EIClaimant', resolvedEiClaimant);
     if (barrierCodes && barrierCodes.length) {
       barrierCodes.forEach(code => add(indent + 1, 'barrierToEmployment', code));
     }
-    const prevEmploymentCode = toCode(clientStatus?.status, CODE_MAPS.prevEmployment) || null;
+    const prevEmploymentCode =
+      toCode(plan.prevEmployment, CODE_MAPS.prevEmployment) ||
+      toCode(plan.actionPlanPreviousEmployment, CODE_MAPS.prevEmployment) ||
+      toCode(clientStatus?.status, CODE_MAPS.prevEmployment) ||
+      null;
     add(indent + 1, 'actionPlanPreviousEmployment', prevEmploymentCode);
     if (prevEmploymentCode === '2') {
-      add(indent + 1, 'actionPlanPreviousEmploymentNOC', clientStatus?.noc || null);
-      add(indent + 1, 'actionPlanPreviousEmploymentNOCVersion', clientStatus?.nocVersion || null);
-      const scheduleCode = toCode(clientStatus?.scheduleType, CODE_MAPS.schedule) || null;
+      const prevNoc =
+        plan.prevEmploymentNoc ||
+        plan.actionPlanPreviousEmploymentNoc ||
+        clientStatus?.noc ||
+        null;
+      const prevNocVersion =
+        plan.prevEmploymentNocVersion ||
+        plan.actionPlanPreviousEmploymentNocVersion ||
+        clientStatus?.nocVersion ||
+        null;
+      add(indent + 1, 'actionPlanPreviousEmploymentNOC', prevNoc || null);
+      add(indent + 1, 'actionPlanPreviousEmploymentNOCVersion', prevNocVersion || null);
+      const scheduleCode =
+        toCode(plan.prevEmploymentScheduleType, CODE_MAPS.schedule) ||
+        toCode(plan.actionPlanPreviousEmploymentScheduleType, CODE_MAPS.schedule) ||
+        toCode(clientStatus?.scheduleType, CODE_MAPS.schedule) ||
+        null;
       add(indent + 1, 'actionPlanPreviousEmploymentScheduleType', scheduleCode);
     } else {
       add(indent + 1, 'actionPlanPreviousEmploymentScheduleType', toCode(clientStatus?.scheduleType, CODE_MAPS.schedule) || null);
@@ -4331,8 +5149,13 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
             planRow.funding_stream || planRow.fundingStream || metadata.fundingStream || null
           ) ||
           null,
+        educationLevel: planRow.education_level || esdc.educationLevel || metadata.educationLevel || null,
+        educationProvince: planRow.education_province || esdc.educationProvince || metadata.educationProvince || null,
         eiClaimant: planRow.EIClaimant || planRow.eiClaimant || esdc.EIClaimant || null,
         prevEmployment: planRow.prev_employment || esdc.actionPlanPreviousEmployment || null,
+        prevEmploymentNoc: esdc.actionPlanPreviousEmploymentNoc || null,
+        prevEmploymentNocVersion: esdc.actionPlanPreviousEmploymentNocVersion || null,
+        prevEmploymentScheduleType: esdc.actionPlanPreviousEmploymentScheduleType || null,
         createdAt: planRow.created_at,
         effectiveDate: planRow.effective_date,
         reviewDate: planRow.review_date,
@@ -7958,16 +8781,13 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
 
     // Run ILMP validation
     await ensureEsdcParticipantSubmissionRecord(conn, numericCaseId, caseRow.application_id || null);
-    const [[submissionRow]] = await conn.query(
-      'SELECT id FROM esdc_participant_submission WHERE case_id = ? ORDER BY id DESC LIMIT 1',
-      [numericCaseId]
-    );
-    if (!submissionRow) {
+    const submissionIdForCase = await findEsdcSubmissionIdForCase(conn, numericCaseId);
+    if (!submissionIdForCase) {
       throw Object.assign(new Error('submission_initialization_failed'), { statusCode: 500 });
     }
 
     await validateEsdcParticipantSubmission(
-      { submissionId: submissionRow.id, caseId: numericCaseId },
+      { submissionId: submissionIdForCase, caseId: numericCaseId },
       { connection: conn, transaction: false }
     );
     const [[updatedSubmission]] = await conn.query(
@@ -9055,6 +9875,9 @@ esdcRouter.get('/participants', async (req, res, next) => {
 
   const params = [];
   const where = [];
+  const activeInterventionStatuses = ['active', 'in_progress', 'in-progress', 'inprogress', 'suspended', 'on_hold', 'on-hold'];
+  const terminalInterventionStatuses = ['completed', 'complete', 'closed', 'done', 'finished', 'cancelled', 'canceled', 'failed'];
+  const startedInterventionStatuses = [...activeInterventionStatuses, ...terminalInterventionStatuses];
 
   if (readiness && ['ready', 'needs_review', 'blocked'].includes(readiness)) {
     where.push('eps.readiness_status = ?');
@@ -9066,6 +9889,76 @@ esdcRouter.get('/participants', async (req, res, next) => {
     params.push(`%${search}%`, `%${search}%`);
   }
 
+  // Include plans that are reportable either for first submission (active with started intervention)
+  // or for close-out (closed/ready with only terminal interventions and result info).
+  where.push(
+    `
+    ap.archived_at IS NULL
+    AND (
+      (
+        LOWER(COALESCE(ap.status, '')) = 'active'
+        AND EXISTS (
+          SELECT 1
+          FROM iset_case_intervention ci
+          WHERE ci.case_id = eps.case_id
+            AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+            AND ci.start_date IS NOT NULL
+            AND ci.start_date <= CURDATE()
+            AND LOWER(COALESCE(ci.status, '')) IN (${startedInterventionStatuses.map(() => '?').join(',')})
+        )
+      )
+      OR (
+        LOWER(COALESCE(ap.status, '')) IN ('closed','ready_to_close','ready-to-close','ready to close')
+        AND ap.result_date IS NOT NULL
+        AND ap.result_code IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM iset_case_intervention ci
+          WHERE ci.case_id = eps.case_id
+            AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM iset_case_intervention ci
+          WHERE ci.case_id = eps.case_id
+            AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+            AND (
+              ci.start_date IS NULL
+              OR LOWER(COALESCE(ci.status, '')) NOT IN (${terminalInterventionStatuses.map(() => '?').join(',')})
+            )
+        )
+      )
+    )
+    `
+  );
+  params.push(...startedInterventionStatuses, ...terminalInterventionStatuses);
+
+  // Only show submissions that still require action (pending or needing resubmission).
+  where.push(
+    `
+    (
+      LOWER(COALESCE(eps.submission_status, '')) IN ('pending','rejected')
+      OR (
+        LOWER(COALESCE(eps.submission_status, '')) = 'submitted'
+        AND LOWER(COALESCE(ap.status, '')) IN ('closed','ready_to_close','ready-to-close','ready to close')
+        AND ap.result_date IS NOT NULL
+        AND ap.result_code IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM iset_case_intervention ci
+          WHERE ci.case_id = eps.case_id
+            AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+            AND (
+              ci.start_date IS NULL
+              OR LOWER(COALESCE(ci.status, '')) NOT IN (${terminalInterventionStatuses.map(() => '?').join(',')})
+            )
+        )
+      )
+    )
+    `
+  );
+  params.push(...terminalInterventionStatuses);
+
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
   try {
@@ -9074,11 +9967,19 @@ esdcRouter.get('/participants', async (req, res, next) => {
       SELECT
         eps.id,
         eps.case_id,
+        eps.action_plan_id,
         eps.readiness_status,
+        eps.warnings,
+        eps.blocking_issues,
         eps.submission_status,
         eps.last_validated_at,
         eps.submitted_at,
+        ap.status AS action_plan_status,
+        ap.effective_date AS action_plan_start_date,
+        ap.result_code AS action_plan_result_code,
+        ap.result_date AS action_plan_result_date,
         COALESCE(
+          NULLIF(TRIM(CONCAT_WS(' ', cl.first_name, cl.last_name)), ''),
           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.personal.full_name')), ''),
           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$.personal.full_name')), ''),
           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.answers."preferred-name"')), ''),
@@ -9115,10 +10016,14 @@ esdcRouter.get('/participants', async (req, res, next) => {
           )), ''),
           COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id))
         ) AS participant_name,
-        COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
+        COALESCE(c.case_number, ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id,
+        c.case_number AS case_number
       FROM esdc_participant_submission eps
       LEFT JOIN iset_application ia ON ia.id = eps.application_id
       LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      LEFT JOIN iset_case c ON c.id = eps.case_id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
       ${whereClause}
       ORDER BY eps.last_validated_at DESC, eps.id DESC
       LIMIT ? OFFSET ?
@@ -9132,6 +10037,9 @@ esdcRouter.get('/participants', async (req, res, next) => {
       FROM esdc_participant_submission eps
       LEFT JOIN iset_application ia ON ia.id = eps.application_id
       LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      LEFT JOIN iset_case c ON c.id = eps.case_id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
       ${whereClause}
       `,
       params
@@ -9140,15 +10048,447 @@ esdcRouter.get('/participants', async (req, res, next) => {
     const items = rows.map(row => ({
       id: row.id,
       case_id: row.case_id,
-      readiness_status: row.readiness_status,
-      submission_status: row.submission_status,
+      action_plan_id: row.action_plan_id,
+      readiness_status: row.readiness_status || 'needs_review',
+      warnings: row.warnings,
+      blocking_issues: row.blocking_issues,
+      submission_status: row.submission_status || 'pending',
       last_validated_at: row.last_validated_at,
       submitted_at: row.submitted_at,
+      action_plan_status: row.action_plan_status,
+      action_plan_start_date: row.action_plan_start_date,
+      action_plan_result_code: row.action_plan_result_code,
+      action_plan_result_date: row.action_plan_result_date,
       tracking_id: row.tracking_id,
+      case_number: row.case_number,
       participant_name: row.participant_name || row.tracking_id
     }));
 
     res.json({ total, items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/esdc/participants/validate-all
+ * Re-run ILMP validation for all queued participants (filtered to active plans with started interventions and pending/rejected submissions).
+ */
+esdcRouter.post('/participants/validate-all', async (req, res, next) => {
+  const activeInterventionStatuses = ['active', 'in_progress', 'in-progress', 'inprogress', 'suspended', 'on_hold', 'on-hold'];
+  const terminalInterventionStatuses = ['completed', 'complete', 'closed', 'done', 'finished', 'cancelled', 'canceled', 'failed'];
+  const startedInterventionStatuses = [...activeInterventionStatuses, ...terminalInterventionStatuses];
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT eps.id
+      FROM esdc_participant_submission eps
+      LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
+      WHERE ap.archived_at IS NULL
+        AND (
+          LOWER(COALESCE(eps.submission_status, '')) IN ('pending','rejected')
+          OR (
+            LOWER(COALESCE(eps.submission_status, '')) = 'submitted'
+            AND LOWER(COALESCE(ap.status, '')) IN ('closed','ready_to_close','ready-to-close','ready to close')
+            AND ap.result_date IS NOT NULL
+            AND ap.result_code IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND (
+                  ci.start_date IS NULL
+                  OR LOWER(COALESCE(ci.status, '')) NOT IN (${terminalInterventionStatuses.map(() => '?').join(',')})
+                )
+            )
+          )
+        )
+        AND (
+          (
+            LOWER(COALESCE(ap.status, '')) = 'active'
+            AND EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND ci.start_date IS NOT NULL
+                AND ci.start_date <= CURDATE()
+                AND LOWER(COALESCE(ci.status, '')) IN (${startedInterventionStatuses.map(() => '?').join(',')})
+            )
+          )
+          OR (
+            LOWER(COALESCE(ap.status, '')) IN ('closed','ready_to_close','ready-to-close','ready to close')
+            AND ap.result_date IS NOT NULL
+            AND ap.result_code IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND (
+                  ci.start_date IS NULL
+                  OR LOWER(COALESCE(ci.status, '')) NOT IN (${terminalInterventionStatuses.map(() => '?').join(',')})
+                )
+            )
+          )
+        )
+      `,
+      [...terminalInterventionStatuses, ...startedInterventionStatuses, ...terminalInterventionStatuses]
+    );
+
+    const ids = rows.map(r => r.id).filter(Boolean);
+    const failures = [];
+    let validated = 0;
+    for (const id of ids) {
+      try {
+        await validateEsdcParticipantSubmission({ submissionId: id }, { transaction: false });
+        validated += 1;
+      } catch (err) {
+        failures.push({ id, error: err?.message || 'validation_failed' });
+      }
+    }
+
+    res.json({ ok: true, total: ids.length, validated, failures });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/esdc/participants/batch-prepare
+ * Generate batch XML for all ready participants (allows bypassing warnings).
+ */
+esdcRouter.post('/participants/batch-prepare', async (req, res, next) => {
+  const { ignoreWarnings = false } = req.body || {};
+  const activeInterventionStatuses = ['active', 'in_progress', 'in-progress', 'inprogress', 'suspended', 'on_hold', 'on-hold'];
+  const terminalInterventionStatuses = ['completed', 'complete', 'closed', 'done', 'finished', 'cancelled', 'canceled', 'failed'];
+  const startedInterventionStatuses = [...activeInterventionStatuses, ...terminalInterventionStatuses];
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT eps.id, eps.case_id, eps.readiness_status, eps.action_plan_id,
+             c.case_number,
+             COALESCE(cl.first_name, '') AS first_name,
+             COALESCE(cl.last_name, '') AS last_name,
+             COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
+      FROM esdc_participant_submission eps
+      LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
+      LEFT JOIN iset_case c ON c.id = eps.case_id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN iset_application ia ON ia.id = eps.application_id
+      LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      WHERE ap.archived_at IS NULL
+        AND (
+          (
+            LOWER(COALESCE(ap.status, '')) = 'active'
+            AND EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND ci.start_date IS NOT NULL
+                AND ci.start_date <= CURDATE()
+                AND LOWER(COALESCE(ci.status, '')) IN (${startedInterventionStatuses.map(() => '?').join(',')})
+            )
+          )
+          OR (
+            LOWER(COALESCE(ap.status, '')) IN ('closed','ready_to_close','ready-to-close','ready to close')
+            AND ap.result_date IS NOT NULL
+            AND ap.result_code IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND (
+                  ci.start_date IS NULL
+                  OR LOWER(COALESCE(ci.status, '')) NOT IN (${terminalInterventionStatuses.map(() => '?').join(',')})
+                )
+            )
+          )
+        )
+        AND (
+          LOWER(COALESCE(eps.submission_status, '')) IN ('pending','rejected')
+          OR (
+            LOWER(COALESCE(eps.submission_status, '')) = 'submitted'
+            AND LOWER(COALESCE(ap.status, '')) IN ('closed','ready_to_close','ready-to-close','ready to close')
+            AND ap.result_date IS NOT NULL
+            AND ap.result_code IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND (
+                  ci.start_date IS NULL
+                  OR LOWER(COALESCE(ci.status, '')) NOT IN (${terminalInterventionStatuses.map(() => '?').join(',')})
+                )
+            )
+          )
+        )
+      `,
+      [...startedInterventionStatuses, ...terminalInterventionStatuses, ...terminalInterventionStatuses]
+    );
+
+    const blocking = [];
+    const warnings = [];
+    const participants = [];
+    const clientFragments = [];
+    const extractClientFragment = xml => {
+      if (!xml || typeof xml !== 'string') return null;
+      const start = xml.indexOf('<client>');
+      const end = xml.lastIndexOf('</client>');
+      if (start === -1 || end === -1) return null;
+      return xml.slice(start, end + '</client>'.length).trim();
+    };
+
+    for (const row of rows) {
+      try {
+        const result = await prepareEsdcParticipantSubmission({ submissionId: row.id, caseId: row.case_id });
+        const readiness = (result?.evaluation?.readinessStatus || row.readiness_status || '').toLowerCase();
+        const baseDetail = {
+          id: row.id,
+          case_id: row.case_id,
+          action_plan_id: row.action_plan_id,
+          tracking_id: row.tracking_id,
+          participant_name: [row.first_name, row.last_name].filter(Boolean).join(' ') || row.tracking_id || `Submission #${row.id}`,
+          readiness_status: readiness
+        };
+        const blockingIssues = result?.evaluation?.blockingIssues || [];
+        const warningList = result?.evaluation?.warnings || [];
+
+        if (blockingIssues.length > 0 || readiness === 'blocked') {
+          blocking.push({ ...baseDetail, detail: blockingIssues.join('; ') || 'Blocking issues' });
+          continue;
+        }
+        if (warningList.length > 0 || readiness === 'needs_review') {
+          warnings.push({ ...baseDetail, detail: warningList.join('; ') || 'Warnings present' });
+          if (!ignoreWarnings) continue;
+        }
+
+        participants.push(baseDetail);
+        if (result?.payload?.xml) {
+          const fragment = extractClientFragment(result.payload.xml);
+          if (fragment) clientFragments.push(fragment);
+        }
+      } catch (err) {
+        blocking.push({ id: row.id, case_id: row.case_id, detail: err?.message || 'prepare_failed' });
+      }
+    }
+
+    if (blocking.length > 0) {
+      return res.status(409).json({ error: 'blocking_issues', blocking });
+    }
+    if (warnings.length > 0 && !ignoreWarnings) {
+      return res.status(409).json({ error: 'warnings_present', warnings });
+    }
+
+    const agreementHolderName = process.env.ESDC_AGREEMENT_HOLDER || 'NWAC ISET';
+    const batchXml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<ALMP:contentALMP xmlns:ALMP="http://servicecanada.gc.ca/ALMP/contentExchange" xmlns:p="http://servicecanada.gc.ca/ALMP/contentTypes" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
+      '  <SchemaVersion>1.4</SchemaVersion>',
+      `  <agreementHolderName>${agreementHolderName}</agreementHolderName>`,
+      '  <sysComment>Awentech nForm System</sysComment>',
+      ...clientFragments.map(fragment => `  ${fragment}`),
+      '</ALMP:contentALMP>'
+    ].join('\n');
+
+    res.json({
+      ok: true,
+      participants,
+      warnings,
+      xml: batchXml
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/esdc/participants/batch-submit
+ * Validate, generate, and mark batch as submitted. Returns XML + participant list.
+ */
+esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
+  const { ignoreWarnings = false } = req.body || {};
+  const activeInterventionStatuses = ['active', 'in_progress', 'in-progress', 'inprogress', 'suspended', 'on_hold', 'on-hold'];
+  const terminalInterventionStatuses = ['completed', 'complete', 'closed', 'done', 'finished', 'cancelled', 'canceled', 'failed'];
+  const startedInterventionStatuses = [...activeInterventionStatuses, ...terminalInterventionStatuses];
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT eps.id, eps.case_id, eps.readiness_status, eps.action_plan_id,
+             c.case_number,
+             COALESCE(cl.first_name, '') AS first_name,
+             COALESCE(cl.last_name, '') AS last_name,
+             COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
+      FROM esdc_participant_submission eps
+      LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
+      LEFT JOIN iset_case c ON c.id = eps.case_id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN iset_application ia ON ia.id = eps.application_id
+      LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      WHERE ap.archived_at IS NULL
+        AND (
+          (
+            LOWER(COALESCE(ap.status, '')) = 'active'
+            AND EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND ci.start_date IS NOT NULL
+                AND ci.start_date <= CURDATE()
+                AND LOWER(COALESCE(ci.status, '')) IN (${startedInterventionStatuses.map(() => '?').join(',')})
+            )
+          )
+          OR (
+            LOWER(COALESCE(ap.status, '')) IN ('closed','ready_to_close','ready-to-close','ready to close')
+            AND ap.result_date IS NOT NULL
+            AND ap.result_code IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND (
+                  ci.start_date IS NULL
+                  OR LOWER(COALESCE(ci.status, '')) NOT IN (${terminalInterventionStatuses.map(() => '?').join(',')})
+                )
+            )
+          )
+        )
+        AND (
+          LOWER(COALESCE(eps.submission_status, '')) IN ('pending','rejected')
+          OR (
+            LOWER(COALESCE(eps.submission_status, '')) = 'submitted'
+            AND LOWER(COALESCE(ap.status, '')) IN ('closed','ready_to_close','ready-to-close','ready to close')
+            AND ap.result_date IS NOT NULL
+            AND ap.result_code IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM iset_case_intervention ci
+              WHERE ci.case_id = eps.case_id
+                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
+                AND (
+                  ci.start_date IS NULL
+                  OR LOWER(COALESCE(ci.status, '')) NOT IN (${terminalInterventionStatuses.map(() => '?').join(',')})
+                )
+            )
+          )
+        )
+      `,
+      [...startedInterventionStatuses, ...terminalInterventionStatuses, ...terminalInterventionStatuses]
+    );
+
+    const blocking = [];
+    const warnings = [];
+    const participants = [];
+    const clientFragments = [];
+    const extractClientFragment = xml => {
+      if (!xml || typeof xml !== 'string') return null;
+      const start = xml.indexOf('<client>');
+      const end = xml.lastIndexOf('</client>');
+      if (start === -1 || end === -1) return null;
+      return xml.slice(start, end + '</client>'.length).trim();
+    };
+
+    for (const row of rows) {
+      try {
+        const result = await prepareEsdcParticipantSubmission({ submissionId: row.id, caseId: row.case_id });
+        const readiness = (result?.evaluation?.readinessStatus || row.readiness_status || '').toLowerCase();
+        const baseDetail = {
+          id: row.id,
+          case_id: row.case_id,
+          action_plan_id: row.action_plan_id,
+          tracking_id: row.tracking_id,
+          participant_name: [row.first_name, row.last_name].filter(Boolean).join(' ') || row.tracking_id || `Submission #${row.id}`,
+          readiness_status: readiness
+        };
+        const blockingIssues = result?.evaluation?.blockingIssues || [];
+        const warningList = result?.evaluation?.warnings || [];
+
+        if (blockingIssues.length > 0 || readiness === 'blocked') {
+          blocking.push({ ...baseDetail, detail: blockingIssues.join('; ') || 'Blocking issues' });
+          continue;
+        }
+        if (warningList.length > 0 || readiness === 'needs_review') {
+          warnings.push({ ...baseDetail, detail: warningList.join('; ') || 'Warnings present' });
+          if (!ignoreWarnings) continue;
+        }
+
+        participants.push(baseDetail);
+        if (result?.payload?.xml) {
+          const fragment = extractClientFragment(result.payload.xml);
+          if (fragment) clientFragments.push(fragment);
+        }
+      } catch (err) {
+        blocking.push({ id: row.id, case_id: row.case_id, detail: err?.message || 'prepare_failed' });
+      }
+    }
+
+    if (blocking.length > 0) {
+      return res.status(409).json({ error: 'blocking_issues', blocking });
+    }
+    if (warnings.length > 0 && !ignoreWarnings) {
+      return res.status(409).json({ error: 'warnings_present', warnings });
+    }
+
+    const agreementHolderName = process.env.ESDC_AGREEMENT_HOLDER || 'NWAC ISET';
+    const batchXml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<ALMP:contentALMP xmlns:ALMP="http://servicecanada.gc.ca/ALMP/contentExchange" xmlns:p="http://servicecanada.gc.ca/ALMP/contentTypes" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
+      '  <SchemaVersion>1.4</SchemaVersion>',
+      `  <agreementHolderName>${agreementHolderName}</agreementHolderName>`,
+      '  <sysComment>Awentech nForm System</sysComment>',
+      ...clientFragments.map(fragment => `  ${fragment}`),
+      '</ALMP:contentALMP>'
+    ].join('\n');
+
+    if (participants.length) {
+      const ids = participants.map(p => p.id);
+      await pool.query(
+        `
+        UPDATE esdc_participant_submission
+        SET submission_status = 'submitted', submitted_at = NOW(), updated_at = NOW()
+        WHERE id IN (${ids.map(() => '?').join(',')})
+        `,
+        ids
+      );
+      await pool.query(
+        `
+        INSERT INTO esdc_participant_submission_history (participant_submission_id, event_type, actor_user_id, event_details)
+        VALUES ${ids.map(() => '(?, "submitted", ?, JSON_OBJECT("batch", "ilmp-batch"))').join(',')}
+        `,
+        ids.flatMap(id => [id, req.user?.id || null])
+      );
+    }
+
+    res.json({
+      ok: true,
+      participants,
+      warnings,
+      xml: batchXml
+    });
   } catch (err) {
     next(err);
   }
@@ -9165,6 +10505,7 @@ esdcRouter.get('/participants/:id', async (req, res, next) => {
       SELECT
         eps.*,
         COALESCE(
+          NULLIF(TRIM(CONCAT_WS(' ', cl.first_name, cl.last_name)), ''),
           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.personal.full_name')), ''),
           NULLIF(TRIM(CONCAT_WS(' ',
             JSON_UNQUOTE(JSON_EXTRACT(ia.payload_json, '$.personal.first_name')),
@@ -9172,10 +10513,13 @@ esdcRouter.get('/participants/:id', async (req, res, next) => {
           )), ''),
           COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id))
         ) AS participant_name,
-        COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
+        COALESCE(c.case_number, ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id,
+        c.case_number AS case_number
       FROM esdc_participant_submission eps
       LEFT JOIN iset_application ia ON ia.id = eps.application_id
       LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      LEFT JOIN iset_case c ON c.id = eps.case_id
+      LEFT JOIN client cl ON cl.id = c.client_id
       WHERE eps.id = ?
       `,
       [id]
@@ -16038,7 +17382,13 @@ app.post('/api/steps', async (req, res) => {
           if (props.accept.length > 200) return res.status(400).json({ error: `file-upload at index ${i} accept too long (max 200 chars)` });
           const parts = props.accept.split(',').map(s => s.trim()).filter(Boolean);
           if (parts.length > 0) {
-            const invalid = parts.filter(p => !/^\.[A-Za-z0-9]+$/.test(p) && !/^[A-Za-z0-9-]+\/[A-Za-z0-9+.-]+$/.test(p));
+            const invalid = parts.filter(p => {
+              // Allow dot-extensions (.jpg), full MIME types (image/jpeg), and simple wildcards (image/*)
+              if (/^\.[A-Za-z0-9]+$/.test(p)) return false;
+              if (/^[A-Za-z0-9-]+\/[A-Za-z0-9+.-]+$/.test(p)) return false;
+              if (/^[A-Za-z0-9-]+\/\*$/.test(p)) return false;
+              return true;
+            });
             if (invalid.length) return res.status(400).json({ error: `file-upload at index ${i} invalid accept tokens: ${invalid.slice(0,5).join(', ')}` });
           }
         }
@@ -16150,17 +17500,22 @@ app.put('/api/steps/:id', async (req, res) => {
             return res.status(400).json({ error: `date-input at index ${i} missing required parts: ${missing.join(', ')}` });
           }
         }
-        if (typeKey === 'file-upload' || typeKey === 'fileupload') {
-          if (props.accept && typeof props.accept === 'string') {
-            if (props.accept.length > 200) return res.status(400).json({ error: `file-upload at index ${i} accept too long (max 200 chars)` });
-            const parts = props.accept.split(',').map(s => s.trim()).filter(Boolean);
-            if (parts.length > 0) {
-              const invalid = parts.filter(p => !/^\.[A-Za-z0-9]+$/.test(p) && !/^[A-Za-z0-9-]+\/[A-Za-z0-9+.-]+$/.test(p));
-              if (invalid.length) return res.status(400).json({ error: `file-upload at index ${i} invalid accept tokens: ${invalid.slice(0,5).join(', ')}` });
-            }
+      if (typeKey === 'file-upload' || typeKey === 'fileupload') {
+        if (props.accept && typeof props.accept === 'string') {
+          if (props.accept.length > 200) return res.status(400).json({ error: `file-upload at index ${i} accept too long (max 200 chars)` });
+          const parts = props.accept.split(',').map(s => s.trim()).filter(Boolean);
+          if (parts.length > 0) {
+            const invalid = parts.filter(p => {
+              if (/^\.[A-Za-z0-9]+$/.test(p)) return false;
+              if (/^[A-Za-z0-9-]+\/[A-Za-z0-9+.-]+$/.test(p)) return false;
+              if (/^[A-Za-z0-9-]+\/\*$/.test(p)) return false;
+              return true;
+            });
+            if (invalid.length) return res.status(400).json({ error: `file-upload at index ${i} invalid accept tokens: ${invalid.slice(0,5).join(', ')}` });
           }
-          if (props.documentType && typeof props.documentType === 'string') {
-            if (!/^[-a-zA-Z0-9_]+$/.test(props.documentType)) return res.status(400).json({ error: `file-upload at index ${i} invalid documentType (use alphanumeric, dash, underscore)` });
+        }
+        if (props.documentType && typeof props.documentType === 'string') {
+          if (!/^[-a-zA-Z0-9_]+$/.test(props.documentType)) return res.status(400).json({ error: `file-upload at index ${i} invalid documentType (use alphanumeric, dash, underscore)` });
             if (props.documentType.length > 40) return res.status(400).json({ error: `file-upload at index ${i} documentType too long (max 40)` });
           }
         }
@@ -18674,14 +20029,16 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     response.eligibility = response.assessment_esdc_eligibility;
     response.finance = financeSummary;
 
-    const [[ilmpComplianceRow]] = await pool.query(
-      `SELECT readiness_status, readiness_summary, warnings, blocking_issues, last_validated_at, payload_snapshot, payload_checksum, payload_storage_key
-         FROM esdc_participant_submission
-         WHERE case_id = ?
-         ORDER BY id DESC
-         LIMIT 1`,
-      [caseId]
-    );
+    const submissionIdForCase = await findEsdcSubmissionIdForCase(pool, caseId);
+    const [[ilmpComplianceRow]] = submissionIdForCase
+      ? await pool.query(
+          `SELECT readiness_status, readiness_summary, warnings, blocking_issues, last_validated_at, payload_snapshot, payload_checksum, payload_storage_key
+             FROM esdc_participant_submission
+             WHERE id = ?
+             LIMIT 1`,
+          [submissionIdForCase]
+        )
+      : [[]];
     response.compliance = {
       ilmp: mapIlmpComplianceFromSubmission(ilmpComplianceRow),
       finance: { status: 'pending', messages: [] },
@@ -18729,21 +20086,18 @@ app.post('/api/cases/:id/validate-ilmp', async (req, res) => {
 
     await ensureEsdcParticipantSubmissionRecord(null, caseId, caseRow.application_id || null);
 
-    const [[submissionRow]] = await pool.query(
-      'SELECT id FROM esdc_participant_submission WHERE case_id = ? ORDER BY id DESC LIMIT 1',
-      [caseId]
-    );
-    if (!submissionRow) {
+    const submissionId = await findEsdcSubmissionIdForCase(pool, caseId);
+    if (!submissionId) {
       return res.status(500).json({ error: 'submission_initialization_failed' });
     }
 
-    await validateEsdcParticipantSubmission({ submissionId: submissionRow.id, caseId });
+    await validateEsdcParticipantSubmission({ submissionId, caseId });
 
     const [[updatedSubmission]] = await pool.query(
       `SELECT readiness_status, readiness_summary, warnings, blocking_issues, last_validated_at
          FROM esdc_participant_submission
          WHERE id = ?`,
-      [submissionRow.id]
+      [submissionId]
     );
 
     const compliance = {
@@ -18806,15 +20160,12 @@ app.post('/api/cases/:id/prepare-ilmp', async (req, res) => {
 
     await ensureEsdcParticipantSubmissionRecord(null, caseId, caseRow.application_id || null);
 
-    const [[submissionRow]] = await pool.query(
-      'SELECT id FROM esdc_participant_submission WHERE case_id = ? ORDER BY id DESC LIMIT 1',
-      [caseId]
-    );
-    if (!submissionRow) {
+    const submissionId = await findEsdcSubmissionIdForCase(pool, caseId);
+    if (!submissionId) {
       return res.status(500).json({ error: 'submission_initialization_failed' });
     }
 
-    const result = await prepareEsdcParticipantSubmission({ submissionId: submissionRow.id, caseId });
+    const result = await prepareEsdcParticipantSubmission({ submissionId, caseId });
     if (result.blocking) {
       return res.status(409).json({
         error: 'blocking_validation_issues',
@@ -20795,6 +22146,12 @@ app.post('/api/action-plans/:id/activate', async (req, res) => {
         return res.status(409).json({ error: 'active_plan_exists', detail: 'case_already_has_active_plan' });
       }
       throw error;
+    }
+
+    try {
+      await ensureEsdcParticipantSubmissionRecord(null, planRow.case_id, planRow.application_id || null, planId);
+    } catch (err) {
+      console.warn('[esdc] failed to ensure participant submission on plan activation', planId, err?.message || err);
     }
 
     const updatedRow = await fetchActionPlanWithCase(planId);

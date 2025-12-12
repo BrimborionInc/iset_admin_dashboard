@@ -57,19 +57,19 @@ const ILMP_PARTICIPANT_RULES = {
         {
           id: 'sin-format',
           description: 'Must contain exactly 9 digits (ILMP Data Exchange Guide, rows 94-103).',
-          severity: 'error',
+          severity: 'blocking',
           validate: value => typeof value === 'string' && /^\d{9}$/.test(value)
         },
         {
           id: 'sin-not-all-zero',
           description: 'Must not contain all 0s (ILMP Data Exchange Guide, row 103).',
-          severity: 'error',
+          severity: 'blocking',
           validate: value => typeof value === 'string' && value !== '000000000'
         },
         {
           id: 'sin-mod10',
           description: 'SIN Number checksum is invalid (ILMP Data Exchange Guide, row 101).',
-          severity: 'error',
+          severity: 'blocking',
           validate: value => {
             if (typeof value !== 'string' || !/^\d{9}$/.test(value)) return false;
             let sum = 0;
@@ -93,7 +93,7 @@ const ILMP_PARTICIPANT_RULES = {
         {
           id: 'dob-not-future',
           description: 'Must not be a future date (ILMP Data Exchange Guide, row 140).',
-          severity: 'error',
+          severity: 'blocking',
           validate: value => {
             if (!value) return false;
             const date = new Date(value);
@@ -105,7 +105,7 @@ const ILMP_PARTICIPANT_RULES = {
         {
           id: 'dob-age-range',
           description: 'Participant age must be between 1 and 100 years inclusive (ILMP Data Exchange Guide, row 141).',
-          severity: 'error',
+          severity: 'blocking',
           validate: value => {
             if (!value) return false;
             const date = new Date(value);
@@ -149,7 +149,7 @@ const ILMP_PARTICIPANT_RULES = {
         {
           id: 'street-length',
           description: 'Must be between 2 and 150 characters or the literal "No Address" (ILMP Data Exchange Guide, row 231).',
-          severity: 'error',
+          severity: 'blocking',
           validate: value => {
             if (typeof value !== 'string') return false;
             const trimmed = value.trim();
@@ -167,7 +167,7 @@ const ILMP_PARTICIPANT_RULES = {
         {
           id: 'city-length',
           description: 'Must be between 3 and 100 characters (ILMP Data Exchange Guide, row 240).',
-          severity: 'error',
+          severity: 'blocking',
           validate: value => {
             if (typeof value !== 'string') return false;
             const trimmed = value.trim();
@@ -190,7 +190,7 @@ const ILMP_PARTICIPANT_RULES = {
         {
           id: 'postal-format',
           description: 'Must be Canadian format A1B2C3, US ZIP, 5-9 digits, or "No Postal Code" (ILMP Data Exchange Guide, rows 272-276).',
-          severity: 'error',
+          severity: 'blocking',
           validate: value => {
             if (typeof value !== 'string') return false;
             const trimmed = value.trim();
@@ -206,7 +206,7 @@ const ILMP_PARTICIPANT_RULES = {
         {
           id: 'postal-prefix-against-province',
           description: 'When province is Canadian (codes 1-12,16), first letter must match province prefix (ILMP Data Exchange Guide, row 272).',
-          severity: 'error',
+          severity: 'blocking',
           validate: (value, context) => {
             if (!value || typeof value !== 'string') return false;
             const trimmed = value.trim();
@@ -221,6 +221,25 @@ const ILMP_PARTICIPANT_RULES = {
             const canonical = trimmed.toUpperCase().replace(/\s+/g, '');
             return prefixes.some(prefix => canonical.startsWith(prefix));
           }
+        }
+      ]
+    },
+    disability: {
+      label: 'Disability',
+      required: true,
+      normalise: value => {
+        if (value === null || typeof value === 'undefined') return null;
+        const str = String(value).trim().toLowerCase();
+        if (['yes', 'y', 'true', '1'].includes(str)) return 'yes';
+        if (['no', 'n', 'false', '0'].includes(str)) return 'no';
+        return value;
+      },
+      tests: [
+        {
+          id: 'disability-explicit',
+          description: 'Must be explicitly Yes or No (ILMP Data Exchange Guide, row 158).',
+          severity: 'blocking',
+          validate: value => value === 'yes' || value === 'no'
         }
       ]
     }

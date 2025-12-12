@@ -1,0 +1,41 @@
+The following table shows the data elements that are mandatory for the SPF program. Even if some of these elements are optional in the XML Schema, these elements are mandatory and request by the SPF program.
+Data Element Description	XML Schema Element
+Agreement Holder Name	<agreementHolderName>
+SIN	<socialInsuranceNumber>
+Last Name	<lastName>
+First Name	<firstName>
+Date of Birth	<dateOfBirth>
+Client’s Gender	<gender>
+Aboriginal Group	<aboriginalGroup>
+Marital Status	<maritalStatus>
+Number of Dependent Children	<numberOfDependantChildren>
+Languages Spoken	<languageSpoken>
+Disability	<disability>
+Street Address	<streetAddress>
+Municipality	<municipality>
+Province	<province>
+Postal Code	<postalZIPCode>
+Agreement Number	<agreementNumber>
+Education Level	<educationLevel>
+Social Assistance Recipient	<socialAssistanceRecipient>
+Employment Insurance Claimant	<EIClaimant>
+Barriers to Employment	<barrierToEmployment>
+Action Plan Client Status at Intake	<actionPlanPreviousEmployment>
+Action Plan Employed Client Details at Intake – NOC *	<actionPlanPreviousEmploymentNOC>
+Action Plan Employed Client Details at Intake – NOC Version *	<actionPlanPreviousEmploymentNOCVersion>
+Action Plan Employed Client Details at Intake – Status *	<actionPlanPreviousEmploymentScheduleType>
+Action Plan Start Date	<actionPlanStartDate>
+Action Plan Result Code *	<actionPlanResultCode>
+Action Plan Result Related NOC *	<actionPlanResultRelatedNOC>
+Action Plan Result Related NOC Version *	<actionPlanResultRelatedNOCVersion>
+Action Plan Details on the Returned to School Result *	<actionPlanFutureEducationLevel>
+Action Plan Result Education Level *	<actionPlanResultEducationLevel>
+Action Plan Result Date *	<actionPlanResultDate>
+Intervention Code	<interventionCode>
+Intervention Start Date	<interventionStartDate>
+Intervention End Date *	<interventionEndDate>
+Intervention Outcome *	<interventionOutcome>
+Intervention Related National Occupation Code *	<interventionRelatedNOC>
+Intervention Related National Occupation Code Version *	<interventionRelatedNOCVersion>
+
+* Conditional elements: these elements are only mandatory in specific cases; please see each section on those elements for more details.

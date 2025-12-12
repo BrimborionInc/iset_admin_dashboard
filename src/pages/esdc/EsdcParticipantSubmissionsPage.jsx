@@ -4,18 +4,19 @@ import { SpaceBetween, Box } from '@cloudscape-design/components';
 
 import EsdcParticipantQueueWidget from './widgets/EsdcParticipantQueueWidget.jsx';
 import EsdcParticipantValidationWidget from './widgets/EsdcParticipantValidationWidget.jsx';
+import EsdcBatchSubmissionWidget from './widgets/EsdcBatchSubmissionWidget.jsx';
 import EsdcParticipantHistoryWidget from './widgets/EsdcParticipantHistoryWidget.jsx';
 import EsdcParticipantsHelp from '../../helpPanelContents/esdcParticipantsHelp.js';
 import EsdcParticipantQueueHelp from '../../helpPanelContents/esdcParticipantQueueHelp.js';
 import EsdcParticipantValidationHelp from '../../helpPanelContents/esdcParticipantValidationHelp.js';
 import EsdcParticipantHistoryHelp from '../../helpPanelContents/esdcParticipantHistoryHelp.js';
 
-const STORAGE_KEY = 'esdc-participants-layout-v1';
+const STORAGE_KEY = 'esdc-participants-layout-v3';
 
 const widgetRegistry = {
   queue: {
     id: 'queue',
-    defaultRowSpan: 6,
+    defaultRowSpan: 3,
     defaultColumnSpan: 4,
     component: EsdcParticipantQueueWidget,
     title: 'Participant submission queue',
@@ -24,9 +25,20 @@ const widgetRegistry = {
     helpTitle: 'Participant queue',
     aiContext: EsdcParticipantQueueHelp.aiContext
   },
+  batch: {
+    id: 'batch',
+    defaultRowSpan: 4,
+    defaultColumnSpan: 2,
+    component: EsdcBatchSubmissionWidget,
+    title: 'Batch submission',
+    description: 'Generate ILMP submission XML for all ready participants.',
+    helpComponent: EsdcParticipantValidationHelp,
+    helpTitle: 'Batch submission',
+    aiContext: EsdcParticipantValidationHelp.aiContext
+  },
   validation: {
     id: 'validation',
-    defaultRowSpan: 6,
+    defaultRowSpan: 4,
     defaultColumnSpan: 2,
     component: EsdcParticipantValidationWidget,
     title: 'Validation summary',
@@ -37,7 +49,7 @@ const widgetRegistry = {
   },
   history: {
     id: 'history',
-    defaultRowSpan: 6,
+    defaultRowSpan: 3,
     defaultColumnSpan: 4,
     component: EsdcParticipantHistoryWidget,
     title: 'Recent participant submissions',
@@ -49,9 +61,10 @@ const widgetRegistry = {
 };
 
 const defaultLayout = [
-  { id: 'queue', rowSpan: 6, columnSpan: 4 },
-  { id: 'validation', rowSpan: 6, columnSpan: 2 },
-  { id: 'history', rowSpan: 6, columnSpan: 4 }
+  { id: 'queue', rowSpan: 3, columnSpan: 4 },
+  { id: 'validation', rowSpan: 4, columnSpan: 2 },
+  { id: 'batch', rowSpan: 4, columnSpan: 2 },
+  { id: 'history', rowSpan: 3, columnSpan: 4 }
 ];
 
 const exportLayout = items =>
