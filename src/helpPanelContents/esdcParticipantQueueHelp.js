@@ -3,11 +3,11 @@ import React from 'react';
 const EsdcParticipantQueueHelp = () => (
   <div>
     <p>
-      The queue lists participants awaiting ESDC submission. Use the filters (to be wired later) to isolate blocked,
-      ready, or in-progress records. Open the workspace to resolve issues or complete the submission workflow.
+      The queue lists participants who currently need an ILMP submission. Use it to open a participant workspace, review
+      validation, and decide when each client is ready for the next export batch.
     </p>
     <p>
-      Readiness badges use three states:
+      Readiness badges:
     </p>
     <ul>
       <li><strong>Ready</strong> (green) — all mandatory ILMP rules pass.</li>
@@ -15,13 +15,13 @@ const EsdcParticipantQueueHelp = () => (
       <li><strong>Blocked</strong> (red) — at least one hard validation failure that must be fixed before a payload can be sent.</li>
     </ul>
     <p>
-      Columns include the community, readiness state, and the timestamp of the last validation run.
+      Columns include participant name, reference ID, readiness/submission state, and last validation time. Click a name to open the participant workspace for full validation and payload prep.
     </p>
   </div>
 );
 
 EsdcParticipantQueueHelp.aiContext = `
-Widget help: Participant submission queue. Describe columns, readiness states, and how to open the workspace.
+Widget help: ILMP export queue. Describe readiness states, columns, and opening the participant workspace to resolve issues.
 `;
 
 export default EsdcParticipantQueueHelp;

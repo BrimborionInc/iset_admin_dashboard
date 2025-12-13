@@ -561,9 +561,9 @@ const AppRoutes = ({
             [
               { text: 'Home', href: '/' },
               { text: 'ESDC Submissions', href: '/esdc/overview' },
-              { text: 'Participants', href: '/esdc/participants' }
+              { text: 'ILMP Submissions & Exports', href: '/esdc/participants' }
             ],
-            'Participant Submissions',
+            'ILMP Submissions & Exports',
             <EsdcParticipantsHelp />,
             (
               <SpaceBetween size="xs" direction="horizontal">

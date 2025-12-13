@@ -1800,8 +1800,10 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
           duration = String(diffDays);
         }
       }
+    } else {
+      duration = null;
     }
-    if (!duration) {
+    if (!duration && endDate) {
       if (Number.isFinite(intervention.durationDays)) {
         duration = normaliseNumericString(intervention.durationDays, { min: 0, max: 999 });
       } else if (Number.isFinite(metadata.durationDays)) {
@@ -1866,9 +1868,13 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
     const codeCandidate = metadata.code ?? intervention.code ?? esdc.interventionCode ?? intervention.intervention_type ?? null;
     const code = normaliseNumericString(codeCandidate, { min: 1, max: 999 });
 
-    const outcome = mapInterventionOutcome(
+    const isClosedStatus = ['completed', 'cancelled'].includes(statusNormalized);
+    let outcome = mapInterventionOutcome(
       intervention.outcome ?? intervention.outcomeCode ?? esdc.interventionOutcome ?? metadata.outcome
     );
+    if (!isClosedStatus && !endDate) {
+      outcome = null;
+    }
 
     const supports = Array.isArray(metadata.supports) && metadata.supports.length
       ? metadata.supports
@@ -3183,6 +3189,20 @@ function runIlmpValidation(context) {
       }
 
       if (endStr) {
+        const statusNormalized = normaliseInterventionStatus(intv.status);
+        if (!['completed', 'cancelled'].includes(statusNormalized)) {
+          const msg = 'Intervention with an end date must be marked completed or cancelled.';
+          blockingIssues.push(`${prefix} ${msg}`);
+          ruleResults.push({
+            id: `${prefix}-end-status-mismatch`,
+            label: 'Intervention end date',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: { status: statusNormalized, end: endStr }
+          });
+        }
         if (!endDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(endStr).trim())) {
           const msg = 'Intervention end date must be in YYYY-MM-DD format.';
           blockingIssues.push(`${prefix} ${msg}`);
@@ -3220,6 +3240,21 @@ function runIlmpValidation(context) {
               passed: false,
               message: msg,
               detail: { end: endStr, planResult: planResultStr }
+            });
+          }
+          const maxEnd = new Date(startDate);
+          maxEnd.setMonth(maxEnd.getMonth() + 60);
+          if (endDate > maxEnd) {
+            const msg = 'Intervention end date must be within 60 months of the start date.';
+            blockingIssues.push(`${prefix} ${msg}`);
+            ruleResults.push({
+              id: `${prefix}-end-too-far`,
+              label: 'Intervention end date',
+              category: 'mandatory',
+              severity: 'blocking',
+              passed: false,
+              message: msg,
+              detail: { start: startStr, end: endStr, maxEnd: maxEnd.toISOString().slice(0,10) }
             });
           }
         }
@@ -4979,6 +5014,11 @@ function buildIlmpParticipantPayload(context) {
       (plan.resultCode ? String(plan.resultCode) : null) ||
       (plan.ActionPlanResultCode ? String(plan.ActionPlanResultCode) : null) ||
       null;
+    const planResultEducationCode =
+      toCode(plan.resultEducationLevel, CODE_MAPS.educationLevel) ||
+      toCode(plan.actionPlanResultEducationLevel, CODE_MAPS.educationLevel) ||
+      (plan.resultEducationLevel ? String(plan.resultEducationLevel).trim() : null) ||
+      null;
     const planResultNoc = plan.resultNoc || plan.actionPlanResultRelatedNOC || plan.ActionPlanResultRelatedNOC || null;
     const planResultNocVersion =
       plan.resultNocVersion ||
@@ -4992,7 +5032,9 @@ function buildIlmpParticipantPayload(context) {
       add(indent + 1, 'actionPlanResultRelatedNOC', planResultNoc || plan.interventions?.[0]?.relatedNoc || null);
       add(indent + 1, 'actionPlanResultRelatedNOCVersion', planResultNocVersion || plan.interventions?.[0]?.relatedNocVersion || null);
     }
-    add(indent + 1, 'actionPlanResultEducationLevel', educationLevelCode || null);
+    if (planResultCode && planResultDate) {
+      add(indent + 1, 'actionPlanResultEducationLevel', planResultEducationCode || null);
+    }
     add(indent + 1, 'actionPlanChildCareNeed', toCode(plan.childcareNeed, CODE_MAPS.childcareNeed) || null);
     add(indent + 1, 'actionPlanChildCareFundedCode', toCode(plan.childcareFunding, CODE_MAPS.childcareFunding) || null);
     const planInterventions = plan.interventions || plan.Interventions?.Intervention || [];
@@ -6486,6 +6528,10 @@ function mapInterventionRow(row) {
     if (Number.isFinite(durationDaysFromMeta)) {
       durationDays = durationDaysFromMeta;
     }
+  }
+  if (!endDate) {
+    durationDays = null;
+    durationWeeks = null;
   }
   if ((!Number.isFinite(durationWeeks) || !Number.isFinite(durationDays)) && startDate && endDate) {
     const start = new Date(startDate);
@@ -10323,7 +10369,14 @@ esdcRouter.post('/participants/batch-prepare', async (req, res, next) => {
  * Validate, generate, and mark batch as submitted. Returns XML + participant list.
  */
 esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
-  const { ignoreWarnings = false } = req.body || {};
+  const {
+    ignoreWarnings = false,
+    filename: downloadFilenameRaw = null,
+    downloadPath: downloadPathRaw = null
+  } = req.body || {};
+  const downloadFilename = (downloadFilenameRaw && String(downloadFilenameRaw).trim()) || `esdc-participants-${Date.now()}.xml`;
+  const downloadPath = downloadPathRaw && String(downloadPathRaw).trim() ? String(downloadPathRaw).trim() : null;
+  const batchId = `ilmp-batch-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   const activeInterventionStatuses = ['active', 'in_progress', 'in-progress', 'inprogress', 'suspended', 'on_hold', 'on-hold'];
   const terminalInterventionStatuses = ['completed', 'complete', 'closed', 'done', 'finished', 'cancelled', 'canceled', 'failed'];
   const startedInterventionStatuses = [...activeInterventionStatuses, ...terminalInterventionStatuses];
@@ -10463,6 +10516,8 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
       ...clientFragments.map(fragment => `  ${fragment}`),
       '</ALMP:contentALMP>'
     ].join('\n');
+    const xmlChecksum = crypto.createHash('sha256').update(batchXml, 'utf8').digest('hex');
+    const xmlSize = Buffer.byteLength(batchXml, 'utf8');
 
     if (participants.length) {
       const ids = participants.map(p => p.id);
@@ -10474,12 +10529,21 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
         `,
         ids
       );
+      const historyDetails = JSON.stringify({
+        batchId,
+        filename: downloadFilename,
+        downloadPath,
+        xmlChecksum,
+        xmlSize,
+        participantCount: participants.length,
+        xml: batchXml
+      });
       await pool.query(
         `
         INSERT INTO esdc_participant_submission_history (participant_submission_id, event_type, actor_user_id, event_details)
-        VALUES ${ids.map(() => '(?, "submitted", ?, JSON_OBJECT("batch", "ilmp-batch"))').join(',')}
+        VALUES ${ids.map(() => '(?, "submitted", ?, ?)').join(',')}
         `,
-        ids.flatMap(id => [id, req.user?.id || null])
+        ids.flatMap(id => [id, req.user?.id || null, historyDetails])
       );
     }
 
@@ -10487,8 +10551,136 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
       ok: true,
       participants,
       warnings,
-      xml: batchXml
+      xml: batchXml,
+      batchId,
+      filename: downloadFilename,
+      downloadPath,
+      xmlChecksum,
+      xmlSize
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/esdc/participants/batches
+ * Returns recent batch downloads (derived from submission history).
+ */
+esdcRouter.get('/participants/batches', async (req, res, next) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT
+        h.id AS history_id,
+        h.participant_submission_id,
+        h.event_details,
+        h.occurred_at,
+        h.actor_user_id,
+        eps.case_id,
+        eps.action_plan_id,
+        eps.submission_status,
+        c.case_number,
+        COALESCE(cl.first_name, '') AS first_name,
+        COALESCE(cl.last_name, '') AS last_name,
+        COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
+      FROM esdc_participant_submission_history h
+      JOIN esdc_participant_submission eps ON eps.id = h.participant_submission_id
+      LEFT JOIN iset_case c ON c.id = eps.case_id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN iset_application ia ON ia.id = eps.application_id
+      LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
+      WHERE h.event_type = 'submitted'
+        AND JSON_EXTRACT(h.event_details, '$.batchId') IS NOT NULL
+      ORDER BY h.occurred_at DESC, h.id DESC
+      LIMIT ?
+      `,
+      [limit * 5]
+    );
+
+    const batchesMap = new Map();
+
+    rows.forEach(row => {
+      const details = safeJsonParse(row.event_details, {}) || {};
+      const batchId = details.batchId || null;
+      if (!batchId) return;
+      let batch = batchesMap.get(batchId);
+      if (!batch) {
+        batch = {
+          batchId,
+          submittedAt: row.occurred_at,
+          filename: details.filename || null,
+          downloadPath: details.downloadPath || null,
+          xmlChecksum: details.xmlChecksum || null,
+          xmlSize: details.xmlSize || null,
+          participants: []
+        };
+        batchesMap.set(batchId, batch);
+      }
+      if (row.occurred_at && (!batch.submittedAt || new Date(row.occurred_at) > new Date(batch.submittedAt))) {
+        batch.submittedAt = row.occurred_at;
+      }
+      if (!batch.filename && details.filename) batch.filename = details.filename;
+      if (!batch.downloadPath && details.downloadPath) batch.downloadPath = details.downloadPath;
+      if (!batch.xmlChecksum && details.xmlChecksum) batch.xmlChecksum = details.xmlChecksum;
+      if (!batch.xmlSize && typeof details.xmlSize !== 'undefined') batch.xmlSize = details.xmlSize;
+      const participantName = [row.first_name, row.last_name].filter(Boolean).join(' ') ||
+        row.tracking_id ||
+        `Submission #${row.participant_submission_id}`;
+      batch.participants.push({
+        submissionId: row.participant_submission_id,
+        caseId: row.case_id,
+        trackingId: row.tracking_id,
+        participantName,
+        submissionStatus: row.submission_status
+      });
+      if (details.xml && !batch.xml) {
+        batch.xml = details.xml;
+      }
+    });
+
+    const items = Array.from(batchesMap.values())
+      .map(entry => ({
+        ...entry,
+        participantCount: entry.participants.length
+      }))
+      .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt))
+      .slice(0, limit);
+
+    res.json({ items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/esdc/participants/batch-reset
+ * Marks a list of participant submissions back to pending.
+ */
+esdcRouter.post('/participants/batch-reset', async (req, res, next) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  const numericIds = ids.map(id => Number(id)).filter(id => Number.isInteger(id) && id > 0);
+  if (!numericIds.length) {
+    return res.status(400).json({ error: 'no_ids', message: 'No participant submission ids provided.' });
+  }
+  try {
+    await pool.query(
+      `
+      UPDATE esdc_participant_submission
+      SET submission_status = 'pending', submitted_at = NULL, rejection_reason = NULL, updated_at = NOW()
+      WHERE id IN (${numericIds.map(() => '?').join(',')})
+      `,
+      numericIds
+    );
+    await pool.query(
+      `
+      INSERT INTO esdc_participant_submission_history (participant_submission_id, event_type, actor_user_id, event_details)
+      VALUES ${numericIds.map(() => '(?, "validated", ?, JSON_OBJECT("reset", true))').join(',')}
+      `,
+      numericIds.flatMap(id => [id, req.user?.id || null])
+    );
+    res.json({ ok: true, count: numericIds.length });
   } catch (err) {
     next(err);
   }

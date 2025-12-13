@@ -39,7 +39,7 @@ const ROUTE_LABELS = {
   '/finance/reports': 'Financial Reports',
   '/finance/settings': 'Finance Settings',
   '/esdc/overview': 'ESDC Submissions Overview',
-  '/esdc/participants': 'Participant Submissions',
+  '/esdc/participants': 'ILMP Submissions & Exports',
   '/esdc/reporting': 'Reporting Packages',
   '/help-support-dashboard': 'Help and Support',
   '/language-settings-dashboard': 'Language Settings',

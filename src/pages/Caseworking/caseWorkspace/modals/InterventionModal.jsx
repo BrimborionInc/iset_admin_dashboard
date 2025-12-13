@@ -118,7 +118,7 @@ const buildInitialForm = (mode, intervention) => {
       status: normaliseStatus(intervention.status || "planned"),
       startDate: intervention.startDate || "",
       endDate: intervention.endDate || "",
-      durationDays: normaliseFormNumbers(intervention.durationDays),
+      durationDays: intervention.endDate ? normaliseFormNumbers(intervention.durationDays) : "",
       outcome: intervention.outcome || "",
       cost: normaliseFormNumbers(intervention.cost),
       fundingStream: intervention.fundingStream || "",
@@ -267,22 +267,44 @@ const InterventionModal = ({
   }, [visible, mode, intervention, startInCloseMode, canClose, plan, inheritedFundingStream]);
 
   useEffect(() => {
-    if (!visible || !inheritedBudgetPot) {
-      setPotOptions([]);
-      return;
-    }
-    apiFetch("/api/finance/budget-pots/lookup")
-      .then(resp => (resp.ok ? resp.json() : []))
-      .then(data => {
-        const opts = (Array.isArray(data) ? data : []).map(item => ({
-          value: item.value || item.id,
-          label: item.code || item.label || item.name || "",
-          description: item.name || item.label || undefined,
-        }));
+    let cancelled = false;
+    const loadPots = async () => {
+      if (!visible) {
+        setPotOptions([]);
+        return;
+      }
+      try {
+        let resp = await apiFetch("/api/reference/budget-pots-lite");
+        if (!resp || !resp.ok) {
+          resp = await apiFetch("/api/finance/budget-pots");
+        }
+        const data = resp && resp.ok ? await resp.json() : [];
+        if (cancelled) return;
+        const opts = (Array.isArray(data) ? data : [])
+          .map(item => {
+            const value = item?.id ?? item?.value ?? item?.code ?? null;
+            if (!value) return null;
+            const code = item?.code || "";
+            const name = item?.name || item?.description || "";
+            const inactiveBadge = item?.isActive === false ? " (inactive)" : "";
+            const label = [code, name].filter(Boolean).join(" - ") + inactiveBadge;
+            return {
+              value: String(value),
+              label: label || String(value),
+              description: name || undefined,
+            };
+          })
+          .filter(Boolean);
         setPotOptions(opts);
-      })
-      .catch(() => setPotOptions([]));
-  }, [visible, inheritedBudgetPot]);
+      } catch (_) {
+        if (!cancelled) setPotOptions([]);
+      }
+    };
+    loadPots();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
 
   useEffect(() => {
     if (isClosing) {
@@ -540,11 +562,7 @@ const applyFieldSideEffects = (draft, field, value) => {
       const start = field === "startDate" ? value : next.startDate;
       const end = field === "endDate" ? value : next.endDate;
       const duration = calculateDurationDays(start, end);
-      if (duration !== null) {
-        next.durationDays = String(duration);
-      } else if (!next.durationDays) {
-        next.durationDays = "";
-      }
+      next.durationDays = duration !== null ? String(duration) : "";
       if (next.costType === "recurring") {
         const occurrences = autoOccurrencesFromDates(start, end, next.recurringPeriod);
         if (occurrences !== null) {

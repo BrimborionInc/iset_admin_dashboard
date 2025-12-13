@@ -272,6 +272,7 @@ const EsdcParticipantValidationWidget = ({
               iconName="refresh"
               loading={validatingAll}
               onClick={handleValidateAll}
+              disabled={items.length === 0 || loading}
             >
               Validate all
             </Button>

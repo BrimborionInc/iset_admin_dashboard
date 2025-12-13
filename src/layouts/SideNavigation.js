@@ -123,7 +123,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       text: 'Government Submissions',
       items: [
         { type: 'link', text: 'Overview', href: '/esdc/overview' },
-        { type: 'link', text: 'Participants', href: '/esdc/participants' },
+        { type: 'link', text: 'ILMP Exports', href: '/esdc/participants' },
         { type: 'link', text: 'Reporting', href: '/esdc/reporting' },
       ],
     },

@@ -3,18 +3,19 @@ import React from 'react';
 const EsdcParticipantValidationHelp = () => (
   <div>
     <p>
-      This widget summarises validation coverage across the participant backlog. It reports how many mandatory fields
-      pass ILMP rules, optional enrichment captured, and the count of blocking issues that still need attention.
+      The validation summary shows current ILMP readiness for everyone in the queue and lets you re-run validation in bulk.
+      Use it to ensure all participants are validated before generating a batch export.
     </p>
     <p>
-      The top issues list shows which rules are failing most frequently, helping administrators prioritise coaching and
-      clean-up work.
+      Counters display how many are ready, need review, or are blocked. “Participants needing attention” links straight
+      to the case workspace for blocked/warning cases. The <strong>Validate all</strong> button refreshes statuses for all queued
+      participants; it’s enabled only when the queue is non-empty.
     </p>
   </div>
 );
 
 EsdcParticipantValidationHelp.aiContext = `
-Widget help: Participant validation summary showing mandatory coverage, blocking issues, and top failing rules.
+Widget help: ILMP validation summary + Validate all; explains counters, attention list, and bulk re-validation.
 `;
 
 export default EsdcParticipantValidationHelp;

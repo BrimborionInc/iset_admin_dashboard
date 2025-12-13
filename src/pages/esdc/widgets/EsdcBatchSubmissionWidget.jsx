@@ -32,6 +32,9 @@ const EsdcBatchSubmissionWidget = ({
   const [blocking, setBlocking] = useState([]);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [filename, setFilename] = useState(() => `esdc-participants-${new Date().toISOString().slice(0,10)}.xml`);
+  const [downloadPath, setDownloadPath] = useState('');
+  const [queueCount, setQueueCount] = useState(0);
+  const [validatedCount, setValidatedCount] = useState(0);
 
   const handleSettingsClick = ({ detail }) => {
     if (detail?.id === 'remove' && typeof actions.removeItem === 'function') {
@@ -57,6 +60,28 @@ const EsdcBatchSubmissionWidget = ({
       window.dispatchEvent(new CustomEvent('esdcParticipants:refresh'));
     } catch (_) {}
   };
+
+  const loadQueueInfo = React.useCallback(async () => {
+    try {
+      const resp = await apiFetch('/api/esdc/participants?limit=500&offset=0');
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) return;
+      const items = Array.isArray(body.items) ? body.items : [];
+      const total = typeof body.total === 'number' ? body.total : items.length;
+      const validated = items.filter(it => it.last_validated_at).length;
+      setQueueCount(total);
+      setValidatedCount(validated);
+    } catch (_) {
+      // ignore errors for gating UI
+    }
+  }, []);
+
+  React.useEffect(() => {
+    loadQueueInfo();
+    const handler = () => loadQueueInfo();
+    window.addEventListener('esdcParticipants:refresh', handler);
+    return () => window.removeEventListener('esdcParticipants:refresh', handler);
+  }, [loadQueueInfo]);
 
   const downloadXml = () => {
     if (!xml) return;
@@ -106,6 +131,7 @@ const EsdcBatchSubmissionWidget = ({
       setParticipants(Array.isArray(body.participants) ? body.participants : []);
       setAlert({ type: 'success', message: `Generated batch for ${body.participants?.length || 0} participants.` });
       triggerRefresh();
+      loadQueueInfo();
     } catch (err) {
       setAlert({ type: 'error', message: err?.message || 'Batch prepare failed.' });
       setXml('');
@@ -122,7 +148,7 @@ const EsdcBatchSubmissionWidget = ({
       const resp = await apiFetch('/api/esdc/participants/batch-submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ignoreWarnings: true })
+        body: JSON.stringify({ ignoreWarnings: true, filename, downloadPath })
       });
       const body = await resp.json().catch(() => ({}));
       if (!resp.ok) {
@@ -133,15 +159,19 @@ const EsdcBatchSubmissionWidget = ({
       }
       setXml(body.xml || '');
       setParticipants(Array.isArray(body.participants) ? body.participants : []);
-      setAlert({ type: 'success', message: `Submitted batch for ${body.participants?.length || 0} participants.` });
+      setAlert({
+        type: 'success',
+        message: `Submitted batch ${body.batchId || ''} for ${body.participants?.length || 0} participants.`
+      });
       triggerRefresh();
+      loadQueueInfo();
       // Trigger download with provided filename
       if (body.xml) {
         const blob = new Blob([body.xml], { type: 'text/xml;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = filename || `esdc-participants-${Date.now()}.xml`;
+        link.download = (body.filename && body.filename.trim()) || filename || `esdc-participants-${Date.now()}.xml`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -191,24 +221,25 @@ const EsdcBatchSubmissionWidget = ({
             description="Generate a single ILMP XML file for all ready participants."
             actions={(
               <SpaceBetween size="xs" direction="horizontal">
-                <Button
-                  variant="primary"
-                  iconName="refresh"
-                  onClick={() => prepareBatch()}
-                  loading={loading}
-                >
-                  Generate batch XML
-                </Button>
-                <Button
-                  variant="normal"
-                  iconName="download"
-                  disabled={!xml}
-                  onClick={() => setShowSubmitModal(true)}
-                >
-                  Download & submit
-                </Button>
-              </SpaceBetween>
-            )}
+              <Button
+                variant="primary"
+                iconName="refresh"
+                onClick={() => prepareBatch()}
+                loading={loading}
+                disabled={queueCount === 0 || validatedCount === 0}
+              >
+                Generate batch XML
+              </Button>
+              <Button
+                variant="normal"
+                iconName="download"
+                disabled={!xml}
+                onClick={() => setShowSubmitModal(true)}
+              >
+                Download
+              </Button>
+            </SpaceBetween>
+          )}
           >
             Batch submission
           </Header>
@@ -316,6 +347,14 @@ const EsdcBatchSubmissionWidget = ({
               type="text"
               value={filename}
               onChange={e => setFilename(e.target.value)}
+              style={{ width: '100%', padding: '8px', borderRadius: 4, border: '1px solid #ccc' }}
+            />
+            <Box variant="strong">Download path (optional)</Box>
+            <input
+              type="text"
+              value={downloadPath}
+              onChange={e => setDownloadPath(e.target.value)}
+              placeholder="e.g. C:\\Users\\you\\Downloads"
               style={{ width: '100%', padding: '8px', borderRadius: 4, border: '1px solid #ccc' }}
             />
           </SpaceBetween>

@@ -10,6 +10,7 @@ import EsdcParticipantsHelp from '../../helpPanelContents/esdcParticipantsHelp.j
 import EsdcParticipantQueueHelp from '../../helpPanelContents/esdcParticipantQueueHelp.js';
 import EsdcParticipantValidationHelp from '../../helpPanelContents/esdcParticipantValidationHelp.js';
 import EsdcParticipantHistoryHelp from '../../helpPanelContents/esdcParticipantHistoryHelp.js';
+import EsdcBatchSubmissionHelp from '../../helpPanelContents/esdcBatchSubmissionHelp.js';
 
 const STORAGE_KEY = 'esdc-participants-layout-v3';
 
@@ -32,9 +33,9 @@ const widgetRegistry = {
     component: EsdcBatchSubmissionWidget,
     title: 'Batch submission',
     description: 'Generate ILMP submission XML for all ready participants.',
-    helpComponent: EsdcParticipantValidationHelp,
+    helpComponent: EsdcBatchSubmissionHelp,
     helpTitle: 'Batch submission',
-    aiContext: EsdcParticipantValidationHelp.aiContext
+    aiContext: EsdcBatchSubmissionHelp.aiContext
   },
   validation: {
     id: 'validation',
@@ -158,7 +159,7 @@ const boardI18nStrings = {
   liveAnnouncementDndCommitted: operation => `${operation} committed`,
   liveAnnouncementDndDiscarded: operation => `${operation} discarded`,
   liveAnnouncementItemRemoved: op => `Removed item ${op.item.data.title}.`,
-  navigationAriaLabel: 'Participant submissions navigation',
+  navigationAriaLabel: 'ILMP Submissions & Exports navigation',
   navigationAriaDescription: 'Use arrow keys to move between widgets.',
   navigationItemAriaLabel: item => (item ? item.data.title : 'Empty')
 };
@@ -179,7 +180,7 @@ const EsdcParticipantSubmissionsPage = ({
       updateBreadcrumbs([
         { text: 'Home', href: '/' },
         { text: 'ESDC Submissions', href: '/esdc/overview' },
-        { text: 'Participants', href: '/esdc/participants' }
+        { text: 'ILMP Submissions & Exports', href: '/esdc/participants' }
       ]);
     }
   }, [updateBreadcrumbs]);

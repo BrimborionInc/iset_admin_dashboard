@@ -43,45 +43,38 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.3.0 (10 Dec 2025)',
-      description: 'Release 0.3.0 adds digital forms for completion and signature by participants.',
+      sectionTitle: 'Release Notes - v0.3.1 (12 Dec 2025)',
+      description: 'Release 0.3.1 introduces the ILMP Exports dashboard to prepare, validate, and download multi-client ILMP XML batches.',
       features: {
         heading: 'Updates',
         sections: [
           {
-            title: 'Release v0.3.0 — Digital Forms Signature',
+            title: 'Release v0.3.1 — ILMP Exports Dashboard',
             paragraphs: [
-              'Case Managers can now send digital documents for signature via Secure Messaging; applicants see and sign them in the public portal.',
-              'Sysadmins can author custom forms in the workflow studio, classify them with a document type, and reuse them as a library.',
-              'Applicants complete forms step by step (including branching when needed); submission deposits a signed PDF into Supporting Documents with the right category.',
-              'Inline improvements: attached forms show in message details; signed documents list with downloads; richer text/headings render correctly in portal and PDFs.'
+              'New “ILMP Exports” dashboard: queue of participants needing submission, bulk validation, batch XML generation, and recent export history.',
+              'Validation tightened to align with ILMP 1.4 rules (e.g., education level at plan start, intervention date/length rules, NOC version/length, SIN and address checks).',
+              'Batch generation produces a single compliant XML with multiple clients; download flow marks included submissions as submitted and logs batch metadata.',
+              'Export history now shows batch details, participants, XML preview with copy, and a “Mark pending” action to re-queue a batch for regeneration.'
             ]
           },
-          {
-            title: 'Path notes',
-            paragraphs: [
-              'Author and classify: new workflow types for forms plus document type selection.',
-              'Send for signature: attach forms when composing secure messages.',
-              'Participant journey: view “Documents to sign”, follow steps with validation, and submit.',
-              'Storage: signed PDFs saved to Supporting Documents with timestamps and document type.'
-            ]
-          }
         ]
       },
       knownBugs: {
         heading: 'Known Bugs',
         sections: [
           {
+            title: 'Public Portal Login and Registrations',
+            paragraphs: [
+              'Email addresses are case sensitive. Entering your email with a different case than you registered will reject your login.'
+            ]
+          },
+          {
             title: 'Public Portal Runtime Error',
             paragraphs: [
               'Inactivity sometimes causes the public portal to throw a runtime error. This may be related to in-progress development changes, but the cause is still unknown.'
             ]
           },
-          { title: 'Record Locking', paragraphs: ['Record locking still sometimes causes progress to be prevented.'] },
           { title: 'Workflow Studio', paragraphs: ['The "flowchart" views do not pan or zoom consistently, making drag interactions unreliable.'] },
-          { title: 'Intake Step Editor', paragraphs: ['Dragging components within the workspace causes flicker and the insertion point is unclear.'] },
-          { title: 'Template Editor (checkbox layout)', paragraphs: ['Checkbox options can overlap their labels in dense blocks; refresh or collapse the section to restore spacing while we patch the layout.'] },
-          { title: 'Default French Strings', paragraphs: ['Certain intake components ship with default French text that interferes with AI-driven translation.'] },
           { title: 'AI Support', paragraphs: ['The support assistant is not yet fully trained on the solution and can drift off topic.'] }
         ]
       },
