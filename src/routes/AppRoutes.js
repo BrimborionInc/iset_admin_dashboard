@@ -82,6 +82,7 @@ import EsdcOverviewHelp from '../helpPanelContents/esdcOverviewHelp.js';
 import EsdcParticipantsHelp from '../helpPanelContents/esdcParticipantsHelp.js';
 import EsdcReportingHelp from '../helpPanelContents/esdcReportingHelp.js';
 import EsdcSubmissionDashboardHelp from '../helpPanelContents/esdcSubmissionDashboardHelp.js';
+import DocumentationLibrary from '../pages/documentation/DocumentationLibrary.jsx';
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -103,11 +104,12 @@ const AppRoutes = ({
     // Add more logic as needed
   };
 
-  const renderContent = (Component, breadcrumbs, headerText, helpKey, actions = null, context = "") => (
+  const renderContent = (Component, breadcrumbs, headerText, helpKey, actions = null, context = "", headerDescription = "") => (
     <ContentLayout
       header={
         <Header
           variant="h1"
+          description={headerDescription || undefined}
           info={<Link variant="info" onClick={() => toggleHelpPanel(helpKey, headerText, context)}>Info</Link>}
           actions={actions} // Attach actions here
         >
@@ -1091,6 +1093,33 @@ const AppRoutes = ({
             'financeSettings'
           )}
         </Guard>
+      </Route>
+
+      <Route path="/documentation">
+        {renderContent(
+          DocumentationLibrary,
+          [{ text: 'Home', href: '/' }, { text: 'Documentation', href: '/documentation' }],
+          'Documentation Library',
+          'documentationLibrary',
+          (
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button
+                iconName="add-plus"
+                onClick={() => window.dispatchEvent(new CustomEvent('documentation:openPalette'))}
+              >
+                Add widget
+              </Button>
+              <Button
+                iconName="refresh"
+                onClick={() => window.dispatchEvent(new CustomEvent('documentation:resetLayout'))}
+              >
+                Reset layout
+              </Button>
+            </SpaceBetween>
+          ),
+          '',
+          "Quick links to the guides you use most often. Each card shows what the doc covers, who it's for, and where to open it."
+        )}
       </Route>
 
       <Route path="/">

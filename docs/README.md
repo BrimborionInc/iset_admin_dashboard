@@ -2,6 +2,8 @@
 
 This library captures the working knowledge for the admin dashboard. The goal is to make it easy for engineers, operators, and analysts to find canonical references for authoring workflows, operational runbooks, and shared platform decisions.
 
+**Mandatory for assistants and developers:** before changing any dashboard or widget, read and follow `docs/guides/configurable-dashboard-notes.md`. Treat it as a blocker; if you haven’t read it this session, stop and do that first. Summarize how you applied it when you finish a dashboard change.
+
 ## Structure
 
 - meta/ — changelog, project map, standing directives, and working notes for the library itself.
@@ -20,6 +22,7 @@ This library captures the working knowledge for the admin dashboard. The goal is
 - prompts/ — curated prompt sheets for Copilot/LLM workflows.
 - runtime/ — normalization, publication, and renderer internals that feed the public portal.
 - Note: Dev DB legacy cleanup completed (2025-01-13). Appointment/queue/location/service taxonomy tables dropped from `iset_intake`; backend legacy endpoints for those tables removed. `organization` and `ptma` retained. Details: `docs/planning/db-legacy-table-cleanup.md`.
+- Guides mandate: the material in `docs/guides/` is the canonical basis for all admin dashboard design and implementation. Read it before making changes, apply its conventions, and update it when patterns or behaviors change.
 
 ## Authoring Guidelines
 

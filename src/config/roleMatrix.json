@@ -38,6 +38,12 @@
       "System Administrator",
       "Program Administrator"
     ],
+    "/documentation": [
+      "System Administrator",
+      "Program Administrator",
+      "Regional Coordinator",
+      "Application Assessor"
+    ],
     "/case-assignment-dashboard?view=assignment": [
       "System Administrator"
     ],

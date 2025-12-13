@@ -2,6 +2,15 @@
 
 This project embeds Cloudscape board components (Board, BoardItem, ItemsPalette) to deliver configurable dashboards. A few lessons learned while implementing the Finance Overview dashboard:
 
+## Non-negotiable checklist (use before coding any dashboard)
+
+- Start from a known-good example (`src/pages/configurationSettings.js`, `src/pages/contact/ContactCommunicationsDashboard.jsx`) instead of hand-rolling Boards/BoardItems.
+- Wire header actions in `AppRoutes` to dispatch `<route>:openPalette` and `<route>:resetLayout`; the page must listen, call `setAvailableItems`, call `setSplitPanelOpen(true)`, and reset the default layout on reset.
+- Use the canonical `boardI18nStrings` and `boardItemI18nStrings` objects (drag/resize announcements) on every Board and BoardItem.
+- Every BoardItem must expose a `ButtonDropdown` in `settings` that calls `actions.removeItem()`; always pass Cloudscape `actions` through unmodified.
+- Guard `setAvailableItems` and storage writes with signatures; do not update on every render.
+- Bump the storage key when changing default layout so new widgets appear by default.
+
 1. **Sync palette state sparingly.** Calling `setAvailableItems` on every render causes the AppLayout and split panel to reopen, which in turn re-renders the board and interrupts drag/resize gestures. Only update the palette when the set of items actually changes—compute a signature or reuse memoised values.
 
 2. **Persist layout carefully.** Store only the minimal placement info (`id`, `rowSpan`, `columnSpan`, `columnOffset`) in localStorage. When rehydrating, filter out unknown widget IDs so stale layouts don’t crash the board after refactors.
@@ -27,7 +36,7 @@ Following these guidelines keeps the board responsive, allows widgets to be adde
 - [ ] Does `setAvailableItems` live behind a signature guard?
 - [ ] Are layout changes persisted only when the exported layout actually changes?
 - [ ] Do palette open/reset events reuse the shared helpers?
-- [ ] Are the `boardI18nStrings` functions identical (or equivalent) to the proven finance implementation?
+- [ ] Are the `boardI18nStrings` and `boardItemI18nStrings` identical (or equivalent) to the proven finance implementation?
 - [ ] Has the new route been registered in access control with System Administrator and Program Administrator enabled by default?
 
 Following the pattern above keeps new dashboards from entering the runaway render loop and ensures widget removal, drag, and resize announcements behave consistently.

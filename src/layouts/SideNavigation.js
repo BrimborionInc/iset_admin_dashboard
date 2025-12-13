@@ -7,7 +7,7 @@ import { apiFetch } from '../auth/apiClient';
 
 const defaultFooterItems = [
   { type: 'divider' },
-  { type: 'link', text: 'Documentation', href: 'https://example.com', external: true },
+  { type: 'link', text: 'Documentation', href: '/documentation', external: false },
 ];
 
 const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotifications, notificationsLoading = false }) => {
