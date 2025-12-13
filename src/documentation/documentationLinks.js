@@ -26,14 +26,6 @@ export const documentationCategories = [
           'Includes band funding/denial letters, educational institution proof, and consent forms.',
           'Covers financial overview, income/expense verification, attendance forms for living allowances.'
         ]
-      },
-      {
-        id: 'sample-wizard',
-        title: 'Sample Wizard Doc',
-        runtimeId: 'sample-wizard-doc',
-        sourcePath: 'src/documentation/runtime/sampleWizardDoc.json',
-        sourceNote: 'Embedded sample for wizard testing.',
-        summary: ['Three simple steps to validate wizard navigation.']
       }
     ],
   },

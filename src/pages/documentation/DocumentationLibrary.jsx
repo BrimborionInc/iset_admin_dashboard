@@ -2,9 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Board from '@cloudscape-design/board-components/board';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
-  Badge,
   Box,
-  ColumnLayout,
   Container,
   Header,
   SideNavigation,
@@ -12,16 +10,12 @@ import {
   ButtonDropdown,
   Wizard,
   ExpandableSection,
-  Button,
   Link,
-  Input,
-  FormField,
-  KeyValuePairs,
 } from '@cloudscape-design/components';
 import documentationCategories from '../../documentation/documentationLinks';
 import runtimeDocuments from '../../documentation/runtime';
 
-const STORAGE_KEY = 'documentation-dashboard-layout-v2';
+const STORAGE_KEY = 'documentation-dashboard-layout-v3';
 
 const widgetRegistry = {
   library: {
@@ -40,20 +34,11 @@ const widgetRegistry = {
     description: 'View summary and key topics.',
     component: null, // injected later
   },
-  sandbox: {
-    id: 'sandbox',
-    defaultRowSpan: 4,
-    defaultColumnSpan: 4,
-    title: 'Sandbox',
-    description: 'Empty space for experimenting with wizard code.',
-    component: null,
-  },
 };
 
 const defaultLayout = [
   { id: 'library', rowSpan: 6, columnSpan: 1 },
   { id: 'reader', rowSpan: 6, columnSpan: 3 },
-  { id: 'sandbox', rowSpan: 4, columnSpan: 4 },
 ];
 
 const exportLayout = items =>
@@ -65,20 +50,21 @@ const exportLayout = items =>
   }));
 
 const toBoardItems = layout =>
-  layout.map(item => {
-    const definition = widgetRegistry[item.id];
-    if (!definition) return item;
-    return {
-      id: definition.id,
-      rowSpan: item.rowSpan ?? definition.defaultRowSpan,
-      columnSpan: item.columnSpan ?? definition.defaultColumnSpan,
-      columnOffset: item.columnOffset,
-      data: {
-        title: definition.title,
-        description: definition.description,
-      },
-    };
-  });
+  layout
+    .filter(item => widgetRegistry[item.id])
+    .map(item => {
+      const definition = widgetRegistry[item.id];
+      return {
+        id: definition.id,
+        rowSpan: item.rowSpan ?? definition.defaultRowSpan,
+        columnSpan: item.columnSpan ?? definition.defaultColumnSpan,
+        columnOffset: item.columnOffset,
+        data: {
+          title: definition.title,
+          description: definition.description,
+        },
+      };
+    });
 
 const computePaletteItems = items =>
   Object.values(widgetRegistry)
@@ -227,51 +213,85 @@ const LibraryWidget = ({ categories, activeDocId, onSelect, actions }) => {
 const ReaderWidget = ({ doc, actions }) => {
   const runtimeDoc = doc?.runtimeId ? runtimeDocuments[doc.runtimeId] : null;
 
-  const wizardSteps = useMemo(() => {
-    if (!runtimeDoc) return [];
-    const stepMode = runtimeDoc.stepMode || 'chunks';
-    if (stepMode === 'slides') {
-      const slides = (runtimeDoc.chunks || []).flatMap(chunk => chunk.slides || []);
-      return slides.map((slide, index) => ({
-        title: slide.title || `Step ${index + 1}`,
-        description: null,
-        stepNumber: index + 1,
-        content: (
-          <SpaceBetween size="m">
-            <ExpandableSection headerText={slide.title || `Step ${index + 1}`} defaultExpanded>
-              <SpaceBetween size="xs">
-                {(slide.content || []).map((line, idx) => (
-                  <Box key={`${slide.id}-${idx}`} as="p">
-                    {line}
-                  </Box>
-                ))}
-              </SpaceBetween>
-            </ExpandableSection>
-          </SpaceBetween>
-        ),
-      }));
+  const renderContentBlock = (block, key) => {
+    if (!block) return null;
+    if (typeof block === 'string') {
+      return (
+        <Box key={key} as="p">
+          {block}
+        </Box>
+      );
     }
 
+    switch (block.type) {
+      case 'p':
+        return (
+          <Box key={key} as="p">
+            {block.text}
+          </Box>
+        );
+      case 'bullets':
+        return (
+          <Box key={key} as="div">
+            <ul style={{ paddingLeft: '1.2rem', margin: '0.25rem 0' }}>
+              {(block.items || []).map((item, idx) => (
+                <li key={`${key}-item-${idx}`} style={{ marginBottom: '0.2rem' }}>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </Box>
+        );
+      case 'contacts':
+        return (
+          <SpaceBetween key={key} size="xs">
+            {(block.items || []).map((item, idx) => (
+              <Box key={`${key}-contact-${idx}`}>
+                <Box fontWeight="bold">{item.name}</Box>
+                {item.email && (
+                  <div>
+                    <Link href={`mailto:${item.email}`}>{item.email}</Link>
+                  </div>
+                )}
+                {item.phone && (
+                  <div>
+                    <Link href={`tel:${item.phone}`}>{item.phone}</Link>
+                  </div>
+                )}
+              </Box>
+            ))}
+          </SpaceBetween>
+        );
+      default:
+        return (
+          <Box key={key} as="p">
+            {block.text || ''}
+          </Box>
+        );
+    }
+  };
+
+  const wizardSteps = useMemo(() => {
+    if (!runtimeDoc) return [];
     return (runtimeDoc.chunks || []).map((chunk, index) => ({
       title: chunk.title,
-      description: `Slides ${chunk.id.replace('chunk-', '').replace('-', '–')}`,
+      description: chunk.description || undefined,
       stepNumber: index + 1,
+      isOptional: chunk.isOptional ?? index > 0,
       content: (
         <SpaceBetween size="m">
-          {chunk.slides
+          {(chunk.slides || [])
             .filter(slide => (slide.title && slide.title.trim()) || (slide.content || []).length > 0)
-            .map(slide => (
+            .map((slide, slideIdx) => (
               <ExpandableSection
                 key={slide.id}
                 headerText={slide.title || 'Details'}
-                defaultExpanded={slide.id === chunk.slides[0].id}
+                defaultExpanded={slideIdx === 0}
               >
                 <SpaceBetween size="xs">
-                  {(slide.content || []).map((line, idx) => (
-                    <Box key={`${slide.id}-${idx}`} as="p">
-                      {line}
-                    </Box>
-                  ))}
+                  {(slide.content || []).map((block, blockIdx) =>
+                    renderContentBlock(block, `${slide.id}-block-${blockIdx}`)
+                  )}
                 </SpaceBetween>
               </ExpandableSection>
             ))}
@@ -352,118 +372,6 @@ const ReaderWidget = ({ doc, actions }) => {
   );
 };
 
-const SandboxWidget = ({ actions }) => {
-  const [activeStepIndex, setActiveStepIndex] = useState(0);
-
-  return (
-    <BoardItem
-      header={<Header variant="h2">Sandbox Wizard</Header>}
-      settings={renderSettings(actions, 'Sandbox settings')}
-      i18nStrings={boardItemI18nStrings}
-    >
-      <Wizard
-        steps={[
-          {
-            title: 'Choose instance type',
-            description: 'Scale resources to workload requirements.',
-            content: (
-              <Container header={<Header variant="h2">Form container header</Header>}>
-                <SpaceBetween direction="vertical" size="l">
-                  <FormField label="First field">
-                    <Input value="Example value" readOnly />
-                  </FormField>
-                  <FormField label="Second field">
-                    <Input value="Another value" readOnly />
-                  </FormField>
-                </SpaceBetween>
-              </Container>
-            ),
-          },
-          {
-            title: 'Add storage',
-            description: 'Optional configuration step.',
-            isOptional: true,
-            content: (
-              <Container header={<Header variant="h2">Form container header</Header>}>
-                <SpaceBetween direction="vertical" size="l">
-                  <FormField label="First field">
-                    <Input value="Storage option A" readOnly />
-                  </FormField>
-                  <FormField label="Second field">
-                    <Input value="Storage option B" readOnly />
-                  </FormField>
-                </SpaceBetween>
-              </Container>
-            ),
-          },
-          {
-            title: 'Configure security group',
-            description: 'Optional configuration step.',
-            isOptional: true,
-            content: (
-              <Container header={<Header variant="h2">Form container header</Header>}>
-                <SpaceBetween direction="vertical" size="l">
-                  <FormField label="First field">
-                    <Input value="Policy 1" readOnly />
-                  </FormField>
-                  <FormField label="Second field">
-                    <Input value="Policy 2" readOnly />
-                  </FormField>
-                </SpaceBetween>
-              </Container>
-            ),
-          },
-          {
-            title: 'Review and launch',
-            content: (
-              <SpaceBetween size="s">
-                <Header
-                  variant="h3"
-                  actions={
-                    <Button onClick={() => setActiveStepIndex(0)}>
-                      Edit
-                    </Button>
-                  }
-                >
-                  Step 1: Instance type
-                </Header>
-                <Container header={<Header variant="h2">Container title</Header>}>
-                  <KeyValuePairs
-                    columns={2}
-                    items={[
-                      { label: 'First field', value: 'Value' },
-                      { label: 'Second Field', value: 'Value' },
-                    ]}
-                  />
-                </Container>
-              </SpaceBetween>
-            ),
-          },
-        ]}
-        activeStepIndex={activeStepIndex}
-        onNavigate={({ detail }) => {
-          if (typeof detail?.requestedStepIndex === 'number') {
-            setActiveStepIndex(detail.requestedStepIndex);
-          }
-        }}
-        i18nStrings={{
-          stepNumberLabel: stepNumber => `Step ${stepNumber}`,
-          collapsedStepsLabel: (stepNumber, stepsCount) => `Step ${stepNumber} of ${stepsCount}`,
-          skipToButtonLabel: (step, stepNumber) => `Skip to ${step.title || `Step ${stepNumber}`}`,
-          navigationAriaLabel: 'Steps',
-          cancelButton: 'Cancel',
-          previousButton: 'Previous',
-          nextButton: 'Next',
-          submitButton: 'Launch instance',
-          optional: 'optional',
-        }}
-        allowSkipTo
-        showCollapsedSteps={false}
-      />
-    </BoardItem>
-  );
-};
-
 const DocumentationLibrary = ({
   updateBreadcrumbs,
   setAvailableItems,
@@ -483,6 +391,7 @@ const DocumentationLibrary = ({
 
   const [activeDocId, setActiveDocId] = useState(allDocs[0]?.id || null);
   const [layout, setLayout] = useState(() => loadLayoutFromStorage() ?? defaultLayout);
+  const sanitizedLayout = useMemo(() => layout.filter(item => widgetRegistry[item.id]), [layout]);
 
   useEffect(() => {
     if (typeof updateBreadcrumbs === 'function') {
@@ -490,7 +399,13 @@ const DocumentationLibrary = ({
     }
   }, [updateBreadcrumbs]);
 
-  const boardItems = useMemo(() => toBoardItems(layout), [layout]);
+  useEffect(() => {
+    if (layout.length !== sanitizedLayout.length) {
+      setLayout(sanitizedLayout);
+    }
+  }, [layout, sanitizedLayout]);
+
+  const boardItems = useMemo(() => toBoardItems(sanitizedLayout), [sanitizedLayout]);
   const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
   const paletteSignatureRef = useRef(JSON.stringify(paletteItems));
 
@@ -600,11 +515,6 @@ const DocumentationLibrary = ({
           doc={activeDoc}
           actions={actions}
         />
-      );
-    }
-    if (item.id === 'sandbox') {
-      return (
-        <SandboxWidget actions={actions} />
       );
     }
     return (

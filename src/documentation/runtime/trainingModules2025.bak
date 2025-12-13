@@ -1,0 +1,377 @@
+{
+  "id": "training-modules-2025",
+  "title": "ISET Orientation Training Modules (2025-2026)",
+  "source": { "deckId": "TRAINING MODULES - September 2025" },
+  "chunks": [
+    {
+      "id": "program-overview-agreement",
+      "title": "Program overview & agreement",
+      "isOptional": false,
+      "tags": ["overview", "agreement", "funding", "eligibility"],
+      "roles": ["Case Manager", "PTMA Lead", "Admin"],
+      "estimatedMinutes": 6,
+      "slides": [
+        {
+          "id": "s1-what-this-orientation-covers",
+          "title": "What this orientation covers",
+          "source": { "slideNumber": 1 },
+          "content": [
+            {
+              "type": "p",
+              "text": "Orientation to the ISET program and NWAC's contribution agreement for case managers, PTMA leads, and administrators - covering mandate, EI/CRF funding streams, eligibility, documentation, case management cadence, and compliance expectations."
+            }
+          ]
+        },
+        {
+          "id": "s3-contribution-agreement-funding",
+          "title": "Contribution agreement & funding",
+          "source": { "slideNumber": 3 },
+          "tags": ["funding", "ei", "crf"],
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "NWAC holds a ten-year contribution agreement with ESDC (2019-2029) valued at about $33M.",
+                "Funding flows through two streams each year: Employment Insurance (EI) for clients who qualify under EI rules, and the Consolidated Revenue Fund (CRF) for costs that are not EI-eligible.",
+                "CRF dollars can be shifted to cover EI-eligible costs, but EI dollars cannot be moved into CRF uses.",
+                "The ISET mandate is to increase Indigenous participation in the labour market through training and education and to close employment and earnings gaps."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s4-who-delivers-iset",
+          "title": "Who delivers ISET",
+          "source": { "slideNumber": 4 },
+          "tags": ["delivery"],
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "NWAC is one of two national ISET holders. Founded in 1974, NWAC serves First Nations, Inuit, and Metis women in all their diversities, on- and off-reserve, status and non-status.",
+                "Across Canada there are more than 115 regional ISET holders. NWAC may sign sub-agreements with PTMAs (13 grassroots organizations; 10 active as of Oct 2024) to deliver the program regionally.",
+                "PTMAs and regional ISET managers handle service delivery, case management, employer and education partnerships, community outreach, and data compliance."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s7-eligibility-identity-proof",
+          "title": "Eligibility & identity proof",
+          "source": { "slideNumber": 7 },
+          "tags": ["eligibility", "identity"],
+          "roles": ["Case Manager"],
+          "requiresAcknowledgement": true,
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Eligibility: Canadian citizen; Indigenous women in all their diversities (status/non-status First Nations, Metis, Inuit; urban, rural, remote); unemployed, under-employed, or at risk; not an active NWAC/PTMA staff member or board member.",
+                "Identity proof: Status/Treaty/Nation card plus a signed Indigenous self-declaration. If no card, provide two reference letters from Indigenous leadership and/or ISC evidence of identity/heritage.",
+                "Self-declaration alone is not enough. Two pieces of ID are required; when available, one must be the Status/Treaty card."
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "intake-consent-verification",
+      "title": "Intake, consent & eligibility verification",
+      "isOptional": true,
+      "tags": ["intake", "consent", "ei", "arms"],
+      "roles": ["Case Manager"],
+      "estimatedMinutes": 6,
+      "slides": [
+        {
+          "id": "s27-application-intake-arms-setup",
+          "title": "Application intake & ARMS setup",
+          "source": { "slideNumber": 27 },
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Intake sources include the web form, walk-ins, job fairs/community events, and referrals.",
+                "Within 5 business days acknowledge receipt, request missing items, and set a deadline. Close the file after three attempts with no response; the client must then re-apply.",
+                "Create and activate the client in ARMS as soon as the application arrives. Upload all documents and record every interaction."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s39-ei-crf-routing-consent",
+          "title": "EI/CRF routing & client consent",
+          "source": { "slideNumber": 39 },
+          "requiresAcknowledgement": true,
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Obtain the signed Client Consent for EI Verification before any check. Submit the EI Verification Request with the consent to the Associate/Senior Director; expect an LMDA response in about 2-3 business days.",
+                "Documents to review and sign: Client Funding Agreement (after approval), Authorization for Release of ISET Client Information, Client Acknowledgement of Funding Source, Consent for Images/Audio, and Conflict of Interest Declaration.",
+                "CRA reminder: A T4A is issued for all ISET funding and clients must report it. Tax exemption decisions are made by CRA, not by case managers."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s43-processing-timelines-compliance",
+          "title": "Processing timelines & file compliance",
+          "source": { "slideNumber": 43 },
+          "requiresAcknowledgement": true,
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Process complete applications within roughly three weeks (depending on volume) after all documents are received. Status remains \"pending\" until NWAC approves and the funding agreement is signed.",
+                "Files must be audit-ready: accurate, current, and consistent data and uploads in ARMS, compliant with ESDC/NWAC privacy and data standards.",
+                "Close out intakes promptly if they are ineligible or incomplete, and record the determination."
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "financial-assessment-supports",
+      "title": "Financial assessment & supports",
+      "isOptional": true,
+      "tags": ["financial", "living-allowance", "tuition"],
+      "roles": ["Case Manager", "PTMA Lead"],
+      "estimatedMinutes": 7,
+      "slides": [
+        {
+          "id": "s54-financial-overview-verification",
+          "title": "Financial overview & verification",
+          "source": { "slideNumber": 54 },
+          "requiresAcknowledgement": true,
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "The client must complete the Financial Overview, disclose all household income and funding sources, and provide proof before any recommendation.",
+                "Income verification may include three recent paystubs (client/partner), child tax statement, proof of alimony/child support, social assistance letters, ROE or tax assessments, and bank statements if needed.",
+                "Band/Treaty letters: a current denial letter on official letterhead (matching the program and term) is required if Band funding is unavailable. A funding letter may make the client ineligible for a living allowance to avoid double-dipping."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s58-expenses-living-allowance",
+          "title": "Expenses & living allowance rules",
+          "source": { "slideNumber": 58 },
+          "requiresAcknowledgement": true,
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Verify expenses when a living allowance is requested (childcare, rent/mortgage, basic utilities, transportation).",
+                "Living allowance: needs-based subsidy during training only; not retroactive; not intended to cover all expenses or debts; not payable while an EI claim is active; monthly attendance reports are required.",
+                "Eligible coverage: rent/mortgage, basic utilities, groceries, transit, and incremental childcare tied to training. Ineligible: debt payments, car payments/insurance, entertainment, subscriptions, and most non-training costs."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s70-program-costs-documentation",
+          "title": "Program costs & documentation",
+          "source": { "slideNumber": 70 },
+          "requiresAcknowledgement": true,
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Eligible costs include tuition and fees at accredited institutions, essential skills/upgrading, diplomas/certificates, degrees, job search or self-employment services, exam/licence fees, required books/materials, and specialized equipment with proof and a quote.",
+                "The Letter of Acceptance and Statement of Fees must be current, on official letterhead or portal, and match the program; provide annual confirmation for multi-year programs.",
+                "Tuition is normally paid directly to the provider. Reimbursements require prior approval and original paid receipts. Specialized equipment over $650 needs NWAC pre-approval; provide receipts within two weeks if funds are advanced."
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "interventions-planning",
+      "title": "Interventions & planning",
+      "isOptional": true,
+      "tags": ["interventions", "planning", "assessment"],
+      "roles": ["Case Manager"],
+      "estimatedMinutes": 7,
+      "slides": [
+        {
+          "id": "s11-intervention-design-research",
+          "title": "Intervention design & research",
+          "source": { "slideNumber": 11 },
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "An intervention is an Individualized Action Plan activity with a defined timeframe to improve employability.",
+                "Case manager research: confirm the career or training choice is realistic; explain physical and mental demands; check labour market demand, wages, and progression (including tech/AI/Red Seal fields); ensure credentials lead to viable employment; aim to close earnings gaps.",
+                "Multiple interventions are allowed when each aligns with the needs assessment and improves employment potential."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s12-employability-dimensions",
+          "title": "Employability dimensions & assessment",
+          "source": { "slideNumber": 12 },
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Career decision: assess the client's ability to choose and research options; use diagnostics if needed.",
+                "Skills enhancement: place clients in training or education to obtain required competencies and credentials (essential skills, academic upgrading, occupational training).",
+                "Work experience: options include student employment, wage subsidy, job creation partnerships, or a self-employment pathway.",
+                "Resume: required. Use it to verify history, identify transferable skills, guide planning, and explore alternatives."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s13-case-manager-assessment",
+          "title": "Case manager assessment & recommendation",
+          "source": { "slideNumber": 13 },
+          "requiresAcknowledgement": true,
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Assess the application against eligibility, documentation, research, and employability dimensions; keep data consistent across documents and ARMS.",
+                "Recommendations must include justification (goals, labour market fit, research, prior interventions). You may recommend alternate interventions or decline funding if not aligned.",
+                "Send all recommendations to NWAC for approval. NWAC will approve, deny, or request changes, and the case manager communicates the decision to the client."
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "funding-streams-options",
+      "title": "Funding streams & program options",
+      "isOptional": true,
+      "tags": ["funding", "streams", "programs"],
+      "roles": ["Case Manager", "PTMA Lead"],
+      "estimatedMinutes": 6,
+      "slides": [
+        {
+          "id": "s14-itp",
+          "title": "Individual Training Purchase (ITP)",
+          "source": { "slideNumber": 14 },
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Covers tuition and fees, related program costs, and living expenses (if eligible) for approved training programs.",
+                "Client must supply current program details and costs; verify the program leads to employment in the chosen field.",
+                "Use program databases and labour market research to support the recommendation."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s18-tws",
+          "title": "Targeted Wage Subsidy (TWS)",
+          "source": { "slideNumber": 18 },
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Encourages employers to hire and train clients with on-the-job experience; supports up to 8 hours per day. Non-profits are eligible for maximum subsidy; private sector is typically about 50% of wages plus MERCs/vacation.",
+                "Employer must provide: outline of duties, a letter of offer after the subsidy ends, and an employment plan with orientation and job description.",
+                "Student employment variant helps full-time students gain work experience."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s20-jcp-seb-group-training",
+          "title": "JCP, SEB, group training",
+          "source": { "slideNumber": 20 },
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Job Creation Partnership (JCP): temporary jobs that benefit the client and the community; public or non-profit only (no private sector); intended to improve long-term employment prospects.",
+                "Self-Employment Benefits (SEB): financial assistance plus business training/support for start-up, business plan development, and marketing/accounting advice; incubator partnerships are eligible.",
+                "Group training/special projects: regional projects that combine certification, life skills, pre-employment, or work experience; require a capable sponsor with management capacity and liability coverage; can run up to 52 weeks."
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "case-management-reporting-compliance",
+      "title": "Case management, reporting & compliance",
+      "isOptional": true,
+      "tags": ["case-management", "reporting", "compliance", "arms"],
+      "roles": ["Case Manager", "PTMA Lead", "Admin"],
+      "estimatedMinutes": 6,
+      "slides": [
+        {
+          "id": "s24-case-management-cadence",
+          "title": "Case management cadence",
+          "source": { "slideNumber": 24 },
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Provide case management for the full intervention: monthly check-ins (or as needed) using trauma-informed, culturally safe engagement.",
+                "Track attendance and milestones; document in ARMS; celebrate progress; adapt plans to address barriers; refer to community supports (mental health, housing, safety).",
+                "Follow up for 12 weeks after the intervention ends and close files with clear outcomes."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s33-planning-outreach-partnerships",
+          "title": "Planning, outreach & partnerships",
+          "source": { "slideNumber": 33 },
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Regional workplan: define priorities and goals, timelines, employer and education partnerships, outreach and events, budgeting/forecasting, and risk mitigation.",
+                "Outreach: respect cultural protocols; engage Elders and knowledge keepers; align messaging to community values; maintain relationships beyond promotion.",
+                "Partnerships: identify aligned employers/providers; explain ISET benefits; co-host pipelines or fairs; keep partners engaged and culturally informed."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s86-reporting-authorization",
+          "title": "Reporting & authorization",
+          "source": { "slideNumber": 86 },
+          "requiresAcknowledgement": true,
+          "content": [
+            {
+              "type": "bullets",
+              "items": [
+                "Reporting: maintain the ISET advance and active client spreadsheet; submit at least every 90 days; track costs, start/end dates, and outcomes. Track Minimum Service Level interactions for non-funded services.",
+                "Authorization to Quit / Section 25: use only in active case management and close to start; it allows EI Part I claims while training. Use the ATQ form and Training Referral per delegation rules.",
+                "ARMS compliance: enter all applications (funded and unfunded); upload documents and notes. NWAC conducts audits and escalates non-compliance."
+              ]
+            }
+          ]
+        },
+        {
+          "id": "s93-contacts",
+          "title": "Contacts",
+          "source": { "slideNumber": 93 },
+          "content": [
+            {
+              "type": "contacts",
+              "items": [
+                { "name": "National ISET Associate Director", "email": "mcoppola@nwac.ca", "phone": "343-961-7909" },
+                { "name": "Senior Director, Economic Development", "email": "sstacey@nwac.ca", "phone": "343-961-3431" },
+                { "name": "Regional ISET Manager (QC)", "email": "emarion@nwac.ca", "phone": "613-404-5095" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
