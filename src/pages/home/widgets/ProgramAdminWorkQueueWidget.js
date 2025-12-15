@@ -204,7 +204,6 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
 ];
 
 const DISABLED_BUCKET_IDS = new Set([
-  'exceptions-escalations',
   'interventions-awaiting-approval',
   'agreement-package-issues',
   'reporting-ilmp-issues',
@@ -244,9 +243,10 @@ const ProgramAdminWorkQueueWidget = ({
     return PROGRAM_ADMIN_BUCKETS.map(bucket => {
       const derivedCount = items.filter(item => item.bucketId === bucket.id).length;
       const override = countsByBucket[bucket.id];
+      const isDisabled = DISABLED_BUCKET_IDS.has(bucket.id);
       return {
         ...bucket,
-        count: Number.isFinite(override) ? override : derivedCount
+        count: isDisabled ? '-' : (Number.isFinite(override) ? override : derivedCount)
       };
     });
   }, [countsByBucket, items]);

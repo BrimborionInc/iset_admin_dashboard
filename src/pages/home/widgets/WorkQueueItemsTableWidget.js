@@ -18,7 +18,7 @@ import {
   TextFilter
 } from '@cloudscape-design/components';
 import { PROGRAM_ADMIN_BUCKETS } from './ProgramAdminWorkQueueWidget';
-import { apiFetch } from '../auth/apiClient';
+import { apiFetch } from '../../../auth/apiClient';
 
 const COLUMN_WIDTHS_STORAGE_KEY = 'work-queue-items-column-widths-v1';
 const ESDC_OPTIONS = [
@@ -224,6 +224,18 @@ const columnDefinitionsByKey = {
     cell: item => item.type || '—',
     sortingField: 'type'
   },
+  notes: {
+    id: 'notes',
+    header: 'Notes',
+    cell: item => {
+      const list = Array.isArray(item.notes_list) ? item.notes_list.filter(Boolean) : null;
+      if (list && list.length) {
+        return list.join(' • ');
+      }
+      return item.notes || '—';
+    },
+    sortingField: 'notes'
+  },
   sin: {
     id: 'sin',
     header: 'SIN',
@@ -327,7 +339,8 @@ const columnKeysByType = {
   Conflict: ['title', 'staff', 'role', 'region', 'details', 'signedAt', 'actions'],
   Eligibility: ['title', 'sin', 'region', 'owner', 'status', 'dueDate', 'actions'],
   AwaitingApproval: ['title', 'owner', 'recommendation', 'intervention', 'cost', 'startDate', 'status', 'dueDate', 'actions'],
-  Exception: ['title', 'region', 'owner', 'status', 'dueDate', 'actions']
+  Exception: ['title', 'notes', 'region', 'owner', 'status', 'dueDate', 'actions'],
+  Escalation: ['title', 'notes', 'region', 'owner', 'status', 'dueDate', 'actions']
 };
 
 const mixedColumnKeys = ['title', 'type', 'owner', 'status', 'dueDate', 'actions'];
@@ -447,7 +460,8 @@ const WorkQueueItemsTableWidget = ({
         item.trackingId,
         item.status,
         item.owner,
-        item.region
+        item.region,
+        item.notes
       ];
       return fields.some(v => v && String(v).toLowerCase().includes(needle));
     });

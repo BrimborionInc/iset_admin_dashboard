@@ -14,7 +14,7 @@ import {
   Alert,
 } from '@cloudscape-design/components';
 import { useHistory } from 'react-router-dom';
-import { apiFetch } from '../auth/apiClient';
+import { apiFetch } from '../../../auth/apiClient';
 
 const BASE_COLUMN_DEFINITIONS = [
   {

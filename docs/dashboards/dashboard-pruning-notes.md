@@ -55,7 +55,7 @@ Running log
 Widgets referenced by retained pages
 ------------------------------------
 - `AccessControlMatrix` (via `src/pages/accessControlDashboard.js`)
-- `ApplicationWorkQueueWidget`, `RecentActivityWidget`, `StatisticsWidget` (via `src/pages/adminDashboardHomePage.js`)
+- `ApplicationWorkQueueWidget`, `RecentActivityWidget`, `StatisticsWidget` (via `src/pages/home/HomeDashboardPage.jsx`)
 - `ApplicationOverviewWidget`, `IsetApplicationFormWidget`, `CoordinatorAssessmentWidget`, `SupportingDocumentsWidget`, `SecureMessagingWidget`, `CaseNotesWidget`, `ApplicationEvents` (via `src/pages/applicationCaseDashboard.js`)
 - (none; uses inline placeholder content) `src/pages/armsReporting.js`
 - `ApplicationsWidget`, `blankTemplate` (via `src/pages/caseAssignmentDashboard.js`)

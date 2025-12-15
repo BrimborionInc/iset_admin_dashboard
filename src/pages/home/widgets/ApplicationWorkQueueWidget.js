@@ -9,7 +9,7 @@ import {
   SpaceBetween,
   StatusIndicator
 } from '@cloudscape-design/components';
-import { apiFetch } from '../auth/apiClient';
+import { apiFetch } from '../../../auth/apiClient';
 
 const getBucketTemplate = role => {
   switch (role) {

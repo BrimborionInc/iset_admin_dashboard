@@ -14,7 +14,7 @@ import {
   Button,
   Box // Import Box component
 } from '@cloudscape-design/components';
-import AdminDashboard from '../pages/adminDashboardHomePage.js';
+import AdminDashboard from '../pages/home/HomeDashboardPage.jsx';
 import AdminDashboardHelp from '../helpPanelContents/adminDashboardHelp.js'; // Default export
 // Remove the old manageAppointments import
 

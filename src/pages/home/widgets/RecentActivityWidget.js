@@ -8,7 +8,7 @@ import {
   SpaceBetween,
   StatusIndicator
 } from '@cloudscape-design/components';
-import { apiFetch } from '../auth/apiClient';
+import { apiFetch } from '../../../auth/apiClient';
 
 const getMockRecentActivity = role => {
   const now = Date.now();

@@ -6036,6 +6036,34 @@ function firstQueryValue(raw) {
   return raw;
 }
 
+const TERMINAL_APPLICATION_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
+function normaliseApplicationStatusValue(status) {
+  if (status === undefined || status === null) return null;
+  return String(status).trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+function isTerminalApplicationStatus(status) {
+  const key = normaliseApplicationStatusValue(status);
+  return key ? TERMINAL_APPLICATION_STATUSES.has(key) : false;
+}
+function normaliseRoleValue(role) {
+  if (!role) return null;
+  return String(role).trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+function canonicalEscalationRole(role) {
+  const key = normaliseRoleValue(role);
+  if (!key) return null;
+  if (key === 'regional_coordinator' || key === 'regionalmanager' || key === 'regional_manager') return 'regional_manager';
+  if (key === 'program_admin' || key === 'programadministrator' || key === 'program_administrator') return 'program_administrator';
+  if (key === 'system_admin' || key === 'systemadministrator' || key === 'sys_admin') return 'system_administrator';
+  if (key === 'application_assessor') return 'coordinator';
+  return key;
+}
+function resolveStaffRole(req) {
+  const headerRole = req.get ? (req.get('X-Dev-Role') || req.get('x-dev-role')) : null;
+  const role = req?.auth?.role || req?.staffProfile?.primary_role || headerRole || null;
+  return role || null;
+}
+
 async function captureCaseEvent({ type, caseId, payload, actorId, actorName, actorType = 'staff', trackingId, correlationId }) {
   try {
     await emitCaseEventSdk({
@@ -13868,6 +13896,591 @@ const markEventRead = eventService.markRead;
 const loadEventCaptureState = eventService.loadCaptureState;
 const updateEventCaptureRules = eventService.updateCaptureRules;
 const getEventCatalog = eventService.getCatalog;
+
+// ---------------- Escalations -----------------
+const ESCALATION_STATES = Object.freeze({
+  pendingReview: 'pending_review',
+  responded: 'responded',
+  escalated: 'escalated',
+  resolved: 'resolved',
+});
+
+function buildEscalationLockError(lockCheck) {
+  const error = lockCheck?.reason === 'identity_missing' ? 'lock_identity_missing' : (lockCheck?.reason === 'missing' || lockCheck?.reason === 'expired' ? 'lock_required' : 'locked');
+  return {
+    status: 423,
+    payload: {
+      error,
+      reason: lockCheck?.reason || 'locked',
+      lock: lockCheck?.lock || null,
+    },
+  };
+}
+
+function normaliseEscalationAction(action) {
+  if (!action) return null;
+  const key = String(action).trim().toLowerCase();
+  if (['respond', 'response', 'responded'].includes(key)) return 'respond';
+  if (['resolve', 'resolved', 'close'].includes(key)) return 'resolve';
+  if (['escalate', 'forward', 'escalated'].includes(key)) return 'escalate';
+  return null;
+}
+
+  function escalationRoleAllowedForCreation(roleKey) {
+  return roleKey === 'coordinator' || roleKey === 'regional_manager' || roleKey === 'system_administrator';
+}
+
+function escalationRoleAllowedForAction(roleKey, ownerRoleKey) {
+  if (!roleKey || !ownerRoleKey) return false;
+  if (roleKey === 'system_administrator') return true;
+  if (roleKey === 'program_administrator' && ownerRoleKey === 'program_administrator') return true;
+  if (roleKey === 'regional_manager' && ownerRoleKey === 'regional_manager') return true;
+  if (roleKey === 'coordinator' && ownerRoleKey === 'coordinator') return true;
+  return false;
+}
+
+app.post('/api/escalations', async (req, res) => {
+  let conn;
+  const toNull = v => (v === undefined || v === null || v === '' ? null : v);
+  try {
+    if (!req.auth || req.auth.subjectType !== 'staff') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const roleRaw = resolveStaffRole(req);
+    const roleKey = canonicalEscalationRole(roleRaw);
+    const isSysAdmin = roleKey === 'system_administrator';
+    if (!escalationRoleAllowedForCreation(roleKey)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const applicationId = Number(req.body?.applicationId || req.body?.application_id);
+    if (!Number.isInteger(applicationId) || applicationId <= 0) {
+      return res.status(400).json({ error: 'invalid_application_id' });
+    }
+    const caseIdRaw = req.body?.caseId || req.body?.case_id || null;
+    const reason = toNull(req.body?.reason);
+    const details = toNull(req.body?.details);
+    const targetRoleKey = canonicalEscalationRole(req.body?.targetRole || req.body?.target_role || (roleKey === 'regional_manager' ? 'program_administrator' : 'regional_manager'));
+    if (!targetRoleKey) {
+      return res.status(400).json({ error: 'target_role_required' });
+    }
+
+    const lockConfig = await readLockConfig();
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [[appRow]] = await conn.query(
+      `SELECT id, status, has_open_escalation, current_escalation_id FROM iset_application WHERE id = ? LIMIT 1 FOR UPDATE`,
+      [applicationId]
+    );
+    if (!appRow) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'application_not_found' });
+    }
+
+    const lockCheck = await enforceApplicationLock(conn, applicationId, req, lockConfig);
+    if (!lockCheck.ok) {
+      await conn.rollback();
+      const { status, payload } = buildEscalationLockError(lockCheck);
+      return res.status(status).json(payload);
+    }
+
+    const appStatusKey = normaliseApplicationStatusValue(appRow.status);
+    if (!isSysAdmin && isTerminalApplicationStatus(appStatusKey)) {
+      await conn.rollback();
+      return res.status(409).json({ error: 'application_terminal', status: appStatusKey || appRow.status || null });
+    }
+
+    let caseId = Number(caseIdRaw) || null;
+    const requesterRegionId = req?.staffProfile?.region_id || null;
+    let targetEmail = null;
+    if (!caseId) {
+      const [[caseRow]] = await conn.query('SELECT id FROM iset_case WHERE application_id = ? LIMIT 1', [applicationId]);
+      caseId = caseRow ? Number(caseRow.id) : null;
+    }
+
+    if (targetRoleKey === 'regional_manager') {
+      const regionParam = requesterRegionId ? [requesterRegionId] : [];
+      const regionClause = requesterRegionId ? 'AND region_id = ?' : '';
+      const [targets] = await conn.query(
+        `SELECT email FROM staff_profiles WHERE primary_role = 'Regional Coordinator' ${regionClause} AND status = 'active' ORDER BY id ASC LIMIT 1`,
+        regionParam
+      );
+      targetEmail = targets && targets[0] ? targets[0].email || null : null;
+    } else if (targetRoleKey === 'program_administrator') {
+      const [targets] = await conn.query(
+        `SELECT email FROM staff_profiles WHERE primary_role = 'Program Administrator' AND status = 'active' ORDER BY id ASC LIMIT 1`
+      );
+      targetEmail = targets && targets[0] ? targets[0].email || null : null;
+    }
+
+    const [openRows] = await conn.query(
+      `SELECT id, state FROM iset_application_escalation WHERE application_id = ? AND state <> ? LIMIT 1 FOR UPDATE`,
+      [applicationId, ESCALATION_STATES.resolved]
+    );
+    if (openRows && openRows.length) {
+      const existing = openRows[0];
+      if (existing.state !== ESCALATION_STATES.responded) {
+        await conn.rollback();
+        return res.status(409).json({ error: 'escalation_exists', escalation_id: existing.id, state: existing.state });
+      }
+      await conn.query(
+        `UPDATE iset_application_escalation
+           SET state = ?, current_owner_role = ?, target_role = ?, reason = ?, details = ?, last_action_note = ?, updated_at = NOW(),
+               resolved_at = NULL, resolved_by_user_id = NULL, resolved_by_role = NULL
+         WHERE id = ?`,
+        [
+          ESCALATION_STATES.pendingReview,
+          targetRoleKey,
+          targetRoleKey,
+          reason,
+          details,
+          toNull(details || reason),
+          existing.id
+        ]
+      );
+      await conn.query(
+        'UPDATE iset_application SET has_open_escalation = 1, current_escalation_id = ? WHERE id = ?',
+        [existing.id, applicationId]
+      );
+      await conn.commit();
+
+      const actor = resolveRequestActor(req);
+      captureCaseEvent({
+        type: 'escalation_escalated',
+        caseId,
+        payload: {
+          escalationId: existing.id,
+          applicationId,
+          state: ESCALATION_STATES.pendingReview,
+          requesterRole: roleKey,
+          targetRole: targetRoleKey,
+          reason,
+          details,
+          targetEmail
+        },
+        actorId: actor.actorId || null,
+        actorName: actor.actorName || null,
+        trackingId: null,
+        correlationId: null,
+      });
+
+      return res.status(200).json({
+        id: existing.id,
+        application_id: applicationId,
+        case_id: caseId,
+        state: ESCALATION_STATES.pendingReview,
+        current_owner_role: targetRoleKey,
+        requester_role: roleKey,
+        target_role: targetRoleKey,
+        reason,
+        details,
+        target_email: targetEmail,
+      });
+    }
+
+    const requesterUserId = await resolveOrCreateUserIdFromAuth(req);
+    if (!requesterUserId) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'requester_unresolved' });
+    }
+
+    const [insert] = await conn.query(
+      `INSERT INTO iset_application_escalation
+        (application_id, case_id, state, current_owner_role, current_owner_user_id, requester_user_id, requester_role, target_role, reason, details, disposition, last_action_note, created_at, updated_at, resolved_at, resolved_by_user_id, resolved_by_role)
+       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL, NOW(), NOW(), NULL, NULL, NULL)`,
+      [
+        applicationId,
+        caseId,
+        ESCALATION_STATES.pendingReview,
+        targetRoleKey,
+        requesterUserId,
+        roleKey,
+        targetRoleKey,
+        reason,
+        details
+      ]
+    );
+
+    await conn.query(
+      'UPDATE iset_application SET has_open_escalation = 1, current_escalation_id = ? WHERE id = ?',
+      [insert.insertId, applicationId]
+    );
+
+    await conn.commit();
+
+    const actor = resolveRequestActor(req);
+    captureCaseEvent({
+      type: 'escalation_created',
+      caseId: caseId || null,
+      payload: {
+        escalationId: insert.insertId,
+        applicationId,
+        state: ESCALATION_STATES.pendingReview,
+        requesterRole: roleKey,
+        targetRole: targetRoleKey,
+        reason,
+        details,
+        targetEmail,
+      },
+      actorId: actor.actorId || null,
+      actorName: actor.actorName || null,
+      trackingId: null,
+      correlationId: null,
+    });
+
+    return res.status(201).json({
+      id: insert.insertId,
+      application_id: applicationId,
+      case_id: caseId,
+      state: ESCALATION_STATES.pendingReview,
+      current_owner_role: targetRoleKey,
+      requester_role: roleKey,
+      target_role: targetRoleKey,
+      reason,
+      details,
+      target_email: targetEmail,
+    });
+  } catch (err) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) {}
+    }
+    console.error('[escalations] create failed:', err?.message || err);
+    return res.status(500).json({ error: 'escalation_create_failed', message: err?.message || 'Unable to create escalation' });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.post('/api/escalations/:id/respond', async (req, res) => {
+  let conn;
+  const toNull = v => (v === undefined || v === null || v === '' ? null : v);
+  try {
+    if (!req.auth || req.auth.subjectType !== 'staff') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const roleRaw = resolveStaffRole(req);
+    const roleKey = canonicalEscalationRole(roleRaw);
+    const isSysAdmin = roleKey === 'system_administrator';
+    const escalationId = Number(req.params.id);
+    if (!Number.isInteger(escalationId) || escalationId <= 0) {
+      return res.status(400).json({ error: 'invalid_escalation_id' });
+    }
+    const action = normaliseEscalationAction(req.body?.action || req.body?.type || null) || 'respond';
+    const note = toNull(req.body?.note || req.body?.notes || req.body?.message);
+    const disposition = toNull(req.body?.disposition) || action;
+    const escalateToRoleKey = canonicalEscalationRole(req.body?.targetRole || req.body?.target_role || req.body?.escalateToRole || null);
+
+    const lockConfig = await readLockConfig();
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [[escRow]] = await conn.query(
+      `SELECT e.*, a.status AS application_status, a.has_open_escalation, a.current_escalation_id, c.id AS case_id
+         FROM iset_application_escalation e
+         JOIN iset_application a ON a.id = e.application_id
+         LEFT JOIN iset_case c ON c.application_id = a.id
+        WHERE e.id = ?
+        LIMIT 1 FOR UPDATE`,
+      [escalationId]
+    );
+    if (!escRow) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'escalation_not_found' });
+    }
+    if (escRow.state === ESCALATION_STATES.resolved) {
+      await conn.rollback();
+      return res.status(409).json({ error: 'escalation_closed' });
+    }
+
+    const lockCheck = await enforceApplicationLock(conn, escRow.application_id, req, lockConfig);
+    if (!lockCheck.ok) {
+      await conn.rollback();
+      const { status, payload } = buildEscalationLockError(lockCheck);
+      return res.status(status).json(payload);
+    }
+
+    const ownerRoleKey = canonicalEscalationRole(escRow.current_owner_role);
+    if (!escalationRoleAllowedForAction(roleKey, ownerRoleKey)) {
+      await conn.rollback();
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const appStatusKey = normaliseApplicationStatusValue(escRow.application_status);
+    if (!isSysAdmin && isTerminalApplicationStatus(appStatusKey) && action !== 'resolve') {
+      await conn.rollback();
+      return res.status(409).json({ error: 'application_terminal', status: appStatusKey || escRow.application_status || null });
+    }
+
+    let nextState = escRow.state;
+    let nextOwnerRoleKey = ownerRoleKey;
+    let resolvedAt = null;
+    let resolvedByUserId = null;
+    let resolvedByRole = null;
+    let targetRoleKey = canonicalEscalationRole(escRow.target_role);
+
+    if (action === 'escalate') {
+      nextState = ESCALATION_STATES.escalated;
+      nextOwnerRoleKey = escalateToRoleKey || 'program_administrator';
+      targetRoleKey = nextOwnerRoleKey;
+    } else if (action === 'resolve') {
+      nextState = ESCALATION_STATES.resolved;
+      resolvedAt = new Date();
+      resolvedByUserId = await resolveOrCreateUserIdFromAuth(req);
+      resolvedByRole = roleKey;
+      nextOwnerRoleKey = ownerRoleKey;
+    } else {
+      nextState = ESCALATION_STATES.responded;
+      nextOwnerRoleKey = canonicalEscalationRole(escRow.requester_role) || escRow.requester_role;
+    }
+
+    await conn.query(
+      `UPDATE iset_application_escalation
+         SET state = ?, current_owner_role = ?, target_role = ?, disposition = ?, last_action_note = ?, updated_at = NOW(),
+             resolved_at = ?, resolved_by_user_id = ?, resolved_by_role = ?
+       WHERE id = ?`,
+      [
+        nextState,
+        nextOwnerRoleKey,
+        targetRoleKey,
+        disposition,
+        note,
+        resolvedAt,
+        resolvedByUserId,
+        resolvedByRole,
+        escalationId
+      ]
+    );
+
+    if (nextState === ESCALATION_STATES.resolved) {
+      await conn.query(
+        'UPDATE iset_application SET has_open_escalation = 0, current_escalation_id = NULL WHERE id = ?',
+        [escRow.application_id]
+      );
+    } else {
+      await conn.query(
+        'UPDATE iset_application SET has_open_escalation = 1, current_escalation_id = ? WHERE id = ?',
+        [escalationId, escRow.application_id]
+      );
+    }
+
+    await conn.commit();
+
+    const actor = resolveRequestActor(req);
+    const eventType = (() => {
+      if (nextState === ESCALATION_STATES.resolved) return 'escalation_resolved';
+      if (nextState === ESCALATION_STATES.escalated) return 'escalation_escalated';
+      return 'escalation_responded';
+    })();
+    let targetEmail = null;
+    if (nextOwnerRoleKey === 'program_administrator') {
+      const [targets] = await conn.query(
+        `SELECT email FROM staff_profiles WHERE primary_role = 'Program Administrator' AND status = 'active' ORDER BY id ASC LIMIT 1`
+      );
+      targetEmail = targets && targets[0] ? targets[0].email || null : null;
+    } else if (nextOwnerRoleKey === 'regional_manager') {
+      const requesterRegionId = req?.staffProfile?.region_id || null;
+      const regionParam = requesterRegionId ? [requesterRegionId] : [];
+      const regionClause = requesterRegionId ? 'AND region_id = ?' : '';
+      const [targets] = await conn.query(
+        `SELECT email FROM staff_profiles WHERE primary_role = 'Regional Coordinator' ${regionClause} AND status = 'active' ORDER BY id ASC LIMIT 1`,
+        regionParam
+      );
+      targetEmail = targets && targets[0] ? targets[0].email || null : null;
+    }
+    captureCaseEvent({
+      type: eventType,
+      caseId: escRow.case_id || null,
+      payload: {
+        escalationId,
+        applicationId: escRow.application_id,
+        previousState: escRow.state,
+        state: nextState,
+        ownerRole: nextOwnerRoleKey,
+        disposition: disposition || null,
+        note,
+        targetEmail,
+      },
+      actorId: actor.actorId || null,
+      actorName: actor.actorName || null,
+      trackingId: null,
+      correlationId: null,
+    });
+
+    return res.json({
+      id: escalationId,
+      application_id: escRow.application_id,
+      case_id: escRow.case_id,
+      state: nextState,
+      current_owner_role: nextOwnerRoleKey,
+      disposition,
+      resolved_at: resolvedAt,
+      resolved_by_user_id: resolvedByUserId,
+      resolved_by_role: resolvedByRole,
+      target_email: targetEmail,
+    });
+  } catch (err) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) {}
+    }
+    console.error('[escalations] respond failed:', err?.message || err);
+    return res.status(500).json({ error: 'escalation_update_failed', message: err?.message || 'Unable to update escalation' });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.get('/api/escalations', async (req, res) => {
+  let conn;
+  try {
+    if (!req.auth || req.auth.subjectType !== 'staff') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const roleKey = canonicalEscalationRole(resolveStaffRole(req));
+    const isSysAdmin = roleKey === 'system_administrator';
+    if (!roleKey && !isSysAdmin) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const ownerRoleFilter = canonicalEscalationRole(firstQueryValue(req.query.ownerRole || req.query.owner_role)) || null;
+    const requesterRoleFilter = canonicalEscalationRole(firstQueryValue(req.query.requesterRole || req.query.requester_role)) || null;
+    const stateFilterRaw = firstQueryValue(req.query.state);
+    const stateFilter = stateFilterRaw ? normaliseApplicationStatusValue(stateFilterRaw) : null;
+    const applicationIdFilter = Number(firstQueryValue(req.query.applicationId || req.query.application_id));
+    const includeResolved = firstQueryValue(req.query.includeResolved) === 'true';
+
+    const where = [];
+    const params = [];
+    if (Number.isInteger(applicationIdFilter) && applicationIdFilter > 0) {
+      where.push('e.application_id = ?');
+      params.push(applicationIdFilter);
+    }
+    if (stateFilter) {
+      where.push('e.state = ?');
+      params.push(stateFilter);
+    } else if (!includeResolved) {
+      where.push('e.state <> ?');
+      params.push(ESCALATION_STATES.resolved);
+    }
+    if (ownerRoleFilter) {
+      where.push('LOWER(REPLACE(e.current_owner_role, " ", "_")) = ?');
+      params.push(ownerRoleFilter);
+    } else if (!isSysAdmin && roleKey) {
+      where.push('(LOWER(REPLACE(e.current_owner_role, " ", "_")) = ? OR LOWER(REPLACE(e.requester_role, " ", "_")) = ?)');
+      params.push(roleKey, roleKey);
+    } else if (requesterRoleFilter) {
+      where.push('LOWER(REPLACE(e.requester_role, " ", "_")) = ?');
+      params.push(requesterRoleFilter);
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    conn = await pool.getConnection();
+    const selectWithHelpers = `SELECT
+         e.id,
+         e.application_id,
+         e.case_id,
+         e.state,
+         e.current_owner_role,
+         e.current_owner_user_id,
+         e.requester_user_id,
+         e.requester_role,
+         e.target_role,
+         e.reason,
+         e.details,
+         e.disposition,
+         e.last_action_note,
+         e.created_at,
+         e.updated_at,
+         e.resolved_at,
+         e.resolved_by_user_id,
+         e.resolved_by_role,
+         a.status AS application_status,
+         a.has_open_escalation,
+         a.current_escalation_id,
+         COALESCE(c.case_number, CONCAT('APP-', e.application_id)) AS tracking_id,
+         c.status AS case_status,
+         c.assigned_to_user_id,
+         JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
+         JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
+         JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name
+       FROM iset_application_escalation e
+       JOIN iset_application a ON a.id = e.application_id
+       LEFT JOIN iset_case c ON c.application_id = e.application_id
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+       ${whereSql}
+       ORDER BY e.updated_at DESC
+       LIMIT 500`;
+    const selectFallback = `SELECT
+         e.id,
+         e.application_id,
+         e.case_id,
+         e.state,
+         e.current_owner_role,
+         e.current_owner_user_id,
+         e.requester_user_id,
+         e.requester_role,
+         e.target_role,
+         e.reason,
+         e.details,
+         e.disposition,
+         e.last_action_note,
+         e.created_at,
+         e.updated_at,
+         e.resolved_at,
+         e.resolved_by_user_id,
+         e.resolved_by_role,
+         a.status AS application_status,
+         COALESCE(c.case_number, CONCAT('APP-', e.application_id)) AS tracking_id,
+         c.status AS case_status,
+         c.assigned_to_user_id
+       FROM iset_application_escalation e
+       JOIN iset_application a ON a.id = e.application_id
+       LEFT JOIN iset_case c ON c.application_id = e.application_id
+       ${whereSql}
+       ORDER BY e.updated_at DESC
+       LIMIT 500`;
+    let rows;
+    try {
+      [rows] = await conn.query(selectWithHelpers, params);
+    } catch (err) {
+      if (err && err.code === 'ER_BAD_FIELD_ERROR') {
+        console.warn('[escalations] helper columns missing, using fallback select');
+        [rows] = await conn.query(selectFallback, params);
+      } else {
+        throw err;
+      }
+    }
+
+    const mapped = Array.isArray(rows) ? rows.map((row) => {
+      const preferred = normaliseString(row.submission_preferred_name) || null;
+      const first = normaliseString(row.submission_first_name) || null;
+      const last = normaliseString(row.submission_last_name) || null;
+      const full = [first, last].filter(Boolean).join(' ').trim();
+      const applicantName = preferred || full || normaliseString(row.tracking_id) || 'Applicant';
+      const noteParts = [row.notes, row.reason, row.details, row.last_action_note]
+        .flatMap(part => {
+          if (Array.isArray(part)) return part;
+          if (part === undefined || part === null) return [];
+          const value = normaliseString(part);
+          return value ? [value] : [];
+        });
+      return {
+        ...row,
+        applicant_name: applicantName,
+        notes: noteParts.join(' • ') || null,
+        notes_list: noteParts
+      };
+    }) : [];
+
+    return res.json({ count: mapped.length, items: mapped });
+  } catch (err) {
+    console.error('[escalations] list failed:', err?.message || err);
+    return res.status(500).json({ error: 'escalation_list_failed', message: err?.message || 'Unable to list escalations' });
+  } finally {
+    if (conn) conn.release();
+  }
+});
 
 // Reminder due/overdue poller: interval scheduled after config load
 const runReminderPoll = () => {

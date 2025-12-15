@@ -74,6 +74,6 @@ _After completing each increment, update this CR with progress details, learning
 - **Schema**: `sql/20251014_create_iset_case_watch.sql` (initial table) and `sql/20251014_align_case_watch_staff_profile.sql` (rename `user_id` to `staff_profile_id`, add FK/index).
 - **Server**: `isetadminserver.js` watch endpoints (`GET /api/me/case-watches`, `POST/DELETE /api/cases/:id/watch`) with metadata normalisation and schema-aligned payloads.
 - **Shared Services**: `shared/events/notificationDispatcher.js` augments bell alerts with watcher audiences and per-user dedupe.
-- **Front-end**: `src/widgets/ApplicationsWidget.js` loads the watchlist, renders the flag column and inline toggle, adds the "My watched cases" filter; `src/widgets/MyWatchlistWidget.js` powers the homepage watchlist panel and is wired into `adminDashboardHomePage.js`.
+- **Front-end**: `src/widgets/ApplicationsWidget.js` loads the watchlist, renders the flag column and inline toggle, adds the "My watched cases" filter; `src/widgets/MyWatchlistWidget.js` powers the homepage watchlist panel and is wired into `src/pages/home/HomeDashboardPage.jsx`.
 - **Testing**: Manual verification covering migration application, API responses, UI toggle behaviour, and watcher bell notifications (documented here; automated coverage deferred).
 

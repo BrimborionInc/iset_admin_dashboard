@@ -59,6 +59,26 @@ function toI18nObject(raw, fallback) {
   return { en: str, fr: str };
 }
 
+function hasExplicitLang(raw, langKey) {
+  if (!raw || typeof langKey !== 'string') return false;
+  const source = raw && typeof raw === 'object' && raw.text ? raw.text : raw;
+  if (!source || typeof source !== 'object') return false;
+  const val = source[langKey];
+  return typeof val === 'string' && val.trim().length > 0;
+}
+
+function pickBestI18n(values = []) {
+  let fallback;
+  for (const v of values) {
+    if (v === undefined || v === null || v === '') continue;
+    const obj = toI18nObject(v, undefined);
+    if (!obj) continue;
+    if (!fallback) fallback = obj;
+    if (hasExplicitLang(v, 'fr')) return obj; // prefer entries that explicitly provide French text
+  }
+  return fallback;
+}
+
 function deepMerge(a, b) {
   if (Array.isArray(a) || Array.isArray(b)) return b ?? a;
   if (a && typeof a === 'object' && b && typeof b === 'object') {
@@ -271,8 +291,15 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         throw err;
       }
 
-      const labelText = props?.fieldset?.legend?.text ?? props?.label?.text ?? props?.titleText ?? '';
-      const hintText = props?.hint?.text ?? props?.text ?? '';
+      const labelI18n = pickBestI18n([
+        props?.label?.text ?? props?.label,
+        props?.fieldset?.legend?.text ?? props?.fieldset?.legend,
+        props?.titleText
+      ]);
+      const hintI18n = pickBestI18n([
+        props?.hint?.text ?? props?.hint,
+        props?.text
+      ]);
       const asLang = (v, lang) => {
         if (v && typeof v === 'object') {
           const val = v[lang] ?? v.en ?? v.fr;
@@ -280,10 +307,12 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         }
         return v == null ? '' : String(v);
       };
-      const labelEn = asLang(labelText, 'en');
-      const labelFr = asLang(labelText, 'fr') || labelEn;
-      const hintEn = asLang(hintText, 'en');
-      const hintFr = asLang(hintText, 'fr') || hintEn;
+      const labelFallbackRaw = props?.fieldset?.legend?.text ?? props?.label?.text ?? props?.titleText ?? '';
+      const hintFallbackRaw = props?.hint?.text ?? props?.text ?? '';
+      const labelEn = (labelI18n && labelI18n.en) || asLang(labelFallbackRaw, 'en');
+      const labelFr = (labelI18n && labelI18n.fr) || labelEn;
+      const hintEn = (hintI18n && hintI18n.en) || asLang(hintFallbackRaw, 'en');
+      const hintFr = (hintI18n && hintI18n.fr) || hintEn;
 
       let options = null;
       if (['radio','radios','checkbox','checkboxes','select'].includes(tplType)) {

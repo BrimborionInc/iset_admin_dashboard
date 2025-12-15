@@ -73,6 +73,25 @@ const truncate = (text, limit = 160) => {
   return `${value.slice(0, limit).trim()}…`;
 };
 
+const EVENT_TIMEZONE = 'America/Toronto';
+const formatDateTime = (value) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!date || Number.isNaN(date.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: EVENT_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit'
+    }).format(date);
+  } catch (_) {
+    return date.toLocaleString();
+  }
+};
+
 const formatReminderDetails = (payload = {}, fallbackTitle) => {
   const title = trimValue(payload.title) || fallbackTitle || 'Reminder';
   const due = payload.due_at ? new Date(payload.due_at).toLocaleDateString() : null;
@@ -203,6 +222,18 @@ const formatEventMessage = (event, actorDisplay) => {
       const base = 'Application submitted';
       return ensureSentence(submitter ? `${base} by ${submitter}` : base);
     }
+    case 'escalation_created':
+    case 'escalation_escalated':
+    case 'escalation_responded':
+    case 'escalation_resolved': {
+      const target = trimValue(payload.targetEmail || payload.target_email || payload.ownerEmail || payload.ownerRole);
+      const stateLabel = trimValue(payload.state || event.event_type.replace('escalation_', '').replace(/_/g, ' ')) || 'escalation';
+      const note = truncate(payload.reason || payload.details || payload.note || payload.last_action_note);
+      const parts = [`Application escalated (${stateLabel})`];
+      if (target) parts.push(`to ${target}`);
+      if (note) parts.push(`Note: ${note}`);
+      return ensureSentence(parts.join(' • '));
+    }
     default:
       if (payload.message) return ensureSentence(payload.message);
       if (payload.summary) return ensureSentence(payload.summary);
@@ -313,7 +344,7 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
     const text = filteringText.toLowerCase();
     const eventDate = parseEventDate(item.created_at);
     const parts = [
-      eventDate ? eventDate.toLocaleString().toLowerCase() : '',
+      eventDate ? formatDateTime(eventDate).toLowerCase() : '',
       item.event_type_label ? item.event_type_label.toLowerCase() : '',
       item.event_type ? item.event_type.toLowerCase() : '',
       item.displayMessage ? item.displayMessage.toLowerCase() : '',
@@ -329,7 +360,7 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
       sortingField: 'created_at',
       cell: item => {
         const d = parseEventDate(item.created_at);
-        return d ? d.toLocaleString() : '';
+        return d ? formatDateTime(d) : '';
       }
     },
     {
@@ -420,7 +451,7 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
     try {
       const header = ['Date/Time', 'Event Type', 'Event Data', 'Actor'];
       const rows = sortedEvents.map(item => {
-        const dateStr = item.created_at ? new Date(item.created_at).toISOString() : '';
+        const dateStr = item.created_at ? formatDateTime(item.created_at) : '';
         const typeStr = item.event_type_label || item.event_type || '';
         const dataStr = (item.displayMessage || '').replace(/\r?\n/g, ' ').trim();
         const actorStr = item.actorDisplay || '';

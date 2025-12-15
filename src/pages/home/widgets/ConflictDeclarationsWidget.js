@@ -13,9 +13,9 @@ import {
   StatusIndicator,
   Table
 } from '@cloudscape-design/components';
-import { apiFetch } from '../auth/apiClient';
-import { getRoleDisplayName } from '../utils/roleDisplay';
-import useCurrentUser from '../hooks/useCurrentUser';
+import { apiFetch } from '../../../auth/apiClient';
+import { getRoleDisplayName } from '../../../utils/roleDisplay';
+import useCurrentUser from '../../../hooks/useCurrentUser';
 
 const buildColumns = (onReassign, onResolve) => [
   {

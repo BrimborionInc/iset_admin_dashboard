@@ -18,7 +18,7 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 ## Key Source Areas (`src/`)
 (Continuously expanded; every newly learned architectural fact must be reflected here immediately – standing directive.)
 - `layouts/`: Navigation & global layout components (e.g., `DemoNavigation.js`, `TopNavigation.js`). Manages IAM bypass, role simulation, and session events.
-- `pages/`: Page-level screens & dashboards (all dashboards, editors, management consoles live here). Examples: `adminDashboardHomePage.js` (landing dashboard), `templateEditorDashboard.js` (standalone notification template authoring), `modifyIntakeStep.js` (intake step/component authoring working area), workflow management pages, code tables, messaging, notifications.
+- `pages/`: Page-level screens & dashboards (all dashboards, editors, management consoles live here). Examples: `home/HomeDashboardPage.jsx` (landing dashboard), `templateEditorDashboard.js` (standalone notification template authoring), `modifyIntakeStep.js` (intake step/component authoring working area), workflow management pages, code tables, messaging, notifications.
 - `widgets/`: Reusable complex UI building blocks embedded within pages (e.g., `WorkflowPreviewWidget.js` – interactive workflow step preview mirroring portal runtime logic for file upload visibility & messaging). Pages compose multiple widgets; widgets should not own routing.
 - `auth/`: Cognito helpers: `isIamOn`, `hasValidSession`, token parsing and role derivation.
 - (Future) `components/`: Smaller presentational or configuration components (to catalog as added).
@@ -32,9 +32,9 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 - IAM toggle disables role selection to avoid contradictory contexts; resetting simulated session state when enabled.
 
 ## Landing Dashboard
-- File: `src/pages/adminDashboardHomePage.js`.
+- File: `src/pages/home/HomeDashboardPage.jsx`.
 - Features: role-aware welcome copy, quick actions, alerts (mock), My Work metrics (mock), recent activity (mock), resources, Development Tracker (System Administrator only).
-- Development Tracker: Card-based tasks with status controls using Cloudscape `SegmentedControl`, modal task detail (added), persistence in `sessionStorage.devTasks` with enrichment merge when new tasks shipped.
+- Development Tracker widget: `src/pages/home/widgets/DevTaskTrackerWidget.jsx` (Cloudscape `SegmentedControl`, modal task detail, status persistence in `sessionStorage.devTasks` with enrichment merge when new tasks shipped).
 - Dev task metadata central source: `src/devTasksData.js`.
 
 ## Workflow Authoring & Preview

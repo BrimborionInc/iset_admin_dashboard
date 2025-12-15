@@ -24,7 +24,7 @@
 - Helper constants manage status/stage normalization and guard against missing schema.
 
 ### Frontend Wiring
-- `src/pages/adminDashboardHomePage.js` fetches the endpoint with `apiFetch` inside a `useEffect`.
+- `src/pages/home/HomeDashboardPage.jsx` fetches the endpoint with `apiFetch` inside a `useEffect`.
 - When IAM is toggled off, dev-bypass headers (`X-Dev-Role`, `X-Dev-Bypass`, etc.) are attached so the call works without Cognito.
 - API results merge into the persona-specific mock array; tiles render counts in the returned order.
 

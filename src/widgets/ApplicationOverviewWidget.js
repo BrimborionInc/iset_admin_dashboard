@@ -16,7 +16,8 @@ import {
   Button,
   Modal,
   Link,
-  Input
+  Input,
+  Textarea
 } from '@cloudscape-design/components';
 import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
 import { apiFetch } from '../auth/apiClient';
@@ -75,6 +76,8 @@ const ASSESSMENT_STATUSES = new Set([
   'on hold', 'on_hold'
 ]);
 
+const FINAL_APPLICATION_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
+
 const toDate = value => {
   const d = value ? new Date(value) : null;
   return d && !Number.isNaN(d.getTime()) ? d : null;
@@ -98,6 +101,34 @@ const getStatusInfo = (row) => {
   })();
   const statusLabel = isUnassignedCase ? `${label} • Unassigned` : label;
   return { rawStatus, statusLabel, statusType, isUnassignedCase };
+};
+
+const canonicalizeRole = (role) => {
+  if (!role) return '';
+  return role.toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
+};
+
+const normalizeEscalationRole = (roleKey) => {
+  if (!roleKey) return '';
+  if (roleKey === 'application_assessor') return 'coordinator';
+  if (roleKey === 'regional_coordinator') return 'regional_manager';
+  if (roleKey === 'program_admin') return 'program_administrator';
+  return roleKey;
+};
+
+const formatRoleLabel = (roleKey) => {
+  if (!roleKey) return 'reviewer';
+  return roleKey
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
+const isNonTerminalApplicationStatus = (status) => {
+  if (!status) return true;
+  const key = status.toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return !FINAL_APPLICATION_STATUSES.has(key);
 };
 
 const computeSlaMeta = (application, slaTargets, rawStatus, isAssigned) => {
@@ -176,6 +207,9 @@ const ApplicationOverviewWidget = ({
   const [statusFeedback, setStatusFeedback] = useState(null);
   const manualStatusRef = useRef(null);
   const [slaTargets, setSlaTargets] = useState(SLA_DEFAULT_DAYS);
+  const [escalation, setEscalation] = useState(null);
+  const [escalationLoading, setEscalationLoading] = useState(false);
+  const [quickActionNote, setQuickActionNote] = useState('');
   const [rowVersion, setRowVersion] = useState(() => {
     const fromProp = Number(applicationRowVersion || 0);
     const fromCase = Number(caseData?.application_row_version || 0);
@@ -256,6 +290,30 @@ const ApplicationOverviewWidget = ({
     }
   }, [applicationRowVersion, rowVersion]);
 
+  const fetchEscalation = useCallback(async () => {
+    if (!application_id) {
+      setEscalation(null);
+      return null;
+    }
+    setEscalationLoading(true);
+    try {
+      const res = await apiFetch(`/api/escalations?applicationId=${application_id}`);
+      if (!res.ok) {
+        throw new Error('Failed to load escalation');
+      }
+      const body = await res.json();
+      const items = Array.isArray(body?.items) ? body.items : [];
+      const open = items.find(item => item.state !== 'resolved') || items[0] || null;
+      setEscalation(open || null);
+      return open;
+    } catch (_) {
+      setEscalation(null);
+      return null;
+    } finally {
+      setEscalationLoading(false);
+    }
+  }, [application_id]);
+
   const fetchLatestApplication = useCallback(async () => {
     if (!application_id) return null;
     try {
@@ -279,7 +337,7 @@ const ApplicationOverviewWidget = ({
     } catch (_) {
       return null;
     }
-  }, [application_id, onRowVersionUpdate]);
+  }, [application_id, fetchEscalation, onRowVersionUpdate]);
 
 
   useEffect(() => {
@@ -330,6 +388,7 @@ const ApplicationOverviewWidget = ({
             onRowVersionUpdate(incomingVersion);
           }
         }
+        fetchEscalation().catch(() => {});
       })
       .catch(err => {
         if (!cancelled) {
@@ -430,7 +489,9 @@ const ApplicationOverviewWidget = ({
   const statusContext = getCaseStatusContext(fallbackStatus);
   const roleAccess = getRoleGroups(userRole);
   const { canonicalStatus, isFinalStatus } = statusContext;
-  const { isSystemAdministratorRole } = roleAccess;
+  const { isSystemAdministratorRole, isAdminRole } = roleAccess;
+  const rawRoleKey = canonicalizeRole(userRole);
+  const roleKey = normalizeEscalationRole(rawRoleKey);
   const canEditStatus = isSystemAdministratorRole && canEditCaseStatus({
     role: userRole,
     status: fallbackStatus,
@@ -444,32 +505,81 @@ const ApplicationOverviewWidget = ({
   const badgeColor = statusColor(statusOption?.value || fallbackStatus || 'unknown');
   const statusSelectDisabled = !canEditStatus || savingStatus || lockedByAnotherUser;
   const canRunQuickActions = !lockedByAnotherUser;
+  const nonTerminalStatus = isNonTerminalApplicationStatus(fallbackStatus);
+  const hasOpenEscalation = escalation && escalation.state && escalation.state !== 'resolved';
+  const escalationOwnerRole = normalizeEscalationRole(canonicalizeRole(escalation?.current_owner_role || escalation?.currentOwnerRole));
+  const isEscalationOwner = hasOpenEscalation && (isSystemAdministratorRole || (roleKey && roleKey === escalationOwnerRole));
+  const escalationBadgeLabel = hasOpenEscalation
+    ? `Escalated to ${formatRoleLabel(escalationOwnerRole || escalation?.target_role || escalation?.targetRole || '')}`
+    : null;
 
   const statusKey = (fallbackStatus || '').toLowerCase();
   const normalizedStatusKey = (fallbackStatus || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
   const quickActionItems = [];
-  if (statusKey === 'in_review' || normalizedStatusKey === 'in_review' || normalizedStatusKey === 'pending_approval') {
+  const canRunStatusQuickActions = isSystemAdministratorRole;
+
+  if (canRunStatusQuickActions) {
+    if (statusKey === 'in_review' || normalizedStatusKey === 'in_review' || normalizedStatusKey === 'pending_approval') {
+      quickActionItems.push({
+        id: 'suspend',
+        text: 'Suspend Application',
+        description: 'Move to Action Required when you need more information from the applicant.'
+      });
+    }
+    if (statusKey === 'docs_requested' || normalizedStatusKey === 'docs_requested') {
+      quickActionItems.push({
+        id: 'resume',
+        text: 'Resume Application',
+        description: 'Return to In Review after applicant provides requested information.'
+      });
+    }
+    if (
+      ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(statusKey) ||
+      ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(normalizedStatusKey)
+    ) {
+      quickActionItems.push({
+        id: 'close',
+        text: 'Close Application',
+        description: 'Mark the application as closed.'
+      });
+    }
+  }
+
+  const escalationTargetRoleLabel = roleKey === 'regional_manager' ? 'Program Administrator' : 'Regional Manager';
+  const canCreateEscalation =
+    nonTerminalStatus &&
+    !hasOpenEscalation &&
+    (roleKey === 'coordinator' || roleKey === 'regional_manager' || isSystemAdministratorRole);
+  const canRespondEscalation = hasOpenEscalation && isEscalationOwner;
+
+  if (canCreateEscalation) {
     quickActionItems.push({
-      id: 'suspend',
-      text: 'Suspend Application',
-      description: 'Move to Action Required when you need more information from the applicant.'
+      id: 'escalate',
+      text: `Escalate to ${escalationTargetRoleLabel}`,
+      description: `Send this application to the ${escalationTargetRoleLabel} for review.`,
+      type: 'escalation'
     });
   }
-  if (statusKey === 'docs_requested' || normalizedStatusKey === 'docs_requested') {
+  if (canRespondEscalation) {
     quickActionItems.push({
-      id: 'resume',
-      text: 'Resume Application',
-      description: 'Return to In Review after applicant provides requested information.'
+      id: 'respond_escalation',
+      text: 'Respond to escalation',
+      description: 'Add guidance or next steps and return it to the requester.',
+      type: 'escalation'
     });
-  }
-  if (
-    ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(statusKey) ||
-    ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(normalizedStatusKey)
-  ) {
+    if (roleKey === 'regional_manager') {
+      quickActionItems.push({
+        id: 'escalate_up',
+        text: 'Escalate to Program Administrator',
+        description: 'Forward this escalation to Program Administrators.',
+        type: 'escalation'
+      });
+    }
     quickActionItems.push({
-      id: 'close',
-      text: 'Close Application',
-      description: 'Mark the application as closed.'
+      id: 'resolve_escalation',
+      text: 'Resolve escalation',
+      description: 'Close the escalation after addressing the issue.',
+      type: 'escalation'
     });
   }
 
@@ -493,6 +603,7 @@ const ApplicationOverviewWidget = ({
     }
 
     const buildConfirm = (title, body, targetStatus) => ({
+      type: 'status',
       title,
       body,
       targetStatus,
@@ -528,6 +639,59 @@ const ApplicationOverviewWidget = ({
           'closed'
         ),
         confirmWord: 'close',
+      });
+      return;
+    }
+
+    if (actionId === 'escalate') {
+      setQuickActionConfirmInput('');
+      setQuickActionNote('');
+      setQuickActionConfirm({
+        type: 'escalation',
+        actionId: 'escalate',
+        title: 'Escalate application',
+        body: `Escalate this application to the ${escalationTargetRoleLabel}. Provide a reason to help them address it.`,
+        requireNote: true
+      });
+      return;
+    }
+
+    if (actionId === 'respond_escalation') {
+      setQuickActionConfirmInput('');
+      setQuickActionNote('');
+      setQuickActionConfirm({
+        type: 'escalation',
+        actionId: 'respond',
+        title: 'Respond to escalation',
+        body: 'Add guidance or next steps for the requester.',
+        requireNote: true
+      });
+      return;
+    }
+
+    if (actionId === 'resolve_escalation') {
+      setQuickActionConfirmInput('');
+      setQuickActionNote('');
+      setQuickActionConfirm({
+        type: 'escalation',
+        actionId: 'resolve',
+        title: 'Resolve escalation',
+        body: 'Resolving will close the escalation. Add a brief note describing the resolution.',
+        requireNote: true,
+        confirmWord: 'resolve'
+      });
+      return;
+    }
+
+    if (actionId === 'escalate_up') {
+      setQuickActionConfirmInput('');
+      setQuickActionNote('');
+      setQuickActionConfirm({
+        type: 'escalation',
+        actionId: 'escalate_up',
+        title: 'Escalate to Program Administrator',
+        body: 'Forward this escalation to Program Administrators. Include the context and what you are requesting.',
+        requireNote: true
       });
       return;
     }
@@ -648,6 +812,109 @@ const ApplicationOverviewWidget = ({
     }
   };
 
+  const runEscalationAction = async (actionId, meta = {}) => {
+    if (!application_id) {
+      setStatusFeedback({ type: 'error', content: 'Application unavailable; cannot perform escalation action.' });
+      return;
+    }
+    if (lockedByAnotherUser) {
+      setStatusFeedback({ type: 'warning', content: lockAlertMessage || 'This case is currently locked by another user.' });
+      return;
+    }
+    const note = (meta?.note || '').trim();
+    if (!note) {
+      setStatusFeedback({ type: 'warning', content: 'Please provide notes before continuing.' });
+      return;
+    }
+    const isCreate = actionId === 'escalate' && !escalation;
+    if (!isCreate && !escalation?.id) {
+      setStatusFeedback({ type: 'error', content: 'No escalation is available for this action.' });
+      return;
+    }
+
+    let releaseAfter = false;
+    try {
+      setSavingStatus(true);
+      if (!lockState.owned) {
+        const lockResult = await acquireLock();
+        if (!lockResult?.ok) {
+          const message = buildLockConflictMessage(lockResult);
+          setStatusFeedback({ type: 'warning', content: message });
+          setSavingStatus(false);
+          return;
+        }
+        releaseAfter = Boolean(lockResult.localOwner);
+      } else if (lockHeldByCurrentUser) {
+        releaseAfter = true;
+        refreshLockHeartbeat().catch(() => {});
+      }
+
+      let endpoint = '';
+      let payload = {};
+      if (isCreate) {
+        const targetRole = roleKey === 'regional_manager' ? 'program_administrator' : 'regional_manager';
+        endpoint = '/api/escalations';
+        payload = {
+          applicationId: application_id,
+          caseId: caseData?.id || caseData?.case_id || null,
+          reason: note,
+          details: note,
+          targetRole
+        };
+      } else {
+        const targetRole = actionId === 'escalate_up' ? 'program_administrator' : escalation?.target_role || escalation?.targetRole || null;
+        endpoint = `/api/escalations/${escalation.id}/respond`;
+        payload = {
+          action: actionId === 'escalate_up' ? 'escalate' : actionId,
+          note,
+          disposition: actionId,
+          targetRole
+        };
+      }
+
+      const response = await apiFetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const body = await response.json().catch(() => null);
+      if (response.status === 423) {
+        const message = buildLockConflictMessage({ reason: body?.reason || body?.error, lock: body?.lock });
+        setStatusFeedback({ type: 'warning', content: message });
+        setSavingStatus(false);
+        if (releaseAfter) releaseLock({ silent: true }).catch(() => {});
+        return;
+      }
+      if (!response.ok) {
+        const message = body?.message || body?.error || 'Escalation action failed.';
+        throw new Error(message);
+      }
+
+      await fetchEscalation();
+      if (typeof actions?.refreshCaseData === 'function') {
+        try { await actions.refreshCaseData(); } catch (_) {}
+      }
+      if (isCreate) {
+        const targetEmail = body?.target_email || null;
+        const targetLabel = targetEmail || 'Regional Manager';
+        setStatusFeedback({ type: 'success', content: `Application escalated to ${targetLabel}.` });
+      } else if (actionId === 'escalate_up' || actionId === 'escalate') {
+        const targetEmail = body?.target_email || null;
+        const targetLabel = targetEmail || 'Program Administrator';
+        setStatusFeedback({ type: 'success', content: `Application escalated to ${targetLabel}.` });
+      } else {
+        setStatusFeedback({ type: 'success', content: 'Escalation updated.' });
+      }
+    } catch (err) {
+      setStatusFeedback({ type: 'error', content: err?.message || 'Escalation action failed.' });
+    } finally {
+      setSavingStatus(false);
+      if (releaseAfter) {
+        releaseLock({ silent: true }).catch(() => {});
+      }
+    }
+  };
+
   const handleStatusChange = ({ detail }) => {
     const nextOption = detail.selectedOption;
     const nextStatus = nextOption?.value;
@@ -700,6 +967,8 @@ const ApplicationOverviewWidget = ({
         ariaLabel="Application status"
       />
     </FormField>
+  ) : hasOpenEscalation ? (
+    <Badge color="severity-medium">{escalationBadgeLabel || 'Escalated'}</Badge>
   ) : (
     <Badge color={badgeColor}>{badgeLabel}</Badge>
   );
@@ -813,7 +1082,6 @@ const ApplicationOverviewWidget = ({
                     Quick actions
                   </ButtonDropdown>
                 ) : null}
-                {badgeLabel ? <Badge color={badgeColor}>{badgeLabel}</Badge> : null}
               </SpaceBetween>
             )
           }
@@ -910,6 +1178,7 @@ const ApplicationOverviewWidget = ({
             onDismiss={() => {
               setQuickActionConfirm(null);
               setQuickActionConfirmInput('');
+              setQuickActionNote('');
             }}
             closeAriaLabel="Close quick action confirmation"
             header={quickActionConfirm?.title || 'Confirm action'}
@@ -919,6 +1188,7 @@ const ApplicationOverviewWidget = ({
                   onClick={() => {
                     setQuickActionConfirm(null);
                     setQuickActionConfirmInput('');
+                    setQuickActionNote('');
                   }}
                   disabled={savingStatus}
                 >
@@ -927,21 +1197,33 @@ const ApplicationOverviewWidget = ({
                 <Button
                   variant="primary"
                   onClick={() => {
+                    if (quickActionConfirm?.type === 'escalation') {
+                      const actionId = quickActionConfirm?.actionId;
+                      const note = quickActionNote;
+                      setQuickActionConfirm(null);
+                      setQuickActionConfirmInput('');
+                      setQuickActionNote('');
+                      runEscalationAction(actionId, { note });
+                      return;
+                    }
                     if (!quickActionConfirm?.targetStatus) {
                       setQuickActionConfirm(null);
                       setQuickActionConfirmInput('');
+                      setQuickActionNote('');
                       return;
                     }
                     const targetOption = quickActionConfirm?.targetOption;
                     setQuickActionConfirm(null);
                     setQuickActionConfirmInput('');
+                    setQuickActionNote('');
                     runStatusUpdate(quickActionConfirm.targetStatus, targetOption);
                   }}
                   loading={savingStatus}
                   disabled={
                     savingStatus ||
                     (quickActionConfirm?.confirmWord &&
-                      quickActionConfirmInput.trim().toLowerCase() !== quickActionConfirm.confirmWord)
+                      quickActionConfirmInput.trim().toLowerCase() !== quickActionConfirm.confirmWord) ||
+                    (quickActionConfirm?.requireNote && !quickActionNote.trim())
                   }
                 >
                   Confirm
@@ -955,6 +1237,15 @@ const ApplicationOverviewWidget = ({
                 <Box fontWeight="bold">
                   This will set status to {quickActionConfirm.targetOption.label}.
                 </Box>
+              ) : null}
+              {quickActionConfirm?.requireNote ? (
+                <FormField label="Notes" description="Provide context for this action.">
+                  <Textarea
+                    value={quickActionNote}
+                    onChange={e => setQuickActionNote(e.detail.value || '')}
+                    rows={3}
+                  />
+                </FormField>
               ) : null}
               {quickActionConfirm?.confirmWord ? (
                 <FormField label={`Type "${quickActionConfirm.confirmWord}" to confirm`}>

@@ -56,7 +56,7 @@ and ensure all links reference only the configured `REACT_APP_COGNITO_REDIRECT_U
 ## Related Files
 - `src/auth/cognito.js`
 - `src/auth/apiClient.js`
-- `src/pages/adminDashboardHomePage.js`
+- `src/pages/home/HomeDashboardPage.jsx`
 - `.env`
 - `src/routes/AppRoutes.js` (Guard logic)
 
