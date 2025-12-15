@@ -341,6 +341,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [isSigningDeclaration, setIsSigningDeclaration] = useState(false);
   const [declarationError, setDeclarationError] = useState(null);
   const [conflictHoldModalVisible, setConflictHoldModalVisible] = useState(false);
+  const [showConflictAlert, setShowConflictAlert] = useState(true);
   const scrollWidgetAndPageTop = useCallback(() => {
     debugScroll('scrollWidgetAndPageTop');
     scrollWidgetAndPageTopOnce(widgetRootRef);
@@ -377,8 +378,10 @@ const CoordinatorAssessmentWidget = forwardRef(
   const hasDeclaredConflict = normalizedConflictChoice === 'conflict';
   const isDeclarationGateActive = !conflictDeclarationSigned || hasDeclaredConflict;
   const eligibilitySet = Boolean(assessment.esdcEligibility);
-  const potSelected = Boolean(assessment.interventionPotId);
-  const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet || !potSelected;
+  const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet;
+  useEffect(() => {
+    setShowConflictAlert(true);
+  }, [conflictDeclarationSigned, hasDeclaredConflict]);
   const conflictDeclarationSignedDisplayDate = conflictDeclarationSignedAt
     ? formatDate(conflictDeclarationSignedAt)
     : null;
@@ -1852,11 +1855,13 @@ const CoordinatorAssessmentWidget = forwardRef(
         <Box variant="small" margin={{ bottom: 's' }}>
           This form is used by the ISET admin team to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, the final approval fields will become available.
         </Box>
-        {conflictDeclarationSigned && (
+        {conflictDeclarationSigned && showConflictAlert && (
           <Alert
             type={hasDeclaredConflict ? 'warning' : 'info'}
             header="Conflict of Interest Declaration"
             statusIconAriaLabel={hasDeclaredConflict ? 'Warning' : 'Information'}
+            dismissible
+            onDismiss={() => setShowConflictAlert(false)}
           >
               <Box margin={{ bottom: hasDeclaredConflict && conflictDetailsNormalized ? 'xs' : 'none' }}>
                 {hasDeclaredConflict
@@ -1903,7 +1908,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               header="Employment insurance eligibility not checked"
               statusIconAriaLabel="Info"
             >
-              Assessment sections are locked until a System Admin or Program Admin checks ESDC eligibility and assigns a budget pot.
+              Assessment sections are locked until a System Admin or Program Admin sets ESDC eligibility.
             </Alert>
             <Box margin={{ bottom: 's' }} />
           </>
@@ -2016,7 +2021,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         </>
         )}
         {sectionHeader('ESDC Eligibility')}
-        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+        <Grid gridDefinition={[{ colspan: 6 }]}>
           <FormField
             label="Eligibility"
             errorText={hasSubmitted && fieldErrors.esdcEligibility ? fieldErrors.esdcEligibility : undefined}
@@ -2030,22 +2035,6 @@ const CoordinatorAssessmentWidget = forwardRef(
               ariaLabel="Eligibility"
               data-error-focus={hasSubmitted && fieldErrors.esdcEligibility ? 'true' : undefined}
               tabIndex={-1}
-              disabled={isEligibilityDisabled}
-            />
-          </FormField>
-          <FormField
-            label="Budget Pot"
-            description="Required to unlock the assessment. Assign the pot that will fund this intervention."
-            errorText={hasSubmitted && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
-          >
-            <Select
-              placeholder={budgetPotLoading ? 'Loading budget pots' : 'Select budget pot'}
-              selectedOption={selectedBudgetPotOption}
-              options={budgetPotOptions}
-              statusType={budgetPotLoading ? 'loading' : 'finished'}
-              loadingText="Loading budget pots"
-              onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
-              data-error-focus={hasSubmitted && fieldErrors.interventionPotId ? 'true' : undefined}
               disabled={isEligibilityDisabled}
             />
           </FormField>
@@ -2419,6 +2408,24 @@ const CoordinatorAssessmentWidget = forwardRef(
               }}
               placeholder="e.g. $4,200.00"
               data-error-focus={hasSubmitted && fieldErrors.interventionCost ? 'true' : undefined}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+        </Grid>
+        <Grid gridDefinition={[{ colspan: 12 }]}>
+          <FormField
+            label="Budget Pot"
+            description="Assign the pot that will fund this intervention."
+            errorText={hasSubmitted && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
+          >
+            <Select
+              placeholder={budgetPotLoading ? 'Loading budget pots' : 'Select budget pot'}
+              selectedOption={selectedBudgetPotOption}
+              options={budgetPotOptions}
+              statusType={budgetPotLoading ? 'loading' : 'finished'}
+              loadingText="Loading budget pots"
+              onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
+              data-error-focus={hasSubmitted && fieldErrors.interventionPotId ? 'true' : undefined}
               disabled={isAssessmentDisabled}
             />
           </FormField>

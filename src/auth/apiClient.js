@@ -3,7 +3,12 @@ import { buildLoginUrl, loadSession, ensureFreshSession, clearSession } from './
 
 const API_BASE = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001';
 
-const REAL_AUTH_PREFIXES = ['/api/staff/assignable', '/api/applications', '/api/cases'];
+const REAL_AUTH_PREFIXES = [
+  '/api/staff/assignable',
+  '/api/applications',
+  '/api/cases',
+  '/api/dashboard/awaiting-approval-items'
+];
 
 function requiresRealAuth(requestPath) {
   const pathOnly = (requestPath || '').split('?')[0];

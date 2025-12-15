@@ -54,6 +54,7 @@ This library captures the working knowledge for the admin dashboard. The goal is
   - If a feature is missing at render time, check the renderer code first (not just the data) before advising “no change needed.”
   - Prefer evidence (files, responses, DOM) over guesses; pause and ask if intent or ownership is unclear.
   - Masking / renderer hotspot: the portal renderer lives in `../ISET-intake/src/renderer/renderers.js`. The admin preview renderer is in `apps/web/src/features/intake/ComponentRenderer.tsx` and is **not** the live portal. Confirm which one you’re editing before making mask or formatting changes.
+- Trap note (Program Admin unassigned list, 2026-02): The “Unassigned Applications” list must use `/api/applications`, not `/api/cases`. The applications endpoint returns `applicant_name`/tracking info; the cases endpoint does not, so the UI falls back to IDs. When wiring work queues, align list data to the same endpoint that surfaces applicant names (see `src/widgets/ApplicationsWidget.js`) and avoid mixing case and application sources for the same bucket.
 
 ## Thread bootstrap notes
 

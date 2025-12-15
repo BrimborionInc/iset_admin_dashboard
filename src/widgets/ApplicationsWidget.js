@@ -194,11 +194,10 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
     targetKey = 'assignment';
   }
   const targetDays = Number(slaTargets[targetKey]) || SLA_DEFAULT_DAYS[targetKey] || 0;
-  if (!targetDays || Number.isNaN(targetDays)) {
-    return { ageDays: Math.floor((Date.now() - submitted.getTime()) / 86400000), due: null, status: 'unknown', deltaDays: null, label: 'Unknown' };
-  }
-
   const nowMs = Date.now();
+  if (!targetDays || Number.isNaN(targetDays)) {
+    return { ageDays: Math.floor((nowMs - submitted.getTime()) / 86400000), due: null, status: 'unknown', deltaDays: null, label: 'Unknown', stage: targetKey };
+  }
   const ageDays = Math.floor((nowMs - submitted.getTime()) / 86400000);
   const effectiveDue = due || new Date(submitted.getTime() + targetDays * 86400000);
   const diffDays = Math.floor((effectiveDue.getTime() - nowMs) / 86400000);
@@ -215,7 +214,7 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
   } else {
     status = 'ok';
   }
-  return { ageDays, due: effectiveDue, status, deltaDays: diffDays, label };
+  return { ageDays, due: effectiveDue, status, deltaDays: diffDays, label, stage: targetKey };
 };
 
 const ApplicationsWidget = ({ actions, refreshKey }) => {
@@ -432,8 +431,8 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
           })();
           return (
             <span
-              title={`Age: ${meta.ageDays ?? 'n/a'}d | Due: ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`}
-              aria-label={`SLA ${meta.status || 'unknown'}; Age ${meta.ageDays ?? 'n/a'} days; Due ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`}
+              title={`SLA (${meta.stage || 'unknown'}): ${meta.label} | Age: ${meta.ageDays ?? 'n/a'}d | Due: ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`}
+              aria-label={`SLA ${meta.stage || 'unknown'} ${meta.status || 'unknown'}; Age ${meta.ageDays ?? 'n/a'} days; Due ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`}
             >
               {badge}
             </span>

@@ -8047,7 +8047,7 @@ async function countProgramAdminAwaitingDecision(pool) {
          FROM iset_application a
          JOIN iset_case c ON c.application_id = a.id
         WHERE a.status IS NOT NULL
-          AND LOWER(a.status) = ?`;
+          AND REPLACE(LOWER(a.status), ' ', '_') = ?`;
     const [[row]] = await pool.query(sql, ['pending_approval']);
     return Number(row?.total ?? 0);
   } catch (err) {
@@ -13615,7 +13615,11 @@ app.get('/api/dashboard/conflict-declarations', async (req, res) => {
       sp.primary_role AS staff_role,
       sp.region_id AS staff_region_id,
       c.case_number,
-      s.reference_number
+      s.reference_number,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province
     FROM iset_case_conflict_declaration cd
     JOIN staff_profiles sp ON sp.id = cd.staff_profile_id
     LEFT JOIN iset_case c ON c.id = cd.case_id
@@ -13627,19 +13631,29 @@ app.get('/api/dashboard/conflict-declarations', async (req, res) => {
   `;
   try {
     const [rows] = await pool.query(sql, params);
-    const declarations = Array.isArray(rows) ? rows.map(r => ({
-      id: r.id,
-      caseId: r.case_id || null,
-      caseNumber: r.case_number || null,
-      referenceNumber: r.reference_number || null,
-      staffProfileId: r.staff_profile_id || null,
-      staffEmail: r.staff_email || null,
-      staffRole: r.staff_role || null,
-      staffRegionId: Number.isFinite(Number(r.staff_region_id)) ? Number(r.staff_region_id) : null,
-      choice: r.declaration_choice || 'conflict',
-      details: r.conflict_details || null,
-      signedAt: r.signed_at ? new Date(r.signed_at).toISOString() : null
-    })) : [];
+    const declarations = Array.isArray(rows) ? rows.map(r => {
+      const preferred = normaliseString(r.submission_preferred_name);
+      const first = normaliseString(r.submission_first_name);
+      const last = normaliseString(r.submission_last_name);
+      const full = [first, last].filter(Boolean).join(' ').trim();
+      const applicantName = full || preferred || normaliseString(r.reference_number) || 'Applicant';
+      return {
+        id: r.id,
+        caseId: r.case_id || null,
+        caseNumber: r.case_number || null,
+        referenceNumber: r.reference_number || null,
+        applicantName,
+        applicant_name: applicantName,
+        address_province: normaliseString(r.submission_address_province) || null,
+        staffProfileId: r.staff_profile_id || null,
+        staffEmail: r.staff_email || null,
+        staffRole: r.staff_role || null,
+        staffRegionId: Number.isFinite(Number(r.staff_region_id)) ? Number(r.staff_region_id) : null,
+        choice: r.declaration_choice || 'conflict',
+        details: r.conflict_details || null,
+        signedAt: r.signed_at ? new Date(r.signed_at).toISOString() : null
+      };
+    }) : [];
     return res.json({ role, regionId: regionId ?? null, declarations });
   } catch (err) {
     if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
@@ -13647,6 +13661,195 @@ app.get('/api/dashboard/conflict-declarations', async (req, res) => {
     }
     console.error('[conflict-declarations] fetch failed:', err.message);
     return res.status(500).json({ error: 'conflict_declarations_fetch_failed', message: err.message });
+  }
+});
+
+// EI Eligibility items (applications needing EI status validation)
+app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+    return res.json({ role, items: [] });
+  }
+  const regionCandidates = [
+    req?.auth?.regionId,
+    req?.staffProfile?.region_id
+  ];
+  let regionId = null;
+  for (const candidate of regionCandidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n)) { regionId = n; break; }
+  }
+  const filters = ['(ca.esdc_eligibility IS NULL OR ca.esdc_eligibility = \'\')'];
+  const params = [];
+  if (role === 'Regional Coordinator') {
+    if (!Number.isFinite(regionId)) {
+      return res.json({ role, items: [] });
+    }
+    filters.push('sp.region_id = ?');
+    params.push(regionId);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const sql = `
+    SELECT
+      c.id AS case_id,
+      c.case_number,
+      a.id AS application_id,
+      a.status AS application_status,
+      a.created_at AS submitted_at,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+      c.assigned_to_user_id,
+      sp.email AS assigned_user_email,
+      sp.primary_role AS assigned_user_role,
+      sp.region_id AS assigned_user_region_id,
+      ca.esdc_eligibility,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"social-insurance-number\"')) AS sin_number
+    FROM iset_case c
+    JOIN iset_application a ON c.application_id = a.id
+    LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+    LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    ${where}
+    ORDER BY a.created_at DESC
+    LIMIT 200
+  `;
+  try {
+    const [rows] = await pool.query(sql, params);
+    const items = Array.isArray(rows) ? rows.map(r => {
+      const preferred = normaliseString(r.submission_preferred_name);
+      const first = normaliseString(r.submission_first_name);
+      const last = normaliseString(r.submission_last_name);
+      const full = [first, last].filter(Boolean).join(' ').trim();
+      const applicantName = full || preferred || normaliseString(r.tracking_id) || 'Applicant';
+      return {
+        caseId: r.case_id || null,
+        caseNumber: r.case_number || null,
+        applicationId: r.application_id || null,
+        trackingId: r.tracking_id || null,
+        applicantName,
+        applicant_name: applicantName,
+        address_province: normaliseString(r.submission_address_province) || null,
+        sin: normaliseString(r.sin_number) || null,
+        assessment_esdc_eligibility: normaliseString(r.esdc_eligibility) || null,
+        status: normaliseString(r.application_status) || null,
+        submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
+        owner: r.assigned_user_email || null,
+        assigned_user_id: r.assigned_to_user_id || null,
+        assigned_user_email: r.assigned_user_email || null,
+        assigned_user_role: r.assigned_user_role || null,
+        assigned_user_region_id: r.assigned_user_region_id || null
+      };
+    }) : [];
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json({ role, regionId: regionId ?? null, items });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      return res.json({ role, regionId: regionId ?? null, items: [] });
+    }
+    console.error('[ei-eligibility-items] fetch failed:', err.message);
+    return res.status(500).json({ error: 'ei_eligibility_items_fetch_failed', message: err.message });
+  }
+});
+
+// Applications awaiting program decision
+app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+    return res.json({ role, items: [] });
+  }
+  const regionCandidates = [
+    req?.auth?.regionId,
+    req?.staffProfile?.region_id
+  ];
+  let regionId = null;
+  for (const candidate of regionCandidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n)) { regionId = n; break; }
+  }
+  const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
+  const filters = [`${statusExpr} = ?`];
+  const params = ['pending_approval'];
+  if (role === 'Regional Coordinator') {
+    if (!Number.isFinite(regionId)) {
+      return res.json({ role, items: [] });
+    }
+    filters.push('sp.region_id = ?');
+    params.push(regionId);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const sql = `
+    SELECT
+      c.id AS case_id,
+      c.case_number,
+      a.id AS application_id,
+      a.status AS application_status,
+      a.created_at AS submitted_at,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+      c.assigned_to_user_id,
+      sp.email AS assigned_user_email,
+      sp.primary_role AS assigned_user_role,
+      sp.region_id AS assigned_user_region_id,
+      ca.recommendation,
+      ca.intervention_code,
+      ca.intervention_cost_total,
+      ca.intervention_start_date,
+      ca.intervention_budget_pot_id,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
+      ic.label AS intervention_label
+    FROM iset_case c
+    JOIN iset_application a ON c.application_id = a.id
+    LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+    LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    LEFT JOIN esdc_intervention_code ic ON ic.code = ca.intervention_code
+    ${where}
+    ORDER BY a.created_at DESC
+    LIMIT 200
+  `;
+  try {
+    const [rows] = await pool.query(sql, params);
+    const items = Array.isArray(rows) ? rows.map(r => {
+      const preferred = normaliseString(r.submission_preferred_name);
+      const first = normaliseString(r.submission_first_name);
+      const last = normaliseString(r.submission_last_name);
+      const full = [first, last].filter(Boolean).join(' ').trim();
+      const applicantName = full || preferred || normaliseString(r.tracking_id) || 'Applicant';
+      return {
+        caseId: r.case_id || null,
+        caseNumber: r.case_number || null,
+        applicationId: r.application_id || null,
+        trackingId: r.tracking_id || null,
+        applicantName,
+        applicant_name: applicantName,
+        address_province: normaliseString(r.submission_address_province) || null,
+        status: normaliseString(r.application_status) || null,
+        submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
+        owner: r.assigned_user_email || null,
+        assigned_user_id: r.assigned_to_user_id || null,
+        assigned_user_email: r.assigned_user_email || null,
+        assigned_user_role: r.assigned_user_role || null,
+        assigned_user_region_id: r.assigned_user_region_id || null,
+        recommendation: r.recommendation || null,
+        intervention_code: r.intervention_code || null,
+        intervention_label: r.intervention_label || null,
+        intervention_cost_total: r.intervention_cost_total || null,
+        intervention_start_date: r.intervention_start_date || null,
+        intervention_pot_id: r.intervention_pot_id || null
+      };
+    }) : [];
+    return res.json({ role, regionId: regionId ?? null, items });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      return res.json({ role, regionId: regionId ?? null, items: [] });
+    }
+    console.error('[awaiting-approval-items] fetch failed:', err.message);
+    return res.status(500).json({ error: 'awaiting_approval_items_fetch_failed', message: err.message });
   }
 });
 

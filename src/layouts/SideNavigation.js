@@ -5,11 +5,6 @@ import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '.
 import { useRoleMatrix, toCanonicalRole } from '../context/RoleMatrixContext';
 import { apiFetch } from '../auth/apiClient';
 
-const defaultFooterItems = [
-  { type: 'divider' },
-  { type: 'link', text: 'Documentation', href: '/documentation', external: false },
-];
-
 const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotifications, notificationsLoading = false }) => {
   const pruneSections = (items = []) =>
     items.filter(item => {
@@ -181,6 +176,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       text: 'Support',
       defaultExpanded: false,
       items: [
+        { type: 'link', text: 'Training Materials', href: '/documentation' },
         { type: 'link', text: 'Tutorials', href: '/tutorials-dashboard' },
         { type: 'link', text: 'Help and Support', href: '/help-support-dashboard' },
       ],
@@ -218,7 +214,8 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
 
   function filterNavItemsForRole(role, signedOut) {
     if (signedOut) {
-      return [...defaultFooterItems];
+      const supportSection = allNavItems.find(section => section.text === 'Support');
+      return supportSection ? pruneSections([{ ...supportSection, defaultExpanded: true }]) : [];
     }
 
     const roleValue = role?.value || role;
@@ -232,9 +229,15 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       };
     });
 
-    const footerItems = [...defaultFooterItems];
-    const dividerIndex = footerItems.findIndex(item => item?.type === 'divider');
+    const footerItems = [];
+    const ensureDivider = () => {
+      if (!footerItems.some(item => item?.type === 'divider')) {
+        footerItems.push({ type: 'divider' });
+      }
+    };
+
     if (isAllowed('/contact-communications', canonicalRole)) {
+      ensureDivider();
       const contactLink = {
         type: 'link',
         href: '/contact-communications',
@@ -250,14 +253,13 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
           </span>
         );
       }
-      const contactInsertAt = dividerIndex >= 0 ? dividerIndex + 1 : footerItems.length;
-      footerItems.splice(contactInsertAt, 0, contactLink);
+      footerItems.push(contactLink);
     }
 
     if (isAllowed('/manage-notifications', canonicalRole)) {
+      ensureDivider();
       const existingContactIndex = footerItems.findIndex(item => item?.href === '/contact-communications');
-      const baseIndex = existingContactIndex >= 0 ? existingContactIndex + 1 : (dividerIndex >= 0 ? dividerIndex + 1 : 0);
-      const insertAt = Math.min(baseIndex, footerItems.length);
+      const insertAt = existingContactIndex >= 0 ? existingContactIndex + 1 : footerItems.length;
       footerItems.splice(insertAt, 0, notificationsFooterItem);
     }
 
