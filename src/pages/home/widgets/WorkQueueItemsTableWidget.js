@@ -55,6 +55,35 @@ const PROVINCE_LABELS = {
   yt: 'Yukon Territory'
 };
 
+const ROLE_DISPLAY_MAP = {
+  sysadmin: 'System Admin',
+  'system administrator': 'System Admin',
+  'system_admin': 'System Admin',
+  'systemadministrator': 'System Admin',
+  'program admin': 'Program Admin',
+  'program administrator': 'Program Admin',
+  'program_admin': 'Program Admin',
+  'programadministrator': 'Program Admin',
+  'regional coordinator': 'Regional Manager',
+  'regional manager': 'Regional Manager',
+  'regional_coordinator': 'Regional Manager',
+  'regionalmanager': 'Regional Manager',
+  'regionalcoordinator': 'Regional Manager',
+  adjudicator: 'ISET Coordinator',
+  'application assessor': 'ISET Coordinator',
+  'application_assessor': 'ISET Coordinator',
+  'applicationassessor': 'ISET Coordinator',
+  'iset coordinator': 'ISET Coordinator',
+  'iset_coordinator': 'ISET Coordinator',
+  'isetcoordinator': 'ISET Coordinator'
+};
+
+const formatRoleDisplay = role => {
+  if (!role) return '—';
+  const key = role.toString().trim().toLowerCase().replace(/\s+/g, ' ');
+  return ROLE_DISPLAY_MAP[key] || ROLE_DISPLAY_MAP[key.replace(/\s+/g, '')] || ROLE_DISPLAY_MAP[key.replace(/\s+/g, '_')] || role;
+};
+
 const normalizeClosedStatus = status => {
   const key = (status || '').toString().trim().toLowerCase();
   return key === 'withdrawn' ? 'closed' : key;
@@ -289,7 +318,7 @@ const columnDefinitionsByKey = {
   role: {
     id: 'role',
     header: 'Role',
-    cell: item => item.staffRole || '—',
+    cell: item => formatRoleDisplay(item.staffRole),
     sortingField: 'staffRole'
   },
   details: {
@@ -412,6 +441,7 @@ const WorkQueueItemsTableWidget = ({
   items = [],
   selectedItemId,
   onSelectItem,
+  role,
   actions,
   onRefresh
 }) => {
@@ -445,6 +475,7 @@ const WorkQueueItemsTableWidget = ({
       bucketDefinitions,
       selectedBucketId
     ]);
+  const shouldWrapLines = selectedBucket && ['exceptions-escalations', 'unresolved-conflicts'].includes(selectedBucket.id);
 
   const queueItems = useMemo(() => {
     if (!selectedBucket) {
@@ -480,6 +511,13 @@ const WorkQueueItemsTableWidget = ({
   }, [queueItems]);
 
   const [slaTargets, setSlaTargets] = useState(SLA_DEFAULT_DAYS);
+  const fireEscalationAction = (item, actionId) => {
+    try {
+      window.dispatchEvent(new CustomEvent('escalation:action', { detail: { actionId, item } }));
+    } catch (_) {
+      // no-op if window unavailable
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -575,8 +613,130 @@ const WorkQueueItemsTableWidget = ({
                 >
                   Open workspace
                 </Link>
-                {item.bucketId === 'unresolved-conflicts' ? (
-                  <SpaceBetween size="xxs" direction="horizontal">
+                {(() => {
+                  const isEscalationBucket = item.bucketId === 'exceptions-escalations';
+                  const canEscalationActions = role === 'Program Administrator' || role === 'Regional Coordinator';
+                  if (isEscalationBucket && canEscalationActions) {
+                    return (
+                      <SpaceBetween size="xxs" direction="horizontal">
+                        <Link
+                          href="#"
+                          onFollow={event => {
+                            event.preventDefault();
+                            fireEscalationAction(item, 'respond');
+                          }}
+                        >
+                          Respond
+                        </Link>
+                        {role === 'Regional Coordinator' && (
+                          <Link
+                            href="#"
+                            onFollow={event => {
+                              event.preventDefault();
+                              fireEscalationAction(item, 'escalate_up');
+                            }}
+                          >
+                            Escalate to Program Admin
+                          </Link>
+                        )}
+                        <Link
+                          href="#"
+                          onFollow={event => {
+                            event.preventDefault();
+                            fireEscalationAction(item, 'resolve');
+                          }}
+                        >
+                          Resolve
+                        </Link>
+                      </SpaceBetween>
+                    );
+                  }
+                  if (item.bucketId === 'unresolved-conflicts') {
+                    return (
+                      <SpaceBetween size="xxs" direction="horizontal">
+                        <Link
+                          href="#"
+                          onFollow={event => {
+                            event.preventDefault();
+                            setAssignTarget(item);
+                            setAssignModalVisible(true);
+                          }}
+                        >
+                          Reassign
+                        </Link>
+                        <Link
+                          href="#"
+                          onFollow={event => {
+                            event.preventDefault();
+                            setResolveTarget(item);
+                          }}
+                        >
+                          Resolve
+                        </Link>
+                      </SpaceBetween>
+                    );
+                  }
+                  if (item.bucketId === 'ei-eligibility-checks') {
+                    return (
+                      <SpaceBetween size="xxs" direction="horizontal">
+                        <Link
+                          href="#"
+                          onFollow={event => {
+                            event.preventDefault();
+                            setEligibilityTarget(item);
+                            setSelectedEligibility(
+                              item.assessment_esdc_eligibility
+                                ? { value: item.assessment_esdc_eligibility, label: item.assessment_esdc_eligibility }
+                                : null
+                            );
+                            setEligibilityModalVisible(true);
+                          }}
+                        >
+                          Set Eligibility
+                        </Link>
+                      </SpaceBetween>
+                    );
+                  }
+                  if (item.bucketId === 'applications-awaiting-approval') {
+                    return (
+                      <SpaceBetween size="xxs" direction="horizontal">
+                        <Link
+                          href="#"
+                          onFollow={event => {
+                            event.preventDefault();
+                            setDecisionTarget(item);
+                            setSelectedDecision(null);
+                            setDecisionReason('');
+                            setSelectedAssurance(null);
+                            setDecisionError(null);
+                            setSelectedBudgetPot(null);
+                            setDecisionModalVisible(true);
+                            if (!budgetPotOptions.length) {
+                              setBudgetPotLoading(true);
+                              apiFetch('/api/reference/budget-pots-lite')
+                                .then(res => res.ok ? res.json() : [])
+                                .then(list => {
+                                  const active = Array.isArray(list) ? list.filter(p => p.isActive) : [];
+                                  const opts = active.map(p => ({
+                                    label: [p.code, p.name].filter(Boolean).join(' - ') || p.name || p.code || p.id,
+                                    value: p.id
+                                  }));
+                                  setBudgetPotOptions(opts);
+                                })
+                                .catch(() => setBudgetPotOptions([]))
+                                .finally(() => setBudgetPotLoading(false));
+                            }
+                          }}
+                        >
+                          Make Decision
+                        </Link>
+                      </SpaceBetween>
+                    );
+                  }
+                  if (item.bucketId === 'overdue') {
+                    return null;
+                  }
+                  return (
                     <Link
                       href="#"
                       onFollow={event => {
@@ -585,83 +745,10 @@ const WorkQueueItemsTableWidget = ({
                         setAssignModalVisible(true);
                       }}
                     >
-                      Reassign
+                      Assign
                     </Link>
-                    <Link
-                      href="#"
-                      onFollow={event => {
-                        event.preventDefault();
-                        setResolveTarget(item);
-                      }}
-                    >
-                      Resolve
-                    </Link>
-                  </SpaceBetween>
-                ) : item.bucketId === 'ei-eligibility-checks' ? (
-                  <SpaceBetween size="xxs" direction="horizontal">
-                    <Link
-                      href="#"
-                      onFollow={event => {
-                        event.preventDefault();
-                        setEligibilityTarget(item);
-                        setSelectedEligibility(
-                          item.assessment_esdc_eligibility
-                            ? { value: item.assessment_esdc_eligibility, label: item.assessment_esdc_eligibility }
-                            : null
-                        );
-                        setEligibilityModalVisible(true);
-                      }}
-                    >
-                      Set Eligibility
-                    </Link>
-                  </SpaceBetween>
-                ) : item.bucketId === 'applications-awaiting-approval' ? (
-                  <SpaceBetween size="xxs" direction="horizontal">
-                    <Link
-                      href="#"
-                      onFollow={event => {
-                        event.preventDefault();
-                        setDecisionTarget(item);
-                        setSelectedDecision(null);
-                        setDecisionReason('');
-                        setSelectedAssurance(null);
-                        setDecisionError(null);
-                        setSelectedBudgetPot(null);
-                        setDecisionModalVisible(true);
-                        if (!budgetPotOptions.length) {
-                          setBudgetPotLoading(true);
-                          apiFetch('/api/reference/budget-pots-lite')
-                            .then(res => res.ok ? res.json() : [])
-                            .then(list => {
-                              const active = Array.isArray(list) ? list.filter(p => p.isActive) : [];
-                              const opts = active.map(p => ({
-                                label: [p.code, p.name].filter(Boolean).join(' - ') || p.name || p.code || p.id,
-                                value: p.id
-                              }));
-                              setBudgetPotOptions(opts);
-                            })
-                            .catch(() => setBudgetPotOptions([]))
-                            .finally(() => setBudgetPotLoading(false));
-                        }
-                      }}
-                    >
-                      Make Decision
-                    </Link>
-                  </SpaceBetween>
-                ) : item.bucketId === 'overdue' ? (
-                  null
-                ) : (
-                  <Link
-                    href="#"
-                    onFollow={event => {
-                      event.preventDefault();
-                      setAssignTarget(item);
-                      setAssignModalVisible(true);
-                    }}
-                  >
-                    Assign
-                  </Link>
-                )}
+                  );
+                })()}
               </SpaceBetween>
             )
           };
@@ -669,7 +756,7 @@ const WorkQueueItemsTableWidget = ({
         return widthOverride ? { ...base, width: widthOverride } : base;
       })
       .filter(Boolean);
-  }, [itemTypes, slaTargets, columnWidths, budgetPotOptions.length]);
+  }, [itemTypes, slaTargets, columnWidths, budgetPotOptions.length, role]);
 
   const selectedItems = useMemo(() => {
     if (!selectedItemId) return [];
@@ -913,6 +1000,7 @@ const WorkQueueItemsTableWidget = ({
         resizableColumns
         stickyHeader
         enableKeyboardNavigation
+        wrapLines={shouldWrapLines}
         filter={
           <TextFilter
             filteringText={filteringText}

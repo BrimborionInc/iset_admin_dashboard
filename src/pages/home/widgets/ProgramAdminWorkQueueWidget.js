@@ -37,12 +37,12 @@ export const PROGRAM_ADMIN_BUCKETS = [
   },
   {
     id: 'applications-awaiting-approval',
-    label: 'Applications Awaiting Approval',
+    label: 'Application Approvals',
     description: 'Assessments completed and awaiting program approval.'
   },
   {
     id: 'interventions-awaiting-approval',
-    label: 'Interventions Awaiting Approval',
+    label: 'Intervention Approvals',
     description: 'Proposed interventions that need approval before issuing agreements.'
   },
   {

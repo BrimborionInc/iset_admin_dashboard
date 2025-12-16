@@ -6,6 +6,7 @@ import { apiFetch } from '../../auth/apiClient';
 import ApplicationWorkQueueWidget from './widgets/ApplicationWorkQueueWidget';
 import CaseWorkQueueWidget from './widgets/CaseWorkQueueWidget';
 import ProgramAdminWorkQueueWidget, { ProgramAdminWorkItemsWidget, PROGRAM_ADMIN_BUCKETS, PROGRAM_ADMIN_SAMPLE_ITEMS } from './widgets/ProgramAdminWorkQueueWidget';
+import IsetCoordinatorWorkQueueWidget, { ISET_COORDINATOR_BUCKETS, ISET_COORDINATOR_SAMPLE_ITEMS } from './widgets/IsetCoordinatorWorkQueueWidget';
 import WorkQueueItemsTableWidget from './widgets/WorkQueueItemsTableWidget';
 import RecentActivityWidget from './widgets/RecentActivityWidget';
 import MyWatchlistWidget from './widgets/MyWatchlistWidget';
@@ -34,6 +35,14 @@ const WIDGET_REGISTRY = {
         component: ProgramAdminWorkQueueWidget,
         title: 'Work Queue',
         description: 'Combined application and case queues (role-scoped).',
+        defaultRowSpan: 3,
+        defaultColumnSpan: 4
+    },
+    'iset-coordinator-work-queue': {
+        id: 'iset-coordinator-work-queue',
+        component: IsetCoordinatorWorkQueueWidget,
+        title: 'Work Queue (ISET Coordinator)',
+        description: 'Scaffolded queue buckets for ISET Coordinators (Application Assessors).',
         defaultRowSpan: 3,
         defaultColumnSpan: 4
     },
@@ -87,7 +96,7 @@ const WIDGET_REGISTRY = {
     }
 };
 
-const STORAGE_PREFIX = 'admin-home-layout-v3';
+const STORAGE_PREFIX = 'admin-home-layout-v5';
 
 const buildDevHeaders = (role) => {
     const headers = { Accept: 'application/json' };
@@ -109,6 +118,7 @@ const buildDevHeaders = (role) => {
 
 const filterWidgetsForRole = (role) => {
     const allowed = { ...WIDGET_REGISTRY };
+    const isIsetCoordinator = role === 'Application Assessor';
     if (role !== 'System Administrator') {
         delete allowed['dev-task-tracker'];
     }
@@ -122,7 +132,12 @@ const filterWidgetsForRole = (role) => {
     } else {
         delete allowed['program-admin-work-queue'];
         delete allowed['program-admin-work-items'];
-        delete allowed['work-queue-items-table'];
+        if (!isIsetCoordinator) {
+            delete allowed['work-queue-items-table'];
+        }
+    }
+    if (!isIsetCoordinator) {
+        delete allowed['iset-coordinator-work-queue'];
     }
     return allowed;
 };
@@ -135,6 +150,16 @@ const buildDefaultLayout = (role) => {
             { id: 'recent-activity', rowSpan: 4, columnSpan: 2 },
             { id: 'my-watchlist', rowSpan: 4, columnSpan: 2 },
             { id: 'conflict-declarations', rowSpan: 4, columnSpan: 4 }
+        ];
+    }
+    if (role === 'Application Assessor') {
+        return [
+            { id: 'iset-coordinator-work-queue', rowSpan: 3, columnSpan: 4 },
+            { id: 'work-queue-items-table', rowSpan: 6, columnSpan: 4 },
+            { id: 'application-work-queue', rowSpan: 2, columnSpan: 4 },
+            { id: 'case-work-queue', rowSpan: 2, columnSpan: 4 },
+            { id: 'recent-activity', rowSpan: 4, columnSpan: 2 },
+            { id: 'my-watchlist', rowSpan: 4, columnSpan: 2 }
         ];
     }
     const base = [
@@ -275,6 +300,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
         return simulatedRole || tokenRole || 'Guest';
     }, [iamOn, tokenRole, simulatedRole]);
     const isWorkQueueRole = role === 'Program Administrator' || role === 'Regional Coordinator';
+    const isIsetCoordinatorRole = role === 'Application Assessor';
 
     const simulateSignedOut = useMemo(() => {
         try {
@@ -284,15 +310,47 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
         }
     }, []);
 
-    const [programAdminItems, setProgramAdminItems] = useState(() => PROGRAM_ADMIN_SAMPLE_ITEMS);
-    const [programAdminBucketId, setProgramAdminBucketId] = useState(() => PROGRAM_ADMIN_BUCKETS[0]?.id || null);
+    const initialItems =
+        isIsetCoordinatorRole ? ISET_COORDINATOR_SAMPLE_ITEMS : PROGRAM_ADMIN_SAMPLE_ITEMS;
+    const initialBucket = isIsetCoordinatorRole ? ISET_COORDINATOR_BUCKETS[0]?.id : PROGRAM_ADMIN_BUCKETS[0]?.id;
+    const [programAdminItems, setProgramAdminItems] = useState(() => initialItems);
+    const [programAdminBucketId, setProgramAdminBucketId] = useState(() => initialBucket || null);
     const [programAdminSelectedItemId, setProgramAdminSelectedItemId] = useState(() => {
-        const initialBucket = PROGRAM_ADMIN_BUCKETS[0]?.id || null;
-        const firstItem = PROGRAM_ADMIN_SAMPLE_ITEMS.find(item => item.bucketId === initialBucket);
+        const firstItem = initialItems.find(item => item.bucketId === (initialBucket || undefined));
         return firstItem?.id || null;
     });
     const [programAdminCounts, setProgramAdminCounts] = useState(() => ({}));
     const [programAdminRefresh, setProgramAdminRefresh] = useState(0);
+    const bucketDefinitions = useMemo(() => {
+        if (isWorkQueueRole) return PROGRAM_ADMIN_BUCKETS;
+        if (isIsetCoordinatorRole) return ISET_COORDINATOR_BUCKETS;
+        return [];
+    }, [isWorkQueueRole, isIsetCoordinatorRole]);
+
+    useEffect(() => {
+        if (isWorkQueueRole) {
+            setProgramAdminItems(PROGRAM_ADMIN_SAMPLE_ITEMS);
+            const first = PROGRAM_ADMIN_BUCKETS[0]?.id || null;
+            setProgramAdminBucketId(first);
+            const firstItem = PROGRAM_ADMIN_SAMPLE_ITEMS.find(item => item.bucketId === first);
+            setProgramAdminSelectedItemId(firstItem?.id || null);
+            setProgramAdminCounts({});
+            return;
+        }
+        if (isIsetCoordinatorRole) {
+            setProgramAdminItems(ISET_COORDINATOR_SAMPLE_ITEMS);
+            const first = ISET_COORDINATOR_BUCKETS[0]?.id || null;
+            setProgramAdminBucketId(first);
+            const firstItem = ISET_COORDINATOR_SAMPLE_ITEMS.find(item => item.bucketId === first);
+            setProgramAdminSelectedItemId(firstItem?.id || null);
+            setProgramAdminCounts({});
+            return;
+        }
+        setProgramAdminItems([]);
+        setProgramAdminBucketId(null);
+        setProgramAdminSelectedItemId(null);
+        setProgramAdminCounts({});
+    }, [isWorkQueueRole, isIsetCoordinatorRole]);
 
     const allowedWidgets = useMemo(() => filterWidgetsForRole(role), [role]);
     const storageKey = useMemo(() => `${STORAGE_PREFIX}.${role || 'guest'}`, [role]);
@@ -350,24 +408,35 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
             const mapped = items.map((row, idx) => {
                 const tracking = row.tracking_id || row.application_id || `ESC-${row.id || idx}`;
                 const noteParts = [];
-                [row.notes_list, row.notes, row.reason, row.details, row.last_action_note].forEach(part => {
-                    if (Array.isArray(part)) {
-                        part.forEach(p => {
-                            if (typeof p === 'string' && p.trim()) noteParts.push(p.trim());
-                        });
-                    } else if (typeof part === 'string' && part.trim()) {
-                        noteParts.push(part.trim());
-                    }
-                });
+                const seenNotes = new Set();
+                const addNote = (value) => {
+                    if (typeof value !== 'string') return;
+                    const trimmed = value.trim();
+                    if (!trimmed || seenNotes.has(trimmed)) return;
+                    seenNotes.add(trimmed);
+                    noteParts.push(trimmed);
+                };
+                if (Array.isArray(row.notes_list)) {
+                    row.notes_list.forEach(addNote);
+                } else if (typeof row.notes === 'string') {
+                    addNote(row.notes);
+                }
+                addNote(row.reason);
+                addNote(row.details);
+                addNote(row.last_action_note);
                 const notes = noteParts.join(' • ');
-                const applicantName =
-                    row.applicant_name ||
-                    row.applicant ||
-                    tracking ||
-                    'Applicant';
-                const ownerLabel = row.current_owner_role
-                    ? row.current_owner_role.toString().replace(/_/g, ' ')
-                    : 'Program Admin';
+                const applicantName = (() => {
+                    const preferred = row.submission_preferred_name || row.applicant_name || row.applicant || null;
+                    const first = row.submission_first_name || null;
+                    const last = row.submission_last_name || null;
+                    const full = [first, last].filter(Boolean).join(' ').trim();
+                    if (full) return full;
+                    return preferred || tracking || 'Applicant';
+                })();
+                const ownerLabel =
+                    row.assigned_user_email ||
+                    row.assigned_user_display_name ||
+                    (row.current_owner_role ? row.current_owner_role.toString().replace(/_/g, ' ') : 'Program Admin');
                 return {
                     id: `esc-${row.id || idx}`,
                     title: `${tracking} · ${applicantName}`,
@@ -378,7 +447,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
                     type: 'Escalation',
                     applicant: applicantName,
                     applicant_name: applicantName,
-                    region: row.assigned_user_region_id || row.region || '—',
+                    region: row.submission_address_province || row.address_province || row.assigned_user_region_id || row.region || '—',
                     owner: ownerLabel,
                     status: row.state || 'pending_review',
                     disposition: row.disposition || null,
@@ -448,7 +517,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
         };
         loadProgramAdminCounts();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh]);
+    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -533,7 +602,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
         };
         loadUnassignedApplications();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh]);
+    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -600,7 +669,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
         };
         loadConflicts();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh]);
+    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -672,7 +741,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
         };
         loadEiEligibility();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh]);
+    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -739,7 +808,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
         };
         loadAwaitingApproval();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh]);
+    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -751,7 +820,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
         };
         loadEscalations();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, fetchEscalations]);
+    }, [role, authVersion, programAdminRefresh, fetchEscalations, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -841,18 +910,19 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
         };
         loadOverdue();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh]);
+    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
-        if (!isWorkQueueRole) {
+        if (!isWorkQueueRole && !isIsetCoordinatorRole) {
             if (programAdminSelectedItemId !== null) {
                 setProgramAdminSelectedItemId(null);
             }
             return;
         }
-        const bucket = programAdminBucketId || PROGRAM_ADMIN_BUCKETS[0]?.id || null;
-        if (!programAdminBucketId && bucket) {
-            setProgramAdminBucketId(bucket);
+        const firstBucket = bucketDefinitions[0]?.id || null;
+        const bucket = programAdminBucketId || firstBucket || null;
+        if (!programAdminBucketId && firstBucket) {
+            setProgramAdminBucketId(firstBucket);
             return;
         }
         const bucketItems = programAdminItems.filter(item => item.bucketId === bucket);
@@ -865,7 +935,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
         if (!bucketItems.some(item => item.id === programAdminSelectedItemId)) {
             setProgramAdminSelectedItemId(bucketItems[0].id);
         }
-    }, [role, programAdminBucketId, programAdminItems, programAdminSelectedItemId]);
+    }, [isWorkQueueRole, isIsetCoordinatorRole, bucketDefinitions, programAdminBucketId, programAdminItems, programAdminSelectedItemId]);
 
     const handleItemsChange = useCallback(({ detail }) => {
         if (!detail || !Array.isArray(detail.items)) return;
@@ -954,7 +1024,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
                     selectedBucketId={programAdminBucketId}
                     selectedItemId={programAdminSelectedItemId}
                     onSelectItem={handleProgramAdminItemSelect}
-                    bucketDefinitions={PROGRAM_ADMIN_BUCKETS}
+                    bucketDefinitions={bucketDefinitions}
                     items={programAdminItems}
                     onRefresh={handleProgramAdminRefresh}
                 />

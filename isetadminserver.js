@@ -14401,12 +14401,17 @@ app.get('/api/escalations', async (req, res) => {
          COALESCE(c.case_number, CONCAT('APP-', e.application_id)) AS tracking_id,
          c.status AS case_status,
          c.assigned_to_user_id,
+         sp.email AS assigned_user_email,
+         sp.display_name AS assigned_user_display_name,
+         sp.region_id AS assigned_user_region_id,
          JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
          JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
-         JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name
+         JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
+         JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province
        FROM iset_application_escalation e
        JOIN iset_application a ON a.id = e.application_id
        LEFT JOIN iset_case c ON c.application_id = e.application_id
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        ${whereSql}
        ORDER BY e.updated_at DESC
@@ -14433,10 +14438,14 @@ app.get('/api/escalations', async (req, res) => {
          a.status AS application_status,
          COALESCE(c.case_number, CONCAT('APP-', e.application_id)) AS tracking_id,
          c.status AS case_status,
-         c.assigned_to_user_id
+         c.assigned_to_user_id,
+         sp.email AS assigned_user_email,
+         sp.display_name AS assigned_user_display_name,
+         sp.region_id AS assigned_user_region_id
        FROM iset_application_escalation e
        JOIN iset_application a ON a.id = e.application_id
        LEFT JOIN iset_case c ON c.application_id = e.application_id
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
        ${whereSql}
        ORDER BY e.updated_at DESC
        LIMIT 500`;
