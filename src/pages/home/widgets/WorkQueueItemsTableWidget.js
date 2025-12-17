@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
   Box,
@@ -83,6 +83,15 @@ const formatRoleDisplay = role => {
   const key = role.toString().trim().toLowerCase().replace(/\s+/g, ' ');
   return ROLE_DISPLAY_MAP[key] || ROLE_DISPLAY_MAP[key.replace(/\s+/g, '')] || ROLE_DISPLAY_MAP[key.replace(/\s+/g, '_')] || role;
 };
+
+const ELIGIBILITY_ALLOWED_MIME_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/bmp',
+  'image/tiff'
+];
+const ELIGIBILITY_MAX_BYTES = 6 * 1024 * 1024;
 
 const normalizeClosedStatus = status => {
   const key = (status || '').toString().trim().toLowerCase();
@@ -468,6 +477,10 @@ const WorkQueueItemsTableWidget = ({
   const [selectedEligibility, setSelectedEligibility] = useState(null);
   const [eligibilitySubmitting, setEligibilitySubmitting] = useState(false);
   const [eligibilityError, setEligibilityError] = useState(null);
+  const [eligibilityFile, setEligibilityFile] = useState(null);
+  const [eligibilityFileError, setEligibilityFileError] = useState(null);
+  const [eligibilityApplicantId, setEligibilityApplicantId] = useState(null);
+  const eligibilityFileInputRef = useRef(null);
   const [resolveTarget, setResolveTarget] = useState(null);
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
   const selectedBucket =
@@ -689,6 +702,16 @@ const WorkQueueItemsTableWidget = ({
                                 ? { value: item.assessment_esdc_eligibility, label: item.assessment_esdc_eligibility }
                                 : null
                             );
+                            const applicantIdFromItem =
+                              item.applicant_user_id ||
+                              item.applicantUserId ||
+                              item.user_id ||
+                              item.userId ||
+                              null;
+                            setEligibilityApplicantId(applicantIdFromItem);
+                            setEligibilityFile(null);
+                            setEligibilityFileError(null);
+                            setEligibilityError(null);
                             setEligibilityModalVisible(true);
                           }}
                         >
@@ -846,16 +869,56 @@ const WorkQueueItemsTableWidget = ({
     }
   };
 
+  const resolveApplicantUserId = async ({ caseId, fallbackApplicantId }) => {
+    if (fallbackApplicantId) return fallbackApplicantId;
+    if (!caseId) return null;
+    try {
+      const res = await apiFetch(`/api/cases/${caseId}`);
+      if (!res.ok) return null;
+      const data = await res.json().catch(() => null);
+      if (!data) return null;
+      return (
+        data.applicant_user_id ||
+        data.applicantUserId ||
+        data.applicant_id ||
+        data.applicantId ||
+        data.user_id ||
+        data.userId ||
+        null
+      );
+    } catch (_) {
+      return null;
+    }
+  };
+
   const handleEligibilitySubmit = async () => {
     const caseId = eligibilityTarget?.case_id || eligibilityTarget?.caseId;
     const applicationId = eligibilityTarget?.application_id || eligibilityTarget?.applicationId;
+    const applicantUserId =
+      eligibilityApplicantId ||
+      eligibilityTarget?.applicant_user_id ||
+      eligibilityTarget?.applicantUserId ||
+      eligibilityTarget?.user_id ||
+      eligibilityTarget?.userId ||
+      null;
     const value = selectedEligibility?.value || selectedEligibility?.label;
     if (!caseId || !value) {
       setEligibilityError('Select an eligibility value.');
       return;
     }
+    if (!eligibilityFile) {
+      setEligibilityError('Upload the EI verification document.');
+      setEligibilityFileError('Upload the EI verification document.');
+      return;
+    }
+    const resolvedApplicantId = await resolveApplicantUserId({ caseId, fallbackApplicantId: applicantUserId });
+    if (!resolvedApplicantId) {
+      setEligibilityError('Unable to determine the applicant for this upload.');
+      return;
+    }
     setEligibilitySubmitting(true);
     setEligibilityError(null);
+    setEligibilityFileError(null);
     try {
       if (applicationId) {
         await apiFetch(`/api/locks/application/${applicationId}`, {
@@ -863,6 +926,38 @@ const WorkQueueItemsTableWidget = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({})
         });
+      }
+      const formData = new FormData();
+      formData.append('file', eligibilityFile);
+      formData.append('label', 'EI Verification');
+      formData.append('documentType', 'ei_verification');
+      if (caseId) formData.append('caseId', caseId);
+      if (applicationId) formData.append('applicationId', applicationId);
+      const uploadResponse = await apiFetch(`/api/applicants/${resolvedApplicantId}/documents/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!uploadResponse || !uploadResponse.ok) {
+        let payload = null;
+        try {
+          payload = await uploadResponse.json();
+        } catch (_) {
+          payload = null;
+        }
+        const code = payload?.error;
+        if (code === 'unsupported_file_type') {
+          throw new Error('That file type is not allowed. Please upload a PDF or image.');
+        }
+        if (code === 'file_too_large') {
+          throw new Error('The file is too large to upload.');
+        }
+        if (code === 'application_required_for_document') {
+          throw new Error('Select an application before uploading this document.');
+        }
+        if (code === 'invalid_document_type') {
+          throw new Error('The EI Verification document type is not available.');
+        }
+        throw new Error('Failed to upload EI verification document.');
       }
       const response = await apiFetch(`/api/cases/${caseId}`, {
         method: 'PUT',
@@ -880,6 +975,8 @@ const WorkQueueItemsTableWidget = ({
       setEligibilityModalVisible(false);
       setEligibilityTarget(null);
       setSelectedEligibility(null);
+      setEligibilityFile(null);
+      setEligibilityApplicantId(null);
       if (typeof onRefresh === 'function') {
         onRefresh();
       }
@@ -1040,6 +1137,9 @@ const WorkQueueItemsTableWidget = ({
           setEligibilityModalVisible(false);
           setEligibilityTarget(null);
           setSelectedEligibility(null);
+          setEligibilityFile(null);
+          setEligibilityFileError(null);
+          setEligibilityApplicantId(null);
           setEligibilityError(null);
         }}
         header="Set EI Eligibility"
@@ -1051,6 +1151,9 @@ const WorkQueueItemsTableWidget = ({
                 setEligibilityModalVisible(false);
                 setEligibilityTarget(null);
                 setSelectedEligibility(null);
+                setEligibilityFile(null);
+                setEligibilityFileError(null);
+                setEligibilityApplicantId(null);
                 setEligibilityError(null);
               }}
             >
@@ -1059,7 +1162,7 @@ const WorkQueueItemsTableWidget = ({
             <Button
               variant="primary"
               loading={eligibilitySubmitting}
-              disabled={!selectedEligibility?.value}
+              disabled={!selectedEligibility?.value || !eligibilityFile || eligibilitySubmitting}
               onClick={handleEligibilitySubmit}
             >
               Save
@@ -1077,6 +1180,43 @@ const WorkQueueItemsTableWidget = ({
               filteringType="auto"
               placeholder="Select eligibility"
             />
+          </FormField>
+          <FormField label="EI Verification document" errorText={eligibilityFileError} stretch>
+            <input
+              type="file"
+              ref={eligibilityFileInputRef}
+              style={{ display: 'none' }}
+              accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+              onChange={event => {
+                const file = event?.target?.files?.[0] || null;
+                if (event?.target) {
+                  event.target.value = '';
+                }
+                if (file) {
+                  if (!ELIGIBILITY_ALLOWED_MIME_TYPES.includes(file.type)) {
+                    setEligibilityFile(null);
+                    setEligibilityFileError('Only PDF, JPG, PNG, BMP, or TIFF files are allowed.');
+                    return;
+                  }
+                  if (file.size > ELIGIBILITY_MAX_BYTES) {
+                    setEligibilityFile(null);
+                    setEligibilityFileError('File is too large (max 6 MB).');
+                    return;
+                  }
+                }
+                setEligibilityFile(file);
+                setEligibilityFileError(file ? null : eligibilityFileError);
+              }}
+            />
+            <Box variant="small" color="text-body-secondary">
+              Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
+            </Box>
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => eligibilityFileInputRef.current && eligibilityFileInputRef.current.click()}>
+                Choose file
+              </Button>
+              <Box>{eligibilityFile ? eligibilityFile.name : 'No file selected'}</Box>
+            </SpaceBetween>
           </FormField>
         </SpaceBetween>
       </Modal>

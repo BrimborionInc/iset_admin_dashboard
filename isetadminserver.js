@@ -20105,6 +20105,25 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
 
       const baseMatches = matchesForTypes(docTypes);
 
+      if (normalizedId === 'status-card-or-reference') {
+        const statusCardMatches = matchesForTypes(['status_card']);
+        const referenceMatches = matchesForTypes(['letter_of_reference']);
+        const requiredRefs = 2;
+        const hasStatusCard = statusCardMatches.length > 0;
+        const matchedCount = hasStatusCard ? requiredRefs : referenceMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, requiredRefs);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: requiredRefs,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
       // Band funding confirmation / denial split
       if (normalizedId === 'band-funding-confirmation' || normalizedId === 'band-funding-letter') {
         effectiveRequired = hasBandFunding;
