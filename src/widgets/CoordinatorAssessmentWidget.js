@@ -34,6 +34,12 @@ const requiresNocForCode = (value) => {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric >= 6 && numeric <= 13;
 };
+const requiresInstitutionForCode = (value) => {
+  if (!value) return false;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return false;
+  return new Set([4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]).has(numeric);
+};
 
 const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
 const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
@@ -153,6 +159,8 @@ const parseCurrencyInput = (value) => {
   const num = Number.parseFloat(cleaned);
   return Number.isFinite(num) ? num : null;
 };
+
+const SUPPORTING_DOCS_REFRESH_EVENT = 'iset:supporting-documents:refresh';
 
 const formatCurrencyDisplay = (value) => {
   const num = parseCurrencyInput(value);
@@ -295,6 +303,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [localAssessmentSubmitted, setLocalAssessmentSubmitted] = useState(false);
   const [checklistWarningVisible, setChecklistWarningVisible] = useState(false);
   const [checklistWarningItems, setChecklistWarningItems] = useState([]);
+  const [checklistNextAction, setChecklistNextAction] = useState(null);
   const [budgetPotOptions, setBudgetPotOptions] = useState([]);
   const [budgetPotLoading, setBudgetPotLoading] = useState(false);
   const [checklistCheckError, setChecklistCheckError] = useState(null);
@@ -379,6 +388,19 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isDeclarationGateActive = !conflictDeclarationSigned || hasDeclaredConflict;
   const eligibilitySet = Boolean(assessment.esdcEligibility);
   const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet;
+  const dispatchSupportingDocsRefresh = useCallback(() => {
+    if (typeof actions?.refreshChecklist === 'function') {
+      actions.refreshChecklist().catch(() => {});
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const detail = applicantUserId ? { applicantUserId } : undefined;
+        window.dispatchEvent(new CustomEvent(SUPPORTING_DOCS_REFRESH_EVENT, { detail }));
+      } catch (_) {
+        // ignore dispatch errors
+      }
+    }
+  }, [actions, applicantUserId]);
   useEffect(() => {
     setShowConflictAlert(true);
   }, [conflictDeclarationSigned, hasDeclaredConflict]);
@@ -411,6 +433,54 @@ const CoordinatorAssessmentWidget = forwardRef(
     () => CHILDCARE_OPTIONS.find(option => option.value === assessment.childcareNeed) || null,
     [assessment.childcareNeed]
   );
+  const hasInterventionCost = useMemo(() => {
+    const val = parseCurrencyInput(assessment.interventionCost);
+    return val !== null && Number.isFinite(val) && val > 0;
+  }, [assessment.interventionCost]);
+  const canManageBudgetPotPending = useMemo(() => {
+    const allowed = new Set(['system administrator', 'program administrator', 'regional manager']);
+    return isPendingApprovalStatus && allowed.has(normalizedRole);
+  }, [isPendingApprovalStatus, normalizedRole]);
+  const showBudgetPot = hasInterventionCost;
+  const eligibilityGridDefinition = useMemo(
+    () => showBudgetPot ? [{ colspan: 6 }, { colspan: 6 }] : [{ colspan: 6 }],
+    [showBudgetPot]
+  );
+  const requiresInstitution = useMemo(() => requiresInstitutionForCode(assessment.interventionCode), [assessment.interventionCode]);
+  const showChildcareFunding = assessment.childcareNeed === 'yes';
+  const showEndDate = Boolean(assessment.startDate);
+  const dateGridDefinition = useMemo(
+    () => showEndDate ? [{ colspan: 6 }, { colspan: 6 }] : [{ colspan: 6 }],
+    [showEndDate]
+  );
+  useEffect(() => {
+    if (requiresNoc) return;
+    setAssessment(prev => {
+      if (!prev.interventionNoc && !prev.interventionNocVersion) return prev;
+      return { ...prev, interventionNoc: '', interventionNocVersion: '' };
+    });
+  }, [requiresNoc]);
+  useEffect(() => {
+    if (requiresInstitution) return;
+    setAssessment(prev => {
+      if (!prev.institution && !prev.programName) return prev;
+      return { ...prev, institution: '', programName: '' };
+    });
+  }, [requiresInstitution]);
+  useEffect(() => {
+    if (assessment.childcareNeed === 'yes') return;
+    setAssessment(prev => {
+      if (!prev.childcareFunding) return prev;
+      return { ...prev, childcareFunding: '' };
+    });
+  }, [assessment.childcareNeed]);
+  useEffect(() => {
+    if (hasInterventionCost) return;
+    setAssessment(prev => {
+      if (!prev.interventionPotId) return prev;
+      return { ...prev, interventionPotId: '' };
+    });
+  }, [hasInterventionCost]);
   const calculatedDuration = useMemo(() => {
     const diff = calculateDurationDays(assessment.startDate, assessment.endDate);
     return diff !== null ? String(diff) : null;
@@ -803,6 +873,13 @@ const CoordinatorAssessmentWidget = forwardRef(
         nextAssessment.interventionNoc = '';
         nextAssessment.interventionNocVersion = '';
       }
+      if (field === 'interventionCode' && !requiresInstitutionForCode(value)) {
+        nextAssessment.institution = '';
+        nextAssessment.programName = '';
+      }
+      if (field === 'startDate' && !value) {
+        nextAssessment.endDate = '';
+      }
       if (hasSubmitted) {
         setFieldErrors(validateAssessment(nextAssessment));
       }
@@ -1040,6 +1117,11 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     // 5. Start Date (no longer mandatory)
     // 6. End Date (no longer mandatory)
+    const startUtc = parseIsoDateToUtc(assessment.startDate);
+    const endUtc = parseIsoDateToUtc(assessment.endDate);
+    if (startUtc !== null && endUtc !== null && endUtc < startUtc) {
+      errors.endDate = 'End date cannot be before start date.';
+    }
     // 7. Institution (no longer mandatory)
     // 8. Program Name (no longer mandatory)
     // 9. ITP/Wage: validation removed, no funding required
@@ -1084,19 +1166,56 @@ const CoordinatorAssessmentWidget = forwardRef(
         errors.interventionCost = 'Enter a valid amount in dollars.';
       }
     }
-    if (!assessment.interventionPotId) {
-      errors.interventionPotId = 'Select a budget pot.';
-    } else {
+    if (assessment.interventionPotId) {
       const potExists = budgetPotOptions.some(opt => opt?.value === assessment.interventionPotId);
       if (!potExists) {
         errors.interventionPotId = 'Select a valid budget pot.';
       }
     }
-    if (parsedInterventionCost !== null && Number.isFinite(parsedInterventionCost) && parsedInterventionCost !== 0 && !assessment.interventionPotId) {
-      errors.interventionPotId = 'Select a budget pot for the intervention cost.';
-    }
     return errors;
   };
+  const runDocumentChecklist = useCallback(
+    async (onContinue, { allowBypass = true } = {}) => {
+      if (!applicantUserId) {
+        setChecklistWarningItems([]);
+        setChecklistNextAction(null);
+        return true;
+      }
+      setChecklistCheckError(null);
+      setChecklistWarningItems([]);
+      setChecklistWarningVisible(false);
+      setChecklistNextAction(null);
+      setCheckingChecklist(true);
+      try {
+        const query = applicationId ? `?applicationId=${encodeURIComponent(applicationId)}` : '';
+        const res = await apiFetch(`/api/applicants/${applicantUserId}/document-checklist${query}`);
+        if (!res.ok) {
+          throw new Error('Failed to load document checklist.');
+        }
+        const payload = await res.json().catch(() => ({ items: [], missingRequiredCount: 0 }));
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        const missing = items.filter(i => i && i.required !== false && i.status !== 'complete');
+        if (missing.length > 0) {
+          setChecklistWarningItems(missing);
+          setChecklistWarningVisible(true);
+          if (allowBypass && typeof onContinue === 'function') {
+            setChecklistNextAction(() => onContinue);
+          } else {
+            setChecklistNextAction(null);
+          }
+          return false;
+        }
+        setChecklistNextAction(null);
+        return true;
+      } catch (err) {
+        setChecklistCheckError(err?.message || 'Checklist check failed. You may proceed.');
+        return true;
+      } finally {
+        setCheckingChecklist(false);
+      }
+    },
+    [applicantUserId, applicationId]
+  );
   const handleSubmit = async () => {
     if (lockedByAnotherUser) {
       showLockAlert({ reason: 'owned_by_other', lock: activeLock }, 'warning');
@@ -1120,135 +1239,137 @@ const CoordinatorAssessmentWidget = forwardRef(
       }, 0);
       return;
     }
-    // --- POST-VALIDATION WORKFLOW ---
-    const lockCheck = await ensureLockForOperation();
-    if (!lockCheck.ok) return;
-    const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
-    // Pull the freshest row_version before building the submit payload to avoid optimistic conflicts.
-    let latestRowVersion = applicationRowVersionState;
-    try {
-      const latest = typeof actions?.refreshCaseData === 'function' ? await actions.refreshCaseData() : null;
-      const refreshedVersion = Number(latest?.application_row_version || latest?.applicationRowVersion || 0);
-      if (refreshedVersion > 0) {
-        latestRowVersion = refreshedVersion;
-        updateRowVersion(refreshedVersion);
-        if (typeof onRowVersionUpdate === 'function') {
-          onRowVersionUpdate(refreshedVersion);
+
+    const submitAssessment = async () => {
+      // --- POST-VALIDATION WORKFLOW ---
+      const lockCheck = await ensureLockForOperation();
+      if (!lockCheck.ok) return;
+      const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
+      // Pull the freshest row_version before building the submit payload to avoid optimistic conflicts.
+      let latestRowVersion = applicationRowVersionState;
+      try {
+        const latest = typeof actions?.refreshCaseData === 'function' ? await actions.refreshCaseData() : null;
+        const refreshedVersion = Number(latest?.application_row_version || latest?.applicationRowVersion || 0);
+        if (refreshedVersion > 0) {
+          latestRowVersion = refreshedVersion;
+          updateRowVersion(refreshedVersion);
+          if (typeof onRowVersionUpdate === 'function') {
+            onRowVersionUpdate(refreshedVersion);
+          }
         }
+      } catch (_) {}
+
+      // 1. If assessment_date_of_assessment is missing, set to today (2025-06-11)
+      let dateOfAssessment = assessment.dateOfAssessment;
+      if (!dateOfAssessment) {
+        dateOfAssessment = '2025-06-11';
       }
-    } catch (_) {}
+      dateOfAssessment = formatDate(dateOfAssessment);
 
-    // 1. If assessment_date_of_assessment is missing, set to today (2025-06-11)
-    let dateOfAssessment = assessment.dateOfAssessment;
-    if (!dateOfAssessment) {
-      dateOfAssessment = '2025-06-11';
-    }
-    dateOfAssessment = formatDate(dateOfAssessment);
-
-    // 2. Save assessment (PUT /api/cases/:id)
-    const versionToken = Number(latestRowVersion || caseData?.application_row_version || 0);
-    let nextApplicationStatus = caseData?.applicationStatus || caseData?.status || null;
-    const payload = {
-      ...assessment,
-      dateOfAssessment,
-      assessment_date_of_assessment: dateOfAssessment,
-      assessment_employment_goals: assessment.employmentGoals || null,
-      assessment_previous_iset: assessment.previousISET || null,
-      assessment_previous_iset_details: assessment.previousISETDetails || null,
-      assessment_employment_barriers: assessment.barriers || null,
-      assessment_local_area_priorities: assessment.priorities || null,
-      assessment_other_funding_details: assessment.otherFunding || null,
-      assessment_esdc_eligibility: assessment.esdcEligibility || null,
-      assessment_intervention_start_date: formatDate(assessment.startDate) || null,
-      assessment_intervention_end_date: formatDate(assessment.endDate) || null,
-      assessment_institution: assessment.institution || null,
-      assessment_program_name: assessment.programName || null,
-      assessment_itp: assessment.itp || [],
-      assessment_wage: assessment.wage || [],
-      assessment_recommendation: assessment.recommendation || null,
-      assessment_justification: assessment.justification || null,
-      assessment_nwac_review: assessment.nwacReview || null,
-      assessment_nwac_reason: assessment.nwacReason || null,
-      assessment_intervention_code: assessment.interventionCode || null,
-      assessment_intervention_duration_days: assessment.interventionDuration || null,
+      // 2. Save assessment (PUT /api/cases/:id)
+      const versionToken = Number(latestRowVersion || caseData?.application_row_version || 0);
+      let nextApplicationStatus = caseData?.applicationStatus || caseData?.status || null;
+      const payload = {
+        ...assessment,
+        dateOfAssessment,
+        assessment_date_of_assessment: dateOfAssessment,
+        assessment_employment_goals: assessment.employmentGoals || null,
+        assessment_previous_iset: assessment.previousISET || null,
+        assessment_previous_iset_details: assessment.previousISETDetails || null,
+        assessment_employment_barriers: assessment.barriers || null,
+        assessment_local_area_priorities: assessment.priorities || null,
+        assessment_other_funding_details: assessment.otherFunding || null,
+        assessment_esdc_eligibility: assessment.esdcEligibility || null,
+        assessment_intervention_start_date: formatDate(assessment.startDate) || null,
+        assessment_intervention_end_date: formatDate(assessment.endDate) || null,
+        assessment_institution: assessment.institution || null,
+        assessment_program_name: assessment.programName || null,
+        assessment_itp: assessment.itp || [],
+        assessment_wage: assessment.wage || [],
+        assessment_recommendation: assessment.recommendation || null,
+        assessment_justification: assessment.justification || null,
+        assessment_nwac_review: assessment.nwacReview || null,
+        assessment_nwac_reason: assessment.nwacReason || null,
+        assessment_intervention_code: assessment.interventionCode || null,
+        assessment_intervention_duration_days: assessment.interventionDuration || null,
         assessment_intervention_cost_total: (() => {
           const val = parseCurrencyInput(assessment.interventionCost);
           return val !== null ? String(val) : null;
         })(),
-      assessment_intervention_pot_id: assessment.interventionPotId || null,
-      assessment_intervention_related_noc: assessment.interventionNoc || null,
-      assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
-      assessment_childcare_need: assessment.childcareNeed || null,
-      assessment_childcare_funding_details: assessment.childcareFunding || null,
-      case_summary: assessment.overview || null
-    };
-    if (!APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus)) {
-      payload.status = 'pending_approval';
-      payload.applicationStatus = 'pending_approval';
-      nextApplicationStatus = 'pending_approval';
-    }
-    const requestBody = { ...payload };
-    if (versionToken > 0) {
-      requestBody.expectedRowVersion = versionToken;
-    }
-    try {
-      // Save assessment
-      const res = await apiFetch(`/api/cases/${caseData.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      });
-      let result = null;
+        assessment_intervention_pot_id: assessment.interventionPotId || null,
+        assessment_intervention_related_noc: assessment.interventionNoc || null,
+        assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
+        assessment_childcare_need: assessment.childcareNeed || null,
+        assessment_childcare_funding_details: assessment.childcareFunding || null,
+        case_summary: assessment.overview || null
+      };
+      if (!APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus)) {
+        payload.status = 'pending_approval';
+        payload.applicationStatus = 'pending_approval';
+        nextApplicationStatus = 'pending_approval';
+      }
+      const requestBody = { ...payload };
+      if (versionToken > 0) {
+        requestBody.expectedRowVersion = versionToken;
+      }
       try {
-        result = await res.json();
-      } catch (_) {
-        result = null;
-      }
-      if (res.status === 423) {
-        showLockAlert({ reason: result?.reason || result?.error, lock: result?.lock });
-        setIsEditingAssessment(false);
-        releaseLock({ silent: true }).catch(() => {});
-        return;
-      }
-      if (res.status === 409) {
-        const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
-        if (latestVersion) updateRowVersion(latestVersion);
-        if (typeof actions?.refreshCaseData === 'function') {
-          try {
-            await actions.refreshCaseData();
-          } catch (_) {}
-        }
-        setIsEditingAssessment(false);
-        setAlert({
-          type: 'warning',
-          content: 'Another user updated this assessment. The latest data has been reloaded; review it and try again.',
-          dismissible: true,
-          statusIconAriaLabel: 'Warning'
+        // Save assessment
+        const res = await apiFetch(`/api/cases/${caseData.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
         });
-        scrollAfterAction();
-        releaseLock({ silent: true }).catch(() => {});
-        return;
-      }
-      if (!res.ok || !result?.success) {
-        throw new Error(result?.error || 'Failed to save assessment.');
-      }
-      const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
-      if (updatedRowVersion) {
-        updateRowVersion(updatedRowVersion);
-      }
+        let result = null;
+        try {
+          result = await res.json();
+        } catch (_) {
+          result = null;
+        }
+        if (res.status === 423) {
+          showLockAlert({ reason: result?.reason || result?.error, lock: result?.lock });
+          setIsEditingAssessment(false);
+          releaseLock({ silent: true }).catch(() => {});
+          return;
+        }
+        if (res.status === 409) {
+          const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
+          if (latestVersion) updateRowVersion(latestVersion);
+          if (typeof actions?.refreshCaseData === 'function') {
+            try {
+              await actions.refreshCaseData();
+            } catch (_) {}
+          }
+          setIsEditingAssessment(false);
+          setAlert({
+            type: 'warning',
+            content: 'Another user updated this assessment. The latest data has been reloaded; review it and try again.',
+            dismissible: true,
+            statusIconAriaLabel: 'Warning'
+          });
+          scrollAfterAction();
+          releaseLock({ silent: true }).catch(() => {});
+          return;
+        }
+        if (!res.ok || !result?.success) {
+          throw new Error(result?.error || 'Failed to save assessment.');
+        }
+        const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
+        if (updatedRowVersion) {
+          updateRowVersion(updatedRowVersion);
+        }
 
-      // 3. Reload caseData (to update status, etc.)
+        // 3. Reload caseData (to update status, etc.)
       const fallbackUpdates = {
         status: payload.status ?? caseData?.status ?? null,
         statusRaw: payload.status ?? caseData?.status ?? null,
         applicationStatus: payload.applicationStatus ?? nextApplicationStatus ?? caseData?.applicationStatus ?? null,
       };
-      if (updatedRowVersion) {
-        fallbackUpdates.application_row_version = updatedRowVersion;
-      }
-      if (typeof onCaseUpdate === 'function') {
-        onCaseUpdate(fallbackUpdates);
-      }
+        if (updatedRowVersion) {
+          fallbackUpdates.application_row_version = updatedRowVersion;
+        }
+        if (typeof onCaseUpdate === 'function') {
+          onCaseUpdate(fallbackUpdates);
+        }
       if (typeof actions?.refreshCaseData === 'function') {
         try {
           await actions.refreshCaseData();
@@ -1256,26 +1377,32 @@ const CoordinatorAssessmentWidget = forwardRef(
           // ignore refresh errors, fallback already applied
         }
       }
+      dispatchSupportingDocsRefresh();
       setIsEditingAssessment(false);
       setShowNWACSection(true);
       setLocalAssessmentSubmitted(true);
       setFieldErrors({});
       setHasSubmitted(false);
-      scrollAfterAction();
-      setAlert({
-        type: 'success',
-        content: 'Assessment submitted successfully. Application status moved to Pending Approval. Complete the outcome notice to finish the review.',
-        dismissible: true,
-        statusIconAriaLabel: 'Success'
-      });
-      setValidationAlert(null);
-      if (releaseAfterSuccess) {
-        releaseLock({ silent: true }).catch(() => {});
+        scrollAfterAction();
+        setAlert({
+          type: 'success',
+          content: 'Assessment submitted successfully. Application status moved to Pending Approval. Complete the outcome notice to finish the review.',
+          dismissible: true,
+          statusIconAriaLabel: 'Success'
+        });
+        setValidationAlert(null);
+        if (releaseAfterSuccess) {
+          releaseLock({ silent: true }).catch(() => {});
+        }
+      } catch (err) {
+        setAlert({ type: 'error', content: err.message || 'Failed to submit assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
+        scrollAfterAction();
       }
-    } catch (err) {
-      setAlert({ type: 'error', content: err.message || 'Failed to submit assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
-      scrollAfterAction();
-    }
+    };
+
+    const checklistOk = await runDocumentChecklist(submitAssessment, { allowBypass: false });
+    if (!checklistOk) return;
+    await submitAssessment();
   };
 
   // Enhanced handleItp and handleWage to clear funding error if valid
@@ -1448,6 +1575,37 @@ const CoordinatorAssessmentWidget = forwardRef(
     return errors;
   };
 
+  const validateOutcomeBeforeApprove = () => {
+    setHasSubmitted(true);
+    setValidationAlert(null);
+    const errors = validateNWACReview(assessment);
+    let costForPotValidation = null;
+    if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
+      costForPotValidation = parseCurrencyInput(assessment.interventionCost);
+      if (costForPotValidation === null || !Number.isFinite(costForPotValidation) || costForPotValidation < 0) {
+        errors.interventionCost = 'Enter a valid amount in dollars.';
+      }
+    }
+    if (costForPotValidation !== null && Number.isFinite(costForPotValidation) && costForPotValidation !== 0 && !assessment.interventionPotId) {
+      errors.interventionPotId = 'Select a budget pot for the intervention cost.';
+    }
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setValidationAlert([...new Set(Object.values(errors))]);
+      setTimeout(() => {
+        const firstErrorField = document.querySelector('[data-error-focus="true"]');
+        if (firstErrorField) {
+          firstErrorField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (typeof firstErrorField.focus === 'function') {
+            firstErrorField.focus();
+          }
+        }
+      }, 0);
+      return false;
+    }
+    return true;
+  };
+
   const handleComplete = async () => {
     if (!isPendingApprovalStatus) {
       return;
@@ -1578,6 +1736,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           // ignore refresh errors, fallback already applied
         }
       }
+      dispatchSupportingDocsRefresh();
       setIsEditingAssessment(false);
       setShowEditConfirmModal(false);
       setShowApproveConfirmModal(false);
@@ -1607,34 +1766,17 @@ const CoordinatorAssessmentWidget = forwardRef(
   };
 
   const handleApproveClick = async () => {
-    if (!isPendingApprovalStatus || !canManageOutcomeReview) {
-      return handleComplete();
-    }
-    if (!applicantUserId) {
-      return handleComplete();
-    }
-    setChecklistCheckError(null);
-    setCheckingChecklist(true);
-    try {
-      const query = applicationId ? `?applicationId=${encodeURIComponent(applicationId)}` : '';
-      const res = await apiFetch(`/api/applicants/${applicantUserId}/document-checklist${query}`);
-      if (!res.ok) {
-        throw new Error('Failed to load document checklist.');
+    const outcomeValid = validateOutcomeBeforeApprove();
+    if (!outcomeValid) return;
+    const requiresChecklist = assessment.nwacReviewStatus === 'approve';
+    if (requiresChecklist) {
+      const checklistOk = await runDocumentChecklist(handleComplete, { allowBypass: true });
+      if (checklistOk) {
+        await handleComplete();
       }
-      const payload = await res.json().catch(() => ({ items: [], missingRequiredCount: 0 }));
-      const items = Array.isArray(payload.items) ? payload.items : [];
-      const missing = items.filter(i => i && i.required !== false && i.status !== 'complete');
-      if (missing.length > 0) {
-        setChecklistWarningItems(missing);
-        setChecklistWarningVisible(true);
-        setCheckingChecklist(false);
-        return;
-      }
-    } catch (err) {
-      setChecklistCheckError(err?.message || 'Checklist check failed. You may proceed.');
+    } else {
+      await handleComplete();
     }
-    setCheckingChecklist(false);
-    await handleComplete();
   };
 
   const headerElement = (
@@ -2021,11 +2163,11 @@ const CoordinatorAssessmentWidget = forwardRef(
         </>
         )}
         {sectionHeader('ESDC Eligibility')}
-        <Grid gridDefinition={[{ colspan: 6 }]}>
+        <Grid gridDefinition={eligibilityGridDefinition}>
           <FormField
             label="Eligibility"
             errorText={hasSubmitted && fieldErrors.esdcEligibility ? fieldErrors.esdcEligibility : undefined}
-            description="Select the client's eligibility category for ESDC funding. Only program admins may set this."
+            description="Select the client's eligibility category for ESDC funding."
           >
             <Select
               selectedOption={ESDC_OPTIONS.find(o => o.value === assessment.esdcEligibility) || null}
@@ -2038,6 +2180,30 @@ const CoordinatorAssessmentWidget = forwardRef(
               disabled={isEligibilityDisabled}
             />
           </FormField>
+          {showBudgetPot && (
+            <FormField
+              label="Budget Pot"
+              description="Assign the pot that will fund this intervention."
+              errorText={hasSubmitted && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
+            >
+              <Select
+                placeholder={
+                  !hasInterventionCost
+                    ? 'Not assigned for zero-cost interventions'
+                    : budgetPotLoading
+                      ? 'Loading budget pots'
+                      : 'Select budget pot'
+                }
+                selectedOption={selectedBudgetPotOption}
+                options={budgetPotOptions}
+                statusType={budgetPotLoading ? 'loading' : 'finished'}
+                loadingText="Loading budget pots"
+                onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
+                data-error-focus={hasSubmitted && fieldErrors.interventionPotId ? 'true' : undefined}
+                disabled={(!canManageBudgetPotPending && isAssessmentDisabled) || !hasInterventionCost}
+              />
+            </FormField>
+          )}
         </Grid>
         {!eligibilitySet && <Box margin={{ bottom: 'l' }} />}
         {sectionHeader('Assessment Overview')}
@@ -2160,94 +2326,127 @@ const CoordinatorAssessmentWidget = forwardRef(
             />
           </FormField>
         </Grid>
-        <Grid gridDefinition={[{ colspan: 12 }]}>
-          <FormField
-            label="Childcare Funding Details (optional)"
-            description="Provide any known childcare supports (existing or requested)."
-          >
-            <Textarea
-              value={assessment.childcareFunding || ''}
-              onChange={({ detail }) => handleField('childcareFunding', detail.value)}
-              disabled={isAssessmentDisabled}
-            />
-          </FormField>
-        </Grid>
-        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
+        {showChildcareFunding && (
+          <Grid gridDefinition={[{ colspan: 12 }]}>
+            <FormField
+              label="Childcare Funding Details (optional)"
+              description="Provide any known childcare supports (existing or requested)."
+            >
+              <Textarea
+                value={assessment.childcareFunding || ''}
+                onChange={({ detail }) => handleField('childcareFunding', detail.value)}
+                disabled={isAssessmentDisabled || assessment.childcareNeed !== 'yes'}
+              />
+            </FormField>
+          </Grid>
+        )}
+        <Grid gridDefinition={dateGridDefinition}> 
           <FormField label="Start Date" errorText={hasSubmitted && fieldErrors.startDate ? fieldErrors.startDate : undefined}
             description="Enter the planned start date for the intervention or training.">
             <DatePicker onChange={({ detail }) => handleField('startDate', detail.value)} value={assessment.startDate} ariaLabel="Start Date" data-error-focus={hasSubmitted && fieldErrors.startDate ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
           </FormField>
-          <FormField label="End Date" errorText={hasSubmitted && fieldErrors.endDate ? fieldErrors.endDate : undefined}
-            description="Enter the planned end date for the intervention or training.">
-            <DatePicker onChange={({ detail }) => handleField('endDate', detail.value)} value={assessment.endDate} ariaLabel="End Date" data-error-focus={hasSubmitted && fieldErrors.endDate ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
-          </FormField>
+          {showEndDate && (
+            <FormField label="End Date" errorText={hasSubmitted && fieldErrors.endDate ? fieldErrors.endDate : undefined}
+              description="Enter the planned end date for the intervention or training.">
+              <DatePicker
+                onChange={({ detail }) => handleField('endDate', detail.value)}
+                value={assessment.endDate}
+                ariaLabel="End Date"
+                data-error-focus={hasSubmitted && fieldErrors.endDate ? 'true' : undefined}
+                tabIndex={-1}
+                readOnly={isAssessmentDisabled || !assessment.startDate}
+                disabled={isAssessmentDisabled || !assessment.startDate}
+                placeholder={assessment.startDate ? undefined : 'Set a start date first'}
+              />
+            </FormField>
+          )}
         </Grid>
-        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
-          <FormField label="Training Institution/Employer" errorText={hasSubmitted && fieldErrors.institution ? fieldErrors.institution : undefined}
-            description="Provide the training institution or employer, if applicable.">
-            <Input value={assessment.institution} onChange={({ detail }) => handleField('institution', detail.value)} ariaLabel="Training Institution/Employer" data-error-focus={hasSubmitted && fieldErrors.institution ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
-          </FormField>
-          <FormField label="Program Name" errorText={hasSubmitted && fieldErrors.programName ? fieldErrors.programName : undefined}
-            description="Enter the program or position name, if known.">
-            <Input value={assessment.programName} onChange={({ detail }) => handleField('programName', detail.value)} ariaLabel="Program Name" data-error-focus={hasSubmitted && fieldErrors.programName ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
-          </FormField>
-        </Grid>
-        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-          <FormField
-            label="NOC Version"
-            description="Required only when the intervention code is 6–13."
-            errorText={hasSubmitted && fieldErrors.interventionNocVersion ? fieldErrors.interventionNocVersion : undefined}
-          >
-            <Select
-              selectedOption={selectedNocVersionOption}
-              onChange={({ detail }) => handleField('interventionNocVersion', detail.selectedOption?.value || '')}
-              options={nocVersions}
-              placeholder={nocVersionsLoading ? 'Loading NOC versions...' : 'Select NOC version'}
-              statusType={nocVersionsLoading ? 'loading' : 'finished'}
-              filteringType="auto"
-              data-error-focus={hasSubmitted && fieldErrors.interventionNocVersion ? 'true' : undefined}
-              disabled={isAssessmentDisabled || nocVersionsLoading}
-            />
-          </FormField>
-          <FormField
-            label="NOC Code"
-            description={requiresNoc ? 'Search by code or title to select the appropriate NOC.' : 'Optional unless the intervention code is 6–13.'}
-            errorText={hasSubmitted && fieldErrors.interventionNoc ? fieldErrors.interventionNoc : undefined}
-          >
-            <Autosuggest
-              value={assessment.interventionNoc || ''}
-              onChange={({ detail }) => {
-                const inputValue = detail.value || '';
-                handleField('interventionNoc', inputValue);
-                if (inputValue.length >= 2) {
-                  fetchNocSuggestions(inputValue);
-                } else {
-                  setNocSuggestions([]);
+        {requiresInstitution && (
+          <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
+            <FormField label="Training Institution/Employer" errorText={hasSubmitted && fieldErrors.institution ? fieldErrors.institution : undefined}
+              description="Provide the training institution or employer, if applicable.">
+              <Input
+                value={assessment.institution}
+                onChange={({ detail }) => handleField('institution', detail.value)}
+                ariaLabel="Training Institution/Employer"
+                data-error-focus={hasSubmitted && fieldErrors.institution ? 'true' : undefined}
+                tabIndex={-1}
+                readOnly={isAssessmentDisabled || !requiresInstitution}
+                disabled={isAssessmentDisabled || !requiresInstitution}
+              />
+            </FormField>
+            <FormField label="Program Name" errorText={hasSubmitted && fieldErrors.programName ? fieldErrors.programName : undefined}
+              description="Enter the program or position name, if known.">
+              <Input
+                value={assessment.programName}
+                onChange={({ detail }) => handleField('programName', detail.value)}
+                ariaLabel="Program Name"
+                data-error-focus={hasSubmitted && fieldErrors.programName ? 'true' : undefined}
+                tabIndex={-1}
+                readOnly={isAssessmentDisabled || !requiresInstitution}
+                disabled={isAssessmentDisabled || !requiresInstitution}
+              />
+            </FormField>
+          </Grid>
+        )}
+        {requiresNoc && (
+          <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+            <FormField
+              label="NOC Version"
+              description="Required only when the intervention code is 6–13."
+              errorText={hasSubmitted && fieldErrors.interventionNocVersion ? fieldErrors.interventionNocVersion : undefined}
+            >
+              <Select
+                selectedOption={selectedNocVersionOption}
+                onChange={({ detail }) => handleField('interventionNocVersion', detail.selectedOption?.value || '')}
+                options={nocVersions}
+                placeholder={nocVersionsLoading ? 'Loading NOC versions...' : 'Select NOC version'}
+                statusType={nocVersionsLoading ? 'loading' : 'finished'}
+                filteringType="auto"
+                data-error-focus={hasSubmitted && fieldErrors.interventionNocVersion ? 'true' : undefined}
+                disabled={!requiresNoc || isAssessmentDisabled || nocVersionsLoading}
+              />
+            </FormField>
+            <FormField
+              label="NOC Code"
+              description={requiresNoc ? 'Search by code or title to select the appropriate NOC.' : 'Optional unless the intervention code is 6–13.'}
+              errorText={hasSubmitted && fieldErrors.interventionNoc ? fieldErrors.interventionNoc : undefined}
+            >
+              <Autosuggest
+                value={assessment.interventionNoc || ''}
+                onChange={({ detail }) => {
+                  const inputValue = detail.value || '';
+                  handleField('interventionNoc', inputValue);
+                  if (inputValue.length >= 2) {
+                    fetchNocSuggestions(inputValue);
+                  } else {
+                    setNocSuggestions([]);
+                  }
+                }}
+                onSelect={({ detail }) => handleField('interventionNoc', detail.value || '')}
+                onLoadItems={({ detail }) => {
+                  if (detail.filteringText) {
+                    fetchNocSuggestions(detail.filteringText);
+                  }
+                }}
+                options={nocSuggestions}
+                statusType={nocSuggestionsLoading ? 'loading' : 'finished'}
+                expandToViewport
+                placeholder={
+                  requiresNoc
+                    ? assessment.interventionNocVersion
+                      ? 'Type to search NOC code'
+                      : 'Select a NOC version first'
+                    : 'Not required'
                 }
-              }}
-              onSelect={({ detail }) => handleField('interventionNoc', detail.value || '')}
-              onLoadItems={({ detail }) => {
-                if (detail.filteringText) {
-                  fetchNocSuggestions(detail.filteringText);
-                }
-              }}
-              options={nocSuggestions}
-              statusType={nocSuggestionsLoading ? 'loading' : 'finished'}
-              expandToViewport
-              placeholder={
-                requiresNoc
-                  ? assessment.interventionNocVersion
-                    ? 'Type to search NOC code'
-                    : 'Select a NOC version first'
-                  : 'Not required'
-              }
-              empty={requiresNoc ? 'No NOC codes found.' : 'NOC selection not required.'}
-              disabled={!requiresNoc || isAssessmentDisabled || !assessment.interventionNocVersion}
-              enteredTextLabel={value => `Use "${value}"`}
-              data-error-focus={hasSubmitted && fieldErrors.interventionNoc ? 'true' : undefined}
-            />
-          </FormField>
-        </Grid>
+                empty={requiresNoc ? 'No NOC codes found.' : 'NOC selection not required.'}
+                disabled={!requiresNoc || isAssessmentDisabled || !assessment.interventionNocVersion}
+                enteredTextLabel={value => `Use "${value}"`}
+                data-error-focus={hasSubmitted && fieldErrors.interventionNoc ? 'true' : undefined}
+              />
+            </FormField>
+          </Grid>
+        )}
         <Box margin={{ top: 'l', bottom: 's' }}>
           <Header variant="h3">Individual Training Purchase (ITP)</Header>
         </Box>
@@ -2412,24 +2611,6 @@ const CoordinatorAssessmentWidget = forwardRef(
             />
           </FormField>
         </Grid>
-        <Grid gridDefinition={[{ colspan: 12 }]}>
-          <FormField
-            label="Budget Pot"
-            description="Assign the pot that will fund this intervention."
-            errorText={hasSubmitted && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
-          >
-            <Select
-              placeholder={budgetPotLoading ? 'Loading budget pots' : 'Select budget pot'}
-              selectedOption={selectedBudgetPotOption}
-              options={budgetPotOptions}
-              statusType={budgetPotLoading ? 'loading' : 'finished'}
-              loadingText="Loading budget pots"
-              onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
-              data-error-focus={hasSubmitted && fieldErrors.interventionPotId ? 'true' : undefined}
-              disabled={isAssessmentDisabled}
-            />
-          </FormField>
-        </Grid>
 
         {!assessmentSubmitted && renderRecommendationSection()}
         <Modal
@@ -2447,14 +2628,37 @@ const CoordinatorAssessmentWidget = forwardRef(
         </Modal>
         <Modal
           visible={checklistWarningVisible}
-          onDismiss={() => setChecklistWarningVisible(false)}
+          onDismiss={() => {
+            setChecklistWarningVisible(false);
+            setChecklistNextAction(null);
+          }}
           header="Checklist incomplete"
           footer={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="primary" onClick={() => { setChecklistWarningVisible(false); handleComplete(); }}>
-                Continue anyway
+              {typeof checklistNextAction === 'function' ? (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setChecklistWarningVisible(false);
+                    const next = checklistNextAction;
+                    setChecklistNextAction(null);
+                    if (typeof next === 'function') {
+                      next();
+                    }
+                  }}
+                >
+                  Continue anyway
+                </Button>
+              ) : null}
+              <Button
+                variant="normal"
+                onClick={() => {
+                  setChecklistWarningVisible(false);
+                  setChecklistNextAction(null);
+                }}
+              >
+                Close
               </Button>
-              <Button variant="normal" onClick={() => setChecklistWarningVisible(false)}>Cancel</Button>
             </SpaceBetween>
           }
         >

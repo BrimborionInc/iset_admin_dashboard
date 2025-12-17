@@ -304,12 +304,13 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       const targetApplicant = event?.detail?.applicantUserId;
       if (targetApplicant && targetApplicant !== applicantUserId) return;
       loadDocuments({ silent: true });
+      loadChecklist();
     };
     window.addEventListener(REFRESH_EVENT, handler);
     return () => {
       window.removeEventListener(REFRESH_EVENT, handler);
     };
-  }, [applicantUserId, loadDocuments]);
+  }, [applicantUserId, loadDocuments, loadChecklist]);
 
   const handleViewDocument = useCallback(
     async item => {

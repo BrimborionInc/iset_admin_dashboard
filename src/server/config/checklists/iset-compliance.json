@@ -5,7 +5,7 @@
   "items": [
     {
       "id": "client-application",
-      "label": "Completed Client Application (submitted)",
+      "label": "Completed Client Application",
       "required": true,
       "documentTypes": ["application_form"],
       "sources": ["application_form"]
@@ -19,7 +19,7 @@
     },
     {
       "id": "ei-verification",
-      "label": "EI Eligibility Verification (coordinator request)",
+      "label": "EI Eligibility Verification",
       "required": true,
       "documentTypes": ["ei_verification"],
       "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
@@ -27,9 +27,9 @@
     },
     {
       "id": "indigenous-declaration",
-      "label": "Indigenous Self-Declaration (intake form) and/or two reference letters",
+      "label": "Indigenous Self-Declaration",
       "required": true,
-      "documentTypes": ["indigenous_declaration", "identity_document"],
+      "documentTypes": ["indigenous_declaration"],
       "sources": ["application_form", "application_submission", "manual_upload", "secure_message_attachment"],
       "notes": "Two reference letters acceptable when no Status/Treaty card."
     },
@@ -41,18 +41,24 @@
       "sources": ["application_form"]
     },
     {
-      "id": "identity-two-ids",
-      "label": "Two pieces of ID (front/back)",
+      "id": "identity-document",
+      "label": "Identity Document (government ID)",
       "required": true,
       "documentTypes": ["identity_document"],
-      "minCount": 2,
       "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
     },
     {
-      "id": "band-letter",
-      "label": "Band funding confirmation or denial letter",
+      "id": "band-funding-confirmation",
+      "label": "Band Funding Confirmation Letter",
       "required": true,
-      "documentTypes": ["band_funding_confirmation", "band_funding_denial"],
+      "documentTypes": ["band_funding_confirmation"],
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+    },
+    {
+      "id": "band-funding-denial",
+      "label": "Band Funding Denial Letter",
+      "required": true,
+      "documentTypes": ["band_funding_denial"],
       "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
     },
     {
@@ -70,7 +76,7 @@
       "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
     },
     {
-      "id": "acknowledgement",
+      "id": "client-acknowledgement",
       "label": "Client Acknowledgement of Funding Source (signed/dated)",
       "required": true,
       "documentTypes": ["client_acknowledgement"],
@@ -98,23 +104,23 @@
       "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
     },
     {
-      "id": "income-evidence",
-      "label": "Income verification (self/spouse: last 3 pay stubs, CTB, ROE, T4s, etc.)",
+      "id": "financial-records",
+      "label": "Financial Records (income evidence)",
       "required": true,
-      "documentTypes": ["financial_records", "financial_evidence"],
+      "documentTypes": ["financial_records"],
       "minCount": 3,
       "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
     },
     {
-      "id": "expense-evidence",
-      "label": "Expense verification (lease/mortgage; 3 months utilities; childcare, etc.)",
+      "id": "financial-evidence",
+      "label": "Financial Evidence (expenses / supporting)",
       "required": true,
       "documentTypes": ["financial_evidence"],
       "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
     },
     {
-      "id": "social-assistance-letter",
-      "label": "Social Assistance letter from Case Manager (for top-up, if applicable)",
+      "id": "supporting-evidence",
+      "label": "Supporting Evidence (e.g. Social Assistance letter)",
       "required": false,
       "documentTypes": ["supporting_evidence"],
       "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
@@ -127,7 +133,7 @@
       "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
     },
     {
-      "id": "case-manager-assessment",
+      "id": "case-assessment",
       "label": "Case Manager Assessment (summary/recommendation)",
       "required": true,
       "documentTypes": ["case_assessment"],
@@ -141,8 +147,8 @@
       "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
     },
     {
-      "id": "attendance-forms",
-      "label": "Monthly Attendance Forms (one per living allowance month)",
+      "id": "attendance-form",
+      "label": "Attendance Form",
       "required": true,
       "documentTypes": ["attendance_form"],
       "minCount": 1,

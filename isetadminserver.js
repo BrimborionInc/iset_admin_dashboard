@@ -113,7 +113,7 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
     let caseMeta = { status: null, application_status: null };
     if (applicationId) {
       const [[app]] = await pool.query(
-        `SELECT a.id, a.payload_json, a.submission_id, s.user_id, s.intake_payload, s.status AS submission_status, s.submitted_at
+        `SELECT a.id, a.payload_json, a.submission_id, a.status AS application_status, s.user_id, s.intake_payload, s.status AS submission_status, s.submitted_at
            FROM iset_application a
            LEFT JOIN iset_application_submission s ON s.id = a.submission_id
           WHERE a.id = ?
@@ -131,7 +131,7 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
     }
     if (!row && applicantId) {
       const [[app]] = await pool.query(
-        `SELECT a.id, a.payload_json, a.submission_id, s.user_id, s.intake_payload, s.status AS submission_status, s.submitted_at
+        `SELECT a.id, a.payload_json, a.submission_id, a.status AS application_status, s.user_id, s.intake_payload, s.status AS submission_status, s.submitted_at
            FROM iset_application a
            LEFT JOIN iset_application_submission s ON s.id = a.submission_id
           WHERE s.user_id = ?
@@ -150,8 +150,10 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
     }
     if (caseRow) {
       caseMeta.status = caseRow.status || null;
-      caseMeta.application_status = caseRow.status || null;
     }
+    const applicationStatusFromApplication = row?.application_status || null;
+    const applicationStatusFromCase = caseRow?.status || null;
+    caseMeta.application_status = applicationStatusFromApplication || applicationStatusFromCase || null;
     if (!row) return { answers: null, applicationId: null, submissionStatus: null, submittedAt: null, caseId: null, assessmentSubmitted: false, assessmentComplete: false, caseStatus: null, applicationStatus: null };
     let payload = row.payload_json;
     if (typeof payload === 'string') {
@@ -173,12 +175,14 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
     let assessmentComplete = false;
     let assessmentLivingAllowance = 0;
     let assessmentDurationDays = null;
+    let assessmentCostTotal = null;
+    let assessmentHasTrainingCosts = false;
     let disabilitySupportRequested = false;
     const caseId = caseRow?.id || null;
     if (caseId) {
       try {
         const [[assess]] = await pool.query(
-          'SELECT recommendation, date_of_assessment, itp_payload, intervention_duration_days, itp_payload FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
+          'SELECT recommendation, date_of_assessment, itp_payload, intervention_duration_days, intervention_cost_total FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
           [caseId]
         );
         assessmentSubmitted = !!assess;
@@ -187,6 +191,9 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
           const hasDate = assess.date_of_assessment !== null && assess.date_of_assessment !== undefined;
           assessmentComplete = hasRecommendation && hasDate;
           assessmentDurationDays = Number(assess.intervention_duration_days) || null;
+          assessmentCostTotal = Number.isFinite(Number(assess.intervention_cost_total))
+            ? Number(assess.intervention_cost_total)
+            : null;
           try {
             let itp = assess.itp_payload;
             if (typeof itp === 'string') {
@@ -199,6 +206,17 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
                 if (cat.includes('living') && cat.includes('allowance') && Number.isFinite(amt)) {
                   assessmentLivingAllowance += amt;
                 }
+                if (
+                  Number.isFinite(amt) &&
+                  amt > 0 &&
+                  (cat.includes('tuition') ||
+                    cat.includes('book') ||
+                    cat.includes('material') ||
+                    cat.includes('equipment') ||
+                    cat.includes('fee'))
+                ) {
+                  assessmentHasTrainingCosts = true;
+                }
                 if (cat.includes('disability') && Number.isFinite(amt) && amt > 0) {
                   disabilitySupportRequested = true;
                 }
@@ -207,6 +225,7 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
           } catch (_) {
             assessmentLivingAllowance = 0;
             disabilitySupportRequested = false;
+            assessmentHasTrainingCosts = false;
           }
         }
       } catch (_) {
@@ -214,9 +233,69 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
         assessmentComplete = false;
         assessmentLivingAllowance = 0;
         assessmentDurationDays = null;
+        assessmentCostTotal = null;
+        assessmentHasTrainingCosts = false;
         disabilitySupportRequested = false;
       }
     }
+    const numericFromAnswers = (keys = []) => {
+      if (!Array.isArray(keys)) return null;
+      for (const key of keys) {
+        const raw = normalizedAnswers && normalizedAnswers[key];
+        const value = Array.isArray(raw) ? raw[0] : raw;
+        if (value === null || typeof value === 'undefined') continue;
+        const num = Number.parseFloat(
+          typeof value === 'string' ? value.replace(/[^0-9.+-]/g, '') : value
+        );
+        if (Number.isFinite(num)) return num;
+      }
+      return null;
+    };
+    const bandFundingAmount = numericFromAnswers(['income-band-funding', 'income_band_funding', 'income-band-funding-amount']);
+    const socialAssistanceAmount = numericFromAnswers(['income-social-assistance', 'income_social_assistance', 'income-social-assistance-amount']);
+    const targetProgramValueRaw = normalizedAnswers?.['target-program'] || normalizedAnswers?.['target_program'] || null;
+    const targetProgramValue = Array.isArray(targetProgramValueRaw)
+      ? String(targetProgramValueRaw[0] || '').toLowerCase()
+      : String(targetProgramValueRaw || '').toLowerCase();
+    const incomeKeys = [
+      'income-employment',
+      'income_employment',
+      'income-employment_spousal',
+      'income-spousal',
+      'income_spousal',
+      'income-other',
+      'income_other',
+      'income-band-funding',
+      'income_band_funding',
+      'income-social-assistance',
+      'income_social_assistance'
+    ];
+    const expenseKeys = [
+      'expenses-rent',
+      'expenses_rent',
+      'expenses-lease',
+      'expenses_lease',
+      'expenses-mortgage',
+      'expenses_mortgage',
+      'expenses-electricity',
+      'expenses_electricity',
+      'expenses-utilities',
+      'expenses_utilities',
+      'expenses-transportation',
+      'expenses_transportation',
+      'expenses-childcare',
+      'expenses_childcare',
+      'expenses-other',
+      'expenses_other'
+    ];
+    const sumValues = keys => keys.reduce((sum, key) => {
+      const val = numericFromAnswers([key]);
+      return Number.isFinite(val) ? sum + val : sum;
+    }, 0);
+    const totalIncome = sumValues(incomeKeys);
+    const totalExpenses = sumValues(expenseKeys);
+    const hasIncome = totalIncome > 0;
+    const hasExpenses = totalExpenses > 0;
     return {
       answers: normalizedAnswers,
       applicationId: row.id || null,
@@ -229,11 +308,38 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
       applicationStatus: caseMeta.application_status || null,
       assessmentLivingAllowance,
       assessmentDurationDays,
-      disabilitySupportRequested
+      assessmentCostTotal,
+      assessmentHasTrainingCosts,
+      disabilitySupportRequested,
+      bandFundingAmount,
+      socialAssistanceAmount,
+      hasIncome,
+      hasExpenses,
+      targetProgramValue
     };
   } catch (err) {
     console.warn('[checklist] failed to load application answers', err?.message || err);
-    return { answers: null, applicationId: null, submissionStatus: null, submittedAt: null, caseId: null, assessmentSubmitted: false, assessmentComplete: false, caseStatus: null, applicationStatus: null };
+    return {
+      answers: null,
+      applicationId: null,
+      submissionStatus: null,
+      submittedAt: null,
+      caseId: null,
+      assessmentSubmitted: false,
+      assessmentComplete: false,
+      caseStatus: null,
+      applicationStatus: null,
+      assessmentLivingAllowance: 0,
+      assessmentDurationDays: null,
+      assessmentCostTotal: null,
+      assessmentHasTrainingCosts: false,
+      disabilitySupportRequested: false,
+      bandFundingAmount: null,
+      socialAssistanceAmount: null,
+      hasIncome: false,
+      hasExpenses: false,
+      targetProgramValue: ''
+    };
   }
 }
 
@@ -19487,71 +19593,305 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       };
     });
 
-    const items = checklist.items.map(item => {
-      const baseRequired = item.required !== false;
-      const minCount = Number.isFinite(Number(item.minCount)) ? Number(item.minCount) : 1;
-      const aliases = Array.isArray(item.documentTypes) ? item.documentTypes.map(String) : [];
-      const matches = normalizedDocs.filter(d => {
-        if (!aliases.length) return false;
-        return d.docTypes.some(t => aliases.includes(t));
-      });
-      const sources = Array.isArray(item.sources) ? item.sources : [];
-      let appSatisfied = false;
-      let effectiveRequired = baseRequired;
-
-      if (item.id === 'acceptance-letter') {
-        const targetProgramRaw = applicationAnswers?.['target-program'];
-        const targetValue = Array.isArray(targetProgramRaw)
-          ? String(targetProgramRaw[0] || '').toLowerCase()
-          : String(targetProgramRaw || '').toLowerCase();
-        const needsAcceptance =
-          targetValue === 'skills_development' ||
-          targetValue === 'yes' ||
-          targetValue.includes('skills');
-        effectiveRequired = needsAcceptance;
-      }
-
-      if (item.id === 'statement-of-account') {
-        const targetProgramRaw = applicationAnswers?.['target-program'];
-        const targetValue = Array.isArray(targetProgramRaw)
-          ? String(targetProgramRaw[0] || '').toLowerCase()
-          : String(targetProgramRaw || '').toLowerCase();
-        const needsStatement =
-          targetValue === 'skills_development' ||
-          targetValue === 'yes' ||
-          targetValue.includes('skills');
-        effectiveRequired = needsStatement;
-      }
-
-      if (sources.includes('application_form')) {
-        if (aliases.includes('application_form')) {
-          appSatisfied = applicationExists;
-        } else {
-          appSatisfied = aliases.some(type => applicationDocTypeSatisfied(type, applicationAnswers));
-        }
-      }
-
-      if (item.id === 'case-manager-assessment') {
-        const statusAllows =
+    const assessmentCostTotal = Number.isFinite(Number(applicationAnswerMeta.assessmentCostTotal))
+      ? Number(applicationAnswerMeta.assessmentCostTotal)
+      : null;
+    const assessmentHasTrainingCosts = Boolean(applicationAnswerMeta.assessmentHasTrainingCosts);
+    const bandFundingAmount = Number.isFinite(Number(applicationAnswerMeta.bandFundingAmount))
+      ? Number(applicationAnswerMeta.bandFundingAmount)
+      : null;
+    const hasBandFunding = bandFundingAmount !== null && bandFundingAmount > 0;
+    const bandFundingZeroOrNull = bandFundingAmount === null || bandFundingAmount <= 0;
+    const socialAssistanceAmount = Number.isFinite(Number(applicationAnswerMeta.socialAssistanceAmount))
+      ? Number(applicationAnswerMeta.socialAssistanceAmount)
+      : null;
+    const hasSocialAssistance = socialAssistanceAmount !== null && socialAssistanceAmount > 0;
+    const hasIncome = Boolean(applicationAnswerMeta.hasIncome);
+    const hasExpenses = Boolean(applicationAnswerMeta.hasExpenses);
+    const targetProgramValue = String(applicationAnswerMeta.targetProgramValue || '').toLowerCase();
+    const trainingProgramSet = new Set(['skills_development', 'tws', 'jcp', 'group']);
+    const isTrainingProgram = trainingProgramSet.has(targetProgramValue);
+    const assessmentHasLivingAllowance = assessmentLivingAllowance > 0;
+    const applicationApproved = applicationStatusLower === 'approved';
+    const approvalOrLater = (() => {
+      if (applicationStatusLower) {
+        return (
+          applicationStatusLower === CASE_STATUS_DERIVED_VALUES.pendingApproval ||
           applicationStatusLower === 'pending_approval' ||
-          CASE_STATUS_FINAL_SET.has(caseStatusLower);
-        appSatisfied = assessmentSubmitted && assessmentComplete && statusAllows;
-        const matchedCount = appSatisfied ? 1 : 0;
-        const status = appSatisfied ? 'complete' : (effectiveRequired ? 'missing' : 'complete');
+          applicationStatusLower === 'approved'
+        );
+      }
+      return (
+        caseStatusLower === CASE_STATUS_DERIVED_VALUES.pendingApproval ||
+        caseStatusLower === CASE_STATUS_DERIVED_VALUES.initiated ||
+        CASE_STATUS_FINAL_SET.has(caseStatusLower)
+      );
+    })();
+    const postApproval = (() => {
+      if (applicationStatusLower) {
+        return applicationStatusLower === 'approved';
+      }
+      return (
+        caseStatusLower === CASE_STATUS_DERIVED_VALUES.initiated ||
+        CASE_STATUS_FINAL_SET.has(caseStatusLower)
+      );
+    })();
+    const assessmentStage = assessmentSubmitted || approvalOrLater || applicationExists;
+    const needsBudgetSupport =
+      assessmentHasLivingAllowance ||
+      hasExpenses ||
+      hasSocialAssistance ||
+      disabilitySupportRequested;
+    const normaliseId = id => String(id || '').toLowerCase().replace(/_/g, '-');
+    const matchesForTypes = (types = []) => normalizedDocs.filter(d => {
+      if (!Array.isArray(types) || !types.length) return false;
+      return d.docTypes.some(t => types.includes(t));
+    });
+    const computeStatus = (required, count, min) => {
+      if (!required) return 'complete';
+      if (count >= min) return 'complete';
+      if (count > 0) return 'in_progress';
+      return 'missing';
+    };
+
+    const items = checklist.items.map(item => {
+      const normalizedId = normaliseId(item.id);
+      const baseRequired = item.required !== false;
+      const sources = Array.isArray(item.sources) ? item.sources : [];
+      const docTypes = Array.isArray(item.documentTypes) ? item.documentTypes.map(String) : [];
+      let effectiveRequired = baseRequired;
+      let effectiveMinCount = Number.isFinite(Number(item.minCount)) ? Number(item.minCount) : 1;
+
+      const appSatisfied =
+        sources.includes('application_form') &&
+        (docTypes.includes('application_form')
+          ? applicationExists
+          : docTypes.some(type => applicationDocTypeSatisfied(type, applicationAnswers)));
+
+      const baseMatches = matchesForTypes(docTypes);
+
+      // Band funding confirmation / denial split
+      if (normalizedId === 'band-funding-confirmation' || normalizedId === 'band-funding-letter') {
+        effectiveRequired = hasBandFunding;
+        const confirmationMatches = matchesForTypes(['band_funding_confirmation']);
+        const matchedCount = confirmationMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
         return {
           id: item.id,
           label: item.label,
           required: effectiveRequired,
-          minCount,
+          minCount: 1,
           matchedCount,
           status,
-          documentTypes: aliases,
+          documentTypes: docTypes,
           sources
         };
       }
 
-      if (item.id === 'attendance-forms') {
-        const requiresAttendance = assessmentLivingAllowance > 0;
+      if (normalizedId === 'band-funding-denial') {
+        effectiveRequired = bandFundingZeroOrNull;
+        const denialMatches = matchesForTypes(['band_funding_denial']);
+        const matchedCount = denialMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'acceptance-letter') {
+        effectiveRequired = isTrainingProgram;
+        const matchedCount = baseMatches.length + (appSatisfied ? 1 : 0);
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'statement-of-account') {
+        const hasCosts = assessmentHasTrainingCosts || (assessmentCostTotal !== null && assessmentCostTotal > 0);
+        effectiveRequired = applicationApproved && hasCosts;
+        const matchedCount = baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'client-acknowledgement') {
+        effectiveRequired = approvalOrLater;
+        const matchedCount = baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'release-student-info') {
+        const needsRelease = approvalOrLater && (isTrainingProgram || assessmentHasTrainingCosts);
+        effectiveRequired = needsRelease;
+        const matchedCount = baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'financial-overview') {
+        effectiveRequired = assessmentStage && needsBudgetSupport;
+        const satisfiedByApplication = hasIncome || hasExpenses;
+        const matchedCount = baseMatches.length + (satisfiedByApplication ? 1 : 0);
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'financial-records') {
+        effectiveRequired = assessmentStage && hasIncome;
+        effectiveMinCount = Math.max(3, effectiveMinCount || 3);
+        const matchedCount = baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, effectiveMinCount);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: effectiveMinCount,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'financial-evidence') {
+        effectiveRequired = assessmentStage && (hasExpenses || assessmentHasLivingAllowance);
+        const matchedCount = baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, effectiveMinCount);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: effectiveMinCount,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'supporting-evidence' || normalizedId === 'social-assistance-letter') {
+        effectiveRequired = approvalOrLater && hasSocialAssistance;
+        const matchedCount = baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'resume') {
+        effectiveRequired = assessmentStage;
+        const matchedCount = baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'case-assessment' || normalizedId === 'case-manager-assessment') {
+        // Not mandatory for submission; becomes mandatory at approval or later.
+        effectiveRequired = approvalOrLater;
+        const statusAllows =
+          approvalOrLater ||
+          (!applicationStatusLower && (caseStatusLower === CASE_STATUS_DERIVED_VALUES.pendingApproval || CASE_STATUS_FINAL_SET.has(caseStatusLower)));
+        const assessmentSatisfied = assessmentSubmitted && assessmentComplete && statusAllows;
+        const matchedCount = assessmentSatisfied ? 1 : baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'funding-agreement') {
+        effectiveRequired = applicationApproved;
+        const matchedCount = baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'attendance-form' || normalizedId === 'attendance-forms') {
+        const requiresAttendance = postApproval && assessmentHasLivingAllowance;
         effectiveRequired = requiresAttendance;
         const expectedMonths = (() => {
           if (!requiresAttendance) return 0;
@@ -19560,15 +19900,8 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
           }
           return 1;
         })();
-        const matchedCount = matches.length;
-        let status = 'missing';
-        if (!effectiveRequired) {
-          status = 'complete';
-        } else if (matchedCount >= expectedMonths) {
-          status = 'complete';
-        } else if (matchedCount > 0) {
-          status = 'in_progress';
-        }
+        const matchedCount = baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, expectedMonths || 1);
         return {
           id: item.id,
           label: item.label,
@@ -19576,52 +19909,37 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
           minCount: expectedMonths || 1,
           matchedCount,
           status,
-          documentTypes: aliases,
+          documentTypes: docTypes,
           sources
         };
       }
 
-      if (item.id === 'medical-documentation') {
-        const requiresMedical = disabilitySupportRequested;
-        effectiveRequired = requiresMedical;
-        const matchedCount = matches.length + (appSatisfied ? 1 : 0);
-        let status = 'missing';
-        if (!effectiveRequired) {
-          status = 'complete';
-        } else if (matchedCount >= minCount) {
-          status = 'complete';
-        } else if (matchedCount > 0) {
-          status = 'in_progress';
-        }
+      if (normalizedId === 'medical-documentation') {
+        effectiveRequired = assessmentStage && disabilitySupportRequested;
+        const matchedCount = baseMatches.length + (appSatisfied ? 1 : 0);
+        const status = computeStatus(effectiveRequired, matchedCount, effectiveMinCount);
         return {
           id: item.id,
           label: item.label,
           required: effectiveRequired,
-          minCount,
+          minCount: effectiveMinCount,
           matchedCount,
           status,
-          documentTypes: aliases,
+          documentTypes: docTypes,
           sources
         };
       }
 
-      const matchedCount = matches.length + (appSatisfied ? 1 : 0);
-      let status = 'missing';
-      if (!effectiveRequired) {
-        status = 'complete';
-      } else if (matchedCount >= minCount) {
-        status = 'complete';
-      } else if (matchedCount > 0) {
-        status = 'in_progress';
-      }
+      const matchedCount = baseMatches.length + (appSatisfied ? 1 : 0);
+      const status = computeStatus(effectiveRequired, matchedCount, effectiveMinCount);
       return {
         id: item.id,
         label: item.label,
         required: effectiveRequired,
-        minCount,
+        minCount: effectiveMinCount,
         matchedCount,
         status,
-        documentTypes: aliases,
+        documentTypes: docTypes,
         sources
       };
     });
