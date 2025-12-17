@@ -25,34 +25,35 @@ const API_BASE_URL = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '
 
 const REFRESH_EVENT = 'iset:supporting-documents:refresh';
 
-const PREFERENCES_STORAGE_KEY = 'supporting-documents-table-preferences-v1';
-const COLUMN_WIDTHS_STORAGE_KEY = 'supporting-documents-table-widths-v1';
-const ALL_COLUMN_IDS = ['label', 'file_name', 'source', 'uploaded_at', 'actions'];
+const PREFERENCES_STORAGE_KEY = 'supporting-documents-table-preferences-v2';
+const COLUMN_WIDTHS_STORAGE_KEY = 'supporting-documents-table-widths-v2';
+const ALL_COLUMN_IDS = ['label', 'file_name', 'source', 'case_number', 'scope', 'uploaded_at', 'actions'];
 const REQUIRED_COLUMN_IDS = ['file_name', 'actions'];
 const DOCUMENT_TYPE_OPTIONS_FALLBACK = [
-  { value: '', label: 'Select document type' },
-  { value: 'application_form', label: 'Application form (legacy)' },
-  { value: 'ei_consent', label: 'EI Consent Form' },
-  { value: 'ei_verification', label: 'EI Eligibility Verification' },
-  { value: 'indigenous_declaration', label: 'Indigenous declaration' },
-  { value: 'conflict_of_interest', label: 'Conflict of Interest Form' },
-  { value: 'identity_document', label: 'Identity document' },
-  { value: 'supporting_evidence', label: 'Supporting evidence' },
-  { value: 'client_acknowledgement', label: 'Client acknowledgement' },
-  { value: 'release_student_info', label: 'Release of student info' },
-  { value: 'media_consent', label: 'Media consent' },
-  { value: 'financial_overview', label: 'Financial overview/budget' },
-  { value: 'financial_records', label: 'Income evidence' },
-  { value: 'financial_evidence', label: 'Expense evidence' },
-  { value: 'statement_of_account', label: 'Statement of Account' },
-  { value: 'acceptance_letter', label: 'Letter of Acceptance' },
-  { value: 'band_funding_confirmation', label: 'Band funding confirmation' },
-  { value: 'band_funding_denial', label: 'Band funding denial' },
-  { value: 'medical_documentation', label: 'Medical documentation' },
-  { value: 'resume', label: 'Resume' },
-  { value: 'case_assessment', label: 'Case manager assessment' },
-  { value: 'funding_agreement', label: 'Funding agreement' },
-  { value: 'attendance_form', label: 'Attendance form' }
+  { value: '', label: 'Select document type', scope: 'application' },
+  { value: 'application_form', label: 'Application form (legacy)', scope: 'application' },
+  { value: 'ei_consent', label: 'EI Consent Form', scope: 'application' },
+  { value: 'ei_verification', label: 'EI Eligibility Verification', scope: 'application' },
+  { value: 'indigenous_declaration', label: 'Indigenous declaration', scope: 'client' },
+  { value: 'conflict_of_interest', label: 'Conflict of Interest Form', scope: 'application' },
+  { value: 'identity_document', label: 'Identity document', scope: 'client' },
+  { value: 'supporting_evidence', label: 'Supporting evidence', scope: 'application' },
+  { value: 'client_acknowledgement', label: 'Client acknowledgement', scope: 'application' },
+  { value: 'release_student_info', label: 'Release of student info', scope: 'application' },
+  { value: 'media_consent', label: 'Media consent', scope: 'application' },
+  { value: 'financial_overview', label: 'Financial overview/budget', scope: 'application' },
+  { value: 'financial_records', label: 'Income evidence', scope: 'application' },
+  { value: 'financial_evidence', label: 'Expense evidence', scope: 'application' },
+  { value: 'statement_of_account', label: 'Statement of Account', scope: 'application' },
+  { value: 'acceptance_letter', label: 'Letter of Acceptance', scope: 'application' },
+  { value: 'band_funding_confirmation', label: 'Band funding confirmation', scope: 'application' },
+  { value: 'band_funding_denial', label: 'Band funding denial', scope: 'application' },
+  { value: 'medical_documentation', label: 'Medical documentation', scope: 'application' },
+  { value: 'resume', label: 'Resume', scope: 'client' },
+  { value: 'case_assessment', label: 'Case manager assessment', scope: 'application' },
+  { value: 'funding_agreement', label: 'Funding agreement', scope: 'application' },
+  { value: 'attendance_form', label: 'Attendance form', scope: 'application' },
+  { value: 'voided_cheque', label: 'Voided cheque', scope: 'client' }
 ];
 
 const formatDate = value => {
@@ -84,9 +85,13 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         const opts = Array.isArray(data?.items)
           ? data.items
               .filter(d => d && d.code)
-              .map(d => ({ value: d.code, label: d.label || d.code }))
+              .map(d => ({
+                value: d.code,
+                label: d.label || d.code,
+                scope: d.scope || 'application'
+              }))
           : [];
-        const list = [{ value: '', label: 'Select document type' }, ...opts];
+        const list = [{ value: '', label: 'Select document type', scope: 'application' }, ...opts];
         setDocumentTypeOptions(list);
       } catch (_) {
         // fall back to static options
@@ -95,6 +100,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     })();
     return () => { cancelled = true; };
   }, []);
+  const [applicationOptions, setApplicationOptions] = useState([]);
+  const [applicationsLoading, setApplicationsLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -126,6 +133,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [editCategoryError, setEditCategoryError] = useState('');
   const [pendingCategory, setPendingCategory] = useState('');
   const [pendingCategoryError, setPendingCategoryError] = useState('');
+  const [pendingApplication, setPendingApplication] = useState('');
+  const [pendingApplicationError, setPendingApplicationError] = useState('');
+  const [selectedApplicationFilter, setSelectedApplicationFilter] = useState('');
   const [visibleColumns, setVisibleColumns] = useState(() => {
     if (typeof window === 'undefined') return ALL_COLUMN_IDS;
     try {
@@ -168,6 +178,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const fileInputRef = useRef(null);
   const nextUploadLabelRef = useRef('');
   const nextUploadCategoryRef = useRef('');
+  const nextUploadApplicationIdRef = useRef('');
   const applicantUserId =
     caseData?.applicant_user_id ??
     caseData?.applicantUserId ??
@@ -186,6 +197,62 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     workspace?.application_id ??
     workspace?.applicationId ??
     null;
+  const loadApplicantApplications = useCallback(async () => {
+    if (!applicantUserId) {
+      setApplicationOptions([]);
+      return;
+    }
+    setApplicationsLoading(true);
+    try {
+      const res = await apiFetch(`/api/applicants/${applicantUserId}/applications`);
+      if (!res.ok) throw new Error('Failed to load applications');
+      const payload = await res.json().catch(() => ({ items: [] }));
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      const opts = items
+        .filter(item => item && item.applicationId)
+        .map(item => {
+          const value = String(item.applicationId);
+          const label =
+            item.caseNumber || item.referenceNumber
+              ? item.caseNumber
+                ? `Case ${item.caseNumber}`
+                : `Application ${item.referenceNumber}`
+              : `Application ${value}`;
+          const description = item.caseNumber
+            ? item.referenceNumber
+              ? `Application ${item.referenceNumber}`
+              : null
+            : null;
+          return {
+            value,
+            label,
+            description: description || undefined,
+            status: item.applicationStatus || null
+          };
+        });
+      // Ensure the current workspace application appears as an option even if not returned
+      if (applicationId && !opts.find(opt => opt.value === String(applicationId))) {
+        opts.unshift({
+          value: String(applicationId),
+          label: `Application ${applicationId}`,
+          description: 'Workspace application'
+        });
+      }
+      setApplicationOptions(opts);
+    } catch (err) {
+      console.error('[SupportingDocuments] failed to load applications', err);
+      setApplicationOptions([]);
+    } finally {
+      setApplicationsLoading(false);
+    }
+  }, [applicantUserId, applicationId]);
+  const getDocumentTypeScope = useCallback(
+    code => {
+      const match = documentTypeOptions.find(opt => opt.value === code);
+      return match?.scope || 'application';
+    },
+    [documentTypeOptions]
+  );
   const persistPreferences = useCallback(
     nextVisibleColumns => {
       if (typeof window === 'undefined') return;
@@ -232,7 +299,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
 
   const loadDocuments = useCallback(
     async (options = {}) => {
-      const { silent = false } = options;
+      const { silent = false, applicationId: applicationIdOverride } = options;
+      const filterApplicationId =
+        typeof applicationIdOverride === 'string' || typeof applicationIdOverride === 'number'
+          ? String(applicationIdOverride || '')
+          : selectedApplicationFilter;
       if (!applicantUserId) {
         setDocuments([]);
         setLoading(false);
@@ -246,7 +317,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       }
       setError(null);
       try {
-        const res = await apiFetch(`/api/applicants/${applicantUserId}/documents`);
+        const query = filterApplicationId ? `?applicationId=${encodeURIComponent(filterApplicationId)}` : '';
+        const res = await apiFetch(`/api/applicants/${applicantUserId}/documents${query}`);
         if (!res.ok) throw new Error('Failed to load supporting documents');
         const data = await res.json().catch(() => []);
         setDocuments(Array.isArray(data) ? data : []);
@@ -260,7 +332,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         }
       }
     },
-    [applicantUserId]
+    [applicantUserId, selectedApplicationFilter]
   );
 
   const loadChecklist = useCallback(async () => {
@@ -297,6 +369,18 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     loadDocuments();
     loadChecklist();
   }, [applicantUserId, loadDocuments, loadChecklist]);
+
+  useEffect(() => {
+    if (!applicantUserId) {
+      setApplicationOptions([]);
+      setSelectedApplicationFilter('');
+      setPendingApplication('');
+      return;
+    }
+    setSelectedApplicationFilter('');
+    setPendingApplication(applicationId ? String(applicationId) : '');
+    loadApplicantApplications();
+  }, [applicantUserId, applicationId, loadApplicantApplications]);
 
   useEffect(() => {
     if (!applicantUserId || typeof window === 'undefined') return;
@@ -362,12 +446,20 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       return;
     }
     setLabelError('');
+    setPendingApplicationError('');
+    const initialApplication =
+      selectedApplicationFilter ||
+      (applicationId ? String(applicationId) : '') ||
+      (applicationOptions.length === 1 ? applicationOptions[0].value : '');
+    setPendingApplication(initialApplication || '');
     setLabelModalVisible(true);
     setPendingLabel(prev => prev || '');
-  }, [applicantUserId, uploading]);
+  }, [applicantUserId, uploading, selectedApplicationFilter, applicationId, applicationOptions]);
   const handleLabelModalDismiss = useCallback(() => {
     setLabelModalVisible(false);
     setLabelError('');
+    setPendingApplicationError('');
+    setPendingCategoryError('');
   }, []);
   const handleLabelConfirm = useCallback(() => {
     const trimmed = (pendingLabel || '').trim();
@@ -380,15 +472,38 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       setPendingCategoryError('Select a document type.');
       return;
     }
+    const scope = getDocumentTypeScope(categoryTrimmed);
+    let targetApplicationId =
+      pendingApplication ||
+      selectedApplicationFilter ||
+      (applicationOptions.length === 1 ? applicationOptions[0].value : '') ||
+      (applicationId ? String(applicationId) : '');
+    if (scope === 'application' && !targetApplicationId) {
+      setPendingApplicationError('Select which application this upload belongs to.');
+      return;
+    }
+    if (scope === 'client') {
+      targetApplicationId = '';
+    }
     nextUploadLabelRef.current = trimmed;
     nextUploadCategoryRef.current = categoryTrimmed;
+    nextUploadApplicationIdRef.current = targetApplicationId || '';
     setLabelError('');
     setPendingCategoryError('');
+    setPendingApplicationError('');
     setLabelModalVisible(false);
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
-  }, [pendingLabel, pendingCategory]);
+  }, [
+    pendingLabel,
+    pendingCategory,
+    pendingApplication,
+    selectedApplicationFilter,
+    applicationOptions,
+    applicationId,
+    getDocumentTypeScope
+  ]);
   const handleFileSelected = useCallback(
     async event => {
       const input = event?.target;
@@ -407,7 +522,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         const formData = new FormData();
         formData.append('file', file);
         if (caseId) formData.append('caseId', caseId);
-        if (applicationId) formData.append('applicationId', applicationId);
+        const applicationIdForUpload = (nextUploadApplicationIdRef.current || '').trim();
+        if (applicationIdForUpload) formData.append('applicationId', applicationIdForUpload);
         const labelForUpload = (nextUploadLabelRef.current || '').trim() || file.name;
         formData.append('label', labelForUpload);
         const categoryForUpload = (nextUploadCategoryRef.current || '').trim();
@@ -441,6 +557,15 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           if (errorCode === 'invalid_applicant_id') {
             throw new Error('Unable to determine which applicant this upload belongs to.');
           }
+          if (errorCode === 'application_required_for_document') {
+            throw new Error('Select an application for this document type before uploading.');
+          }
+          if (errorCode === 'invalid_document_type') {
+            throw new Error('The selected document type is not valid or inactive.');
+          }
+          if (errorCode === 'document_type_lookup_failed') {
+            throw new Error('Unable to validate the document type. Try again.');
+          }
           throw new Error(payload?.message || 'Failed to upload document.');
         }
         await loadDocuments({ silent: true });
@@ -452,8 +577,10 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         setUploading(false);
         nextUploadLabelRef.current = '';
         nextUploadCategoryRef.current = '';
+        nextUploadApplicationIdRef.current = '';
         setPendingLabel('');
         setPendingCategory('');
+        setPendingApplication(applicationId ? String(applicationId) : '');
       }
     },
     [applicantUserId, caseId, applicationId, loadDocuments, loadChecklist]
@@ -625,6 +752,15 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     loadChecklist();
   };
 
+  const handleDocumentFilterChange = useCallback(
+    ({ detail }) => {
+      const next = detail?.selectedOption?.value || '';
+      setSelectedApplicationFilter(next);
+      loadDocuments({ silent: false, applicationId: next });
+    },
+    [loadDocuments]
+  );
+
   const baseColumnDefinitions = useMemo(
     () => [
       {
@@ -650,43 +786,57 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         header: 'File Name',
         cell: item => item.file_name || ''
       },
+      {
+        id: 'case_number',
+        header: 'Case',
+        cell: item => {
+          if (item.case_number) return item.case_number;
+          if (item.application_id) return `Application ${item.application_id}`;
+          return 'Client';
+        }
+      },
       { id: 'source', header: 'Source', cell: item => (item.source || '').replace(/_/g, ' ') },
+      {
+        id: 'scope',
+        header: 'Scope',
+        cell: item => (item.scope === 'client' ? 'Client' : 'Application')
+      },
       {
         id: 'uploaded_at',
         header: 'Uploaded',
         cell: item => formatDate(item.uploaded_at)
       },
-            {
-              id: 'actions',
-              header: 'Actions',
-              cell: item => {
-                const isAvailable = Boolean(item?.id && item?.file_path);
-                if (!isAvailable) {
-                  return <span style={{ color: '#888' }}>Unavailable</span>;
-                }
-                const inFlight = !!pendingDownloads[item.id];
-                const deleting = !!pendingDeletes[item.id];
-                return (
-                  <SpaceBetween direction="horizontal" size="xs">
-                    <Button variant="inline-link" onClick={() => openEditModal(item)}>
-                      Edit
-                    </Button>
-                    <Button
-                      variant="inline-link"
-                      onClick={() => handleViewDocument(item)}
-                      disabled={inFlight}
-                      loading={inFlight}
-                    >
-                      View
-                    </Button>
-                    <Button
-                      variant="inline-link"
-                      disabled={deleting}
-                      loading={deleting}
-                      onClick={() => openDeleteModal(item)}
-                    >
-                      Delete
-                    </Button>
+      {
+        id: 'actions',
+        header: 'Actions',
+        cell: item => {
+          const isAvailable = Boolean(item?.id && item?.file_path);
+          if (!isAvailable) {
+            return <span style={{ color: '#888' }}>Unavailable</span>;
+          }
+          const inFlight = !!pendingDownloads[item.id];
+          const deleting = !!pendingDeletes[item.id];
+          return (
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="inline-link" onClick={() => openEditModal(item)}>
+                Edit
+              </Button>
+              <Button
+                variant="inline-link"
+                onClick={() => handleViewDocument(item)}
+                disabled={inFlight}
+                loading={inFlight}
+              >
+                View
+              </Button>
+              <Button
+                variant="inline-link"
+                disabled={deleting}
+                loading={deleting}
+                onClick={() => openDeleteModal(item)}
+              >
+                Delete
+              </Button>
             </SpaceBetween>
           );
         }
@@ -812,6 +962,35 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     [persistPreferences, applyColumnWidthUpdates]
   );
 
+  const applicationFilterOptions = useMemo(() => {
+    const opts = [{ value: '', label: 'All documents (client + all applications)' }];
+    applicationOptions.forEach(opt => {
+      opts.push({
+        value: opt.value,
+        label: opt.label,
+        description: opt.description,
+        tags: opt.status ? [opt.status] : undefined
+      });
+    });
+    return opts;
+  }, [applicationOptions]);
+
+  const selectedApplicationFilterOption = useMemo(
+    () =>
+      applicationFilterOptions.find(opt => opt.value === selectedApplicationFilter) ||
+      applicationFilterOptions[0],
+    [applicationFilterOptions, selectedApplicationFilter]
+  );
+
+  const applicationSelectOptions = useMemo(
+    () =>
+      applicationOptions.map(opt => ({
+        ...opt,
+        tags: opt.status ? [opt.status] : undefined
+      })),
+    [applicationOptions]
+  );
+
   const preferencesComponent = (
     <CollectionPreferences
       title="Table preferences"
@@ -825,6 +1004,13 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       onConfirm={handlePreferencesConfirm}
     />
   );
+
+  const pendingDocScope = getDocumentTypeScope(pendingCategory);
+  const uploadSelectedApplicationOption =
+    applicationSelectOptions.find(opt => opt.value === pendingApplication) ||
+    (applicationSelectOptions.length
+      ? applicationSelectOptions[0]
+      : { value: '', label: applicationOptions.length ? 'Select application' : 'No applications available' });
 
 
   return (
@@ -876,6 +1062,27 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             options={documentTypeOptions}
             selectedAriaLabel="Selected document type"
             placeholder="Select document type"
+          />
+        </FormField>
+        <FormField
+          label="Attach to application"
+          description={
+            pendingDocScope === 'client'
+              ? 'Client-scoped documents are reusable across all applications.'
+              : 'Select which application this document should be attached to.'
+          }
+          errorText={pendingApplicationError}
+        >
+          <Select
+            disabled={pendingDocScope === 'client'}
+            selectedOption={uploadSelectedApplicationOption}
+            onChange={({ detail }) => {
+              setPendingApplicationError('');
+              setPendingApplication(detail.selectedOption.value || '');
+            }}
+            options={applicationSelectOptions}
+            placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
+            loading={applicationsLoading}
           />
         </FormField>
       </Modal>
@@ -1012,6 +1219,16 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           This widget displays all documents related to the applicant, including those submitted with the
           application and any adopted secure message attachments.
         </Box>
+        <FormField label="View documents for">
+          <Select
+            selectedOption={selectedApplicationFilterOption}
+            onChange={handleDocumentFilterChange}
+            options={applicationFilterOptions}
+            placeholder="All documents"
+            loading={applicationsLoading}
+            filteringType="none"
+          />
+        </FormField>
         {error && (
           <Alert type="error" dismissible onDismiss={() => setError(null)}>
             {error}

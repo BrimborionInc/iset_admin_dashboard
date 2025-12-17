@@ -51,7 +51,7 @@ const EsdcParticipantValidationWidget = ({
     setError(null);
     (async () => {
       try {
-        const resp = await apiFetch('/api/esdc/participants?limit=500&offset=0', {
+        const resp = await apiFetch('/api/esdc/participants?limit=500&offset=0&groupByClient=true', {
           signal: controller.signal
         });
         if (!resp.ok) {

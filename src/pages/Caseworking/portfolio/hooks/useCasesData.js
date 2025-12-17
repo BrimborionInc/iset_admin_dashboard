@@ -6,6 +6,7 @@ const defaultResult = {
   totalCount: 0,
   loading: false,
   error: null,
+  grouped: false,
 };
 
 const buildQuery = ({
@@ -15,6 +16,7 @@ const buildQuery = ({
   page,
   pageSize,
   sort,
+  groupByClient,
 }) => {
   const query = new URLSearchParams();
   if (searchText) {
@@ -37,6 +39,9 @@ const buildQuery = ({
     if (sort.direction) {
       query.set("direction", sort.direction);
     }
+  }
+  if (groupByClient) {
+    query.set("groupByClient", "true");
   }
   return query.toString();
 };
@@ -125,6 +130,43 @@ const mapCaseRowToTableItem = row => {
   };
 };
 
+const mapClientGroupToTableItem = group => {
+  const clientName = group?.clientName || "Unknown client";
+  const cases = Array.isArray(group?.cases) ? group.cases : [];
+  const primaryCase = cases[0] || {};
+  const children =
+    cases.length > 1
+      ? cases.map(c => ({
+          ...c,
+          isChild: true,
+          clientName,
+        }))
+      : [];
+  const singleCase = cases.length === 1 ? cases[0] : null;
+  return {
+    id: group?.clientId || group?.id || clientName,
+    clientId: group?.clientId || null,
+    clientName,
+    caseCount: cases.length,
+    cases: children,
+    primaryStatus: primaryCase.status || null,
+    primaryStatusLabel: primaryCase.statusLabel || "-",
+    primaryStatusColor: primaryCase.statusColor || "grey",
+    primaryCaseHref: primaryCase.caseHref || null,
+    singleCase,
+    ownerName: singleCase?.ownerName || null,
+    statusLabel: singleCase?.statusLabel || null,
+    statusColor: singleCase?.statusColor || null,
+    submittedAt: singleCase?.submittedAt || null,
+    lastActivityAt: singleCase?.lastActivityAt || null,
+    openTasks: Number.isFinite(singleCase?.openTasks) ? singleCase.openTasks : 0,
+    overdueTasks: Number.isFinite(singleCase?.overdueTasks) ? singleCase.overdueTasks : 0,
+    openInterventions: Number.isFinite(singleCase?.openInterventions) ? singleCase.openInterventions : 0,
+    totalInterventions: Number.isFinite(singleCase?.totalInterventions) ? singleCase.totalInterventions : 0,
+    nextActionDueAt: singleCase?.nextActionDueAt || null,
+  };
+};
+
 export default function useCasesData({
   enabled,
   searchText,
@@ -133,6 +175,7 @@ export default function useCasesData({
   page,
   pageSize,
   sort,
+  groupByClient = true,
 }) {
   const [result, setResult] = useState(defaultResult);
   const abortRef = useRef(null);
@@ -151,6 +194,7 @@ export default function useCasesData({
         pageSize,
         sort,
         ...override,
+        groupByClient,
       };
       const query = buildQuery(payload);
       if (abortRef.current) {
@@ -175,8 +219,11 @@ export default function useCasesData({
           throw error;
         }
         const data = await response.json();
+        const grouped = Boolean(data?.grouped);
         const items = Array.isArray(data?.items)
-          ? data.items.map(mapCaseRowToTableItem)
+          ? grouped
+            ? data.items.map(mapClientGroupToTableItem)
+            : data.items.map(mapCaseRowToTableItem)
           : [];
         const total = Number.isFinite(data?.totalCount) ? data.totalCount : items.length;
         setResult({
@@ -184,6 +231,7 @@ export default function useCasesData({
           totalCount: total,
           loading: false,
           error: null,
+          grouped,
         });
       } catch (err) {
         if (err?.name === "AbortError") {
@@ -194,10 +242,11 @@ export default function useCasesData({
           totalCount: 0,
           loading: false,
           error: err,
+          grouped: false,
         });
       }
     },
-    [enabled, searchText, statusFilters, ownerFilters, page, pageSize, sort]
+    [enabled, searchText, statusFilters, ownerFilters, page, pageSize, sort, groupByClient]
   );
 
   useEffect(() => {

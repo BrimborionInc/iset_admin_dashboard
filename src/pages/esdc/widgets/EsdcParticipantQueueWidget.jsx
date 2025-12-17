@@ -49,6 +49,7 @@ const EsdcParticipantQueueWidget = ({
   const [totalItems, setTotalItems] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [expandedItems, setExpandedItems] = useState([]);
   const readinessOptions = [
     { label: 'All readiness', value: 'all' },
     { label: 'Ready', value: 'ready' },
@@ -103,6 +104,7 @@ const EsdcParticipantQueueWidget = ({
         if (readiness && readiness !== 'all') {
           params.set('readiness', readiness);
         }
+        params.set('groupByClient', 'true');
         const resp = await apiFetch(`/api/esdc/participants?${params}`, {
           signal: controller.signal
         });
@@ -112,8 +114,9 @@ const EsdcParticipantQueueWidget = ({
         }
         const data = await resp.json();
         if (!cancelled) {
-          setItems(Array.isArray(data.items) ? data.items : []);
-          setTotalItems(typeof data.total === 'number' ? data.total : 0);
+          const nextItems = Array.isArray(data.items) ? data.items : [];
+          setItems(nextItems);
+          setTotalItems(typeof data.total === 'number' ? data.total : nextItems.length);
         }
       } catch (err) {
         if (!cancelled && err.name !== 'AbortError') {
@@ -215,6 +218,7 @@ const EsdcParticipantQueueWidget = ({
       i18nStrings={boardItemI18nStrings}
     >
       <Table
+        trackBy="id"
         columnDefinitions={[
           {
             id: 'participant',
@@ -287,6 +291,21 @@ const EsdcParticipantQueueWidget = ({
         loadingText="Loading participant submissions"
         empty={renderEmptyState()}
         variant="embedded"
+        expandableRows={{
+          getItemChildren: item => (Array.isArray(item.children) && item.children.length ? item.children : []),
+          isItemExpandable: item => Array.isArray(item.children) && item.children.length > 0,
+          expandedItems,
+          onExpandableItemToggle: ({ detail }) => {
+            const id = detail.item?.id;
+            if (!id) return;
+            setExpandedItems(prev => {
+              const set = new Set(prev.map(entry => entry.id));
+              if (detail.expanded) set.add(id);
+              else set.delete(id);
+              return Array.from(set).map(entryId => ({ id: entryId }));
+            });
+          }
+        }}
         filter={(
           <TextFilter
             filteringText={search}

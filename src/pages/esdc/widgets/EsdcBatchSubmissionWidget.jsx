@@ -63,7 +63,7 @@ const EsdcBatchSubmissionWidget = ({
 
   const loadQueueInfo = React.useCallback(async () => {
     try {
-      const resp = await apiFetch('/api/esdc/participants?limit=500&offset=0');
+      const resp = await apiFetch('/api/esdc/participants?limit=500&offset=0&groupByClient=true');
       const body = await resp.json().catch(() => ({}));
       if (!resp.ok) return;
       const items = Array.isArray(body.items) ? body.items : [];

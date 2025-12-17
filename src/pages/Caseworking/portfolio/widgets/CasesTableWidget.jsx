@@ -61,32 +61,41 @@ const isDateOverdue = value => {
   return date < today;
 };
 
-const baseColumns = [
+const groupedColumns = [
   {
     id: "client",
     header: "Client",
-    cell: item => (
-      <Link href={item.caseHref} onFollow={event => event.preventDefault()}>
-        {item.clientName}
-      </Link>
-    ),
-    minWidth: 180,
+    cell: item => {
+      if (item.isChild) {
+        return (
+          <Link href={item.caseHref || "#"} onFollow={event => event.preventDefault()}>
+            {item.trackingId ? `Case ${item.trackingId}` : `Case ${item.id || ""}`}
+          </Link>
+        );
+      }
+      return item.clientName;
+    },
+    minWidth: 220,
     isRowHeader: true,
-  },
-  {
-    id: "owner",
-    header: "Owner",
-    cell: item => item.ownerName ?? "Unassigned",
-    minWidth: 160,
   },
   {
     id: "status",
     header: "Status",
-    cell: item => (
-      <Badge color={item.caseStatusColor || "grey"}>
-        {item.caseStatusLabel || "-"}
-      </Badge>
-    ),
+    cell: item => {
+      const color = item.isChild ? item.statusColor || "grey" : item.primaryStatusColor || "grey";
+      const label = item.isChild ? item.statusLabel || "-" : item.primaryStatusLabel || "-";
+      return <Badge color={color}>{label}</Badge>;
+    },
+    minWidth: 140,
+  },
+  {
+    id: "owner",
+    header: "Owner",
+    cell: item => {
+      if (item.isChild) return item.ownerName ?? "Unassigned";
+      if (item.caseCount === 1) return item.ownerName ?? "Unassigned";
+      return "-";
+    },
     minWidth: 160,
   },
   {
@@ -96,18 +105,21 @@ const baseColumns = [
       const open = Number.isFinite(item.openTasks) ? item.openTasks : 0;
       const overdue = Number.isFinite(item.overdueTasks) ? item.overdueTasks : 0;
       const badgeColor = overdue > 0 ? "red" : open > 0 ? "blue" : "grey";
-      return (
-        <SpaceBetween size="xs">
-          <Badge color={badgeColor}>{open}</Badge>
-          {overdue > 0 ? (
+      const content =
+        overdue > 0 ? (
+          <SpaceBetween size="xxs">
+            <Badge color={badgeColor}>{open}</Badge>
             <Box fontSize="body-s" color="text-status-error">
               {overdue} overdue
             </Box>
-          ) : null}
-        </SpaceBetween>
-      );
+          </SpaceBetween>
+        ) : (
+          <Badge color={badgeColor}>{open}</Badge>
+        );
+      if (item.isChild || item.caseCount === 1) return content;
+      return "-";
     },
-    minWidth: 150,
+    minWidth: 160,
   },
   {
     id: "openInterventions",
@@ -115,9 +127,9 @@ const baseColumns = [
     cell: item => {
       const open = Number.isFinite(item.openInterventions) ? item.openInterventions : 0;
       const total = Number.isFinite(item.totalInterventions) ? item.totalInterventions : 0;
-      return (
-        <Badge color={open > 0 ? "blue" : "green"}>{`${open} / ${total}`}</Badge>
-      );
+      const content = <Badge color={open > 0 ? "blue" : "green"}>{`${open} / ${total}`}</Badge>;
+      if (item.isChild || item.caseCount === 1) return content;
+      return "-";
     },
     minWidth: 160,
   },
@@ -125,24 +137,29 @@ const baseColumns = [
     id: "nextActionDue",
     header: "Next action due",
     cell: item => {
-      if (!item.nextActionDueAt) return "-";
-      const formatted = formatDate(item.nextActionDueAt);
-      const overdue = isDateOverdue(item.nextActionDueAt);
-      return (
-        <Box color={overdue ? "text-status-error" : undefined}>{formatted}</Box>
-      );
+      const value = item.nextActionDueAt;
+      if ((item.isChild || item.caseCount === 1) && value) {
+        const overdue = isDateOverdue(value);
+        return <Box color={overdue ? "text-status-error" : undefined}>{formatDate(value)}</Box>;
+      }
+      if (item.isChild || item.caseCount === 1) return "-";
+      return "-";
     },
     minWidth: 160,
   },
   {
     id: "lastTouch",
     header: "Last touch",
-    cell: item => formatDateTime(item.lastTouchAt),
+    cell: item => {
+      if (item.isChild) return formatDateTime(item.lastActivityAt);
+      if (item.caseCount === 1) return formatDateTime(item.lastActivityAt);
+      return "-";
+    },
     minWidth: 180,
   },
 ];
 
-const baseColumnIds = baseColumns.map(column => column.id);
+const groupedColumnIds = groupedColumns.map(column => column.id);
 
 const loadColumnWidths = () => {
   if (typeof window === "undefined") return [];
@@ -170,7 +187,7 @@ const loadPreferences = () => {
   if (typeof window === "undefined") {
     return {
       pageSize: DEFAULT_PAGE_SIZE,
-      visibleColumns: [...baseColumnIds],
+      visibleColumns: [...groupedColumnIds],
     };
   }
   try {
@@ -178,28 +195,28 @@ const loadPreferences = () => {
     if (!raw) {
       return {
         pageSize: DEFAULT_PAGE_SIZE,
-        visibleColumns: [...baseColumnIds],
+        visibleColumns: [...groupedColumnIds],
       };
     }
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") {
       return {
         pageSize: DEFAULT_PAGE_SIZE,
-        visibleColumns: [...baseColumnIds],
+        visibleColumns: [...groupedColumnIds],
       };
     }
     const visibleColumns = Array.isArray(parsed.visibleColumns)
-      ? parsed.visibleColumns.filter(id => baseColumnIds.includes(id))
-      : [...baseColumnIds];
+      ? parsed.visibleColumns.filter(id => groupedColumnIds.includes(id))
+      : [...groupedColumnIds];
     const pageSize = Number.isFinite(parsed.pageSize) ? parsed.pageSize : DEFAULT_PAGE_SIZE;
     return {
       pageSize,
-      visibleColumns: visibleColumns.length ? visibleColumns : [...baseColumnIds],
+      visibleColumns: visibleColumns.length ? visibleColumns : [...groupedColumnIds],
     };
   } catch {
     return {
       pageSize: DEFAULT_PAGE_SIZE,
-      visibleColumns: [...baseColumnIds],
+      visibleColumns: [...groupedColumnIds],
     };
   }
 };
@@ -255,6 +272,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [selectedAssignee, setSelectedAssignee] = useState(null);
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignSuccess, setAssignSuccess] = useState(null);
+  const [expandedItems, setExpandedItems] = useState([]);
 
   const formatStaffLabel = useCallback(staff => {
     if (!staff) return "Staff";
@@ -484,10 +502,10 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     const nextVisible = detail.contentDisplay
       ? detail.contentDisplay.filter(entry => entry.visible).map(entry => entry.id)
       : preferences.visibleColumns;
-    const normalisedVisible = baseColumnIds.filter(id => nextVisible.includes(id));
+    const normalisedVisible = groupedColumnIds.filter(id => nextVisible.includes(id));
     const nextPreferences = {
       pageSize: detail.pageSize ?? pageSize,
-      visibleColumns: normalisedVisible.length ? normalisedVisible : [...baseColumnIds],
+      visibleColumns: normalisedVisible.length ? normalisedVisible : [...groupedColumnIds],
     };
     preferencesRef.current = nextPreferences;
     setPreferences(nextPreferences);
@@ -521,7 +539,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       });
     } else if (Array.isArray(detail?.widths)) {
       detail.widths.forEach((width, index) => {
-        const column = baseColumns[index];
+        const column = groupedColumns[index];
         const numeric = Number(width);
         if (column && Number.isFinite(numeric)) {
           resolved.push({ id: column.id, width: numeric });
@@ -541,7 +559,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       cancelLabel="Cancel"
       preferences={{
         pageSize,
-        contentDisplay: baseColumns.map(column => ({
+        contentDisplay: groupedColumns.map(column => ({
           id: column.id,
           visible: preferences.visibleColumns.includes(column.id),
         })),
@@ -553,7 +571,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       }}
       contentDisplayPreference={{
         title: "Select columns",
-        options: baseColumns.map(column => ({
+        options: groupedColumns.map(column => ({
           id: column.id,
           label: column.header,
           alwaysVisible: column.id === "client",
@@ -581,7 +599,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const totalMatchesText = useLiveCases
     ? liveLoading
       ? "Loading…"
-      : `${totalCount} case${totalCount === 1 ? "" : "s"}`
+      : `${totalCount} client${totalCount === 1 ? "" : "s"}`
     : `${offlineStatusFilteredCases.length} match${offlineStatusFilteredCases.length === 1 ? "" : "es"}`;
   const emptyState = liveError ? (
     <Box padding="m">
@@ -635,17 +653,14 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
 
   const columnsToRender = useMemo(() => {
     const visibleSet = new Set(preferences.visibleColumns);
-    const columns = baseColumns
+    const columns = groupedColumns
       .filter(column => visibleSet.has(column.id))
       .map(column => {
         const storedWidth = columnWidths.find(entry => entry.id === column.id);
         return storedWidth ? { ...column, width: storedWidth.width } : column;
       });
-    if (canManageAssignments) {
-      columns.push(actionsColumn);
-    }
     return columns;
-  }, [preferences.visibleColumns, columnWidths, canManageAssignments, actionsColumn]);
+  }, [preferences.visibleColumns, columnWidths]);
 
   const selectedAgreement = selectedAgreements?.[0] || null;
   const headerActionItems = [];
@@ -733,8 +748,30 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           pagination={pagination}
           preferences={preferencesComponent}
           onColumnWidthsChange={handleColumnWidthsChange}
+          expandableRows={{
+            getItemChildren: item => (Array.isArray(item.cases) && item.cases.length > 1 ? item.cases : []),
+            isItemExpandable: item => Array.isArray(item.cases) && item.cases.length > 1,
+            expandedItems,
+            onExpandableItemToggle: ({ detail }) => {
+              const itemId = detail.item?.id;
+              if (!itemId) return;
+              setExpandedItems(prev => {
+                const set = new Set(prev.map(entry => entry.id));
+                if (detail.expanded) {
+                  set.add(itemId);
+                } else {
+                  set.delete(itemId);
+                }
+                return Array.from(set).map(id => ({ id }));
+              });
+            },
+          }}
           onRowClick={({ detail }) => {
-            const caseId = detail?.item?.id;
+            const caseId = detail?.item?.isChild
+              ? detail.item.id
+              : detail?.item?.caseCount === 1
+                ? detail.item.singleCase?.id
+                : null;
             if (caseId) {
               history.push(`/cases/${caseId}`);
             }

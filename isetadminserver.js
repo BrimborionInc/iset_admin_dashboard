@@ -106,6 +106,25 @@ async function loadChecklistConfig() {
   }
 }
 
+async function loadDocumentTypeScopeMap(executor = pool) {
+  const map = new Map();
+  try {
+    const [rows] = await executor.query(
+      `SELECT code, COALESCE(scope, 'application') AS scope
+         FROM document_type
+        WHERE is_active = 1`
+    );
+    rows.forEach(row => {
+      if (row && row.code) {
+        map.set(row.code, row.scope || 'application');
+      }
+    });
+  } catch (err) {
+    console.warn('[document-types] scope map load failed', err?.message || err);
+  }
+  return map;
+}
+
 async function loadApplicationAnswers({ applicantId = null, applicationId = null }) {
   try {
     let row = null;
@@ -970,6 +989,16 @@ function isValidSin(digits) {
     sum += digit;
   }
   return sum % 10 === 0;
+}
+
+function hashSin(digits) {
+  if (!digits) return null;
+  try {
+    return crypto.createHash('sha256').update(digits).digest('hex');
+  } catch (err) {
+    console.warn('[sin:hash] failed to hash SIN:', err?.message || err);
+    return null;
+  }
 }
 
 function parseDate(value) {
@@ -7006,6 +7035,8 @@ async function buildClientProfileFromApplication(connection, applicationId) {
   const dob = toDateOnly(extractDob(context));
   const gender = clamp(extractGender(context), 32);
   const aboriginalGroup = clamp(extractIndigenousIdentity(context), 64);
+  const sinDigits = cleanSin(extractSin(context));
+  const sinHash = sinDigits && isValidSin(sinDigits) ? hashSin(sinDigits) : null;
 
   const addressStructure = extractAddress(context);
   const sanitise = value => {
@@ -7051,7 +7082,8 @@ async function buildClientProfileFromApplication(connection, applicationId) {
     referenceNumber,
     preferredName,
     address,
-    contact
+    contact,
+    sinHash
   };
 
   return {
@@ -7062,11 +7094,12 @@ async function buildClientProfileFromApplication(connection, applicationId) {
     gender,
     aboriginalGroup,
     emailNormalized: contactEmailNormalized,
+    sinHash,
     addressJson: JSON.stringify(addressPayload)
   };
 }
 
-async function ensureCaseClientLinkForApproval(connection, { caseId, applicationId, existingClientId }) {
+async function ensureCaseClientLinkForApproval(connection, { caseId, applicationId, existingClientId, actorId = null, actorName = null }) {
   if (existingClientId) return existingClientId;
   if (!applicationId) return null;
 
@@ -7078,7 +7111,61 @@ async function ensureCaseClientLinkForApproval(connection, { caseId, application
 
   const lowerFirst = profile.firstName.toLowerCase();
   const lowerLast = profile.lastName.toLowerCase();
+  const sinHash = profile.sinHash || null;
   let targetClientId = null;
+
+  let existingClientRow = null;
+
+  if (sinHash) {
+    const params = [sinHash];
+    let sql = `
+      SELECT id, address_json, dob, first_name, last_name
+        FROM client
+       WHERE JSON_UNQUOTE(JSON_EXTRACT(address_json, '$.sinHash')) = ?
+    `;
+    if (profile.dob) {
+      sql += ' AND dob = ?';
+      params.push(profile.dob);
+    }
+    sql += ' LIMIT 1';
+    const [[bySinHash]] = await connection.query(sql, params);
+    if (bySinHash) {
+      targetClientId = bySinHash.id;
+      existingClientRow = bySinHash;
+    }
+  }
+
+  if (!targetClientId && sinHash) {
+    // Fallback: scan prior submissions to reuse an existing client if the same SIN was used
+    const [sinCandidates] = await connection.query(
+      `SELECT c.client_id, s.intake_payload
+         FROM iset_case c
+         JOIN iset_application a ON a.id = c.application_id
+         JOIN iset_application_submission s ON s.id = a.submission_id
+        WHERE c.client_id IS NOT NULL`
+    );
+    for (const row of sinCandidates) {
+      if (!row?.intake_payload || !row?.client_id) continue;
+      let payloadObj = null;
+      try {
+        payloadObj = typeof row.intake_payload === 'string'
+          ? JSON.parse(row.intake_payload)
+          : row.intake_payload;
+      } catch (_) {
+        payloadObj = null;
+      }
+      if (!payloadObj || typeof payloadObj !== 'object') continue;
+      const candidateSinDigits = cleanSin(extractSin({ payload: {}, answers: payloadObj, caseContext: {} }));
+      if (!candidateSinDigits || !isValidSin(candidateSinDigits)) continue;
+      const candidateHash = hashSin(candidateSinDigits);
+      if (candidateHash && candidateHash === sinHash) {
+        targetClientId = row.client_id;
+        const [[clientRow]] = await connection.query('SELECT * FROM client WHERE id = ? LIMIT 1', [targetClientId]);
+        existingClientRow = clientRow || null;
+        break;
+      }
+    }
+  }
 
   if (profile.emailNormalized) {
     const [[byEmail]] = await connection.query(
@@ -7091,6 +7178,8 @@ async function ensureCaseClientLinkForApproval(connection, { caseId, application
     );
     if (byEmail) {
       targetClientId = byEmail.id;
+      const [[clientRow]] = await connection.query('SELECT * FROM client WHERE id = ? LIMIT 1', [targetClientId]);
+      existingClientRow = clientRow || null;
     }
   }
 
@@ -7107,6 +7196,8 @@ async function ensureCaseClientLinkForApproval(connection, { caseId, application
       );
       if (byNameDob) {
         targetClientId = byNameDob.id;
+        const [[clientRow]] = await connection.query('SELECT * FROM client WHERE id = ? LIMIT 1', [targetClientId]);
+        existingClientRow = clientRow || null;
       }
     } else {
       const [[byNameOnly]] = await connection.query(
@@ -7120,6 +7211,8 @@ async function ensureCaseClientLinkForApproval(connection, { caseId, application
       );
       if (byNameOnly) {
         targetClientId = byNameOnly.id;
+        const [[clientRow]] = await connection.query('SELECT * FROM client WHERE id = ? LIMIT 1', [targetClientId]);
+        existingClientRow = clientRow || null;
       }
     }
   }
@@ -7141,8 +7234,19 @@ async function ensureCaseClientLinkForApproval(connection, { caseId, application
     targetClientId = insertResult.insertId;
   } else {
     await connection.query(
-      'UPDATE client SET updated_at = NOW() WHERE id = ?',
-      [targetClientId]
+      `UPDATE client
+          SET updated_at = NOW(),
+              address_json = CASE
+                WHEN ? IS NOT NULL AND (
+                  address_json IS NULL
+                  OR JSON_EXTRACT(address_json, '$.sinHash') IS NULL
+                  OR JSON_UNQUOTE(JSON_EXTRACT(address_json, '$.sinHash')) <> ?
+                )
+                  THEN JSON_SET(COALESCE(address_json, JSON_OBJECT()), '$.sinHash', ?)
+                ELSE address_json
+              END
+        WHERE id = ?`,
+      [sinHash, sinHash, sinHash, targetClientId]
     );
   }
 
@@ -7150,6 +7254,52 @@ async function ensureCaseClientLinkForApproval(connection, { caseId, application
     'UPDATE iset_case SET client_id = ?, updated_at = NOW() WHERE id = ?',
     [targetClientId, caseId]
   );
+
+  try {
+    const changes = [];
+    const addChange = (field, fromValue, toValue) => {
+      const fromVal = fromValue === undefined ? null : fromValue;
+      const toVal = toValue === undefined ? null : toValue;
+      if (fromVal === toVal) return;
+      changes.push({ field, from: fromVal, to: toVal });
+    };
+    const normalizeDob = value => {
+      if (!value) return null;
+      if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+      }
+      const asString = String(value);
+      if (!asString) return null;
+      return asString.slice(0, 10);
+    };
+
+    if (existingClientRow) {
+      addChange('first_name', existingClientRow.first_name, profile.firstName);
+      addChange('last_name', existingClientRow.last_name, profile.lastName);
+      addChange('dob', normalizeDob(existingClientRow.dob), profile.dob);
+      addChange('gender', existingClientRow.gender, profile.gender);
+      addChange('aboriginal_group', existingClientRow.aboriginal_group, profile.aboriginalGroup);
+      addChange('address_json', existingClientRow.address_json, profile.addressJson);
+    } else {
+      addChange('created', null, profile);
+    }
+    const identityWarning = changes.some(change => change.field === 'dob' || change.field === 'first_name' || change.field === 'last_name');
+    await captureCaseEvent({
+      type: 'client_updated',
+      caseId,
+      payload: {
+        clientId: targetClientId,
+        applicationId,
+        changes,
+        identityWarning,
+      },
+      actorId,
+      actorName,
+      trackingId: null,
+    });
+  } catch (err) {
+    console.warn('[client:update:audit] failed', err?.message || err);
+  }
 
   return targetClientId;
 }
@@ -10051,7 +10201,10 @@ esdcRouter.get('/participants', async (req, res, next) => {
     search,
     limit = 25,
     offset = 0,
+    groupByClient: groupByClientRaw = 'true'
   } = req.query;
+
+  const groupByClient = String(groupByClientRaw || 'true').toLowerCase() !== 'false';
 
   const params = [];
   const where = [];
@@ -10065,8 +10218,8 @@ esdcRouter.get('/participants', async (req, res, next) => {
   }
 
   if (search) {
-    where.push('(COALESCE(ias.reference_number, CONCAT(\'CASE-\', eps.case_id)) LIKE ? OR ia.payload_json->>"$.personal.last_name" LIKE ?)');
-    params.push(`%${search}%`, `%${search}%`);
+    where.push('(COALESCE(ias.reference_number, CONCAT(\'CASE-\', eps.case_id)) LIKE ? OR ia.payload_json->>"$.personal.last_name" LIKE ? OR cl.last_name LIKE ? OR cl.first_name LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
   }
 
   // Include plans that are reportable either for first submission (active with started intervention)
@@ -10197,7 +10350,10 @@ esdcRouter.get('/participants', async (req, res, next) => {
           COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id))
         ) AS participant_name,
         COALESCE(c.case_number, ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id,
-        c.case_number AS case_number
+        c.case_number AS case_number,
+        c.client_id,
+        cl.first_name AS client_first_name,
+        cl.last_name AS client_last_name
       FROM esdc_participant_submission eps
       LEFT JOIN iset_application ia ON ia.id = eps.application_id
       LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
@@ -10225,26 +10381,125 @@ esdcRouter.get('/participants', async (req, res, next) => {
       params
     );
 
-    const items = rows.map(row => ({
-      id: row.id,
-      case_id: row.case_id,
-      action_plan_id: row.action_plan_id,
-      readiness_status: row.readiness_status || 'needs_review',
-      warnings: row.warnings,
-      blocking_issues: row.blocking_issues,
-      submission_status: row.submission_status || 'pending',
-      last_validated_at: row.last_validated_at,
-      submitted_at: row.submitted_at,
-      action_plan_status: row.action_plan_status,
-      action_plan_start_date: row.action_plan_start_date,
-      action_plan_result_code: row.action_plan_result_code,
-      action_plan_result_date: row.action_plan_result_date,
-      tracking_id: row.tracking_id,
-      case_number: row.case_number,
-      participant_name: row.participant_name || row.tracking_id
-    }));
+    const normalizeReadiness = value => {
+      const key = typeof value === 'string' ? value.trim().toLowerCase() : '';
+      if (key === 'blocked') return 'blocked';
+      if (key === 'ready') return 'ready';
+      return 'needs_review';
+    };
+    const readinessPriority = { blocked: 3, needs_review: 2, ready: 1 };
+    const normalizeSubmissionStatus = value => {
+      const key = typeof value === 'string' ? value.trim().toLowerCase() : '';
+      if (key === 'rejected') return 'rejected';
+      if (key === 'submitted') return 'submitted';
+      if (key === 'accepted') return 'accepted';
+      return 'pending';
+    };
+    const submissionPriority = { rejected: 4, pending: 3, submitted: 2, accepted: 1 };
 
-    res.json({ total, items });
+    if (!groupByClient) {
+      const items = rows.map(row => ({
+        id: row.id,
+        case_id: row.case_id,
+        action_plan_id: row.action_plan_id,
+        readiness_status: normalizeReadiness(row.readiness_status || 'needs_review'),
+        warnings: row.warnings,
+        blocking_issues: row.blocking_issues,
+        submission_status: normalizeSubmissionStatus(row.submission_status || 'pending'),
+        last_validated_at: row.last_validated_at,
+        submitted_at: row.submitted_at,
+        action_plan_status: row.action_plan_status,
+        action_plan_start_date: row.action_plan_start_date,
+        action_plan_result_code: row.action_plan_result_code,
+        action_plan_result_date: row.action_plan_result_date,
+        tracking_id: row.tracking_id,
+        case_number: row.case_number,
+        participant_name: row.participant_name || row.tracking_id
+      }));
+      res.json({ total, items, grouped: false });
+      return;
+    }
+
+    const groups = new Map();
+    rows.forEach(row => {
+      const clientKey = row.client_id || `case-${row.case_id}`;
+      if (!groups.has(clientKey)) {
+        groups.set(clientKey, {
+          id: `client-${clientKey}`,
+          client_id: row.client_id || null,
+          participant_name:
+            row.participant_name ||
+            (row.client_first_name && row.client_last_name ? `${row.client_first_name} ${row.client_last_name}` : row.tracking_id),
+          readiness_status: 'ready',
+          submission_status: 'accepted',
+          last_validated_at: null,
+          submitted_at: null,
+          tracking_id: row.tracking_id,
+          case_number: row.case_number,
+          children: []
+        });
+      }
+      const group = groups.get(clientKey);
+      const readiness = normalizeReadiness(row.readiness_status);
+      const submission = normalizeSubmissionStatus(row.submission_status);
+      if (readinessPriority[readiness] > readinessPriority[group.readiness_status]) {
+        group.readiness_status = readiness;
+      }
+      if (submissionPriority[submission] > submissionPriority[group.submission_status]) {
+        group.submission_status = submission;
+      }
+      if (!group.last_validated_at || (row.last_validated_at && new Date(row.last_validated_at) > new Date(group.last_validated_at))) {
+        group.last_validated_at = row.last_validated_at;
+      }
+      if (!group.submitted_at || (row.submitted_at && new Date(row.submitted_at) > new Date(group.submitted_at))) {
+        group.submitted_at = row.submitted_at;
+      }
+      group.children.push({
+        id: row.id,
+        case_id: row.case_id,
+        action_plan_id: row.action_plan_id,
+        readiness_status: readiness,
+        warnings: row.warnings,
+        blocking_issues: row.blocking_issues,
+        submission_status: submission,
+        last_validated_at: row.last_validated_at,
+        submitted_at: row.submitted_at,
+        action_plan_status: row.action_plan_status,
+        action_plan_start_date: row.action_plan_start_date,
+        action_plan_result_code: row.action_plan_result_code,
+        action_plan_result_date: row.action_plan_result_date,
+        tracking_id: row.tracking_id,
+        case_number: row.case_number,
+        participant_name: row.participant_name || row.tracking_id,
+        isChild: true
+      });
+    });
+
+    const items = Array.from(groups.values()).map(group => {
+      const pickPrimary = () => {
+        const priorities = { active: 0, closed: 1, ready_to_close: 2, 'ready-to-close': 2, dormant: 3 };
+        return [...group.children].sort((a, b) => {
+          const pa = priorities[(a.action_plan_status || '').toLowerCase()] ?? 4;
+          const pb = priorities[(b.action_plan_status || '').toLowerCase()] ?? 4;
+          if (pa !== pb) return pa - pb;
+          const da = a.action_plan_start_date ? new Date(a.action_plan_start_date).getTime() : 0;
+          const db = b.action_plan_start_date ? new Date(b.action_plan_start_date).getTime() : 0;
+          return db - da;
+        })[0];
+      };
+      const primary = pickPrimary() || group.children[0] || {};
+      return {
+        ...group,
+        tracking_id: primary.tracking_id || group.tracking_id,
+        case_number: primary.case_number || group.case_number,
+        action_plan_status: primary.action_plan_status || null,
+        action_plan_start_date: primary.action_plan_start_date || null,
+        action_plan_result_code: primary.action_plan_result_code || null,
+        action_plan_result_date: primary.action_plan_result_date || null
+      };
+    });
+
+    res.json({ total: items.length, items, grouped: true });
   } catch (err) {
     next(err);
   }
@@ -10355,6 +10610,7 @@ esdcRouter.post('/participants/batch-prepare', async (req, res, next) => {
       `
       SELECT eps.id, eps.case_id, eps.readiness_status, eps.action_plan_id,
              c.case_number,
+             c.client_id,
              COALESCE(cl.first_name, '') AS first_name,
              COALESCE(cl.last_name, '') AS last_name,
              COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
@@ -10427,28 +10683,105 @@ esdcRouter.post('/participants/batch-prepare', async (req, res, next) => {
     const warnings = [];
     const participants = [];
     const clientFragments = [];
-    const extractClientFragment = xml => {
-      if (!xml || typeof xml !== 'string') return null;
-      const start = xml.indexOf('<client>');
-      const end = xml.lastIndexOf('</client>');
-      if (start === -1 || end === -1) return null;
-      return xml.slice(start, end + '</client>'.length).trim();
-    };
+const extractClientFragment = xml => {
+  if (!xml || typeof xml !== 'string') return null;
+  const start = xml.indexOf('<client>');
+  const end = xml.lastIndexOf('</client>');
+  if (start === -1 || end === -1) return null;
+  return xml.slice(start, end + '</client>'.length).trim();
+};
 
-    for (const row of rows) {
+const normalisePlanStatusShort = status => {
+  const key = typeof status === 'string' ? status.trim().toLowerCase() : '';
+  if (key === 'in_progress' || key === 'in-progress') return 'in_progress';
+  if (key === 'ready_to_close' || key === 'ready-to-close') return 'ready_to_close';
+  return key || '';
+};
+
+async function buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings = false } = {}) {
+  if (!Array.isArray(clientRows) || !clientRows.length) {
+    return { error: 'no_rows' };
+  }
+  const connection = await pool.getConnection();
+  try {
+    const contexts = [];
+    for (const row of clientRows) {
+      const ctx = await loadEsdcParticipantSubmissionContext(connection, row.id, {
+        caseId: row.case_id,
+        forUpdate: false
+      });
+      contexts.push(ctx);
+    }
+    const combinedPlans = contexts.flatMap(ctx => ctx.caseActionPlans || []);
+    const activePlans = combinedPlans.filter(plan => normalisePlanStatusShort(plan.status) === 'active');
+    const baseContext = [...contexts].sort((a, b) => {
+      const aTs = a?.caseRow?.updated_at ? new Date(a.caseRow.updated_at).getTime() : 0;
+      const bTs = b?.caseRow?.updated_at ? new Date(b.caseRow.updated_at).getTime() : 0;
+      return bTs - aTs;
+    })[0];
+    const combinedContext = { ...baseContext, caseActionPlans: combinedPlans };
+    const evaluation = runIlmpValidation(combinedContext);
+    const blockingIssues = [...(evaluation.blockingIssues || [])];
+    if (activePlans.length > 1) {
+      blockingIssues.push('Only one active action plan is permitted per client.');
+    }
+    const warnings = evaluation.warnings || [];
+    if (blockingIssues.length > 0) {
+      return {
+        blockingIssues,
+        warnings,
+        readinessStatus: 'blocked',
+        evaluation
+      };
+    }
+    if (warnings.length > 0 && !ignoreWarnings) {
+      return {
+        warnings,
+        blockingIssues,
+        readinessStatus: evaluation.readinessStatus || 'needs_review',
+        evaluation
+      };
+    }
+    const snapshot = buildIlmpParticipantPayload(combinedContext);
+    return {
+      evaluation,
+      blockingIssues,
+      warnings,
+      snapshot,
+      readinessStatus: evaluation.readinessStatus || 'ready'
+    };
+  } finally {
+    connection.release();
+  }
+}
+
+    const clientGroups = new Map();
+    rows.forEach(r => {
+      const key = r.client_id || `case-${r.case_id}`;
+      if (!clientGroups.has(key)) clientGroups.set(key, []);
+      clientGroups.get(key).push(r);
+    });
+
+    for (const [key, clientRows] of clientGroups.entries()) {
+      const displayName = (() => {
+        const named = clientRows.find(r => r.first_name || r.last_name);
+        if (named) return `${named.first_name || ''} ${named.last_name || ''}`.trim() || named.tracking_id;
+        return clientRows[0]?.tracking_id || `Client ${key}`;
+      })();
       try {
-        const result = await prepareEsdcParticipantSubmission({ submissionId: row.id, caseId: row.case_id });
-        const readiness = (result?.evaluation?.readinessStatus || row.readiness_status || '').toLowerCase();
+        const aggregated = await buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings });
+        const readiness = (aggregated?.readinessStatus || '').toLowerCase();
         const baseDetail = {
-          id: row.id,
-          case_id: row.case_id,
-          action_plan_id: row.action_plan_id,
-          tracking_id: row.tracking_id,
-          participant_name: [row.first_name, row.last_name].filter(Boolean).join(' ') || row.tracking_id || `Submission #${row.id}`,
-          readiness_status: readiness
+          id: clientRows[0].id,
+          case_id: clientRows[0].case_id,
+          client_id: clientRows[0].client_id || null,
+          tracking_id: clientRows[0].tracking_id,
+          participant_name: displayName,
+          readiness_status: readiness,
+          submission_ids: clientRows.map(r => r.id)
         };
-        const blockingIssues = result?.evaluation?.blockingIssues || [];
-        const warningList = result?.evaluation?.warnings || [];
+        const blockingIssues = aggregated?.blockingIssues || [];
+        const warningList = aggregated?.warnings || [];
 
         if (blockingIssues.length > 0 || readiness === 'blocked') {
           blocking.push({ ...baseDetail, detail: blockingIssues.join('; ') || 'Blocking issues' });
@@ -10460,12 +10793,12 @@ esdcRouter.post('/participants/batch-prepare', async (req, res, next) => {
         }
 
         participants.push(baseDetail);
-        if (result?.payload?.xml) {
-          const fragment = extractClientFragment(result.payload.xml);
+        if (aggregated?.snapshot?.xml) {
+          const fragment = extractClientFragment(aggregated.snapshot.xml);
           if (fragment) clientFragments.push(fragment);
         }
       } catch (err) {
-        blocking.push({ id: row.id, case_id: row.case_id, detail: err?.message || 'prepare_failed' });
+        blocking.push({ id: clientRows[0]?.id || key, case_id: clientRows[0]?.case_id || null, detail: err?.message || 'prepare_failed' });
       }
     }
 
@@ -10519,6 +10852,7 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
       `
       SELECT eps.id, eps.case_id, eps.readiness_status, eps.action_plan_id,
              c.case_number,
+             c.client_id,
              COALESCE(cl.first_name, '') AS first_name,
              COALESCE(cl.last_name, '') AS last_name,
              COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
@@ -10599,20 +10933,33 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
       return xml.slice(start, end + '</client>'.length).trim();
     };
 
-    for (const row of rows) {
+    const clientGroups = new Map();
+    rows.forEach(r => {
+      const key = r.client_id || `case-${r.case_id}`;
+      if (!clientGroups.has(key)) clientGroups.set(key, []);
+      clientGroups.get(key).push(r);
+    });
+
+    for (const [key, clientRows] of clientGroups.entries()) {
+      const displayName = (() => {
+        const named = clientRows.find(r => r.first_name || r.last_name);
+        if (named) return `${named.first_name || ''} ${named.last_name || ''}`.trim() || named.tracking_id;
+        return clientRows[0]?.tracking_id || `Client ${key}`;
+      })();
       try {
-        const result = await prepareEsdcParticipantSubmission({ submissionId: row.id, caseId: row.case_id });
-        const readiness = (result?.evaluation?.readinessStatus || row.readiness_status || '').toLowerCase();
+        const aggregated = await buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings });
+        const readiness = (aggregated?.readinessStatus || '').toLowerCase();
         const baseDetail = {
-          id: row.id,
-          case_id: row.case_id,
-          action_plan_id: row.action_plan_id,
-          tracking_id: row.tracking_id,
-          participant_name: [row.first_name, row.last_name].filter(Boolean).join(' ') || row.tracking_id || `Submission #${row.id}`,
-          readiness_status: readiness
+          id: clientRows[0].id,
+          case_id: clientRows[0].case_id,
+          client_id: clientRows[0].client_id || null,
+          tracking_id: clientRows[0].tracking_id,
+          participant_name: displayName,
+          readiness_status: readiness,
+          submission_ids: clientRows.map(r => r.id)
         };
-        const blockingIssues = result?.evaluation?.blockingIssues || [];
-        const warningList = result?.evaluation?.warnings || [];
+        const blockingIssues = aggregated?.blockingIssues || [];
+        const warningList = aggregated?.warnings || [];
 
         if (blockingIssues.length > 0 || readiness === 'blocked') {
           blocking.push({ ...baseDetail, detail: blockingIssues.join('; ') || 'Blocking issues' });
@@ -10624,12 +10971,12 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
         }
 
         participants.push(baseDetail);
-        if (result?.payload?.xml) {
-          const fragment = extractClientFragment(result.payload.xml);
+        if (aggregated?.snapshot?.xml) {
+          const fragment = extractClientFragment(aggregated.snapshot.xml);
           if (fragment) clientFragments.push(fragment);
         }
       } catch (err) {
-        blocking.push({ id: row.id, case_id: row.case_id, detail: err?.message || 'prepare_failed' });
+        blocking.push({ id: clientRows[0]?.id || key, case_id: clientRows[0]?.case_id || null, detail: err?.message || 'prepare_failed' });
       }
     }
 
@@ -10654,7 +11001,7 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
     const xmlSize = Buffer.byteLength(batchXml, 'utf8');
 
     if (participants.length) {
-      const ids = participants.map(p => p.id);
+      const ids = participants.flatMap(p => Array.isArray(p.submission_ids) ? p.submission_ids : [p.id]);
       await pool.query(
         `
         UPDATE esdc_participant_submission
@@ -19157,12 +19504,37 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
     const label = labelRaw ? labelRaw.slice(0, 255) : null;
     const docTypeRaw = typeof req.body?.documentType === 'string' ? req.body.documentType.trim() : '';
     const docType = docTypeRaw || null;
+    let docTypeScope = null;
+    if (docType) {
+      try {
+        const [[docTypeRow]] = await pool.query(
+          'SELECT COALESCE(scope, \"application\") AS scope FROM document_type WHERE code = ? AND is_active = 1 LIMIT 1',
+          [docType]
+        );
+        if (!docTypeRow) {
+          cleanupUploadedFile();
+          return res.status(400).json({ error: 'invalid_document_type' });
+        }
+        docTypeScope = docTypeRow.scope || 'application';
+      } catch (err) {
+        cleanupUploadedFile();
+        console.error('[admin:documents:upload] doc type lookup failed', err);
+        return res.status(500).json({ error: 'document_type_lookup_failed' });
+      }
+    }
     const metadataObj = {};
     if (label) metadataObj.label = label;
     if (docType) metadataObj.document_type = docType;
     const metadata = Object.keys(metadataObj).length ? JSON.stringify(metadataObj) : null;
     const caseId = normalisePositiveInteger(req.body?.caseId);
-    const applicationId = normalisePositiveInteger(req.body?.applicationId);
+    const applicationIdRaw = normalisePositiveInteger(req.body?.applicationId);
+    let applicationId = applicationIdRaw;
+    if (docTypeScope === 'client') {
+      applicationId = null;
+    } else if (docType && docTypeScope === 'application' && !applicationIdRaw) {
+      cleanupUploadedFile();
+      return res.status(400).json({ error: 'application_required_for_document' });
+    }
     const source = 'manual_upload';
     const uploaderUserId = resolveAdminActorUserId(req);
     const mimeType = file.mimetype || null;
@@ -19523,7 +19895,7 @@ app.get('/api/document-types', async (req, res) => {
   const includeInactive = String(req.query.includeInactive || '').toLowerCase() === 'true';
   try {
     const [rows] = await pool.query(
-      `SELECT code, label, description, sort_order, is_active
+      `SELECT code, label, description, sort_order, is_active, COALESCE(scope, 'application') AS scope
          FROM document_type
         WHERE is_active = 1 OR ?
         ORDER BY sort_order, label`,
@@ -19534,7 +19906,8 @@ app.get('/api/document-types', async (req, res) => {
       label: r.label,
       description: r.description,
       sortOrder: r.sort_order,
-      isActive: !!r.is_active
+      isActive: !!r.is_active,
+      scope: r.scope || 'application'
     }));
     res.json({ items });
   } catch (err) {
@@ -19543,10 +19916,49 @@ app.get('/api/document-types', async (req, res) => {
   }
 });
 
+app.get('/api/applicants/:id/applications', async (req, res) => {
+  const applicantId = normalisePositiveInteger(req.params.id);
+  if (!applicantId) {
+    return res.status(400).json({ error: 'invalid_applicant_id' });
+  }
+  try {
+    const [rows] = await pool.query(
+      `SELECT
+          c.id AS case_id,
+          c.case_number,
+          a.id AS application_id,
+          a.status AS application_status,
+          a.created_at AS application_created_at,
+          COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+            s.reference_number
+          ) AS reference_number
+       FROM iset_application_submission s
+       JOIN iset_application a ON a.submission_id = s.id
+       LEFT JOIN iset_case c ON c.application_id = a.id
+      WHERE s.user_id = ?
+      ORDER BY a.created_at DESC`,
+      [applicantId]
+    );
+    const items = rows.map(r => ({
+      caseId: r.case_id || null,
+      caseNumber: r.case_number || null,
+      applicationId: r.application_id || null,
+      applicationStatus: r.application_status || null,
+      referenceNumber: r.reference_number || null,
+      createdAt: r.application_created_at || null
+    }));
+    return res.json({ items });
+  } catch (err) {
+    console.error('[applicant-applications] failed', err);
+    return res.status(500).json({ error: 'failed_to_load_applications' });
+  }
+});
+
 app.get('/api/applicants/:id/document-checklist', async (req, res) => {
-  const applicantId = Number(req.params.id);
-  const applicationId = Number.isFinite(Number(req.query.applicationId)) ? Number(req.query.applicationId) : null;
-  if (!Number.isFinite(applicantId) || applicantId <= 0) {
+  const applicantId = normalisePositiveInteger(req.params.id);
+  const applicationId = normalisePositiveInteger(req.query.applicationId);
+  if (!applicantId) {
     return res.status(400).json({ error: 'invalid_applicant_id' });
   }
   try {
@@ -19554,8 +19966,14 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     if (!checklist || !Array.isArray(checklist.items)) {
       return res.status(200).json({ items: [], missingRequiredCount: 0 });
     }
+    const docTypeScopeMap = await loadDocumentTypeScopeMap();
+    const [[appCountRow] = []] = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM iset_application_submission WHERE user_id = ?`,
+      [applicantId]
+    );
+    const applicantApplicationCount = Number(appCountRow?.cnt || 0);
     const [docs] = await pool.query(
-      `SELECT id, file_name, file_path, label, metadata, document_category, source, created_at AS uploaded_at
+      `SELECT id, file_name, file_path, label, metadata, document_category, source, application_id, created_at AS uploaded_at
         FROM iset_document
        WHERE applicant_user_id = ? AND status = 'active'`,
       [applicantId]
@@ -19583,12 +20001,21 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       const docTypes = [];
       if (doc.document_category) docTypes.push(String(doc.document_category));
       if (meta && meta.document_type) docTypes.push(String(meta.document_type));
+      const scope = (() => {
+        for (const t of docTypes) {
+          const mapped = docTypeScopeMap.get(t);
+          if (mapped) return mapped;
+        }
+        return 'application';
+      })();
       return {
         id: doc.id,
         file_name: doc.file_name,
         label: doc.label,
         source: doc.source,
         uploaded_at: doc.uploaded_at,
+        application_id: doc.application_id || null,
+        scope,
         docTypes,
       };
     });
@@ -19645,7 +20072,15 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     const normaliseId = id => String(id || '').toLowerCase().replace(/_/g, '-');
     const matchesForTypes = (types = []) => normalizedDocs.filter(d => {
       if (!Array.isArray(types) || !types.length) return false;
-      return d.docTypes.some(t => types.includes(t));
+      const matchesType = d.docTypes.some(t => types.includes(t));
+      if (!matchesType) return false;
+      const scope = d.scope || 'application';
+      if (!applicationId || scope === 'client') return true;
+      const docAppId = normalisePositiveInteger(d.application_id);
+      if (docAppId !== null) return docAppId === applicationId;
+      // Gracefully allow legacy application-scoped docs without an application_id when the applicant has only one application.
+      if (applicantApplicationCount <= 1) return true;
+      return false;
     });
     const computeStatus = (required, count, min) => {
       if (!required) return 'complete';
@@ -19953,16 +20388,48 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
 });
 
 app.get('/api/applicants/:id/documents', async (req, res) => {
-  const applicantId = req.params.id;
+  const applicantId = normalisePositiveInteger(req.params.id);
+  const applicationFilterId = normalisePositiveInteger(req.query.applicationId);
+  const caseFilterId = normalisePositiveInteger(req.query.caseId);
+  if (!applicantId) {
+    return res.status(400).json({ error: 'invalid_applicant_id' });
+  }
   try {
+    const docTypeScopeMap = await loadDocumentTypeScopeMap();
+    const whereClauses = ['d.applicant_user_id = ?', `d.status = 'active'`];
+    const params = [applicantId];
+    if (caseFilterId) {
+      whereClauses.push('d.case_id = ?');
+      params.push(caseFilterId);
+    } else if (applicationFilterId) {
+      whereClauses.push('(d.application_id = ? OR c.application_id = ?)');
+      params.push(applicationFilterId, applicationFilterId);
+    }
+    const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
     const [rows] = await pool.query(
-      `SELECT id, case_id, application_id, file_name, file_path, label, metadata, document_category, source, created_at AS uploaded_at
-       FROM iset_document
-       WHERE applicant_user_id = ? AND status = 'active'
-       ORDER BY created_at DESC`,
-      [applicantId]
+      `SELECT
+          d.id,
+          d.case_id,
+          c.case_number,
+          d.application_id,
+          d.file_name,
+          d.file_path,
+          d.label,
+          d.metadata,
+          d.document_category,
+          d.source,
+          d.created_at AS uploaded_at
+       FROM iset_document d
+       LEFT JOIN iset_case c ON c.id = d.case_id
+       ${whereSql}
+       ORDER BY d.created_at DESC`,
+      params
     );
-    res.status(200).json(rows);
+    const items = rows.map(row => ({
+      ...row,
+      scope: docTypeScopeMap.get(row.document_category) || 'application'
+    }));
+    res.status(200).json(items);
   } catch (error) {
     console.error('Error fetching applicant documents:', error);
     res.status(500).json({ error: 'Failed to fetch applicant documents' });
@@ -20057,6 +20524,7 @@ app.get('/api/cases', async (req, res) => {
   };
 
   try {
+    const groupByClient = String(firstValue(req.query.groupByClient) || '').toLowerCase() === 'true';
     const page = Math.max(1, parseInt(firstValue(req.query.page) ?? '1', 10) || 1);
     const rawPageSize = parseInt(firstValue(req.query.pageSize) ?? '25', 10);
     const pageSize = Math.min(Math.max(Number.isFinite(rawPageSize) ? rawPageSize : 25, 1), 100);
@@ -20365,11 +20833,65 @@ app.get('/api/cases', async (req, res) => {
 
     const items = rows.map(mapRowToCase);
 
+    if (!groupByClient) {
+      return res.json({
+        items,
+        page,
+        pageSize,
+        totalCount,
+      });
+    }
+
+    const groups = new Map();
+    const formatClientName = (client = {}) => {
+      const parts = [];
+      if (client.firstName) parts.push(client.firstName);
+      if (client.lastName) parts.push(client.lastName);
+      const combined = parts.join(' ').trim();
+      return combined || 'Unknown client';
+    };
+
+    items.forEach(caseItem => {
+      const key = caseItem.client?.id ? `client-${caseItem.client.id}` : `case-${caseItem.id}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          id: key,
+          clientId: caseItem.client?.id || null,
+          clientName: formatClientName(caseItem.client),
+          cases: [],
+          latestUpdatedAt: caseItem.lastActivityAt || caseItem.openedAt || null,
+        });
+      }
+      const group = groups.get(key);
+      group.cases.push({
+        id: caseItem.id,
+        status: caseItem.status,
+        statusLabel: caseItem.status ? caseItem.status.split('_').map(token => token.charAt(0).toUpperCase() + token.slice(1)).join(' ') : '-',
+        statusColor: caseItem.caseStatusColor || 'grey',
+        ownerName: caseItem.owner?.name || caseItem.owner?.email || null,
+        trackingId: caseItem.trackingId || null,
+        submittedAt: caseItem.submittedAt || null,
+        lastActivityAt: caseItem.lastActivityAt || null,
+        caseHref: caseItem.id ? `/cases/${caseItem.id}` : null,
+        openTasks: Number.isFinite(caseItem.openTasks) ? caseItem.openTasks : 0,
+        overdueTasks: Number.isFinite(caseItem.overdueTasks) ? caseItem.overdueTasks : 0,
+        openInterventions: Number.isFinite(caseItem.openInterventions) ? caseItem.openInterventions : 0,
+        totalInterventions: Number.isFinite(caseItem.totalInterventions) ? caseItem.totalInterventions : 0,
+        nextActionDueAt: caseItem.nextActionDueAt || null,
+      });
+      if (caseItem.lastActivityAt && (!group.latestUpdatedAt || new Date(caseItem.lastActivityAt) > new Date(group.latestUpdatedAt))) {
+        group.latestUpdatedAt = caseItem.lastActivityAt;
+      }
+    });
+
+    const groupedItems = Array.from(groups.values());
+
     res.json({
-      items,
+      grouped: true,
+      items: groupedItems,
       page,
       pageSize,
-      totalCount,
+      totalCount: groupedItems.length,
     });
   } catch (error) {
     console.error('GET /api/cases failed:', error);
@@ -30771,11 +31293,15 @@ app.put('/api/cases/:id', async (req, res) => {
       }
     }
 
+    const { actorId: requestActorId, actorName: requestActorName } = resolveRequestActor(req) || {};
+
     if ((shouldEnsureClientLink || (!ensuredClientId && targetStatus === CASE_STATUS_DERIVED_VALUES.initiated)) && applicationId) {
       ensuredClientId = await ensureCaseClientLinkForApproval(conn, {
         caseId,
         applicationId,
-        existingClientId: ensuredClientId
+        existingClientId: ensuredClientId,
+        actorId: requestActorId || null,
+        actorName: requestActorName || null
       });
       await ensureEsdcParticipantSubmissionRecord(conn, caseId, applicationId);
     }
