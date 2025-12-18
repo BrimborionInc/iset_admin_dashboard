@@ -27,6 +27,7 @@ const ROUTE_LABELS = {
   '/case-assignment-dashboard': 'Manage Applications',
   '/case-assignment-dashboard?view=assignment': 'Application Assignment',
   '/contact-communications': 'Contact Communications',
+  '/messages': 'Messages',
   '/configuration-settings': 'Configuration Settings',
   '/configuration/events': 'Event Capture',
   '/finance/allocations': 'Allocations & Transfers',

@@ -13461,6 +13461,7 @@ const dbConfig = {
 };
 
 pool = mysql.createPool(dbConfig);
+app.locals.pool = pool;
 hydrateAuthConfigFromDatabase().catch(err => {
   console.warn('[auth-config] Initial hydration failed:', err.message);
 });
@@ -25423,6 +25424,530 @@ app.put('/api/admin/messages/:id/status', async (req, res) => {
   } catch (error) {
     console.error('Error updating message status:', error);
     res.status(500).json({ error: 'Failed to update message status' });
+  }
+});
+
+// --- Staff-to-staff secure messaging (internal) -----------------------------
+// Schema lives in sql/20251218_create_staff_messaging_tables.sql
+// Routes below intentionally avoid /api/admin/messages, which is already used for applicant/case messaging.
+
+const STAFF_MESSAGE_FOLDERS = new Set(['inbox', 'sent', 'deleted']);
+
+function normaliseStaffProfileSummaryRow(row) {
+  if (!row) return null;
+  const displayName = row.display_name || row.name || row.email || null;
+  return {
+    staff_profile_id: row.id,
+    display_name: displayName,
+    primary_role: row.primary_role || null,
+    email: row.email || null,
+  };
+}
+
+function truncatePreview(value, maxLen = 160) {
+  if (!value) return '';
+  const text = String(value).replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, Math.max(0, maxLen - 1))}…`;
+}
+
+function normaliseStaffMessageFolder(raw) {
+  const value = String(raw || '').trim().toLowerCase();
+  return STAFF_MESSAGE_FOLDERS.has(value) ? value : null;
+}
+
+app.get('/api/me/staff-profiles', async (req, res) => {
+  try {
+    const limitRaw = Number.parseInt(String(req.query.limit || '50'), 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 250) : 50;
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const like = q ? `%${q}%` : null;
+
+    const where = ["COALESCE(status, 'active') = 'active'"];
+    const params = [];
+    if (like) {
+      where.push('(display_name LIKE ? OR name LIKE ? OR email LIKE ?)');
+      params.push(like, like, like);
+    }
+    params.push(limit);
+
+    const [rows] = await pool.query(
+      `SELECT id, display_name, name, email, primary_role
+         FROM staff_profiles
+        WHERE ${where.join(' AND ')}
+        ORDER BY COALESCE(display_name, name, email, CAST(id AS CHAR)) ASC
+        LIMIT ?`,
+      params
+    );
+
+    const items = (rows || [])
+      .map(normaliseStaffProfileSummaryRow)
+      .filter(Boolean)
+      .map((row) => ({
+        id: row.staff_profile_id,
+        displayName: row.display_name,
+        primaryRole: row.primary_role,
+        email: row.email,
+      }));
+
+    return res.json({ items });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.json({ items: [] });
+    }
+    console.error('[staff-messages] GET /api/me/staff-profiles failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_list_staff_profiles' });
+  }
+});
+
+app.get('/api/me/staff-messages', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+
+    const folder = normaliseStaffMessageFolder(req.query.folder || 'inbox');
+    if (!folder) {
+      return res.status(400).json({ error: 'invalid_folder', allowed: Array.from(STAFF_MESSAGE_FOLDERS) });
+    }
+
+    const limitRaw = Number.parseInt(String(req.query.limit || '100'), 10);
+    const offsetRaw = Number.parseInt(String(req.query.offset || '0'), 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 250) : 100;
+    const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0;
+
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const like = q ? `%${q}%` : null;
+
+    const where = [
+      'smi.owner_staff_profile_id = ?',
+      'smi.folder = ?',
+      'smi.purged_at IS NULL',
+    ];
+    const params = [staffProfileId, folder];
+
+    if (like) {
+      where.push('(smt.subject LIKE ? OR sm.body LIKE ? OR sender.display_name LIKE ? OR sender.name LIKE ? OR sender.email LIKE ?)');
+      params.push(like, like, like, like, like);
+    }
+
+    params.push(limit, offset);
+
+    const [rows] = await pool.query(
+      `SELECT
+          smi.id AS item_id,
+          smi.owner_staff_profile_id AS owner_staff_profile_id,
+          smi.folder AS folder,
+          smi.folder_before_deleted AS folder_before_deleted,
+          smi.read_at AS read_at,
+          smi.deleted_at AS deleted_at,
+          smi.purged_at AS purged_at,
+          sm.id AS message_id,
+          sm.thread_id AS thread_id,
+          sm.sender_staff_profile_id AS sender_staff_profile_id,
+          sm.body AS body,
+          sm.created_at AS created_at,
+          smt.subject AS subject,
+          sender.id AS sender_id,
+          sender.display_name AS sender_display_name,
+          sender.name AS sender_name,
+          sender.email AS sender_email,
+          sender.primary_role AS sender_primary_role
+        FROM staff_message_item smi
+        JOIN staff_message sm ON sm.id = smi.message_id
+        JOIN staff_message_thread smt ON smt.id = sm.thread_id
+        LEFT JOIN staff_profiles sender ON sender.id = sm.sender_staff_profile_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY sm.created_at DESC
+       LIMIT ? OFFSET ?`,
+      params
+    );
+
+    const threadIds = (rows || [])
+      .map((row) => Number(row.thread_id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const uniqueThreadIds = Array.from(new Set(threadIds));
+
+    let participantsByThread = new Map();
+    if (uniqueThreadIds.length) {
+      const placeholders = uniqueThreadIds.map(() => '?').join(',');
+      const [participantRows] = await pool.query(
+        `SELECT
+            smtp.thread_id,
+            sp.id,
+            sp.display_name,
+            sp.name,
+            sp.email,
+            sp.primary_role
+          FROM staff_message_thread_participant smtp
+          JOIN staff_profiles sp ON sp.id = smtp.staff_profile_id
+         WHERE smtp.thread_id IN (${placeholders})
+         ORDER BY smtp.thread_id ASC, COALESCE(sp.display_name, sp.name, sp.email, CAST(sp.id AS CHAR)) ASC`,
+        uniqueThreadIds
+      );
+      participantsByThread = (participantRows || []).reduce((map, row) => {
+        const threadId = Number(row.thread_id);
+        if (!Number.isFinite(threadId)) return map;
+        if (!map.has(threadId)) map.set(threadId, []);
+        const summary = normaliseStaffProfileSummaryRow(row);
+        if (summary) {
+          map.get(threadId).push({
+            staffProfileId: summary.staff_profile_id,
+            displayName: summary.display_name,
+            primaryRole: summary.primary_role,
+            email: summary.email,
+          });
+        }
+        return map;
+      }, new Map());
+    }
+
+    const items = (rows || []).map((row) => {
+      const senderProfile = normaliseStaffProfileSummaryRow({
+        id: row.sender_id || row.sender_staff_profile_id || null,
+        display_name: row.sender_display_name || null,
+        name: row.sender_name || null,
+        email: row.sender_email || null,
+        primary_role: row.sender_primary_role || null,
+      });
+      const threadId = Number(row.thread_id);
+      const senderId = Number(row.sender_staff_profile_id);
+      const participants = participantsByThread.get(threadId) || [];
+      const recipients = participants.filter((p) => Number(p.staffProfileId) !== senderId);
+      const createdAt = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
+      const readAt = row.read_at instanceof Date ? row.read_at.toISOString() : (row.read_at ? String(row.read_at) : null);
+      return {
+        id: Number(row.item_id),
+        messageId: Number(row.message_id),
+        threadId,
+        ownerStaffProfileId: Number(row.owner_staff_profile_id),
+        folder: row.folder,
+        deletedFrom: row.folder_before_deleted || null,
+        unread: row.folder === 'inbox' && !row.read_at,
+        receivedAt: createdAt,
+        readAt,
+        subject: row.subject || '(No subject)',
+        body: row.body || '',
+        preview: truncatePreview(row.body || ''),
+        sender: senderProfile
+          ? {
+            staffProfileId: senderProfile.staff_profile_id,
+            displayName: senderProfile.display_name,
+            primaryRole: senderProfile.primary_role,
+            email: senderProfile.email,
+          }
+          : null,
+        recipients,
+        participants,
+      };
+    });
+
+    return res.json({
+      folder,
+      items,
+      viewer: { staffProfileId },
+    });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.json({ folder: req.query.folder || 'inbox', items: [], viewer: { staffProfileId: null } });
+    }
+    console.error('[staff-messages] GET /api/me/staff-messages failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_list_staff_messages' });
+  }
+});
+
+app.get('/api/me/staff-messages/counts', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+    const [rows] = await pool.query(
+      `SELECT folder,
+              COUNT(*) AS total,
+              SUM(CASE WHEN read_at IS NULL AND folder = 'inbox' THEN 1 ELSE 0 END) AS unread
+         FROM staff_message_item
+        WHERE owner_staff_profile_id = ? AND purged_at IS NULL
+        GROUP BY folder`,
+      [staffProfileId]
+    );
+    const counts = { inbox: { total: 0, unread: 0 }, sent: { total: 0, unread: 0 }, deleted: { total: 0, unread: 0 } };
+    for (const row of rows || []) {
+      const folder = row.folder;
+      if (!counts[folder]) continue;
+      counts[folder].total = Number(row.total) || 0;
+      counts[folder].unread = Number(row.unread) || 0;
+    }
+    return res.json(counts);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.json({ inbox: { total: 0, unread: 0 }, sent: { total: 0, unread: 0 }, deleted: { total: 0, unread: 0 } });
+    }
+    console.error('[staff-messages] GET /api/me/staff-messages/counts failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_fetch_counts' });
+  }
+});
+
+app.post('/api/me/staff-messages', async (req, res) => {
+  let connection;
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+
+    const body = req.body || {};
+    const threadIdRaw = body.threadId ?? body.thread_id ?? null;
+    const threadId = threadIdRaw === null || typeof threadIdRaw === 'undefined' ? null : Number(threadIdRaw);
+    if (threadId !== null && (!Number.isFinite(threadId) || threadId <= 0)) {
+      return res.status(400).json({ error: 'invalid_thread_id' });
+    }
+
+    const subjectValue = typeof body.subject === 'string' ? body.subject.trim() : '';
+    const bodyValue = typeof body.body === 'string' ? body.body.trim() : '';
+    if (!bodyValue) {
+      return res.status(400).json({ error: 'message_body_required' });
+    }
+
+    const rawRecipients = body.toStaffProfileIds ?? body.to_staff_profile_ids ?? body.recipients ?? body.to ?? [];
+    const recipientIds = Array.from(new Set(
+      (Array.isArray(rawRecipients) ? rawRecipients : [rawRecipients])
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0 && value !== Number(staffProfileId))
+    ));
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    let effectiveThreadId = threadId;
+    let threadSubject = null;
+    let participantIds = [];
+
+    if (effectiveThreadId) {
+      const [[threadRow]] = await connection.query(
+        'SELECT id, subject FROM staff_message_thread WHERE id = ? LIMIT 1 FOR UPDATE',
+        [effectiveThreadId]
+      );
+      if (!threadRow) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'thread_not_found' });
+      }
+      threadSubject = threadRow.subject || null;
+
+      const [existingParticipants] = await connection.query(
+        'SELECT staff_profile_id FROM staff_message_thread_participant WHERE thread_id = ?',
+        [effectiveThreadId]
+      );
+      const existingIds = (existingParticipants || [])
+        .map((row) => Number(row.staff_profile_id))
+        .filter((value) => Number.isFinite(value) && value > 0);
+
+      const nextIds = Array.from(new Set([staffProfileId, ...existingIds, ...recipientIds]));
+      const existingSet = new Set(existingIds);
+      const toInsert = nextIds.filter((id) => !existingSet.has(id));
+
+      if (toInsert.length) {
+        const valuesSql = toInsert.map(() => '(?, ?)').join(',');
+        const values = toInsert.flatMap((id) => [effectiveThreadId, id]);
+        await connection.query(
+          `INSERT INTO staff_message_thread_participant (thread_id, staff_profile_id) VALUES ${valuesSql}`,
+          values
+        );
+      }
+
+      participantIds = nextIds;
+
+      if (!threadSubject && subjectValue) {
+        await connection.query('UPDATE staff_message_thread SET subject = ? WHERE id = ?', [subjectValue, effectiveThreadId]);
+        threadSubject = subjectValue;
+      }
+    } else {
+      if (!subjectValue) {
+        await connection.rollback();
+        return res.status(400).json({ error: 'subject_required' });
+      }
+      if (!recipientIds.length) {
+        await connection.rollback();
+        return res.status(400).json({ error: 'recipients_required' });
+      }
+      const [result] = await connection.query(
+        'INSERT INTO staff_message_thread (subject, created_by_staff_profile_id) VALUES (?, ?)',
+        [subjectValue, staffProfileId]
+      );
+      effectiveThreadId = result.insertId;
+      threadSubject = subjectValue;
+      participantIds = Array.from(new Set([staffProfileId, ...recipientIds]));
+      const valuesSql = participantIds.map(() => '(?, ?)').join(',');
+      const values = participantIds.flatMap((id) => [effectiveThreadId, id]);
+      await connection.query(
+        `INSERT INTO staff_message_thread_participant (thread_id, staff_profile_id) VALUES ${valuesSql}`,
+        values
+      );
+    }
+
+    const [msgResult] = await connection.query(
+      'INSERT INTO staff_message (thread_id, sender_staff_profile_id, body, metadata_json) VALUES (?, ?, ?, NULL)',
+      [effectiveThreadId, staffProfileId, bodyValue]
+    );
+    const messageId = msgResult.insertId;
+
+    await connection.query('UPDATE staff_message_thread SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [effectiveThreadId]);
+
+    const now = new Date();
+    const itemValuesSql = participantIds.map(() => '(?, ?, ?, ?, NULL, NULL)').join(',');
+    const itemValues = participantIds.flatMap((participantId) => ([
+      messageId,
+      participantId,
+      participantId === staffProfileId ? 'sent' : 'inbox',
+      participantId === staffProfileId ? now : null,
+    ]));
+    await connection.query(
+      `INSERT INTO staff_message_item (message_id, owner_staff_profile_id, folder, read_at, deleted_at, purged_at)
+       VALUES ${itemValuesSql}`,
+      itemValues
+    );
+
+    await connection.commit();
+
+    // Return the sender's mailbox item (suitable for UI insert)
+    const [[senderItem]] = await pool.query(
+      `SELECT smi.id AS item_id
+         FROM staff_message_item smi
+        WHERE smi.message_id = ? AND smi.owner_staff_profile_id = ?
+        LIMIT 1`,
+      [messageId, staffProfileId]
+    );
+    return res.status(201).json({
+      ok: true,
+      threadId: effectiveThreadId,
+      messageId,
+      itemId: senderItem?.item_id ? Number(senderItem.item_id) : null,
+      subject: threadSubject || '(No subject)',
+    });
+  } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch {}
+    }
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(503).json({ error: 'staff_messaging_unavailable' });
+    }
+    console.error('[staff-messages] POST /api/me/staff-messages failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_send_staff_message' });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.patch('/api/me/staff-messages/:itemId/read', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+    const itemId = Number(req.params.itemId);
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      return res.status(400).json({ error: 'invalid_item_id' });
+    }
+    await pool.query(
+      `UPDATE staff_message_item
+          SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP)
+        WHERE id = ? AND owner_staff_profile_id = ? AND purged_at IS NULL`,
+      [itemId, staffProfileId]
+    );
+    return res.status(204).send();
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(204).send();
+    }
+    console.error('[staff-messages] PATCH read failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_mark_read' });
+  }
+});
+
+app.put('/api/me/staff-messages/:itemId/delete', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+    const itemId = Number(req.params.itemId);
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      return res.status(400).json({ error: 'invalid_item_id' });
+    }
+    await pool.query(
+      `UPDATE staff_message_item
+          SET folder_before_deleted = CASE
+              WHEN folder IN ('inbox','sent') THEN folder
+              ELSE folder_before_deleted
+            END,
+            folder = 'deleted',
+            deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP)
+        WHERE id = ? AND owner_staff_profile_id = ? AND purged_at IS NULL`,
+      [itemId, staffProfileId]
+    );
+    return res.status(204).send();
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(204).send();
+    }
+    console.error('[staff-messages] PUT delete failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_delete_message' });
+  }
+});
+
+app.put('/api/me/staff-messages/:itemId/restore', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+    const itemId = Number(req.params.itemId);
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      return res.status(400).json({ error: 'invalid_item_id' });
+    }
+    await pool.query(
+      `UPDATE staff_message_item
+          SET folder = COALESCE(folder_before_deleted, 'inbox'),
+              folder_before_deleted = NULL,
+              deleted_at = NULL
+        WHERE id = ? AND owner_staff_profile_id = ? AND folder = 'deleted' AND purged_at IS NULL`,
+      [itemId, staffProfileId]
+    );
+    return res.status(204).send();
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(204).send();
+    }
+    console.error('[staff-messages] PUT restore failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_restore_message' });
+  }
+});
+
+app.delete('/api/me/staff-messages/:itemId', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+    const itemId = Number(req.params.itemId);
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      return res.status(400).json({ error: 'invalid_item_id' });
+    }
+    await pool.query(
+      `UPDATE staff_message_item
+          SET purged_at = COALESCE(purged_at, CURRENT_TIMESTAMP)
+        WHERE id = ? AND owner_staff_profile_id = ?`,
+      [itemId, staffProfileId]
+    );
+    return res.status(204).send();
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(204).send();
+    }
+    console.error('[staff-messages] DELETE purge failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_purge_message' });
   }
 });
 

@@ -70,6 +70,7 @@ import FinanceForecastingHelp from '../helpPanelContents/financeForecastingHelp.
 import FinancePaymentsHelp from '../helpPanelContents/financePaymentsHelp.js';
 import ContactCommunicationsDashboard from '../pages/contact/ContactCommunicationsDashboard.jsx';
 import ContactCommunicationsHelp from '../helpPanelContents/contactCommunicationsHelp.js';
+import MessagesDashboardPage from '../pages/messages/MessagesDashboardPage.jsx';
 import PortfolioDashboardPage from '../pages/Caseworking/PortfolioDashboardPage.jsx';
 import PortfolioDashboardHelp from '../helpPanelContents/portfolioDashboardHelp.js';
 import CaseWorkspacePage from '../pages/Caseworking/CaseWorkspacePage.jsx';
@@ -727,6 +728,20 @@ const AppRoutes = ({
               </SpaceBetween>
             ),
             ContactCommunicationsHelp.aiContext
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/messages">
+        <Guard path="/messages">
+          {renderContent(
+            MessagesDashboardPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Messages', href: '/messages' },
+            ],
+            'Messages',
+            <Box variant="p">Internal secure messaging scaffold.</Box>
           )}
         </Guard>
       </Route>

@@ -43,18 +43,64 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.3.1 (12 Dec 2025)',
-      description: 'Release 0.3.1 introduces the ILMP Exports dashboard to prepare, validate, and download multi-client ILMP XML batches.',
+      sectionTitle: 'Release Notes - v0.4.0 (18 Dec 2025)',
+      description: 'Release 0.4.1 covers a range of changes including staff-to-staff secure messaging. See the updates.',
       features: {
-        heading: 'Updates',
+        heading: 'What’s New',
         sections: [
           {
-            title: 'Release v0.3.1 — ILMP Exports Dashboard',
+            title: 'Secure internal messaging',
             paragraphs: [
-              'New “ILMP Exports” dashboard: queue of participants needing submission, bulk validation, batch XML generation, and recent export history.',
-              'Validation tightened to align with ILMP 1.4 rules (e.g., education level at plan start, intervention date/length rules, NOC version/length, SIN and address checks).',
-              'Batch generation produces a single compliant XML with multiple clients; download flow marks included submissions as submitted and logs batch metadata.',
-              'Export history now shows batch details, participants, XML preview with copy, and a “Mark pending” action to re-queue a batch for regeneration.'
+              'A new secure messaging feature is now available.',
+              'Selecting Messages from the side navigation opens an email-style dashboard where you can view, send, and receive messages.',
+              'Opening a message displays it in a small, pinned window in the bottom-right corner of the screen.',
+              'The message stays open while you move around the system, so you can continue reading or responding while working elsewhere.',
+              'Messages can be sent to multiple staff members.'
+            ]
+          },
+          {
+            title: 'Improved handling of repeat applications',
+            paragraphs: [
+              'The system now better supports clients who apply more than once.',
+              'When a client submits a subsequent application (for example, a second year of funding), it is treated as a new application.',
+              'Once approved, the Case Management view will show multiple cases under the same client profile.',
+              'This makes it easy to see a client’s full application and funding history in one place.'
+            ]
+          },
+          {
+            title: 'Document checklist now reflects how applications actually work',
+            paragraphs: [
+              'The document checklist has been redesigned to distinguish between different kinds of documents.',
+              'Client-level documents are only checked once and follow the client.',
+              'Application-level documents are required for each new application.',
+              'For example, EI verification and consent forms are now correctly tied to the application, not reused from earlier submissions.',
+              'When a new application is started, the checklist resets appropriately for that application.'
+            ]
+          },
+          {
+            title: 'Mandatory document completion before assessment submission',
+            paragraphs: [
+              'The document checklist now actively enforces completeness.',
+              'Assessors cannot submit an assessment to managers or program administrators unless all required documents are present.',
+              'This ensures applications are complete before they move forward in the workflow.'
+            ]
+          },
+          {
+            title: 'EI verification now requires supporting documents',
+            paragraphs: [
+              'When performing an EI verification check:',
+              'Managers and administrators must now upload the supporting EI status document at the same time as setting eligibility.',
+              'This ensures the decision is always backed by documentation.'
+            ]
+          },
+          {
+            title: 'Updates to accepted document types',
+            paragraphs: [
+              'Several improvements have been made to document recognition:',
+              'Status Card has been reintroduced as a document type.',
+              'Letters of Reference have been added as an alternative.',
+              'If a Status Card is not provided, the checklist will now require two Letters of Reference instead.',
+              'This supports participants who do not have a Status Card but can confirm Indigenous status through references.'
             ]
           },
         ]
@@ -140,63 +186,64 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.2.3 (4 décembre 2025)',
-      description: 'La version 0.2.3 répond aux premiers commentaires de l’AFAC lors de la première revue de démonstration.',
+      sectionTitle: 'Notes de version - v0.4.0 (18 décembre 2025)',
+      description: 'La version 0.4.1 présente la messagerie sécurisée entre membres du personnel et d’autres améliorations. Consultez les mises à jour.',
       features: {
-        heading: 'Mises à jour',
+        heading: 'Quoi de neuf',
         sections: [
           {
-            title: 'Correctif v0.2.3 — Alignement du parcours et corrections',
+            title: 'Messagerie interne sécurisée',
             paragraphs: [
-              'Le numéro d’inscription est désormais obligatoire pour les Premières Nations inscrites (10 chiffres). Les personnes sans statut, inuites et métisses ont leur propre champ libre avec consignes adaptées.',
-              'La communauté d’origine reprend par défaut l’affiliation fournie dans la déclaration autochtone, tout en restant modifiable.',
-              'Nouvelle étape d’admission demandant de détailler les prêts ou bourses d’études reçus.',
-              'Statut d’emploi : ajout de « Employé en congé approuvé » et affichage dans les revenus du ménage du widget du formulaire.',
-              'Correctif : cliquer sur Retour sur une étape avec erreur de validation efface désormais l’erreur.'
+              'Une nouvelle messagerie sécurisée entre membres du personnel est disponible.',
+              'Choisir Messages dans la navigation latérale ouvre un tableau de bord type courriel pour voir, envoyer et recevoir des messages.',
+              'L’ouverture d’un message l’affiche dans une petite fenêtre épinglée en bas à droite de l’écran.',
+              'Le message reste ouvert pendant que vous vous déplacez dans le système, ce qui permet de lire ou de répondre en travaillant ailleurs.',
+              'Les messages peuvent être envoyés à plusieurs membres du personnel.'
             ]
           },
           {
-            title: 'Correctif v0.2.2 — Liste de contrôle des documents',
+            title: 'Meilleure gestion des demandes répétées',
             paragraphs: [
-              'La liste de contrôle des documents est disponible dans l’espace de travail Évaluation des demandes; les évaluatrices peuvent marquer les éléments comme requis, reçus ou dispensés directement dans le dossier.',
-              'Les statuts des éléments restent en place lorsque vous changez d’onglet pour éviter de perdre le travail en cours.',
-              'Des notes en ligne expliquent pourquoi un document est dispensé ou indiquent les suivis nécessaires avant une décision.',
-              'Les totaux requis vs complétés montrent rapidement ce qui bloque encore l’approbation.'
+              'Le système gère mieux les clients qui déposent plus d’une demande.',
+              'Lorsqu’un client soumet une demande subséquente (p. ex. une deuxième année de financement), elle est traitée comme une nouvelle demande.',
+              'Une fois approuvées, la vue Gestion des dossiers affiche plusieurs dossiers sous le même profil client.',
+              'Cela permet de voir l’historique complet des demandes et du financement d’un client au même endroit.'
             ]
           },
           {
-            title: 'Version 0.2.0 — Gestion des dossiers',
+            title: 'La liste de contrôle reflète la réalité des demandes',
             paragraphs: [
-              'Ajout du module de gestion des dossiers avec espace de travail et panneaux (messagerie sécurisée, documents, notes/tâches, calendrier, plans d’action, interventions, finance, conformité, aperçu d’export).',
-              'Mise en page réinitialisable et aide rapide dans chaque panneau.'
+              'La liste de contrôle des documents distingue désormais clairement les types de documents.',
+              'Les documents au niveau du client sont vérifiés une seule fois et suivent le client.',
+              'Les documents au niveau de la demande sont requis pour chaque nouvelle demande.',
+              'Par exemple, la vérification AE et les formulaires de consentement sont correctement liés à la demande, et non réutilisés de soumissions antérieures.',
+              'Lorsqu’une nouvelle demande est amorcée, la liste de contrôle se réinitialise pour cette demande.'
             ]
           },
           {
-            title: 'Correctif v0.1.5 — Échafaudage du portefeuille de dossiers',
+            title: 'Documents obligatoires avant la soumission de l’évaluation',
             paragraphs: [
-              'Préparation des tableaux de bord « Portefeuille de dossiers » et « Espace de travail du dossier » avec panneaux configurables et contrôles d’accès mis à jour.'
+              'La liste de contrôle des documents applique maintenant la complétude.',
+              'Les évaluateurs ne peuvent pas soumettre une évaluation aux gestionnaires ou aux administrateurs de programme tant que tous les documents requis ne sont pas présents.',
+              'Cela garantit que les demandes sont complètes avant d’avancer dans le flux de travail.'
             ]
           },
           {
-            title: 'Correctif v0.1.4 — Corrections de bogues',
+            title: 'La vérification AE exige une pièce justificative',
             paragraphs: [
-              'Réactivation du lien « Mot de passe oublié » et capture fiable des événements « case_watch_removed » dans le portail public.',
-              'Corrections pour l’affichage des accents dans la messagerie publique et pour les actions d’approbation/rejet des coordonnatrices et évaluatrices.',
-              'Message NAS ajusté et extension du fichier XML EDSC pour inclure l’intervention.'
+              'Lors d’une vérification d’assurance-emploi :',
+              'Les gestionnaires et administrateurs doivent téléverser le document attestant le statut AE en même temps que la décision d’admissibilité.',
+              'Cela garantit que chaque décision est appuyée par une preuve.'
             ]
           },
           {
-            title: 'Correctif v0.1.3 — Préparation EDSC',
+            title: 'Mise à jour des types de documents acceptés',
             paragraphs: [
-              'Prépare le module de soumission vers EDSC avec quatre tableaux de bord (Aperçu, Participantes, Espace de soumission, Rapports).',
-              'Validation EDSC 1.4 par participante, y compris la vérification du NAS et la génération d’instantanés XML ILMP.'
-            ]
-          },
-          {
-            title: 'Correctif v0.1.2 — Portail public',
-            paragraphs: [
-              'Actualisation du contenu public (témoin, confidentialité, à propos, contact) et connexion du tableau des messages de contact.',
-              'Simplification de la carte « Demande ISET – Brouillon incomplet » pour mettre de l’avant le nombre de sections complétées.'
+              'Plusieurs améliorations ont été apportées à la reconnaissance des documents :',
+              'La carte de statut est réintroduite comme type de document.',
+              'Les lettres de référence sont ajoutées comme alternative.',
+              'Si aucune carte de statut n’est fournie, la liste de contrôle exigera désormais deux lettres de référence.',
+              'Cela soutient les participants qui n’ont pas de carte de statut mais peuvent confirmer leur statut autochtone au moyen de références.'
             ]
           }
         ]

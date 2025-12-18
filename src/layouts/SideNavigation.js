@@ -45,6 +45,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
   const tokenRole = getRoleFromClaims(getIdTokenClaims());
   const effectiveRole = (iamOn && signedIn && tokenRole) ? { value: tokenRole } : currentRole;
   const [contactCount, setContactCount] = useState(null);
+  const [messageCount, setMessageCount] = useState(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -79,6 +80,33 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
     return () => {
       isCancelled = true;
       controller.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    async function loadMessageCount() {
+      try {
+        const resp = await apiFetch('/api/me/staff-messages/counts', { method: 'GET', signal: controller.signal });
+        if (!resp.ok) throw new Error(`status ${resp.status}`);
+        const json = await resp.json();
+        const unread = Number(json?.inbox?.unread ?? 0);
+        if (!cancelled) setMessageCount(unread);
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[SideNavigation] message count fetch failed', err);
+          setMessageCount(null);
+        }
+      }
+    }
+    loadMessageCount();
+    const onRefresh = () => loadMessageCount();
+    window.addEventListener('staff-messages:refresh', onRefresh);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.removeEventListener('staff-messages:refresh', onRefresh);
     };
   }, []);
 
@@ -203,6 +231,22 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
     return item;
   }, [notificationCount]);
 
+  const messagesFooterItem = useMemo(() => {
+    const placeholderCount = messageCount ?? 0;
+    return {
+      type: 'link',
+      id: 'footer-messages',
+      text: 'Messages',
+      href: '/messages',
+      external: false,
+      info: (
+        <span style={{ display: 'inline-flex', pointerEvents: 'none' }} aria-hidden="true">
+          <Badge color={placeholderCount > 0 ? 'blue' : 'grey'}>{placeholderCount}</Badge>
+        </span>
+      ),
+    };
+  }, [messageCount]);
+
   function isAllowed(href, roleValue) {
     if (!href) return true;
     const allowed = roleMatrix?.routes?.[href];
@@ -261,6 +305,13 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       const existingContactIndex = footerItems.findIndex(item => item?.href === '/contact-communications');
       const insertAt = existingContactIndex >= 0 ? existingContactIndex + 1 : footerItems.length;
       footerItems.splice(insertAt, 0, notificationsFooterItem);
+    }
+
+    if (isAllowed('/messages', canonicalRole)) {
+      ensureDivider();
+      const notificationsIndex = footerItems.findIndex(item => item?.id === 'footer-notifications');
+      const insertAt = notificationsIndex >= 0 ? notificationsIndex + 1 : footerItems.length;
+      footerItems.splice(insertAt, 0, messagesFooterItem);
     }
 
     return [...pruneSections(filteredSections), ...footerItems];

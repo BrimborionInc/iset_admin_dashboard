@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { requireRole } = require('../../middleware/authz');
 const { resolveAwsCredentials } = require('../../lib/awsCredentials');
-const { CognitoIdentityProviderClient, ListUsersCommand, ListUsersInGroupCommand, AdminCreateUserCommand, AdminAddUserToGroupCommand, AdminDisableUserCommand, AdminEnableUserCommand, AdminUpdateUserAttributesCommand } = require('@aws-sdk/client-cognito-identity-provider');
+const { CognitoIdentityProviderClient, ListUsersCommand, ListUsersInGroupCommand, AdminCreateUserCommand, AdminAddUserToGroupCommand, AdminDisableUserCommand, AdminEnableUserCommand, AdminUpdateUserAttributesCommand, AdminGetUserCommand } = require('@aws-sdk/client-cognito-identity-provider');
 
 const POOL_ID = process.env.COGNITO_USER_POOL_ID;
 const REGION = process.env.AWS_REGION || process.env.COGNITO_REGION;
@@ -47,6 +47,49 @@ function normalizeRoleKey(role) {
 function canCreateRole(actorKey, targetKey) {
   const set = CAN_CREATE[actorKey];
   return !!set && set.has(targetKey);
+}
+
+function mapAdminRoleKeyToStaffPrimaryRole(roleKey) {
+  switch (roleKey) {
+    case 'SysAdmin':
+      return 'System Administrator';
+    case 'ProgramAdmin':
+      return 'Program Administrator';
+    case 'RegionalCoordinator':
+      return 'Regional Coordinator';
+    case 'Adjudicator':
+      return 'Application Assessor';
+    default:
+      return null;
+  }
+}
+
+function getDbPoolFromRequest(req) {
+  const pool = req?.app?.locals?.pool;
+  return pool && typeof pool.query === 'function' ? pool : null;
+}
+
+async function upsertStaffProfile(pool, { cognitoSub, email, name, displayName, primaryRole, regionId }) {
+  if (!pool) return;
+  if (!cognitoSub || !email) return;
+
+  const safeName = typeof name === 'string' ? name.trim() : '';
+  const safeDisplay = typeof displayName === 'string' ? displayName.trim() : '';
+  const finalName = safeName || safeDisplay || email;
+  const finalDisplay = safeDisplay || safeName || email;
+  const normalizedRegionId = Number.isFinite(regionId) ? regionId : null;
+
+  await pool.query(
+    `INSERT INTO staff_profiles (cognito_sub, email, name, display_name, primary_role, region_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        email = VALUES(email),
+        name = VALUES(name),
+        display_name = VALUES(display_name),
+        primary_role = VALUES(primary_role),
+        region_id = VALUES(region_id)`,
+    [cognitoSub, email, finalName, finalDisplay, primaryRole, normalizedRegionId]
+  );
 }
 
 const AUTH_ENABLED = String(process.env.AUTH_PROVIDER || 'none').toLowerCase() === 'cognito';
@@ -186,7 +229,7 @@ if (!AUTH_ENABLED) {
   router.post('/users', requireRole('SysAdmin', 'ProgramAdmin', 'RegionalCoordinator'), async (req, res) => {
     try {
       const actor = req.auth;
-      const { email, role, region_id, user_id, suppressInvite } = req.body || {};
+      const { email, role, region_id, user_id, suppressInvite, name, display_name } = req.body || {};
       const actorKey = normalizeRoleKey(actor?.role);
       const targetKey = normalizeRoleKey(role);
       if (!email || !targetKey) return res.status(400).json({ error: 'email and role are required' });
@@ -211,6 +254,44 @@ if (!AUTH_ENABLED) {
       });
       const createResp = await client.send(createCmd);
       await client.send(new AdminAddUserToGroupCommand({ UserPoolId: POOL_ID, Username: email, GroupName: targetKey }));
+
+      const primaryRole = mapAdminRoleKeyToStaffPrimaryRole(targetKey);
+      const pool = getDbPoolFromRequest(req);
+      if (pool && primaryRole) {
+        const createdAttributes = createResp?.User?.Attributes;
+        const attr = Array.isArray(createdAttributes)
+          ? Object.fromEntries(createdAttributes.map(a => [a.Name, a.Value]))
+          : null;
+
+        let cognitoSub = attr?.sub || null;
+        if (!cognitoSub) {
+          try {
+            const getResp = await client.send(new AdminGetUserCommand({ UserPoolId: POOL_ID, Username: email }));
+            const attrs = Array.isArray(getResp?.UserAttributes) ? getResp.UserAttributes : [];
+            cognitoSub = attrs.find(a => a.Name === 'sub')?.Value || null;
+          } catch (e) {
+            console.warn('[admin-users] staff_profiles upsert skipped (AdminGetUser failed):', e?.message || e);
+          }
+        }
+
+        if (cognitoSub) {
+          try {
+            await upsertStaffProfile(pool, {
+              cognitoSub,
+              email,
+              name,
+              displayName: display_name,
+              primaryRole,
+              regionId: Number.isFinite(region_id) ? Number(region_id) : null
+            });
+          } catch (e) {
+            console.warn('[admin-users] staff_profiles upsert failed (non-fatal):', e?.message || e);
+          }
+        } else {
+          console.warn('[admin-users] staff_profiles upsert skipped (missing cognito sub for new user)');
+        }
+      }
+
       res.status(201).json({
         message: 'User created',
         cognito: createResp?.User?.Username || email,

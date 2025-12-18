@@ -22,6 +22,8 @@ import CustomSplitPanel from './layouts/CustomSplitPanel.js';
 import { LocationProvider } from './context/LocationContext';
 import AdminDashboardHelp from './helpPanelContents/adminDashboardHelp.js';
 import AdminConsoleIntroHelp from './helpPanelContents/adminConsoleIntroHelp.js';
+import { MessagingProvider } from './pages/messages/MessagingContext.js';
+import FloatingMessageWindow from './pages/messages/FloatingMessageWindow.jsx';
 
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_STORED_MESSAGES = 24;
@@ -706,85 +708,88 @@ const AppContent = ({ currentRole }) => {
 
   return (
     <LocationProvider>
-      <FloatingChat
-        visible={chatVisible}
-        aiContext={aiContext}
-        onClose={() => setChatVisible(false)}
-        title={helpPanelTitle}
-      />
-      <AppLayout
-        navigationOpen={isNavigationOpen}
-        onNavigationChange={({ detail }) => setIsNavigationOpen(detail.open)}
-        navigation={
-          <SideNavigation
-            currentRole={currentRole}
-            notificationCount={notifications.length}
-            refreshNotifications={refreshNotifications}
-            notificationsLoading={notificationsLoading}
-          />
-        }
-        notifications={
-          <div ref={flashbarRef}>
-            <Flashbar stackItems items={notificationFlashbarItems} />
-          </div>
-        }
-        toolsOpen={isHelpPanelOpen}
-        onToolsChange={({ detail }) => setIsHelpPanelOpen(detail.open)}
-        tools={
-          <HelpPanel
-            header={
-              <Header
-                variant="h2"
-                actions={
-                  <Button
-                    onClick={() => setChatVisible(!chatVisible)}
-                    variant="primary"
-                  >
-                    {chatVisible ? "Close AI" : "Ask the AI"}
-                  </Button>
-                }
-              >
-                {helpPanelTitle}
-              </Header>
-            }
-          >
-            {currentHelpContent}
-          </HelpPanel>
-        }
-        splitPanelOpen={splitPanelOpen}
-        onSplitPanelToggle={({ detail }) => setSplitPanelOpen(detail.open)}
-        splitPanel={
-          <CustomSplitPanel
-            availableItems={availableItems}
-            handleItemSelect={handleItemSelect}
-            splitPanelSize={splitPanelSize}
-            setSplitPanelSize={setSplitPanelSize}
-            splitPanelOpen={splitPanelOpen}
-            setSplitPanelOpen={setSplitPanelOpen}
-          />
-        }
-        splitPanelPreferences={splitPanelPreferences}
-        onSplitPanelPreferencesChange={handleSplitPanelPreferencesChange}
-        content={
-          <SpaceBetween size="l">
-            <AppRoutes
-              toggleHelpPanel={toggleHelpPanel}
-              updateBreadcrumbs={updateBreadcrumbs}
-              setSplitPanelOpen={setSplitPanelOpen}
-              splitPanelOpen={splitPanelOpen}
-              setSplitPanelSize={setSplitPanelSize}
-              splitPanelSize={splitPanelSize}
-              setAvailableItems={setAvailableItems}
-              openPaletteInTools={openPaletteInTools}
-              breadcrumbs={breadcrumbs}
-              helpMessages={helpMessages}
-              aiContext={AdminDashboardHelp.aiContext} // Use the static aiContext property
+      <MessagingProvider>
+        <FloatingMessageWindow chatVisible={chatVisible} />
+        <FloatingChat
+          visible={chatVisible}
+          aiContext={aiContext}
+          onClose={() => setChatVisible(false)}
+          title={helpPanelTitle}
+        />
+        <AppLayout
+          navigationOpen={isNavigationOpen}
+          onNavigationChange={({ detail }) => setIsNavigationOpen(detail.open)}
+          navigation={
+            <SideNavigation
+              currentRole={currentRole}
+              notificationCount={notifications.length}
+              refreshNotifications={refreshNotifications}
+              notificationsLoading={notificationsLoading}
             />
+          }
+          notifications={
+            <div ref={flashbarRef}>
+              <Flashbar stackItems items={notificationFlashbarItems} />
+            </div>
+          }
+          toolsOpen={isHelpPanelOpen}
+          onToolsChange={({ detail }) => setIsHelpPanelOpen(detail.open)}
+          tools={
+            <HelpPanel
+              header={
+                <Header
+                  variant="h2"
+                  actions={
+                    <Button
+                      onClick={() => setChatVisible(!chatVisible)}
+                      variant="primary"
+                    >
+                      {chatVisible ? "Close AI" : "Ask the AI"}
+                    </Button>
+                  }
+                >
+                  {helpPanelTitle}
+                </Header>
+              }
+            >
+              {currentHelpContent}
+            </HelpPanel>
+          }
+          splitPanelOpen={splitPanelOpen}
+          onSplitPanelToggle={({ detail }) => setSplitPanelOpen(detail.open)}
+          splitPanel={
+            <CustomSplitPanel
+              availableItems={availableItems}
+              handleItemSelect={handleItemSelect}
+              splitPanelSize={splitPanelSize}
+              setSplitPanelSize={setSplitPanelSize}
+              splitPanelOpen={splitPanelOpen}
+              setSplitPanelOpen={setSplitPanelOpen}
+            />
+          }
+          splitPanelPreferences={splitPanelPreferences}
+          onSplitPanelPreferencesChange={handleSplitPanelPreferencesChange}
+          content={
+            <SpaceBetween size="l">
+              <AppRoutes
+                toggleHelpPanel={toggleHelpPanel}
+                updateBreadcrumbs={updateBreadcrumbs}
+                setSplitPanelOpen={setSplitPanelOpen}
+                splitPanelOpen={splitPanelOpen}
+                setSplitPanelSize={setSplitPanelSize}
+                splitPanelSize={splitPanelSize}
+                setAvailableItems={setAvailableItems}
+                openPaletteInTools={openPaletteInTools}
+                breadcrumbs={breadcrumbs}
+                helpMessages={helpMessages}
+                aiContext={AdminDashboardHelp.aiContext} // Use the static aiContext property
+              />
 
-          </SpaceBetween>
-        }
-        contentDensity={contentDensity}
-      />
+            </SpaceBetween>
+          }
+          contentDensity={contentDensity}
+        />
+      </MessagingProvider>
     </LocationProvider>
   );
 };

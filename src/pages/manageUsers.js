@@ -70,7 +70,7 @@ export default function UserManagementDashboard() {
   const [showCreate, setShowCreate] = useState(false);
   const [flashItems, setFlashItems] = useState([]);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ email: '', role: null, regionId: '' });
+  const [form, setForm] = useState({ email: '', name: '', displayName: '', role: null, regionId: '' });
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [quickFilter, setQuickFilter] = useState('all');
   const [actionBusy, setActionBusy] = useState(false);
@@ -94,6 +94,14 @@ export default function UserManagementDashboard() {
     const active = QUICK_FILTERS.find(f => f.id === quickFilter) || QUICK_FILTERS[0];
     return users.filter(u => active.predicate(u)).filter(u => !ft || [u.username, u.email, u.role].some(v => String(v).toLowerCase().includes(ft)));
   }, [filteringText, users, quickFilter, QUICK_FILTERS]);
+
+  const quickFilterCounts = useMemo(() => {
+    const counts = {};
+    QUICK_FILTERS.forEach(filter => {
+      counts[filter.id] = users.filter(filter.predicate).length;
+    });
+    return counts;
+  }, [users, QUICK_FILTERS]);
 
   // Debounced server search
   useEffect(() => {
@@ -158,13 +166,22 @@ export default function UserManagementDashboard() {
   }
 
   function handleCreateSubmit() {
-    if (!form.email || !form.role) {
+    const email = form.email.trim();
+    const name = form.name.trim();
+    const displayName = form.displayName.trim() || name;
+    if (!email || !form.role) {
       pushFlash('error', 'Email and role are required');
+      return;
+    }
+    if (!name) {
+      pushFlash('error', 'Name is required');
       return;
     }
     setCreating(true);
     const payload = {
-      email: form.email,
+      email,
+      name,
+      display_name: displayName,
       role: form.role,
       ...(form.regionId ? { region_id: Number(form.regionId) } : {})
     };
@@ -175,11 +192,11 @@ export default function UserManagementDashboard() {
     }).then(async resp => {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       // Optimistically add user (mock or real) for immediate feedback
-      setUsers(cur => ([...cur, { username: form.email, email: form.email, role: form.role, status: 'FORCE_CHANGE_PASSWORD', regionId: form.regionId ? Number(form.regionId) : null, mfa: false, lastSignIn: null }]));
-      recordAudit({ action: 'create', actor: 'you', detail: `Created user as ${form.role}`, target: form.email });
-      pushFlash('success', `Created ${form.email} as ${form.role}`);
+      setUsers(cur => ([...cur, { username: email, email, role: form.role, status: 'FORCE_CHANGE_PASSWORD', regionId: form.regionId ? Number(form.regionId) : null, mfa: false, lastSignIn: null }]));
+      recordAudit({ action: 'create', actor: 'you', detail: `Created user as ${form.role}`, target: email });
+      pushFlash('success', `Created ${email} as ${form.role}`);
       setShowCreate(false);
-      setForm({ email: '', role: null, regionId: '' });
+      setForm({ email: '', name: '', displayName: '', role: null, regionId: '' });
     }).catch(e => {
       pushFlash('error', `Create failed (${e.message})`);
     }).finally(() => setCreating(false));
@@ -346,41 +363,52 @@ export default function UserManagementDashboard() {
             resizeHandleAriaLabel={itemI18n.resizeHandleAriaLabel}
           >
             {item.id === 'admin-users-table' && (
-              <SpaceBetween size="s">
-                <QuickFilters active={quickFilter} setActive={setQuickFilter} options={QUICK_FILTERS} />
-                <Table
-                  selectionType="multi"
-                  onSelectionChange={({ detail }) => onSelectionChange(detail)}
-                  selectedItems={selected}
-                  trackBy="username"
-                  columnDefinitions={columns}
-                  items={filtered}
-                  loading={loadingUsers}
-                  loadingText="Loading administrative users"
-                  filter={<TextFilter filteringText={filteringText} onChange={e => setFilteringText(e.detail.filteringText)} filteringPlaceholder="Search users" />}
-                  header={<Header
-                    actions={
-                      <SpaceBetween direction="horizontal" size="xs">
-                        <Button onClick={() => setShowCreate(true)} variant="primary" disabled={actionBusy}>Create user</Button>
-                        <Button disabled={!selected.length || actionBusy} onClick={bulkDisable}>{actionBusy ? 'Working…' : 'Disable'}</Button>
-                        <Button disabled={!selected.length || actionBusy} onClick={bulkEnable}>{actionBusy ? 'Working…' : 'Enable'}</Button>
-                        <Button disabled={!selected.length || actionBusy} onClick={bulkForceReset}>{actionBusy ? 'Working…' : 'Force reset'}</Button>
-                        <Button disabled={!selected.length || actionBusy} onClick={bulkRemoveRole}>Remove role</Button>
-                        <Button disabled={!selected.length || actionBusy} onClick={bulkResendInvite}>Resend invite</Button>
-                      </SpaceBetween>
-                    }
-                    counter={`(${filtered.length})${selected.length ? ` — ${selected.length} selected` : ''}`}
-                  >Administrative Users</Header>}
-                  empty={<Box textAlign="center" color="inherit"><SpaceBetween size="m"><b>No users</b><Button onClick={() => setShowCreate(true)} variant="primary">Create user</Button></SpaceBetween></Box>}
-                />
-                {inspectorOpen && selected.length === 1 && (
-                  <UserInspector
-                    user={selected[0]}
-                    onClose={() => { setInspectorOpen(false); setSelected([]); }}
-                    onChangeRole={(username, currentRole) => { setShowRoleChange(true); setRoleChangeTarget({ username, newRole: currentRole }); }}
-                  />
-                )}
-              </SpaceBetween>
+              <Tabs
+                ariaLabel="Administrative user filters"
+                activeTabId={quickFilter}
+                onChange={({ detail }) => setQuickFilter(detail.activeTabId)}
+                disableContentPaddings
+                tabs={QUICK_FILTERS.map(opt => ({
+                  id: opt.id,
+                  label: `${opt.label} (${quickFilterCounts[opt.id] ?? 0})`,
+                  content: (
+                    <SpaceBetween size="s">
+                      <Table
+                        selectionType="multi"
+                        onSelectionChange={({ detail }) => onSelectionChange(detail)}
+                        selectedItems={selected}
+                        trackBy="username"
+                        columnDefinitions={columns}
+                        items={filtered}
+                        loading={loadingUsers}
+                        loadingText="Loading administrative users"
+                        filter={<TextFilter filteringText={filteringText} onChange={e => setFilteringText(e.detail.filteringText)} filteringPlaceholder="Search users" />}
+                        header={<Header
+                          actions={
+                            <SpaceBetween direction="horizontal" size="xs">
+                              <Button onClick={() => setShowCreate(true)} variant="primary" disabled={actionBusy}>Create user</Button>
+                              <Button disabled={!selected.length || actionBusy} onClick={bulkDisable}>{actionBusy ? 'Working…' : 'Disable'}</Button>
+                              <Button disabled={!selected.length || actionBusy} onClick={bulkEnable}>{actionBusy ? 'Working…' : 'Enable'}</Button>
+                              <Button disabled={!selected.length || actionBusy} onClick={bulkForceReset}>{actionBusy ? 'Working…' : 'Force reset'}</Button>
+                              <Button disabled={!selected.length || actionBusy} onClick={bulkRemoveRole}>Remove role</Button>
+                              <Button disabled={!selected.length || actionBusy} onClick={bulkResendInvite}>Resend invite</Button>
+                            </SpaceBetween>
+                          }
+                          counter={`(${filtered.length})${selected.length ? ` — ${selected.length} selected` : ''}`}
+                        >Administrative Users</Header>}
+                        empty={<Box textAlign="center" color="inherit"><SpaceBetween size="m"><b>No users</b><Button onClick={() => setShowCreate(true)} variant="primary">Create user</Button></SpaceBetween></Box>}
+                      />
+                      {inspectorOpen && selected.length === 1 && (
+                        <UserInspector
+                          user={selected[0]}
+                          onClose={() => { setInspectorOpen(false); setSelected([]); }}
+                          onChangeRole={(username, currentRole) => { setShowRoleChange(true); setRoleChangeTarget({ username, newRole: currentRole }); }}
+                        />
+                      )}
+                    </SpaceBetween>
+                  )
+                }))}
+              />
             )}
             {item.id === 'role-kpis' && (
               <RoleKpisWidget counts={roleCounts} />
@@ -409,6 +437,8 @@ export default function UserManagementDashboard() {
         >
           <SpaceBetween size="m">
             <FormField label="Email" stretch><Input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.detail.value }))} placeholder="user@example.org" /></FormField>
+            <FormField label="Name" stretch><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.detail.value }))} placeholder="e.g. Jane Doe" /></FormField>
+            <FormField label="Display name" stretch description="Shown in assignments and audit trails. Defaults to Name."><Input value={form.displayName} onChange={e => setForm(f => ({ ...f, displayName: e.detail.value }))} placeholder="e.g. Jane D." /></FormField>
             <FormField label="Role"><Select selectedOption={form.role ? ROLE_OPTIONS.find(r => r.value === form.role) : null} onChange={e => setForm(f => ({ ...f, role: e.detail.selectedOption.value }))} options={ROLE_OPTIONS} placeholder="Select role" /></FormField>
             {form.role && ['RegionalCoordinator','Adjudicator'].includes(form.role) && (
               <FormField label="Region ID (numeric)"><Input value={form.regionId} onChange={e => setForm(f => ({ ...f, regionId: e.detail.value }))} inputMode="numeric" placeholder="e.g. 1" /></FormField>
@@ -537,16 +567,6 @@ function UserInspector({ user, onClose, onChangeRole }) {
       <Tabs tabs={tabs} ariaLabel="User detail tabs" />
       <Box margin={{ top: 'm' }} variant="small" color="inherit">Future actions: reset password, change role, enable/disable, force password reset.</Box>
     </Container>
-  );
-}
-
-function QuickFilters({ active, setActive, options }) {
-  return (
-    <SpaceBetween size="xs" direction="horizontal">
-      {options.map(opt => (
-        <Button key={opt.id} variant={active === opt.id ? 'primary' : 'normal'} onClick={() => setActive(opt.id)}>{opt.label}</Button>
-      ))}
-    </SpaceBetween>
   );
 }
 
