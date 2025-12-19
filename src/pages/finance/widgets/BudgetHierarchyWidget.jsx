@@ -434,14 +434,14 @@ const baseTree = useMemo(() => buildTree(activeData), [activeData]);
     if (!flattenedTree.length) {
       if (selectedPotId !== null) {
         console.log("[Budgets] clearing selection; no items in active view");
-        selectPot(null);
+        selectPot(null, "active");
       }
       return;
     }
     const match = flattenedTree.some(item => String(item.id) === String(selectedPotId));
     if (!match) {
       console.log("[Budgets] active selection not found; defaulting to first item");
-      selectPot(flattenedTree[0].id);
+      selectPot(flattenedTree[0].id, "active");
     }
   }, [flattenedTree, selectedPotId, selectPot, activeTab]);
 
@@ -525,7 +525,7 @@ useEffect(() => {
     const next = detail.selectedItems?.[0];
     if (next?.id) {
       console.log("[Budgets] selecting pot", next.id, "in tab", activeTab);
-      selectPot(next.id);
+      selectPot(next.id, activeTab === "drafts" ? "draft" : "active");
     }
   };
 
@@ -1003,7 +1003,14 @@ useEffect(() => {
     >
       <Tabs
         activeTabId={activeTab}
-        onChange={({ detail }) => setActiveTab(detail.activeTabId)}
+        onChange={({ detail }) => {
+          setActiveTab(detail.activeTabId);
+          if (detail.activeTabId === "active") {
+            selectPot(null, "active");
+          } else if (detail.activeTabId === "drafts") {
+            selectPot(null, "draft");
+          }
+        }}
         tabs={[
           { id: "active", label: "Active Budget", content: tableContent },
           { id: "drafts", label: "Draft Budgets", content: tableContent },

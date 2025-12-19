@@ -22,6 +22,7 @@ import {
 import { boardItemI18nStrings } from "./common";
 import { apiFetch } from "../../../auth/apiClient.js";
 import { useBudgetsData } from "./BudgetsDataContext.jsx";
+import BudgetPotTagsEditor from "./BudgetPotTagsEditor.jsx";
 
 const nodeTypeOptions = [
   { label: "Funding stream", value: "Funding stream" },
@@ -45,6 +46,10 @@ const blankCreateForm = {
   adminPct: "",
   description: "",
   policyNotes: "",
+  fundingSource: "",
+  isRestricted: false,
+  agreementId: "",
+  fiscalYearTag: "",
 };
 
 const mapPotToEditForm = (pot, parentOptions) => {
@@ -71,6 +76,10 @@ const mapPotToEditForm = (pot, parentOptions) => {
         : "",
     description: pot.description ?? "",
     policyNotes: pot.policyNotes ?? "",
+    fundingSource: pot.fundingSource ?? "",
+    isRestricted: Boolean(pot.isRestricted),
+    agreementId: pot.agreementId ?? "",
+    fiscalYearTag: pot.fiscalYearTag ?? pot.fiscalYear ?? "",
   };
 };
 
@@ -126,6 +135,7 @@ const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpP
     selectedDraft,
     selectedDraftFiscalYear,
     selectedDraftPots,
+    selectedPotSource,
     draftCreateOrUpdatePot,
     draftArchivePot,
     draftDeletePot,
@@ -185,7 +195,9 @@ const [snapshotNotes, setSnapshotNotes] = useState("");
   const [createAdjustedFocused, setCreateAdjustedFocused] = useState(false);
   const [editApprovedFocused, setEditApprovedFocused] = useState(false);
   const [editAdjustedFocused, setEditAdjustedFocused] = useState(false);
-  const hasDraft = Boolean(selectedDraftId);
+const hasDraft = Boolean(selectedDraftId);
+const isActiveSelection = selectedPotSource === "active";
+const disableEdit = isActiveSelection || !hasDraft;
 
   useEffect(() => {
     if (!selectedDraftId && drafts?.length) {
@@ -266,22 +278,27 @@ const parentOptions = useMemo(() => {
     return [topLevelOption, ...options];
   }, [selectedDraftPots, activeTab, selectedPotId]);
 
-  const selectedPot = useMemo(
-    () =>
-      (selectedDraftPots || []).find(pot => String(pot.id) === String(selectedPotId)) ?? null,
-    [selectedDraftPots, selectedPotId]
-  );
+  const selectedPot = useMemo(() => {
+    if (selectedPotSource !== "draft") return null;
+    return (selectedDraftPots || []).find(pot => String(pot.id) === String(selectedPotId)) ?? null;
+  }, [selectedDraftPots, selectedPotId, selectedPotSource]);
 
   useEffect(() => {
     setEditForm(mapPotToEditForm(selectedPot, parentOptions));
   }, [selectedPot, parentOptions]);
 
   useEffect(() => {
+    if (selectedPotSource === "active") {
+      setEditForm(null);
+    }
+  }, [selectedPotSource]);
+
+  useEffect(() => {
     const handler = event => {
       const { mode, potId, parentId } = event.detail || {};
       if (mode === "edit" && potId) {
         setActiveTab("edit");
-        selectPot(potId);
+        selectPot(potId, "draft");
         return;
       }
       if (mode === "create") {
@@ -366,6 +383,10 @@ const handleCreateSubmit = async event => {
       adminTargetPct: sanitizeNumber(createForm.adminPct),
       description: createForm.description,
       policyNotes: createForm.policyNotes,
+      agreementId: createForm.agreementId || null,
+      fundingSource: createForm.fundingSource || null,
+      isRestricted: !!createForm.isRestricted,
+      fiscalYearTag: createForm.fiscalYearTag || null,
       status: "draft",
     });
     setSelectedDraftId(draftId);
@@ -409,6 +430,10 @@ const handleEditSubmit = async event => {
       adminTargetPct: sanitizeNumber(editForm?.adminPct),
       description: editForm?.description,
       policyNotes: editForm?.policyNotes,
+      agreementId: editForm?.agreementId || null,
+      fundingSource: editForm?.fundingSource || null,
+      isRestricted: !!editForm?.isRestricted,
+      fiscalYearTag: editForm?.fiscalYearTag || null,
     });
     setFeedback("Budget pot updated in draft.");
     setFeedbackType("success");
@@ -446,7 +471,7 @@ const handleArchive = async () => {
       await draftDeletePot(selectedPot.id);
       setFeedback("Budget pot deleted from draft.");
       setFeedbackType("success");
-      selectPot(null);
+      selectPot(null, "draft");
       setDeletePotModalOpen(false);
     } catch (err) {
       setErrorText(err?.message || "Failed to delete pot.");
@@ -650,6 +675,17 @@ const handleArchive = async () => {
             onChange={({ detail }) => handleCreateChange("description", detail.value)}
           />
         </FormField>
+        <Container header={<Header variant="h3">Classification &amp; tags</Header>}>
+          <BudgetPotTagsEditor
+            value={{
+              fundingSource: createForm.fundingSource,
+              isRestricted: createForm.isRestricted,
+              agreementId: createForm.agreementId,
+              fiscalYearTag: createForm.fiscalYearTag,
+            }}
+            onChange={tags => setCreateForm(prev => ({ ...prev, ...tags }))}
+          />
+        </Container>
         <FormField label="Policy guardrails" description="Key rules, approval limits, or restrictions for this pot.">
           <Textarea
             value={createForm.policyNotes}
@@ -670,7 +706,9 @@ const handleArchive = async () => {
           </Button>
           <Button
             variant="link"
-            onClick={() => setCreateForm({ ...blankCreateForm })}
+            onClick={() => {
+              setCreateForm({ ...blankCreateForm });
+            }}
           >
             Reset form
           </Button>
@@ -679,30 +717,48 @@ const handleArchive = async () => {
     </form>
   );
 
-  const editTab = selectedPot ? (
+  const editTab = isActiveSelection ? (
+    <SpaceBetween size="m">
+      <Alert type="info" header="Active budgets are read-only">
+        <SpaceBetween size="xs">
+          <Box variant="p">
+            Active pots cannot be edited directly in Structure manager. To correct an active pot, follow the publish flow:
+          </Box>
+          <Box variant="p">a) Take a snapshot (ideally out of hours).</Box>
+          <Box variant="p">b) Promote that snapshot to a draft.</Box>
+          <Box variant="p">c) Edit the pot in the draft.</Box>
+          <Box variant="p">d) Publish the draft budget.</Box>
+        </SpaceBetween>
+      </Alert>
+    </SpaceBetween>
+  ) : selectedPot ? (
     <form onSubmit={handleEditSubmit}>
       <SpaceBetween size="m">
         {!hasDraft ? (
-          <Alert type="info" header="Select a draft to edit">
-            Editing is only available when a draft is selected in Drafts & versions.
+          <Alert type="info" header="Active budgets are read-only">
+            Editing is only available in a draft. Create or select a draft in “Drafts & versions,”
+            make your changes there, then publish to update the active budget.
           </Alert>
         ) : null}
         <ColumnLayout columns={2} variant="text-grid">
           <SpaceBetween size="s">
             <FormField label="Pot name" stretch description="Human-friendly title shown in lists and searches.">
               <Input
+                disabled={disableEdit}
                 value={editForm?.name ?? ""}
                 onChange={({ detail }) => handleEditChange("name", detail.value)}
               />
             </FormField>
             <FormField label="Funding code" stretch description="Short code or GL string; must be unique within the draft.">
               <Input
+                disabled={disableEdit}
                 value={editForm?.code ?? ""}
                 onChange={({ detail }) => handleEditChange("code", detail.value)}
               />
             </FormField>
             <FormField label="Parent pot" stretch description="Where this pot sits in the hierarchy. Choose Top-level for roots.">
               <Select
+                disabled={disableEdit}
                 selectedOption={editForm?.parentOption ?? topLevelOption}
                 options={parentOptions}
                 onChange={({ detail }) => handleEditChange("parentOption", detail.selectedOption)}
@@ -710,6 +766,7 @@ const handleArchive = async () => {
             </FormField>
             <FormField label="Node type" stretch description="Category label only; it does not drive calculations.">
               <Select
+                disabled={disableEdit}
                 selectedOption={editForm?.nodeType ?? nodeTypeOptions[0]}
                 options={nodeTypeOptions}
                 onChange={({ detail }) => handleEditChange("nodeType", detail.selectedOption)}
@@ -717,6 +774,7 @@ const handleArchive = async () => {
             </FormField>
             <FormField label="Owner" description="Person/role accountable for this pot.">
               <Input
+                disabled={disableEdit}
                 value={editForm?.owner ?? ""}
                 onChange={({ detail }) => handleEditChange("owner", detail.value)}
               />
@@ -725,6 +783,7 @@ const handleArchive = async () => {
           <SpaceBetween size="s">
             <FormField label="Approved amount" description="Original authority for this pot (CAD).">
               <Input
+                disabled={disableEdit}
                 value={
                   editApprovedFocused
                     ? editForm?.approved ?? ""
@@ -737,6 +796,7 @@ const handleArchive = async () => {
             </FormField>
             <FormField label="Adjusted amount" description="Approved plus/minus amendments (CAD).">
               <Input
+                disabled={disableEdit}
                 value={
                   editAdjustedFocused
                     ? editForm?.adjusted ?? ""
@@ -761,6 +821,7 @@ const handleArchive = async () => {
             </FormField>
             <FormField label="Admin % target" description="Target admin share of adjusted amount (percentage).">
               <Input
+                disabled={disableEdit}
                 type="number"
                 value={editForm?.adminPct ?? ""}
                 onChange={({ detail }) => handleEditChange("adminPct", detail.value)}
@@ -770,26 +831,40 @@ const handleArchive = async () => {
         </ColumnLayout>
         <FormField label="Description" description="Short context shown in details; optional.">
           <Textarea
+            disabled={disableEdit}
             value={editForm?.description ?? ""}
             rows={3}
             onChange={({ detail }) => handleEditChange("description", detail.value)}
           />
         </FormField>
+        <Container header={<Header variant="h3">Classification &amp; tags</Header>}>
+          <BudgetPotTagsEditor
+            disabled={disableEdit}
+            value={{
+              fundingSource: editForm?.fundingSource,
+              isRestricted: editForm?.isRestricted,
+              agreementId: editForm?.agreementId,
+              fiscalYearTag: editForm?.fiscalYearTag,
+            }}
+            onChange={tags => setEditForm(prev => ({ ...(prev || {}), ...tags }))}
+          />
+        </Container>
         <FormField label="Policy guardrails" description="Key rules, approval limits, or restrictions for this pot.">
           <Textarea
+            disabled={disableEdit}
             value={editForm?.policyNotes ?? ""}
             rows={3}
             onChange={({ detail }) => handleEditChange("policyNotes", detail.value)}
           />
         </FormField>
         <SpaceBetween direction="horizontal" size="xs">
-          <Button variant="primary" type="submit" loading={editSubmitting} disabled={editSubmitting}>
+          <Button variant="primary" type="submit" loading={editSubmitting} disabled={editSubmitting || disableEdit}>
             Save changes
           </Button>
           <Button
             variant="normal"
             onClick={() => setDeletePotModalOpen(true)}
-            disabled={deletePotSubmitting}
+            disabled={deletePotSubmitting || disableEdit}
             iconName="remove"
           >
             Delete
@@ -798,7 +873,7 @@ const handleArchive = async () => {
       </SpaceBetween>
     </form>
   ) : (
-    <Box variant="p">Select a budget pot from the hierarchy to edit its details.</Box>
+    <Box variant="p">Select a draft pot from the hierarchy to edit its details.</Box>
   );
 
   const versionsTab = (

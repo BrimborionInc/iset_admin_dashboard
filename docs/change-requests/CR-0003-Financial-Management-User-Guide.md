@@ -1,7 +1,7 @@
 # ISET Financial Management Module – Executive User Guide
 
 _Audience: Program senior management (Executive Directors, Finance Officers, Operations Leads)_  
-_Source documents: CR-0003 Functional Requirements, CR-0003 Implementation Log (latest update 2025‑10‑20)_
+_Source documents: CR-0003 Functional Requirements, CR-0003 Implementation Log (latest update 2025‑12‑07), CR-0003 Addendum (Payments & Reporting), Finance Enablement Tracker_
 
 ---
 
@@ -89,18 +89,19 @@ Use **Finance Settings** to tailor the experience to each agreement holder:
 
 ---
 
-## 3. Current Delivery Status (2025‑10‑20)
+## 3. Current Delivery Status (2025‑12‑07)
 
 | Area | Status | Notes |
 |------|--------|-------|
 | Navigation & Access Control | Delivered | Finance section routes, guards, and role matrix entries in place. |
 | Finance Overview | Delivered | Configurable board with KPIs, trend, compliance, deadlines, help text. |
-| Budgets | Delivered | Configurable board with hierarchy, pot detail, saved views, burn rate, active view; structure manager scaffold in progress. |
-| Allocations & Transfers | Delivered | Transfer wizard, approvals queue, history, policy exceptions, snapshots. |
-| Reconciliation | Delivered | Transactions queue, exception detail, bulk actions, sync status (mock data). |
+| Budgets | Delivered | Configurable board with live pot API (CRUD, draft/publish, snapshots), saved views, burn rate, active view; CSV export; structure manager edits drafts. |
+| Allocations & Transfers | Scaffolded | Transfer wizard, approvals queue, history, policy exceptions, snapshots using mock data; live wiring pending. |
+| Reconciliation | Scaffolded | Transactions queue, exception detail, bulk actions, sync status using mock data; live transaction/evidence wiring pending. |
 | Reports | Planned | Requirements documented; dashboard scaffolding still pending. |
 | Monitoring & Evidence | Planned | Requirements documented; dashboard scaffolding still pending. |
 | Forecasting & Scenarios | Planned | Requirements documented (CR-0003 §20). |
+| Finance Payments | Scaffolded | Payments board per addendum (queue, detail, comms, SLA) on mock data; services not wired. |
 | Finance Settings | Planned | Configuration requirements documented; dashboard scaffold pending. |
 | Configurable dashboard conventions | Delivered | Guidance captured in `docs/guides/cloudscape-table-persistence.md`; applies to all finance boards. |
 
@@ -114,6 +115,6 @@ See `CR-0003-Implementation-Log.md` for detailed sprint history and open tasks.
 2. **Audit-Ready Operations:** Every adjustment, reallocation, and exception resolution is designed to carry policy checks, approval routing, evidence references, and snapshot history.
 3. **Plan → Operate → Report Cycle:** The workflow mirrors the ISET lifecycle—plan budgets, reallocate responsibly, reconcile daily operations, certify reports, monitor compliance, and forecast future scenarios.
 4. **Configuration without Redeploys:** Finance Settings will let administrators adapt hierarchy, terminology, approvals, and mapping rules directly—keeping the module aligned with evolving agreements.
-5. **Iterative Delivery:** Allocations and Reconciliation boards are scaffolded with mock data and persistence patterns now; Reporting, Monitoring, Forecasting, and Settings dashboards will follow the same pattern with real integrations as backend services land.
+5. **Iterative Delivery:** Allocations, Reconciliation, and Payments boards are scaffolded with mock data and persistence patterns now; Reporting, Monitoring, Forecasting, and Settings dashboards will follow the same pattern with real integrations as backend services land.
 
-Use this guide alongside the CR‑0003 documentation for deeper functional details. Future iterations will extend the manual with step-by-step procedures for each dashboard and widget once their workflows move from scaffold to production data.*** End Patch
+Use this guide alongside the CR‑0003 documentation for deeper functional details. Future iterations will extend the manual with step-by-step procedures for each dashboard and widget once their workflows move from scaffold to production data.

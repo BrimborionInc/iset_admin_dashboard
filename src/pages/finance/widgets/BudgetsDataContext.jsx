@@ -3,6 +3,13 @@ import { apiFetch } from "../../../auth/apiClient";
 
 const BudgetsDataContext = createContext(undefined);
 
+export const defaultPotTags = {
+  fundingSource: "",
+  isRestricted: false,
+  agreementId: "",
+  fiscalYearTag: "",
+};
+
 const parseAdminPct = value => {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -17,6 +24,7 @@ const parseAdminPct = value => {
 export const BudgetsDataProvider = ({ children }) => {
   const [pots, setPots] = useState([]);
   const [selectedPotId, setSelectedPotId] = useState(null);
+  const [selectedPotSource, setSelectedPotSource] = useState("active"); // "active" | "draft"
   const [selectedDraftId, setSelectedDraftId] = useState(null);
   const [draftChanges, setDraftChanges] = useState([]);
   const [activeVersion, setActiveVersion] = useState({
@@ -46,13 +54,22 @@ export const BudgetsDataProvider = ({ children }) => {
     return {
       id: pot.id,
       fiscalYear: pot.fiscalYear || pot.fiscal_year || null,
+      fiscalYearTag: pot.fiscalYearTag || pot.fiscal_year_tag || null,
       parentId: pot.parentId ?? null,
       name: pot.name,
       code: pot.code,
       nodeType: pot.nodeType || meta.nodeType || "budget",
+      fundingSource: pot.fundingSource || pot.funding_source || null,
+      isRestricted:
+        typeof pot.isRestricted === "boolean"
+          ? pot.isRestricted
+          : typeof pot.is_restricted !== "undefined"
+            ? !!pot.is_restricted
+            : false,
+      agreementId: pot.agreementId || pot.agreement_id || null,
       owner: pot.owner || meta.owner || "Finance",
-      description: meta.description || "",
-      policyNotes: meta.policyNotes || "",
+      description: meta.description || meta.policy_notes || "",
+      policyNotes: meta.policyNotes || meta.policy_notes || "",
       approved,
       adjusted,
       committed,
@@ -88,9 +105,10 @@ export const BudgetsDataProvider = ({ children }) => {
         })
       );
       setPots(normalized);
-      // Only auto-select from live pots if nothing is currently selected.
-      if (selectedPotId === null && normalized.length) {
+      // Only auto-select from live pots if nothing is currently selected AND we are in an active context.
+      if (selectedPotId === null && selectedPotSource === "active" && normalized.length) {
         setSelectedPotId(normalized[0].id);
+        setSelectedPotSource("active");
       }
     } catch (e) {
       console.error("[Budgets] failed to load pots", e);
@@ -175,13 +193,14 @@ export const BudgetsDataProvider = ({ children }) => {
     setSelectedDraftId(drafts[0].id);
   }, [drafts, selectedDraftId]);
 
-  const selectPot = useCallback(potId => {
+  const selectPot = useCallback((potId, source = "active") => {
     setSelectedPotId(potId ?? null);
+    setSelectedPotSource(source || "active");
     if (potId) {
       try {
         window.dispatchEvent(
           new CustomEvent("financeBudgets:potSelected", {
-            detail: { potId },
+            detail: { potId, source: source || "active" },
           })
         );
       } catch {
@@ -202,6 +221,10 @@ export const BudgetsDataProvider = ({ children }) => {
             parentId: payload.parentId || null,
             nodeType: payload.nodeType,
             owner: payload.owner,
+            agreementId: payload.agreementId || null,
+            fundingSource: payload.fundingSource || null,
+            isRestricted: payload.isRestricted || false,
+            fiscalYearTag: payload.fiscalYearTag || null,
             approved: payload.approved,
             adjusted: payload.adjusted,
             committed: payload.committed,
@@ -215,10 +238,15 @@ export const BudgetsDataProvider = ({ children }) => {
           }),
         });
         if (!resp.ok) {
-          throw new Error(`Create failed: ${resp.status}`);
+          try {
+            const data = await resp.json();
+            throw new Error(data?.error || `Create failed: ${resp.status}`);
+          } catch (err) {
+            throw err instanceof Error ? err : new Error(`Create failed: ${resp.status}`);
+          }
         }
         const created = normalizePot(await resp.json());
-        setPots(prev => [...prev, created]);
+      setPots(prev => [...prev, created]);
         setDraftChanges(prev => [
           ...prev,
           {
@@ -229,7 +257,7 @@ export const BudgetsDataProvider = ({ children }) => {
             timestamp: new Date().toISOString(),
           },
         ]);
-        selectPot(created.id);
+        selectPot(created.id, "active");
       } catch (e) {
         console.error("[Budgets] failed to create pot", e);
         setError(e.message || "Failed to create budget pot");
@@ -253,6 +281,10 @@ export const BudgetsDataProvider = ({ children }) => {
             parentId: updates.parentId ?? null,
             nodeType: updates.nodeType,
             owner: updates.owner,
+            agreementId: updates.agreementId ?? null,
+            fundingSource: updates.fundingSource ?? null,
+            isRestricted: typeof updates.isRestricted === "boolean" ? updates.isRestricted : undefined,
+            fiscalYearTag: updates.fiscalYearTag ?? null,
             approved: updates.approved,
             adjusted: updates.adjusted,
             committed: updates.committed,
@@ -268,7 +300,12 @@ export const BudgetsDataProvider = ({ children }) => {
           }),
         });
         if (!resp.ok) {
-          throw new Error(`Update failed: ${resp.status}`);
+          try {
+            const data = await resp.json();
+            throw new Error(data?.error || `Update failed: ${resp.status}`);
+          } catch (err) {
+            throw err instanceof Error ? err : new Error(`Update failed: ${resp.status}`);
+          }
         }
         const updated = normalizePot(await resp.json());
         setPots(prev => prev.map(pot => (pot.id === updated.id ? updated : pot)));
@@ -488,6 +525,7 @@ export const BudgetsDataProvider = ({ children }) => {
     () => ({
       pots,
       selectedPotId,
+      selectedPotSource,
       selectPot,
       createPot,
       updatePot,
@@ -522,6 +560,7 @@ export const BudgetsDataProvider = ({ children }) => {
     [
       pots,
       selectedPotId,
+      selectedPotSource,
       selectPot,
       createPot,
       updatePot,

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
   Header,
@@ -51,6 +51,7 @@ const AllocationTransferWizardWidget = ({
   potOptions = [],
   potMetrics = {},
   createAllocation,
+  refreshAllocations,
 }) => {
   const [formState, setFormState] = useState(DEFAULT_STATE);
   const [lastSubmission, setLastSubmission] = useState(null);
@@ -67,6 +68,9 @@ const AllocationTransferWizardWidget = ({
   const [evidenceModalError, setEvidenceModalError] = useState(null);
   const [editingEvidenceId, setEditingEvidenceId] = useState(null);
   const [editingExistingAttachments, setEditingExistingAttachments] = useState([]);
+  const [validationState, setValidationState] = useState({ status: "idle", violations: [], message: null });
+  const validationAbortRef = useRef(null);
+  const [successMessage, setSuccessMessage] = useState(null);
   const cleanupAttachments = async (attachments = []) => {
     const targets = (attachments || []).filter(att => att && att.key);
     if (!targets.length) return;
@@ -120,6 +124,8 @@ const AllocationTransferWizardWidget = ({
       cleanupAttachments(evidenceItems.flatMap(item => item.attachments || []));
     }
     setFormState(DEFAULT_STATE);
+    setValidationState({ status: "idle", violations: [], message: null });
+    setSuccessMessage(null);
     setEvidenceItems([]);
     setNewEvidenceLabel("");
     setNewEvidenceType("");
@@ -130,11 +136,23 @@ const AllocationTransferWizardWidget = ({
     setEditingExistingAttachments([]);
   };
 
+  // Normalize pot options: only leaf (no children) and sorted alpha by label
+  const leafPotOptions = useMemo(() => {
+    const childrenByParent = new Map();
+    (potOptions || []).forEach(opt => {
+      if (opt.parentId) {
+        childrenByParent.set(String(opt.parentId), true);
+      }
+    });
+    const leaves = (potOptions || []).filter(opt => !childrenByParent.has(String(opt.value)));
+    return [...leaves].sort((a, b) => (a.label || "").localeCompare(b.label || ""));
+  }, [potOptions]);
+
   useEffect(() => {
     if (!prefillRequest || !prefillRequest.potId) {
       return;
     }
-    const optionMatch = potOptions.find(option => option.value === prefillRequest.potId);
+    const optionMatch = leafPotOptions.find(option => option.value === prefillRequest.potId);
     if (!optionMatch) {
       return;
     }
@@ -152,7 +170,7 @@ const AllocationTransferWizardWidget = ({
     if (typeof onPrefillConsumed === "function") {
       onPrefillConsumed();
     }
-  }, [prefillRequest, onPrefillConsumed, potOptions]);
+  }, [prefillRequest, onPrefillConsumed, leafPotOptions]);
 
   const derived = useMemo(() => {
     const amount = Number(formState.amount);
@@ -217,6 +235,66 @@ const AllocationTransferWizardWidget = ({
         Info
       </Link>
     ) : undefined;
+
+  const fetchValidation = useCallback(
+    async ({ sourceId, destId, signal }) => {
+      if (!sourceId || !destId || sourceId === destId) {
+        setValidationState({ status: "idle", violations: [], message: null });
+        return;
+      }
+      setValidationState({ status: "pending", violations: [], message: null });
+      try {
+        const resp = await apiFetch("/api/finance/allocations/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sourcePotId: sourceId, destinationPotId: destId }),
+          signal,
+        });
+        if (!resp.ok) {
+          const payload = await resp.json().catch(() => null);
+          const message = payload?.error || `Validation failed (${resp.status})`;
+          setValidationState({ status: "error", violations: [], message });
+          return;
+        }
+        const payload = await resp.json();
+        setValidationState({
+          status: "done",
+          violations: Array.isArray(payload.violations) ? payload.violations : [],
+          message: null,
+          ok: payload.ok !== false,
+        });
+      } catch (err) {
+        if (err?.name === "AbortError") return;
+        setValidationState({
+          status: "error",
+          violations: [],
+          message: "Validation temporarily unavailable. Try again.",
+        });
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    const sourceId = formState.sourcePot?.value;
+    const destId = formState.destinationPot?.value;
+    if (!sourceId || !destId || sourceId === destId) {
+      setValidationState({ status: "idle", violations: [], message: null });
+      return;
+    }
+    if (validationAbortRef.current) {
+      validationAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    validationAbortRef.current = controller;
+    const timer = setTimeout(() => {
+      fetchValidation({ sourceId, destId, signal: controller.signal });
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [formState.sourcePot, formState.destinationPot, fetchValidation]);
 
   const handleSettingsClick = ({ detail }) => {
     if (detail?.id === "remove" && typeof actions.removeItem === "function") {
@@ -337,6 +415,7 @@ const AllocationTransferWizardWidget = ({
 
   const handleSubmit = async () => {
     setSubmitError(null);
+    setSuccessMessage(null);
     const nextErrors = validateForm();
     setErrors(nextErrors);
     if (Object.values(nextErrors).some(Boolean)) {
@@ -345,6 +424,37 @@ const AllocationTransferWizardWidget = ({
     }
     setSubmitting(true);
     try {
+      // Revalidate on submit
+      const validateResp = await apiFetch("/api/finance/allocations/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourcePotId: formState.sourcePot.value,
+          destinationPotId: formState.destinationPot.value,
+        }),
+      });
+      if (!validateResp.ok) {
+        const payload = await validateResp.json().catch(() => null);
+        setSubmitError(payload?.error || `Validation failed (${validateResp.status})`);
+        setSubmitting(false);
+        return;
+      }
+      const validatePayload = await validateResp.json();
+      if (
+        validatePayload.ok === false ||
+        (Array.isArray(validatePayload.violations) &&
+          validatePayload.violations.some(v => v.severity === "error"))
+      ) {
+        setValidationState({
+          status: "done",
+          violations: validatePayload.violations || [],
+          message: null,
+          ok: false,
+        });
+        setSubmitting(false);
+        return;
+      }
+
       const evidencePayload = evidenceItems.map(item => ({
         label: item.label,
         type: item.type || null,
@@ -352,21 +462,23 @@ const AllocationTransferWizardWidget = ({
       }));
       const payload = {
         sourcePotId: formState.sourcePot?.value,
-        destPotId: formState.destinationPot?.value,
+        destinationPotId: formState.destinationPot?.value,
         amount: Number(formState.amount),
-        justification: formState.justification,
-        currency: "CAD",
-        metadata: {
-          tags: formState.tags,
-          effectiveDate: formState.effectiveDate,
-          includeEvidence: derived.evidenceReady,
-          evidence: evidencePayload,
-          policyIssues: derived.issues,
-        },
+        justification: formState.justification.trim(),
       };
-      let apiResponse = null;
-      if (typeof createAllocation === "function") {
-        apiResponse = await createAllocation(payload);
+      if (formState.effectiveDate) {
+        payload.effectiveDate = formState.effectiveDate;
+      }
+      const apiResponse = typeof createAllocation === "function" ? await createAllocation(payload) : null;
+      if (apiResponse && apiResponse.ok === false && Array.isArray(apiResponse.violations)) {
+        setValidationState({
+          status: "done",
+          violations: apiResponse.violations,
+          message: null,
+          ok: false,
+        });
+        setSubmitting(false);
+        return;
       }
       setLastSubmission({
         ...formState,
@@ -375,9 +487,13 @@ const AllocationTransferWizardWidget = ({
         policyIssues: derived.issues,
         evidence: evidencePayload,
       });
+      setSuccessMessage("Transfer proposed and sent for approval.");
       resetForm();
+      if (typeof refreshAllocations === "function") {
+        refreshAllocations();
+      }
     } catch (error) {
-      const message = error?.message || "Transfer submission failed.";
+      const message = error?.message || "Unable to submit transfer right now.";
       setSubmitError(message);
       console.error("[Allocations] submit failed", error);
     } finally {
@@ -385,7 +501,11 @@ const AllocationTransferWizardWidget = ({
     }
   };
 
-  const disableSubmit = submitting;
+  const disableSubmit =
+    submitting ||
+    validationState.status === "pending" ||
+    (validationState.status === "done" &&
+      validationState.violations?.some(v => v.severity === "error"));
 
   return (
     <BoardItem
@@ -453,7 +573,7 @@ const AllocationTransferWizardWidget = ({
             <FormField label="Source pot" stretch errorText={errors.sourcePot}>
               <Select
                 placeholder="Select source"
-                options={potOptions.filter(option => option.value !== formState.destinationPot?.value)}
+              options={leafPotOptions.filter(option => option.value !== formState.destinationPot?.value)}
                 selectedOption={formState.sourcePot}
                 onChange={({ detail }) => updateField("sourcePot", detail.selectedOption)}
               />
@@ -461,11 +581,37 @@ const AllocationTransferWizardWidget = ({
             <FormField label="Destination pot" stretch errorText={errors.destinationPot}>
               <Select
                 placeholder="Select destination"
-                options={potOptions.filter(option => option.value !== formState.sourcePot?.value)}
+              options={leafPotOptions.filter(option => option.value !== formState.sourcePot?.value)}
                 selectedOption={formState.destinationPot}
                 onChange={({ detail }) => updateField("destinationPot", detail.selectedOption)}
               />
             </FormField>
+            {validationState.status === "pending" ? (
+              <StatusIndicator type="loading">Validating transfer policy…</StatusIndicator>
+            ) : null}
+            {validationState.message ? (
+              <Alert type="error" statusIconAriaLabel="Error message">
+                {validationState.message}
+              </Alert>
+            ) : null}
+            {validationState.status === "done" &&
+            Array.isArray(validationState.violations) &&
+            validationState.violations.length ? (
+              <Alert type="error" statusIconAriaLabel="Validation errors">
+                <SpaceBetween size="xxs">
+                  {validationState.violations.map(v => (
+                    <Box key={v.code} variant="p">
+                      {v.message ||
+                        (v.code === "missing_funding_source"
+                          ? "Both pots must be classified (Funding source) in Budgets before transfers can be validated."
+                          : v.code === "ei_to_crf_not_permitted"
+                            ? "Transfers from EI-funded pots to CRF-funded pots are not permitted."
+                            : v.code)}
+                    </Box>
+                  ))}
+                </SpaceBetween>
+              </Alert>
+            ) : null}
             <FormField label="Transfer amount" stretch errorText={errors.amount}>
               <Input
                 placeholder="e.g., 75,000.00"
@@ -506,6 +652,11 @@ const AllocationTransferWizardWidget = ({
         </ColumnLayout>
 
         <SpaceBetween size="m">
+          {successMessage ? (
+            <Alert type="success" statusIconAriaLabel="Success">
+              {successMessage}
+            </Alert>
+          ) : null}
           {submitError ? (
             <Alert type="error" statusIconAriaLabel="Error message">
               {submitError}

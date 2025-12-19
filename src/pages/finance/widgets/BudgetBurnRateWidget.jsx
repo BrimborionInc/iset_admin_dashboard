@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
+  Alert,
   Header,
   SpaceBetween,
   ButtonDropdown,
@@ -42,7 +43,7 @@ const buildTimeframesFromFiscalYear = fiscalYear => {
 };
 
 const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
-  const { pots, selectedPotId, activeVersion } = useBudgetsData();
+  const { pots, selectedPotId, activeVersion, selectedPotSource } = useBudgetsData();
   const [timeframeOptions, setTimeframeOptions] = useState([]);
   const [timeframe, setTimeframe] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -68,12 +69,15 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
     }
   };
 
+  const isDraftSelection = useMemo(() => selectedPotSource === "draft", [selectedPotSource]);
+
   const activeSelectedPot = useMemo(() => {
-    if (!Array.isArray(pots) || !pots.length) return null;
+    if (!Array.isArray(pots) || !pots.length || isDraftSelection) return null;
+    if (!selectedPotId) return null;
     const activePots = pots.filter(p => p.status !== "archived");
     const match = activePots.find(p => String(p.id) === String(selectedPotId));
-    return match || activePots[0] || null;
-  }, [pots, selectedPotId]);
+    return match || null;
+  }, [pots, selectedPotId, isDraftSelection]);
 
   useEffect(() => {
     const fy = activeSelectedPot?.fiscalYear || activeVersion?.label || null;
@@ -148,7 +152,7 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
       options={timeframeOptions}
       placeholder="Select period"
       selectedAriaLabel="Burn-rate timeframe"
-      disabled={!timeframeOptions.length}
+      disabled={!timeframeOptions.length || isDraftSelection}
     />
   );
 
@@ -247,11 +251,20 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
     </SpaceBetween>
   );
 
+  const draftNotice = (
+    <Alert type="info" header="Burn-rate is available for active budgets only">
+      Select a published pot to view burn-rate insights. Draft pots do not have transactions or burn history until they
+      are published.
+    </Alert>
+  );
+
   const tabs = [
     {
       id: "overview",
       label: "Overview",
-      content: overview ? (
+      content: isDraftSelection ? (
+        draftNotice
+      ) : overview ? (
         <SpaceBetween size="s">
           <Box variant="strong">{overview.name}</Box>
           <Box variant="awsui-key-label">Burn vs. adjusted budget</Box>
@@ -268,12 +281,12 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
     {
       id: "graph",
       label: "Graph",
-      content: <Box variant="p">Graph placeholder</Box>,
+      content: isDraftSelection ? draftNotice : <Box variant="p">Graph placeholder</Box>,
     },
     {
       id: "interventions",
       label: "Interventions",
-      content: interventionsTab,
+      content: isDraftSelection ? draftNotice : interventionsTab,
     },
   ];
 

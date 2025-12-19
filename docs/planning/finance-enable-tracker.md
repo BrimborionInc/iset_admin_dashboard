@@ -27,6 +27,7 @@ Last Updated: 2025-12-07
 - 2025-12-07: Saved views rewired to real API + DB table (`finance_saved_view`); UI now creates/edits/deletes views per active budget version. Loaded view/summary widgets moved to palette by default.
 - 2025-12-07: Pot detail widget refreshed (3-col overview, tabs, actions/export dropdown); CSV export endpoint added (`GET /api/finance/budget-pots/:id/export?format=csv`).
 - 2025-12-07: Burn-rate widget now reads live pot metrics (adjusted/actual/forecast/variance) with simple risk tagging; risk filter listens to loaded view presets.
+- 2025-12-07: Payments board scaffolded (queue/detail/comms/SLA widgets) on mock data per addendum; waiting on services/GL/evidence wiring.
 
 ## Current Focus
 - Budgets dashboard now runs live: pot CRUD, draft/publish, snapshots, pot selection for case interventions. Case-linked finance transactions roll into committed/actual. Draft/snapshot UX refined; saved views and pot detail widgets now backed by API + CSV export; burn-rate widget uses live metrics with risk tagging.
@@ -37,6 +38,7 @@ Last Updated: 2025-12-07
 - Expose pot transaction history endpoint and UI; harden status transitions (draft→submitted→posted) for reconciliation.
 - Add guarded recalc endpoint for pot rollups and background consistency checks.
 - Extend exports beyond CSV (PDF/JSON) and align with saved views filters.
+- Wire Payments board to services (packet ingest, confirmations, evidence, GL/regional context) and replace mock data context.
 
 ## Links
 - Workflow map: `docs/planning/finance-workflow-map.md`

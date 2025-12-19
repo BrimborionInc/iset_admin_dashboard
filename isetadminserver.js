@@ -27748,14 +27748,20 @@ function mapBudgetPotRow(row) {
   if (row && row.metadata) {
     try { meta = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata; } catch { meta = {}; }
   }
+  const fundingSource = row.funding_source || null;
+  const fiscalYearTag = row.fiscal_year_tag || null;
   return {
     id: String(row.id),
     parentId: row.parent_id ? String(row.parent_id) : null,
     agreementCode: row.agreement_code || null,
+    agreementId: row.agreement_id || null,
     fiscalYear: row.fiscal_year || null,
+    fiscalYearTag: fiscalYearTag || null,
     name: row.name,
     code: row.code,
     nodeType: meta.nodeType || row.pot_type || 'budget',
+    fundingSource: fundingSource,
+    isRestricted: !!row.is_restricted,
     owner: row.owner || null,
     isAdminCap: !!row.is_admin_cap,
     isActive: !!row.is_active,
@@ -27768,6 +27774,27 @@ function mapBudgetPotRow(row) {
     metadata: meta,
   };
 }
+
+const normalizeFundingSource = value => {
+  if (typeof value !== 'string') return null;
+  const upper = value.trim().toUpperCase();
+  return ['EI', 'CRF', 'OTHER'].includes(upper) ? upper : null;
+};
+
+const normalizeFiscalYearTag = value => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (/^\d{4}$/.test(trimmed)) return trimmed;
+  if (/^\d{4}-\d{4}$/.test(trimmed)) return trimmed;
+  return null;
+};
+
+const normalizeBooleanLike = value => {
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === '1' || value === 'true') return true;
+  if (value === 0 || value === '0' || value === 'false') return false;
+  return null;
+};
 
 // Lightweight budget pot list for non-finance users (code/name/id only)
 app.get('/api/reference/budget-pots-lite', async (_req, res) => {
@@ -27847,6 +27874,26 @@ function requireFinanceRole(req, res) {
   if (role && allowed.has(role)) return null;
   res.status(403).json({ error: 'forbidden', message: 'Insufficient role for finance operations.' });
   return { denied: true };
+}
+
+function evaluateTransferPolicies(sourcePot, destPot) {
+  const violations = [];
+  const sourceFs = (sourcePot?.funding_source || "").toUpperCase();
+  const destFs = (destPot?.funding_source || "").toUpperCase();
+  if (!sourceFs || !destFs) {
+    violations.push({
+      severity: "error",
+      code: "missing_funding_source",
+      message: "Both source and destination pots must have a funding source classification before transfer.",
+    });
+  } else if (sourceFs === "EI" && destFs === "CRF") {
+    violations.push({
+      severity: "error",
+      code: "ei_to_crf_not_permitted",
+      message: "Transfers from EI-funded pots to CRF-funded pots are not permitted.",
+    });
+  }
+  return violations;
 }
 
 async function refreshFinancePotSums(connection = null) {
@@ -28066,20 +28113,45 @@ app.post('/api/finance/budget-pots', async (req, res) => {
     if (!body.name || !body.code) {
       return res.status(400).json({ error: 'name_and_code_required' });
     }
+    const fundingSource = body.fundingSource || body.funding_source || null;
+    const normalizedFundingSource = fundingSource ? normalizeFundingSource(fundingSource) : null;
+    if (fundingSource && !normalizedFundingSource) {
+      return res.status(400).json({ error: 'invalid_funding_source' });
+    }
+    const fiscalYearTagInput = body.fiscalYearTag || body.fiscal_year_tag || null;
+    const fiscalYearTag = fiscalYearTagInput ? normalizeFiscalYearTag(fiscalYearTagInput) : null;
+    if (fiscalYearTagInput && !fiscalYearTag) {
+      return res.status(400).json({ error: 'invalid_fiscal_year_tag' });
+    }
+    const restricted = body.isRestricted !== undefined
+      ? normalizeBooleanLike(body.isRestricted)
+      : body.is_restricted !== undefined
+        ? normalizeBooleanLike(body.is_restricted)
+        : null;
+    if (restricted === null && (body.isRestricted !== undefined || body.is_restricted !== undefined)) {
+      return res.status(400).json({ error: 'invalid_is_restricted' });
+    }
+    const agreementId = typeof body.agreementId === 'string'
+      ? body.agreementId.trim() || null
+      : body.agreement_id || null;
     const parentId = body.parentId ? Number(body.parentId) : null;
     const insertSql = `
       INSERT INTO budget_pot
-        (parent_id, agreement_code, fiscal_year, name, code, pot_type, owner, is_admin_cap, is_active,
+        (parent_id, agreement_code, agreement_id, fiscal_year, fiscal_year_tag, name, code, pot_type, funding_source, is_restricted, owner, is_admin_cap, is_active,
          approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `;
     const params = [
       Number.isFinite(parentId) ? parentId : null,
       body.agreementCode || null,
+      agreementId,
       body.fiscalYear || null,
+      fiscalYearTag,
       body.name,
       body.code,
       body.nodeType || 'budget',
+      normalizedFundingSource,
+      restricted === null ? 0 : restricted ? 1 : 0,
       body.owner || null,
       body.isAdminCap ? 1 : 0,
       body.isActive === false ? 0 : 1,
@@ -28108,6 +28180,27 @@ app.put('/api/finance/budget-pots/:id', async (req, res) => {
       return res.status(400).json({ error: 'invalid_pot_id' });
     }
     const body = req.body || {};
+    const fundingSourceRaw = body.fundingSource || body.funding_source;
+    const fundingSource = fundingSourceRaw ? normalizeFundingSource(fundingSourceRaw) : null;
+    if (fundingSourceRaw && !fundingSource) {
+      return res.status(400).json({ error: 'invalid_funding_source' });
+    }
+    const fiscalYearTagRaw = body.fiscalYearTag || body.fiscal_year_tag;
+    const fiscalYearTag = fiscalYearTagRaw ? normalizeFiscalYearTag(fiscalYearTagRaw) : null;
+    if (fiscalYearTagRaw && !fiscalYearTag) {
+      return res.status(400).json({ error: 'invalid_fiscal_year_tag' });
+    }
+    const restrictedRaw = body.isRestricted !== undefined ? body.isRestricted : body.is_restricted;
+    const restricted = restrictedRaw !== undefined ? normalizeBooleanLike(restrictedRaw) : null;
+    if (restrictedRaw !== undefined && restricted === null) {
+      return res.status(400).json({ error: 'invalid_is_restricted' });
+    }
+    const agreementId =
+      typeof body.agreementId === 'string'
+        ? body.agreementId.trim() || null
+        : body.agreement_id !== undefined
+          ? body.agreement_id
+          : undefined;
     const fields = [];
     const params = [];
     const assign = (col, val) => { fields.push(`${col} = ?`); params.push(val); };
@@ -28117,7 +28210,11 @@ app.put('/api/finance/budget-pots/:id', async (req, res) => {
     if (body.owner !== undefined) assign('owner', body.owner);
     if (body.parentId !== undefined) assign('parent_id', body.parentId ? Number(body.parentId) : null);
     if (body.agreementCode !== undefined) assign('agreement_code', body.agreementCode);
+    if (agreementId !== undefined) assign('agreement_id', agreementId);
     if (body.fiscalYear !== undefined) assign('fiscal_year', body.fiscalYear);
+    if (fiscalYearTagRaw !== undefined) assign('fiscal_year_tag', fiscalYearTag);
+    if (fundingSourceRaw !== undefined) assign('funding_source', fundingSource);
+    if (restrictedRaw !== undefined) assign('is_restricted', restricted ? 1 : 0);
     if (body.is_admin_cap !== undefined || body.isAdminCap !== undefined) assign('is_admin_cap', body.isAdminCap ? 1 : 0);
     if (body.is_active !== undefined || body.isActive !== undefined) assign('is_active', body.isActive === false ? 0 : 1);
     if (body.approved !== undefined) assign('approved_amount', Number(body.approved) || 0);
@@ -28375,6 +28472,24 @@ app.get('/api/finance/allocations', async (req, res) => {
   }
 });
 
+app.get('/api/finance/allocations/:id', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const allocationId = Number(req.params.id);
+  if (!Number.isFinite(allocationId)) {
+    return res.status(400).json({ error: 'invalid_allocation_id' });
+  }
+  try {
+    const allocation = await fetchAllocationById(allocationId);
+    if (!allocation) {
+      return res.status(404).json({ error: 'allocation_not_found' });
+    }
+    res.status(200).json(allocation);
+  } catch (err) {
+    console.error('[finance] failed to fetch allocation', err);
+    res.status(500).json({ error: 'failed_to_fetch_allocation' });
+  }
+});
+
 app.post('/api/finance/allocations', async (req, res) => {
   if (requireFinanceRole(req, res)) return;
   try {
@@ -28389,8 +28504,14 @@ app.post('/api/finance/allocations', async (req, res) => {
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ error: 'invalid_amount' });
     }
+    if (!justification) {
+      return res.status(400).json({ error: 'justification_required' });
+    }
     const currency = (body.currency || 'CAD').slice(0, 3);
     const metadata = body.metadata ? safeJsonParse(body.metadata, {}) : {};
+    if (body.effectiveDate || body.effective_date) {
+      metadata.effectiveDate = body.effectiveDate || body.effective_date;
+    }
     const userId = req.user?.id || req.auth?.id || null;
     const requesterName =
       req.user?.name ||
@@ -28400,6 +28521,20 @@ app.post('/api/finance/allocations', async (req, res) => {
       null;
     if (requesterName) {
       metadata.requestedBy = requesterName;
+    }
+    // Policy validation (server-side)
+    const [pots] = await pool.query(
+      'SELECT id, name, code, funding_source, is_restricted, agreement_id, fiscal_year_tag FROM budget_pot WHERE id IN (?, ?)',
+      [sourcePotId, destPotId]
+    );
+    const sourcePot = pots.find(p => Number(p.id) === sourcePotId);
+    const destPot = pots.find(p => Number(p.id) === destPotId);
+    if (!sourcePot || !destPot) {
+      return res.status(400).json({ error: 'invalid_pot_ids' });
+    }
+    const violations = evaluateTransferPolicies(sourcePot, destPot);
+    if (violations.some(v => v.severity === 'error')) {
+      return res.status(409).json({ error: 'allocation_policy_violation', violations, ok: false });
     }
     const [result] = await pool.query(
       `INSERT INTO budget_allocation
@@ -28412,6 +28547,42 @@ app.post('/api/finance/allocations', async (req, res) => {
   } catch (err) {
     console.error('[finance] failed to create allocation', err);
     res.status(500).json({ error: 'failed_to_create_allocation' });
+  }
+});
+
+// Validate transfer policies before creating an allocation/transfer.
+// curl examples:
+//  - EI->CRF block: curl -X POST http://localhost:3001/api/finance/allocations/validate -H "Content-Type: application/json" -d '{"sourcePotId":1,"destinationPotId":2}'
+//  - Missing funding source: same call with unclassified pots returns missing_funding_source violation.
+app.post('/api/finance/allocations/validate', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const body = req.body || {};
+  const sourcePotId = Number(body.sourcePotId || body.source_pot_id);
+  const destPotId = Number(body.destinationPotId || body.destPotId || body.dest_pot_id);
+  if (!Number.isFinite(sourcePotId) || !Number.isFinite(destPotId) || sourcePotId === destPotId) {
+    return res.status(400).json({ error: 'invalid_pot_ids' });
+  }
+  try {
+    const [rows] = await pool.query(
+      'SELECT id, name, code, funding_source, is_restricted, agreement_id, fiscal_year_tag FROM budget_pot WHERE id IN (?, ?)',
+      [sourcePotId, destPotId]
+    );
+    const sourcePot = rows.find(r => Number(r.id) === sourcePotId);
+    const destPot = rows.find(r => Number(r.id) === destPotId);
+    if (!sourcePot || !destPot) {
+      return res.status(400).json({ error: 'invalid_pot_ids' });
+    }
+    const violations = evaluateTransferPolicies(sourcePot, destPot);
+    const hasErrors = violations.some(v => v.severity === "error");
+    return res.status(200).json({
+      ok: !hasErrors,
+      violations,
+      sourcePot: { id: String(sourcePot.id), name: sourcePot.name, code: sourcePot.code, fundingSource: sourcePot.funding_source || null },
+      destinationPot: { id: String(destPot.id), name: destPot.name, code: destPot.code, fundingSource: destPot.funding_source || null },
+    });
+  } catch (err) {
+    console.error('[finance] failed to validate allocation', err);
+    res.status(500).json({ error: 'failed_to_validate_allocation' });
   }
 });
 
@@ -28866,25 +29037,37 @@ app.post('/api/finance/budget-snapshots', async (req, res) => {
       );
       const snapshotId = result.insertId;
       if (pots.length) {
-        const insertValues = pots.map(pot => [
-          snapshotId,
-          pot.id,
-          pot.parent_id,
-          pot.name,
-          pot.code,
+        const insertValues = pots.map(pot => {
+          const metaValue =
+            pot.metadata === null || typeof pot.metadata === 'undefined'
+              ? null
+              : typeof pot.metadata === 'string'
+                ? pot.metadata
+                : JSON.stringify(pot.metadata);
+          return [
+            snapshotId,
+            pot.id,
+            pot.parent_id,
+            pot.name,
+            pot.code,
+          pot.agreement_id || null,
+          pot.funding_source || null,
+          pot.is_restricted ? 1 : 0,
           pot.pot_type,
           pot.is_admin_cap,
+          pot.fiscal_year_tag || null,
           pot.approved_amount,
           pot.adjusted_amount,
           pot.committed_amount,
-          pot.actual_amount,
-          pot.forecast_amount,
-          pot.admin_share_amount,
-          pot.metadata ? JSON.stringify(pot.metadata) : null,
-        ]);
+            pot.actual_amount,
+            pot.forecast_amount,
+            pot.admin_share_amount,
+            metaValue,
+          ];
+        });
         await conn.query(
           `INSERT INTO budget_snapshot_pot
-           (snapshot_id, budget_pot_id, parent_pot_id, name, code, pot_type, is_admin_cap,
+           (snapshot_id, budget_pot_id, parent_pot_id, name, code, agreement_id, funding_source, is_restricted, pot_type, is_admin_cap, fiscal_year_tag,
             approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata)
            VALUES ?`,
           [insertValues]
@@ -28934,21 +29117,31 @@ app.get('/api/finance/budget-snapshots/:id', async (req, res) => {
       createdByUserId: snapshot.created_by_user_id,
       notes: snapshot.notes,
       createdAt: snapshot.created_at,
-      pots: pots.map(row => ({
-        id: row.budget_pot_id,
-        parentId: row.parent_pot_id,
-        name: row.name,
-        code: row.code,
-        potType: row.pot_type,
-        isAdminCap: !!row.is_admin_cap,
-        approved: Number(row.approved_amount || 0),
-        adjusted: Number(row.adjusted_amount || 0),
-        committed: Number(row.committed_amount || 0),
-        actual: Number(row.actual_amount || 0),
-        forecast: Number(row.forecast_amount || 0),
-        adminShare: Number(row.admin_share_amount || 0),
-        metadata: row.metadata ? safeJsonParse(row.metadata, {}) : {},
-      })),
+      pots: pots.map(row => {
+        let meta = row.metadata ? safeJsonParse(row.metadata, {}) : {};
+        if (typeof meta === 'string') {
+          meta = safeJsonParse(meta, {});
+        }
+        return {
+          id: row.budget_pot_id,
+          parentId: row.parent_pot_id,
+          name: row.name,
+          code: row.code,
+          agreementId: row.agreement_id || null,
+          fundingSource: row.funding_source || null,
+          isRestricted: !!row.is_restricted,
+          potType: row.pot_type,
+          isAdminCap: !!row.is_admin_cap,
+          fiscalYearTag: row.fiscal_year_tag || null,
+          approved: Number(row.approved_amount || 0),
+          adjusted: Number(row.adjusted_amount || 0),
+          committed: Number(row.committed_amount || 0),
+          actual: Number(row.actual_amount || 0),
+          forecast: Number(row.forecast_amount || 0),
+          adminShare: Number(row.admin_share_amount || 0),
+          metadata: meta,
+        };
+      }),
     });
   } catch (err) {
     console.error('[finance] failed to fetch budget snapshot', err);
@@ -29001,22 +29194,36 @@ app.post('/api/finance/budget-snapshots/:id/restore-draft', async (req, res) => 
       `SELECT * FROM budget_snapshot_pot WHERE snapshot_id = ? ORDER BY parent_pot_id IS NULL DESC, parent_pot_id, id`,
       [snapshotId]
     );
-    const payloadPots = pots.map(p => ({
-      id: p.budget_pot_id,
-      parentId: p.parent_pot_id,
-      name: p.name,
-      code: p.code,
-      nodeType: p.pot_type,
-      isAdminCap: Boolean(p.is_admin_cap),
-      approved: Number(p.approved_amount || 0),
-      adjusted: Number(p.adjusted_amount || 0),
-      committed: Number(p.committed_amount || 0),
-      actual: Number(p.actual_amount || 0),
-      forecast: Number(p.forecast_amount || 0),
-      adminShare: Number(p.admin_share_amount || 0),
-      metadata: p.metadata ? safeJsonParse(p.metadata, {}) : {},
-      status: 'draft',
-    }));
+    const payloadPots = pots.map(p => {
+      let meta = p.metadata ? safeJsonParse(p.metadata, {}) : {};
+      if (typeof meta === 'string') {
+        meta = safeJsonParse(meta, {});
+      }
+      const policyNotes = meta?.policyNotes || meta?.policy_notes || null;
+      const description = meta?.description || null;
+      return {
+        id: p.budget_pot_id,
+        parentId: p.parent_pot_id,
+        name: p.name,
+        code: p.code,
+        agreementId: p.agreement_id || null,
+        fundingSource: p.funding_source || null,
+        isRestricted: !!p.is_restricted,
+        nodeType: p.pot_type,
+        isAdminCap: Boolean(p.is_admin_cap),
+        fiscalYearTag: p.fiscal_year_tag || null,
+        approved: Number(p.approved_amount || 0),
+        adjusted: Number(p.adjusted_amount || 0),
+        committed: Number(p.committed_amount || 0),
+        actual: Number(p.actual_amount || 0),
+        forecast: Number(p.forecast_amount || 0),
+        adminShare: Number(p.admin_share_amount || 0),
+        policyNotes,
+        description,
+        metadata: meta,
+        status: 'draft',
+      };
+    });
     const payloadFiscalYear = typeof body.fiscalYear === 'string' && body.fiscalYear.trim()
       ? body.fiscalYear.trim()
       : snapshot.fiscal_year || null;
@@ -29191,8 +29398,12 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
           pot.parent_id,
           pot.name,
           pot.code,
+          pot.agreement_id || null,
+          pot.funding_source || null,
+          pot.is_restricted ? 1 : 0,
           pot.pot_type,
           pot.is_admin_cap,
+          pot.fiscal_year_tag || null,
           pot.approved_amount,
           pot.adjusted_amount,
           pot.committed_amount,
@@ -29203,7 +29414,7 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
         ]);
         await conn.query(
           `INSERT INTO budget_snapshot_pot
-           (snapshot_id, budget_pot_id, parent_pot_id, name, code, pot_type, is_admin_cap,
+           (snapshot_id, budget_pot_id, parent_pot_id, name, code, agreement_id, funding_source, is_restricted, pot_type, is_admin_cap, fiscal_year_tag,
             approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata)
            VALUES ?`,
           [values]
@@ -29241,6 +29452,26 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
           name = replaceYear(name, targetYear);
           code = replaceYear(code, targetYear);
         }
+        const fundingSourceRaw = next.fundingSource || next.funding_source || null;
+        const fundingSource = fundingSourceRaw ? normalizeFundingSource(fundingSourceRaw) : null;
+        if (fundingSourceRaw && !fundingSource) {
+          throw new Error('invalid_funding_source');
+        }
+        const restrictedRaw =
+          next.isRestricted !== undefined ? next.isRestricted : next.is_restricted;
+        const restricted = restrictedRaw !== undefined ? normalizeBooleanLike(restrictedRaw) : null;
+        if (restrictedRaw !== undefined && restricted === null) {
+          throw new Error('invalid_is_restricted');
+        }
+        const agreementId =
+          typeof next.agreementId === 'string'
+            ? next.agreementId.trim() || null
+            : next.agreement_id || null;
+        const fiscalYearTagRaw = next.fiscalYearTag || next.fiscal_year_tag || null;
+        const fiscalYearTag = fiscalYearTagRaw ? normalizeFiscalYearTag(fiscalYearTagRaw) : null;
+        if (fiscalYearTagRaw && !fiscalYearTag) {
+          throw new Error('invalid_fiscal_year_tag');
+        }
         const meta = {
           ...(typeof next.metadata === 'object' && next.metadata !== null ? next.metadata : {}),
           ...(next.nodeType ? { nodeType: next.nodeType } : {}),
@@ -29252,10 +29483,14 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
           Number.isFinite(idNum) ? idNum : null,
           Number.isFinite(parentIdNum) ? parentIdNum : null,
           next.agreementCode || null,
+          agreementId,
           potFiscalYear,
+          fiscalYearTag || potFiscalYear,
           name,
           code,
           next.nodeType || 'budget',
+          fundingSource,
+          restricted ? 1 : 0,
           next.owner || null,
           next.isAdminCap ? 1 : 0,
           next.status === 'archived' ? 0 : 1,
@@ -29279,16 +29514,20 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
       for (const values of prepared) {
         const [result] = await conn.query(
           `INSERT INTO budget_pot
-             (id, parent_id, agreement_code, fiscal_year, name, code, pot_type, owner, is_admin_cap, is_active,
+             (id, parent_id, agreement_code, agreement_id, fiscal_year, fiscal_year_tag, name, code, pot_type, funding_source, is_restricted, owner, is_admin_cap, is_active,
               approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
            ON DUPLICATE KEY UPDATE
              parent_id = VALUES(parent_id),
              agreement_code = VALUES(agreement_code),
+             agreement_id = VALUES(agreement_id),
              fiscal_year = VALUES(fiscal_year),
+             fiscal_year_tag = VALUES(fiscal_year_tag),
              name = VALUES(name),
              code = VALUES(code),
              pot_type = VALUES(pot_type),
+             funding_source = VALUES(funding_source),
+             is_restricted = VALUES(is_restricted),
              owner = VALUES(owner),
              is_admin_cap = VALUES(is_admin_cap),
              is_active = VALUES(is_active),

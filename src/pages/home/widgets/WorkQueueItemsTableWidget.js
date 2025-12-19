@@ -739,11 +739,27 @@ const WorkQueueItemsTableWidget = ({
                               apiFetch('/api/reference/budget-pots-lite')
                                 .then(res => res.ok ? res.json() : [])
                                 .then(list => {
-                                  const active = Array.isArray(list) ? list.filter(p => p.isActive) : [];
-                                  const opts = active.map(p => ({
-                                    label: [p.code, p.name].filter(Boolean).join(' - ') || p.name || p.code || p.id,
-                                    value: p.id
-                                  }));
+                                  const isFundingStream = pot => {
+                                    const potType =
+                                      pot?.pot_type ??
+                                      pot?.potType ??
+                                      pot?.type ??
+                                      pot?.nodeType ??
+                                      pot?.metadata?.pot_type ??
+                                      pot?.metadata?.nodeType ??
+                                      '';
+                                    const norm = String(potType).trim().toLowerCase().replace(/[_\\s]+/g, ' ');
+                                    return norm === 'funding stream';
+                                  };
+                                  const active = Array.isArray(list)
+                                    ? list.filter(p => p.isActive && isFundingStream(p))
+                                    : [];
+                                  const opts = active
+                                    .map(p => ({
+                                      label: [p.code, p.name].filter(Boolean).join(' - ') || p.name || p.code || p.id,
+                                      value: p.id
+                                    }))
+                                    .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
                                   setBudgetPotOptions(opts);
                                 })
                                 .catch(() => setBudgetPotOptions([]))

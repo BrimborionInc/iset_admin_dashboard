@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
+  Alert,
   Header,
   SpaceBetween,
   ButtonDropdown,
@@ -12,25 +13,51 @@ import {
   Button,
   Tabs,
   Table,
+  Popover,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
 import { useBudgetsData } from "./BudgetsDataContext.jsx";
+import BudgetPotTagsSummary from "./BudgetPotTagsSummary.jsx";
 import { apiFetch } from "../../../auth/apiClient";
 
 const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
-  const { pots, selectedPotId } = useBudgetsData();
-  const pot = useMemo(() => {
+  const { pots, selectedPotId, selectedDraftId, selectedDraftPots, selectedPotSource } = useBudgetsData();
+  const activePot = useMemo(() => {
     if (!Array.isArray(pots) || pots.length === 0) {
       return null;
     }
     if (selectedPotId) {
       const match = pots.find(entry => entry.id === selectedPotId);
-      if (match) {
-        return match;
-      }
+      return match ?? null;
     }
-    return pots[0];
+    return null;
   }, [pots, selectedPotId]);
+
+  const draftPot = useMemo(() => {
+    if (!selectedDraftId || !Array.isArray(selectedDraftPots)) return null;
+    if (!selectedPotId) return null;
+    return selectedDraftPots.find(p => String(p.id) === String(selectedPotId)) || null;
+  }, [selectedDraftId, selectedDraftPots, selectedPotId]);
+
+  const pot = useMemo(() => {
+    if (selectedPotSource === "draft" && draftPot) {
+      // Merge draft-specific fields over the active pot so policy/tags reflect draft edits while retaining base metadata.
+      const base = activePot ? { ...activePot } : {};
+      Object.entries(draftPot).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          base[key] = value;
+        }
+      });
+      base.status = draftPot.status || "draft";
+      return base;
+    }
+    if (selectedPotSource === "active") {
+      return activePot;
+    }
+    return null;
+  }, [activePot, draftPot, selectedPotSource]);
+
+  const isDraftView = selectedPotSource === "draft";
   const activePotId = pot?.id ?? null;
   const adminPercentage =
     pot && pot.adjusted ? Math.round(((pot.adminShare ?? 0) / pot.adjusted) * 1000) / 10 : 0;
@@ -50,6 +77,14 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         : pot?.status === "archived"
           ? "Archived"
           : "Published";
+  const potTags = pot
+    ? {
+        fundingSource: pot.fundingSource || null,
+        isRestricted: !!pot.isRestricted,
+        agreementId: pot.agreementId || null,
+        fiscalYearTag: pot.fiscalYearTag || pot.fiscalYear || null,
+      }
+    : null;
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
       variant="info"
@@ -373,11 +408,34 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     </SpaceBetween>
   );
 
+  const renderPolicy = () => (
+    <SpaceBetween size="m">
+      <SpaceBetween size="s">
+        <Box variant="awsui-key-label">Classification &amp; tags</Box>
+        {potTags &&
+        (potTags.fundingSource || potTags.agreementId || potTags.fiscalYearTag || potTags.isRestricted) ? (
+          <BudgetPotTagsSummary tags={potTags} />
+        ) : (
+          <Box variant="p" fontStyle="italic">
+            Not set
+          </Box>
+        )}
+      </SpaceBetween>
+      <SpaceBetween size="s">
+        <Box variant="awsui-key-label">Policy notes &amp; references</Box>
+        <Box variant="p" fontStyle={pot?.policyNotes ? "normal" : "italic"}>
+          {pot?.policyNotes?.trim() ? pot.policyNotes : "Not set"}
+        </Box>
+      </SpaceBetween>
+    </SpaceBetween>
+  );
+
   const tabs = [
     { id: "financials", label: "Financials", content: renderFinancials() },
     { id: "adjustments", label: "Adjustments", content: renderAdjustments() },
     { id: "approvals", label: "Approvals", content: renderApprovals() },
     { id: "evidence", label: "Evidence", content: renderEvidence() },
+    { id: "policy", label: "Policy", content: renderPolicy() },
   ];
 
   const quickActionsMenuItems = [
@@ -526,38 +584,61 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       <SpaceBetween size="l">
         <SpaceBetween size="s">
           {pot ? (
-            <ColumnLayout columns={2} variant="text-grid">
-              <SpaceBetween size="s">
-                <SpaceBetween size="xxs">
-                  <Box variant="strong">{pot.name}</Box>
-                  <SpaceBetween direction="horizontal" size="xxs">
-                    {pot.code ? <Badge color="blue">{pot.code}</Badge> : null}
-                    {pot.owner ? <Badge color="green">{pot.owner}</Badge> : null}
-                  </SpaceBetween>
-                  {pot.description ? <Box variant="p">{pot.description}</Box> : null}
-                </SpaceBetween>
+            <SpaceBetween size="s">
+              <Box variant="strong">{pot.name}</Box>
+              <SpaceBetween direction="horizontal" size="xxs">
+                <Popover
+                  triggerType="hover"
+                  size="small"
+                  position="top"
+                  content={
+                    <Box variant="p">
+                      {isDraftView
+                        ? "Draft pot in the current draft payload. Publish to make active."
+                        : "Active (published) pot currently in use."}
+                    </Box>
+                  }
+                >
+                  {isDraftView ? <Badge color="red">Draft</Badge> : <Badge color="grey">Active</Badge>}
+                </Popover>
+                {pot.code ? (
+                  <Popover
+                    triggerType="hover"
+                    size="small"
+                    position="top"
+                    content={<Box variant="p">Funding code / identifier for this pot.</Box>}
+                  >
+                    <Badge color="blue">{pot.code}</Badge>
+                  </Popover>
+                ) : null}
+                {pot.owner ? (
+                  <Popover
+                    triggerType="hover"
+                    size="small"
+                    position="top"
+                    content={<Box variant="p">Responsible owner or coordinating role for this pot.</Box>}
+                  >
+                    <Badge color="green">{pot.owner}</Badge>
+                  </Popover>
+                ) : null}
+                {pot ? <BudgetPotTagsSummary tags={potTags} showBadges showGrid={false} /> : null}
               </SpaceBetween>
-              <SpaceBetween size="s">
-                <Box variant="awsui-key-label">Owner</Box>
-                <Box variant="p">{pot?.owner ?? "Unassigned"}</Box>
-              </SpaceBetween>
-            </ColumnLayout>
+              {pot.description ? <Box variant="p">{pot.description}</Box> : null}
+            </SpaceBetween>
           ) : (
-            <StatusIndicator type="pending">No pot selected</StatusIndicator>
+            <Alert type="info" header="No pot selected">
+              Select a pot in the current Budget hierarchy tab (Active or Draft) to view its details.
+            </Alert>
           )}
         </SpaceBetween>
 
-        <Tabs
-          tabs={tabs}
-          activeTabId={activeTabId}
-          onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
-        />
-        <SpaceBetween size="xxs">
-          <Box variant="awsui-key-label">Policy guardrails (not implemented yet)</Box>
-          <Box variant="p" fontStyle={pot?.policyNotes ? "normal" : "italic"}>
-            {pot?.policyNotes || "not set"}
-          </Box>
-        </SpaceBetween>
+        {pot ? (
+          <Tabs
+            tabs={tabs}
+            activeTabId={activeTabId}
+            onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
+          />
+        ) : null}
       </SpaceBetween>
     </BoardItem>
   );

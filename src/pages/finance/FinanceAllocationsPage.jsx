@@ -216,6 +216,7 @@ const FinanceAllocationsPageContent = ({
     history,
     snapshots,
     createAllocation,
+    refreshAll,
     approveAllocation,
     rejectAllocation,
     applyAllocation,
@@ -369,6 +370,7 @@ const FinanceAllocationsPageContent = ({
       extraProps.potOptions = potOptions;
       extraProps.potMetrics = potMetrics;
       extraProps.createAllocation = createAllocation;
+      extraProps.refreshAllocations = refreshAll;
     }
     if (item.id === "approvals") {
       extraProps.items = approvals;

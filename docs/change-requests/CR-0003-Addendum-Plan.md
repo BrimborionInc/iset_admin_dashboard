@@ -4,6 +4,7 @@ _Scope: scaffolding-only implementation using dummy data (no live services)_
 
 ## 1. Context Snapshot
 - Base finance dashboards (Overview, Budgets, Allocations, Reconciliation, Monitoring, Forecasting, Reports) now reference the updated NWAC + PTMA pot hierarchy seeded in `financeDemoData.js`.
+- Payments board (queue, detail, comms, SLA) is scaffolded on mock data per addendum; live services are not wired.
 - Existing functionality supports configurable boards, table persistence, and mock data contexts only; no backend API wiring or notifications are in play yet.
 
 ## 2. Addendum Workstream Checklist
@@ -16,6 +17,7 @@ _Scope: scaffolding-only implementation using dummy data (no live services)_
   - Communication Log (mock email history).
   - SLA Snapshot (metric cards).
 - [x] Seed `PaymentsDataContext.jsx` with dummy packets, documents, SLA calculations.
+- [ ] Wire Payments workspace to live services (packet ingest, confirmations, evidence, GL/regional context) once APIs are available.
 
 ### 2.2 Budgets & Allocations Enhancements
 - [ ] Regional commitment overview widget (PTMA admin/client metrics, GL snippet).

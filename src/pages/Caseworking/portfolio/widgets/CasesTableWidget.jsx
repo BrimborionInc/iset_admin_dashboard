@@ -73,7 +73,11 @@ const groupedColumns = [
           </Link>
         );
       }
-      return item.clientName;
+      return (
+        <Link href={item.caseHref || "#"} onFollow={event => event.preventDefault()}>
+          {item.clientName || item.trackingId || item.id}
+        </Link>
+      );
     },
     minWidth: 220,
     isRowHeader: true,

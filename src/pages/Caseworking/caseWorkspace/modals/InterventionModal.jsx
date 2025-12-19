@@ -280,7 +280,20 @@ const InterventionModal = ({
         }
         const data = resp && resp.ok ? await resp.json() : [];
         if (cancelled) return;
+        const isFundingStream = pot => {
+          const potType =
+            pot?.pot_type ??
+            pot?.potType ??
+            pot?.type ??
+            pot?.nodeType ??
+            pot?.metadata?.pot_type ??
+            pot?.metadata?.nodeType ??
+            "";
+          const norm = String(potType).trim().toLowerCase().replace(/[_\s]+/g, " ");
+          return norm === "funding stream";
+        };
         const opts = (Array.isArray(data) ? data : [])
+          .filter(isFundingStream)
           .map(item => {
             const value = item?.id ?? item?.value ?? item?.code ?? null;
             if (!value) return null;

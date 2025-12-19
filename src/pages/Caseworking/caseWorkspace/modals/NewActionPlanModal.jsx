@@ -256,7 +256,8 @@ const NewActionPlanModal = ({
               item?.metadata?.pot_type ??
               item?.metadata?.nodeType ??
               "";
-            return String(potType).trim().toLowerCase() === "funding stream";
+            const norm = String(potType).trim().toLowerCase().replace(/[_\s]+/g, " ");
+            return norm === "funding stream";
           })
           .filter(item => item?.isActive !== false)
           .filter(item => {

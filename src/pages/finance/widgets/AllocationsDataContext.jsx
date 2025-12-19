@@ -39,6 +39,8 @@ const normalizeAllocation = allocation => {
   const metadata = allocation.metadata || {};
   return {
     ...allocation,
+    sourcePotId: allocation.sourcePotId ? String(allocation.sourcePotId) : null,
+    destinationPotId: allocation.destPotId ? String(allocation.destPotId) : null,
     title: allocation.justification || `Transfer ${source} → ${dest}`,
     potFrom: source,
     potTo: dest,
@@ -80,7 +82,12 @@ export const AllocationsDataProvider = ({ children }) => {
     const metrics = {};
     (data || []).forEach(pot => {
       const label = pot.code ? `${pot.name} (${pot.code})` : pot.name;
-      options.push({ value: String(pot.id), label });
+      options.push({
+        value: String(pot.id),
+        label,
+        parentId: pot.parentId || pot.parent_id || null,
+        nodeType: pot.nodeType || pot.node_type || pot.metadata?.nodeType || null,
+      });
       metrics[pot.id] = computePotMetrics(pot);
     });
     setPotOptions(options);
@@ -88,39 +95,43 @@ export const AllocationsDataProvider = ({ children }) => {
   }, []);
 
   const loadAllocations = useCallback(async () => {
-    const resp = await apiFetch("/api/finance/allocations?status=proposed,approved");
+    const resp = await apiFetch("/api/finance/allocations");
     if (!resp.ok) {
       throw new Error(`Failed to load allocations (${resp.status})`);
     }
     const data = await resp.json();
-    setApprovals((Array.isArray(data) ? data : []).map(normalizeAllocation));
-  }, []);
-
-  const loadHistory = useCallback(async () => {
-    const resp = await apiFetch("/api/finance/allocations?status=applied");
-    if (!resp.ok) {
-      throw new Error(`Failed to load allocation history (${resp.status})`);
-    }
-    const data = await resp.json();
-    const normalized = (Array.isArray(data) ? data : []).map(item => {
-      const approvedOn = item.appliedAt || item.approvedAt || item.updatedAt || item.createdAt;
-      const metadata = item.metadata || {};
-      return {
-        id: item.id,
-        transferId: item.id,
-        approvedOn: formatDate(approvedOn),
-        summary: item.justification || `Transfer ${item.sourcePotName || ""} → ${item.destPotName || ""}`.trim(),
-        amount: item.amount,
-        potFrom: item.sourcePotName || item.sourcePotId || "Source pot",
-        potTo: item.destPotName || item.destPotId || "Destination pot",
-        approvedBy: Array.isArray(metadata.approvers) ? metadata.approvers : [],
-        before: metadata.beforeBalances || {},
-        after: metadata.afterBalances || {},
-        evidence: Array.isArray(metadata.evidence) ? metadata.evidence : [],
-        metadata,
-      };
-    });
-    setHistory(normalized);
+    const normalized = (Array.isArray(data) ? data : []).map(normalizeAllocation);
+    setApprovals(normalized.filter(item => item.status === "proposed"));
+    setHistory(
+      normalized
+        .map(item => {
+          const approvedOn = item.appliedAt || item.approvedAt || item.updatedAt || item.createdAt;
+          const metadata = item.metadata || {};
+          return {
+            id: item.id,
+            transferId: item.id,
+            approvedOn: formatDate(approvedOn),
+            summary:
+              item.justification ||
+              `Transfer ${item.sourcePotName || ""} → ${item.destPotName || ""}`.trim(),
+            amount: item.amount,
+            potFrom: item.sourcePotName || item.sourcePotId || "Source pot",
+            potTo: item.destPotName || item.destPotId || "Destination pot",
+            status: item.status,
+            approvedBy: Array.isArray(metadata.approvers) ? metadata.approvers : [],
+            before: metadata.beforeBalances || {},
+            after: metadata.afterBalances || {},
+            evidence: Array.isArray(metadata.evidence) ? metadata.evidence : [],
+            metadata,
+            createdAt: item.createdAt || null,
+          };
+        })
+        .sort((a, b) => {
+          const dateA = a.createdAt || a.approvedOn || "";
+          const dateB = b.createdAt || b.approvedOn || "";
+          return dateA > dateB ? -1 : dateA < dateB ? 1 : 0;
+        })
+    );
   }, []);
 
   const loadSnapshots = useCallback(async () => {
@@ -140,27 +151,37 @@ export const AllocationsDataProvider = ({ children }) => {
         body: JSON.stringify(payload),
       });
       if (!resp.ok) {
-        throw new Error(`Allocation submit failed (${resp.status})`);
+        let errPayload = null;
+        try {
+          errPayload = await resp.json();
+        } catch (_) {
+          /* ignore */
+        }
+        const errorCode = errPayload?.error || `Allocation submit failed (${resp.status})`;
+        if (errorCode === "allocation_policy_violation") {
+          return { ok: false, violations: errPayload?.violations || [], error: errorCode };
+        }
+        throw new Error(errorCode);
       }
       const data = await resp.json();
-      await Promise.all([loadAllocations(), loadHistory()]);
-      return data;
+      await loadAllocations();
+      return { ok: true, allocation: data };
     },
-    [loadAllocations, loadHistory]
+    [loadAllocations]
   );
 
   const refreshAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([loadPots(), loadAllocations(), loadHistory(), loadSnapshots()]);
+      await Promise.all([loadPots(), loadAllocations(), loadSnapshots()]);
     } catch (err) {
       console.error("[Allocations] load failed", err);
       setError(err.message || "Failed to load allocations data");
     } finally {
       setLoading(false);
     }
-  }, [loadAllocations, loadHistory, loadPots, loadSnapshots]);
+  }, [loadAllocations, loadPots, loadSnapshots]);
 
   const approveAllocation = useCallback(
     async allocationId => {
