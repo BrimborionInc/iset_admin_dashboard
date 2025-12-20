@@ -17,6 +17,7 @@ import {
 } from "@cloudscape-design/components";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 import { apiFetch } from "../../../../auth/apiClient.js";
+import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 
 const EI_CLAIMANT_OPTIONS = [
   { value: "1", label: "Employment insurance claimant" },
@@ -144,6 +145,10 @@ const NOC_VERSION_OPTIONS = [
   { value: "2021", label: "2021" },
 ];
 const DEFAULT_NOC_VERSION = NOC_VERSION_OPTIONS[0]?.value || "";
+const POSTING_CONTEXT_OPTIONS = [
+  { value: "external", label: "External (region/PTMA)" },
+  { value: "internal", label: "Internal (NWAC)" },
+];
 
 const defaultForm = {
   name: "",
@@ -152,6 +157,7 @@ const defaultForm = {
   reviewDate: "",
   fundingStream: "",
   budgetPot: "",
+  postingContext: "external",
   agreementNumber: "",
   educationLevel: "",
   educationProvince: "",
@@ -193,6 +199,10 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     fundingStreamsLoading,
     loadFundingStreams,
   } = useCaseWorkspace();
+  const currentUser = useCurrentUser();
+  const role = currentUser?.role ? currentUser.role : null;
+  const canonicalRole = role === "Regional Manager" ? "Regional Coordinator" : role;
+  const isAssessor = canonicalRole === "Application Assessor";
   const [form, setForm] = useState(defaultForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -213,13 +223,59 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
   const [potOptions, setPotOptions] = useState([]);
   const [potLoading, setPotLoading] = useState(false);
   const initialFormRef = useRef(defaultForm);
+  const fundingStreamRef = useRef(defaultForm.fundingStream);
+  const budgetPotRef = useRef(defaultForm.budgetPot);
+  const normalizedProvinceRef = useRef("");
+
+  const clearFieldError = useCallback(field => {
+    setFieldErrors(prev => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }, []);
+
+  const participantProvince = (() => {
+    const context = caseData?.caseContext || {};
+    const clientRegionCode =
+      caseData?.client?.regionDetails?.code ||
+      caseData?.client?.region?.code ||
+      null;
+    const answersProvince =
+      context?.applicationAnswers?.["address-province"] ||
+      context?.applicationPayload?.answers?.["address-province"] ||
+      null;
+    return (
+      context.addressProvince ||
+      context.address?.province ||
+      clientRegionCode ||
+      answersProvince ||
+      ""
+    );
+  })();
+  const normalizedProvince = participantProvince ? participantProvince.trim().toUpperCase() : "";
+  useEffect(() => {
+    normalizedProvinceRef.current = normalizedProvince;
+  }, [normalizedProvince]);
+
+  useEffect(() => {
+    fundingStreamRef.current = form.fundingStream;
+  }, [form.fundingStream]);
+
+  useEffect(() => {
+    budgetPotRef.current = form.budgetPot;
+  }, [form.budgetPot]);
 
   const loadPots = useCallback(async query => {
     setPotLoading(true);
     try {
-      const resp = await apiFetch("/api/finance/budget-pots");
+      const resp = await apiFetch("/api/reference/budget-pots-lite?chargeableOnly=0");
       const data = resp.ok ? await resp.json() : [];
       const qLower = (query || "").toLowerCase();
+      const currentFundingStream = fundingStreamRef.current;
+      const currentProvince = normalizedProvinceRef.current;
+      const currentSelectedBudgetPot = budgetPotRef.current ? String(budgetPotRef.current) : "";
       const opts = (Array.isArray(data) ? data : [])
         .filter(item => {
           const potType =
@@ -233,7 +289,41 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
           const norm = String(potType).trim().toLowerCase().replace(/[_\s]+/g, " ");
           return norm === "funding stream";
         })
-        .filter(item => item?.isActive !== false)
+        .filter(item => {
+          const selectedId = currentSelectedBudgetPot;
+          const itemId = item?.id || item?.value || item?.code || "";
+          const itemIdStr = itemId ? String(itemId) : "";
+          const isSelectedItem = selectedId && itemIdStr && itemIdStr === selectedId;
+
+          const isActive =
+            !(item?.isActive === false || item?.is_active === false || item?.is_active === 0);
+          if (!isActive && !isSelectedItem) return false;
+
+          const fundingSourceRaw = item.fundingSource || item.funding_source || "";
+          const normalizeStream = val => (val ? String(val).trim().toUpperCase() : "");
+          const deriveStreamFromCode = codeVal => {
+            const codeStr = normalizeStream(codeVal);
+            if (!codeStr) return "";
+            if (codeStr.includes("-EI") || codeStr.endsWith(" EI")) return "EI";
+            if (codeStr.includes("-CRF") || codeStr.endsWith(" CRF")) return "CRF";
+            return "";
+          };
+
+          if (currentFundingStream) {
+            const streamNorm = normalizeStream(currentFundingStream);
+            const potFunding = normalizeStream(fundingSourceRaw) || deriveStreamFromCode(item.code);
+            if (streamNorm && potFunding && potFunding !== streamNorm) {
+              return false;
+            }
+            // If a funding stream is selected and we cannot infer the pot's stream, keep it for now.
+          }
+
+          if (!currentProvince) return true;
+          const regions = Array.isArray(item.regions) ? item.regions.map(r => String(r).toUpperCase()) : [];
+          if (isSelectedItem && !regions.length) return true;
+          if (!regions.length) return false; // require an explicit region match when participant province known
+          return regions.includes(currentProvince) || isSelectedItem;
+        })
         .filter(item => {
           if (!qLower) return true;
           const name = String(item?.name || "").toLowerCase();
@@ -244,22 +334,24 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
           const value = item.id || item.value || item.code;
           if (!value) return null;
           const code = item.code || "";
-          const label = item.label || item.name || code || "";
+          const name = item.name || item.label || "";
+          const label = [code, name].filter(Boolean).join(" - ") || code || name || String(value);
           return {
             value: String(value),
             label,
             description: code || undefined,
+            agreementId: item.agreement_id || item.agreementId || item.agreementCode || null,
           };
         })
         .filter(Boolean);
-      setPotOptions(opts);
+     setPotOptions(opts);
     } catch (err) {
       console.warn("[ActionPlan] budget pot lookup failed", err);
       setPotOptions([]);
     } finally {
       setPotLoading(false);
     }
-  }, []);
+  }, [apiFetch]);
 
   const fundingStreamSelectOptions = useMemo(() => {
     const formatted = (Array.isArray(fundingStreams) ? fundingStreams : []).map(item => {
@@ -282,19 +374,36 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
 
   const selectedBudgetPot = useMemo(
     () =>
-      potOptions.find(opt => opt.value === form.budgetPot) ||
-      (form.budgetPot ? { value: form.budgetPot, label: form.budgetPot } : null),
+      potOptions.find(opt => String(opt.value) === String(form.budgetPot)) ||
+      (form.budgetPot
+        ? {
+            value: String(form.budgetPot),
+            label:
+              potOptions.find(opt => String(opt.value) === String(form.budgetPot))?.label ||
+              String(form.budgetPot),
+          }
+        : null),
     [potOptions, form.budgetPot]
   );
 
-  const clearFieldError = useCallback(field => {
-    setFieldErrors(prev => {
-      if (!prev[field]) return prev;
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
-  }, []);
+  // Derive agreement number from the selected budget pot's agreement_id when available.
+  useEffect(() => {
+    if (!selectedBudgetPot) return;
+    const pot = potOptions.find(opt => String(opt.value) === String(selectedBudgetPot.value));
+    if (pot && pot.agreementId) {
+      setForm(current => ({
+        ...current,
+        agreementNumber: pot.agreementId,
+      }));
+      clearFieldError("agreementNumber");
+    }
+  }, [selectedBudgetPot, potOptions, clearFieldError]);
+  useEffect(() => {
+    if (!isAssessor) return;
+    if (form.postingContext !== "external") {
+      setForm(current => ({ ...current, postingContext: "external" }));
+    }
+  }, [isAssessor, form.postingContext]);
 
   useEffect(() => {
     if (!visible || !plan) return;
@@ -318,6 +427,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
       reviewDate: plan?.endDate || "",
       fundingStream: planFundingStream,
       budgetPot: plan?.budgetPot || plan?.budget_pot || "",
+      postingContext: plan?.postingContext || plan?.posting_context || "external",
       agreementNumber,
       educationLevel: plan?.educationLevel ? String(plan.educationLevel) : "",
       educationProvince: plan?.educationProvince ? String(plan.educationProvince) : "",
@@ -349,6 +459,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
       reviewDate: plan?.endDate || "",
       fundingStream: planFundingStream,
       budgetPot: plan?.budgetPot || plan?.budget_pot || "",
+      postingContext: plan?.postingContext || plan?.posting_context || "external",
       agreementNumber,
       educationLevel: plan?.educationLevel ? String(plan.educationLevel) : "",
       educationProvince: plan?.educationProvince ? String(plan.educationProvince) : "",
@@ -378,42 +489,35 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     setFundingExpanded(true);
     setApplicantExpanded(true);
     setCloseoutExpanded(false);
-  }, [visible, plan, loadFundingStreams, loadPots]);
+  }, [visible, plan, loadFundingStreams, participantProvince]);
 
+  // Reload budget pots when funding stream or participant province changes so filtering stays current.
   useEffect(() => {
-    if (!form.fundingStream) return;
-    const derived = deriveAgreementNumberFromFundingStream(form.fundingStream);
-    if (form.agreementNumber === derived) return;
-    setForm(current => ({
-      ...current,
-      agreementNumber: derived,
-    }));
-  }, [form.fundingStream, form.agreementNumber]);
+    if (!visible) return;
+    loadPots().catch(() => {});
+  }, [visible, form.fundingStream, normalizedProvince, loadPots]);
 
+  // Agreement number now derives from selected pot; keep fundingStream independent.
   useEffect(() => {
     if (form.fundingStream) return;
     if (form.eiClaimant === "1" || form.eiClaimant === "2") {
       setForm(current => ({
         ...current,
         fundingStream: "EI",
-        agreementNumber: deriveAgreementNumberFromFundingStream("EI"),
       }));
       setFieldErrors(prev => {
         const next = { ...prev };
         delete next.fundingStream;
-        delete next.agreementNumber;
         return next;
       });
     } else if (form.eiClaimant === "3") {
       setForm(current => ({
         ...current,
         fundingStream: "CRF",
-        agreementNumber: deriveAgreementNumberFromFundingStream("CRF"),
       }));
       setFieldErrors(prev => {
         const next = { ...prev };
         delete next.fundingStream;
-        delete next.agreementNumber;
         return next;
       });
     }
@@ -585,6 +689,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
       summary: form.summary || null,
       fundingStream: fundingStream || null,
       budgetPot: form.budgetPot || null,
+      postingContext: form.postingContext || "external",
       agreementNumber: agreementNumber || null,
       educationLevel: form.educationLevel || null,
       educationProvince: form.educationProvince || null,
@@ -622,7 +727,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     []
   );
   const sectionHasFundingErrors = useCallback(
-    errors => Boolean(errors.fundingStream || errors.budgetPot || errors.agreementNumber),
+    errors => Boolean(errors.fundingStream || errors.budgetPot || errors.agreementNumber || errors.postingContext),
     []
   );
   const sectionHasApplicantErrors = useCallback(errors =>
@@ -664,6 +769,11 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
       return updated;
     } catch (err) {
       setSaving(false);
+      if (["missing_internal_gl_code", "missing_external_gl_code", "posting_context_not_permitted"].includes(err?.code)) {
+        setFieldErrors(prev => ({ ...prev, postingContext: err?.message || "Check Paid from selection." }));
+        setValidationError(err?.message || "Check Paid from selection.");
+        return null;
+      }
       setError(err?.message || "Failed to update action plan.");
       return null;
     }
@@ -671,6 +781,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
 
   if (!visible || !plan) return null;
 
+  const selectedPostingContext = POSTING_CONTEXT_OPTIONS.find(opt => opt.value === form.postingContext) || POSTING_CONTEXT_OPTIONS[0];
   const selectedPrevEmployment = PREV_EMPLOYMENT_OPTIONS.find(opt => opt.value === form.prevEmployment) || null;
   const selectedEiClaimant = EI_CLAIMANT_OPTIONS.find(opt => opt.value === form.eiClaimant) || null;
   const selectedEducationLevel = EDUCATION_OPTIONS.find(opt => opt.value === form.educationLevel) || null;
@@ -933,12 +1044,16 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
               options={fundingStreamSelectOptions}
               onChange={({ detail }) => {
                 clearFieldError("fundingStream");
-                clearFieldError("agreementNumber");
                 setForm(current => ({
                   ...current,
                   fundingStream: detail.selectedOption?.value || "",
-                  agreementNumber: deriveAgreementNumberFromFundingStream(detail.selectedOption?.value || ""),
+                  budgetPot: "",
+                  agreementNumber: "",
                 }));
+                // Changing funding stream should clear dependent fields and reload filtered pots.
+                clearFieldError("budgetPot");
+                clearFieldError("agreementNumber");
+                loadPots().catch(() => {});
               }}
               placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
               statusType={fundingStreamsLoading ? "loading" : "finished"}
@@ -959,17 +1074,34 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                 if (detail?.filteringText !== undefined) {
                   loadPots(detail.filteringText);
                 }
+              }}
+              placeholder={potLoading ? "Loading budget pots" : "Select budget pot"}
+              statusType={potLoading ? "loading" : "finished"}
+              empty={potLoading ? undefined : "No budget pots found"}
+              disabled={isClosed && !editEnabled}
+            />
+          </FormField>
+          <FormField
+            label="Paid from"
+            description="Select whether this pot is charged externally or internally."
+            errorText={fieldErrors.postingContext}
+          >
+            {isAssessor ? (
+              <Input value="External (region/PTMA)" readOnly disabled />
+            ) : (
+              <Select
+                selectedOption={selectedPostingContext}
+                options={POSTING_CONTEXT_OPTIONS}
+                onChange={({ detail }) => {
+                  clearFieldError("postingContext");
+                  setForm(current => ({ ...current, postingContext: detail.selectedOption?.value || "external" }));
                 }}
-                placeholder={potLoading ? "Loading budget pots" : "Select budget pot"}
-                statusType={potLoading ? "loading" : "finished"}
-                empty={potLoading ? undefined : "No budget pots found"}
+                placeholder="Select"
                 disabled={isClosed && !editEnabled}
               />
-            </FormField>
-            <FormField label="Agreement Number" description="Mapped automatically from funding stream (read-only)." errorText={fieldErrors.agreementNumber}>
-              <Input value={form.agreementNumber} readOnly />
-            </FormField>
-          </ColumnLayout>
+            )}
+          </FormField>
+        </ColumnLayout>
         </ExpandableSection>
 
         <ExpandableSection

@@ -788,6 +788,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
                         intervention_cost_total: row.intervention_cost_total || null,
                         intervention_start_date: row.intervention_start_date || null,
                         intervention_pot_id: row.intervention_pot_id || null,
+                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
                         dueDate: null,
                         submittedAt: submitted,
                         summary: 'Awaiting program decision',

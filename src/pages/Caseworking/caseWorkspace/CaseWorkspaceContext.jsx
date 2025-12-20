@@ -86,6 +86,7 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     cost: costValue,
     potId: payload.potId || payload.fundingStream || null,
     fundingStream: payload.fundingStream || null,
+    postingContext: payload.postingContext || payload.posting_context || payload.metadata?.postingContext || null,
     noc: resolvedNoc,
     nocVersion: resolvedNocVersion,
     notes: payload.notes || null,
@@ -307,6 +308,7 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
       archivedAt: plan.archivedAt || null,
       budgetPot: plan.budgetPot || plan.budget_pot || null,
       fundingStream: plan.fundingStream || plan.funding_stream || null,
+      postingContext: plan.postingContext || plan.posting_context || null,
       resultCode: plan.resultCode || null,
       resultDate: plan.resultDate || null,
       resultEducationLevel: plan.resultEducationLevel || null,
@@ -738,6 +740,8 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
         `Failed to update action plan (${response.status})`;
       const error = new Error(message);
       error.status = response.status;
+      error.code = details?.error;
+      error.details = details;
       throw error;
     }
     const data = await response.json();
@@ -838,6 +842,8 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
           `Failed to create intervention (${response.status})`;
         const error = new Error(message);
         error.status = response.status;
+        error.code = details?.error;
+        error.details = details;
         throw error;
       }
       const data = await response.json();
@@ -894,6 +900,8 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
           `Failed to update intervention (${response.status})`;
         const error = new Error(message);
         error.status = response.status;
+        error.code = details?.error;
+        error.details = details;
         throw error;
       }
       const data = await response.json();
@@ -1271,6 +1279,8 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
           `Failed to create action plan (${response.status})`;
         const error = new Error(message);
         error.status = response.status;
+        error.code = details?.error;
+        error.details = details;
         throw error;
       }
       return response.json();

@@ -10,6 +10,18 @@ export const defaultPotTags = {
   fiscalYearTag: "",
 };
 
+const normalizeRegionCodes = (value = []) => {
+  if (!value && value !== "") return [];
+  const list = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [value];
+  return Array.from(
+    new Set(
+      list
+        .map(entry => (entry === null || entry === undefined ? "" : String(entry).trim().toUpperCase()))
+        .filter(Boolean)
+    )
+  );
+};
+
 const parseAdminPct = value => {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -59,6 +71,8 @@ export const BudgetsDataProvider = ({ children }) => {
       name: pot.name,
       code: pot.code,
       nodeType: pot.nodeType || meta.nodeType || "budget",
+      glProjectCodeExternal: pot.glProjectCodeExternal || pot.gl_project_code_external || null,
+      glProjectCodeInternal: pot.glProjectCodeInternal || pot.gl_project_code_internal || null,
       fundingSource: pot.fundingSource || pot.funding_source || null,
       isRestricted:
         typeof pot.isRestricted === "boolean"
@@ -85,6 +99,7 @@ export const BudgetsDataProvider = ({ children }) => {
       adjustments,
       evidence,
       status: pot.isActive === false ? "archived" : "published",
+      regions: normalizeRegionCodes(pot.regions),
     };
   }, []);
 
@@ -221,6 +236,9 @@ export const BudgetsDataProvider = ({ children }) => {
             parentId: payload.parentId || null,
             nodeType: payload.nodeType,
             owner: payload.owner,
+            regions: Array.isArray(payload.regions) ? payload.regions : undefined,
+            glProjectCodeExternal: payload.glProjectCodeExternal || null,
+            glProjectCodeInternal: payload.glProjectCodeInternal || null,
             agreementId: payload.agreementId || null,
             fundingSource: payload.fundingSource || null,
             isRestricted: payload.isRestricted || false,
@@ -281,6 +299,9 @@ export const BudgetsDataProvider = ({ children }) => {
             parentId: updates.parentId ?? null,
             nodeType: updates.nodeType,
             owner: updates.owner,
+            regions: Array.isArray(updates.regions) ? updates.regions : undefined,
+            glProjectCodeExternal: updates.glProjectCodeExternal ?? null,
+            glProjectCodeInternal: updates.glProjectCodeInternal ?? null,
             agreementId: updates.agreementId ?? null,
             fundingSource: updates.fundingSource ?? null,
             isRestricted: typeof updates.isRestricted === "boolean" ? updates.isRestricted : undefined,
@@ -360,7 +381,10 @@ export const BudgetsDataProvider = ({ children }) => {
     }
     const potsArray = payload?.pots;
     if (!Array.isArray(potsArray)) return [];
-    return potsArray;
+    return potsArray.map(pot => ({
+      ...pot,
+      regions: normalizeRegionCodes(pot.regions),
+    }));
   }, [selectedDraft]);
 
   const selectedDraftFiscalYear = useMemo(() => {

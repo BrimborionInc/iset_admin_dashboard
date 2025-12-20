@@ -8,8 +8,10 @@ import {
   Link,
   FormField,
   Input,
+  Checkbox,
   Textarea,
   Select,
+  Multiselect,
   Tabs,
   Box,
   Button,
@@ -31,7 +33,37 @@ const nodeTypeOptions = [
   { label: "Delivery partner", value: "Delivery partner" },
 ];
 
+const isFundingStreamType = value => {
+  const raw = value && typeof value === "object" && value.value !== undefined ? value.value : value;
+  const norm = String(raw || "").trim().toLowerCase().replace(/[_\s]+/g, " ");
+  return norm === "funding stream";
+};
+
 const topLevelOption = { label: "Top-level budget", value: "" };
+
+const regionOptions = [
+  { label: "Alberta (AB)", value: "AB" },
+  { label: "British Columbia (BC)", value: "BC" },
+  { label: "Manitoba (MB)", value: "MB" },
+  { label: "New Brunswick (NB)", value: "NB" },
+  { label: "Newfoundland and Labrador (NL)", value: "NL" },
+  { label: "Northwest Territories (NT)", value: "NT" },
+  { label: "Nova Scotia (NS)", value: "NS" },
+  { label: "Nunavut (NU)", value: "NU" },
+  { label: "Ontario (ON)", value: "ON" },
+  { label: "Prince Edward Island (PE)", value: "PE" },
+  { label: "Quebec (QC)", value: "QC" },
+  { label: "Saskatchewan (SK)", value: "SK" },
+  { label: "Yukon (YT)", value: "YT" },
+];
+
+const toSelectedRegionOptions = codes =>
+  (Array.isArray(codes) ? codes : [])
+    .map(code => {
+      const match = regionOptions.find(opt => opt.value === code);
+      return match || { label: code, value: code };
+    })
+    .filter(option => option.value);
 
 const blankCreateForm = {
   name: "",
@@ -39,6 +71,7 @@ const blankCreateForm = {
   parentOption: topLevelOption,
   nodeType: nodeTypeOptions[1],
   owner: "",
+  regions: [],
   approved: "",
   adjusted: "",
   committed: "",
@@ -46,6 +79,8 @@ const blankCreateForm = {
   adminPct: "",
   description: "",
   policyNotes: "",
+  glProjectCodeExternal: "",
+  glProjectCodeInternal: "",
   fundingSource: "",
   isRestricted: false,
   agreementId: "",
@@ -66,6 +101,7 @@ const mapPotToEditForm = (pot, parentOptions) => {
     parentOption,
     nodeType,
     owner: pot.owner ?? "",
+    regions: Array.isArray(pot.regions) ? pot.regions.map(code => String(code).toUpperCase()) : [],
     approved: pot.approved !== undefined ? String(pot.approved) : "",
     adjusted: pot.adjusted !== undefined ? String(pot.adjusted) : "",
     committed: pot.committed !== undefined ? String(pot.committed) : "",
@@ -76,6 +112,8 @@ const mapPotToEditForm = (pot, parentOptions) => {
         : "",
     description: pot.description ?? "",
     policyNotes: pot.policyNotes ?? "",
+    glProjectCodeExternal: pot.glProjectCodeExternal ?? "",
+    glProjectCodeInternal: pot.glProjectCodeInternal ?? "",
     fundingSource: pot.fundingSource ?? "",
     isRestricted: Boolean(pot.isRestricted),
     agreementId: pot.agreementId ?? "",
@@ -189,15 +227,17 @@ const [snapshotNotes, setSnapshotNotes] = useState("");
   const [inlineDraftFiscalYear, setInlineDraftFiscalYear] = useState("");
   const [deleteSnapshotId, setDeleteSnapshotId] = useState(null);
   const [deleteDraftId, setDeleteDraftId] = useState(null);
-  const [restoreSnapshotTarget, setRestoreSnapshotTarget] = useState(null);
-  const [restoreFiscalYear, setRestoreFiscalYear] = useState("");
-  const [createApprovedFocused, setCreateApprovedFocused] = useState(false);
-  const [createAdjustedFocused, setCreateAdjustedFocused] = useState(false);
-  const [editApprovedFocused, setEditApprovedFocused] = useState(false);
-  const [editAdjustedFocused, setEditAdjustedFocused] = useState(false);
+const [restoreSnapshotTarget, setRestoreSnapshotTarget] = useState(null);
+const [restoreFiscalYear, setRestoreFiscalYear] = useState("");
+const [createApprovedFocused, setCreateApprovedFocused] = useState(false);
+const [createAdjustedFocused, setCreateAdjustedFocused] = useState(false);
+const [editApprovedFocused, setEditApprovedFocused] = useState(false);
+const [editAdjustedFocused, setEditAdjustedFocused] = useState(false);
 const hasDraft = Boolean(selectedDraftId);
 const isActiveSelection = selectedPotSource === "active";
 const disableEdit = isActiveSelection || !hasDraft;
+const createIsFundingStream = isFundingStreamType(createForm.nodeType);
+const editIsFundingStream = isFundingStreamType(editForm?.nodeType);
 
   useEffect(() => {
     if (!selectedDraftId && drafts?.length) {
@@ -376,6 +416,9 @@ const handleCreateSubmit = async event => {
       parentId: createForm.parentOption?.value || null,
       nodeType: createForm.nodeType?.value,
       owner: createForm.owner,
+      regions: Array.isArray(createForm.regions) ? createForm.regions : [],
+      glProjectCodeExternal: createForm.glProjectCodeExternal || null,
+      glProjectCodeInternal: createForm.glProjectCodeInternal || null,
       approved: sanitizeNumber(createForm.approved),
       adjusted: sanitizeNumber(createForm.adjusted),
       committed: undefined,
@@ -423,6 +466,9 @@ const handleEditSubmit = async event => {
       parentId: parentIdValue,
       nodeType: editForm?.nodeType?.value,
       owner: editForm?.owner,
+      regions: Array.isArray(editForm?.regions) ? editForm.regions : [],
+      glProjectCodeExternal: editForm?.glProjectCodeExternal || null,
+      glProjectCodeInternal: editForm?.glProjectCodeInternal || null,
       approved: sanitizeNumber(editForm?.approved),
       adjusted: sanitizeNumber(editForm?.adjusted),
       committed: undefined,
@@ -686,6 +732,46 @@ const handleArchive = async () => {
             onChange={tags => setCreateForm(prev => ({ ...prev, ...tags }))}
           />
         </Container>
+        <FormField
+          label="Regions (optional)"
+          description="Assign one or more regions to scope this pot. Leave blank if the pot is not region-specific."
+        >
+          <Multiselect
+            selectedOptions={toSelectedRegionOptions(createForm.regions)}
+            options={regionOptions}
+            placeholder="Select regions (optional)"
+            filteringType="auto"
+            onChange={({ detail }) =>
+              handleCreateChange(
+                "regions",
+                (detail.selectedOptions || []).map(opt => opt.value).filter(Boolean)
+              )
+            }
+          />
+        </FormField>
+        {createIsFundingStream ? (
+          <Container header={<Header variant="h3">Accounting codes</Header>}>
+            <SpaceBetween size="s">
+              <Box variant="p">
+                External is used when the region/partner pays from their own bank account. Internal is used when NWAC pays but attributes the cost to the region.
+              </Box>
+              <FormField label="External GL/project code">
+                <Input
+                  value={createForm.glProjectCodeExternal}
+                  placeholder="e.g., EXT-GL-001"
+                  onChange={({ detail }) => handleCreateChange("glProjectCodeExternal", detail.value)}
+                />
+              </FormField>
+              <FormField label="Internal GL/project code">
+                <Input
+                  value={createForm.glProjectCodeInternal}
+                  placeholder="e.g., INT-GL-001"
+                  onChange={({ detail }) => handleCreateChange("glProjectCodeInternal", detail.value)}
+                />
+              </FormField>
+            </SpaceBetween>
+          </Container>
+        ) : null}
         <FormField label="Policy guardrails" description="Key rules, approval limits, or restrictions for this pot.">
           <Textarea
             value={createForm.policyNotes}
@@ -756,20 +842,20 @@ const handleArchive = async () => {
                 onChange={({ detail }) => handleEditChange("code", detail.value)}
               />
             </FormField>
-            <FormField label="Parent pot" stretch description="Where this pot sits in the hierarchy. Choose Top-level for roots.">
-              <Select
-                disabled={disableEdit}
-                selectedOption={editForm?.parentOption ?? topLevelOption}
-                options={parentOptions}
-                onChange={({ detail }) => handleEditChange("parentOption", detail.selectedOption)}
-              />
-            </FormField>
             <FormField label="Node type" stretch description="Category label only; it does not drive calculations.">
               <Select
                 disabled={disableEdit}
                 selectedOption={editForm?.nodeType ?? nodeTypeOptions[0]}
                 options={nodeTypeOptions}
                 onChange={({ detail }) => handleEditChange("nodeType", detail.selectedOption)}
+              />
+            </FormField>
+            <FormField label="Parent pot" stretch description="Where this pot sits in the hierarchy. Choose Top-level for roots.">
+              <Select
+                disabled={disableEdit}
+                selectedOption={editForm?.parentOption ?? topLevelOption}
+                options={parentOptions}
+                onChange={({ detail }) => handleEditChange("parentOption", detail.selectedOption)}
               />
             </FormField>
             <FormField label="Owner" description="Person/role accountable for this pot.">
@@ -780,6 +866,59 @@ const handleArchive = async () => {
               />
             </FormField>
           </SpaceBetween>
+          <SpaceBetween size="s">
+            <FormField label="Funding source">
+              <Select
+                disabled={disableEdit}
+                placeholder="Select funding source"
+                selectedOption={
+                  editForm?.fundingSource
+                    ? [
+                        { label: "EI", value: "EI" },
+                        { label: "CRF", value: "CRF" },
+                        { label: "Other", value: "OTHER" },
+                      ].find(opt => opt.value === editForm.fundingSource) ?? null
+                    : null
+                }
+                options={[
+                  { label: "EI", value: "EI" },
+                  { label: "CRF", value: "CRF" },
+                  { label: "Other", value: "OTHER" },
+                ]}
+                onChange={({ detail }) =>
+                  handleEditChange("fundingSource", detail.selectedOption?.value || "")
+                }
+              />
+            </FormField>
+            <FormField label="Agreement ID">
+              <Input
+                disabled={disableEdit}
+                value={editForm?.agreementId ?? ""}
+                placeholder="e.g., CA-2025-1234"
+                onChange={({ detail }) => handleEditChange("agreementId", detail.value)}
+              />
+            </FormField>
+            <FormField label="Fiscal year" description='Accepts values like "2025" or "2025-2026".'>
+              <Input
+                disabled={disableEdit}
+                value={editForm?.fiscalYearTag ?? ""}
+                placeholder="2025-2026"
+                onChange={({ detail }) => handleEditChange("fiscalYearTag", detail.value)}
+              />
+            </FormField>
+            <FormField label="Restricted">
+              <Checkbox
+                disabled={disableEdit}
+                checked={Boolean(editForm?.isRestricted)}
+                onChange={({ detail }) => handleEditChange("isRestricted", detail.checked)}
+              >
+                Restricted
+              </Checkbox>
+            </FormField>
+          </SpaceBetween>
+        </ColumnLayout>
+
+        <ColumnLayout columns={2} variant="text-grid">
           <SpaceBetween size="s">
             <FormField label="Approved amount" description="Original authority for this pot (CAD).">
               <Input
@@ -807,6 +946,8 @@ const handleArchive = async () => {
                 onBlur={() => setEditAdjustedFocused(false)}
               />
             </FormField>
+          </SpaceBetween>
+          <SpaceBetween size="s">
             <FormField
               label="Committed amount"
               description="Calculated from draft spend; read-only."
@@ -829,6 +970,27 @@ const handleArchive = async () => {
             </FormField>
           </SpaceBetween>
         </ColumnLayout>
+
+        <FormField
+          label="Regions (optional)"
+          description="Assign one or more regions to scope this pot. Leave blank if the pot is not region-specific."
+        >
+          <Multiselect
+            inlineTokens
+            disabled={disableEdit}
+            selectedOptions={toSelectedRegionOptions(editForm?.regions)}
+            options={regionOptions}
+            placeholder="Select regions (optional)"
+            filteringType="auto"
+            onChange={({ detail }) =>
+              handleEditChange(
+                "regions",
+                (detail.selectedOptions || []).map(opt => opt.value).filter(Boolean)
+              )
+            }
+          />
+        </FormField>
+
         <FormField label="Description" description="Short context shown in details; optional.">
           <Textarea
             disabled={disableEdit}
@@ -837,18 +999,31 @@ const handleArchive = async () => {
             onChange={({ detail }) => handleEditChange("description", detail.value)}
           />
         </FormField>
-        <Container header={<Header variant="h3">Classification &amp; tags</Header>}>
-          <BudgetPotTagsEditor
-            disabled={disableEdit}
-            value={{
-              fundingSource: editForm?.fundingSource,
-              isRestricted: editForm?.isRestricted,
-              agreementId: editForm?.agreementId,
-              fiscalYearTag: editForm?.fiscalYearTag,
-            }}
-            onChange={tags => setEditForm(prev => ({ ...(prev || {}), ...tags }))}
-          />
-        </Container>
+        {editIsFundingStream ? (
+          <Container header={<Header variant="h3">Accounting codes</Header>}>
+            <SpaceBetween size="s">
+              <Box variant="p">
+                External is used when the region/partner pays from their own bank account. Internal is used when NWAC pays but the cost is attributed to the region.
+              </Box>
+              <FormField label="External GL/project code">
+                <Input
+                  disabled={disableEdit}
+                  value={editForm?.glProjectCodeExternal ?? ""}
+                  placeholder="e.g., EXT-GL-001"
+                  onChange={({ detail }) => handleEditChange("glProjectCodeExternal", detail.value)}
+                />
+              </FormField>
+              <FormField label="Internal GL/project code">
+                <Input
+                  disabled={disableEdit}
+                  value={editForm?.glProjectCodeInternal ?? ""}
+                  placeholder="e.g., INT-GL-001"
+                  onChange={({ detail }) => handleEditChange("glProjectCodeInternal", detail.value)}
+                />
+              </FormField>
+            </SpaceBetween>
+          </Container>
+        ) : null}
         <FormField label="Policy guardrails" description="Key rules, approval limits, or restrictions for this pot.">
           <Textarea
             disabled={disableEdit}

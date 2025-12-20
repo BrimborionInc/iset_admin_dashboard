@@ -16,6 +16,7 @@ import {
   Textarea,
 } from "@cloudscape-design/components";
 import { apiFetch } from "../../../../auth/apiClient.js";
+import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 
 const STATUS_OPTIONS = [
   { value: "planned", label: "Planned" },
@@ -38,6 +39,10 @@ const RECURRING_PERIOD_OPTIONS = [
 const OPEN_INTERVENTION_STATUSES = new Set(["planned", "in_progress", "suspended"]);
 const IN_PROGRESS_OUTCOME = "2";
 const DEFAULT_CLOSED_OUTCOME = "1";
+const POSTING_CONTEXT_OPTIONS = [
+  { value: "external", label: "External (region/PTMA)" },
+  { value: "internal", label: "Internal (NWAC)" },
+];
 
 const calculateDurationDays = (start, end) => {
   if (!start || !end) return null;
@@ -68,6 +73,7 @@ const defaultForm = {
   recurringPeriod: "",
   recurringAmount: "",
   recurringOccurrences: "",
+  postingContext: "external",
 };
 
 const FORM_KEYS = Object.keys(defaultForm);
@@ -129,6 +135,7 @@ const buildInitialForm = (mode, intervention) => {
       recurringPeriod: costSettings.period || "",
       recurringAmount: normaliseFormNumbers(costSettings.amountPerPeriod),
       recurringOccurrences: normaliseFormNumbers(costSettings.occurrences),
+      postingContext: intervention.postingContext || intervention.metadata?.postingContext || "external",
     };
   }
   return { ...defaultForm };
@@ -208,6 +215,11 @@ const InterventionModal = ({
   nocVersionsLoading = false,
   onSearchNocCodes = () => Promise.resolve([]),
 }) => {
+  const currentUser = useCurrentUser();
+  const role = currentUser?.role ? currentUser.role : null;
+  const canonicalRole = role === "Regional Manager" ? "Regional Coordinator" : role;
+  const isAssessor = canonicalRole === "Application Assessor";
+  const canSelectPostingContext = canonicalRole === "Regional Coordinator" || canonicalRole === "Program Administrator";
   const [form, setForm] = useState({ ...defaultForm });
   const initialFormRef = useRef({ ...defaultForm });
   const [loading, setLoading] = useState(false);
@@ -249,6 +261,7 @@ const InterventionModal = ({
       // Inherit funding stream from plan (read-only) if provided.
       if (plan) {
         draft.fundingStream = inheritedFundingStream || "";
+        draft.postingContext = plan?.postingContext || plan?.posting_context || draft.postingContext;
       }
       return draft;
     })();
@@ -267,6 +280,13 @@ const InterventionModal = ({
   }, [visible, mode, intervention, startInCloseMode, canClose, plan, inheritedFundingStream]);
 
   useEffect(() => {
+    if (!isAssessor) return;
+    if (form.postingContext !== "external") {
+      setForm(current => ({ ...current, postingContext: "external" }));
+    }
+  }, [isAssessor, form.postingContext]);
+
+  useEffect(() => {
     let cancelled = false;
     const loadPots = async () => {
       if (!visible) {
@@ -274,9 +294,9 @@ const InterventionModal = ({
         return;
       }
       try {
-        let resp = await apiFetch("/api/reference/budget-pots-lite");
+        let resp = await apiFetch("/api/reference/budget-pots-lite?chargeableOnly=0");
         if (!resp || !resp.ok) {
-          resp = await apiFetch("/api/finance/budget-pots");
+          resp = await apiFetch("/api/reference/budget-pots-lite?chargeableOnly=0");
         }
         const data = resp && resp.ok ? await resp.json() : [];
         if (cancelled) return;
@@ -300,7 +320,7 @@ const InterventionModal = ({
             const code = item?.code || "";
             const name = item?.name || item?.description || "";
             const inactiveBadge = item?.isActive === false ? " (inactive)" : "";
-            const label = [code, name].filter(Boolean).join(" - ") + inactiveBadge;
+            const label = [code, name].filter(Boolean).join(" - ") + inactiveBadge || String(value);
             return {
               value: String(value),
               label: label || String(value),
@@ -443,9 +463,13 @@ const InterventionModal = ({
   );
 
   const inheritedBudgetPotLabel = useMemo(() => {
-    const match = potOptions.find(opt => opt.value === inheritedBudgetPot);
-    return match?.label || inheritedBudgetPot || "Not set";
+    const match = potOptions.find(opt => String(opt.value) === String(inheritedBudgetPot));
+    return match?.label || (inheritedBudgetPot ? String(inheritedBudgetPot) : "Not set");
   }, [potOptions, inheritedBudgetPot]);
+  const selectedPostingContext = useMemo(
+    () => POSTING_CONTEXT_OPTIONS.find(option => option.value === form.postingContext) || POSTING_CONTEXT_OPTIONS[0],
+    [form.postingContext]
+  );
 
   const isRecurringCost = form.costType === "recurring";
 
@@ -837,6 +861,7 @@ const applyFieldSideEffects = (draft, field, value) => {
       outcome: outcomeValue,
       cost: costValue,
       potId: inheritedBudgetPot || null,
+      postingContext: form.postingContext || "external",
       fundingStream: inheritedFundingStream || null,
       notes: form.notes.trim() || null,
       noc: form.noc.trim() || null,
@@ -856,6 +881,12 @@ const applyFieldSideEffects = (draft, field, value) => {
     try {
       await onSubmit(payload);
     } catch (submitError) {
+      if (["missing_internal_gl_code", "missing_external_gl_code", "posting_context_not_permitted"].includes(submitError?.code)) {
+        setFieldErrors(prev => ({ ...prev, postingContext: submitError?.message || "Check Paid from selection." }));
+        setValidationError(submitError?.message || "Check Paid from selection.");
+        setLoading(false);
+        return;
+      }
       setError(submitError?.message || "Unable to save intervention.");
       setLoading(false);
       return;
@@ -1140,6 +1171,31 @@ const applyFieldSideEffects = (draft, field, value) => {
               </FormField>
               <FormField label="Budget Pot" description="Inherited. Adjust in parent Action Plan.">
                 <Input value={inheritedBudgetPotLabel} readOnly disabled />
+              </FormField>
+              <FormField
+                label="Paid from"
+                description="Select whether this pot is charged externally or internally."
+                errorText={fieldErrors.postingContext}
+              >
+                {isAssessor || !canSelectPostingContext ? (
+                  <Input value="External (region/PTMA)" readOnly disabled />
+                ) : (
+                  <Select
+                    selectedOption={selectedPostingContext}
+                    options={POSTING_CONTEXT_OPTIONS}
+                    onChange={({ detail }) => {
+                      setFieldErrors(prev => {
+                        if (!prev.postingContext) return prev;
+                        const next = { ...prev };
+                        delete next.postingContext;
+                        return next;
+                      });
+                      setForm(current => ({ ...current, postingContext: detail.selectedOption?.value || "external" }));
+                    }}
+                    placeholder="Select"
+                    disabled={isReadOnly}
+                  />
+                )}
               </FormField>
               <FormField label="Cost type">
                 <RadioGroup

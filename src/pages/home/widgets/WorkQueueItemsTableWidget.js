@@ -8,8 +8,10 @@ import {
   CopyToClipboard,
   FormField,
   Header,
+  Input,
   Link,
   Modal,
+  RadioGroup,
   Select,
   Textarea,
   SpaceBetween,
@@ -53,6 +55,46 @@ const PROVINCE_LABELS = {
   qc: 'Quebec',
   sk: 'Saskatchewan',
   yt: 'Yukon Territory'
+};
+
+const normalizeProvinceCode = value => {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 2).toUpperCase();
+};
+
+const mapEligibilityToFundingSource = value => {
+  if (!value) return null;
+  const norm = value.toString().trim().toLowerCase();
+  if (!norm) return null;
+  if (norm.includes('ei')) return 'EI';
+  if (norm.includes('crf')) return 'CRF';
+  return null;
+};
+
+const toBudgetPotOptions = list => {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter(pot => {
+      const potType = pot?.potType || pot?.pot_type || '';
+      const normalizedType = potType ? potType.toString().trim().toLowerCase() : '';
+      const isFundingStream = normalizedType === 'funding stream';
+      const isActive = pot?.isActive !== false && pot?.is_active !== 0;
+      return isActive && isFundingStream;
+    })
+    .map(pot => {
+      const label = [pot.code, pot.name].filter(Boolean).join(' - ') || pot.name || pot.code || pot.id || pot.value;
+      const value = pot.id ?? pot.value;
+      return {
+        label,
+        value: value != null ? String(value) : '',
+        fundingSource: pot.fundingSource || pot.funding_source || null,
+        regions: Array.isArray(pot.regions) ? pot.regions : [],
+      };
+    })
+    .filter(option => option.value)
+    .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
 };
 
 const ROLE_DISPLAY_MAP = {
@@ -454,6 +496,9 @@ const WorkQueueItemsTableWidget = ({
   actions,
   onRefresh
 }) => {
+  const canonicalRole = role === 'Regional Manager' ? 'Regional Coordinator' : role;
+  const isAssessor = canonicalRole === 'Application Assessor';
+  const canSelectPostingContext = canonicalRole === 'Regional Coordinator' || canonicalRole === 'Program Administrator';
   const [filteringText, setFilteringText] = useState('');
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null);
@@ -467,10 +512,12 @@ const WorkQueueItemsTableWidget = ({
   const [selectedDecision, setSelectedDecision] = useState(null);
   const [decisionReason, setDecisionReason] = useState('');
   const [selectedAssurance, setSelectedAssurance] = useState(null);
+  const [postingContextValue, setPostingContextValue] = useState('external');
   const [selectedBudgetPot, setSelectedBudgetPot] = useState(null);
   const [budgetPotOptions, setBudgetPotOptions] = useState([]);
   const [budgetPotLoading, setBudgetPotLoading] = useState(false);
   const [decisionError, setDecisionError] = useState(null);
+  const [postingContextError, setPostingContextError] = useState(null);
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [eligibilityModalVisible, setEligibilityModalVisible] = useState(false);
   const [eligibilityTarget, setEligibilityTarget] = useState(null);
@@ -483,6 +530,11 @@ const WorkQueueItemsTableWidget = ({
   const eligibilityFileInputRef = useRef(null);
   const [resolveTarget, setResolveTarget] = useState(null);
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
+  const applicantProvinceCode = normalizeProvinceCode(decisionTarget?.address_province || decisionTarget?.region);
+  const applicantProvinceLabel = applicantProvinceCode
+    ? PROVINCE_LABELS[applicantProvinceCode.toLowerCase()] || applicantProvinceCode
+    : 'Province not set';
+  const applicantEligibilityLabel = decisionTarget?.assessment_esdc_eligibility || 'no eligibility recorded';
   const selectedBucket =
     useMemo(() => bucketDefinitions.find(bucket => bucket.id === selectedBucketId) || bucketDefinitions[0] || null, [
       bucketDefinitions,
@@ -512,6 +564,12 @@ const WorkQueueItemsTableWidget = ({
   }, [items, selectedBucket, filteringText]);
 
   const [columnWidths, setColumnWidths] = useState(() => loadStoredColumnWidths());
+
+  useEffect(() => {
+    if (isAssessor) {
+      setPostingContextValue('external');
+    }
+  }, [isAssessor]);
 
   const itemTypes = useMemo(() => {
     const types = new Set();
@@ -565,6 +623,39 @@ const WorkQueueItemsTableWidget = ({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!decisionModalVisible) return;
+    if (!selectedBudgetPot?.value) return;
+    const match = budgetPotOptions.find(opt => String(opt.value) === String(selectedBudgetPot.value));
+    if (match) {
+      if (selectedBudgetPot.label !== match.label) {
+        setSelectedBudgetPot(match);
+      }
+      return;
+    }
+    if (!budgetPotLoading && budgetPotOptions.length) {
+      setSelectedBudgetPot(prev => (prev?.value ? { value: String(prev.value), label: String(prev.value) } : prev));
+    }
+  }, [decisionModalVisible, selectedBudgetPot, budgetPotOptions, budgetPotLoading]);
+
+  useEffect(() => {
+    if (!decisionModalVisible) return;
+    if (selectedBudgetPot?.value) return;
+    if (!budgetPotOptions.length) return;
+    const eligibilityFunding = mapEligibilityToFundingSource(decisionTarget?.assessment_esdc_eligibility);
+    const provinceCode = applicantProvinceCode;
+    const match = budgetPotOptions.find(opt => {
+      const optFunding = opt.fundingSource ? String(opt.fundingSource).toUpperCase() : null;
+      const regionList = Array.isArray(opt.regions) ? opt.regions.map(r => String(r).toUpperCase()) : [];
+      const fundingOk = eligibilityFunding ? optFunding === eligibilityFunding : true;
+      const regionOk = provinceCode ? regionList.length === 0 || regionList.includes(provinceCode) : true;
+      return fundingOk && regionOk;
+    });
+    if (match) {
+      setSelectedBudgetPot(match);
+    }
+  }, [decisionModalVisible, selectedBudgetPot, budgetPotOptions, decisionTarget, applicantProvinceCode]);
 
   const columnDefinitions = useMemo(() => {
     const keys = buildColumns(itemTypes);
@@ -732,36 +823,27 @@ const WorkQueueItemsTableWidget = ({
                             setDecisionReason('');
                             setSelectedAssurance(null);
                             setDecisionError(null);
-                            setSelectedBudgetPot(null);
+                            setPostingContextError(null);
+                            const existingPosting =
+                              item.assessment_posting_context ||
+                              item.postingContext ||
+                              item.posting_context ||
+                              null;
+                            const normalizedPosting =
+                              typeof existingPosting === 'string' && ['external', 'internal'].includes(existingPosting.trim().toLowerCase())
+                                ? existingPosting.trim().toLowerCase()
+                                : 'external';
+                            setPostingContextValue(isAssessor ? 'external' : normalizedPosting);
+                            const existingPotId = item.assessment_intervention_pot_id || item.assessment_budget_pot_id || null;
+                            setSelectedBudgetPot(
+                              existingPotId ? { value: String(existingPotId), label: String(existingPotId) } : null
+                            );
                             setDecisionModalVisible(true);
                             if (!budgetPotOptions.length) {
                               setBudgetPotLoading(true);
-                              apiFetch('/api/reference/budget-pots-lite')
-                                .then(res => res.ok ? res.json() : [])
-                                .then(list => {
-                                  const isFundingStream = pot => {
-                                    const potType =
-                                      pot?.pot_type ??
-                                      pot?.potType ??
-                                      pot?.type ??
-                                      pot?.nodeType ??
-                                      pot?.metadata?.pot_type ??
-                                      pot?.metadata?.nodeType ??
-                                      '';
-                                    const norm = String(potType).trim().toLowerCase().replace(/[_\\s]+/g, ' ');
-                                    return norm === 'funding stream';
-                                  };
-                                  const active = Array.isArray(list)
-                                    ? list.filter(p => p.isActive && isFundingStream(p))
-                                    : [];
-                                  const opts = active
-                                    .map(p => ({
-                                      label: [p.code, p.name].filter(Boolean).join(' - ') || p.name || p.code || p.id,
-                                      value: p.id
-                                    }))
-                                    .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
-                                  setBudgetPotOptions(opts);
-                                })
+                              apiFetch('/api/reference/budget-pots-lite?chargeableOnly=1')
+                                .then(res => (res.ok ? res.json() : []))
+                                .then(list => setBudgetPotOptions(toBudgetPotOptions(list)))
                                 .catch(() => setBudgetPotOptions([]))
                                 .finally(() => setBudgetPotLoading(false));
                             }
@@ -1009,12 +1091,15 @@ const WorkQueueItemsTableWidget = ({
     const decisionValue = selectedDecision?.value;
     const assuranceValue = selectedAssurance?.value;
     const potId = selectedBudgetPot?.value || null;
+    const postingContext = isAssessor ? 'external' : postingContextValue || 'external';
+    const assessmentEligibility = decisionTarget?.assessment_esdc_eligibility || null;
     if (!caseId || !decisionValue || !assuranceValue || (decisionValue === 'reject' && !decisionReason.trim())) {
       setDecisionError('Fill in all required fields.');
       return;
     }
     setDecisionSubmitting(true);
     setDecisionError(null);
+    setPostingContextError(null);
     try {
       if (applicationId) {
         await apiFetch(`/api/locks/application/${applicationId}`, {
@@ -1028,6 +1113,8 @@ const WorkQueueItemsTableWidget = ({
         assessment_nwac_review: assuranceValue,
         assessment_nwac_reason: decisionValue === 'reject' ? decisionReason : null,
         assessment_intervention_pot_id: potId,
+        assessment_esdc_eligibility: assessmentEligibility,
+        postingContext,
         status: decisionValue === 'approve' ? 'approved' : 'rejected',
         applicationStatus: decisionValue === 'approve' ? 'approved' : 'rejected'
       };
@@ -1037,7 +1124,15 @@ const WorkQueueItemsTableWidget = ({
         body: JSON.stringify(payload)
       });
       if (!response.ok) {
-        throw new Error('decision_failed');
+        let details = null;
+        try {
+          details = await response.json();
+        } catch (_) {
+          details = null;
+        }
+        const error = new Error(details?.message || 'Failed to save decision. Please try again.');
+        error.code = details?.error;
+        throw error;
       }
       if (applicationId) {
         try {
@@ -1049,12 +1144,19 @@ const WorkQueueItemsTableWidget = ({
       setSelectedDecision(null);
       setDecisionReason('');
       setSelectedAssurance(null);
+      setPostingContextValue('external');
+      setPostingContextError(null);
       setSelectedBudgetPot(null);
       if (typeof onRefresh === 'function') {
         onRefresh();
       }
-    } catch (_) {
-      setDecisionError('Failed to save decision. Please try again.');
+    } catch (err) {
+      if (['missing_internal_gl_code', 'missing_external_gl_code', 'posting_context_not_permitted'].includes(err?.code)) {
+        setPostingContextError(err?.message || 'Check Paid from selection.');
+        setDecisionError(null);
+      } else {
+        setDecisionError('Failed to save decision. Please try again.');
+      }
     } finally {
       setDecisionSubmitting(false);
     }
@@ -1244,6 +1346,8 @@ const WorkQueueItemsTableWidget = ({
           setSelectedDecision(null);
           setDecisionReason('');
           setSelectedAssurance(null);
+          setPostingContextValue('external');
+          setPostingContextError(null);
           setSelectedBudgetPot(null);
           setDecisionError(null);
         }}
@@ -1258,6 +1362,8 @@ const WorkQueueItemsTableWidget = ({
                 setSelectedDecision(null);
                 setDecisionReason('');
                 setSelectedAssurance(null);
+                setPostingContextValue('external');
+                setPostingContextError(null);
                 setSelectedBudgetPot(null);
                 setDecisionError(null);
               }}
@@ -1307,7 +1413,11 @@ const WorkQueueItemsTableWidget = ({
               ]}
             />
           </FormField>
-          <FormField label="Budget Pot" stretch>
+          <FormField
+            label="Budget Pot"
+            stretch
+            description={`Applicant province: ${applicantProvinceLabel} · Eligibility: ${applicantEligibilityLabel}`}
+          >
             <Select
               placeholder={budgetPotLoading ? 'Loading budget pots' : 'Select budget pot'}
               selectedOption={selectedBudgetPot}
@@ -1317,6 +1427,24 @@ const WorkQueueItemsTableWidget = ({
               onChange={({ detail }) => setSelectedBudgetPot(detail.selectedOption || null)}
               filteringType="auto"
             />
+          </FormField>
+          <FormField label="Paid from" errorText={postingContextError} stretch>
+            {isAssessor ? (
+              <Input value="External (region/PTMA)" readOnly disabled />
+            ) : (
+              <RadioGroup
+                direction="horizontal"
+                value={postingContextValue}
+                onChange={({ detail }) => {
+                  setPostingContextError(null);
+                  setPostingContextValue(detail.value || 'external');
+                }}
+                items={[
+                  { value: 'external', label: 'External (region/PTMA)' },
+                  { value: 'internal', label: 'Internal (NWAC)' }
+                ]}
+              />
+            )}
           </FormField>
         </SpaceBetween>
       </Modal>

@@ -79,13 +79,6 @@ const maritalStatusOptions = [
   { value: "widowed", label: "Widowed" },
 ];
 
-const eiStatusOptions = [
-  { value: "", label: "Not set" },
-  { value: "receiving", label: "Receiving EI" },
-  { value: "active_claim", label: "Active claim" },
-  { value: "not_receiving", label: "Not receiving EI" },
-  { value: "unknown", label: "Unknown" },
-];
 
 const cleanSin = (raw = "") => {
   const digits = String(raw || "").replace(/\D/g, "");
@@ -172,6 +165,8 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const errorAlertRef = React.useRef(null);
+  const successAlertRef = React.useRef(null);
   const [form, setForm] = useState({
     firstName: "",
     lastName: "",
@@ -207,7 +202,6 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
     maritalStatus: "",
     dependentChildren: "",
     agesOfChildren: "",
-    eiStatus: "",
     hasDisability: "",
     disabilityDescription: "",
     homeCommunity: "",
@@ -372,7 +366,6 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
       maritalStatus: caseContext.maritalStatus || readAnswer("marital-status") || "",
       dependentChildren: caseContext.dependentChildren || readAnswer("dependent-children") || "",
       agesOfChildren: caseContext.agesOfChildren || readAnswer("ages-of-children") || "",
-      eiStatus: caseContext.eiStatus || readAnswer("ei_status") || "",
       hasDisability:
         normalizeYesNo(caseContext.hasDisability) || normalizeYesNo(readAnswer("has-disability")) || "",
       disabilityDescription: caseContext.disabilityDescription || readAnswer("disability-description") || "",
@@ -415,10 +408,6 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
   const selectedMaritalStatus = useMemo(
     () => maritalStatusOptions.find(opt => opt.value === (form.maritalStatus || "")) || maritalStatusOptions[0],
     [form.maritalStatus]
-  );
-  const selectedEiStatus = useMemo(
-    () => eiStatusOptions.find(opt => opt.value === (form.eiStatus || "")) || eiStatusOptions[0],
-    [form.eiStatus]
   );
 
   const handleSave = async () => {
@@ -475,7 +464,6 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
         maritalStatus: form.maritalStatus || null,
         dependentChildren: form.dependentChildren || null,
         agesOfChildren: form.agesOfChildren || null,
-        eiStatus: form.eiStatus || null,
         hasDisability: normalizedHasDisability || null,
         disabilityDescription: form.disabilityDescription || null,
         homeCommunity: form.homeCommunity || null,
@@ -549,7 +537,6 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
           "marital-status": form.maritalStatus || null,
           "dependent-children": form.dependentChildren || null,
           "ages-of-children": form.agesOfChildren || null,
-          "ei_status": form.eiStatus || null,
           "has-disability": normalizedHasDisability || null,
           "disability-description": form.disabilityDescription || null,
           "home-community": form.homeCommunity || null,
@@ -565,6 +552,14 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
       setSaving(false);
     }
   };
+
+  // Ensure alerts are visible after save attempts.
+  useEffect(() => {
+    const scrollTarget = error ? errorAlertRef.current : success ? successAlertRef.current : null;
+    if (scrollTarget && typeof scrollTarget.scrollIntoView === "function") {
+      scrollTarget.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [error, success]);
 
   const handleCancel = () => {
     const personal = caseContext.applicationPersonal || {};
@@ -637,14 +632,26 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
     >
       <SpaceBetween size="m">
         {error && (
-          <Alert type="error" dismissible onDismiss={() => setError(null)}>
-            {error}
-          </Alert>
+          <div ref={errorAlertRef}>
+            <Alert
+              type="error"
+              dismissible
+              onDismiss={() => setError(null)}
+            >
+              {error}
+            </Alert>
+          </div>
         )}
         {success && (
-          <Alert type="success" dismissible onDismiss={() => setSuccess(null)}>
-            {success}
-          </Alert>
+          <div ref={successAlertRef}>
+            <Alert
+              type="success"
+              dismissible
+              onDismiss={() => setSuccess(null)}
+            >
+              {success}
+            </Alert>
+          </div>
         )}
         <SpaceBetween size="l">
           <ExpandableSection
@@ -1118,19 +1125,6 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                   readOnly={!editing}
                   placeholder="Comma separated"
                 />
-              </FormField>
-              <FormField label="EI status">
-                {editing ? (
-                  <Select
-                    options={eiStatusOptions}
-                    selectedOption={selectedEiStatus}
-                    onChange={({ detail }) =>
-                      setForm(current => ({ ...current, eiStatus: detail.selectedOption?.value || "" }))
-                    }
-                  />
-                ) : (
-                  <Input value={selectedEiStatus?.label || "Not set"} readOnly />
-                )}
               </FormField>
             </ColumnLayout>
           </ExpandableSection>

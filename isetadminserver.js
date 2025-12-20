@@ -4073,7 +4073,13 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     if (['crf', 'non-insured client', 'non insured client'].includes(key)) return 3;
     return null;
   };
-  const eiClaimantCode = mapEiClaimant(assessmentRow.esdc_eligibility);
+  const eligibilityValue =
+    assessmentRow.esdc_eligibility ||
+    caseRow?.assessment_esdc_eligibility ||
+    caseRow?.esdc_eligibility ||
+    caseRow?.eligibility ||
+    null;
+  const eiClaimantCode = mapEiClaimant(eligibilityValue);
   const fundingStream = (() => {
     if (eiClaimantCode === 1 || eiClaimantCode === 2 || eiClaimantCode === '1' || eiClaimantCode === '2') return 'EI';
     if (eiClaimantCode === 3 || eiClaimantCode === '3') return 'CRF';
@@ -6423,6 +6429,10 @@ function mapActionPlanRow(plan) {
     status: plan.status || null,
     budgetPot: plan.budget_pot || esdc.budgetPot || null,
     fundingStream: plan.funding_stream || esdc.fundingStream || null,
+    postingContext:
+      (metadata && metadata.postingContext) ||
+      esdc.postingContext ||
+      null,
     eiClaimant: plan.EIClaimant || plan.eiClaimant || esdc.EIClaimant || null,
     prevEmployment:
       plan.prev_employment || plan.prevEmployment || esdc.actionPlanPreviousEmployment || null,
@@ -6751,6 +6761,7 @@ function mapInterventionRow(row) {
       null,
     outcomeCode: row.outcome_code || esdc.interventionOutcome || null,
     fundingStream: row.funding_stream || planFundingStream || metadata.fundingStream || null,
+    postingContext: metadata.postingContext || null,
     cost: Number.isFinite(row.intervention_cost) ? Number(row.intervention_cost) : (Number.isFinite(resolvedCost) ? resolvedCost : null),
     budgetAmount,
     approvedAmount,
@@ -14275,6 +14286,7 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
       ca.recommendation,
+      ca.esdc_eligibility AS assessment_esdc_eligibility,
       ca.intervention_code,
       ca.intervention_cost_total,
       ca.intervention_start_date,
@@ -14322,7 +14334,8 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
         intervention_label: r.intervention_label || null,
         intervention_cost_total: r.intervention_cost_total || null,
         intervention_start_date: r.intervention_start_date || null,
-        intervention_pot_id: r.intervention_pot_id || null
+        intervention_pot_id: r.intervention_pot_id || null,
+        assessment_esdc_eligibility: r.assessment_esdc_eligibility || null
       };
     }) : [];
     return res.json({ role, regionId: regionId ?? null, items });
@@ -22559,6 +22572,11 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     role === 'SysAdmin' ||
     role === 'ProgramAdmin';
 
+  let postingContext = normalizePostingContext(req.body?.postingContext || req.body?.posting_context) || 'external';
+  if (role === 'Application Assessor' || role === 'Adjudicator') {
+    postingContext = 'external';
+  }
+
   if (!allowAll) {
     if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
       const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : null;
@@ -22603,7 +22621,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
   }
 
   const planStatus = 'draft';
-  const metadata = summary ? { summary } : null;
+  const metadata = { ...(summary ? { summary } : {}), postingContext };
   const caseIdentifier = caseRow.case_number || caseRow.tracking_id || `Case #${caseId}`;
 
   let connection;
@@ -22723,6 +22741,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       agreementNumber: derivedAgreementNumber,
       fundingStream,
       budgetPot: parsedBudgetPotId,
+      postingContext,
       educationLevel,
       educationProvince,
       socialAssistanceRecipient,
@@ -22822,6 +22841,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
         ownerStaffProfileId: resolvedOwnerStaffProfileId || null,
         ownerUserId: null,
         summary: summary || null,
+        postingContext,
         interventionCount: 0,
       };
 
@@ -23049,6 +23069,15 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       return res.status(409).json({ error: 'plan_not_editable', message: 'Cannot add interventions to a closed or archived plan.' });
     }
 
+    const role = inferUserRole(req);
+    const planMetadata = safeJsonParse(planRow.metadata_json, null) || {};
+    const planPostingContext = normalizePostingContext(planMetadata.postingContext) || 'external';
+    let postingContext =
+      normalizePostingContext(req.body?.postingContext || req.body?.posting_context) || planPostingContext;
+    if (role === 'Application Assessor' || role === 'Adjudicator') {
+      postingContext = 'external';
+    }
+
     const identity = getRequesterIdentity(req);
     const createdBy = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
 
@@ -23058,11 +23087,59 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         : typeof outcomeCode === 'string'
         ? outcomeCode.trim()
         : '';
-    const trimmedPotId = typeof potId === 'string' ? potId.trim() : '';
+    const trimmedPotId = (() => {
+      if (typeof potId === 'string') return potId.trim();
+      if (Number.isFinite(potId)) return String(potId);
+      return '';
+    })();
     const trimmedFundingStream = typeof fundingStream === 'string' ? fundingStream.trim() : '';
     const trimmedNotes = typeof notes === 'string' ? notes.trim() : '';
     const trimmedNoc = typeof noc === 'string' ? noc.trim() : '';
     const trimmedNocVersion = typeof nocVersion === 'string' ? nocVersion.trim() : '';
+    let glProjectCodeUsed = null;
+    if (trimmedPotId) {
+      const [[potRow]] = await pool.query(
+        'SELECT pot_type, gl_project_code_external, gl_project_code_internal, metadata FROM budget_pot WHERE id = ? LIMIT 1',
+        [trimmedPotId]
+      );
+      if (potRow) {
+        const potMeta = safeJsonParse(potRow.metadata, {});
+        let potTypeRaw = potRow.pot_type || potMeta.nodeType || potMeta.pot_type || '';
+        let potTypeNorm = potTypeRaw
+          ? String(potTypeRaw)
+              .trim()
+              .toLowerCase()
+              .replace(/[_\s]+/g, ' ')
+          : '';
+        if (!potTypeNorm && potMeta.nodeType) {
+          const inferred = String(potMeta.nodeType).trim();
+          if (inferred) {
+            await pool.query('UPDATE budget_pot SET pot_type = ? WHERE id = ?', [inferred, trimmedPotId]);
+            potTypeRaw = inferred;
+            potTypeNorm = inferred.toLowerCase().replace(/[_\s]+/g, ' ');
+          }
+        }
+        if (potTypeNorm !== 'funding stream') {
+          return res.status(400).json({
+            error: 'invalid_pot_type_for_assignment',
+            message: 'Only Funding Stream pots can be selected for charging. Choose a Funding Stream pot.'
+          });
+        }
+        glProjectCodeUsed =
+          postingContext === 'internal'
+            ? (potRow.gl_project_code_internal || '').trim()
+            : (potRow.gl_project_code_external || '').trim();
+        if (!glProjectCodeUsed) {
+          return res.status(400).json({
+            error: postingContext === 'internal' ? 'missing_internal_gl_code' : 'missing_external_gl_code',
+            message:
+              postingContext === 'internal'
+                ? 'This pot is missing an Internal GL/project code. Set it in Budgets.'
+                : 'This pot is missing an External GL/project code. Set it in Budgets.'
+          });
+        }
+      }
+    }
 
     const requiresNoc = Number(trimmedCode) >= 6 && Number(trimmedCode) <= 13;
     if (requiresNoc) {
@@ -23125,6 +23202,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     if (durationWeeksValue !== null) metadata.durationWeeks = durationWeeksValue;
     if (Number.isFinite(plannedCostInt)) metadata.cost = plannedCostInt;
     if (trimmedPotId) metadata.potId = trimmedPotId;
+    metadata.postingContext = postingContext;
     if (trimmedFundingStream) metadata.fundingStream = trimmedFundingStream;
     if (trimmedNotes) metadata.notes = trimmedNotes;
     if (trimmedOutcomeCreate) metadata.outcome = trimmedOutcomeCreate;
@@ -23150,6 +23228,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       interventionCost: plannedCostInt,
       interventionRelatedNOC: trimmedNoc || null,
       interventionRelatedNOCVersion: trimmedNocVersion || null,
+      postingContext,
     });
 
     const [result] = await pool.query(
@@ -23218,6 +23297,8 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         amount: amountForFinance,
         status: 'submitted',
         transactionDate: startDateValue || null,
+        postingContext,
+        glProjectCodeUsed,
         connection: null,
       });
     }
@@ -23351,6 +23432,8 @@ app.patch('/api/interventions/:id', async (req, res) => {
     });
   }
 
+  const role = inferUserRole(req);
+
   try {
     const interventionRow = await fetchInterventionWithCase(interventionId);
     if (!interventionRow) {
@@ -23384,7 +23467,6 @@ app.patch('/api/interventions/:id', async (req, res) => {
       if (!caseRow) {
         return res.status(404).json({ error: 'case_not_found' });
       }
-      const role = inferUserRole(req);
       const identity = getRequesterIdentity(req);
       const allowAll =
         role === 'System Administrator' ||
@@ -23414,6 +23496,27 @@ app.patch('/api/interventions/:id', async (req, res) => {
     const metadata = safeJsonParse(interventionRow.metadata_json, null) || {};
     const metadataPayload =
       body.metadata && typeof body.metadata === 'object' ? body.metadata : null;
+    const planMetadata = safeJsonParse(planRow?.metadata_json, null) || {};
+    const existingPostingContext =
+      normalizePostingContext(metadata.postingContext) ||
+      normalizePostingContext(planMetadata.postingContext) ||
+      'external';
+    let postingContext = (() => {
+      if (
+        Object.prototype.hasOwnProperty.call(body, 'postingContext') ||
+        Object.prototype.hasOwnProperty.call(body, 'posting_context')
+      ) {
+        return normalizePostingContext(body.postingContext || body.posting_context) || 'external';
+      }
+      return existingPostingContext;
+    })();
+    if (role === 'Application Assessor' || role === 'Adjudicator') {
+      postingContext = 'external';
+    }
+    if (metadata.postingContext !== postingContext) {
+      metadata.postingContext = postingContext;
+      metadataChanged = true;
+    }
 
     // Mark ILMP compliance as pending on intervention change
     if (true) {
@@ -23636,6 +23739,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
 
     const esdcExisting = safeJsonParse(interventionRow.esdc_intervention_json, {}) || {};
     const esdcPayload = { ...esdcExisting };
+    esdcPayload.postingContext = postingContext;
     if (Object.prototype.hasOwnProperty.call(body, 'code')) {
       esdcPayload.interventionCode = typeof body.code === 'string' ? body.code.trim() : esdcPayload.interventionCode || null;
     }
@@ -23708,9 +23812,27 @@ app.patch('/api/interventions/:id', async (req, res) => {
         ? plannedCostInt
         : null;
     const potFromBody =
-      Object.prototype.hasOwnProperty.call(body, 'potId') && typeof body.potId === 'string'
-        ? body.potId.trim()
-        : payload.potId || null;
+      (() => {
+        if (Object.prototype.hasOwnProperty.call(body, 'potId')) {
+          if (typeof body.potId === 'string') return body.potId.trim();
+          if (Number.isFinite(body.potId)) return String(body.potId);
+          return null;
+        }
+        return payload.potId || null;
+      })();
+    let glProjectCodeUsed = null;
+    if (potFromBody) {
+      try {
+        const { glProjectCodeUsed: gl } = await ensureChargeablePot({
+          runner: pool,
+          potId: potFromBody,
+          postingContext
+        });
+        glProjectCodeUsed = gl;
+      } catch (err) {
+        return res.status(err.status || 400).json({ error: err.code || 'invalid_pot', message: err.message });
+      }
+    }
     if (potFromBody && amountForFinance !== null) {
       await upsertFinanceTransactionForIntervention({
         caseId: payload.caseId || planRow?.case_id || interventionRow.case_id || null,
@@ -23719,6 +23841,8 @@ app.patch('/api/interventions/:id', async (req, res) => {
         amount: amountForFinance,
         status: 'submitted',
         transactionDate: payload.startDate || null,
+        postingContext,
+        glProjectCodeUsed,
         connection: null,
       });
     }
@@ -24378,6 +24502,24 @@ app.patch('/api/action-plans/:id', async (req, res) => {
     if (summary !== null && typeof summary !== 'undefined') {
       metadata.summary = summary || null;
     }
+    const existingPostingContext =
+      normalizePostingContext(metadata.postingContext) ||
+      normalizePostingContext(esdcExisting.postingContext) ||
+      'external';
+    let postingContext = (() => {
+      if (
+        Object.prototype.hasOwnProperty.call(req.body, 'postingContext') ||
+        Object.prototype.hasOwnProperty.call(req.body, 'posting_context')
+      ) {
+        return normalizePostingContext(req.body.postingContext || req.body.posting_context) || 'external';
+      }
+      return existingPostingContext;
+    })();
+    const role = inferUserRole(req);
+    if (role === 'Application Assessor' || role === 'Adjudicator') {
+      postingContext = 'external';
+    }
+    metadata.postingContext = postingContext;
 
     const claimantValue = (() => {
       if (typeof req.body.eiClaimant === 'undefined') return undefined;
@@ -24549,6 +24691,7 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       agreementNumber,
       fundingStream,
       budgetPot: parsedBudgetPotId,
+      postingContext,
       educationLevel,
       educationProvince,
       socialAssistanceRecipient,
@@ -24648,6 +24791,9 @@ app.get('/api/cases/:id', async (req, res) => {
         COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
         COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
         s.created_at AS submitted_at,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers.\"address-province\"')) AS application_address_province,
+        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers.province')) AS application_province_fallback,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
         ca.date_of_assessment AS assessment_date_of_assessment,
         ca.overview AS case_summary,
         ca.employment_goals AS assessment_employment_goals,
@@ -24676,6 +24822,7 @@ app.get('/api/cases/:id', async (req, res) => {
         ca.intervention_budget_pot_id AS assessment_intervention_pot_id,
         bp.code AS assessment_intervention_pot_code,
         bp.name AS assessment_intervention_pot_name,
+        ca.posting_context AS assessment_posting_context,
         ca.childcare_need AS assessment_childcare_need,
         ca.childcare_funding_details AS assessment_childcare_funding_details,
         ca.action_plan_result_code AS assessment_action_plan_result_code,
@@ -27750,6 +27897,8 @@ function mapBudgetPotRow(row) {
   }
   const fundingSource = row.funding_source || null;
   const fiscalYearTag = row.fiscal_year_tag || null;
+  const glExternal = row.gl_project_code_external || null;
+  const glInternal = row.gl_project_code_internal || null;
   return {
     id: String(row.id),
     parentId: row.parent_id ? String(row.parent_id) : null,
@@ -27763,6 +27912,8 @@ function mapBudgetPotRow(row) {
     fundingSource: fundingSource,
     isRestricted: !!row.is_restricted,
     owner: row.owner || null,
+    glProjectCodeExternal: glExternal,
+    glProjectCodeInternal: glInternal,
     isAdminCap: !!row.is_admin_cap,
     isActive: !!row.is_active,
     approved: Number(row.approved_amount || 0),
@@ -27772,6 +27923,7 @@ function mapBudgetPotRow(row) {
     forecast: Number(row.forecast_amount || 0),
     adminShare: Number(row.admin_share_amount || 0),
     metadata: meta,
+    regions: Array.isArray(row.regions) ? row.regions : [],
   };
 }
 
@@ -27781,6 +27933,61 @@ const normalizeFundingSource = value => {
   return ['EI', 'CRF', 'OTHER'].includes(upper) ? upper : null;
 };
 
+const normalizeRegionCodes = value => {
+  if (!value && value !== '') return [];
+  const arr = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [value];
+  return Array.from(
+    new Set(
+      arr
+        .map(entry => (entry === null || entry === undefined ? '' : String(entry).trim().toUpperCase()))
+        .filter(Boolean)
+    )
+  );
+};
+
+async function fetchValidRegionCodeSet(connection = null) {
+  const runner = connection || pool;
+  const [rows] = await runner.query('SELECT code FROM canada_region');
+  return new Set((rows || []).map(r => String(r.code).trim().toUpperCase()));
+}
+
+async function fetchPotRegions(potIds, connection = null) {
+  const runner = connection || pool;
+  const ids = Array.from(new Set((potIds || []).map(id => Number(id)).filter(Number.isFinite)));
+  if (!ids.length) return new Map();
+  const [rows] = await runner.query(
+    `SELECT pot_id, region_code
+       FROM budget_pot_region
+      WHERE pot_id IN (${ids.map(() => '?').join(',')})
+      ORDER BY pot_id, region_code`,
+    ids
+  );
+  const map = new Map();
+  (rows || []).forEach(row => {
+    const key = String(row.pot_id);
+    const code = row.region_code ? String(row.region_code).trim().toUpperCase() : null;
+    if (!code) return;
+    const list = map.get(key) || [];
+    list.push(code);
+    map.set(key, list);
+  });
+  return map;
+}
+
+async function replacePotRegions(potId, regions, connection = null) {
+  const runner = connection || pool;
+  const potNumeric = Number(potId);
+  if (!Number.isFinite(potNumeric)) return;
+  await runner.query('DELETE FROM budget_pot_region WHERE pot_id = ?', [potNumeric]);
+  const codes = normalizeRegionCodes(regions);
+  if (!codes.length) return;
+  const values = codes.map(code => [potNumeric, code]);
+  await runner.query(
+    'INSERT INTO budget_pot_region (pot_id, region_code) VALUES ?',
+    [values]
+  );
+}
+
 const normalizeFiscalYearTag = value => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -27788,6 +27995,67 @@ const normalizeFiscalYearTag = value => {
   if (/^\d{4}-\d{4}$/.test(trimmed)) return trimmed;
   return null;
 };
+
+const normalizeGlCode = value => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed;
+};
+
+const normalizePostingContext = value => {
+  if (!value) return null;
+  const norm = String(value).trim().toLowerCase();
+  if (norm === 'external' || norm === 'internal') return norm;
+  return null;
+};
+
+// Validate that a pot is chargeable (funding stream) and return the GL/project code for the given posting context.
+async function ensureChargeablePot({ runner, potId, postingContext = 'external' }) {
+  const numericPotId = Number(potId);
+  if (!Number.isFinite(numericPotId)) {
+    const err = new Error('Budget pot not found.');
+    err.code = 'invalid_pot_id';
+    err.status = 400;
+    throw err;
+  }
+  const [[potRow]] = await runner.query(
+    'SELECT pot_type, gl_project_code_external, gl_project_code_internal, metadata FROM budget_pot WHERE id = ? LIMIT 1',
+    [numericPotId]
+  );
+  if (!potRow) {
+    const err = new Error('Budget pot not found.');
+    err.code = 'invalid_pot_id';
+    err.status = 400;
+    throw err;
+  }
+  const potMeta = safeJsonParse(potRow.metadata, {});
+  const potTypeRaw = potRow.pot_type || potMeta.nodeType || potMeta.pot_type || '';
+  const potTypeNorm = potTypeRaw
+    ? String(potTypeRaw).trim().toLowerCase().replace(/[_\s]+/g, ' ')
+    : '';
+  if (potTypeNorm !== 'funding stream') {
+    const err = new Error('Only Funding Stream pots can be selected for charging. Choose a Funding Stream pot.');
+    err.code = 'invalid_pot_type_for_assignment';
+    err.status = 400;
+    throw err;
+  }
+  const glProjectCodeUsed =
+    postingContext === 'internal'
+      ? (potRow.gl_project_code_internal || '').trim()
+      : (potRow.gl_project_code_external || '').trim();
+  if (!glProjectCodeUsed) {
+    const err = new Error(
+      postingContext === 'internal'
+        ? 'This pot is missing an Internal GL/project code. Set it in Budgets.'
+        : 'This pot is missing an External GL/project code. Set it in Budgets.'
+    );
+    err.code = postingContext === 'internal' ? 'missing_internal_gl_code' : 'missing_external_gl_code';
+    err.status = 400;
+    throw err;
+  }
+  return { glProjectCodeUsed };
+}
 
 const normalizeBooleanLike = value => {
   if (typeof value === 'boolean') return value;
@@ -27797,18 +28065,26 @@ const normalizeBooleanLike = value => {
 };
 
 // Lightweight budget pot list for non-finance users (code/name/id only)
-app.get('/api/reference/budget-pots-lite', async (_req, res) => {
+app.get('/api/reference/budget-pots-lite', async (req, res) => {
   try {
+    const chargeableOnly = req.query.chargeableOnly === '1' || req.query.chargeableOnly === 'true';
+    const where = chargeableOnly ? 'WHERE pot_type = ? AND is_active = 1' : '';
+    const params = chargeableOnly ? ['Funding stream'] : [];
     const [rows] = await pool.query(
-      'SELECT id, code, name, pot_type, is_active FROM budget_pot ORDER BY code IS NULL, code'
+      `SELECT id, code, name, pot_type, funding_source, agreement_id, is_active FROM budget_pot ${where} ORDER BY code IS NULL, code`,
+      params
     );
+    const regionMap = await fetchPotRegions(rows.map(r => r.id));
     const list = (Array.isArray(rows) ? rows : []).map(r => ({
       id: String(r.id),
       value: String(r.id),
       code: r.code || null,
       name: r.name || null,
       potType: r.pot_type || null,
-      isActive: r.is_active !== 0
+      fundingSource: r.funding_source || null,
+      agreementId: r.agreement_id || null,
+      isActive: r.is_active !== 0,
+      regions: regionMap.get(String(r.id)) || []
     }));
     res.json(list);
   } catch (err) {
@@ -27933,7 +28209,17 @@ async function refreshFinancePotSums(connection = null) {
   }
 }
 
-async function upsertFinanceTransactionForIntervention({ caseId, interventionId, potId, amount, status = 'submitted', transactionDate = null, connection = null }) {
+async function upsertFinanceTransactionForIntervention({
+  caseId,
+  interventionId,
+  potId,
+  amount,
+  status = 'submitted',
+  transactionDate = null,
+  postingContext = 'external',
+  glProjectCodeUsed = null,
+  connection = null
+}) {
   const runner = connection || pool;
   try {
     const potNumeric = Number(potId);
@@ -27950,16 +28236,16 @@ async function upsertFinanceTransactionForIntervention({ caseId, interventionId,
     if (existing) {
       await runner.query(
         `UPDATE finance_transaction
-         SET budget_pot_id = ?, amount = ?, status = ?, transaction_date = ?, updated_at = NOW()
+         SET budget_pot_id = ?, amount = ?, status = ?, transaction_date = ?, posting_context = ?, gl_project_code_used = ?, updated_at = NOW()
          WHERE id = ?`,
-        [potNumeric, normalizedAmount, status, txDate, existing.id]
+        [potNumeric, normalizedAmount, status, txDate, postingContext, glProjectCodeUsed, existing.id]
       );
     } else {
       await runner.query(
         `INSERT INTO finance_transaction
-           (case_id, case_intervention_id, budget_pot_id, amount, currency, status, transaction_date, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'CAD', ?, ?, NOW(), NOW())`,
-        [caseId, interventionId, potNumeric, normalizedAmount, status, txDate]
+           (case_id, case_intervention_id, budget_pot_id, posting_context, gl_project_code_used, amount, currency, status, transaction_date, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'CAD', ?, ?, NOW(), NOW())`,
+        [caseId, interventionId, potNumeric, postingContext, glProjectCodeUsed, normalizedAmount, status, txDate]
       );
     }
     await refreshFinancePotSums(connection);
@@ -28050,7 +28336,8 @@ app.get('/api/finance/budget-pots', async (req, res) => {
       `SELECT * FROM budget_pot ${whereClause}ORDER BY parent_id IS NULL DESC, parent_id, id`
       , params
     );
-    res.status(200).json(rows.map(mapBudgetPotRow));
+    const regionMap = await fetchPotRegions(rows.map(r => r.id));
+    res.status(200).json(rows.map(row => mapBudgetPotRow({ ...row, regions: regionMap.get(String(row.id)) || [] })));
   } catch (err) {
     console.error('[finance] failed to list budget pots', err);
     res.status(500).json({ error: 'failed_to_list_budget_pots' });
@@ -28062,8 +28349,13 @@ app.get('/api/finance/budget-pots/lookup', async (req, res) => {
   try {
     const qRaw = (req.query.q || req.query.query || '').trim();
     const limit = Math.min(Number(req.query.limit) || 25, 100);
+    const chargeableOnly = req.query.chargeableOnly === '1' || req.query.chargeableOnly === 'true';
     const params = [];
     let where = 'WHERE is_active = 1';
+    if (chargeableOnly) {
+      where += ' AND pot_type = ?';
+      params.push('Funding stream');
+    }
     if (qRaw) {
       where += ' AND (name LIKE ? OR code LIKE ?)';
       const like = `%${qRaw}%`;
@@ -28099,7 +28391,8 @@ app.get('/api/finance/budget-pots/:id', async (req, res) => {
     if (!row) {
       return res.status(404).json({ error: 'pot_not_found' });
     }
-    res.status(200).json(mapBudgetPotRow(row));
+    const regionMap = await fetchPotRegions([potId]);
+    res.status(200).json(mapBudgetPotRow({ ...row, regions: regionMap.get(String(potId)) || [] }));
   } catch (err) {
     console.error('[finance] failed to fetch budget pot', err);
     res.status(500).json({ error: 'failed_to_fetch_budget_pot' });
@@ -28112,6 +28405,22 @@ app.post('/api/finance/budget-pots', async (req, res) => {
     const body = req.body || {};
     if (!body.name || !body.code) {
       return res.status(400).json({ error: 'name_and_code_required' });
+    }
+    const glExternalRaw = body.glProjectCodeExternal || body.gl_project_code_external || null;
+    const glInternalRaw = body.glProjectCodeInternal || body.gl_project_code_internal || null;
+    const glExternal = glExternalRaw ? normalizeGlCode(glExternalRaw) : null;
+    const glInternal = glInternalRaw ? normalizeGlCode(glInternalRaw) : null;
+    if (glExternal && glExternal.length > 64) {
+      return res.status(400).json({ error: 'invalid_gl_project_code_external', message: 'External GL/project code must be 64 characters or fewer.' });
+    }
+    if (glInternal && glInternal.length > 64) {
+      return res.status(400).json({ error: 'invalid_gl_project_code_internal', message: 'Internal GL/project code must be 64 characters or fewer.' });
+    }
+    const regions = normalizeRegionCodes(body.regions || body.regionCodes || body.region_codes);
+    const allowedRegions = await fetchValidRegionCodeSet();
+    const invalidRegions = regions.filter(code => !allowedRegions.has(code));
+    if (invalidRegions.length) {
+      return res.status(400).json({ error: 'invalid_regions', invalidRegions });
     }
     const fundingSource = body.fundingSource || body.funding_source || null;
     const normalizedFundingSource = fundingSource ? normalizeFundingSource(fundingSource) : null;
@@ -28137,9 +28446,9 @@ app.post('/api/finance/budget-pots', async (req, res) => {
     const parentId = body.parentId ? Number(body.parentId) : null;
     const insertSql = `
       INSERT INTO budget_pot
-        (parent_id, agreement_code, agreement_id, fiscal_year, fiscal_year_tag, name, code, pot_type, funding_source, is_restricted, owner, is_admin_cap, is_active,
+        (parent_id, agreement_code, agreement_id, fiscal_year, fiscal_year_tag, gl_project_code_external, gl_project_code_internal, name, code, pot_type, funding_source, is_restricted, owner, is_admin_cap, is_active,
          approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `;
     const params = [
       Number.isFinite(parentId) ? parentId : null,
@@ -28147,6 +28456,8 @@ app.post('/api/finance/budget-pots', async (req, res) => {
       agreementId,
       body.fiscalYear || null,
       fiscalYearTag,
+      glExternal,
+      glInternal,
       body.name,
       body.code,
       body.nodeType || 'budget',
@@ -28164,8 +28475,12 @@ app.post('/api/finance/budget-pots', async (req, res) => {
       body.metadata ? JSON.stringify(body.metadata) : JSON.stringify({ nodeType: body.nodeType || 'budget' }),
     ];
     const [result] = await pool.query(insertSql, params);
+    if (regions.length) {
+      await replacePotRegions(result.insertId, regions);
+    }
     const [[row]] = await pool.query('SELECT * FROM budget_pot WHERE id = ? LIMIT 1', [result.insertId]);
-    res.status(201).json(mapBudgetPotRow(row));
+    const regionMap = await fetchPotRegions([result.insertId]);
+    res.status(201).json(mapBudgetPotRow({ ...row, regions: regionMap.get(String(result.insertId)) || [] }));
   } catch (err) {
     console.error('[finance] failed to create budget pot', err);
     res.status(500).json({ error: 'failed_to_create_budget_pot' });
@@ -28185,6 +28500,16 @@ app.put('/api/finance/budget-pots/:id', async (req, res) => {
     if (fundingSourceRaw && !fundingSource) {
       return res.status(400).json({ error: 'invalid_funding_source' });
     }
+    const glExternalRaw = body.glProjectCodeExternal || body.gl_project_code_external;
+    const glInternalRaw = body.glProjectCodeInternal || body.gl_project_code_internal;
+    const glExternal = glExternalRaw ? normalizeGlCode(glExternalRaw) : null;
+    const glInternal = glInternalRaw ? normalizeGlCode(glInternalRaw) : null;
+    if (glExternalRaw !== undefined && glExternal && glExternal.length > 64) {
+      return res.status(400).json({ error: 'invalid_gl_project_code_external', message: 'External GL/project code must be 64 characters or fewer.' });
+    }
+    if (glInternalRaw !== undefined && glInternal && glInternal.length > 64) {
+      return res.status(400).json({ error: 'invalid_gl_project_code_internal', message: 'Internal GL/project code must be 64 characters or fewer.' });
+    }
     const fiscalYearTagRaw = body.fiscalYearTag || body.fiscal_year_tag;
     const fiscalYearTag = fiscalYearTagRaw ? normalizeFiscalYearTag(fiscalYearTagRaw) : null;
     if (fiscalYearTagRaw && !fiscalYearTag) {
@@ -28201,6 +28526,16 @@ app.put('/api/finance/budget-pots/:id', async (req, res) => {
         : body.agreement_id !== undefined
           ? body.agreement_id
           : undefined;
+    const regionsInput = body.regions || body.regionCodes || body.region_codes;
+    const regionsProvided = regionsInput !== undefined;
+    const regions = regionsProvided ? normalizeRegionCodes(regionsInput) : [];
+    if (regionsProvided) {
+      const allowedRegions = await fetchValidRegionCodeSet();
+      const invalidRegions = regions.filter(code => !allowedRegions.has(code));
+      if (invalidRegions.length) {
+        return res.status(400).json({ error: 'invalid_regions', invalidRegions });
+      }
+    }
     const fields = [];
     const params = [];
     const assign = (col, val) => { fields.push(`${col} = ?`); params.push(val); };
@@ -28213,6 +28548,8 @@ app.put('/api/finance/budget-pots/:id', async (req, res) => {
     if (agreementId !== undefined) assign('agreement_id', agreementId);
     if (body.fiscalYear !== undefined) assign('fiscal_year', body.fiscalYear);
     if (fiscalYearTagRaw !== undefined) assign('fiscal_year_tag', fiscalYearTag);
+    if (glExternalRaw !== undefined) assign('gl_project_code_external', glExternal);
+    if (glInternalRaw !== undefined) assign('gl_project_code_internal', glInternal);
     if (fundingSourceRaw !== undefined) assign('funding_source', fundingSource);
     if (restrictedRaw !== undefined) assign('is_restricted', restricted ? 1 : 0);
     if (body.is_admin_cap !== undefined || body.isAdminCap !== undefined) assign('is_admin_cap', body.isAdminCap ? 1 : 0);
@@ -28234,11 +28571,15 @@ app.put('/api/finance/budget-pots/:id', async (req, res) => {
     }
     params.push(potId);
     await pool.query(`UPDATE budget_pot SET ${fields.join(', ')} WHERE id = ?`, params);
+    if (regionsProvided) {
+      await replacePotRegions(potId, regions);
+    }
     const [[row]] = await pool.query('SELECT * FROM budget_pot WHERE id = ? LIMIT 1', [potId]);
     if (!row) {
       return res.status(404).json({ error: 'pot_not_found' });
     }
-    res.status(200).json(mapBudgetPotRow(row));
+    const regionMap = await fetchPotRegions([potId]);
+    res.status(200).json(mapBudgetPotRow({ ...row, regions: regionMap.get(String(potId)) || [] }));
   } catch (err) {
     console.error('[finance] failed to update budget pot', err);
     res.status(500).json({ error: 'failed_to_update_budget_pot' });
@@ -29027,6 +29368,7 @@ app.post('/api/finance/budget-snapshots', async (req, res) => {
   const creator = null;
   try {
     const [pots] = await pool.query('SELECT * FROM budget_pot');
+    const regionMap = await fetchPotRegions(pots.map(p => p.id));
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -29067,11 +29409,25 @@ app.post('/api/finance/budget-snapshots', async (req, res) => {
         });
         await conn.query(
           `INSERT INTO budget_snapshot_pot
-           (snapshot_id, budget_pot_id, parent_pot_id, name, code, agreement_id, funding_source, is_restricted, pot_type, is_admin_cap, fiscal_year_tag,
+           (snapshot_id, budget_pot_id, parent_pot_id, name, code, gl_project_code_external, gl_project_code_internal, agreement_id, funding_source, is_restricted, pot_type, is_admin_cap, fiscal_year_tag,
             approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata)
            VALUES ?`,
           [insertValues]
         );
+        const regionValues = [];
+        pots.forEach(pot => {
+          const codes = regionMap.get(String(pot.id)) || [];
+          codes.forEach(code => {
+            regionValues.push([snapshotId, pot.id, code]);
+          });
+        });
+        if (regionValues.length) {
+          await conn.query(
+            `INSERT INTO budget_snapshot_pot_region (snapshot_id, budget_pot_id, region_code, created_at, updated_at)
+             VALUES ?`,
+            [regionValues.map(v => [...v, new Date(), new Date()])]
+          );
+        }
       }
       await conn.commit();
       res.status(201).json({ id: snapshotId, label, snapshotAt: new Date().toISOString(), notes, agreementCode, fiscalYear });
@@ -29108,6 +29464,19 @@ app.get('/api/finance/budget-snapshots/:id', async (req, res) => {
       `SELECT * FROM budget_snapshot_pot WHERE snapshot_id = ? ORDER BY parent_pot_id IS NULL DESC, parent_pot_id, id`,
       [snapshotId]
     );
+    const [regionsRows] = await pool.query(
+      'SELECT budget_pot_id, region_code FROM budget_snapshot_pot_region WHERE snapshot_id = ?',
+      [snapshotId]
+    );
+    const snapshotRegionMap = new Map();
+    (regionsRows || []).forEach(r => {
+      const key = String(r.budget_pot_id);
+      const code = r.region_code ? String(r.region_code).trim().toUpperCase() : null;
+      if (!code) return;
+      const list = snapshotRegionMap.get(key) || [];
+      list.push(code);
+      snapshotRegionMap.set(key, list);
+    });
     res.status(200).json({
       id: snapshot.id,
       label: snapshot.label,
@@ -29127,6 +29496,8 @@ app.get('/api/finance/budget-snapshots/:id', async (req, res) => {
           parentId: row.parent_pot_id,
           name: row.name,
           code: row.code,
+          glProjectCodeExternal: row.gl_project_code_external || null,
+          glProjectCodeInternal: row.gl_project_code_internal || null,
           agreementId: row.agreement_id || null,
           fundingSource: row.funding_source || null,
           isRestricted: !!row.is_restricted,
@@ -29140,6 +29511,7 @@ app.get('/api/finance/budget-snapshots/:id', async (req, res) => {
           forecast: Number(row.forecast_amount || 0),
           adminShare: Number(row.admin_share_amount || 0),
           metadata: meta,
+          regions: snapshotRegionMap.get(String(row.budget_pot_id)) || [],
         };
       }),
     });
@@ -29194,6 +29566,19 @@ app.post('/api/finance/budget-snapshots/:id/restore-draft', async (req, res) => 
       `SELECT * FROM budget_snapshot_pot WHERE snapshot_id = ? ORDER BY parent_pot_id IS NULL DESC, parent_pot_id, id`,
       [snapshotId]
     );
+    const [regionsRows] = await pool.query(
+      'SELECT budget_pot_id, region_code FROM budget_snapshot_pot_region WHERE snapshot_id = ?',
+      [snapshotId]
+    );
+    const snapshotRegionMap = new Map();
+    (regionsRows || []).forEach(r => {
+      const key = String(r.budget_pot_id);
+      const code = r.region_code ? String(r.region_code).trim().toUpperCase() : null;
+      if (!code) return;
+      const list = snapshotRegionMap.get(key) || [];
+      list.push(code);
+      snapshotRegionMap.set(key, list);
+    });
     const payloadPots = pots.map(p => {
       let meta = p.metadata ? safeJsonParse(p.metadata, {}) : {};
       if (typeof meta === 'string') {
@@ -29206,6 +29591,8 @@ app.post('/api/finance/budget-snapshots/:id/restore-draft', async (req, res) => 
         parentId: p.parent_pot_id,
         name: p.name,
         code: p.code,
+        glProjectCodeExternal: p.gl_project_code_external || null,
+        glProjectCodeInternal: p.gl_project_code_internal || null,
         agreementId: p.agreement_id || null,
         fundingSource: p.funding_source || null,
         isRestricted: !!p.is_restricted,
@@ -29221,6 +29608,7 @@ app.post('/api/finance/budget-snapshots/:id/restore-draft', async (req, res) => 
         policyNotes,
         description,
         metadata: meta,
+        regions: snapshotRegionMap.get(String(p.budget_pot_id)) || [],
         status: 'draft',
       };
     });
@@ -29385,6 +29773,7 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
 
       // Snapshot current live pots before applying the draft
       const [currentPots] = await conn.query('SELECT * FROM budget_pot');
+      const currentRegions = await fetchPotRegions(currentPots.map(p => p.id), conn);
       const [snapshotResult] = await conn.query(
         `INSERT INTO budget_snapshot (label, snapshot_at, agreement_code, fiscal_year, created_by_user_id, notes, created_at)
          VALUES (?, NOW(), ?, ?, ?, ?, NOW())`,
@@ -29419,11 +29808,24 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
            VALUES ?`,
           [values]
         );
+        const regionValues = [];
+        currentPots.forEach(pot => {
+          const codes = currentRegions.get(String(pot.id)) || [];
+          codes.forEach(code => regionValues.push([snapshotId, pot.id, code, new Date(), new Date()]));
+        });
+        if (regionValues.length) {
+          await conn.query(
+            `INSERT INTO budget_snapshot_pot_region (snapshot_id, budget_pot_id, region_code, created_at, updated_at) VALUES ?`,
+            [regionValues]
+          );
+        }
       }
 
       // Apply draft pots (upsert by id/code)
       const potsById = new Set();
       const draftPots = payload.pots;
+      const preparedRegions = [];
+      const allowedRegions = await fetchValidRegionCodeSet(conn);
       // Simple parent-first ordering: insert roots first, then children until all done.
       const remaining = [...draftPots];
       const prepared = [];
@@ -29472,6 +29874,24 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
         if (fiscalYearTagRaw && !fiscalYearTag) {
           throw new Error('invalid_fiscal_year_tag');
         }
+        const glExternalRaw = next.glProjectCodeExternal || next.gl_project_code_external || null;
+        const glInternalRaw = next.glProjectCodeInternal || next.gl_project_code_internal || null;
+        const glExternal = glExternalRaw ? normalizeGlCode(glExternalRaw) : null;
+        const glInternal = glInternalRaw ? normalizeGlCode(glInternalRaw) : null;
+        if (glExternal && glExternal.length > 64) {
+          throw new Error('invalid_gl_project_code_external');
+        }
+        if (glInternal && glInternal.length > 64) {
+          throw new Error('invalid_gl_project_code_internal');
+        }
+        const regions = normalizeRegionCodes(next.regions || next.regionCodes || next.region_codes);
+        const invalidRegions = regions.filter(code => !allowedRegions.has(code));
+        if (invalidRegions.length) {
+          const err = new Error('invalid_regions');
+          err.code = 'invalid_regions';
+          err.invalidRegions = invalidRegions;
+          throw err;
+        }
         const meta = {
           ...(typeof next.metadata === 'object' && next.metadata !== null ? next.metadata : {}),
           ...(next.nodeType ? { nodeType: next.nodeType } : {}),
@@ -29486,6 +29906,8 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
           agreementId,
           potFiscalYear,
           fiscalYearTag || potFiscalYear,
+          glExternal,
+          glInternal,
           name,
           code,
           next.nodeType || 'budget',
@@ -29502,6 +29924,7 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
           adminShare,
           JSON.stringify(meta),
         ]);
+        preparedRegions.push(regions);
         if (Number.isFinite(idNum)) {
           potsById.add(idNum);
         }
@@ -29511,18 +29934,50 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
         throw new Error('failed_to_resolve_parent_order');
       }
 
-      for (const values of prepared) {
+      const potColumns = [
+        'id',
+        'parent_id',
+        'agreement_code',
+        'agreement_id',
+        'fiscal_year',
+        'fiscal_year_tag',
+        'gl_project_code_external',
+        'gl_project_code_internal',
+        'name',
+        'code',
+        'pot_type',
+        'funding_source',
+        'is_restricted',
+        'owner',
+        'is_admin_cap',
+        'is_active',
+        'approved_amount',
+        'adjusted_amount',
+        'committed_amount',
+        'actual_amount',
+        'forecast_amount',
+        'admin_share_amount',
+        'metadata',
+        'created_at',
+        'updated_at',
+      ];
+      const potPlaceholders = potColumns.map(() => '?').join(', ');
+
+      for (let i = 0; i < prepared.length; i += 1) {
+        const values = prepared[i];
+        const rowValues = [...values, new Date(), new Date()];
         const [result] = await conn.query(
           `INSERT INTO budget_pot
-             (id, parent_id, agreement_code, agreement_id, fiscal_year, fiscal_year_tag, name, code, pot_type, funding_source, is_restricted, owner, is_admin_cap, is_active,
-              approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+             (${potColumns.join(', ')})
+           VALUES (${potPlaceholders})
            ON DUPLICATE KEY UPDATE
              parent_id = VALUES(parent_id),
              agreement_code = VALUES(agreement_code),
              agreement_id = VALUES(agreement_id),
              fiscal_year = VALUES(fiscal_year),
              fiscal_year_tag = VALUES(fiscal_year_tag),
+             gl_project_code_external = VALUES(gl_project_code_external),
+             gl_project_code_internal = VALUES(gl_project_code_internal),
              name = VALUES(name),
              code = VALUES(code),
              pot_type = VALUES(pot_type),
@@ -29539,12 +29994,14 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
              admin_share_amount = VALUES(admin_share_amount),
              metadata = VALUES(metadata),
              updated_at = NOW()`,
-          values
+          rowValues
         );
         const explicitId = Number(values[0]);
         const effectiveId = Number.isFinite(explicitId) ? explicitId : Number(result.insertId);
         if (Number.isFinite(effectiveId)) {
           potsById.add(effectiveId);
+          const regions = preparedRegions[i] || [];
+          await replacePotRegions(effectiveId, regions, conn);
         }
       }
 
@@ -29560,6 +30017,9 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
       res.status(200).json({ success: true, snapshotId });
     } catch (err) {
       await conn.rollback();
+      if (err && err.code === 'invalid_regions') {
+        return res.status(400).json({ error: 'invalid_regions', invalidRegions: err.invalidRegions || [] });
+      }
       console.error('[finance] failed to publish draft', err);
       return res.status(500).json({ error: 'failed_to_publish_draft' });
     } finally {
@@ -31880,58 +32340,92 @@ app.put('/api/cases/:id', async (req, res) => {
       assessmentBudgetPotId = typeof parsedPotId === 'undefined' ? null : parsedPotId;
     }
 
-    if (hasAssessmentPayload) {
-      const insertColumns = ['case_id'];
-      const insertValues = [caseId];
-      const updateAssignments = [];
-      const add = (column, value) => {
-        if (typeof value === 'undefined') return;
-        insertColumns.push(column);
-        insertValues.push(value);
-        updateAssignments.push(`${column} = VALUES(${column})`);
-      };
+  if (hasAssessmentPayload) {
+    const identity = getRequesterIdentity(req);
+    const canonicalRole = canonicaliseAccessRole(identity.role);
+    let postingContext = normalizePostingContext(body.postingContext || body.posting_context) || 'external';
+    if (canonicalRole === 'Application Assessor') {
+      postingContext = 'external';
+    }
+    if (canonicalRole === 'Application Assessor' && postingContext !== 'external') {
+      return res.status(400).json({
+        error: 'posting_context_not_permitted',
+        message: 'ISET Coordinators must use External posting.'
+      });
+    }
 
-      add('date_of_assessment', toNull(body.assessment_date_of_assessment));
-      add('overview', toNull(body.case_summary));
-      add('employment_goals', toNull(body.assessment_employment_goals));
-      add('previous_iset', toTinyInt(body.assessment_previous_iset));
-      add('previous_iset_details', toNull(body.assessment_previous_iset_details));
-      add('employment_barriers', toJsonValue(body.assessment_employment_barriers ?? null, []));
-      add('local_area_priorities', toJsonValue(body.assessment_local_area_priorities ?? null, []));
-      add('other_funding_details', toNull(body.assessment_other_funding_details));
-      add('esdc_eligibility', toNull(body.assessment_esdc_eligibility));
-      add('intervention_start_date', toNull(body.assessment_intervention_start_date));
-      add('intervention_end_date', toNull(body.assessment_intervention_end_date));
-      add('institution', toNull(body.assessment_institution));
-      add('program_name', toNull(body.assessment_program_name));
-      add('itp_payload', toJsonValue(body.assessment_itp ?? null, { tuition: '', books: '', materials: '', living: '' }));
-      add('wage_payload', toJsonValue(body.assessment_wage ?? null, { wages: '', mercs: '', nonwages: '', other: '' }));
-      add('recommendation', toNull(body.assessment_recommendation));
-      add('justification', toNull(body.assessment_justification));
-      add('nwac_review', toNull(body.assessment_nwac_review));
-      add('nwac_reason', toNull(body.assessment_nwac_reason));
-      add('intervention_code', toNumericRange(body.assessment_intervention_code, { min: 1, max: 99 }));
-      add('intervention_outcome_code', toNumericRange(body.assessment_intervention_outcome_code, { min: 1, max: 99 }));
-      add('intervention_duration_days', toNumericRange(body.assessment_intervention_duration_days, { min: 0, max: 999 }));
-      add('intervention_cost_total', toNumericRange(body.assessment_intervention_cost_total, { min: 0, max: 999999 }));
-      add('intervention_related_noc', toNull(body.assessment_intervention_related_noc));
-      add('intervention_related_noc_version', toNull(body.assessment_intervention_related_noc_version));
-      add('childcare_need', toTinyInt(body.assessment_childcare_need));
-      add('childcare_funding_details', toNull(body.assessment_childcare_funding_details));
-      add('action_plan_result_code', toNull(body.assessment_action_plan_result_code));
-      add('action_plan_result_date', toNull(body.assessment_action_plan_result_date));
-      add('intervention_budget_pot_id', assessmentBudgetPotProvided ? assessmentBudgetPotId : undefined);
-      if (updateAssignments.length) {
-        const placeholders = insertColumns.map(() => '?').join(', ');
-        const updateClause = updateAssignments.join(', ');
-        await conn.query(
-          `INSERT INTO iset_case_assessment (${insertColumns.join(', ')}) VALUES (${placeholders})
-           ON DUPLICATE KEY UPDATE ${updateClause}`,
-          insertValues
-        );
-        bumpApplicationRowVersion = true;
+    let glProjectCodeUsed = null;
+    if (assessmentBudgetPotId) {
+      try {
+        const { glProjectCodeUsed: gl } = await ensureChargeablePot({
+          runner: conn,
+          potId: assessmentBudgetPotId,
+          postingContext
+        });
+        glProjectCodeUsed = gl;
+      } catch (err) {
+        return res.status(err.status || 400).json({ error: err.code || 'invalid_pot', message: err.message });
       }
     }
+
+    const insertColumns = ['case_id'];
+    const insertValues = [caseId];
+    const updateAssignments = [];
+    const add = (column, value) => {
+      if (typeof value === 'undefined') return;
+      insertColumns.push(column);
+      insertValues.push(value);
+      updateAssignments.push(`${column} = VALUES(${column})`);
+    };
+    const addIfPresent = (key, column, mapper = v => v) => {
+      if (!Object.prototype.hasOwnProperty.call(body, key)) return;
+      add(column, mapper(body[key]));
+    };
+
+    addIfPresent('assessment_date_of_assessment', 'date_of_assessment', toNull);
+    addIfPresent('case_summary', 'overview', toNull);
+    addIfPresent('assessment_employment_goals', 'employment_goals', toNull);
+    addIfPresent('assessment_previous_iset', 'previous_iset', toTinyInt);
+    addIfPresent('assessment_previous_iset_details', 'previous_iset_details', toNull);
+    addIfPresent('assessment_employment_barriers', 'employment_barriers', val => toJsonValue(val ?? null, []));
+    addIfPresent('assessment_local_area_priorities', 'local_area_priorities', val => toJsonValue(val ?? null, []));
+    addIfPresent('assessment_other_funding_details', 'other_funding_details', toNull);
+    addIfPresent('assessment_esdc_eligibility', 'esdc_eligibility', toNull);
+    addIfPresent('assessment_intervention_start_date', 'intervention_start_date', toNull);
+    addIfPresent('assessment_intervention_end_date', 'intervention_end_date', toNull);
+    addIfPresent('assessment_institution', 'institution', toNull);
+    addIfPresent('assessment_program_name', 'program_name', toNull);
+    addIfPresent('assessment_itp', 'itp_payload', val => toJsonValue(val ?? null, { tuition: '', books: '', materials: '', living: '' }));
+    addIfPresent('assessment_wage', 'wage_payload', val => toJsonValue(val ?? null, { wages: '', mercs: '', nonwages: '', other: '' }));
+    addIfPresent('assessment_recommendation', 'recommendation', toNull);
+    addIfPresent('assessment_justification', 'justification', toNull);
+    addIfPresent('assessment_nwac_review', 'nwac_review', toNull);
+    addIfPresent('assessment_nwac_reason', 'nwac_reason', toNull);
+    addIfPresent('assessment_intervention_code', 'intervention_code', val => toNumericRange(val, { min: 1, max: 99 }));
+    addIfPresent('assessment_intervention_outcome_code', 'intervention_outcome_code', val => toNumericRange(val, { min: 1, max: 99 }));
+    addIfPresent('assessment_intervention_duration_days', 'intervention_duration_days', val => toNumericRange(val, { min: 0, max: 999 }));
+    addIfPresent('assessment_intervention_cost_total', 'intervention_cost_total', val => toNumericRange(val, { min: 0, max: 999999 }));
+    addIfPresent('assessment_intervention_related_noc', 'intervention_related_noc', toNull);
+    addIfPresent('assessment_intervention_related_noc_version', 'intervention_related_noc_version', toNull);
+    addIfPresent('assessment_childcare_need', 'childcare_need', toTinyInt);
+    addIfPresent('assessment_childcare_funding_details', 'childcare_funding_details', toNull);
+    addIfPresent('assessment_action_plan_result_code', 'action_plan_result_code', toNull);
+    addIfPresent('assessment_action_plan_result_date', 'action_plan_result_date', toNull);
+    if (assessmentBudgetPotProvided) {
+      add('intervention_budget_pot_id', assessmentBudgetPotId);
+      add('posting_context', postingContext);
+    }
+    if (updateAssignments.length) {
+      const placeholders = insertColumns.map(() => '?').join(', ');
+      const updateClause = updateAssignments.join(', ');
+      await conn.query(
+        `INSERT INTO iset_case_assessment (${insertColumns.join(', ')}) VALUES (${placeholders})
+         ON DUPLICATE KEY UPDATE ${updateClause}`,
+        insertValues
+      );
+      bumpApplicationRowVersion = true;
+    }
+  }
 
     if (hasCaseContextPayload) {
       const providedContext =

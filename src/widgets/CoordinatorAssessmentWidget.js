@@ -29,6 +29,11 @@ const CHILDCARE_OPTIONS = [
   { value: 'no', label: 'No' }
 ];
 
+const POSTING_OPTIONS = [
+  { value: 'external', label: 'External (region/PTMA)' },
+  { value: 'internal', label: 'Internal (NWAC)' }
+];
+
 const requiresNocForCode = (value) => {
   if (!value) return false;
   const numeric = Number(value);
@@ -206,6 +211,7 @@ const mergeAssessmentState = (current, incoming) => {
     'interventionDuration',
     'interventionCost',
     'interventionPotId',
+    'postingContext',
     'interventionNoc',
     'interventionNocVersion',
     'childcareNeed',
@@ -262,6 +268,7 @@ const buildEmptyAssessment = () => ({
   interventionDuration: '',
   interventionCost: '',
   interventionPotId: '',
+  postingContext: '',
   interventionNoc: '',
   interventionNocVersion: '',
   childcareNeed: '',
@@ -334,6 +341,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   } = useCurrentUser();
   const userRole = currentUserRole || '';
   const normalizedRole = (userRole || '').toString().trim().toLowerCase();
+  const canonicalRole = normalizedRole === 'regional manager' ? 'regional coordinator' : normalizedRole;
+  const isAssessor = canonicalRole === 'application assessor';
   const isEligibilityAdmin = normalizedRole === 'system administrator' || normalizedRole === 'program administrator';
 
   const [interventionCodes, setInterventionCodes] = useState([]);
@@ -429,6 +438,125 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     return null;
   }, [budgetPotOptions, assessment.interventionPotId, caseData]);
+
+
+  const participantProvince = useMemo(() => {
+    const context = caseData?.caseContext || {};
+    const clientRegion = caseData?.client?.regionDetails?.code || caseData?.client?.region?.code || null;
+
+    // Immutable submission payload (when no edits made)
+    const submissionAnswers =
+      context?.applicationAnswers?.['address-province'] ||
+      context?.applicationPayload?.answers?.['address-province'] ||
+      context?.applicationPayload?.answers?.['province'] ||
+      caseData?.submission_address_province ||
+      caseData?.submissionAddressProvince ||
+      null;
+
+    // Mutable application payloads (edits)
+    const application = caseData?.application || {};
+    const applicationPayload = application?.intake_payload || application?.intakePayload || application?.payload || {};
+    const applicationAnswers =
+      applicationPayload?.answers?.['address-province'] ||
+      applicationPayload?.answers?.['province'] ||
+      application?.address_province ||
+      application?.application_address_province ||
+      application?.applicationProvince ||
+      application?.application_province ||
+      caseData?.application_address_province ||
+      caseData?.application_province_fallback ||
+      application?.province ||
+      null;
+    const applicationVersion = caseData?.applicationVersion || {};
+    const applicationVersionPayload = applicationVersion?.intake_payload || applicationVersion?.payload_json || {};
+    const applicationVersionAnswers =
+      applicationVersionPayload?.answers?.['address-province'] ||
+      applicationVersionPayload?.answers?.['province'] ||
+      null;
+
+    // Direct case-level projections (if API surfaces them)
+    const caseLevelProvince =
+      caseData?.address_province ||
+      caseData?.addressProvince ||
+      caseData?.application_address_province ||
+      null;
+
+    return (
+      applicationAnswers ||
+      applicationVersionAnswers ||
+      caseLevelProvince ||
+      context.addressProvince ||
+      context.address?.province ||
+      clientRegion ||
+      submissionAnswers ||
+      ''
+    );
+  }, [caseData]);
+  const normalizedProvince = participantProvince ? String(participantProvince).trim().toUpperCase() : '';
+
+  const deriveFundingStreamFromEligibility = useCallback((eligibility) => {
+    const normalized = (eligibility || '').toString().toLowerCase();
+    if (normalized.includes('ei')) return 'EI';
+    if (normalized.includes('crf')) return 'CRF';
+    return '';
+  }, []);
+
+  const interventionPotRef = useRef('');
+  useEffect(() => {
+    interventionPotRef.current = assessment.interventionPotId;
+  }, [assessment.interventionPotId]);
+
+  useEffect(() => {
+    if (!isAssessor) return;
+    if (!assessment.interventionPotId) return;
+    if (assessment.postingContext !== 'external') {
+      setAssessment(prev => ({ ...prev, postingContext: 'external' }));
+    }
+  }, [isAssessor, assessment.interventionPotId, assessment.postingContext]);
+
+  const buildAssessmentPayload = useCallback(() => ({
+    assessment_date_of_assessment: formatDate(assessment.dateOfAssessment) || null,
+    assessment_employment_goals: assessment.employmentGoals || null,
+    assessment_previous_iset: assessment.previousISET || null,
+    assessment_previous_iset_details: assessment.previousISETDetails || null,
+    assessment_employment_barriers: assessment.barriers || null,
+    assessment_local_area_priorities: assessment.priorities || null,
+    assessment_other_funding_details: assessment.otherFunding || null,
+    assessment_esdc_eligibility: assessment.esdcEligibility || null,
+    assessment_intervention_start_date: formatDate(assessment.startDate) || null,
+    assessment_intervention_end_date: formatDate(assessment.endDate) || null,
+    assessment_institution: assessment.institution || null,
+    assessment_program_name: assessment.programName || null,
+    assessment_itp: assessment.itp || [],
+    assessment_wage: assessment.wage || [],
+    assessment_recommendation: assessment.recommendation || null,
+    assessment_justification: assessment.justification || null,
+    assessment_nwac_review: assessment.nwacReview || null,
+    assessment_nwac_reason: assessment.nwacReason || null,
+    assessment_intervention_code: assessment.interventionCode || null,
+    assessment_intervention_duration_days: assessment.interventionDuration || null,
+    assessment_intervention_cost_total: (() => {
+      const val = parseCurrencyInput(assessment.interventionCost);
+      return val !== null ? String(val) : null;
+    })(),
+    assessment_intervention_pot_id: assessment.interventionPotId || null,
+    postingContext: assessment.postingContext || null,
+    assessment_intervention_related_noc: assessment.interventionNoc || null,
+    assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
+    assessment_childcare_need: assessment.childcareNeed || null,
+    assessment_childcare_funding_details: assessment.childcareFunding || null,
+    case_summary: assessment.overview || null
+  }), [assessment]);
+  const handlePostingContextErrors = useCallback((result) => {
+    const code = result?.error || result?.code;
+    if (['missing_internal_gl_code', 'missing_external_gl_code', 'posting_context_not_permitted'].includes(code)) {
+      const message = result?.message || 'Check Paid from selection.';
+      setFieldErrors(prev => ({ ...prev, postingContext: message }));
+      setValidationAlert([message]);
+      return true;
+    }
+    return false;
+  }, []);
   const selectedChildcareOption = useMemo(
     () => CHILDCARE_OPTIONS.find(option => option.value === assessment.childcareNeed) || null,
     [assessment.childcareNeed]
@@ -437,13 +565,17 @@ const CoordinatorAssessmentWidget = forwardRef(
     const val = parseCurrencyInput(assessment.interventionCost);
     return val !== null && Number.isFinite(val) && val > 0;
   }, [assessment.interventionCost]);
+  const selectedPostingContext = useMemo(
+    () => POSTING_OPTIONS.find(opt => opt.value === assessment.postingContext) || null,
+    [assessment.postingContext]
+  );
   const canManageBudgetPotPending = useMemo(() => {
     const allowed = new Set(['system administrator', 'program administrator', 'regional manager']);
     return isPendingApprovalStatus && allowed.has(normalizedRole);
   }, [isPendingApprovalStatus, normalizedRole]);
   const showBudgetPot = hasInterventionCost;
   const eligibilityGridDefinition = useMemo(
-    () => showBudgetPot ? [{ colspan: 6 }, { colspan: 6 }] : [{ colspan: 6 }],
+    () => showBudgetPot ? [{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }] : [{ colspan: 6 }],
     [showBudgetPot]
   );
   const requiresInstitution = useMemo(() => requiresInstitutionForCode(assessment.interventionCode), [assessment.interventionCode]);
@@ -690,7 +822,8 @@ const CoordinatorAssessmentWidget = forwardRef(
         if (raw === false || raw === 0 || raw === '0') return 'no';
         return '';
       })(),
-      childcareFunding: caseData.assessment_childcare_funding_details || ''
+      childcareFunding: caseData.assessment_childcare_funding_details || '',
+      postingContext: caseData.assessment_posting_context || caseData.assessmentPostingContext || ''
     };
     const mergedIncoming = { ...buildEmptyAssessment(), ...placeholders };
     const merged = mergeAssessmentState(assessment, mergedIncoming);
@@ -769,17 +902,56 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
     };
 
-    const loadBudgetPots = async () => {
+    const loadBudgetPots = async (query) => {
       setBudgetPotLoading(true);
       try {
         let data = [];
-        let response = await apiFetch('/api/reference/budget-pots-lite');
+        let response = await apiFetch('/api/reference/budget-pots-lite?chargeableOnly=1');
         if (!response || !response.ok) {
           response = await apiFetch('/api/finance/budget-pots');
         }
         data = response && response.ok ? await response.json() : [];
         if (cancelled) return;
+        const qLower = (query || '').toString().toLowerCase();
+        const targetFundingStream = deriveFundingStreamFromEligibility(assessment.esdcEligibility);
         const options = (Array.isArray(data) ? data : [])
+          .filter(item => {
+            const potType = item?.potType || item?.pot_type || item?.type || '';
+            const norm = potType.toString().trim().toLowerCase().replace(/[_\s]+/g, ' ');
+            return norm === 'funding stream';
+          })
+          .filter(item => {
+            const selectedId = interventionPotRef.current ? String(interventionPotRef.current) : '';
+            const itemId = item?.id || item?.value || item?.code || '';
+            const itemIdStr = itemId ? String(itemId) : '';
+            const isSelected = selectedId && itemIdStr === selectedId;
+            const isActive = !(item?.isActive === false || item?.is_active === false || item?.is_active === 0);
+            if (!isActive && !isSelected) return false;
+
+            const normalize = v => (v ? String(v).trim().toUpperCase() : '');
+            const potFunding = normalize(item.fundingSource || item.funding_source) || (() => {
+              const code = normalize(item.code);
+              if (!code) return '';
+              if (code.includes('-EI') || code.endsWith(' EI')) return 'EI';
+              if (code.includes('-CRF') || code.endsWith(' CRF')) return 'CRF';
+              return '';
+            })();
+            if (targetFundingStream) {
+              const streamNorm = normalize(targetFundingStream);
+              if (streamNorm && potFunding && potFunding !== streamNorm) return false;
+            }
+            if (!normalizedProvince) return true;
+            const regions = Array.isArray(item.regions) ? item.regions.map(r => normalize(r)) : [];
+            if (isSelected && !regions.length) return true;
+            if (!regions.length) return false;
+            return regions.includes(normalizedProvince) || isSelected;
+          })
+          .filter(item => {
+            if (!qLower) return true;
+            const name = String(item?.name || '').toLowerCase();
+            const code = String(item?.code || '').toLowerCase();
+            return name.includes(qLower) || code.includes(qLower);
+          })
           .map(item => {
             const value = item?.id ?? item?.value ?? item?.code ?? null;
             if (!value) return null;
@@ -806,12 +978,16 @@ const CoordinatorAssessmentWidget = forwardRef(
 
     loadInterventionCodes();
     loadNocVersions();
-    loadBudgetPots();
+    if (hasInterventionCost) {
+      loadBudgetPots();
+    } else {
+      setBudgetPotOptions([]);
+    }
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [assessment.esdcEligibility, normalizedProvince, hasInterventionCost, assessment.interventionPotId, deriveFundingStreamFromEligibility]);
 
   useEffect(() => {
     setNocSuggestions([]);
@@ -879,6 +1055,21 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
       if (field === 'startDate' && !value) {
         nextAssessment.endDate = '';
+      }
+      if (field === 'esdcEligibility') {
+        nextAssessment.interventionPotId = '';
+        nextAssessment.postingContext = '';
+      }
+      if (field === 'interventionPotId') {
+        if (!value) {
+          nextAssessment.postingContext = '';
+        } else if (!nextAssessment.postingContext) {
+          nextAssessment.postingContext = 'external';
+        }
+      }
+      if (field === 'postingContext') {
+        const { postingContext: _ignore, ...rest } = fieldErrors;
+        setFieldErrors(rest);
       }
       if (hasSubmitted) {
         setFieldErrors(validateAssessment(nextAssessment));
@@ -1171,6 +1362,9 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (!potExists) {
         errors.interventionPotId = 'Select a valid budget pot.';
       }
+      if (!assessment.postingContext) {
+        errors.postingContext = 'Select how this pot is paid from.';
+      }
     }
     return errors;
   };
@@ -1270,38 +1464,9 @@ const CoordinatorAssessmentWidget = forwardRef(
       const versionToken = Number(latestRowVersion || caseData?.application_row_version || 0);
       let nextApplicationStatus = caseData?.applicationStatus || caseData?.status || null;
       const payload = {
-        ...assessment,
+        ...buildAssessmentPayload(),
         dateOfAssessment,
         assessment_date_of_assessment: dateOfAssessment,
-        assessment_employment_goals: assessment.employmentGoals || null,
-        assessment_previous_iset: assessment.previousISET || null,
-        assessment_previous_iset_details: assessment.previousISETDetails || null,
-        assessment_employment_barriers: assessment.barriers || null,
-        assessment_local_area_priorities: assessment.priorities || null,
-        assessment_other_funding_details: assessment.otherFunding || null,
-        assessment_esdc_eligibility: assessment.esdcEligibility || null,
-        assessment_intervention_start_date: formatDate(assessment.startDate) || null,
-        assessment_intervention_end_date: formatDate(assessment.endDate) || null,
-        assessment_institution: assessment.institution || null,
-        assessment_program_name: assessment.programName || null,
-        assessment_itp: assessment.itp || [],
-        assessment_wage: assessment.wage || [],
-        assessment_recommendation: assessment.recommendation || null,
-        assessment_justification: assessment.justification || null,
-        assessment_nwac_review: assessment.nwacReview || null,
-        assessment_nwac_reason: assessment.nwacReason || null,
-        assessment_intervention_code: assessment.interventionCode || null,
-        assessment_intervention_duration_days: assessment.interventionDuration || null,
-        assessment_intervention_cost_total: (() => {
-          const val = parseCurrencyInput(assessment.interventionCost);
-          return val !== null ? String(val) : null;
-        })(),
-        assessment_intervention_pot_id: assessment.interventionPotId || null,
-        assessment_intervention_related_noc: assessment.interventionNoc || null,
-        assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
-        assessment_childcare_need: assessment.childcareNeed || null,
-        assessment_childcare_funding_details: assessment.childcareFunding || null,
-        case_summary: assessment.overview || null
       };
       if (!APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus)) {
         payload.status = 'pending_approval';
@@ -1348,6 +1513,10 @@ const CoordinatorAssessmentWidget = forwardRef(
           });
           scrollAfterAction();
           releaseLock({ silent: true }).catch(() => {});
+          return;
+        }
+        if (handlePostingContextErrors(result)) {
+          scrollAfterAction();
           return;
         }
         if (!res.ok || !result?.success) {
@@ -1432,39 +1601,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     setAlert(null);
     try {
-      // Prepare payload for backend (map frontend fields to backend fields)
-      const payload = {
-        assessment_date_of_assessment: formatDate(assessment.dateOfAssessment) || null,
-        assessment_employment_goals: assessment.employmentGoals || null,
-        assessment_previous_iset: assessment.previousISET || null,
-        assessment_previous_iset_details: assessment.previousISETDetails || null,
-        assessment_employment_barriers: assessment.barriers || null,
-        assessment_local_area_priorities: assessment.priorities || null,
-        assessment_other_funding_details: assessment.otherFunding || null,
-        assessment_esdc_eligibility: assessment.esdcEligibility || null,
-        assessment_intervention_start_date: formatDate(assessment.startDate) || null,
-        assessment_intervention_end_date: formatDate(assessment.endDate) || null,
-        assessment_institution: assessment.institution || null,
-        assessment_program_name: assessment.programName || null,
-        assessment_itp: assessment.itp || [],
-        assessment_wage: assessment.wage || [],
-        assessment_recommendation: assessment.recommendation || null,
-        assessment_justification: assessment.justification || null,
-        assessment_nwac_review: assessment.nwacReview || null,
-        assessment_nwac_reason: assessment.nwacReason || null,
-        assessment_intervention_code: assessment.interventionCode || null,
-        assessment_intervention_duration_days: assessment.interventionDuration || null,
-        assessment_intervention_cost_total: (() => {
-          const val = parseCurrencyInput(assessment.interventionCost);
-          return val !== null ? String(val) : null;
-        })(),
-        assessment_intervention_pot_id: assessment.interventionPotId || null,
-        assessment_intervention_related_noc: assessment.interventionNoc || null,
-        assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
-        assessment_childcare_need: assessment.childcareNeed || null,
-        assessment_childcare_funding_details: assessment.childcareFunding || null,
-        case_summary: assessment.overview || null
-      };
+      const payload = buildAssessmentPayload();
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return;
       const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
@@ -1506,6 +1643,10 @@ const CoordinatorAssessmentWidget = forwardRef(
         });
         scrollAfterAction();
         releaseLock({ silent: true }).catch(() => {});
+        return;
+      }
+      if (handlePostingContextErrors(result)) {
+        scrollAfterAction();
         return;
       }
       if (!res.ok || !result?.success) {
@@ -1589,6 +1730,9 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (costForPotValidation !== null && Number.isFinite(costForPotValidation) && costForPotValidation !== 0 && !assessment.interventionPotId) {
       errors.interventionPotId = 'Select a budget pot for the intervention cost.';
     }
+    if (assessment.interventionPotId && !assessment.postingContext) {
+      errors.postingContext = 'Select how this pot is paid from.';
+    }
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
       setValidationAlert([...new Set(Object.values(errors))]);
@@ -1626,6 +1770,9 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     if (costForPotValidation !== null && Number.isFinite(costForPotValidation) && costForPotValidation !== 0 && !assessment.interventionPotId) {
       errors.interventionPotId = 'Select a budget pot for the intervention cost.';
+    }
+    if (assessment.interventionPotId && !assessment.postingContext) {
+      errors.postingContext = 'Select how this pot is paid from.';
     }
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
@@ -1672,6 +1819,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         return val !== null ? String(val) : null;
       })(),
       assessment_intervention_pot_id: assessment.interventionPotId || null,
+      postingContext: assessment.postingContext || null,
       assessment_intervention_related_noc: assessment.interventionNoc || null,
       assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
       assessment_childcare_need: assessment.childcareNeed || null,
@@ -1707,6 +1855,10 @@ const CoordinatorAssessmentWidget = forwardRef(
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });
+        scrollAfterAction();
+        return;
+      }
+      if (handlePostingContextErrors(result)) {
         scrollAfterAction();
         return;
       }
@@ -2181,28 +2333,55 @@ const CoordinatorAssessmentWidget = forwardRef(
             />
           </FormField>
           {showBudgetPot && (
-            <FormField
-              label="Budget Pot"
-              description="Assign the pot that will fund this intervention."
-              errorText={hasSubmitted && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
-            >
-              <Select
-                placeholder={
-                  !hasInterventionCost
-                    ? 'Not assigned for zero-cost interventions'
-                    : budgetPotLoading
-                      ? 'Loading budget pots'
-                      : 'Select budget pot'
-                }
-                selectedOption={selectedBudgetPotOption}
-                options={budgetPotOptions}
-                statusType={budgetPotLoading ? 'loading' : 'finished'}
-                loadingText="Loading budget pots"
-                onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
-                data-error-focus={hasSubmitted && fieldErrors.interventionPotId ? 'true' : undefined}
-                disabled={(!canManageBudgetPotPending && isAssessmentDisabled) || !hasInterventionCost}
-              />
-            </FormField>
+            <>
+              <FormField
+                label="Budget Pot"
+                description="Assign the pot that will fund this intervention."
+                errorText={hasSubmitted && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
+              >
+                <Select
+                  placeholder={
+                    !hasInterventionCost
+                      ? 'Not assigned for zero-cost interventions'
+                      : budgetPotLoading
+                        ? 'Loading budget pots'
+                        : 'Select budget pot'
+                  }
+                  selectedOption={selectedBudgetPotOption}
+                  options={budgetPotOptions}
+                  statusType={budgetPotLoading ? 'loading' : 'finished'}
+                  loadingText="Loading budget pots"
+                  onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
+                  data-error-focus={hasSubmitted && fieldErrors.interventionPotId ? 'true' : undefined}
+                  disabled={(!canManageBudgetPotPending && isAssessmentDisabled) || !hasInterventionCost}
+                />
+              </FormField>
+              <FormField
+                label="Paid from"
+                description="Select whether this pot is charged externally or internally."
+                errorText={hasSubmitted && fieldErrors.postingContext ? fieldErrors.postingContext : undefined}
+              >
+                {isAssessor ? (
+                  <Input value="External (region/PTMA)" readOnly disabled={!assessment.interventionPotId || !hasInterventionCost || isAssessmentDisabled} />
+                ) : (
+                  <Select
+                    selectedOption={selectedPostingContext}
+                    options={POSTING_OPTIONS}
+                    onChange={({ detail }) => handleField('postingContext', detail.selectedOption?.value || '')}
+                    placeholder="Select"
+                    data-error-focus={hasSubmitted && fieldErrors.postingContext ? 'true' : undefined}
+                    disabled={
+                      !assessment.interventionPotId ||
+                      !hasInterventionCost ||
+                      lockedByAnotherUser ||
+                      isLockedStatus ||
+                      isDecisionFinal ||
+                      (isAssessmentDisabled && !canManageBudgetPotPending)
+                    }
+                  />
+                )}
+              </FormField>
+            </>
           )}
         </Grid>
         {!eligibilitySet && <Box margin={{ bottom: 'l' }} />}

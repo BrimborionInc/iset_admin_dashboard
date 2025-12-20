@@ -14,6 +14,7 @@ import {
   Tabs,
   Table,
   Popover,
+  Input,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
 import { useBudgetsData } from "./BudgetsDataContext.jsx";
@@ -85,6 +86,8 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         fiscalYearTag: pot.fiscalYearTag || pot.fiscalYear || null,
       }
     : null;
+  const potTypeNorm = (pot?.nodeType || "").toString().trim().toLowerCase().replace(/[_\s]+/g, " ");
+  const isFundingStream = potTypeNorm === "funding stream";
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
       variant="info"
@@ -409,23 +412,87 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   );
 
   const renderPolicy = () => (
-    <SpaceBetween size="m">
+    <SpaceBetween size="l">
+      <SpaceBetween size="xxs">
+        <Box fontSize="heading-m" fontWeight="bold">
+          Policy guardrails
+        </Box>
+        <Box color="text-body-secondary">
+          Review funding source, fiscal tags, accounting codes, and any policy notes for this pot.
+        </Box>
+      </SpaceBetween>
+
       <SpaceBetween size="s">
         <Box variant="awsui-key-label">Classification &amp; tags</Box>
-        {potTags &&
-        (potTags.fundingSource || potTags.agreementId || potTags.fiscalYearTag || potTags.isRestricted) ? (
-          <BudgetPotTagsSummary tags={potTags} />
-        ) : (
-          <Box variant="p" fontStyle="italic">
-            Not set
-          </Box>
-        )}
+        <ColumnLayout columns={3} variant="text-grid">
+          <SpaceBetween size="xxs">
+            <Box variant="strong">Funding source</Box>
+            <Box color="text-body-secondary">Program or fiscal source driving this pot.</Box>
+            <Input value={pot?.fundingSource || "Not set"} readOnly disabled />
+          </SpaceBetween>
+          <SpaceBetween size="xxs">
+            <Box variant="strong">Restricted</Box>
+            <Box color="text-body-secondary">Whether spend is restricted to tagged use-cases.</Box>
+            <Input value={pot?.isRestricted ? "Yes" : "No"} readOnly disabled />
+          </SpaceBetween>
+          <SpaceBetween size="xxs">
+            <Box variant="strong">Agreement ID</Box>
+            <Box color="text-body-secondary">Linked agreement or authority number.</Box>
+            <Input value={pot?.agreementId || "Not set"} readOnly disabled />
+          </SpaceBetween>
+          <SpaceBetween size="xxs">
+            <Box variant="strong">Fiscal year</Box>
+            <Box color="text-body-secondary">Fiscal period this pot belongs to.</Box>
+            <Input value={pot?.fiscalYearTag || pot?.fiscalYear || "Not set"} readOnly disabled />
+          </SpaceBetween>
+          <SpaceBetween size="xxs">
+            <Box variant="strong">Status</Box>
+            <Box color="text-body-secondary">Draft/published lifecycle of this pot.</Box>
+            <Input value={lifecycleLabel} readOnly disabled />
+          </SpaceBetween>
+          <SpaceBetween size="xxs">
+            <Box variant="strong">Pot type</Box>
+            <Box color="text-body-secondary">Hierarchy or classification for this pot.</Box>
+            <Input value={pot?.nodeType || "Not set"} readOnly disabled />
+          </SpaceBetween>
+          <SpaceBetween size="xxs">
+            <Box variant="strong">Regions</Box>
+            <Box color="text-body-secondary">Regions scoped to this pot (blank means all regions).</Box>
+            <Input
+              value={
+                pot?.regions && pot.regions.length
+                  ? pot.regions.join(", ")
+                  : "Not set"
+              }
+              readOnly
+              disabled
+            />
+          </SpaceBetween>
+        </ColumnLayout>
       </SpaceBetween>
+
+      {isFundingStream ? (
+        <SpaceBetween size="s">
+          <Box variant="awsui-key-label">Accounting codes</Box>
+          <ColumnLayout columns={2} variant="text-grid">
+            <SpaceBetween size="xxs">
+              <Box variant="strong">External</Box>
+              <Box color="text-body-secondary">GL/project code used for external (region/PTMA) posting.</Box>
+              <Input value={pot?.glProjectCodeExternal || "Not set"} readOnly disabled />
+            </SpaceBetween>
+            <SpaceBetween size="xxs">
+              <Box variant="strong">Internal</Box>
+              <Box color="text-body-secondary">GL/project code used for internal (NWAC) posting.</Box>
+              <Input value={pot?.glProjectCodeInternal || "Not set"} readOnly disabled />
+            </SpaceBetween>
+          </ColumnLayout>
+        </SpaceBetween>
+      ) : null}
+
       <SpaceBetween size="s">
         <Box variant="awsui-key-label">Policy notes &amp; references</Box>
-        <Box variant="p" fontStyle={pot?.policyNotes ? "normal" : "italic"}>
-          {pot?.policyNotes?.trim() ? pot.policyNotes : "Not set"}
-        </Box>
+        <Box color="text-body-secondary">Links, memos, or policy excerpts that govern this pot.</Box>
+        <Input value={(pot?.policyNotes?.trim() ? pot.policyNotes : "Not set") || "Not set"} readOnly disabled />
       </SpaceBetween>
     </SpaceBetween>
   );

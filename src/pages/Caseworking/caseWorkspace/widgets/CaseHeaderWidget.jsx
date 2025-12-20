@@ -11,9 +11,12 @@ import {
   Alert,
   SpaceBetween,
   StatusIndicator,
+  Select,
+  FormField,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
+import { apiFetch } from "../../../../auth/apiClient.js";
 
 const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const { caseData, isLoading, error, markReadyToClose, closeCase, reopenCase, refresh } = useCaseWorkspace();
@@ -29,6 +32,12 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [modalLoading, setModalLoading] = useState(false);
   const [headerWarnings, setHeaderWarnings] = useState([]);
   const [reopenModalOpen, setReopenModalOpen] = useState(false);
+  const [assignModalVisible, setAssignModalVisible] = useState(false);
+  const [assignableStaff, setAssignableStaff] = useState([]);
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [assignError, setAssignError] = useState(null);
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
+  const [selectedAssignee, setSelectedAssignee] = useState(null);
 
   const DetailItem = ({ label, value }) => (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
@@ -288,10 +297,70 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     }
   };
 
+  const loadAssignable = useCallback(async () => {
+    setAssignLoading(true);
+    setAssignError(null);
+    try {
+      const res = await apiFetch("/api/staff/assignable");
+      if (!res.ok) {
+        throw new Error("assignable_fetch_failed");
+      }
+      const data = await res.json();
+      const options = Array.isArray(data)
+        ? data.map(staff => ({
+            label: `${staff.display_name || staff.email || staff.id} (${staff.role || "Staff"})`,
+            value: String(staff.id),
+          }))
+        : [];
+      setAssignableStaff(options);
+      const currentOwnerId = caseData?.owner?.id ? String(caseData.owner.id) : null;
+      if (currentOwnerId && options.some(opt => opt.value === currentOwnerId)) {
+        setSelectedAssignee(options.find(opt => opt.value === currentOwnerId) || null);
+      }
+    } catch (err) {
+      setAssignableStaff([]);
+      setAssignError("Unable to load assignable staff.");
+    } finally {
+      setAssignLoading(false);
+    }
+  }, [caseData?.owner?.id]);
+
+  const handleAssignSubmit = useCallback(async () => {
+    const caseId = caseData?.id;
+    if (!caseId || !selectedAssignee?.value) {
+      setAssignError("Select an assignee.");
+      return;
+    }
+    setAssignSubmitting(true);
+    setAssignError(null);
+    try {
+      const response = await apiFetch(`/api/cases/${caseId}/assign`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignee_id: selectedAssignee.value }),
+      });
+      if (!response.ok) {
+        throw new Error("assign_failed");
+      }
+      setAssignModalVisible(false);
+      setSelectedAssignee(null);
+      await refresh();
+    } catch (err) {
+      setAssignError("Assignment failed. Please try again.");
+    } finally {
+      setAssignSubmitting(false);
+    }
+  }, [caseData?.id, selectedAssignee, refresh]);
+
   const handleQuickAction = useCallback(
     async ({ detail }) => {
       if (!detail?.id) return;
-      if (detail.id === "close") {
+      if (detail.id === "assign") {
+        setAssignError(null);
+        setSelectedAssignee(null);
+        setAssignModalVisible(true);
+        loadAssignable().catch(() => {});
+      } else if (detail.id === "close") {
         setActionError(null);
         setActionLoading(true);
         try {
@@ -331,7 +400,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         setReopenModalOpen(true);
       }
     },
-    [markReadyToClose, closeCase, refresh, openValidationModal, buildValidationSummary]
+    [markReadyToClose, closeCase, refresh, openValidationModal, buildValidationSummary, loadAssignable]
   );
 
   return (
@@ -405,6 +474,54 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
             <StatusIndicator type="info">No case data available.</StatusIndicator>
           </Box>
         ) : null}
+        <Modal
+          visible={assignModalVisible}
+          onDismiss={() => {
+            if (assignSubmitting) return;
+            setAssignModalVisible(false);
+            setSelectedAssignee(null);
+            setAssignError(null);
+          }}
+          header="Assign / reassign case"
+          closeAriaLabel="Close assign modal"
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button
+                onClick={() => {
+                  if (assignSubmitting) return;
+                  setAssignModalVisible(false);
+                  setSelectedAssignee(null);
+                  setAssignError(null);
+                }}
+                disabled={assignSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button variant="primary" loading={assignSubmitting} onClick={handleAssignSubmit}>
+                Save
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            {assignError ? <StatusIndicator type="error">{assignError}</StatusIndicator> : null}
+            <FormField
+              label="Assignee"
+              description="Select the staff member who will own this case."
+              stretch
+            >
+              <Select
+                placeholder={assignLoading ? "Loading staff..." : "Select assignee"}
+                selectedOption={selectedAssignee}
+                options={assignableStaff}
+                onChange={({ detail }) => setSelectedAssignee(detail.selectedOption || null)}
+                statusType={assignLoading ? "loading" : "finished"}
+                filteringType="auto"
+                disabled={assignLoading}
+              />
+            </FormField>
+          </SpaceBetween>
+        </Modal>
         <Modal
           visible={validationModal.visible}
           onDismiss={closeValidationModal}
