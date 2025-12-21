@@ -188,8 +188,12 @@ const AllocationHistoryWidget = ({
     ) : undefined;
 
   const historyItems = Array.isArray(items) ? items : [];
+  const appliedHistory = useMemo(
+    () => historyItems.filter(item => item.status === "approved" || item.status === "applied"),
+    [historyItems]
+  );
   const pending = Array.isArray(pendingItems)
-    ? pendingItems.filter(item => item.status === "approved")
+    ? pendingItems.filter(item => item.status === "proposed")
     : [];
   const [activeTab, setActiveTab] = useState("applied");
 
@@ -346,7 +350,7 @@ const baseColumnDefinitions = useMemo(
     persistColumnWidths(ordered);
   };
 
-  const totalItems = historyItems.length;
+  const totalItems = appliedHistory.length;
   const pagesCount = Math.max(1, Math.ceil(totalItems / pageSize));
   useEffect(() => {
     if (currentPageIndex > pagesCount) {
@@ -356,8 +360,8 @@ const baseColumnDefinitions = useMemo(
 
   const pagedItems = useMemo(() => {
     const start = (currentPageIndex - 1) * pageSize;
-    return historyItems.slice(start, start + pageSize);
-  }, [historyItems, currentPageIndex, pageSize]);
+    return appliedHistory.slice(start, start + pageSize);
+  }, [appliedHistory, currentPageIndex, pageSize]);
 
   const preferencesComponent = (
     <CollectionPreferences
@@ -537,7 +541,7 @@ const baseColumnDefinitions = useMemo(
           },
           {
             id: "applied",
-            label: `Historical transfers (${historyItems.length})`,
+            label: `Historical transfers (${appliedHistory.length})`,
             content: (
               <SpaceBetween size="m">
                 <Table

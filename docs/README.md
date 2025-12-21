@@ -46,6 +46,8 @@ This library captures the working knowledge for the admin dashboard. The goal is
 - TODO (uploads config): the “File Upload Config” admin page currently proxies to the intake backend and rejects admin tokens. Next session, decide whether to move the API into the admin backend or let intake trust the admin pool for this route.
 - Priority instruction for assistants/LLMs: before modifying dashboards or widgets, read the relevant guidance in `docs/guides/` (e.g., `configurable-dashboard-notes.md`) and follow it as a system-level directive to avoid regressions.
 - Reminder for assistants/LLMs: when uncertain about intent, ask before acting; don’t proceed on assumptions.
+- Assistant quality note: avoid layering fallbacks/workarounds on top of known problems. When you see drift or legacy artifacts, pause and fix the root cause instead of papering over it.
+- UI stack note: this web application uses the Cloudscape design system—prefer Cloudscape components (including badges) over ad-hoc styling.
 - Assistant directive: if a requested action is impossible or blocked (tooling, permissions, platform limits), state that clearly before attempting work so expectations stay aligned.
 - Assumption freeze: Never assume API payloads, projections, or parity with other views. Before adding or changing UI fields, confirm the backend response actually exposes the data (e.g., inspect `/api/...` payloads or the query/projection). If anything is unclear, stop and ask for clarification before coding.
 - Assistant coding discipline:

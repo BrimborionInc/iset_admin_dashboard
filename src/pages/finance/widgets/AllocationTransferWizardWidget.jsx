@@ -465,6 +465,7 @@ const AllocationTransferWizardWidget = ({
         destinationPotId: formState.destinationPot?.value,
         amount: Number(formState.amount),
         justification: formState.justification.trim(),
+        metadata: { evidence: evidencePayload },
       };
       if (formState.effectiveDate) {
         payload.effectiveDate = formState.effectiveDate;

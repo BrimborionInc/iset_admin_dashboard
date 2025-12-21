@@ -3,6 +3,7 @@ import { BoardItem } from "@cloudscape-design/board-components";
 import {
   Alert,
   Box,
+  Badge,
   Button,
   ButtonDropdown,
   CollectionPreferences,
@@ -76,7 +77,16 @@ const PAGE_SIZE_OPTIONS = [
   { label: "20 plans", value: 20 },
   { label: "50 plans", value: 50 },
 ];
-const ALL_COLUMN_IDS = ["title", "dates", "status", "result", "interventions", "actions"];
+const ALL_COLUMN_IDS = [
+  "title",
+  "dates",
+  "status",
+  "fundingStream",
+  "budgetPot",
+  "result",
+  "interventions",
+  "actions",
+];
 const REQUIRED_COLUMN_IDS = new Set(["title", "actions"]);
 
 const DEFAULT_PREFERENCES = {
@@ -551,6 +561,22 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
             {formatLabel(item.status || "unknown")}
           </StatusIndicator>
         ),
+      },
+      {
+        id: "fundingStream",
+        header: "Funding stream",
+        cell: item => item.fundingStream || "-",
+      },
+      {
+        id: "budgetPot",
+        header: "Budget pot",
+        cell: item => {
+          const code = item.budgetPotCode || item.budgetPot || null;
+          if (!code) return "-";
+          return (
+            <Badge color="blue">{code}</Badge>
+          );
+        },
       },
       {
         id: "result",

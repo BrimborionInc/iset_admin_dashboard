@@ -588,6 +588,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_case_event',
   'iset_case_financial_snapshot',
   'iset_case_intervention',
+  'finance_transaction',
   'iset_case_note',
   'iset_case_task',
   'iset_case_watch',
@@ -602,11 +603,13 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'message_signing_request',
   'signing_request',
   'iset_intake.message_attachment',
+  'iset_intake.iset_case_reminder',
   'iset_intake.messages',
   'documents',
   'iset_document',
   'pending_uploads',
   'iset_application_version',
+  'iset_intake.iset_application_escalation',
   'iset_application_draft_dynamic',
   'iset_application_file',
   'iset_application_submission',
@@ -4316,6 +4319,15 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
           applicationPayloadObj = appPayload?.payload || {};
           applicationPersonal = applicationPayloadObj.personal || {};
           applicationAnswers = sanitiseAnswersPayload(applicationPayloadObj.answers || {});
+          const payloadRequestedSupports = Array.isArray(applicationPayloadObj?.answers?.['requested-supports'])
+            ? applicationPayloadObj.answers['requested-supports']
+            : [];
+          const existingRequestedSupports = applicationAnswers['requested-supports'];
+          const needsRequestedSupports =
+            !Array.isArray(existingRequestedSupports) || existingRequestedSupports.length === 0;
+          if (payloadRequestedSupports.length && needsRequestedSupports) {
+            applicationAnswers['requested-supports'] = [...payloadRequestedSupports];
+          }
         } catch (_) {
           applicationAnswers = {};
         }
@@ -4390,13 +4402,85 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
         null;
 
       const seedContext = pruneNullish({
+        firstName:
+          applicationPersonal.first_name ||
+          applicationPersonal.firstName ||
+          readFirstAnswer('first-name', 'given-name'),
+        lastName:
+          applicationPersonal.last_name ||
+          applicationPersonal.lastName ||
+          readFirstAnswer('last-name', 'family-name'),
+        preferredName:
+          applicationPersonal.preferred_name ||
+          applicationPersonal.preferredName ||
+          readFirstAnswer('preferred-name'),
+        middleNames:
+          applicationPersonal.middle_names ||
+          applicationPersonal.middleNames ||
+          readFirstAnswer('middle-names', 'middle-name'),
+        pronouns: applicationPersonal.pronouns || readFirstAnswer('pronouns'),
+        gender: applicationGender || null,
+        genderIdentity:
+          applicationPersonal.gender_identity ||
+          applicationPersonal.genderIdentity ||
+          readFirstAnswer('gender-identity', 'gender_identity', 'what-is-your-gender-identity') ||
+          null,
+        sex: applicationPersonal.sex || readFirstAnswer('sex', 'biological_sex') || null,
+        sin:
+          applicationPersonal.sin ||
+          readFirstAnswer('sin', 'social_insurance_number', 'social-insurance-number') ||
+          null,
+        dateOfBirth: applicationDob || null,
+        address: pruneNullish(applicationAddress) || undefined,
+        mailingAddress:
+          pruneNullish(
+            applicationPersonal.mailing_address ||
+              applicationPersonal.mailingAddress ||
+              readFirstAnswer('address-mailing-address')
+          ) || undefined,
+        emailPrimary: applicationPersonal.email || readFirstAnswer('contact-email-address') || null,
+        phonePrimary: applicationPersonal.phone || readFirstAnswer('telephone-day') || null,
+        phoneAlt: applicationPersonal.phone_alt || readFirstAnswer('telephone-alt') || null,
+        emergencyName: readFirstAnswer('emergency-contact-name') || null,
+        emergencyPhone: readFirstAnswer('emergency-contact-telephone') || null,
+        emergencyRelationship: readFirstAnswer('emergency-contact-relationship') || null,
+        indigenousIdentity:
+          applicationPersonal.legal_indigenous_identity ||
+          readFirstAnswer('legal-indigenous-identity') ||
+          null,
+        indigenousAffiliation:
+          applicationPersonal.indigenous_affiliation ||
+          readFirstAnswer('indigenous-affiliation-declaration') ||
+          null,
+        registrationNumber:
+          applicationPersonal.registration_number ||
+          readFirstAnswer('indigenous-registration-number', 'registration-number') ||
+          null,
+        homeCommunity:
+          applicationPersonal.home_community ||
+          applicationPersonal.homeCommunity ||
+          readFirstAnswer('home-community') ||
+          null,
+        languageSpoken:
+          applicationPersonal.preferred_language ||
+          readFirstAnswer('language-spoken', 'preferred-language', 'language-preference') ||
+          null,
+        visibleMinority: readFirstAnswer('visible-minority') || null,
+        maritalStatus: readFirstAnswer('marital-status') || null,
+        dependentChildren: readFirstAnswer('dependent-children') || null,
+        agesOfChildren: readFirstAnswer('ages-of-children') || null,
+        hasDisability: normaliseYesNo(readFirstAnswer('has-disability')),
+        disabilityDescription: readFirstAnswer('disability-description') || null,
+        householdComposition: readFirstAnswer('household-composition') || null,
         employmentGoals: assessmentRow?.employment_goals || applicationEmploymentGoals || null,
         employmentStatus: applicationEmploymentStatus || null,
         educationLevel: applicationEducationLevel || null,
+        educationProvince: readFirstAnswer('education-province', 'education-location') || null,
         employmentNocVersion: nocVersion || null,
         employmentNoc: noc || null,
         socialAssistance: applicationSocialAssistance,
         employmentInsurance: applicationEmploymentInsurance,
+        eiClaimant: readFirstAnswer('ei-claimant-status', 'employment-insurance-claimant') || null,
         childcareNeed: applicationChildcareNeed || childcareNeed || null,
         childcareFunding: applicationChildcareFunding || childcareFunding || null,
         employmentBarriers: parseArrayLocal(assessmentRow?.employment_barriers) || applicationEmploymentBarriers || [],
@@ -4406,9 +4490,6 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
           (previousIsetBoolean ? 'yes' : previousIsetBoolean === false ? 'no' : null),
         previousIsetDetails: applicationPreviousIsetDetails || assessmentRow?.previous_iset_details || null,
         otherFunding: assessmentRow?.other_funding_details || applicationOtherFunding || null,
-        gender: applicationGender || null,
-        dateOfBirth: applicationDob || null,
-        address: pruneNullish(applicationAddress) || undefined,
         applicationPersonal: pruneNullish(applicationPersonal) || undefined,
         applicationAnswers: Object.keys(applicationAnswers || {}).length ? applicationAnswers : undefined,
         applicationPayload: pruneNullish(applicationPayloadObj) || undefined,
@@ -5823,6 +5904,7 @@ async function fetchActionPlanWithCase(planId) {
     `SELECT
        ap.*,
        ap.esdc_action_plan_json AS esdcActionPlanJson,
+       bp.code AS budget_pot_code,
        c.assigned_to_user_id,
        c.portfolio_region_id,
        sp.region_id AS owner_region_id,
@@ -5833,6 +5915,7 @@ async function fetchActionPlanWithCase(planId) {
      ) AS intervention_count
    FROM iset_case_action_plan ap
    JOIN iset_case c ON c.id = ap.case_id
+   LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
    WHERE ap.id = ?
    LIMIT 1`,
@@ -6427,7 +6510,9 @@ function mapActionPlanRow(plan) {
     caseId: plan.case_id || plan.caseId || null,
     name: plan.name || null,
     status: plan.status || null,
-    budgetPot: plan.budget_pot || esdc.budgetPot || null,
+    budgetPotId: plan.budget_pot || null,
+    budgetPotCode: plan.budget_pot_code || esdc.budgetPot || null,
+    budgetPot: plan.budget_pot || null,
     fundingStream: plan.funding_stream || esdc.fundingStream || null,
     postingContext:
       (metadata && metadata.postingContext) ||
@@ -6687,8 +6772,33 @@ function mapInterventionRow(row) {
   const approvedAmount = toNumber(row.approved_amount);
   const budgetAmount = toNumber(row.budget_amount);
   const actualAmount = toNumber(row.actual_amount);
+  const interventionCost = toNumber(row.intervention_cost);
+  const computeRecurringTotal = meta => {
+    if (!meta || typeof meta !== 'object') return null;
+    const calc =
+      toNumber(meta?.costSettings?.calculatedTotal) ??
+      toNumber(meta?.recurrence?.calculatedTotal);
+    if (calc !== null) return calc;
+    const amountPerPeriod =
+      toNumber(meta?.costSettings?.amountPerPeriod) ??
+      toNumber(meta?.recurrence?.amountPerPeriod);
+    const occurrences =
+      toNumber(meta?.costSettings?.occurrences) ??
+      toNumber(meta?.recurrence?.occurrences);
+    if (Number.isFinite(amountPerPeriod) && Number.isFinite(occurrences)) {
+      return amountPerPeriod * occurrences;
+    }
+    return null;
+  };
   const costFromMeta = toNumber(metadata.cost);
-  const resolvedCost = approvedAmount ?? budgetAmount ?? costFromMeta ?? toNumber(esdc.interventionCost);
+  const recurringTotal = computeRecurringTotal(metadata);
+  const resolvedCost =
+    interventionCost ??
+    budgetAmount ??
+    approvedAmount ??
+    recurringTotal ??
+    costFromMeta ??
+    toNumber(esdc.interventionCost);
   const startDate = toDateOnly(row.start_date);
   const endDate = toDateOnly(row.end_date);
   let durationWeeks = toNumber(metadata.durationWeeks);
@@ -6762,10 +6872,12 @@ function mapInterventionRow(row) {
     outcomeCode: row.outcome_code || esdc.interventionOutcome || null,
     fundingStream: row.funding_stream || planFundingStream || metadata.fundingStream || null,
     postingContext: metadata.postingContext || null,
-    cost: Number.isFinite(row.intervention_cost) ? Number(row.intervention_cost) : (Number.isFinite(resolvedCost) ? resolvedCost : null),
+    cost: Number.isFinite(resolvedCost) ? resolvedCost : null,
+    plannedCost: Number.isFinite(resolvedCost) ? resolvedCost : null,
     budgetAmount,
     approvedAmount,
     actualAmount,
+    actualCost: actualAmount,
     potId: metadata.potId || metadata.budgetPotId || null,
     noc: row.related_noc || metadata.noc || esdc.interventionRelatedNOC || null,
     nocVersion:
@@ -21316,6 +21428,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         ap.budget_pot,
         ap.funding_stream,
         ap.esdc_action_plan_json AS esdcActionPlanJson,
+        bp.code AS budget_pot_code,
         ap.archived_at,
         ap.created_at,
         ap.updated_at,
@@ -21325,6 +21438,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
            WHERE ci.action_plan_id = ap.id
          ) AS intervention_count
        FROM iset_case_action_plan ap
+       LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
        WHERE ap.case_id = ?
        ORDER BY ap.created_at ASC, ap.id ASC`,
       [caseId]
@@ -28175,34 +28289,40 @@ function evaluateTransferPolicies(sourcePot, destPot) {
 async function refreshFinancePotSums(connection = null) {
   const runner = connection || pool;
   try {
-    // Reset committed/actual so pots without transactions don't retain stale values
-    await runner.query('UPDATE budget_pot SET committed_amount = 0, actual_amount = 0');
-    // Apply sums from finance transactions to leaf pots
     await runner.query(
-      `UPDATE budget_pot bp
-       JOIN (
-         SELECT budget_pot_id,
-                SUM(CASE WHEN status IN ('draft','submitted','approved') THEN amount ELSE 0 END) AS committed,
-                SUM(CASE WHEN status = 'posted' THEN amount ELSE 0 END) AS actual
-         FROM finance_transaction
-         GROUP BY budget_pot_id
-       ) t ON bp.id = t.budget_pot_id
-       SET bp.committed_amount = t.committed,
-           bp.actual_amount = t.actual`
-    );
-    // Roll up committed/actual to parents (single pass; covers current depth)
-    await runner.query(
-      `UPDATE budget_pot p
-       JOIN (
-         SELECT parent_id,
-                SUM(committed_amount) AS committed,
-                SUM(actual_amount) AS actual
-         FROM budget_pot
-         WHERE parent_id IS NOT NULL
-         GROUP BY parent_id
-       ) c ON p.id = c.parent_id
-       SET p.committed_amount = c.committed,
-           p.actual_amount = c.actual`
+      `WITH RECURSIVE pot_base AS (
+         SELECT
+           bp.id AS pot_id,
+           bp.parent_id,
+           COALESCE(SUM(CASE WHEN ft.status IN ('draft','submitted','approved') THEN ft.amount ELSE 0 END), 0) AS committed,
+           COALESCE(SUM(CASE WHEN ft.status = 'posted' THEN ft.amount ELSE 0 END), 0) AS actual
+         FROM budget_pot bp
+         LEFT JOIN finance_transaction ft ON ft.budget_pot_id = bp.id
+         GROUP BY bp.id, bp.parent_id
+       ),
+       rollup AS (
+         SELECT pot_id, parent_id, committed, actual
+         FROM pot_base
+         UNION ALL
+         SELECT parent.pot_id AS pot_id,
+                parent.parent_id,
+                r.committed,
+                r.actual
+         FROM rollup r
+         JOIN pot_base parent ON parent.pot_id = r.parent_id
+         WHERE r.parent_id IS NOT NULL
+       ),
+       agg AS (
+         SELECT pot_id,
+                SUM(committed) AS committed,
+                SUM(actual) AS actual
+         FROM rollup
+         GROUP BY pot_id
+       )
+       UPDATE budget_pot bp
+       LEFT JOIN agg ON agg.pot_id = bp.id
+       SET bp.committed_amount = COALESCE(agg.committed, 0),
+           bp.actual_amount = COALESCE(agg.actual, 0)`
     );
   } catch (err) {
     console.warn('[finance] failed to refresh pot sums', err?.message || err);
@@ -28836,7 +28956,7 @@ app.post('/api/finance/allocations', async (req, res) => {
   try {
     const body = req.body || {};
     const sourcePotId = Number(body.sourcePotId || body.source_pot_id);
-    const destPotId = Number(body.destPotId || body.dest_pot_id);
+    const destPotId = Number(body.destinationPotId || body.destPotId || body.dest_pot_id);
     const amount = Number(body.amount);
     const justification = typeof body.justification === 'string' ? body.justification.trim() : '';
     if (!Number.isFinite(sourcePotId) || !Number.isFinite(destPotId) || sourcePotId === destPotId) {
@@ -29105,12 +29225,36 @@ app.post('/api/finance/allocations/:id/apply', async (req, res) => {
 app.get('/api/finance/transactions', async (req, res) => {
   if (requireFinanceRole(req, res)) return;
   try {
-    const { potId, caseId, interventionId, limit = 100 } = req.query || {};
+    const { potId, potIds, caseId, interventionId, limit = 100 } = req.query || {};
     const where = [];
     const params = [];
-    if (potId) {
+    const parsedPotIds = [];
+    if (Array.isArray(potIds)) {
+      potIds.forEach(id => {
+        const num = Number(id);
+        if (Number.isFinite(num)) parsedPotIds.push(num);
+      });
+    } else if (typeof potIds === 'string') {
+      potIds
+        .split(',')
+        .map(s => s.trim())
+        .forEach(id => {
+          const num = Number(id);
+          if (Number.isFinite(num)) parsedPotIds.push(num);
+        });
+    }
+    const singlePotId = Number(potId);
+    if (Number.isFinite(singlePotId)) {
+      parsedPotIds.push(singlePotId);
+    }
+    const uniquePotIds = Array.from(new Set(parsedPotIds));
+    if (uniquePotIds.length === 1) {
       where.push('ft.budget_pot_id = ?');
-      params.push(Number(potId));
+      params.push(uniquePotIds[0]);
+    } else if (uniquePotIds.length > 1) {
+      const placeholders = uniquePotIds.map(() => '?').join(',');
+      where.push(`ft.budget_pot_id IN (${placeholders})`);
+      params.push(...uniquePotIds);
     }
     if (caseId) {
       where.push('ft.case_id = ?');
@@ -29392,6 +29536,8 @@ app.post('/api/finance/budget-snapshots', async (req, res) => {
             pot.parent_id,
             pot.name,
             pot.code,
+            pot.gl_project_code_external || null,
+            pot.gl_project_code_internal || null,
           pot.agreement_id || null,
           pot.funding_source || null,
           pot.is_restricted ? 1 : 0,
@@ -29787,6 +29933,8 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
           pot.parent_id,
           pot.name,
           pot.code,
+          pot.gl_project_code_external || null,
+          pot.gl_project_code_internal || null,
           pot.agreement_id || null,
           pot.funding_source || null,
           pot.is_restricted ? 1 : 0,
@@ -29803,7 +29951,7 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
         ]);
         await conn.query(
           `INSERT INTO budget_snapshot_pot
-           (snapshot_id, budget_pot_id, parent_pot_id, name, code, agreement_id, funding_source, is_restricted, pot_type, is_admin_cap, fiscal_year_tag,
+           (snapshot_id, budget_pot_id, parent_pot_id, name, code, gl_project_code_external, gl_project_code_internal, agreement_id, funding_source, is_restricted, pot_type, is_admin_cap, fiscal_year_tag,
             approved_amount, adjusted_amount, committed_amount, actual_amount, forecast_amount, admin_share_amount, metadata)
            VALUES ?`,
           [values]

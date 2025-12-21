@@ -17,6 +17,7 @@ import {
 } from "@cloudscape-design/components";
 import { apiFetch } from "../../../../auth/apiClient.js";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
+import { formatCurrencyDisplay, getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat.js";
 
 const STATUS_OPTIONS = [
   { value: "planned", label: "Planned" },
@@ -275,7 +276,8 @@ const InterventionModal = ({
     setError(null);
     setNocSuggestions([]);
     setNocSuggestionsLoading(false);
-    setIsClosing(Boolean(startInCloseMode && canClose && mode === "edit"));
+    const isClosed = intervention && isClosedStatusValue(intervention.status);
+    setIsClosing(Boolean((startInCloseMode && canClose && mode === "edit") || (mode === "edit" && isClosed)));
     setCloseForm(buildCloseForm(intervention));
   }, [visible, mode, intervention, startInCloseMode, canClose, plan, inheritedFundingStream]);
 
@@ -350,6 +352,13 @@ const InterventionModal = ({
   const isReadOnly = Boolean(readOnly || (mode === "edit" && isClosedIntervention && !canClose));
   const modalHeader =
     mode === "edit" ? (isReadOnly ? "View intervention" : "Edit intervention") : "Add intervention";
+  useEffect(() => {
+    if (!visible) return;
+    if (mode !== "edit") return;
+    if (intervention && isClosedStatusValue(intervention.status)) {
+      setIsClosing(true);
+    }
+  }, [visible, mode, intervention]);
 
   const selectOptions = useMemo(() => {
     const formatted = (Array.isArray(codeOptions) ? codeOptions : [])
@@ -547,22 +556,15 @@ const InterventionModal = ({
     return form.cost;
   }, [isRecurringCost, recurringTotal, form.cost]);
   const formattedCostDisplay = useMemo(() => {
-    if (costInputValue === "" || costInputValue === null || typeof costInputValue === "undefined") {
-      return "";
-    }
-    const num = Number(costInputValue);
-    if (!Number.isFinite(num)) return costInputValue;
-    return `$${num.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return formatCurrencyDisplay(costInputValue);
   }, [costInputValue]);
   const [isCostFocused, setIsCostFocused] = useState(false);
   const [isRecurringAmountFocused, setIsRecurringAmountFocused] = useState(false);
 
   const formattedRecurringAmount = useMemo(() => {
-    if (!form.recurringAmount) return "";
-    const num = Number(form.recurringAmount);
-    if (!Number.isFinite(num)) return form.recurringAmount;
-    return `$${num.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return formatCurrencyDisplay(form.recurringAmount);
   }, [form.recurringAmount]);
+  const [isActualCostFocused, setIsActualCostFocused] = useState(false);
 
 const applyFieldSideEffects = (draft, field, value) => {
   const next = { ...draft, [field]: value };
@@ -981,6 +983,7 @@ const applyFieldSideEffects = (draft, field, value) => {
             : "Close edit intervention modal"
           : "Close new intervention modal"
       }
+      size="large"
       footer={
         <SpaceBetween size="xs" direction="horizontal">
           <Button onClick={handleCancel} disabled={loading}>
@@ -1036,6 +1039,71 @@ const applyFieldSideEffects = (draft, field, value) => {
         <Box color="text-body-secondary" fontSize="body-s">
           All fields can be updated while the intervention remains in a planned or in-progress state. Use "Close intervention" to record the final outcome and actual spend. Activating an intervention will also activate its parent action plan if it is still in draft.
         </Box>
+        {mode === "edit" && (isClosing || isClosedIntervention) && (
+          <SpaceBetween size="s">
+            <Header variant="h3">Close intervention</Header>
+            {showCloseGuidance && isClosing && canClose && (
+              <Alert
+                type={isDirty ? "warning" : "info"}
+                dismissible
+                dismissAriaLabel="Dismiss close guidance"
+                onDismiss={() => setShowCloseGuidance(false)}
+              >
+                {isDirty
+                  ? "Save pending edits before closing. Then pick an outcome, closure status, and final amounts to record the intervention."
+                  : "Choose the outcome, closure status, completion date, and actual cost (if applicable) to close this intervention."}
+              </Alert>
+            )}
+          <ColumnLayout columns={3} variant="text-grid">
+            <FormField label="ESDC outcome" description="Required to close.">
+              <Select
+                selectedOption={selectedCloseOutcomeOption}
+                onChange={({ detail }) =>
+                  handleCloseChange("outcome", detail.selectedOption?.value || "")
+                }
+                options={outcomeSelectOptions}
+                filteringType="auto"
+                disabled={isReadOnly || !canClose}
+              />
+            </FormField>
+            <FormField label="Closure status">
+              <Select
+                selectedOption={selectedCloseStatusOption}
+                onChange={({ detail }) =>
+                  handleCloseChange("status", detail.selectedOption?.value || "completed")
+                  }
+                  options={CLOSE_STATUS_OPTIONS}
+                disabled={isReadOnly || !canClose}
+                />
+              </FormField>
+              <FormField
+                label="Completion date"
+                description="Required. Must match the final intervention end date."
+              >
+                <DatePicker
+                  value={closeForm.completionDate}
+                  onChange={({ detail }) => handleCloseChange("completionDate", detail.value)}
+                  placeholder="YYYY-MM-DD"
+                  disabled={isReadOnly || !canClose}
+              />
+            </FormField>
+            <FormField
+                label="Actual cost"
+                description="Whole dollars 0–999999. Leave blank if not applicable."
+              >
+                <Input
+                  value={getCurrencyInputDisplayValue(closeForm.actualAmount, isActualCostFocused)}
+                  onChange={({ detail }) => handleCloseChange("actualAmount", detail.value)}
+                  onFocus={() => setIsActualCostFocused(true)}
+                  onBlur={() => setIsActualCostFocused(false)}
+                  placeholder="e.g. 4200"
+                  disabled={isReadOnly || !canClose}
+                />
+              </FormField>
+            </ColumnLayout>
+          </SpaceBetween>
+        )}
+
         <SpaceBetween size="xl">
           <SpaceBetween size="s">
             <Header variant="h3">Intervention details</Header>
@@ -1223,7 +1291,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                   </FormField>
                   <FormField label="Amount per period">
                     <Input
-                      value={isRecurringAmountFocused ? form.recurringAmount : formattedRecurringAmount}
+                      value={getCurrencyInputDisplayValue(form.recurringAmount, isRecurringAmountFocused)}
                       onChange={({ detail }) => handleChange("recurringAmount", detail.value)}
                       onFocus={() => setIsRecurringAmountFocused(true)}
                       onBlur={() => setIsRecurringAmountFocused(false)}
@@ -1243,11 +1311,11 @@ const applyFieldSideEffects = (draft, field, value) => {
                       disabled
                     />
                   </FormField>
-                  <FormField
-                    label="Cost"
-                    description="Calculated total based on recurring schedule."
-                    errorText={fieldErrors.cost}
-                  >
+              <FormField
+                label="Planned cost"
+                description="Calculated total based on recurring schedule."
+                errorText={fieldErrors.cost}
+              >
                     <Input
                       value={formattedCostDisplay}
                       onChange={({ detail }) => handleChange("cost", detail.value)}
@@ -1259,9 +1327,9 @@ const applyFieldSideEffects = (draft, field, value) => {
                 </>
               )}
               {!isRecurringCost && (
-                <FormField label="Cost" errorText={fieldErrors.cost}>
+                <FormField label="Planned cost" errorText={fieldErrors.cost}>
                   <Input
-                    value={isReadOnly || isCostFocused ? costInputValue : formattedCostDisplay}
+                    value={getCurrencyInputDisplayValue(costInputValue, isCostFocused)}
                     onChange={({ detail }) => handleChange("cost", detail.value)}
                     onFocus={() => setIsCostFocused(true)}
                     onBlur={() => setIsCostFocused(false)}
@@ -1285,10 +1353,10 @@ const applyFieldSideEffects = (draft, field, value) => {
               />
             </FormField>
           </SpaceBetween>
-          {mode === "edit" && canClose && isClosing && (
+          {mode === "edit" && (isClosing || isClosedIntervention) && (
             <SpaceBetween size="s">
               <Header variant="h3">Close intervention</Header>
-              {showCloseGuidance && (
+              {showCloseGuidance && isClosing && canClose && (
                 <Alert
                   type={isDirty ? "warning" : "info"}
                   dismissible
@@ -1309,6 +1377,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                   }
                   options={outcomeSelectOptions}
                   filteringType="auto"
+                  disabled={isReadOnly || !canClose}
                 />
               </FormField>
               <FormField label="Closure status">
@@ -1318,6 +1387,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                     handleCloseChange("status", detail.selectedOption?.value || "completed")
                     }
                     options={CLOSE_STATUS_OPTIONS}
+                  disabled={isReadOnly || !canClose}
                   />
                 </FormField>
                 <FormField
@@ -1328,16 +1398,20 @@ const applyFieldSideEffects = (draft, field, value) => {
                     value={closeForm.completionDate}
                     onChange={({ detail }) => handleCloseChange("completionDate", detail.value)}
                     placeholder="YYYY-MM-DD"
+                    disabled={isReadOnly || !canClose}
                 />
               </FormField>
               <FormField
-                  label="Actual amount"
+                  label="Actual cost"
                   description="Whole dollars 0–999999. Leave blank if not applicable."
                 >
                   <Input
-                    value={closeForm.actualAmount}
+                    value={getCurrencyInputDisplayValue(closeForm.actualAmount, isActualCostFocused)}
                     onChange={({ detail }) => handleCloseChange("actualAmount", detail.value)}
+                    onFocus={() => setIsActualCostFocused(true)}
+                    onBlur={() => setIsActualCostFocused(false)}
                     placeholder="e.g. 4200"
+                    disabled={isReadOnly || !canClose}
                   />
                 </FormField>
               </ColumnLayout>

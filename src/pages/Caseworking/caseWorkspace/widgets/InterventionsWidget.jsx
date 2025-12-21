@@ -52,6 +52,46 @@ const statusIndicatorType = status => {
   return "info";
 };
 
+const toNumberOrNull = value => {
+  if (value === null || typeof value === "undefined") return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const numeric = Number(trimmed.replace(/,/g, ""));
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const getPlannedCost = item =>
+  toNumberOrNull(
+    item.plannedCost ??
+      item.cost ??
+      item.budgetAmount ??
+      item.approvedAmount ??
+      item.intervention_cost ??
+      item.interventionCost
+  );
+
+const getActualCost = item => toNumberOrNull(item.actualAmount);
+
+const getDisplayCost = item => {
+  const actual = getActualCost(item);
+  const planned = getPlannedCost(item);
+  const closed = isClosedStatus(item.status);
+  if (closed && actual !== null) {
+    return { value: actual, label: "actual" };
+  }
+  if (planned !== null) {
+    return { value: planned, label: "planned" };
+  }
+  if (actual !== null) {
+    return { value: actual, label: closed ? "actual" : "planned" };
+  }
+  return { value: null, label: null };
+};
+
 const renderComplianceBadge = status => {
   const value = (status || "").toLowerCase();
   if (value === "ok" || value === "clean") return <Badge color="green">OK</Badge>;
@@ -76,7 +116,6 @@ const ALL_COLUMN_IDS = [
   "outcome",
   "duration",
   "cost",
-  "pot",
   "compliance",
   "actions",
 ];
@@ -238,6 +277,15 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const pendingFocusRef = useRef(null);
   const selectedPlanRef = useRef(selectedActionPlanId);
+  const refreshInterventions = useCallback(async () => {
+    if (typeof refresh !== "function") return;
+    try {
+      await refresh();
+    } catch (err) {
+      console.warn("[InterventionsWidget] refresh failed", err);
+      setErrorMessage(current => current ?? (err?.message || "Unable to refresh interventions."));
+    }
+  }, [refresh]);
 
   const initialPreferences = useMemo(() => loadStoredPreferences(), []);
   const [pageSize, setPageSize] = useState(initialPreferences.pageSize);
@@ -644,6 +692,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     if (result?.id) {
       setSelectedInterventionId(result.id);
     }
+    await refreshInterventions();
     return result;
   };
 
@@ -670,6 +719,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     if (result?.id) {
       setSelectedInterventionId(result.id);
     }
+    await refreshInterventions();
     return result;
   };
 
@@ -715,6 +765,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       if (selectedInterventionId === pendingDelete.id) {
         setSelectedInterventionId(null);
       }
+      await refreshInterventions();
     } catch (error) {
       setErrorMessage(error?.message || "Unable to delete intervention.");
     } finally {
@@ -794,8 +845,22 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         header: "Duration (weeks)",
         cell: item => (Number.isFinite(item.durationWeeks) ? item.durationWeeks : "-"),
       },
-      { id: "cost", header: "Cost", cell: item => formatCurrency(item.cost) },
-      { id: "pot", header: "Budget pot", cell: item => item.potId ?? "Unmapped" },
+      {
+        id: "cost",
+        header: "Cost",
+        cell: item => {
+          const cost = getDisplayCost(item);
+          if (cost.value === null) return "-";
+          return (
+            <Box>
+              <div>{formatCurrency(cost.value)}</div>
+              <div style={{ color: "var(--color-text-body-secondary)", fontSize: "12px" }}>
+                ({cost.label === "actual" ? "actual" : "planned"})
+              </div>
+            </Box>
+          );
+        },
+      },
       {
         id: "compliance",
         header: "Compliance",

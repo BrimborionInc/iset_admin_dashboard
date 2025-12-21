@@ -5,7 +5,6 @@ import {
   Header,
   SpaceBetween,
   ButtonDropdown,
-  ColumnLayout,
   Box,
   StatusIndicator,
   ProgressBar,
@@ -13,6 +12,7 @@ import {
   Link,
   Tabs,
   Table,
+  LineChart,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
 import { useBudgetsData } from "./BudgetsDataContext.jsx";
@@ -24,6 +24,30 @@ const formatCurrency = value => {
 };
 
 const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const fiscalMonthOrder = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
+const lineChartI18nStrings = {
+  detailPopoverDismissAriaLabel: "Dismiss",
+  legendAriaLabel: "Burn-rate graph legend",
+  xAxisAriaRoleDescription: "Months on the fiscal calendar",
+  yAxisAriaRoleDescription: "Spend amounts in Canadian dollars",
+  xTickFormatter: label => label,
+  yTickFormatter: value => formatCurrency(value),
+  xTickFormatterLabel: label => `Month ${label}`,
+  yTickFormatterLabel: value => formatCurrency(value),
+};
+
+const labelForMonth = m => monthLabels[(m - 1 + 12) % 12];
+const monthsForTimeframe = timeframe => {
+  if (!timeframe) return fiscalMonthOrder;
+  if (!timeframe.quarter) return fiscalMonthOrder;
+  const quarterMap = {
+    q1: [4, 5, 6],
+    q2: [7, 8, 9],
+    q3: [10, 11, 12],
+    q4: [1, 2, 3],
+  };
+  return quarterMap[timeframe.quarter] || fiscalMonthOrder;
+};
 
 const buildTimeframesFromFiscalYear = fiscalYear => {
   if (!fiscalYear) return [];
@@ -49,6 +73,9 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
   const [transactions, setTransactions] = useState([]);
   const [loadingTx, setLoadingTx] = useState(false);
   const [txError, setTxError] = useState(null);
+  const [planSeries, setPlanSeries] = useState([]);
+  const [actualSeries, setActualSeries] = useState([]);
+  const [graphError, setGraphError] = useState(null);
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
@@ -79,6 +106,31 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
     return match || null;
   }, [pots, selectedPotId, isDraftSelection]);
 
+  const selectedPotAndDescendants = useMemo(() => {
+    if (!activeSelectedPot) return [];
+    if (!Array.isArray(pots) || !pots.length) return [activeSelectedPot.id];
+    const childrenMap = new Map();
+    pots.forEach(p => {
+      const parent = p.parentId || p.parent_id || null;
+      if (!parent) return;
+      const list = childrenMap.get(String(parent)) || [];
+      list.push(p.id);
+      childrenMap.set(String(parent), list);
+    });
+    const acc = [];
+    const stack = [activeSelectedPot.id];
+    const seen = new Set();
+    while (stack.length) {
+      const id = stack.pop();
+      if (seen.has(String(id))) continue;
+      seen.add(String(id));
+      acc.push(id);
+      const kids = childrenMap.get(String(id)) || [];
+      kids.forEach(k => stack.push(k));
+    }
+    return acc;
+  }, [activeSelectedPot, pots]);
+
   useEffect(() => {
     const fy = activeSelectedPot?.fiscalYear || activeVersion?.label || null;
     if (!fy) {
@@ -101,7 +153,11 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
       setLoadingTx(true);
       setTxError(null);
       try {
-        const resp = await apiFetch(`/api/finance/transactions?potId=${activeSelectedPot.id}&limit=5000`, {
+        const potQuery =
+          selectedPotAndDescendants.length > 1
+            ? `potIds=${selectedPotAndDescendants.map(id => encodeURIComponent(id)).join(",")}`
+            : `potId=${encodeURIComponent(activeSelectedPot.id)}`;
+        const resp = await apiFetch(`/api/finance/transactions?${potQuery}&limit=5000`, {
           signal: controller.signal,
         });
         if (!resp.ok) {
@@ -110,6 +166,7 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
         const txs = await resp.json();
         setTransactions(txs || []);
       } catch (err) {
+        if (err?.name === "AbortError") return;
         console.error("[Finance] burn-rate interventions failed to load tx", err);
         setTxError(err.message || "Failed to load transactions");
         setTransactions([]);
@@ -119,29 +176,56 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
     };
     loadTx();
     return () => controller.abort();
-  }, [activeSelectedPot]);
+  }, [activeSelectedPot, selectedPotAndDescendants]);
 
   const overview = useMemo(() => {
     if (!activeSelectedPot) {
       return null;
     }
-    const adjusted = Number(activeSelectedPot.adjusted) || 0;
-    const actual = Number(activeSelectedPot.actual) || 0;
-    const burn = adjusted > 0 ? actual / adjusted : 0;
-    const remaining = Number.isFinite(activeSelectedPot.remaining) ? activeSelectedPot.remaining : adjusted - actual;
-    const forecastVariance = Number(activeSelectedPot.forecastVariance);
-    const varianceType = forecastVariance > 0 ? "error" : forecastVariance < 0 ? "success" : "info";
-    const varianceLabel = forecastVariance > 0 ? "Forecast above budget" : forecastVariance < 0 ? "Forecast below budget" : "On plan";
+    const scopeIds = selectedPotAndDescendants.length ? selectedPotAndDescendants : [activeSelectedPot.id];
+    const sums = scopeIds.reduce(
+      (acc, id) => {
+        const pot = (pots || []).find(p => String(p.id) === String(id));
+        if (!pot) return acc;
+        acc.adjusted += Number(pot.adjusted ?? pot.adjusted_amount) || 0;
+        acc.actual += Number(pot.actual) || 0;
+        acc.forecastVariance += Number(pot.forecastVariance) || 0;
+        return acc;
+      },
+      { adjusted: 0, actual: 0, forecastVariance: 0 }
+    );
+    const burn = sums.adjusted > 0 ? sums.actual / sums.adjusted : 0;
+    const remaining = sums.adjusted - sums.actual;
+    const overBudget = remaining < 0;
+    const varianceType = overBudget ? "error" : sums.forecastVariance > 0 ? "error" : sums.forecastVariance < 0 ? "success" : "info";
+    const varianceLabel = overBudget
+      ? "Over budget"
+      : sums.forecastVariance > 0
+        ? "Forecast above budget"
+        : sums.forecastVariance < 0
+          ? "Forecast below budget"
+          : "On plan";
     return {
       name: activeSelectedPot.name,
+      scopeCount: scopeIds.length,
       burnPct: Math.max(0, Math.min(100, Math.round(burn * 100))),
       remaining,
       varianceType,
       varianceLabel,
-      forecastVariance,
+      varianceValue: overBudget ? Math.abs(remaining) : Math.abs(sums.forecastVariance || remaining),
       guardrail: activeSelectedPot.policyNotes || "Guardrails not documented.",
     };
-  }, [activeSelectedPot]);
+  }, [activeSelectedPot, pots, selectedPotAndDescendants]);
+
+  const planActualDelta = useMemo(() => {
+    const lastPlan = planSeries?.[planSeries.length - 1]?.y || 0;
+    const lastActual = actualSeries?.[actualSeries.length - 1]?.y || 0;
+    return {
+      plan: lastPlan,
+      actual: lastActual,
+      delta: lastActual - lastPlan,
+    };
+  }, [planSeries, actualSeries]);
 
   const actionsArea = (
     <Select
@@ -201,6 +285,71 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
       .sort((a, b) => new Date(b.transactionDate || b.createdAt || b.updatedAt) - new Date(a.transactionDate || a.createdAt || a.updatedAt));
   }, [timeframe, transactions]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadPlan = async () => {
+      if (!activeSelectedPot || !timeframe) {
+        setPlanSeries([]);
+        setGraphError(null);
+        return;
+      }
+      setGraphError(null);
+      try {
+        const resp = await apiFetch(`/api/finance/spend-curve?fiscalYear=${encodeURIComponent(timeframe.fiscalYear)}`, {
+          signal: controller.signal,
+        });
+        if (!resp.ok) {
+          throw new Error(`Plan load failed (${resp.status})`);
+        }
+        const curveData = await resp.json();
+        const entries = Array.isArray(curveData.entries) ? curveData.entries : [];
+        const totalAdjusted = selectedPotAndDescendants.reduce((sum, id) => {
+          const match = (pots || []).find(p => String(p.id) === String(id));
+          return sum + (Number(match?.adjusted ?? match?.adjusted_amount) || 0);
+        }, 0);
+        const pctByMonth = new Map(entries.map(entry => [Number(entry.month), Number(entry.pct)]));
+        let cumulative = 0;
+        const months = monthsForTimeframe(timeframe);
+        const points = months.map(month => {
+          cumulative += pctByMonth.get(month) || 0;
+          return { x: labelForMonth(month), y: Math.round((totalAdjusted * cumulative) / 100) };
+        });
+        setPlanSeries(points);
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          return;
+        }
+        console.error("[Finance] burn-rate plan load failed", err);
+        setGraphError(err.message || "Failed to load spend plan");
+        setPlanSeries([]);
+      }
+    };
+    loadPlan();
+    return () => controller.abort();
+  }, [activeSelectedPot, timeframe, selectedPotAndDescendants, pots]);
+
+  useEffect(() => {
+    if (!timeframe) {
+      setActualSeries([]);
+      return;
+    }
+    const months = monthsForTimeframe(timeframe);
+    const sums = new Map();
+    filteredTransactions.forEach(tx => {
+      const ts = tx.transactionDate || tx.createdAt || tx.updatedAt;
+      if (!ts) return;
+      const dt = new Date(ts);
+      const month = dt.getUTCMonth() + 1;
+      sums.set(month, (sums.get(month) || 0) + (Number(tx.amount) || 0));
+    });
+    let cumulative = 0;
+    const points = months.map(month => {
+      cumulative += sums.get(month) || 0;
+      return { x: labelForMonth(month), y: Math.round(cumulative) };
+    });
+    setActualSeries(points);
+  }, [timeframe, filteredTransactions]);
+
   const interventionColumns = [
     {
       id: "date",
@@ -258,6 +407,69 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
     </Alert>
   );
 
+  const graphMonths = useMemo(() => (timeframe ? monthsForTimeframe(timeframe) : []), [timeframe]);
+  const graphSeries = useMemo(() => {
+    const series = [];
+    if (planSeries?.length) {
+      series.push({
+        title: "Plan",
+        type: "line",
+        data: planSeries,
+        valueFormatter: ({ y }) => formatCurrency(y),
+      });
+    }
+    if (actualSeries?.length) {
+      series.push({
+        title: "Actual",
+        type: "line",
+        data: actualSeries,
+        valueFormatter: ({ y }) => formatCurrency(y),
+      });
+    }
+    return series;
+  }, [planSeries, actualSeries]);
+  const graphXDomain = useMemo(() => graphMonths.map(labelForMonth), [graphMonths]);
+  const graphYDomain = useMemo(() => {
+    const maxVal =
+      Math.max(
+        ...graphSeries.flatMap(s => s.data.map(point => (typeof point.y === "number" ? point.y : Number(point.y) || 0))),
+        0
+      ) || 0;
+    const padded = maxVal > 0 ? Math.ceil(maxVal / 1000) * 1000 : 1000;
+    return [0, padded];
+  }, [graphSeries]);
+
+  const graphTabContent = isDraftSelection ? (
+    draftNotice
+  ) : !activeSelectedPot || !timeframe ? (
+    <Box variant="p">Select an active budget pot to view burn-rate graph.</Box>
+  ) : (
+    <SpaceBetween size="s">
+      {graphError && <StatusIndicator type="error">{graphError}</StatusIndicator>}
+      {!graphSeries.length ? (
+        <Box variant="p">{loadingTx ? "Loading transactions..." : "No spend data for this pot in the selected period."}</Box>
+      ) : (
+        <LineChart
+          series={graphSeries}
+          height={280}
+          xTitle="Month"
+          yTitle="Cumulative spend (CAD)"
+          legendTitle="Data sets"
+          ariaLabel="Burn-rate plan vs. actual"
+          i18nStrings={lineChartI18nStrings}
+          detailPopoverSeriesContent={({ series, y }) => ({
+            key: series.title,
+            value: formatCurrency(y),
+          })}
+          xDomain={graphXDomain}
+          yDomain={graphYDomain}
+          xScaleType="categorical"
+          empty={<Box variant="p">No spend data for this pot in the selected period.</Box>}
+        />
+      )}
+    </SpaceBetween>
+  );
+
   const tabs = [
     {
       id: "overview",
@@ -267,11 +479,25 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
       ) : overview ? (
         <SpaceBetween size="s">
           <Box variant="strong">{overview.name}</Box>
+          {overview.scopeCount > 1 && (
+            <Box variant="awsui-key-label">{`Includes ${overview.scopeCount - 1} child pot${overview.scopeCount - 1 === 1 ? "" : "s"}`}</Box>
+          )}
           <Box variant="awsui-key-label">Burn vs. adjusted budget</Box>
-          <ProgressBar value={overview.burnPct} label={`${overview.burnPct}%`} additionalInfo={`${formatCurrency(overview.remaining)} remaining`} />
+          <ProgressBar
+            value={overview.burnPct}
+            label={`${overview.burnPct}%`}
+            additionalInfo={`${formatCurrency(overview.remaining)} remaining`}
+            variant={overview.remaining < 0 ? "error" : "default"}
+          />
           <StatusIndicator type={overview.varianceType}>
-            {overview.varianceLabel}: {formatCurrency(Math.abs(overview.forecastVariance))}
+            {overview.varianceLabel}: {formatCurrency(overview.varianceValue)}
           </StatusIndicator>
+          <Box variant="awsui-key-label">Plan vs. actual (period)</Box>
+          <Box variant="p">
+            Actual {formatCurrency(planActualDelta.actual)} vs plan {formatCurrency(planActualDelta.plan)} (
+            {planActualDelta.delta >= 0 ? "+" : "-"}
+            {formatCurrency(Math.abs(planActualDelta.delta))})
+          </Box>
           <Box variant="p">{overview.guardrail}</Box>
         </SpaceBetween>
       ) : (
@@ -281,7 +507,7 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
     {
       id: "graph",
       label: "Graph",
-      content: isDraftSelection ? draftNotice : <Box variant="p">Graph placeholder</Box>,
+      content: graphTabContent,
     },
     {
       id: "interventions",

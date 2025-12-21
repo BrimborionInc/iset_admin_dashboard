@@ -37,28 +37,13 @@ const buildInterventionFromApi = (planId, payload = {}) => {
       : { ilmp: "pending", finance: "pending" };
   const status = normaliseInterventionStatus(payload.status);
   const durationDays = toNumberOrNull(payload.durationDays);
-  const costCandidates = [
-    payload.metadata?.cost,
-    payload.metadata?.costSettings?.calculatedTotal,
-    payload.cost,
-    payload.budgetAmount,
-    payload.approvedAmount,
-    payload.actualAmount,
-  ];
-  let costValue = null;
-  for (const candidate of costCandidates) {
-    const numeric = toNumberOrNull(candidate);
-    if (numeric === null) {
-      continue;
-    }
-    if (numeric !== 0) {
-      costValue = numeric;
-      break;
-    }
-    if (costValue === null) {
-      costValue = 0;
-    }
-  }
+  const plannedCost =
+    toNumberOrNull(payload.plannedCost) ??
+    toNumberOrNull(payload.cost) ??
+    toNumberOrNull(payload.budgetAmount) ??
+    toNumberOrNull(payload.approvedAmount) ??
+    toNumberOrNull(payload.metadata?.costSettings?.calculatedTotal) ??
+    toNumberOrNull(payload.metadata?.cost);
   const resolvedNoc =
     payload.noc ||
     payload.nocCode ||
@@ -83,7 +68,8 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     endDate: payload.endDate || null,
     durationDays,
     outcome: payload.outcome || payload.outcomeCode || null,
-    cost: costValue,
+    plannedCost,
+    cost: plannedCost,
     potId: payload.potId || payload.fundingStream || null,
     fundingStream: payload.fundingStream || null,
     postingContext: payload.postingContext || payload.posting_context || payload.metadata?.postingContext || null,
@@ -306,7 +292,8 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
       activatedAt: plan.activatedAt || null,
       closedAt: plan.closedAt || null,
       archivedAt: plan.archivedAt || null,
-      budgetPot: plan.budgetPot || plan.budget_pot || null,
+      budgetPot: plan.budgetPotId || plan.budgetPot || plan.budget_pot || null,
+      budgetPotCode: plan.budgetPotCode || null,
       fundingStream: plan.fundingStream || plan.funding_stream || null,
       postingContext: plan.postingContext || plan.posting_context || null,
       resultCode: plan.resultCode || null,
