@@ -614,14 +614,14 @@ const AppContent = ({ currentRole }) => {
         const href =
           isCaseManaged && caseId
             ? `/cases/${caseId}`
-            : trackingId
-              ? `/application-case/${trackingId}`
-              : null;
+            : caseId
+              ? `/application-case/${caseId}`
+              : trackingId
+                ? `/application-case/${trackingId}`
+                : null;
         const linkColor = flashType === 'info' ? 'inverted' : 'normal';
-        const linkLabel = isCaseManaged
-          ? caseNumber
-            ? `View case ${caseNumber}`
-            : 'View case'
+        const linkLabel = caseId
+          ? (caseNumber ? `View case ${caseNumber}` : 'View case')
           : appReference
             ? `View application ${appReference}`
             : 'View application';

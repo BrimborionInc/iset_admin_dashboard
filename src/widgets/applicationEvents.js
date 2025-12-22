@@ -380,7 +380,7 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
         const trackingId = item.event_data?.tracking_id || item.tracking_id;
         const caseId = item.event_data?.case_id || item.case_id;
         const href = caseId
-          ? `/cases/${caseId}`
+          ? `/application-case/${caseId}`
           : trackingId
             ? `/application-case/${trackingId}`
             : null;

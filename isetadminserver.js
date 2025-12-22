@@ -6261,6 +6261,7 @@ function firstQueryValue(raw) {
 }
 
 const TERMINAL_APPLICATION_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
+const APPROVAL_COST_THRESHOLD = 25000;
 function normaliseApplicationStatusValue(status) {
   if (status === undefined || status === null) return null;
   return String(status).trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -8621,16 +8622,6 @@ async function resolveRegionalCoordinatorContext(req) {
   const staffProfileId = coordinatorInList || (staffIds.length ? staffIds[0] : null);
   const regionId = Number.isInteger(Number(regionIdRaw)) && Number(regionIdRaw) > 0 ? Number(regionIdRaw) : null;
 
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[work-queue][rc-context]', {
-      requestedId: candidateIdRaw,
-      requestedRegion: regionIdRaw,
-      resolvedStaffProfileId: staffProfileId,
-      resolvedRegionId: regionId,
-      staffIds
-    });
-  }
-
   return {
     valid: Number.isInteger(staffProfileId) && staffProfileId > 0,
     staffProfileId: Number.isInteger(staffProfileId) && staffProfileId > 0 ? staffProfileId : null,
@@ -8645,16 +8636,6 @@ async function resolveApplicationAssessorContext(req) {
   const headerRegionIdRaw = req.get('X-Dev-RegionId') || req.get('x-dev-regionid') || null;
   const candidateIdRaw = headerUserIdRaw ?? req.staffProfile?.id ?? null;
   let regionIdRaw = headerRegionIdRaw ?? req.staffProfile?.region_id ?? req.auth?.regionId ?? null;
-
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[assessor-resolve:start]', {
-      headerUserIdRaw,
-      staffProfileId: req.staffProfile?.id ?? null,
-      staffProfileRole: req.staffProfile?.primary_role ?? null,
-      candidateIdRaw,
-      regionIdRaw
-    });
-  }
 
   const matchesAssessorRole = (profile) => {
     const role = profile?.primary_role;
@@ -8695,17 +8676,11 @@ async function resolveApplicationAssessorContext(req) {
   };
 
   let resolvedId = await tryResolveById(candidateIdRaw);
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[assessor-resolve:after-id]', { candidateIdRaw, resolvedId });
-  }
 
   if (!resolvedId && regionIdRaw != null) {
     const regionNumeric = Number(regionIdRaw);
     if (Number.isInteger(regionNumeric) && regionNumeric > 0) {
       resolvedId = await tryResolveByRegion(regionNumeric);
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[assessor-resolve:after-region]', { regionNumeric, resolvedId });
-      }
       if (resolvedId) {
         regionIdRaw = regionNumeric;
       }
@@ -8715,9 +8690,6 @@ async function resolveApplicationAssessorContext(req) {
   if (!resolvedId) {
     try {
       const [[row]] = await pool.query('SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles WHERE primary_role = ? ORDER BY id ASC LIMIT 1', ['Application Assessor']);
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[assessor-resolve:global-fallback]', row || null);
-      }
       if (row && matchesAssessorRole(row)) {
         req.staffProfile = req.staffProfile || row;
         resolvedId = Number(row.id);
@@ -8729,9 +8701,6 @@ async function resolveApplicationAssessorContext(req) {
   }
 
   if (!resolvedId) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[work-queue][assessor-context]', { requestedId: candidateIdRaw, reason: 'no_assessor_profile' });
-    }
     return { valid: false, staffIds: [] };
   }
 
@@ -8742,15 +8711,6 @@ async function resolveApplicationAssessorContext(req) {
     regionId: req.staffProfile?.region_id ?? (regionIdRaw != null ? Number(regionIdRaw) : null),
     staffIds
   };
-
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[work-queue][assessor-context]', {
-      requestedId: candidateIdRaw,
-      resolvedId: context.staffProfileId,
-      resolvedRegionId: context.regionId,
-      staffIds: context.staffIds
-    });
-  }
 
   return context;
 }
@@ -9887,41 +9847,17 @@ app.get('/api/staff/assignable', async (req, res) => {
     const explicitOn = iamModeHeader === 'on';
     const explicitOff = iamModeHeader === 'off';
 
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[staff-assignable] context', {
-        iamModeHeader,
-        bypassHeader,
-        authProvider,
-        envIamEnabled,
-        devBypassEnv,
-        isAuthenticated,
-        explicitOn,
-        explicitOff,
-        hasAuth: !!req.auth,
-        authRole: req.auth ? req.auth.role : null
-      });
-    }
-
     if ((bypassHeader && !explicitOn) || explicitOff) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[staff-assignable] returning placeholders (bypass or explicitOff)');
-      }
       return res.json(placeholderStaff);
     }
 
     if (!envIamEnabled || (!isAuthenticated && devBypassEnv && !explicitOn)) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[staff-assignable] returning placeholders (env or unauthenticated)');
-      }
       return res.json(placeholderStaff);
     }
 
     if (envIamEnabled) {
       const cognitoStaff = await fetchAssignableFromCognito(pool);
       if (Array.isArray(cognitoStaff) && cognitoStaff.length) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.log('[staff-assignable] returning', cognitoStaff.length, 'staff from Cognito');
-        }
         return res.json(cognitoStaff);
       }
     }
@@ -12609,6 +12545,484 @@ const buildHistoryForStep = (stepCursor) => {
   return [...DUMMY_STEP_ORDER];
 };
 
+// --- AI-generated dummy draft helpers --------------------------------------
+const AI_DUMMY_DEFAULT_MODEL = (global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '').trim() || 'mistralai/mistral-7b-instruct';
+const AI_DUMMY_MAX_TOKENS = Math.max(400, Math.min(1600, parseInt(process.env.AI_DUMMY_MAX_TOKENS || '900', 10) || 900));
+const AI_DUMMY_TEMP = Math.min(1, Math.max(0.1, parseFloat(process.env.AI_DUMMY_TEMPERATURE || '0.55')));
+const AI_DUMMY_TOP_P = Math.min(1, Math.max(0.1, parseFloat(process.env.AI_DUMMY_TOP_P || '0.9')));
+const AI_DUMMY_CACHE_TTL_MS = 60 * 1000;
+let __publishedWorkflowSchemaCache = { fetchedAt: 0, payload: null };
+
+async function fetchPublishedWorkflowSchema(force = false) {
+  const now = Date.now();
+  if (!force && __publishedWorkflowSchemaCache.payload && (now - __publishedWorkflowSchemaCache.fetchedAt) < AI_DUMMY_CACHE_TTL_MS) {
+    return __publishedWorkflowSchemaCache.payload;
+  }
+  const [[row]] = await pool.query(
+    "SELECT v FROM iset_runtime_config WHERE scope='publish' AND k='workflow.schema.intake' LIMIT 1"
+  );
+  if (!row || !row.v) {
+    throw new Error('runtime_schema_missing');
+  }
+  let payload = row.v;
+  if (typeof payload === 'string') {
+    payload = JSON.parse(payload);
+  }
+  __publishedWorkflowSchemaCache = { fetchedAt: now, payload };
+  return payload;
+}
+
+function summarizeSchemaForAi(schemaSteps) {
+  const seen = new Set();
+  const summary = [];
+  (schemaSteps || []).forEach(step => {
+    const stepId = step?.id || step?.name || step?.key || 'step';
+    (step?.components || []).forEach(comp => {
+      const key = comp?.storageKey || comp?.props?.name;
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      const type = comp?.type || comp?.template_key || 'text';
+      let options = [];
+      if (Array.isArray(comp?.options)) {
+        options = comp.options
+          .map(o => o?.value || o)
+          .filter(Boolean)
+          .slice(0, 6);
+      }
+      summary.push({ key, type, step: stepId, options });
+    });
+  });
+  return summary.slice(0, 140); // keep prompt compact
+}
+
+function coerceSignatureField(value, name) {
+  const finalName = name || (value && value.name) || '';
+  return { name: finalName, signed: true };
+}
+
+function extractJsonObject(text) {
+  if (!text) return null;
+  try { return JSON.parse(text); } catch (_) {}
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) {
+    try { return JSON.parse(match[0]); } catch (_) {}
+  }
+  return null;
+}
+
+async function generateAiDummyDraft({ provinceCode, stepCursor = 'summary-page', workflowId = 'iset-v1', userId = 48, onProgress = null }) {
+  if (!AI_KEY) {
+    const err = new Error('ai_disabled');
+    err.status = 501;
+    throw err;
+  }
+  const callDiagnostics = [];
+  const callAi = async ({ messages, label, maxTokens = 480 }) => {
+    const payload = {
+      model: AI_DUMMY_DEFAULT_MODEL,
+      messages,
+      temperature: AI_DUMMY_TEMP,
+      top_p: AI_DUMMY_TOP_P,
+      max_tokens: maxTokens
+    };
+    const headers = {
+      Authorization: `Bearer ${AI_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.ALLOWED_ORIGIN || 'http://localhost:3001',
+      'X-Title': 'Admin Dummy Draft Generator'
+    };
+    try {
+      const resp = await axios.post('https://openrouter.ai/api/v1/chat/completions', payload, { headers, timeout: 20000 });
+      const content = resp.data?.choices?.[0]?.message?.content || '';
+      callDiagnostics.push({
+        attempt: label,
+        status: resp.status,
+        model: AI_DUMMY_DEFAULT_MODEL,
+        contentPreview: String(content || '').slice(0, 200)
+      });
+      return { content, providerData: resp.data };
+    } catch (err) {
+      callDiagnostics.push({
+        attempt: `${label}-error`,
+        status: err?.response?.status || 500,
+        message: err?.message || 'request_failed',
+        providerData: err?.response?.data || null
+      });
+      const e = new Error(err?.response?.data?.error || err?.message || 'ai_request_failed');
+      e.status = err?.response?.status || 500;
+      e.details = err?.response?.data || null;
+      throw e;
+    }
+  };
+
+function buildStepChunks(schemaSteps) {
+  const chunks = [];
+  const orderMap = new Map(DUMMY_STEP_ORDER.map((id, idx) => [id, idx]));
+  const grouped = new Map();
+  (schemaSteps || []).forEach(step => {
+    const stepId = step?.stepId || step?.step_id || step?.id || step?.name || step?.key || 'step';
+    const comps = Array.isArray(step?.components) ? step.components : [];
+    comps.forEach(comp => {
+      const key = comp?.storageKey || comp?.props?.name || comp?.id;
+      if (!key) return;
+      if (!grouped.has(stepId)) grouped.set(stepId, []);
+      grouped.get(stepId).push(key);
+    });
+  });
+  Array.from(grouped.entries())
+    .sort((a, b) => {
+      const ia = orderMap.has(a[0]) ? orderMap.get(a[0]) : 999;
+      const ib = orderMap.has(b[0]) ? orderMap.get(b[0]) : 999;
+      return ia - ib;
+    })
+    .forEach(([stepId, keys]) => {
+      const uniqueKeys = Array.from(new Set(keys)).filter(Boolean);
+      if (!uniqueKeys.length) return;
+      chunks.push({
+        name: stepId,
+        keys: uniqueKeys,
+        maxTokens: Math.min(480, 180 + keys.length * 18),
+        concise: true
+      });
+    });
+  return chunks;
+}
+
+  const schemaPayload = await fetchPublishedWorkflowSchema();
+  const schemaSteps = schemaPayload?.schema || schemaPayload?.schemaEnvelope?.steps || [];
+  const fieldSummary = summarizeSchemaForAi(schemaSteps);
+  const stepChunks = buildStepChunks(schemaSteps);
+  const regionSet = await fetchValidRegionCodeSet().catch(() => new Set());
+  const province = (() => {
+    const normalized = (provinceCode || '').trim().toUpperCase();
+    if (normalized && regionSet.has(normalized)) return normalized;
+    if (regionSet.size) return Array.from(regionSet)[0];
+    return 'ON';
+  })();
+  const payloadData = {};
+  const errors = [];
+  const warnings = [];
+  const chunkLogs = [];
+  let identityFullName = null;
+
+  if (typeof onProgress === 'function') {
+    onProgress({ type: 'plan', steps: stepChunks.map(c => c.name) });
+  }
+
+  for (const chunk of stepChunks) {
+    const keyList = chunk.keys;
+    const exampleSnippet = chunk.example ? `Example values (do not repeat verbatim): ${JSON.stringify(chunk.example)}` : '';
+    const conditionalRules = [];
+    if (keyList.includes('social-assistance') || keyList.includes('income-social-assist')) {
+      conditionalRules.push('- If social-assistance is yes, set income-social-assist to a realistic monthly amount (200-1800).');
+    }
+    if (keyList.includes('expenses_transport') || keyList.includes('expenses_bus_pass')) {
+      conditionalRules.push('- If expenses_transport includes bus/buss_pass, set expenses_bus_pass to a realistic monthly amount (40-200).');
+    }
+    if (keyList.includes('loan-grant') || keyList.includes('loan-grant-details')) {
+      conditionalRules.push('- If loan-grant is yes, provide loan-grant-details with name and monthly amount (concise).');
+    }
+    if (keyList.some(k => String(k).startsWith('paragraph'))) {
+      conditionalRules.push('- Do not leave paragraph fields blank; for each paragraph* key, write a short sentence (8-20 words), plain and neutral.');
+    }
+    if (keyList.some(k => String(k).startsWith('income-'))) {
+      conditionalRules.push('- Incomes are monthly amounts in CAD; keep them reasonable (0-6000 depending on type).');
+    }
+    if (keyList.some(k => String(k).startsWith('expenses'))) {
+      conditionalRules.push('- Expenses are monthly amounts in CAD; keep them reasonable (rent 400-2000, groceries 150-1200, transport 0-500).');
+    }
+    if (keyList.includes('first-name') || keyList.includes('last-name')) {
+      conditionalRules.push('- Use varied first/last initials; avoid reusing the same starting letters (do not default to A/B).');
+    }
+    const conditionalSnippet = conditionalRules.length ? `\nConditional rules:\n${conditionalRules.join('\n')}\n` : '';
+    const systemPrompt = `
+You are generating realistic, respectful dummy intake data for the ISET program.
+Return ONLY JSON for the requested keys as: { "payload": { <keys...> } } with no prose, no comments.
+- Applicant is an Indigenous woman in Canada.
+- Use province ${province} for address-province.
+- Use fake-but-plausible values; avoid placeholders and long paragraphs.
+- Use option values where applicable; arrays for multi-selects.
+- Signatures must be objects { "name": "<full name>", "signed": true } when asked.
+- Keep sentences concise (max ~120 characters). Avoid newlines unless list explicitly allows.
+- For Canadian addresses: postal code format A1A 1A1 (uppercase), phone format (###) ###-####.
+- Long-term goal or descriptions: keep under 90 characters, plain sentences.
+${exampleSnippet}
+${conditionalSnippet}
+Vary applicant names across drafts; avoid repeating similar first/last initials.
+`.trim();
+    const userPayload = {
+      instruction: 'Fill only the listed keys with plausible values.',
+      province,
+      keys: keyList,
+      schemaHints: fieldSummary.filter(f => keyList.includes(f.key)),
+      alreadyFilled: Object.keys(payloadData),
+      concise: !!chunk.concise,
+      fullName: payloadData['first-name'] ? `${payloadData['first-name']} ${payloadData['last-name']}`.trim() : null
+    };
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: JSON.stringify(userPayload) }
+    ];
+    let aiContent = '';
+    let parsed = null;
+    try {
+      const { content } = await callAi({ messages, label: `chunk-${chunk.name}`, maxTokens: chunk.maxTokens || 360 });
+      aiContent = content;
+      parsed = extractJsonObject(aiContent);
+      if (!parsed || typeof parsed !== 'object' || typeof parsed.payload !== 'object') {
+        // Fallback retry with stricter minimal prompt for any invalid parse
+        const retryMessages = [
+          { role: 'system', content: `Return ONLY JSON as {"payload":{...keys...}}. No prose. Keep values short and valid. Keys: ${keyList.join(', ')}. Use postal code A1A 1A1, phone (###) ###-#### where applicable. Numbers must be plain numbers.` },
+          { role: 'user', content: JSON.stringify(userPayload) }
+        ];
+        const retry = await callAi({ messages: retryMessages, label: `chunk-${chunk.name}-retry`, maxTokens: Math.min((chunk.maxTokens || 340), 340) });
+        aiContent = retry.content;
+        parsed = extractJsonObject(aiContent);
+      }
+    } catch (err) {
+      errors.push(`chunk_${chunk.name}_request_failed`);
+      chunkLogs.push({ chunk: chunk.name, raw: err.details || err.message, ok: false });
+      continue;
+    }
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.payload !== 'object') {
+      errors.push(`chunk_${chunk.name}_invalid_json`);
+      chunkLogs.push({ chunk: chunk.name, raw: aiContent, ok: false });
+      continue;
+    }
+    const chunkPayload = parsed.payload;
+    const missing = [];
+    keyList.forEach(k => {
+      if (!(k in chunkPayload)) missing.push(k);
+    });
+    if (missing.length) {
+      warnings.push(`chunk_${chunk.name}_missing:${missing.join(',')}`);
+    }
+    Object.entries(chunkPayload).forEach(([k, v]) => {
+      payloadData[k] = v;
+    });
+    const logEntry = { chunk: chunk.name, ok: true, missing, preview: JSON.stringify(chunkPayload).slice(0, 200) };
+    chunkLogs.push(logEntry);
+    if (typeof onProgress === 'function') onProgress({ type: 'chunk', ...logEntry });
+    if (chunk.name === 'identity') {
+      const fn = chunkPayload['first-name'] || payloadData['first-name'] || 'Sky';
+      const ln = chunkPayload['last-name'] || payloadData['last-name'] || 'Test';
+      payloadData['first-name'] = fn;
+      payloadData['last-name'] = ln;
+      if (!payloadData['preferred-name']) payloadData['preferred-name'] = fn;
+      identityFullName = `${fn || ''} ${ln || ''}`.trim() || null;
+    }
+  }
+
+  const firstName = (payloadData && payloadData['first-name']) || 'Sky';
+  const lastName = (payloadData && payloadData['last-name']) || 'Test';
+  const fullName = `${firstName} ${lastName}`.trim() || 'Test Applicant';
+  if (!payloadData['address-province']) payloadData['address-province'] = province;
+  payloadData['first-name'] = String(firstName).trim() || 'Sky';
+  payloadData['last-name'] = String(lastName).trim() || 'Test';
+  payloadData['preferred-name'] = String(payloadData['preferred-name'] || firstName).trim();
+  payloadData['address-province'] = province.toLowerCase();
+  if (!payloadData['address-city']) payloadData['address-city'] = 'Winnipeg';
+  if (!payloadData['address-street-address']) payloadData['address-street-address'] = '123 River Rd';
+  if (!payloadData['address-postcode']) payloadData['address-postcode'] = 'K1A 0B1';
+  // Normalize province code casing to lowercase
+  if (payloadData['address-province']) {
+    payloadData['address-province'] = String(payloadData['address-province']).trim().toLowerCase();
+  }
+  if (!payloadData['contact-email-address']) {
+    payloadData['contact-email-address'] = `${payloadData['first-name'].toLowerCase()}.${payloadData['last-name'].toLowerCase()}@example.com`;
+  }
+  if (!payloadData['telephone-day']) payloadData['telephone-day'] = '(204) 555-0101';
+  if (!payloadData['dob']) payloadData['dob'] = '1988-05-14';
+  if (!payloadData['target-program']) payloadData['target-program'] = null;
+  // Numeric coercion for known fields
+  const NUMERIC_FIELDS = [
+    'income-employment','income-spousal','income-social-assist','income-child-support','income-child-benefit','income-other-description',
+    'expenses-rent','expenses-groceries','expenses-utilities','expenses-electricity','expenses-heating','expenses-water','expenses-sewerage','expenses-garbage',
+    'expenses_transport','expenses_bus_pass','expenses-other-total'
+  ];
+  NUMERIC_FIELDS.forEach(key => {
+    if (key in payloadData) {
+      const raw = payloadData[key];
+      const num = Number(raw);
+      if (Number.isFinite(num)) {
+        payloadData[key] = num;
+      }
+    }
+  });
+  // No automatic program/support defaults; rely on LLM output
+  // Student loan/grant conditional details
+  if (payloadData['loan-grant'] === 'yes' || payloadData['loan-grant'] === true) {
+    if (!payloadData['loan-grant-details']) {
+      payloadData['loan-grant-details'] = 'Provincial student loan (QC) – $250/month.';
+    }
+  }
+  if (!payloadData['labour-force-status']) {
+    payloadData['labour-force-status'] = 'unemployed';
+    warnings.push('labour_fallback_applied');
+  }
+  if (!payloadData['highest-education']) {
+    payloadData['highest-education'] = 'secondary_school_diploma_or_ged';
+  }
+  if (!payloadData['education-year']) {
+    payloadData['education-year'] = 2015;
+  }
+  if (!payloadData['education-location']) {
+    payloadData['education-location'] = province.toLowerCase();
+  }
+  const incomeFields = ['income-employment','income-spousal','income-social-assist','income-child-support','income-child-benefit','income-other','income-other-description'];
+  incomeFields.forEach(f => {
+    if (!(f in payloadData)) payloadData[f] = 0;
+  });
+  if (!payloadData['ei_status']) {
+    payloadData['ei_status'] = 'planning';
+  }
+  // Normalize income numbers to realistic monthly ranges
+  const clamp = (val, min, max) => Math.min(max, Math.max(min, val));
+  const monthlyRanges = {
+    'income-employment': [0, 6000],
+    'income-spousal': [0, 6000],
+    'income-social-assist': [0, 2500],
+    'income-child-support': [0, 2000],
+    'income-child-benefit': [0, 2000],
+    'income-other-description': [0, 4000]
+  };
+  Object.entries(monthlyRanges).forEach(([key, [mn, mx]]) => {
+    if (key in payloadData) {
+      const num = Number(payloadData[key]);
+      if (Number.isFinite(num)) {
+        payloadData[key] = clamp(num, mn, mx);
+      }
+    }
+  });
+  // Normalize expenses to reasonable monthly amounts
+  const expenseRanges = {
+    'expenses-rent': [400, 2000],
+    'expenses-groceries': [150, 1200],
+    'expenses-utilities': [50, 600],
+    'expenses-electricity': [20, 400],
+    'expenses-heating': [20, 400],
+    'expenses-water': [10, 200],
+    'expenses-sewerage': [5, 150],
+    'expenses-garbage': [5, 150],
+    'expenses_transport': [0, 500],
+    'expenses_bus_pass': [0, 250],
+    'expenses-other-total': [0, 800]
+  };
+  Object.entries(expenseRanges).forEach(([key, [mn, mx]]) => {
+    if (key in payloadData) {
+      const num = Number(payloadData[key]);
+      if (Number.isFinite(num)) {
+        payloadData[key] = clamp(num, mn, mx);
+      }
+    }
+  });
+  // Transport-specific: ensure bus pass amount when selected
+  const transportOpts = Array.isArray(payloadData['expenses_transport'])
+    ? payloadData['expenses_transport']
+    : (payloadData['expenses_transport'] ? [payloadData['expenses_transport']] : []);
+  if (transportOpts.some(opt => ['buss_pass','bus_pass','bus'].includes(String(opt).toLowerCase()))) {
+    const amt = Number(payloadData['expenses_bus_pass']);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      const val = Math.round(60 + Math.random() * 80); // 60-140 monthly
+      payloadData['expenses_bus_pass'] = val;
+    }
+  }
+  // Normalize loan-grant-details to a string if object provided
+  if (payloadData['loan-grant-details'] && typeof payloadData['loan-grant-details'] === 'object') {
+    const name = payloadData['loan-grant-details'].name || payloadData['loan-grant-details'].title || 'Student grant';
+    const amt = payloadData['loan-grant-details'].monthly_amount || payloadData['loan-grant-details'].amount || payloadData['loan-grant-details'].value || '';
+    const amtStr = Number.isFinite(Number(amt)) ? `$${Number(amt)}` : String(amt || '$400');
+    payloadData['loan-grant-details'] = `${name} – ${amtStr} per month`;
+  }
+  // Generic fallbacks for missing paragraph fields (avoid empty text blocks)
+  if (!payloadData['paragraph']) {
+    payloadData['paragraph'] = 'I am applying to improve my skills and employment opportunities.';
+  }
+  if (!payloadData['paragraph-2']) {
+    payloadData['paragraph-2'] = 'I am committed to completing this program and contributing to my community.';
+  }
+  if (!payloadData['paragraph-3']) {
+    payloadData['paragraph-3'] = 'My goal is to secure stable work and support my family.';
+  }
+  // Emergency contact defaults
+  if (!payloadData['emergency-contact-name']) payloadData['emergency-contact-name'] = fullName || 'Contact Name';
+  if (!payloadData['emergency-contact-telephone']) payloadData['emergency-contact-telephone'] = '(204) 555-0102';
+  if (!payloadData['emergency-contact-relationship']) payloadData['emergency-contact-relationship'] = 'Family';
+  // Fallbacks for program/support/income if still missing
+  if (!payloadData['target-program']) {
+    payloadData['target-program'] = 'skills_development';
+    warnings.push('program_fallback_applied');
+    chunkLogs.push({ chunk: 'program-core-fallback', ok: true, missing: ['target-program'], preview: 'skills_development' });
+    if (typeof onProgress === 'function') onProgress({ type: 'chunk', chunk: 'program-core-fallback', ok: true, missing: ['target-program'] });
+  }
+  if (!payloadData['long-term-goal']) {
+    payloadData['long-term-goal'] = 'Secure skills training and stable employment in community.';
+    warnings.push('program_goal_fallback_applied');
+  }
+  if (!Array.isArray(payloadData['barriers'])) {
+    payloadData['barriers'] = ['education', 'funding'];
+    warnings.push('program_supports_fallback_applied');
+  }
+  if (!Array.isArray(payloadData['requested-supports']) || !payloadData['requested-supports'].length) {
+    payloadData['requested-supports'] = ['tuition', 'books'];
+    warnings.push('requested-supports defaulted');
+  }
+  if (!payloadData['disability-support']) {
+    payloadData['disability-support'] = 'no';
+  }
+  if (!payloadData['labour-force-status']) {
+    payloadData['labour-force-status'] = 'unemployed';
+    warnings.push('labour_fallback_applied');
+  }
+  if (!payloadData['highest-education']) {
+    payloadData['highest-education'] = 'secondary_school_diploma_or_ged';
+  }
+  if (!payloadData['education-year']) {
+    payloadData['education-year'] = 2015;
+  }
+  if (!payloadData['education-location']) {
+    payloadData['education-location'] = province.toLowerCase();
+  }
+  ['consent', 'indigenous_declaration', 'conflict_applicant_signature', 'legal_submission_sig'].forEach(key => {
+    payloadData[key] = coerceSignatureField(payloadData[key], fullName);
+  });
+
+  // Deterministic signatures and identity-linked fields
+  const reg = payloadData['registration-number'] || `REG-${province}-${String(Date.now()).slice(-5)}`;
+  // Normalize registration number: 10 digits with a space after first three (e.g., 123 4567890)
+  const regNum = (() => {
+    const digits = String(reg).replace(/\D+/g, '').padEnd(10, '0').slice(0, 10);
+    return `${digits.slice(0,3)} ${digits.slice(3)}`;
+  })();
+  const sin = payloadData['social-insurance-number'] || '123-456-789';
+  const affiliation = payloadData['indigenous-affiliation-declaration'] || `Member of the Atikamekw Nation in ${province}`;
+  payloadData['registration-number'] = regNum;
+  payloadData['social-insurance-number'] = sin;
+  payloadData['indigenous-affiliation-declaration'] = affiliation;
+  payloadData['conflict_of_interest'] = payloadData['conflict_of_interest'] || 'no_conflict';
+  const sigName = identityFullName || fullName;
+  payloadData['consent'] = coerceSignatureField(payloadData['consent'], sigName);
+  payloadData['indigenous_declaration'] = coerceSignatureField(payloadData['indigenous_declaration'], sigName);
+  payloadData['conflict_applicant_signature'] = coerceSignatureField(payloadData['conflict_applicant_signature'], sigName);
+  payloadData['legal_submission_sig'] = coerceSignatureField(payloadData['legal_submission_sig'], sigName);
+  const history = buildHistoryForStep(stepCursor);
+  const draftPayload = { ...payloadData, history };
+  const summary = {
+    applicantName: `${payloadData['first-name']} ${payloadData['last-name']}`.trim(),
+    profileId: payloadData['registration-number'] || payloadData['indigenous-affiliation-declaration'] || 'ai-generated',
+    homeCommunity: payloadData['home-comminuty'] || payloadData['address-city'] || null,
+    targetProgram: payloadData['target-program'] || null
+  };
+  return {
+    draftPayload,
+    history,
+    summary,
+    stepCursor,
+    workflowId,
+    validation: { errors, warnings, province, chunks: chunkLogs, calls: callDiagnostics }
+  };
+}
+
 const DUMMY_DRAFTS = [
   {
     id: 'aiyana-bear',
@@ -13152,6 +13566,110 @@ function buildDummyDraft(stepCursor = 'summary-page') {
   };
   return { draftPayload, history, summary };
 }
+
+// GET /api/regions/canada -> province/territory list for dummy generation UI
+app.get('/api/regions/canada', async (_req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT code, name_en FROM canada_region ORDER BY name_en');
+    const options = (rows || []).map(row => ({
+      code: String(row.code || '').trim().toUpperCase(),
+      name: row.name_en || row.code
+    })).filter(opt => opt.code);
+    res.json(options);
+  } catch (err) {
+    console.error('[canada-regions] lookup failed:', err.message);
+    res.status(500).json({ error: 'region_lookup_failed', message: err.message });
+  }
+});
+
+// POST /api/ai/create-dummy-draft
+// Body: { province?: string, userId?: number, stepCursor?: string, workflowId?: string }
+// Query: ?stream=1 to receive NDJSON progress events per chunk and final result.
+app.post('/api/ai/create-dummy-draft', async (req, res) => {
+  const stream = req.query.stream === '1';
+  const body = req.body || {};
+  const userId = Number(body.userId) || 48; // enforce single test user by default
+  const workflowId = String(body.workflowId || 'iset-v1');
+  const stepCursor = String(body.stepCursor || 'summary-page');
+  const province = body.province || body.provinceCode || body.regionCode;
+
+  const sendEvent = (obj) => {
+    if (!stream) return;
+    try {
+      res.write(JSON.stringify(obj) + '\n');
+    } catch (_) {
+      // ignore write errors
+    }
+  };
+
+  try {
+    if (stream) {
+      res.setHeader('Content-Type', 'application/x-ndjson');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.flushHeaders?.();
+    }
+
+    const generated = await generateAiDummyDraft({
+      provinceCode: province,
+      stepCursor,
+      workflowId,
+      userId,
+      onProgress: (event) => sendEvent(event)
+    });
+    const { draftPayload, history, summary, validation } = generated;
+
+    const [existingRows] = await pool.query(
+      'SELECT id, version FROM iset_intake.iset_application_draft_dynamic WHERE user_id = ? LIMIT 1',
+      [userId]
+    );
+
+    let action = 'inserted';
+    let version = 1;
+    if (existingRows.length) {
+      const current = existingRows[0];
+      version = Number(current.version || 1) + 1;
+      await pool.query(
+        `UPDATE iset_intake.iset_application_draft_dynamic
+           SET workflow_id = ?, step_cursor = ?, draft_payload = ?, history = ?, doc_refs = NULL, version = ?
+         WHERE user_id = ?`,
+        [workflowId, stepCursor, JSON.stringify(draftPayload), JSON.stringify(history), version, userId]
+      );
+      action = 'updated';
+    } else {
+      await pool.query(
+        `INSERT INTO iset_intake.iset_application_draft_dynamic
+           (user_id, workflow_id, step_cursor, draft_payload, history, doc_refs, version)
+         VALUES (?,?,?,?,?,NULL,1)`,
+        [userId, workflowId, stepCursor, JSON.stringify(draftPayload), JSON.stringify(history)]
+      );
+    }
+
+    const finalPayload = {
+      ok: true,
+      action,
+      userId,
+      version,
+      stepCursor,
+      workflowId,
+      applicant: summary,
+      validation
+    };
+
+    if (stream) {
+      sendEvent({ type: 'done', result: finalPayload });
+      return res.end();
+    }
+    return res.json(finalPayload);
+  } catch (err) {
+    const status = err.status || 500;
+    console.error('[ai-dummy-draft] error:', err.message);
+    if (stream) {
+      sendEvent({ type: 'error', error: 'ai_dummy_draft_failed', message: err.message, details: err.details || null });
+      return res.end();
+    }
+    res.status(status).json({ error: 'ai_dummy_draft_failed', message: err.message, details: err.details || null });
+  }
+});
 
 // POST /api/create-dummy-draft
 // Body (optional): { userId?: number, stepCursor?: string, workflowId?: string }
@@ -13734,16 +14252,6 @@ app.get('/api/dashboard/case-work-queue', async (req, res) => {
     }
   }
 
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[case-work-queue][role]', {
-      iamMode: iamModeHeader,
-      headerRole: req.get('X-Dev-Role') || req.get('x-dev-role') || null,
-      resolvedRole: role,
-      staffRole: req.staffProfile?.primary_role || null,
-      authRole: req.auth?.role || null
-    });
-  }
-
   try {
     if (role === 'Program Administrator') {
       const [activeCount, inactiveCount, readyToCloseCount, newIntakesCount, followUpsDueCount, ilmpIssuesCount] = await Promise.all([
@@ -13811,10 +14319,6 @@ app.get('/api/dashboard/case-work-queue', async (req, res) => {
           ])
         : [0, 0, 0, 0, 0, 0];
 
-      if (!context?.valid && process.env.NODE_ENV !== 'production') {
-        console.log('[case-work-queue][regional] context invalid', context);
-      }
-
       return res.json({
         role,
         generatedAt: new Date().toISOString(),
@@ -13872,10 +14376,6 @@ app.get('/api/dashboard/case-work-queue', async (req, res) => {
             countReadyToCloseCasesByOwner(pool, staffId)
           ])
         : [0, 0, 0, 0, 0, 0];
-
-      if (!context?.valid && process.env.NODE_ENV !== 'production') {
-        console.log('[case-work-queue][assessor] context invalid', context);
-      }
 
       return res.json({
         role,
@@ -13941,16 +14441,6 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
     if (simRole) {
       role = simRole;
     }
-  }
-
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[work-queue][role]', {
-      iamMode: iamModeHeader,
-      headerRole: req.get('X-Dev-Role') || req.get('x-dev-role') || null,
-      resolvedRole: role,
-      staffRole: req.staffProfile?.primary_role || null,
-      authRole: req.auth?.role || null
-    });
   }
 
   try {
@@ -14047,8 +14537,6 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
           countRegionalDueThisWeek(pool, staffIds),
           countRegionalOverdue(pool, staffIds)
         ]);
-      } else if (process.env.NODE_ENV !== 'production') {
-        console.log('[work-queue][regional] context invalid', context);
       }
 
       return res.json({
@@ -14130,8 +14618,6 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
           countAssessorAwaitingApplicantResponse(pool, staffId),
           countAssessorOverdue(pool, staffId)
         ]);
-      } else if (process.env.NODE_ENV !== 'production') {
-        console.log('[work-queue][assessor] context invalid', context);
       }
 
       return res.json({
@@ -14921,6 +15407,17 @@ app.get('/api/escalations', async (req, res) => {
       return res.status(403).json({ error: 'forbidden' });
     }
 
+    const headerRegionIdRaw = req.get('X-Dev-RegionId') || req.get('x-dev-regionid') || null;
+    const regionIdRaw =
+      headerRegionIdRaw ??
+      req.staffProfile?.region_id ??
+      req.auth?.regionId ??
+      req.auth?.claims?.region_id ??
+      req.auth?.claims?.['custom:region_id'] ??
+      null;
+    const parsedRegionId = Number(regionIdRaw);
+    const regionId = Number.isInteger(parsedRegionId) && parsedRegionId > 0 ? parsedRegionId : null;
+
     const ownerRoleFilter = canonicalEscalationRole(firstQueryValue(req.query.ownerRole || req.query.owner_role)) || null;
     const requesterRoleFilter = canonicalEscalationRole(firstQueryValue(req.query.requesterRole || req.query.requester_role)) || null;
     const stateFilterRaw = firstQueryValue(req.query.state);
@@ -14950,6 +15447,16 @@ app.get('/api/escalations', async (req, res) => {
     } else if (requesterRoleFilter) {
       where.push('LOWER(REPLACE(e.requester_role, " ", "_")) = ?');
       params.push(requesterRoleFilter);
+    }
+
+    const shouldScopeToRegion = !isSysAdmin && roleKey === 'regional_manager';
+    if (shouldScopeToRegion) {
+      if (regionId !== null) {
+        where.push('(sp.region_id = ? OR c.portfolio_region_id = ?)');
+        params.push(regionId, regionId);
+      } else {
+        return res.json({ count: 0, items: [] });
+      }
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -19572,6 +20079,7 @@ async function emitDocumentUploadedEvent({ req, caseId, applicationId, applicant
     size_bytes: typeof sizeBytes === 'number' && Number.isFinite(sizeBytes) ? sizeBytes : null,
     applicant_user_id: applicantUserId || null,
     tracking_id: trackingId,
+    document_type: req?.body?.documentType || req?.body?.document_type || null,
     message: message || (fileName ? `Document uploaded: ${fileName}.` : 'Document uploaded.')
   };
   try {
@@ -32284,6 +32792,11 @@ app.put('/api/cases/:id', async (req, res) => {
     if (!trimmed) return null;
     return trimmed.slice(0, 4000);
   };
+  const parseCostValue = (val) => {
+    if (val === undefined || val === null || val === '') return null;
+    const num = Number(String(val).replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(num) ? num : null;
+  };
 
   let conn;
   let beforeStatus = null;
@@ -32476,16 +32989,50 @@ app.put('/api/cases/:id', async (req, res) => {
       Object.prototype.hasOwnProperty.call(body, 'caseContext') ||
       Object.prototype.hasOwnProperty.call(body, 'case_context');
 
-    const rawAssessmentPotId =
-      body.assessment_intervention_pot_id ??
-      body.assessment_budget_pot_id ??
-      body.interventionPotId ??
-      body.potId ??
-      undefined;
-    if (typeof rawAssessmentPotId !== 'undefined') {
-      assessmentBudgetPotProvided = true;
-      const parsedPotId = toNumericRange(rawAssessmentPotId, { min: 1, max: null, stripNonDigits: true });
-      assessmentBudgetPotId = typeof parsedPotId === 'undefined' ? null : parsedPotId;
+  const rawAssessmentPotId =
+    body.assessment_intervention_pot_id ??
+    body.assessment_budget_pot_id ??
+    body.interventionPotId ??
+    body.potId ??
+    undefined;
+  if (typeof rawAssessmentPotId !== 'undefined') {
+    assessmentBudgetPotProvided = true;
+    const parsedPotId = toNumericRange(rawAssessmentPotId, { min: 1, max: null, stripNonDigits: true });
+    assessmentBudgetPotId = typeof parsedPotId === 'undefined' ? null : parsedPotId;
+  }
+
+    const canonicalRoleForApproval = canonicaliseAccessRole(identity.role);
+    const approvalRequested = (() => {
+      const statusNorm = normaliseCaseStatusValue(body.status);
+      const appStatusNorm = normaliseCaseStatusValue(body.applicationStatus);
+      const reviewStatusNorm = typeof body.assessment_nwac_review_status === 'string'
+        ? body.assessment_nwac_review_status.trim().toLowerCase()
+        : null;
+      return statusNorm === 'approved' || appStatusNorm === 'approved' || reviewStatusNorm === 'approve';
+    })();
+    if (approvalRequested && canonicalRoleForApproval === 'Regional Coordinator') {
+      let approvalCost = parseCostValue(
+        body.assessment_intervention_cost_total ??
+        body.intervention_cost_total ??
+        body.interventionCost ??
+        null
+      );
+      if (approvalCost === null) {
+        const [[costRow]] = await conn.query(
+          'SELECT intervention_cost_total FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
+          [caseId]
+        );
+        approvalCost = parseCostValue(costRow?.intervention_cost_total);
+      }
+      if (approvalCost !== null && approvalCost >= APPROVAL_COST_THRESHOLD) {
+        await conn.rollback();
+        return res.status(403).json({
+          success: false,
+          error: 'approval_threshold_exceeded',
+          message: `Regional Coordinators cannot approve applications with total cost >= ${APPROVAL_COST_THRESHOLD}. Escalate to NWAC Administrators.`,
+          lock: lockCheck.lock || null
+        });
+      }
     }
 
   if (hasAssessmentPayload) {
@@ -33015,18 +33562,36 @@ app.put('/api/cases/:id', async (req, res) => {
     }
 
     if (body.assessment_nwac_review) {
+      const outcome = body.assessment_nwac_review || null;
+      const reason = body.assessment_nwac_reason || null;
+      const approvalCost = parseCostValue(
+        body.assessment_intervention_cost_total ??
+        body.intervention_cost_total ??
+        caseRow?.assessment_intervention_cost_total ??
+        null
+      );
+      const budgetPotId =
+        typeof assessmentBudgetPotId !== 'undefined'
+          ? assessmentBudgetPotId
+          : toNumericRange(body.assessment_intervention_pot_id, { min: 1, max: null, stripNonDigits: true });
+      const postingContext = normalizePostingContext(body.postingContext || body.posting_context || caseRow?.posting_context) || null;
+      const outcomeLabel = outcome === 'approve' ? 'approved' : outcome ? 'not approved' : 'submitted';
       await captureCaseEvent({
         type: 'nwac_review_submitted',
         caseId,
         payload: {
           evaluator_name: actorName || null,
           tracking_id: trackingId,
-          outcome: body.assessment_nwac_review || null,
-          reason: body.assessment_nwac_reason || null,
-          message: body.assessment_nwac_review === 'approve'
-            ? 'NWAC review approved.'
-            : body.assessment_nwac_review
-              ? 'NWAC review rejected.'
+          outcome,
+          outcome_label: outcomeLabel,
+          reason,
+          approval_cost_total: approvalCost,
+          budget_pot_id: budgetPotId ?? null,
+          posting_context: postingContext,
+          message: outcome === 'approve'
+            ? `NWAC review approved${approvalCost !== null ? ` ($${approvalCost})` : ''}${budgetPotId ? ` · Pot ${budgetPotId}` : ''}${postingContext ? ` · Paid from ${postingContext}` : ''}.`
+            : outcome
+              ? `NWAC review not approved${approvalCost !== null ? ` ($${approvalCost})` : ''}${budgetPotId ? ` · Pot ${budgetPotId}` : ''}${postingContext ? ` · Paid from ${postingContext}` : ''}.`
               : 'NWAC review submitted.',
         },
 

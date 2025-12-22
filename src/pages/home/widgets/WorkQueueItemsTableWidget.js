@@ -23,6 +23,7 @@ import { PROGRAM_ADMIN_BUCKETS } from './ProgramAdminWorkQueueWidget';
 import { apiFetch } from '../../../auth/apiClient';
 
 const COLUMN_WIDTHS_STORAGE_KEY = 'work-queue-items-column-widths-v1';
+const APPROVAL_COST_THRESHOLD = 25000;
 const ESDC_OPTIONS = [
   { label: 'CRF', value: 'CRF' },
   { label: 'EI Active Claim', value: 'EI Active Claim' },
@@ -535,6 +536,25 @@ const WorkQueueItemsTableWidget = ({
     ? PROVINCE_LABELS[applicantProvinceCode.toLowerCase()] || applicantProvinceCode
     : 'Province not set';
   const applicantEligibilityLabel = decisionTarget?.assessment_esdc_eligibility || 'no eligibility recorded';
+  const interventionCostValue = useMemo(() => {
+    const raw =
+      decisionTarget?.intervention_cost_total ??
+      decisionTarget?.assessment_intervention_cost_total ??
+      decisionTarget?.interventionCost ??
+      decisionTarget?.intervention_cost ??
+      null;
+    if (raw === null || raw === undefined || raw === '') return null;
+    const parsed = typeof raw === 'string' ? Number(raw.replace(/[^0-9.-]/g, '')) : Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [decisionTarget]);
+  const hasInterventionCost = useMemo(
+    () => interventionCostValue !== null && interventionCostValue > 0,
+    [interventionCostValue]
+  );
+  const approvalThresholdBlocked = useMemo(
+    () => canonicalRole === 'Regional Coordinator' && interventionCostValue !== null && interventionCostValue >= APPROVAL_COST_THRESHOLD,
+    [canonicalRole, interventionCostValue]
+  );
   const selectedBucket =
     useMemo(() => bucketDefinitions.find(bucket => bucket.id === selectedBucketId) || bucketDefinitions[0] || null, [
       bucketDefinitions,
@@ -1093,8 +1113,17 @@ const WorkQueueItemsTableWidget = ({
     const potId = selectedBudgetPot?.value || null;
     const postingContext = isAssessor ? 'external' : postingContextValue || 'external';
     const assessmentEligibility = decisionTarget?.assessment_esdc_eligibility || null;
+    if (approvalThresholdBlocked && decisionValue === 'approve') {
+      setDecisionError(`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`);
+      return;
+    }
+    const requiresBudgetPot = decisionValue === 'approve' && hasInterventionCost;
     if (!caseId || !decisionValue || !assuranceValue || (decisionValue === 'reject' && !decisionReason.trim())) {
       setDecisionError('Fill in all required fields.');
+      return;
+    }
+    if (requiresBudgetPot && !potId) {
+      setDecisionError('Select a budget pot for the intervention cost.');
       return;
     }
     setDecisionSubmitting(true);
@@ -1112,11 +1141,11 @@ const WorkQueueItemsTableWidget = ({
         assessment_nwac_review_status: decisionValue === 'approve' ? 'approve' : 'reject',
         assessment_nwac_review: assuranceValue,
         assessment_nwac_reason: decisionValue === 'reject' ? decisionReason : null,
-        assessment_intervention_pot_id: potId,
+        assessment_intervention_pot_id: requiresBudgetPot ? potId : null,
         assessment_esdc_eligibility: assessmentEligibility,
-        postingContext,
-        status: decisionValue === 'approve' ? 'approved' : 'rejected',
-        applicationStatus: decisionValue === 'approve' ? 'approved' : 'rejected'
+        postingContext: requiresBudgetPot ? postingContext : null,
+        status: decisionValue === 'approve' ? 'approved' : 'in_review',
+        applicationStatus: decisionValue === 'approve' ? 'approved' : 'in_review'
       };
       const response = await apiFetch(`/api/cases/${caseId}`, {
         method: 'PUT',
@@ -1386,15 +1415,22 @@ const WorkQueueItemsTableWidget = ({
             <Select
               placeholder="Select decision"
               selectedOption={selectedDecision}
-              onChange={({ detail }) => setSelectedDecision(detail.selectedOption || null)}
+              onChange={({ detail }) => {
+                if (approvalThresholdBlocked && detail.selectedOption?.value === 'approve') {
+                  setDecisionError(`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`);
+                  return;
+                }
+                setDecisionError(null);
+                setSelectedDecision(detail.selectedOption || null);
+              }}
               options={[
-                { label: 'Approve', value: 'approve' },
-                { label: 'Reject', value: 'reject' }
+                { label: 'Approved', value: 'approve' },
+                { label: 'Not Approved', value: 'reject' }
               ]}
             />
           </FormField>
           {selectedDecision?.value === 'reject' && (
-            <FormField label="Reason for denial" stretch>
+            <FormField label="Reason for not approving" stretch>
               <Textarea
                 value={decisionReason}
                 onChange={({ detail }) => setDecisionReason(detail.value)}
@@ -1413,39 +1449,43 @@ const WorkQueueItemsTableWidget = ({
               ]}
             />
           </FormField>
-          <FormField
-            label="Budget Pot"
-            stretch
-            description={`Applicant province: ${applicantProvinceLabel} · Eligibility: ${applicantEligibilityLabel}`}
-          >
-            <Select
-              placeholder={budgetPotLoading ? 'Loading budget pots' : 'Select budget pot'}
-              selectedOption={selectedBudgetPot}
-              options={budgetPotOptions}
-              statusType={budgetPotLoading ? 'loading' : 'finished'}
-              loadingText="Loading budget pots"
-              onChange={({ detail }) => setSelectedBudgetPot(detail.selectedOption || null)}
-              filteringType="auto"
-            />
-          </FormField>
-          <FormField label="Paid from" errorText={postingContextError} stretch>
-            {isAssessor ? (
-              <Input value="External (region/PTMA)" readOnly disabled />
-            ) : (
-              <RadioGroup
-                direction="horizontal"
-                value={postingContextValue}
-                onChange={({ detail }) => {
-                  setPostingContextError(null);
-                  setPostingContextValue(detail.value || 'external');
-                }}
-                items={[
-                  { value: 'external', label: 'External (region/PTMA)' },
-                  { value: 'internal', label: 'Internal (NWAC)' }
-                ]}
-              />
-            )}
-          </FormField>
+          {selectedDecision?.value === 'approve' && hasInterventionCost && (
+            <>
+              <FormField
+                label="Budget Pot"
+                stretch
+                description={`Applicant province: ${applicantProvinceLabel} · Eligibility: ${applicantEligibilityLabel}`}
+              >
+                <Select
+                  placeholder={budgetPotLoading ? 'Loading budget pots' : 'Select budget pot'}
+                  selectedOption={selectedBudgetPot}
+                  options={budgetPotOptions}
+                  statusType={budgetPotLoading ? 'loading' : 'finished'}
+                  loadingText="Loading budget pots"
+                  onChange={({ detail }) => setSelectedBudgetPot(detail.selectedOption || null)}
+                  filteringType="auto"
+                />
+              </FormField>
+              <FormField label="Paid from" errorText={postingContextError} stretch>
+                {isAssessor ? (
+                  <Input value="External (region/PTMA)" readOnly disabled />
+                ) : (
+                  <RadioGroup
+                    direction="horizontal"
+                    value={postingContextValue}
+                    onChange={({ detail }) => {
+                      setPostingContextError(null);
+                      setPostingContextValue(detail.value || 'external');
+                    }}
+                    items={[
+                      { value: 'external', label: 'External (region/PTMA)' },
+                      { value: 'internal', label: 'Internal (NWAC)' }
+                    ]}
+                  />
+                )}
+              </FormField>
+            </>
+          )}
         </SpaceBetween>
       </Modal>
       <Modal

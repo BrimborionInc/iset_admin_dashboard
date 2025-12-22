@@ -39,7 +39,7 @@ const DOCUMENT_TYPE_OPTIONS_FALLBACK = [
   { value: 'identity_document', label: 'Identity document', scope: 'client' },
   { value: 'supporting_evidence', label: 'Supporting evidence', scope: 'application' },
   { value: 'client_acknowledgement', label: 'Client acknowledgement', scope: 'application' },
-  { value: 'release_student_info', label: 'Release of student info', scope: 'application' },
+  { value: 'iset_client_info_release', label: 'Authorization for the Release of ISET Client Information', scope: 'application' },
   { value: 'media_consent', label: 'Media consent', scope: 'application' },
   { value: 'financial_overview', label: 'Financial overview/budget', scope: 'application' },
   { value: 'financial_records', label: 'Income evidence', scope: 'application' },

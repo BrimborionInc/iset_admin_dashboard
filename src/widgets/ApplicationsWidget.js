@@ -375,7 +375,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
       {
         id: 'applicant_name',
         header: 'Applicant',
-        cell: i => renderCaseLink(i, redactApplicantDisplay(i.applicant_name)),
+        cell: i => renderCaseLink(i, i.applicant_name || '-'),
         minWidth: 180,
         sortingComparator: (a, b) => compareRows('applicant_name', a, b)
       },

@@ -508,6 +508,10 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
   };
 
   const loadCase = useCallback(async () => {
+    if (!caseId) {
+      setState(prev => ({ ...prev, isLoading: false, error: "Failed to load case." }));
+      return null;
+    }
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     try {
       if (!useLiveData) {
@@ -518,13 +522,30 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
         return data;
       }
 
-      const response = await apiFetch(`/api/cases/${caseId}/workspace`, { method: "GET" });
-      if (!response.ok) {
-        const error = new Error("Failed to load case.");
-        error.status = response.status;
-        throw error;
+      const fetchOnce = async () => {
+        const resp = await apiFetch(`/api/cases/${caseId}/workspace`, { method: "GET" });
+        if (!resp.ok) {
+          const error = new Error("Failed to load case.");
+          error.status = resp.status;
+          error.response = resp;
+          throw error;
+        }
+        return resp.json();
+      };
+
+      let payload;
+      try {
+        payload = await fetchOnce();
+      } catch (err) {
+        const status = err?.status;
+        // Retry once for transient errors (network/5xx/locked)
+        if (status && status >= 500) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+          payload = await fetchOnce();
+        } else {
+          throw err;
+        }
       }
-      const payload = await response.json();
       const data = buildCaseFromWorkspaceApi(caseId, payload);
       setState({ caseData: data, isLoading: false, error: null });
       if (typeof window !== 'undefined') {

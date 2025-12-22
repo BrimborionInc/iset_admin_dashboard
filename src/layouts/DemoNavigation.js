@@ -164,6 +164,11 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
   const [clearResult, setClearResult] = useState(null);
   const [isCreatingDummy, setIsCreatingDummy] = useState(false);
   const [dummyResult, setDummyResult] = useState(null);
+  const [provinceOptions, setProvinceOptions] = useState([]);
+  const [selectedProvince, setSelectedProvince] = useState(null);
+  const [isLoadingProvinces, setIsLoadingProvinces] = useState(false);
+  const [showAiDummyModal, setShowAiDummyModal] = useState(false);
+  const [progressEvents, setProgressEvents] = useState([]);
   const [contentDensity, setContentDensity] = useState(() => {
     if (typeof window === 'undefined') return 'comfortable';
     const stored = window.localStorage?.getItem(CONTENT_DENSITY_STORAGE_KEY);
@@ -363,27 +368,115 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
 
   const isConfirmationValid = confirmationValue.trim().toLowerCase() === 'delete';
 
+  const loadProvinceOptions = async () => {
+    setIsLoadingProvinces(true);
+    try {
+      const resp = await apiFetch('/api/regions/canada');
+      const data = await resp.json().catch(() => []);
+      const opts = (Array.isArray(data) ? data : []).map((r) => ({
+        label: r.name && r.code ? `${r.name} (${r.code})` : (r.name || r.code),
+        value: r.code,
+      })).filter((o) => o.value);
+      setProvinceOptions(opts);
+      if (!selectedProvince && opts.length) setSelectedProvince(opts[0]);
+    } catch {
+      // fall back to hardcoded list if needed
+      const fallback = [
+        { label: 'Alberta (AB)', value: 'AB' },
+        { label: 'British Columbia (BC)', value: 'BC' },
+        { label: 'Manitoba (MB)', value: 'MB' },
+        { label: 'New Brunswick (NB)', value: 'NB' },
+        { label: 'Newfoundland and Labrador (NL)', value: 'NL' },
+        { label: 'Northwest Territories (NT)', value: 'NT' },
+        { label: 'Nova Scotia (NS)', value: 'NS' },
+        { label: 'Nunavut (NU)', value: 'NU' },
+        { label: 'Ontario (ON)', value: 'ON' },
+        { label: 'Prince Edward Island (PE)', value: 'PE' },
+        { label: 'Quebec (QC)', value: 'QC' },
+        { label: 'Saskatchewan (SK)', value: 'SK' },
+        { label: 'Yukon (YT)', value: 'YT' },
+      ];
+      setProvinceOptions(fallback);
+      if (!selectedProvince && fallback.length) setSelectedProvince(fallback[0]);
+    } finally {
+      setIsLoadingProvinces(false);
+    }
+  };
+
+  const handleOpenAiDummyModal = () => {
+    setShowAiDummyModal(true);
+    if (!provinceOptions.length) {
+      loadProvinceOptions();
+    }
+  };
+
   const handleCreateDummyDraft = async () => {
     setIsCreatingDummy(true);
     setDummyResult(null);
+    const provinceValue = selectedProvince?.value || selectedProvince?.code || selectedProvince?.label;
+    setProgressEvents([]);
     try {
-      const resp = await apiFetch('/api/create-dummy-draft', { method: 'POST', body: JSON.stringify({}) });
-      let json = null; try { json = await resp.json(); } catch {}
-      if (resp.ok) {
-        const actionLabel = json?.action === 'updated' ? 'updated' : 'created';
-        const targetUserId = json?.userId ?? 48;
-        const applicantName = json?.applicant?.applicantName;
-        const stepLabel = json?.stepCursor || 'summary-page';
-        const messageParts = [`Dummy draft ${actionLabel} for user ${targetUserId}.`];
-        if (applicantName) {
-          messageParts.push(`Profile: ${applicantName}.`);
-        }
-        if (stepLabel) {
-          messageParts.push(`Step: ${stepLabel}.`);
-        }
-        setDummyResult({ type: 'success', message: messageParts.join(' '), details: json });
-      } else {
+      const resp = await apiFetch('/api/ai/create-dummy-draft?stream=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ province: provinceValue, stepCursor: 'summary-page' }),
+      });
+      if (!resp.ok || !resp.body) {
+        const json = await resp.json().catch(() => null);
         setDummyResult({ type: 'error', message: json?.message || 'Failed to create dummy draft', details: json });
+        return;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let evt = null;
+          try { evt = JSON.parse(line); } catch { continue; }
+          if (evt.type === 'plan') {
+            const planned = Array.isArray(evt.steps) ? evt.steps : [];
+            setProgressEvents(planned.map(step => ({ chunk: step, ok: false, pending: true })));
+          } else if (evt.type === 'chunk') {
+            setProgressEvents(prev => {
+              const existingIdx = prev.findIndex(p => p.chunk === evt.chunk);
+              if (existingIdx >= 0) {
+                const next = [...prev];
+                next[existingIdx] = evt;
+                return next;
+              }
+              return [...prev, evt];
+            });
+          } else if (evt.type === 'done') {
+            const json = evt.result || {};
+            const actionLabel = json?.action === 'updated' ? 'updated' : 'created';
+            const targetUserId = json?.userId ?? 48;
+            const applicantName = json?.applicant?.applicantName;
+            const province = json?.applicant?.province || json?.validation?.province;
+            const indigenous = json?.applicant?.indigenous || json?.applicant?.indigenousIdentity || json?.validation?.indigenous;
+            const summary = {
+              applicant: {
+                applicantName: applicantName || '-',
+                province: province || '-',
+                indigenousIdentity: indigenous || '-',
+              },
+            };
+            setDummyResult({
+              type: 'success',
+              message: `Dummy draft ${actionLabel} for user ${targetUserId}.`,
+              details: summary,
+            });
+            setShowAiDummyModal(false);
+          } else if (evt.type === 'error') {
+            setDummyResult({ type: 'error', message: evt.message || 'Failed to create dummy draft', details: evt.details || evt });
+            setShowAiDummyModal(false);
+          }
+        }
       }
     } catch (e) {
       setDummyResult({ type: 'error', message: e.message || 'Failed to create dummy draft' });
@@ -433,8 +526,60 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
           style={{ minWidth: 200 }}
           disabled={iamOn}
         />
-        <Button variant="link" loading={isCreatingDummy} onClick={handleCreateDummyDraft}>Create Dummy Draft</Button>
+        <Button variant="link" loading={isCreatingDummy} onClick={handleOpenAiDummyModal}>Create Dummy Draft</Button>
       </div>
+
+      {showAiDummyModal && (
+        <Modal
+          visible={showAiDummyModal}
+          header="Generate AI dummy draft"
+          closeAriaLabel="Close dummy draft options"
+          onDismiss={() => { if (!isCreatingDummy) setShowAiDummyModal(false); }}
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => setShowAiDummyModal(false)} disabled={isCreatingDummy}>Cancel</Button>
+              <Button
+                variant="primary"
+                loading={isCreatingDummy}
+                disabled={isCreatingDummy || isLoadingProvinces || !selectedProvince}
+                onClick={handleCreateDummyDraft}
+              >
+                Generate draft
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="m">
+            <Box>Select the province or territory for the simulated applicant's address. The AI will auto-generate the rest of the draft.</Box>
+            <FormField label="Province / Territory" description="Used for address fields">
+              <Select
+                loadingText="Loading provinces..."
+                statusType={isLoadingProvinces ? 'loading' : 'finished'}
+                selectedOption={selectedProvince}
+                onChange={({ detail }) => setSelectedProvince(detail.selectedOption)}
+                options={provinceOptions}
+                placeholder="Select province"
+              />
+            </FormField>
+            {isCreatingDummy && (
+              <Box>
+                <strong>Progress:</strong>
+                <ul>
+                  {(progressEvents.length ? progressEvents : [{ chunk: 'processing', pending: true }]).map(ev => {
+                    const status = ev.ok ? 'done' : (ev.pending ? 'pending' : 'error');
+                    return (
+                      <li key={ev.chunk}>
+                        {ev.chunk} — {status}
+                        {ev && !ev.ok && !ev.pending && ev.raw ? ' (invalid JSON)' : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Box>
+            )}
+          </SpaceBetween>
+        </Modal>
+      )}
 
       {confirmVisible && (
         <Modal
@@ -515,8 +660,21 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
           footer={<SpaceBetween size="xs" direction="horizontal"><Button variant="primary" onClick={() => setDummyResult(null)}>Close</Button></SpaceBetween>}
         >
           <SpaceBetween size="s">
-            <Box>{dummyResult.message}</Box>
-            {renderResultDetails(dummyResult.details)}
+            {dummyResult.type === 'success' ? (
+              <>
+                <Box>{dummyResult.message}</Box>
+                <Box>
+                  <div><strong>Applicant:</strong> {dummyResult.details?.applicant?.applicantName || '-'}</div>
+                  <div><strong>Province:</strong> {dummyResult.details?.applicant?.province || dummyResult.details?.validation?.province || '-'}</div>
+                  <div><strong>Indigenous Identity:</strong> {dummyResult.details?.applicant?.indigenousIdentity || dummyResult.details?.applicant?.indigenous || dummyResult.details?.validation?.indigenous || 'Indigenous'}</div>
+                </Box>
+              </>
+            ) : (
+              <>
+                <Box>{dummyResult.message}</Box>
+                {renderResultDetails(dummyResult.details)}
+              </>
+            )}
           </SpaceBetween>
         </Modal>
       )}

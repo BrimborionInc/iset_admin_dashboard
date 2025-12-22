@@ -14,7 +14,8 @@ import {
   Modal,
   Input,
   Textarea,
-  Checkbox
+  Checkbox,
+  Multiselect
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
 import SecureMessagesHelpPanelContent from '../helpPanelContents/secureMessagesHelpPanelContent';
@@ -997,18 +998,28 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
             ) : workflowOptions.length === 0 ? (
               <Box color="text-body-secondary">No eligible forms (type “Form”) available.</Box>
             ) : (
-              <SpaceBetween size="xxs">
-                {workflowOptions.map(wf => (
-                  <Checkbox
-                    key={wf.id}
-                    checked={selectedWorkflowIds.includes(wf.id)}
-                    onChange={() => toggleWorkflowSelection(wf.id)}
-                    disabled={composeSending}
-                  >
-                    {wf.name} <span style={{ color: '#687078' }}>({wf.type === 'consent-cm-prefill' ? 'Form (CM prefill)' : 'Form (No prefill)'})</span>
-                  </Checkbox>
-                ))}
-              </SpaceBetween>
+              <Multiselect
+                placeholder="Select form(s)…"
+                inlineTokens
+                tokenLimit={0}
+                disableBrowserAutocorrect
+                selectedOptions={workflowOptions
+                  .filter(wf => selectedWorkflowIds.includes(wf.id))
+                  .map(wf => ({
+                    label: wf.name,
+                    value: wf.id,
+                    description: wf.type === 'consent-cm-prefill' ? 'Form (CM prefill)' : 'Form (No prefill)'
+                  }))}
+                options={workflowOptions.map(wf => ({
+                  label: wf.name,
+                  value: wf.id,
+                  description: wf.type === 'consent-cm-prefill' ? 'Form (CM prefill)' : 'Form (No prefill)'
+                }))}
+                onChange={({ detail }) => {
+                  setSelectedWorkflowIds(detail.selectedOptions.map(opt => opt.value));
+                }}
+                disabled={composeSending}
+              />
             )}
           </div>
           <Checkbox

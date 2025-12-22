@@ -49,6 +49,10 @@ const requiresInstitutionForCode = (value) => {
 const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
 const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
 const APPLICATION_OUTCOME_STATUSES = new Set(['pending_approval']);
+const OVERVIEW_WORD_LIMIT = 400;
+const EMPLOYMENT_GOALS_WORD_LIMIT = 400;
+const NOT_APPROVED_CASE_STATUS = 'in_review';
+const APPROVAL_COST_THRESHOLD = 25000;
 
 // Section header helper for consistent spacing
 const sectionHeader = (label) => (
@@ -175,6 +179,19 @@ const formatCurrencyDisplay = (value) => {
 
 const isEmptyString = (val) => val === null || val === undefined || val === '';
 const isEmptyArray = (val) => !Array.isArray(val) || val.length === 0;
+const countWords = (value) => {
+  if (!value) return 0;
+  return String(value)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+};
+const limitWords = (value, maxWords) => {
+  if (!value) return '';
+  const words = String(value).trim().split(/\s+/);
+  if (words.length <= maxWords) return value;
+  return words.slice(0, maxWords).join(' ');
+};
 const normalizeConflictDeclarationChoice = (value) => {
   if (value === null || value === undefined) return '';
   const normalized = String(value).trim().toLowerCase();
@@ -343,7 +360,9 @@ const CoordinatorAssessmentWidget = forwardRef(
   const normalizedRole = (userRole || '').toString().trim().toLowerCase();
   const canonicalRole = normalizedRole === 'regional manager' ? 'regional coordinator' : normalizedRole;
   const isAssessor = canonicalRole === 'application assessor';
-  const isEligibilityAdmin = normalizedRole === 'system administrator' || normalizedRole === 'program administrator';
+  const isEligibilityAdmin = ['system administrator', 'program administrator', 'regional manager', 'regional coordinator'].includes(normalizedRole);
+  const numericInterventionCost = useMemo(() => parseCurrencyToNumber(assessment.interventionCost), [assessment.interventionCost]);
+  const isHighCostApprovalBlocked = canonicalRole === 'regional coordinator' && Number.isFinite(numericInterventionCost) && numericInterventionCost >= APPROVAL_COST_THRESHOLD;
 
   const [interventionCodes, setInterventionCodes] = useState([]);
   const [interventionCodesLoading, setInterventionCodesLoading] = useState(false);
@@ -355,7 +374,6 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [conflictDeclarationSignedAt, setConflictDeclarationSignedAt] = useState(caseData?.assessment_conflict_declaration_signed_at || null);
   const [conflictDeclarationChoice, setConflictDeclarationChoice] = useState(caseData?.assessment_conflict_declaration_choice || '');
   const [conflictDeclarationDetails, setConflictDeclarationDetails] = useState(caseData?.assessment_conflict_declaration_details || '');
-  const [declarationChecked, setDeclarationChecked] = useState(false);
   const [isSigningDeclaration, setIsSigningDeclaration] = useState(false);
   const [declarationError, setDeclarationError] = useState(null);
   const [conflictHoldModalVisible, setConflictHoldModalVisible] = useState(false);
@@ -570,9 +588,9 @@ const CoordinatorAssessmentWidget = forwardRef(
     [assessment.postingContext]
   );
   const canManageBudgetPotPending = useMemo(() => {
-    const allowed = new Set(['system administrator', 'program administrator', 'regional manager']);
-    return isPendingApprovalStatus && allowed.has(normalizedRole);
-  }, [isPendingApprovalStatus, normalizedRole]);
+    const allowed = new Set(['system administrator', 'program administrator', 'regional manager', 'regional coordinator']);
+    return allowed.has(normalizedRole);
+  }, [normalizedRole]);
   const showBudgetPot = hasInterventionCost;
   const eligibilityGridDefinition = useMemo(
     () => showBudgetPot ? [{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }] : [{ colspan: 6 }],
@@ -706,10 +724,14 @@ const CoordinatorAssessmentWidget = forwardRef(
     () => (typeof conflictDeclarationDetails === 'string' ? conflictDeclarationDetails.trim() : ''),
     [conflictDeclarationDetails]
   );
+  const overviewWordCount = useMemo(() => countWords(assessment.overview), [assessment.overview]);
+  const employmentGoalsWordCount = useMemo(
+    () => countWords(assessment.employmentGoals),
+    [assessment.employmentGoals]
+  );
   const isDeclarationSubmissionDisabled =
     !hasDeclarationChoice ||
     (hasDeclaredConflict && !conflictDetailsNormalized) ||
-    !declarationChecked ||
     lockedByAnotherUser ||
     isSigningDeclaration;
 
@@ -827,8 +849,13 @@ const CoordinatorAssessmentWidget = forwardRef(
     };
     const mergedIncoming = { ...buildEmptyAssessment(), ...placeholders };
     const merged = mergeAssessmentState(assessment, mergedIncoming);
-    setAssessment(merged);
-    setInitialAssessment(merged);
+    const mergedWithLimits = {
+      ...merged,
+      overview: limitWords(merged.overview, OVERVIEW_WORD_LIMIT),
+      employmentGoals: limitWords(merged.employmentGoals, EMPLOYMENT_GOALS_WORD_LIMIT)
+    };
+    setAssessment(mergedWithLimits);
+    setInitialAssessment(mergedWithLimits);
     setConflictDeclarationSigned(Boolean(caseData?.assessment_conflict_declaration_signed));
     setConflictDeclarationSignedAt(caseData?.assessment_conflict_declaration_signed_at || null);
     const incomingConflictChoice = normalizeConflictDeclarationChoice(
@@ -837,7 +864,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     );
     setConflictDeclarationChoice(incomingConflictChoice);
     setConflictDeclarationDetails(caseData?.assessment_conflict_declaration_details || '');
-    setDeclarationChecked(false);
     setDeclarationError(null);
   }, [caseData]);
 
@@ -1035,7 +1061,12 @@ const CoordinatorAssessmentWidget = forwardRef(
   // Enhanced handleField to clear error for the field if value is now valid
   const handleField = (field, value) => {
     setAssessment(prevAssessment => {
-      const nextAssessment = { ...prevAssessment, [field]: value };
+      const nextValue = (() => {
+        if (field === 'overview') return limitWords(value, OVERVIEW_WORD_LIMIT);
+        if (field === 'employmentGoals') return limitWords(value, EMPLOYMENT_GOALS_WORD_LIMIT);
+        return value;
+      })();
+      const nextAssessment = { ...prevAssessment, [field]: nextValue };
       if (field === 'previousISET' && value !== 'yes') {
         nextAssessment.previousISETDetails = '';
       }
@@ -1164,10 +1195,6 @@ const CoordinatorAssessmentWidget = forwardRef(
       setDeclarationError('Provide details about the potential conflict or bias before proceeding.');
       return;
     }
-    if (!declarationChecked) {
-      setDeclarationError('Confirm your declaration before continuing.');
-      return;
-    }
     setIsSigningDeclaration(true);
     setDeclarationError(null);
     try {
@@ -1229,7 +1256,6 @@ const CoordinatorAssessmentWidget = forwardRef(
       setConflictDeclarationSignedAt(signedAtIso);
       setConflictDeclarationChoice(choice);
       setConflictDeclarationDetails(choice === 'conflict' ? detailsValue : '');
-      setDeclarationChecked(false);
       if (typeof actions?.refreshCaseData === 'function') {
         try {
           await actions.refreshCaseData();
@@ -1276,7 +1302,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     conflictDeclarationSigned,
     conflictDeclarationChoice,
     conflictDeclarationDetails,
-    declarationChecked,
     isSigningDeclaration,
     canonicalApplicationStatus,
     ensureLockForOperation,
@@ -1330,7 +1355,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     // 13. Conditional: NWAC fields
     if (assessment.nwacReview && !assessment.nwacReason) {
-      errors.nwacReason = 'Reason for denial is required.';
+      errors.nwacReason = 'Reason for not approving is required.';
     }
     // 14. Intervention code required
     if (!assessment.interventionCode) {
@@ -1555,7 +1580,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         scrollAfterAction();
         setAlert({
           type: 'success',
-          content: 'Assessment submitted successfully. Application status moved to Pending Approval. Complete the outcome notice to finish the review.',
+          content: 'Assessment submitted successfully. Application status moved to Pending Approval. Assessments must be approved by an authorised NWAC representative. Your assessment has been flagged for their attention.',
           dismissible: true,
           statusIconAriaLabel: 'Success'
         });
@@ -1711,7 +1736,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       errors.nwacReview = 'Assessment assurance outcome is required.';
     }
     if (assessment.nwacReviewStatus === 'reject' && (!assessment.nwacReason || !assessment.nwacReason.trim())) {
-      errors.nwacReason = 'Reason for denial is required.';
+      errors.nwacReason = 'Reason for not approving is required.';
     }
     return errors;
   };
@@ -1727,10 +1752,11 @@ const CoordinatorAssessmentWidget = forwardRef(
         errors.interventionCost = 'Enter a valid amount in dollars.';
       }
     }
-    if (costForPotValidation !== null && Number.isFinite(costForPotValidation) && costForPotValidation !== 0 && !assessment.interventionPotId) {
+    const isOutcomeApproved = assessment.nwacReviewStatus === 'approve';
+    if (isOutcomeApproved && costForPotValidation !== null && Number.isFinite(costForPotValidation) && costForPotValidation !== 0 && !assessment.interventionPotId) {
       errors.interventionPotId = 'Select a budget pot for the intervention cost.';
     }
-    if (assessment.interventionPotId && !assessment.postingContext) {
+    if (isOutcomeApproved && assessment.interventionPotId && !assessment.postingContext) {
       errors.postingContext = 'Select how this pot is paid from.';
     }
     setFieldErrors(errors);
@@ -1762,16 +1788,17 @@ const CoordinatorAssessmentWidget = forwardRef(
     setValidationAlert(null);
     const errors = validateNWACReview(assessment);
     let costForPotValidation = null;
+    const isOutcomeApproved = assessment.nwacReviewStatus === 'approve';
     if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
       costForPotValidation = parseCurrencyInput(assessment.interventionCost);
       if (costForPotValidation === null || !Number.isFinite(costForPotValidation) || costForPotValidation < 0) {
         errors.interventionCost = 'Enter a valid amount in dollars.';
       }
     }
-    if (costForPotValidation !== null && Number.isFinite(costForPotValidation) && costForPotValidation !== 0 && !assessment.interventionPotId) {
+    if (isOutcomeApproved && costForPotValidation !== null && Number.isFinite(costForPotValidation) && costForPotValidation !== 0 && !assessment.interventionPotId) {
       errors.interventionPotId = 'Select a budget pot for the intervention cost.';
     }
-    if (assessment.interventionPotId && !assessment.postingContext) {
+    if (isOutcomeApproved && assessment.interventionPotId && !assessment.postingContext) {
       errors.postingContext = 'Select how this pot is paid from.';
     }
     setFieldErrors(errors);
@@ -1826,8 +1853,8 @@ const CoordinatorAssessmentWidget = forwardRef(
       assessment_childcare_funding_details: assessment.childcareFunding || null,
       case_summary: assessment.overview || null,
       assessment_submit_action: true,
-      status: assessment.nwacReviewStatus === 'approve' ? 'initiated' : 'archived',
-      applicationStatus: assessment.nwacReviewStatus === 'approve' ? 'approved' : 'rejected'
+      status: assessment.nwacReviewStatus === 'approve' ? 'initiated' : NOT_APPROVED_CASE_STATUS,
+      applicationStatus: assessment.nwacReviewStatus === 'approve' ? 'approved' : 'in_review'
     };
     const requestBody = { ...payload };
     if (versionToken > 0) {
@@ -1901,7 +1928,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         type: 'success',
         content: assessment.nwacReviewStatus === 'approve'
           ? 'Outcome notice complete. Application approved.'
-          : 'Outcome notice complete. Application rejected.',
+          : 'Outcome notice complete. Application not approved; status returned to In review.',
         dismissible: true,
         statusIconAriaLabel: 'Success'
       });
@@ -1918,6 +1945,10 @@ const CoordinatorAssessmentWidget = forwardRef(
   };
 
   const handleApproveClick = async () => {
+    if (isHighCostApprovalBlocked) {
+      setValidationAlert([`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`]);
+      return;
+    }
     const outcomeValid = validateOutcomeBeforeApprove();
     if (!outcomeValid) return;
     const requiresChecklist = assessment.nwacReviewStatus === 'approve';
@@ -1952,7 +1983,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             <Button variant="primary" onClick={handleSubmit}>Submit</Button>
           )}
           {!isEligibilityGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && (
-            <Button variant="primary" onClick={handleApproveClick} disabled={!isPendingApprovalStatus || !canManageOutcomeReview || checkingChecklist}>Approve/Reject</Button>
+            <Button variant="primary" onClick={handleApproveClick} disabled={!isPendingApprovalStatus || !canManageOutcomeReview || checkingChecklist}>Approve / Mark Not Approved</Button>
           )}
         </SpaceBetween>
       }
@@ -2104,18 +2135,6 @@ const CoordinatorAssessmentWidget = forwardRef(
                   />
                 </FormField>
               )}
-              <Checkbox
-                checked={declarationChecked}
-                onChange={({ detail }) => {
-                  setDeclarationChecked(detail.checked);
-                  if (detail.checked) {
-                    setDeclarationError(null);
-                  }
-                }}
-                disabled={lockedByAnotherUser || isSigningDeclaration}
-              >
-                I confirm the statement above and agree to proceed.
-              </Checkbox>
               <SpaceBetween direction="horizontal" size="s">
                 <Button
                   variant="primary"
@@ -2149,25 +2168,6 @@ const CoordinatorAssessmentWidget = forwardRef(
         <Box variant="small" margin={{ bottom: 's' }}>
           This form is used by the ISET admin team to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, the final approval fields will become available.
         </Box>
-        {conflictDeclarationSigned && showConflictAlert && (
-          <Alert
-            type={hasDeclaredConflict ? 'warning' : 'info'}
-            header="Conflict of Interest Declaration"
-            statusIconAriaLabel={hasDeclaredConflict ? 'Warning' : 'Information'}
-            dismissible
-            onDismiss={() => setShowConflictAlert(false)}
-          >
-              <Box margin={{ bottom: hasDeclaredConflict && conflictDetailsNormalized ? 'xs' : 'none' }}>
-                {hasDeclaredConflict
-                  ? 'You declared a potential conflict for this case.'
-                  : 'No active conflict: a declaration is on file. If a conflict was previously declared, it has been resolved so you may proceed.'}{' '}
-                {conflictDeclarationSignedDisplayDate ? `Signed on ${conflictDeclarationSignedDisplayDate}.` : 'Signed.'}
-              </Box>
-            {hasDeclaredConflict && conflictDetailsNormalized && (
-              <Box>{conflictDetailsNormalized}</Box>
-            )}
-          </Alert>
-        )}
         {validationAlert && (
           <Alert
             type="warning"
@@ -2217,14 +2217,6 @@ const CoordinatorAssessmentWidget = forwardRef(
         )}
         {showNWACSection && (
           <>
-            {lacksOutcomePermission && !lockedByAnotherUser && (
-              <Alert
-                type="info"
-                statusIconAriaLabel="Information"
-              >
-                You do not have permission to complete the NWAC outcome notice. Contact an administrator if you need access.
-              </Alert>
-            )}
             <Box
               style={
                 isNWACFieldsDisabled || isOutcomeNoticeDisabled
@@ -2239,6 +2231,10 @@ const CoordinatorAssessmentWidget = forwardRef(
                     <RadioGroup
                       value={assessment.nwacReviewStatus || ''}
                       onChange={({ detail }) => {
+                        if (detail.value === 'approve' && isHighCostApprovalBlocked) {
+                          setValidationAlert([`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`]);
+                          return;
+                        }
                         if (isNWACFieldsDisabled) return;
                         if (detail.value === 'approve' && assessment.nwacReason) {
                           setShowApproveConfirmModal(true);
@@ -2248,8 +2244,8 @@ const CoordinatorAssessmentWidget = forwardRef(
                         }
                       }}
                       items={[
-                        { value: 'approve', label: 'Approve' },
-                        { value: 'reject', label: 'Reject' }
+                        { value: 'approve', label: 'Approved' },
+                        { value: 'reject', label: 'Not Approved' }
                       ]}
                       ariaLabel="NWAC Review Status"
                       data-error-focus={hasSubmitted && fieldErrors.nwacReviewStatus ? 'true' : undefined}
@@ -2278,7 +2274,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               </Grid>
               {assessment.nwacReviewStatus === 'reject' && (
                 <Grid gridDefinition={[{ colspan: 12 }]}>
-                  <FormField label="Reason for Denial" stretch={true} >
+                  <FormField label="Reason for Not Approving" stretch={true} >
                     <Box width="100%">
                       <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
                         if (isNWACFieldsDisabled) return;
@@ -2292,7 +2288,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             <Modal
               visible={showApproveConfirmModal}
               onDismiss={() => setShowApproveConfirmModal(false)}
-              header="Clear Reason for Denial?"
+              header="Clear not-approved reason?"
               footer={
                 <SpaceBetween direction="horizontal" size="xs">
                   <Button variant="primary" onClick={() => {
@@ -2308,7 +2304,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 </SpaceBetween>
               }
             >
-              <Box>Switching to "Approve" will clear the Reason for Denial. Do you want to continue?</Box>
+              <Box>Switching to "Approve" will clear the reason for not approving. Do you want to continue?</Box>
             </Modal>
           </>
         )}
@@ -2353,7 +2349,12 @@ const CoordinatorAssessmentWidget = forwardRef(
                   loadingText="Loading budget pots"
                   onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
                   data-error-focus={hasSubmitted && fieldErrors.interventionPotId ? 'true' : undefined}
-                  disabled={(!canManageBudgetPotPending && isAssessmentDisabled) || !hasInterventionCost}
+                  disabled={
+                    baseAssessmentLocked ||
+                    isEligibilityGateActive ||
+                    (!canManageBudgetPotPending && isAssessmentDisabled) ||
+                    !hasInterventionCost
+                  }
                 />
               </FormField>
               <FormField
@@ -2396,7 +2397,8 @@ const CoordinatorAssessmentWidget = forwardRef(
         </Grid>
         <Grid gridDefinition={[{ colspan: 12 }]}> 
           <FormField label="Client Application Overview & Request" stretch={true} errorText={hasSubmitted && fieldErrors.overview ? fieldErrors.overview : undefined}
-            description="Summarize the client's application, background, and the specific request or intervention being considered. Include any relevant context from the application form.">
+            description="Summarize the client's application, background, and the specific request or intervention being considered. Include any relevant context from the application form."
+            constraintText={`${overviewWordCount}/${OVERVIEW_WORD_LIMIT} words maximum`}>
             <Box width="100%">
               <Textarea placeholder={initialAssessment.overview} value={assessment.overview} onChange={({ detail }) => handleField('overview', detail.value)} data-error-focus={hasSubmitted && fieldErrors.overview ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
             </Box>
@@ -2404,7 +2406,8 @@ const CoordinatorAssessmentWidget = forwardRef(
         </Grid>
         <Grid gridDefinition={[{ colspan: 12 }]}> 
           <FormField label="Client’s Employment Goal(s)" stretch={true} errorText={hasSubmitted && fieldErrors.employmentGoals ? fieldErrors.employmentGoals : undefined}
-            description="Describe the client's short- and long-term employment goals as discussed during assessment. Reference the goals stated in the application form if available.">
+            description="Describe the client's short- and long-term employment goals as discussed during assessment. Reference the goals stated in the application form if available."
+            constraintText={`${employmentGoalsWordCount}/${EMPLOYMENT_GOALS_WORD_LIMIT} words maximum`}>
             <Box width="100%">
               <Textarea placeholder={initialAssessment.employmentGoals} value={assessment.employmentGoals} onChange={({ detail }) => handleField('employmentGoals', detail.value)} data-error-focus={hasSubmitted && fieldErrors.employmentGoals ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
             </Box>
