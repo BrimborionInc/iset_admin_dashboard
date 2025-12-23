@@ -13,6 +13,7 @@ import FinancePanelWidget from "./caseWorkspace/widgets/FinancePanelWidget.jsx";
 import CompliancePanelWidget from "./caseWorkspace/widgets/CompliancePanelWidget.jsx";
 import ParticipantDetailsWidget from "./caseWorkspace/widgets/ParticipantDetailsWidget.jsx";
 import ExportPreviewWidget from "./caseWorkspace/widgets/ExportPreviewWidget.jsx";
+import InterventionAssessmentWidget from "./caseWorkspace/widgets/InterventionAssessmentWidget.jsx";
 import CaseWorkspaceCaseHeaderHelp from "../../helpPanelContents/caseWorkspaceCaseHeaderHelp.js";
 import SupportingDocumentsHelp from "../../helpPanelContents/supportingDocumentsHelp.js";
 import SecureMessagesHelpPanelContent from "../../helpPanelContents/secureMessagesHelpPanelContent.js";
@@ -105,6 +106,17 @@ const widgetRegistry = {
     description: "Edit ILMP-compliant intervention records.",
     helpComponent: CaseWorkspaceInterventionsHelp,
     helpTitle: "Interventions",
+    aiContext: CaseWorkspaceInterventionsHelp.aiContext,
+  },
+  interventionAssessment: {
+    id: "interventionAssessment",
+    defaultRowSpan: 6,
+    defaultColumnSpan: 4,
+    component: InterventionAssessmentWidget,
+    title: "Intervention assessment",
+    description: "Propose a new intervention for approval.",
+    helpComponent: CaseWorkspaceInterventionsHelp,
+    helpTitle: "Intervention assessment",
     aiContext: CaseWorkspaceInterventionsHelp.aiContext,
   },
   financePanel: {

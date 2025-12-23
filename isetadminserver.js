@@ -6577,12 +6577,44 @@ function mapActionPlanRow(plan) {
 function normaliseInterventionStatus(status) {
   if (!status) return 'planned';
   const value = String(status).trim().toLowerCase();
-  if (['planned', 'planning', 'draft'].includes(value)) return 'planned';
-  if (['active', 'inprogress', 'in-progress', 'in_progress', 'progress'].includes(value)) return 'in_progress';
-  if (['complete', 'completed', 'closed', 'done', 'finished'].includes(value)) return 'completed';
-  if (['cancelled', 'canceled'].includes(value)) return 'cancelled';
-  if (['suspended', 'on-hold', 'on_hold'].includes(value)) return 'suspended';
-  return 'planned';
+  const direct = new Set([
+    'draft',
+    'submitted',
+    'in_review',
+    'changes_requested',
+    'approved',
+    'rejected',
+    'planned',
+    'in_progress',
+    'suspended',
+    'ready_to_close',
+    'completed',
+    'cancelled',
+  ]);
+  const aliases = {
+    planning: 'planned',
+    'in-review': 'in_review',
+    'in review': 'in_review',
+    'changes-requested': 'changes_requested',
+    'changes requested': 'changes_requested',
+    active: 'in_progress',
+    inprogress: 'in_progress',
+    'in-progress': 'in_progress',
+    progress: 'in_progress',
+    'on-hold': 'suspended',
+    on_hold: 'suspended',
+    'ready-to-close': 'ready_to_close',
+    'ready to close': 'ready_to_close',
+    readyclose: 'ready_to_close',
+    complete: 'completed',
+    closed: 'completed',
+    done: 'completed',
+    finished: 'completed',
+    canceled: 'cancelled',
+  };
+  if (aliases[value]) return aliases[value];
+  if (direct.has(value)) return value;
+  return value || 'planned';
 }
 
 function isInterventionClosedStatus(status) {
@@ -23818,28 +23850,33 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       return res.status(422).json({ error: 'duration_required', message: 'Duration (days) is required when an end date is provided.' });
     }
 
-    const metadata = {};
-    metadata.code = trimmedCode;
-    metadata.title = trimmedTitle;
-    if (durationWeeksValue !== null) metadata.durationWeeks = durationWeeksValue;
-    if (Number.isFinite(plannedCostInt)) metadata.cost = plannedCostInt;
-    if (trimmedPotId) metadata.potId = trimmedPotId;
-    metadata.postingContext = postingContext;
-    if (trimmedFundingStream) metadata.fundingStream = trimmedFundingStream;
-    if (trimmedNotes) metadata.notes = trimmedNotes;
-    if (trimmedOutcomeCreate) metadata.outcome = trimmedOutcomeCreate;
-    if (trimmedNoc) metadata.noc = trimmedNoc;
-    if (trimmedNocVersion) metadata.nocVersion = trimmedNocVersion;
-    metadata.compliance = { ilmp: 'pending', finance: 'pending' };
+    const metadataSource =
+      metadataPayload && typeof metadataPayload === 'object' ? metadataPayload : null;
+    const metadata = metadataSource ? { ...metadataSource } : {};
+    const ensure = (key, value) => {
+      if (!Object.prototype.hasOwnProperty.call(metadata, key) || metadata[key] === undefined) {
+        metadata[key] = value;
+      }
+    };
+    ensure('code', trimmedCode);
+    ensure('title', trimmedTitle);
+    if (durationWeeksValue !== null) ensure('durationWeeks', durationWeeksValue);
+    if (Number.isFinite(plannedCostInt)) ensure('cost', plannedCostInt);
+    if (trimmedPotId) ensure('potId', trimmedPotId);
+    ensure('postingContext', metadata.postingContext || postingContext);
+    if (trimmedFundingStream) ensure('fundingStream', trimmedFundingStream);
+    if (trimmedNotes) ensure('notes', trimmedNotes);
+    if (trimmedOutcomeCreate) ensure('outcome', trimmedOutcomeCreate);
+    if (trimmedNoc) ensure('noc', trimmedNoc);
+    if (trimmedNocVersion) ensure('nocVersion', trimmedNocVersion);
+    if (!metadata.compliance || typeof metadata.compliance !== 'object') {
+      metadata.compliance = { ilmp: 'pending', finance: 'pending' };
+    }
 
     const recurringFallbackTotal = Number.isFinite(plannedCostInt)
       ? plannedCostInt
       : normaliseRecurringNumber(metadata.cost);
-    const metadataSource =
-      metadataPayload && typeof metadataPayload === 'object' ? metadataPayload : null;
-    if (metadataSource) {
-      mergeRecurringCostMetadata(metadata, metadataSource, recurringFallbackTotal);
-    }
+    mergeRecurringCostMetadata(metadata, metadata, recurringFallbackTotal);
 
     const esdcPayload = pruneNullish({
       interventionCode: trimmedCode,

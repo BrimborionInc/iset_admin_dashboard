@@ -41,8 +41,10 @@ const formatDate = value => {
 
 const normaliseStatus = status => (status || "").toLowerCase();
 const isClosedStatus = status => ["completed", "cancelled"].includes(normaliseStatus(status));
-const isOpenStatus = status => !isClosedStatus(status);
+const isOpenStatus = status => ["planned", "in_progress", "suspended"].includes(normaliseStatus(status));
+const isClosableStatus = status => ["in_progress", "suspended"].includes(normaliseStatus(status));
 const isPlannedStatus = status => normaliseStatus(status) === "planned";
+const isDraftStatus = status => normaliseStatus(status) === "draft";
 
 const statusIndicatorType = status => {
   const value = (status || "").toLowerCase();
@@ -553,18 +555,50 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const planStatus = (activePlan?.status || "").toLowerCase();
   const canModify = !!activePlan && ["draft", "active"].includes(planStatus);
   const canCloseSelected =
-    canModify && !!selectedIntervention && isOpenStatus(selectedIntervention?.status);
+    canModify && !!selectedIntervention && isClosableStatus(selectedIntervention?.status);
+
+  const dispatchDraftSelection = useCallback(
+    intervention => {
+      if (!intervention?.id || !isDraftStatus(intervention.status)) return;
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("iset:intervention-assessment:select", {
+            detail: {
+              interventionId: intervention.id,
+              planId: activePlan?.id ?? null,
+            },
+          })
+        );
+      }
+    },
+    [activePlan?.id]
+  );
+
+  const resumeDraft = useCallback(
+    intervention => {
+      if (!intervention?.id) return;
+      setSelectedInterventionId(intervention.id);
+      setFormMode(null);
+      setStartInCloseMode(false);
+      setForceReadOnly(false);
+      dispatchDraftSelection(intervention);
+    },
+    [dispatchDraftSelection]
+  );
 
   const getInterventionActionItems = useCallback(
     intervention => {
       if (!intervention) return [];
-      const items = [{ id: "view", text: "View intervention" }];
       const status = intervention.status;
+      if (isDraftStatus(status)) {
+        return [{ id: "resume", text: "Resume draft" }];
+      }
+      const items = [{ id: "view", text: "View intervention" }];
       if (canModify) {
         if (isPlannedStatus(status)) {
           items.push({ id: "activate", text: "Activate intervention" });
           items.push({ id: "delete", text: "Delete intervention" });
-        } else if (isOpenStatus(status)) {
+        } else if (isClosableStatus(status)) {
           items.push({ id: "close", text: "Close intervention" });
         }
       }
@@ -573,16 +607,23 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     [canModify]
   );
 
-  const openCreateModal = () => {
+  const openDraftWizard = () => {
     if (!activePlan) {
-      setErrorMessage("Select an action plan before adding interventions.");
+      setErrorMessage("Select an action plan before starting a proposal.");
       return;
     }
     setStartInCloseMode(false);
     setForceReadOnly(false);
     setSuccessMessage(null);
     setErrorMessage(null);
-    setFormMode("create");
+    setFormMode(null);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("iset:intervention-assessment:new", {
+          detail: { planId: activePlan.id },
+        })
+      );
+    }
   };
 
   const openViewModal = useCallback(
@@ -789,6 +830,10 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               ariaLabel={`View intervention ${label}`}
               onFollow={event => {
                 event.preventDefault();
+                if (isDraftStatus(item.status)) {
+                  resumeDraft(item);
+                  return;
+                }
                 openViewModal(item);
               }}
             >
@@ -808,6 +853,10 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               ariaLabel={`View intervention ${item.title}`}
               onFollow={event => {
                 event.preventDefault();
+                if (isDraftStatus(item.status)) {
+                  resumeDraft(item);
+                  return;
+                }
                 openViewModal(item);
               }}
             >
@@ -888,7 +937,13 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                 if (item?.id) {
                   setSelectedInterventionId(item.id);
                 }
-                if (detail?.id === "view") {
+                if (detail?.id === "resume") {
+                  resumeDraft(item);
+                } else if (detail?.id === "view") {
+                  if (isDraftStatus(item.status)) {
+                    resumeDraft(item);
+                    return;
+                  }
                   openViewModal(item);
                 } else if (detail?.id === "close") {
                   openCloseModal(item);
@@ -921,6 +976,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     formMode,
     openViewModal,
     openCloseModal,
+    resumeDraft,
     setSelectedInterventionId,
   ]);
 
@@ -1076,7 +1132,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             <Button
               iconName="add-plus"
               disabled={!canModify}
-              onClick={openCreateModal}
+              onClick={openDraftWizard}
             >
               New intervention
             </Button>
@@ -1131,11 +1187,17 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             onSelectionChange={({ detail }) => {
               const item = detail.selectedItems?.[0];
               setSelectedInterventionId(item?.id ?? null);
+              if (item && isDraftStatus(item.status)) {
+                resumeDraft(item);
+              }
             }}
             onRowClick={({ detail }) => {
               const item = detail?.item;
               if (!item?.id) return;
               setSelectedInterventionId(item.id);
+              if (isDraftStatus(item.status)) {
+                resumeDraft(item);
+              }
             }}
             columnDefinitions={visibleColumnDefinitions}
             preferences={preferencesComponent}

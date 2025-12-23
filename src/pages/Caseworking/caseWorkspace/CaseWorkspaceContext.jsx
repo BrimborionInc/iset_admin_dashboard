@@ -6,17 +6,59 @@ const LIVE_CASES_STORAGE_KEY = "iset-demo-use-live-cases";
 const normaliseInterventionStatus = status => {
   if (!status) return "planned";
   const value = String(status).trim().toLowerCase();
-  if (["planned", "planning", "draft"].includes(value)) return "planned";
-  if (["active", "inprogress", "in-progress", "in_progress", "progress"].includes(value)) return "in_progress";
-  if (["suspended", "on-hold", "on_hold"].includes(value)) return "suspended";
-  if (["complete", "completed", "closed", "done"].includes(value)) return "completed";
-  if (["cancelled", "canceled"].includes(value)) return "cancelled";
+  const direct = new Set([
+    "draft",
+    "submitted",
+    "in_review",
+    "changes_requested",
+    "approved",
+    "rejected",
+    "planned",
+    "in_progress",
+    "suspended",
+    "ready_to_close",
+    "completed",
+    "cancelled",
+  ]);
+  const aliases = {
+    planning: "planned",
+    "in-review": "in_review",
+    "in review": "in_review",
+    "changes-requested": "changes_requested",
+    "changes requested": "changes_requested",
+    active: "in_progress",
+    inprogress: "in_progress",
+    "in-progress": "in_progress",
+    progress: "in_progress",
+    "on-hold": "suspended",
+    on_hold: "suspended",
+    "ready-to-close": "ready_to_close",
+    "ready to close": "ready_to_close",
+    readyclose: "ready_to_close",
+    complete: "completed",
+    closed: "completed",
+    done: "completed",
+    finished: "completed",
+    canceled: "cancelled",
+  };
+  if (aliases[value]) return aliases[value];
+  if (direct.has(value)) return value;
   return value || "planned";
 };
 
 const isOpenInterventionStatus = status => {
   const value = normaliseInterventionStatus(status);
-  return ["planned", "in_progress", "suspended"].includes(value);
+  return [
+    "draft",
+    "submitted",
+    "in_review",
+    "changes_requested",
+    "approved",
+    "planned",
+    "in_progress",
+    "suspended",
+    "ready_to_close",
+  ].includes(value);
 };
 
 const toNumberOrNull = value => {
@@ -28,6 +70,11 @@ const buildInterventionFromApi = (planId, payload = {}) => {
   if (!payload || typeof payload !== "object") {
     return null;
   }
+  const resolvedMetadata =
+    payload.metadata ||
+    payload.metadataJson ||
+    payload.metadata_json ||
+    null;
   const compliance =
     payload.compliance && typeof payload.compliance === "object"
       ? {
@@ -48,12 +95,16 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     payload.noc ||
     payload.nocCode ||
     payload.noc_code ||
+    payload.relatedNoc ||
+    payload.related_noc ||
     payload.nocCodeValue ||
     payload.noc_code_value ||
     null;
   const resolvedNocVersion =
     payload.nocVersion ||
     payload.noc_version ||
+    payload.relatedNocVersion ||
+    payload.related_noc_version ||
     payload.nocVersionCode ||
     payload.noc_version_code ||
     null;
@@ -80,7 +131,7 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     approvedAmount: toNumberOrNull(payload.approvedAmount),
     actualAmount: toNumberOrNull(payload.actualAmount),
     budgetAmount: toNumberOrNull(payload.budgetAmount),
-    metadata: payload.metadata || null,
+    metadata: resolvedMetadata,
     createdByStaffProfileId: payload.createdByStaffProfileId || null,
     createdAt: payload.createdAt || null,
     updatedAt: payload.updatedAt || null,
@@ -856,6 +907,9 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       }
       const data = await response.json();
       let intervention = buildInterventionFromApi(actionPlanId, data);
+      if (!intervention.metadata && payload?.metadata) {
+        intervention = { ...intervention, metadata: payload.metadata };
+      }
       intervention = mergeRecurrenceMetadata(intervention, payload);
       if (!intervention) {
         return null;
@@ -914,6 +968,9 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       }
       const data = await response.json();
       let intervention = buildInterventionFromApi(actionPlanId, data);
+      if (!intervention.metadata && payload?.metadata) {
+        intervention = { ...intervention, metadata: payload.metadata };
+      }
       intervention = mergeRecurrenceMetadata(intervention, payload);
       if (!intervention) {
         return null;
