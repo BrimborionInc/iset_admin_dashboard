@@ -50,5 +50,8 @@ Following the pattern above keeps new dashboards from entering the runaway rende
 
 10. **BoardItem i18n strings are required.** Cloudscape’s BoardItem now expects `i18nStrings` (`dragHandleAriaLabel/Description`, `resizeHandleAriaLabel/Description`). Omitting them throws `Cannot read properties of undefined (reading 'dragHandleAriaLabel')` when dragging new widgets from the palette. Provide the canonical object on every BoardItem (not just the Board).
 
+### Case workspace widget note (Intervention Assessment)
+- When reassigning a submitted proposal to a different Action Plan from the EI step, persist the `actionPlanId` change before leaving the step and use numeric IDs in update calls so the board state can move the intervention between plans without stale associations.
+
 ### Configuration dashboard note (Nov 2025)
 - The configuration dashboard storage key moved to `configuration-dashboard-layout-v2` when the Backend jobs widget was added. If new widgets appear only in “Available Widgets”, clear `localStorage` for the old key or bump it again when adjusting the default layout.

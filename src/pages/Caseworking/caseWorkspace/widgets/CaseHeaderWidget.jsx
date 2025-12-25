@@ -590,15 +590,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
 
   const handleSettingsClick = ({ detail }) => {
     if (detail?.id === "remove" && typeof actions.removeItem === "function") {
-      if (typeof window !== "undefined" && window.console) {
-        window.console.info("[CaseHeaderWidget] remove requested");
-      }
       actions.removeItem();
-    } else if (typeof window !== "undefined" && window.console) {
-      window.console.info("[CaseHeaderWidget] remove not executed", {
-        hasRemove: typeof actions.removeItem === "function",
-        detail,
-      });
     }
   };
 

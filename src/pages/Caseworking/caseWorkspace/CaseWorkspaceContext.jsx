@@ -1054,12 +1054,34 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       markCompliancePending();
       setState(prev => {
         if (!prev.caseData) return prev;
+        const targetPlanId = intervention.actionPlanId || actionPlanId;
+        let interventionPlaced = false;
         const nextPlans = prev.caseData.actionPlans.map(plan => {
-          if (plan.id !== actionPlanId) return plan;
           const current = Array.isArray(plan.interventions) ? plan.interventions : [];
-          const updated = current.map(item => (item.id === interventionId ? intervention : item));
+          const hasIntervention = current.some(item => item.id === interventionId);
+          if (!hasIntervention) return plan;
+          if (String(plan.id) === String(targetPlanId)) {
+            const updated = current.map(item => (item.id === interventionId ? intervention : item));
+            interventionPlaced = true;
+            return { ...plan, interventions: updated, interventionCount: updated.length };
+          }
+          const updated = current.filter(item => item.id !== interventionId);
           return { ...plan, interventions: updated, interventionCount: updated.length };
         });
+        if (!interventionPlaced && targetPlanId) {
+          const targetIndex = nextPlans.findIndex(plan => String(plan.id) === String(targetPlanId));
+          if (targetIndex >= 0) {
+            const plan = nextPlans[targetIndex];
+            const current = Array.isArray(plan.interventions) ? plan.interventions : [];
+            if (!current.some(item => item.id === interventionId)) {
+              const updated = [...current, intervention];
+              nextPlans[targetIndex] = { ...plan, interventions: updated, interventionCount: updated.length };
+            } else {
+              const updated = current.map(item => (item.id === interventionId ? intervention : item));
+              nextPlans[targetIndex] = { ...plan, interventions: updated, interventionCount: updated.length };
+            }
+          }
+        }
         const { open, total } = recomputeInterventionCounts(nextPlans);
         return {
           ...prev,

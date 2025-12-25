@@ -431,7 +431,7 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
       } else if (actionId === "close") {
         const openInterventions = (plan.interventions || []).filter(item => {
           const status = (item?.status || "").toLowerCase();
-          return status !== "completed" && status !== "cancelled";
+          return status !== "completed" && status !== "cancelled" && status !== "submitted";
         });
         if (openInterventions.length > 0) {
           const message = buildOpenInterventionMessage(openInterventions, plan.id);

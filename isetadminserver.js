@@ -2973,8 +2973,11 @@ function runIlmpValidation(context) {
     interventions.forEach(intv => {
       const s = intv.startDate ? parseDate(intv.startDate) : null;
       const e = intv.endDate ? parseDate(intv.endDate) : null;
+      const status = String(intv.status || '').toLowerCase();
       if (s && (!earliestStart || s < earliestStart)) earliestStart = s;
-      if (e && (!latestEnd || e > latestEnd)) latestEnd = e;
+      if (e && status !== 'draft' && status !== 'submitted' && (!latestEnd || e > latestEnd)) {
+        latestEnd = e;
+      }
     });
 
     if (earliestStart && planStart && earliestStart < planStart) {
@@ -24381,6 +24384,13 @@ app.patch('/api/interventions/:id', async (req, res) => {
   if (!body || typeof body !== 'object' || Object.keys(body).length === 0) {
     return res.status(400).json({ error: 'no_updates', message: 'No intervention fields provided for update.' });
   }
+  const actionPlanProvided = hasOwn(body, 'actionPlanId') || hasOwn(body, 'action_plan_id');
+  const actionPlanIdValue = actionPlanProvided
+    ? coerceOptionalPositiveInt(body.actionPlanId ?? body.action_plan_id)
+    : undefined;
+  if (actionPlanProvided && (Number.isNaN(actionPlanIdValue) || actionPlanIdValue === null)) {
+    return res.status(400).json({ error: 'invalid_action_plan_id' });
+  }
 
   const parseNumeric = value => {
     if (value === null || typeof value === 'undefined' || value === '') return null;
@@ -24501,12 +24511,27 @@ app.patch('/api/interventions/:id', async (req, res) => {
       return res.status(404).json({ error: 'intervention_not_found' });
     }
 
-    const planId = interventionRow.action_plan_id;
+    const originalPlanId = interventionRow.action_plan_id;
+    let planId = originalPlanId;
+    const isReassigning = Number.isInteger(actionPlanIdValue) && actionPlanIdValue !== originalPlanId;
+    if (isReassigning) {
+      planId = actionPlanIdValue;
+    }
     let planRow = null;
     if (Number.isInteger(planId)) {
       planRow = await fetchActionPlanWithCase(planId);
       if (!planRow) {
         return res.status(404).json({ error: 'action_plan_not_found' });
+      }
+      if (
+        Number.isFinite(Number(planRow.case_id)) &&
+        Number.isFinite(Number(interventionRow.case_id)) &&
+        Number(planRow.case_id) !== Number(interventionRow.case_id)
+      ) {
+        return res.status(409).json({
+          error: 'action_plan_case_mismatch',
+          message: 'Action plan does not belong to this case.',
+        });
       }
       const accessError = validateCaseAccessForPlan(req, planRow);
       if (accessError) {
@@ -24624,6 +24649,11 @@ app.patch('/api/interventions/:id', async (req, res) => {
     if (statusProvided) {
       updates.push('status = ?');
       params.push(statusValue);
+    }
+
+    if (isReassigning) {
+      updates.push('action_plan_id = ?');
+      params.push(planId);
     }
 
     if (typeof startDateValue !== 'undefined') {
@@ -24858,6 +24888,9 @@ app.patch('/api/interventions/:id', async (req, res) => {
 
     if (planId) {
       await pool.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [planId]);
+    }
+    if (isReassigning && originalPlanId && originalPlanId !== planId) {
+      await pool.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [originalPlanId]);
     }
 
     const updatedRow = await fetchInterventionWithCase(interventionId);
@@ -25297,7 +25330,7 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
     const openInterventions = mappedInterventions
       .filter(item => {
         const status = String(item.status || '').toLowerCase();
-        return status !== 'completed' && status !== 'cancelled';
+        return status !== 'completed' && status !== 'cancelled' && status !== 'submitted';
       })
       .map(item => ({
         id: item.id,
@@ -25315,7 +25348,7 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
     }
 
     const [[maxIntervention]] = await pool.query(
-      'SELECT MAX(end_date) AS latest_end FROM iset_case_intervention WHERE action_plan_id = ?',
+      "SELECT MAX(end_date) AS latest_end FROM iset_case_intervention WHERE action_plan_id = ? AND status NOT IN ('draft','submitted')",
       [planId]
     );
     const latestInterventionEnd = maxIntervention?.latest_end ? toDateOnly(maxIntervention.latest_end) : null;

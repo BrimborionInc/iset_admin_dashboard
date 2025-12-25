@@ -174,6 +174,10 @@ const CloseActionPlanModal = ({
       const planStart = plan?.startDate || plan?.effectiveDate || null;
       const latestInterventionEnd = Array.isArray(plan?.interventions)
         ? plan.interventions
+            .filter(item => {
+              const status = String(item?.status || "").toLowerCase();
+              return status !== "draft" && status !== "submitted";
+            })
             .map(item => item?.endDate || item?.end_date || null)
             .filter(Boolean)
             .sort()

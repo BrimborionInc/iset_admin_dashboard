@@ -301,17 +301,7 @@ const CaseWorkspacePage = ({
 }) => {
   const { caseId } = useParams();
   const [layout, setLayout] = useState(() => loadLayoutFromStorage() ?? [...defaultLayout]);
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.console) {
-      window.console.info("[CaseWorkspace] layout ids", layout.map(item => item?.id));
-    }
-  }, [layout]);
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.console) {
-      window.console.info("[CaseWorkspace] board items", boardItems.map(item => item?.id));
-    }
-  }, [boardItems]);
   const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
   const paletteSignatureRef = useRef(JSON.stringify(paletteItems.map(item => item.id)));
 
@@ -347,9 +337,6 @@ const CaseWorkspacePage = ({
   const handleItemsChange = useCallback(({ detail }) => {
     if (!detail || !Array.isArray(detail.items)) return;
     const next = exportLayout(detail.items);
-    if (typeof window !== "undefined" && window.console) {
-      window.console.info("[CaseWorkspace] onItemsChange", next);
-    }
     setLayout(current => (areLayoutsEqual(current, next) ? current : next));
   }, []);
 

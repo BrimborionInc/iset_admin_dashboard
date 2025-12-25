@@ -318,10 +318,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
     () => workspaceCaseId ?? caseData?.id ?? caseData?.case_id ?? null,
     [workspaceCaseId, caseData]
   );
-  const logWizard = useCallback((message, data = {}) => {
-    if (typeof window === "undefined" || !window.console) return;
-    window.console.info(`[InterventionAssessmentWizard] ${message}`, data);
-  }, []);
+  const logWizard = useCallback(() => {}, []);
   const resolveStoredStep = useCallback(
     (key, stepIds = ALL_STEP_IDS) => {
       if (!key || typeof getInterventionWizardStep !== "function") return null;
@@ -339,6 +336,40 @@ const InterventionAssessmentWidget = ({ actions }) => {
     },
     [getInterventionWizardDraft]
   );
+  const hasMeaningfulDraft = useCallback(draft => {
+    if (!draft || typeof draft !== "object") return false;
+    const textKeys = [
+      "code",
+      "rationale",
+      "deliveryPartner",
+      "startDate",
+      "endDate",
+      "durationDays",
+      "plannedCost",
+      "notes",
+      "nocVersion",
+      "nocCode",
+      "institution",
+      "programName",
+      "childcareNeed",
+      "childcareFunding",
+      "itpDetails",
+      "wageSubsidyDetails",
+      "eiVerificationStatus",
+      "eiVerificationNotes",
+      "decisionOutcome",
+      "decisionNotes",
+    ];
+    if (textKeys.some(key => String(draft[key] || "").trim())) return true;
+    if (draft.deliveryMode && draft.deliveryMode !== "partner") return true;
+    if (draft.postingContext && draft.postingContext !== "external") return true;
+    if (draft.eiConsent !== null && typeof draft.eiConsent !== "undefined") return true;
+    if (Array.isArray(draft.barriers) && draft.barriers.length) return true;
+    const hasNestedValues = obj =>
+      obj && Object.values(obj).some(value => String(value || "").trim());
+    if (hasNestedValues(draft.itp) || hasNestedValues(draft.wage)) return true;
+    return false;
+  }, []);
   const mergeStoredDraft = useCallback((baseForm, storedDraft) => {
     if (!storedDraft) return baseForm;
     const merged = { ...baseForm, ...storedDraft };
@@ -495,7 +526,6 @@ const InterventionAssessmentWidget = ({ actions }) => {
     const reasons = [];
     if (!form.code) reasons.push("Intervention code");
     if (!form.startDate) reasons.push("Start date");
-    if (!form.endDate) reasons.push("End date");
     if (form.startDate && form.endDate && !isDateOrderValid()) {
       reasons.push("Start date must be on or before end date");
     }
@@ -633,6 +663,8 @@ const InterventionAssessmentWidget = ({ actions }) => {
         interventionId,
         selectionKey,
         storedStep,
+        planId: detail?.planId ?? null,
+        caseId,
       });
       if (typeof setSelectedInterventionId === "function") {
         const numericInterventionId = Number(interventionId);
@@ -836,6 +868,50 @@ const InterventionAssessmentWidget = ({ actions }) => {
     return null;
   }, [caseData, hydratedDraftId, selectedDraftId, selectedInterventionId]);
 
+  const resolvePlanIdValue = useCallback(value => {
+    if (value === null || typeof value === "undefined" || value === "") return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }, []);
+
+  const getPlanReassignment = useCallback(() => {
+    const nextPlanId = resolvePlanIdValue(form.actionPlanId);
+    if (!nextPlanId) return null;
+    const selected = findSelectedIntervention();
+    const currentPlanId = resolvePlanIdValue(selected?.actionPlanId);
+    if (currentPlanId && String(currentPlanId) === String(nextPlanId)) return null;
+    return {
+      interventionId: selected?.id || activeInterventionIdValue,
+      nextPlanId,
+      currentPlanId,
+    };
+  }, [activeInterventionIdValue, findSelectedIntervention, form.actionPlanId, resolvePlanIdValue]);
+
+  const persistPlanReassignment = useCallback(async () => {
+    const reassignment = getPlanReassignment();
+    if (!reassignment) return true;
+    if (!reassignment.interventionId || typeof updateIntervention !== "function") {
+      setError("Select a submitted proposal before reassigning the Action Plan.");
+      return false;
+    }
+    const numericInterventionId = Number(reassignment.interventionId);
+    const resolvedInterventionId = Number.isFinite(numericInterventionId)
+      ? numericInterventionId
+      : reassignment.interventionId;
+    try {
+      await updateIntervention(reassignment.nextPlanId, resolvedInterventionId, {
+        actionPlanId: reassignment.nextPlanId,
+      });
+      if (typeof setSelectedActionPlanId === "function") {
+        setSelectedActionPlanId(reassignment.nextPlanId);
+      }
+      return true;
+    } catch (err) {
+      setError(err?.message || "Unable to update the Action Plan for this intervention.");
+      return false;
+    }
+  }, [getPlanReassignment, setError, setSelectedActionPlanId, updateIntervention]);
+
   const buildPayload = useCallback(
     statusValue => {
       const selectedCode = codeOptions.find(option => option.value === form.code);
@@ -976,7 +1052,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
   const validateStep = useCallback(
     stepId => {
       if (stepId === "framing") {
-        return Boolean(form.code) && Boolean(form.startDate) && Boolean(form.endDate) && isDateOrderValid();
+        return Boolean(form.code) && Boolean(form.startDate) && (!form.endDate || isDateOrderValid());
       }
       if (stepId === "rationale") {
         return Boolean(form.rationale && form.rationale.trim());
@@ -1143,6 +1219,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
       }, 0);
       const storedStepKey = caseId && draft.id ? `${caseId}:${draft.id}` : null;
       const storedDraft = resolveStoredDraft(storedStepKey);
+      const shouldMergeDraft = storedDraft && hasMeaningfulDraft(storedDraft);
       const hydratedForm = {
         ...defaultFormState,
         ...form,
@@ -1176,9 +1253,12 @@ const InterventionAssessmentWidget = ({ actions }) => {
         decisionOutcome: review.decision || "",
         decisionNotes: review.decisionNotes || "",
       };
-      const nextForm = mergeStoredDraft(hydratedForm, storedDraft);
+      const nextForm = shouldMergeDraft ? mergeStoredDraft(hydratedForm, storedDraft) : hydratedForm;
       if (storedDraft) {
-        logWizard("hydrate merge stored draft", { storedStepKey, stored: true });
+        logWizard("hydrate merge stored draft", { storedStepKey, stored: shouldMergeDraft });
+        if (!shouldMergeDraft) {
+          logWizard("hydrate ignored stored draft (empty)", { storedStepKey });
+        }
       }
       setForm(nextForm);
       if (planId && typeof setSelectedActionPlanId === "function") {
@@ -1227,6 +1307,14 @@ const InterventionAssessmentWidget = ({ actions }) => {
       return;
     }
 
+    if (selectedDraftId) {
+      logWizard("hydrate missing selection", {
+        selectedDraftId,
+        targetPlanId,
+        interventionCount: plans.reduce((acc, plan) => acc + (plan.interventions || []).length, 0),
+      });
+    }
+
     if (!targetPlanId) return;
 
     // Fallback: fetch interventions for the plan if not present in case data
@@ -1257,6 +1345,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
     hydratedDraftUpdatedAt,
     logWizard,
     mergeStoredDraft,
+    hasMeaningfulDraft,
     resolveStoredDraft,
     resolveStoredStep,
     selectedActionPlanId,
@@ -1369,6 +1458,10 @@ const InterventionAssessmentWidget = ({ actions }) => {
         return;
       }
       if (currentStep === "ei") {
+        const planOk = await persistPlanReassignment();
+        if (!planOk) {
+          return;
+        }
         const uploadOk = await uploadEiVerificationIfSelected();
         if (!uploadOk) {
           return;
@@ -1468,9 +1561,12 @@ const InterventionAssessmentWidget = ({ actions }) => {
       }
       const selected = findSelectedIntervention();
       const targetId = selected?.id || activeInterventionIdValue;
-      const actionPlanId = selected?.actionPlanId || form.actionPlanId;
-      const numericPlanId = Number(actionPlanId);
-      if (!targetId || !actionPlanId || !Number.isFinite(numericPlanId)) {
+      const numericTargetId = Number(targetId);
+      const resolvedTargetId = Number.isFinite(numericTargetId) ? numericTargetId : targetId;
+      const formPlanId = resolvePlanIdValue(form.actionPlanId);
+      const selectedPlanId = resolvePlanIdValue(selected?.actionPlanId);
+      const actionPlanId = formPlanId || selectedPlanId;
+      if (!resolvedTargetId || !actionPlanId) {
         setError("Select a submitted proposal before saving review details.");
         return;
       }
@@ -1478,16 +1574,19 @@ const InterventionAssessmentWidget = ({ actions }) => {
         setError("Intervention updates are not available.");
         return;
       }
-      await uploadEiVerificationIfSelected({ interventionId: targetId });
+      await uploadEiVerificationIfSelected({ interventionId: resolvedTargetId });
       setIsSubmitting(true);
       try {
         const payload = buildPayload("submitted");
-        const saved = await updateIntervention(numericPlanId, targetId, payload);
+        if (formPlanId && (!selectedPlanId || String(formPlanId) !== String(selectedPlanId))) {
+          payload.actionPlanId = formPlanId;
+        }
+        const saved = await updateIntervention(actionPlanId, resolvedTargetId, payload);
         if (saved?.actionPlanId && saved.actionPlanId !== selectedActionPlanId) {
           setSelectedActionPlanId(saved.actionPlanId);
         }
-        if (saved?.id || targetId) {
-          const resolvedId = saved?.id || targetId;
+        if (saved?.id || resolvedTargetId) {
+          const resolvedId = saved?.id || resolvedTargetId;
           setSelectedDraftId(resolvedId);
           setHydratedDraftId(resolvedId);
           setHydratedDraftUpdatedAt(saved?.updatedAt || saved?.createdAt || null);
@@ -1513,6 +1612,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
       hydratedDraftId,
       isEditable,
       isSubmittedStatus,
+      resolvePlanIdValue,
       selectedActionPlanId,
       selectedDraftId,
       setSelectedActionPlanId,
@@ -1733,9 +1833,12 @@ const InterventionAssessmentWidget = ({ actions }) => {
       }
       const selected = findSelectedIntervention();
       const targetId = selected?.id || activeInterventionIdValue;
-      const actionPlanId = selected?.actionPlanId || form.actionPlanId;
-      const numericPlanId = Number(actionPlanId);
-      if (!targetId || !actionPlanId || !Number.isFinite(numericPlanId)) {
+      const numericTargetId = Number(targetId);
+      const resolvedTargetId = Number.isFinite(numericTargetId) ? numericTargetId : targetId;
+      const formPlanId = resolvePlanIdValue(form.actionPlanId);
+      const selectedPlanId = resolvePlanIdValue(selected?.actionPlanId);
+      const actionPlanId = formPlanId || selectedPlanId;
+      if (!resolvedTargetId || !actionPlanId) {
         setError("Select a submitted proposal before submitting a decision.");
         return;
       }
@@ -1747,12 +1850,15 @@ const InterventionAssessmentWidget = ({ actions }) => {
       try {
         const nextStatus = outcome;
         const payload = buildPayload(nextStatus);
-        const saved = await updateIntervention(numericPlanId, targetId, payload);
+        if (formPlanId && (!selectedPlanId || String(formPlanId) !== String(selectedPlanId))) {
+          payload.actionPlanId = formPlanId;
+        }
+        const saved = await updateIntervention(actionPlanId, resolvedTargetId, payload);
         if (saved?.actionPlanId && saved.actionPlanId !== selectedActionPlanId) {
           setSelectedActionPlanId(saved.actionPlanId);
         }
-        if (saved?.id || targetId) {
-          const resolvedId = saved?.id || targetId;
+        if (saved?.id || resolvedTargetId) {
+          const resolvedId = saved?.id || resolvedTargetId;
           setSelectedDraftId(resolvedId);
           setHydratedDraftId(resolvedId);
           setHydratedDraftUpdatedAt(saved?.updatedAt || saved?.createdAt || null);
@@ -1784,6 +1890,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
       isSubmittedStatus,
       missingRequiredCount,
       requiredFundingStream,
+      resolvePlanIdValue,
       selectedActionPlanId,
       setSelectedActionPlanId,
       setSelectedInterventionId,
@@ -1932,9 +2039,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
         <FormField
           label="End date"
           errorText={
-            attemptedSteps.framing && !form.endDate
-              ? "Required"
-              : attemptedSteps.framing && form.startDate && form.endDate && !isDateOrderValid()
+            attemptedSteps.framing && form.endDate && !isDateOrderValid()
                 ? "End date cannot be before start date"
                 : undefined
           }
@@ -2562,9 +2667,9 @@ const InterventionAssessmentWidget = ({ actions }) => {
             {selectedCodeOption ? selectedCodeOption.label : form.code || "—"}
           </div>
           <div>Start: {form.startDate || "—"}</div>
-          <div>End: {form.endDate || "—"}</div>
-          <div>Duration: {form.durationDays || "—"} days</div>
-          <div>Action Plan: {planOptions.find(p => p.value === form.actionPlanId)?.label || "—"}</div>
+          <div>End: {form.endDate || "Not Set"}</div>
+          <div>Duration: {form.endDate ? `${form.durationDays || "—"} days` : "tba"}</div>
+          <div>Current Action Plan: {planOptions.find(p => p.value === form.actionPlanId)?.label || "—"}</div>
         </Box>
         <Box>
           <Header variant="h4">Rationale</Header>
@@ -2674,7 +2779,18 @@ const InterventionAssessmentWidget = ({ actions }) => {
           dismissible
           onDismiss={() => dismissAlert("eiPlanMismatch")}
         >
-          {planMismatchAlertText}
+          <SpaceBetween size="xs">
+            <span>{planMismatchAlertText}</span>
+            <Link
+              href="#action-plans"
+              onFollow={event => {
+                event.preventDefault();
+                openWorkspaceWidget("actionPlans", 4, 2);
+              }}
+            >
+              View Action Plans
+            </Link>
+          </SpaceBetween>
         </Alert>
       )}
       {eiVerificationUploadError && (

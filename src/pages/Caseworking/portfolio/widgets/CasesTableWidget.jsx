@@ -425,13 +425,11 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const handleCaseAction = useCallback(
     (caseItem, actionType) => {
       if (!useLiveCases) {
-        console.info("[portfolio] assignment actions available in live data mode only");
         return;
       }
       if (!caseItem?.id) return;
       const numericId = Number.parseInt(caseItem.id, 10);
       if (!Number.isFinite(numericId)) {
-        console.warn("[portfolio] skipping assignment for non-numeric case id", caseItem.id);
         return;
       }
       setAssignModalMode(actionType === "reassign" ? "reassign" : "assign");

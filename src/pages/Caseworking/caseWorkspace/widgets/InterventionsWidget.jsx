@@ -1026,30 +1026,36 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           }
           const label = getTypeLabel(item) || "intervention";
           return (
-            <ButtonDropdown
-              ariaLabel={`Actions for ${label}`}
-              items={items}
-              onItemClick={({ detail }) => {
-                if (item?.id) {
-                  setSelectedInterventionId(item.id);
-                }
-                if (detail?.id === "resume") {
-                  resumeDraft(item);
-                } else if (detail?.id === "view") {
-                  openWizardView(item);
-                } else if (detail?.id === "close") {
-                  openCloseModal(item);
-                } else if (detail?.id === "activate") {
-                  handleActivate(item);
-                } else if (detail?.id === "delete") {
-                  setPendingDelete(item);
-                }
-              }}
-              disabled={formMode !== null}
-              expandToViewport
+            <span
+              onClick={event => event.stopPropagation()}
+              onMouseDown={event => event.stopPropagation()}
+              onKeyDown={event => event.stopPropagation()}
             >
-              Actions
-            </ButtonDropdown>
+              <ButtonDropdown
+                ariaLabel={`Actions for ${label}`}
+                items={items}
+                onItemClick={({ detail }) => {
+                  if (item?.id) {
+                    setSelectedInterventionId(item.id);
+                  }
+                  if (detail?.id === "resume") {
+                    resumeDraft(item);
+                  } else if (detail?.id === "view") {
+                    openWizardView(item);
+                  } else if (detail?.id === "close") {
+                    openCloseModal(item);
+                  } else if (detail?.id === "activate") {
+                    handleActivate(item);
+                  } else if (detail?.id === "delete") {
+                    setPendingDelete(item);
+                  }
+                }}
+                disabled={formMode !== null}
+                expandToViewport
+              >
+                Actions
+              </ButtonDropdown>
+            </span>
           );
         },
       },
@@ -1293,6 +1299,12 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             onSelectionChange={({ detail }) => {
               const item = detail.selectedItems?.[0];
               setSelectedInterventionId(item?.id ?? null);
+              if (item) {
+                const isProposal = isProposalWorkflowStatus(item.status);
+                if (isProposal) {
+                  openInterventionInWizard(item);
+                }
+              }
             }}
             columnDefinitions={visibleColumnDefinitions}
             preferences={preferencesComponent}

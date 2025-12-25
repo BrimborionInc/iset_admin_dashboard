@@ -17,6 +17,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Intervention Assessment wizard now loads the intervention checklist by stage (draft vs submitted), makes the documents step mandatory, adds contextual upload links, and includes manual refresh + auto-refresh. Save Progress is separate from Submit Decision.
 - EI verification step now validates eligibility on Next and triggers uploads on Next/Save Progress when a file is selected (no standalone upload button). Uploads attach to the intervention (not application) and show a blocking alert if no intervention record exists. Submit Decision is gated on decision outcome, EI status, and submitted-stage checklist completeness.
 - EI verification step now blocks progression when EI status implies a funding stream mismatch with the selected Action Plan, shows instructions to close/create the correct plan, and provides an Action Plan picker to reassign.
+- EI step now persists Action Plan reassignment on Next/Save Progress and keeps the selected plan aligned with the intervention record so submitted proposals move between plans cleanly.
 - Status normalization currently recognizes: `draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`, `planned`, `in_progress`, `suspended`, `ready_to_close`, `completed`, `cancelled` (plus aliases like `in-progress`, `ready-to-close`, `canceled`).
 - Interventions table status now shows “Submitted — EI verified/unverified” based on EI status value (document presence is handled by the checklist).
 - Intervention checklist logic now follows the reduced submission list (band funding letter, acceptance letter if institution, financial overview + evidence if living allowance) and adds EI verification at approval.
@@ -36,6 +37,11 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Draft form entries are now stored outside the widget and merged during hydration so in-progress fields (e.g., employer/wage subsidy details) survive board remounts; draft state is cleared when the widget is removed.
 - DB check: `document_type.code='ei_verification'` is scoped as `application`, which is correct for intervention uploads; the latest EI verification upload is stored with `application_id=1` and `linked_intervention_id=NULL` (doc id 19), so the intervention checklist cannot see it. That record predates the latest intervention (intervention id 5), which suggests the upload came from the application flow or an older UI that did not send `interventionId`.
 - Interventions table row click no longer opens the modal; only the Type link triggers view, preventing action menu clicks from opening the modal.
+- Interventions table selection now only opens the proposal wizard for draft/submitted items; other rows simply select without opening the modal. The row Actions menu no longer triggers selection/open due to event stop-propagation.
+- Removed temporary console logging around intervention table selection and wizard hydration after resolving proposal loading issues.
+- Wizard hydration now ignores empty stored drafts so a blank cached draft cannot overwrite submitted intervention data.
+- Action plans can now be closed even if they contain submitted interventions; only active/closed states block.
+- Action plan closeout date validation now ignores draft/submitted interventions when checking the latest intervention end date.
 - Case header now shows a compact Action Plan summary (selected/active plan, status, funding stream).
 - Case header now includes an intervention rollup (total plus draft/submitted/approved/in-progress/closed counts).
 - Case header now shows a funding snapshot (overall and selected plan committed/actual/remaining).
