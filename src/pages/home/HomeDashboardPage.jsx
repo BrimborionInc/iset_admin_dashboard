@@ -816,6 +816,85 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
             return;
         }
         let ignore = false;
+        const loadInterventionApprovals = async () => {
+            try {
+                const response = await apiFetch('/api/dashboard/intervention-approval-items', {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                const items = Array.isArray(payload?.items) ? payload.items : [];
+                const mapped = items.map((row, idx) => {
+                    const tracking =
+                        row.trackingId ||
+                        row.tracking_id ||
+                        row.caseNumber ||
+                        row.case_number ||
+                        row.caseId ||
+                        row.case_id ||
+                        `INT-${idx}`;
+                    const applicantName =
+                        row.applicant_name ||
+                        row.applicantName ||
+                        tracking ||
+                        'Applicant';
+                    const interventionLabel =
+                        row.intervention_label ||
+                        row.interventionLabel ||
+                        row.intervention_title ||
+                        row.interventionTitle ||
+                        null;
+                    const interventionId = row.interventionId || row.intervention_id || null;
+                    const caseId = row.caseId || row.case_id || null;
+                    return {
+                        id: interventionId ? `INT-${interventionId}` : String(tracking),
+                        title: applicantName,
+                        trackingId: tracking,
+                        case_id: caseId,
+                        application_id: row.applicationId || row.application_id || null,
+                        bucketId: 'interventions-awaiting-approval',
+                        type: 'InterventionApproval',
+                        applicant: applicantName,
+                        applicant_name: applicantName,
+                        region: row.address_province || '—',
+                        address_province: row.address_province || null,
+                        owner: row.owner || row.assigned_user_email || 'Unassigned',
+                        assigned_user_id: row.assigned_user_id || null,
+                        status: row.status || 'Submitted',
+                        intervention_code: row.intervention_code || null,
+                        intervention_label: interventionLabel,
+                        intervention_cost_total: row.intervention_cost_total || null,
+                        intervention_start_date: row.intervention_start_date || null,
+                        dueDate: null,
+                        submittedAt: row.submittedAt || row.submitted_at || null,
+                        summary: 'Intervention proposal awaiting approval',
+                        workspacePath: caseId ? `/cases/${caseId}` : '/case-assignment-dashboard'
+                    };
+                });
+                setProgramAdminItems(current => {
+                    const nonInterventions = current.filter(item => item.bucketId !== 'interventions-awaiting-approval');
+                    return [...mapped, ...nonInterventions];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'interventions-awaiting-approval': mapped.length
+                }));
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadInterventionApprovals();
+        return () => { ignore = true; };
+    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+
+    useEffect(() => {
+        if (!isWorkQueueRole) {
+            return;
+        }
+        let ignore = false;
         const loadEscalations = async () => {
             await fetchEscalations();
         };

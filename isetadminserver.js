@@ -48,9 +48,11 @@ let allocationPollIntervalMsDynamic =
 let allocationApplyHourConfig = DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
 const CHECKLIST_SCOPE = 'checklist';
 const CHECKLIST_KEY = 'checklist.compliance.iset';
+const CHECKLIST_INTERVENTION_KEY = 'checklist.compliance.iset.intervention';
+const CHECKLIST_FALLBACK_PATH = path.join(__dirname, 'src', 'server', 'config', 'checklists', 'iset-compliance.json');
 
 const CHECKLIST_CACHE_TTL_MS = 30 * 1000;
-let checklistCache = { ts: 0, data: null };
+const checklistCacheByKey = new Map();
 let hasAssessmentBudgetPotColumn = null;
 const ILMP_SCHEMA_VERSION = '1.4';
 
@@ -81,27 +83,42 @@ async function ensureAssessmentBudgetPotColumn(executor = pool) {
   return false;
 }
 
-async function loadChecklistConfig() {
+function loadChecklistConfigFromFile(filePath = CHECKLIST_FALLBACK_PATH) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed || null;
+  } catch (err) {
+    console.warn('[checklist] fallback file load failed', err?.message || err);
+    return null;
+  }
+}
+
+async function loadChecklistConfig(key = CHECKLIST_KEY) {
   const now = Date.now();
-  if (checklistCache.data && now - checklistCache.ts < CHECKLIST_CACHE_TTL_MS) {
-    return checklistCache.data;
+  const cacheKey = key || CHECKLIST_KEY;
+  const cached = checklistCacheByKey.get(cacheKey);
+  if (cached?.data && now - cached.ts < CHECKLIST_CACHE_TTL_MS) {
+    return cached.data;
   }
   try {
     const [rows] = await pool.query(
       'SELECT v FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
-      [CHECKLIST_SCOPE, CHECKLIST_KEY]
+      [CHECKLIST_SCOPE, cacheKey]
     );
     if (!rows || !rows.length) {
-      checklistCache = { ts: now, data: null };
+      checklistCacheByKey.set(cacheKey, { ts: now, data: null });
       return null;
     }
     const raw = rows[0].v;
     const parsed = typeof raw === 'object' ? raw : JSON.parse(raw);
-    checklistCache = { ts: now, data: parsed || null };
-    return checklistCache.data;
+    const data = parsed || null;
+    checklistCacheByKey.set(cacheKey, { ts: now, data });
+    return data;
   } catch (err) {
     console.warn('[checklist] load failed', err?.message || err);
-    checklistCache = { ts: now, data: null };
+    checklistCacheByKey.set(cacheKey, { ts: now, data: null });
     return null;
   }
 }
@@ -468,6 +485,28 @@ function computeFileSha256(filePath) {
       resolve(null);
     });
   });
+}
+
+async function duplicateDocumentFile({ filePath, fileName, applicantUserId }) {
+  if (!filePath) {
+    throw new Error('missing_file_path');
+  }
+  const storageMode = resolveUploadStorageMode();
+  if (storageMode === 's3') {
+    const { generateKey, copyObject, DRIVER } = require('../ISET-intake/s3Provider');
+    if (DRIVER !== 's3' || typeof copyObject !== 'function') {
+      throw new Error('s3_copy_unavailable');
+    }
+    const key = generateKey(applicantUserId || 'admin', fileName || 'document');
+    await copyObject({ sourceKey: filePath, targetKey: key });
+    return key;
+  }
+  const normalized = String(filePath).replace(/\\/g, '/').replace(/^\/+/, '');
+  const sourcePath = path.join(INTAKE_ROOT, normalized);
+  const targetName = sanitiseUploadFilename(fileName || 'document');
+  const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, targetName);
+  await fs.promises.copyFile(sourcePath, targetPath);
+  return toIntakeRelativePath(targetPath);
 }
 
 function normalisePositiveInteger(value) {
@@ -14978,6 +15017,107 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
   }
 });
 
+// Intervention proposals awaiting approval
+app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+    return res.json({ role, items: [] });
+  }
+  const regionCandidates = [
+    req?.auth?.regionId,
+    req?.staffProfile?.region_id
+  ];
+  let regionId = null;
+  for (const candidate of regionCandidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n)) { regionId = n; break; }
+  }
+  const statusExpr = `REPLACE(LOWER(TRIM(ci.status)), ' ', '_')`;
+  const filters = [`${statusExpr} IN (?, ?)`];
+  const params = ['submitted', 'in_review'];
+  if (role === 'Regional Coordinator') {
+    if (!Number.isFinite(regionId)) {
+      return res.json({ role, items: [] });
+    }
+    filters.push('sp.region_id = ?');
+    params.push(regionId);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const sql = `
+    SELECT
+      ci.id AS intervention_id,
+      ci.case_id,
+      ci.action_plan_id,
+      ci.intervention_code AS intervention_code,
+      ci.intervention_type AS intervention_type,
+      JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
+      ci.status AS intervention_status,
+      ci.start_date AS intervention_start_date,
+      COALESCE(ci.intervention_cost, ci.budget_amount, ci.approved_amount) AS intervention_cost_total,
+      COALESCE(ci.updated_at, ci.created_at) AS submitted_at,
+      c.case_number,
+      c.assigned_to_user_id,
+      sp.email AS assigned_user_email,
+      sp.primary_role AS assigned_user_role,
+      sp.region_id AS assigned_user_region_id,
+      a.id AS application_id,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
+      ic.label AS intervention_label
+    FROM iset_case_intervention ci
+    JOIN iset_case c ON c.id = ci.case_id
+    LEFT JOIN iset_application a ON c.application_id = a.id
+    LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
+    ${where}
+    ORDER BY ci.updated_at DESC, ci.created_at DESC
+    LIMIT 200
+  `;
+  try {
+    const [rows] = await pool.query(sql, params);
+    const items = Array.isArray(rows) ? rows.map(r => {
+      const preferred = normaliseString(r.submission_preferred_name);
+      const first = normaliseString(r.submission_first_name);
+      const last = normaliseString(r.submission_last_name);
+      const full = [first, last].filter(Boolean).join(' ').trim();
+      const applicantName = full || preferred || normaliseString(r.tracking_id) || 'Applicant';
+      const interventionLabel = normaliseString(r.intervention_label) || normaliseString(r.intervention_title) || null;
+      return {
+        interventionId: r.intervention_id || null,
+        caseId: r.case_id || null,
+        caseNumber: r.case_number || null,
+        applicationId: r.application_id || null,
+        trackingId: r.tracking_id || null,
+        applicantName,
+        applicant_name: applicantName,
+        address_province: normaliseString(r.submission_address_province) || null,
+        status: normaliseString(r.intervention_status) || null,
+        submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
+        owner: r.assigned_user_email || null,
+        assigned_user_id: r.assigned_to_user_id || null,
+        assigned_user_email: r.assigned_user_email || null,
+        assigned_user_role: r.assigned_user_role || null,
+        assigned_user_region_id: r.assigned_user_region_id || null,
+        intervention_code: r.intervention_code || null,
+        intervention_label: interventionLabel,
+        intervention_cost_total: r.intervention_cost_total || null,
+        intervention_start_date: r.intervention_start_date || null
+      };
+    }) : [];
+    return res.json({ role, regionId: regionId ?? null, items });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      return res.json({ role, regionId: regionId ?? null, items: [] });
+    }
+    console.error('[intervention-approval-items] fetch failed:', err.message);
+    return res.status(500).json({ error: 'intervention_approval_items_fetch_failed', message: err.message });
+  }
+});
+
 
 const eventService = createEventService({ pool, logger: console });
 registerNotificationHook(async (event) => {
@@ -20194,12 +20334,16 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
     const metadata = Object.keys(metadataObj).length ? JSON.stringify(metadataObj) : null;
     const caseId = normalisePositiveInteger(req.body?.caseId);
     const applicationIdRaw = normalisePositiveInteger(req.body?.applicationId);
+    const interventionIdRaw = normalisePositiveInteger(req.body?.interventionId || req.body?.linkedInterventionId);
     let applicationId = applicationIdRaw;
+    let interventionId = interventionIdRaw;
     if (docTypeScope === 'client') {
       applicationId = null;
-    } else if (docType && docTypeScope === 'application' && !applicationIdRaw) {
-      cleanupUploadedFile();
-      return res.status(400).json({ error: 'application_required_for_document' });
+      interventionId = null;
+    } else if (docType && docTypeScope === 'application') {
+      if (interventionId) {
+        applicationId = null;
+      }
     }
     const source = 'manual_upload';
     const uploaderUserId = resolveAdminActorUserId(req);
@@ -20249,6 +20393,7 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
       const insertPayload = [
         caseId,
         applicationId,
+        interventionId,
         applicantId,
         uploaderUserId,
         source,
@@ -20263,11 +20408,12 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
       ];
       const [result] = await pool.query(
         `INSERT INTO iset_document
-           (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)
+           (case_id, application_id, linked_intervention_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)
          ON DUPLICATE KEY UPDATE
            applicant_user_id = VALUES(applicant_user_id),
            application_id = VALUES(application_id),
+           linked_intervention_id = VALUES(linked_intervention_id),
            case_id = VALUES(case_id),
            user_id = VALUES(user_id),
            label = VALUES(label),
@@ -20292,7 +20438,7 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
           ? ['id = ?', [insertId]]
           : ['file_path = ?', [relativePath]];
         const [rows] = await pool.query(
-        `SELECT id, case_id, application_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
+        `SELECT id, case_id, application_id, linked_intervention_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
            FROM iset_document
          WHERE ${lookupKey[0]}
          LIMIT 1`,
@@ -20491,6 +20637,12 @@ app.put('/api/documents/:id', async (req, res) => {
   }
   const rawDocType = typeof req.body?.documentType === 'string' ? req.body.documentType.trim() : '';
   const docType = rawDocType || null;
+  const applicationIdProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'applicationId');
+  const interventionIdProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'interventionId') || Object.prototype.hasOwnProperty.call(req.body || {}, 'linkedInterventionId');
+  const applicationId = applicationIdProvided ? normalisePositiveInteger(req.body?.applicationId) : undefined;
+  const interventionId = interventionIdProvided
+    ? normalisePositiveInteger(req.body?.interventionId || req.body?.linkedInterventionId)
+    : undefined;
   let metadataObj = {};
   try {
     const [rows] = await pool.query('SELECT metadata, document_category FROM iset_document WHERE id = ? LIMIT 1', [documentId]);
@@ -20511,17 +20663,36 @@ app.put('/api/documents/:id', async (req, res) => {
   if (docType) metadataObj.document_type = docType;
   const metadata = JSON.stringify(metadataObj);
   try {
+    const updateFields = [
+      'label = ?',
+      'metadata = ?',
+      'document_category = COALESCE(?, document_category)'
+    ];
+    const updateParams = [label, metadata, docType || null];
+    if (applicationIdProvided || interventionIdProvided) {
+      let nextApplicationId = applicationId ?? null;
+      let nextInterventionId = interventionId ?? null;
+      if (nextInterventionId) {
+        nextApplicationId = null;
+      } else if (nextApplicationId) {
+        nextInterventionId = null;
+      }
+      updateFields.push('application_id = ?');
+      updateFields.push('linked_intervention_id = ?');
+      updateParams.push(nextApplicationId);
+      updateParams.push(nextInterventionId);
+    }
     const [result] = await pool.query(
       `UPDATE iset_document
-         SET label = ?, metadata = ?, document_category = COALESCE(?, document_category), updated_at = NOW()
+         SET ${updateFields.join(', ')}, updated_at = NOW()
        WHERE id = ?`,
-      [label, metadata, docType || null, documentId]
+      [...updateParams, documentId]
     );
     if (!result || result.affectedRows === 0) {
       return res.status(404).json({ error: 'document_not_found' });
     }
     const [[row]] = await pool.query(
-      `SELECT id, case_id, application_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
+      `SELECT id, case_id, application_id, linked_intervention_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
          FROM iset_document
         WHERE id = ?
         LIMIT 1`,
@@ -20531,6 +20702,105 @@ app.put('/api/documents/:id', async (req, res) => {
   } catch (err) {
     console.error('[admin:documents:update] error', err);
     return res.status(500).json({ error: 'failed_to_update_document' });
+  }
+});
+
+app.post('/api/documents/:id/duplicate', async (req, res) => {
+  const documentId = Number(req.params.id);
+  if (!Number.isFinite(documentId) || documentId <= 0) {
+    return res.status(400).json({ error: 'invalid_document_id' });
+  }
+  const rawLabel = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
+  const labelOverride = rawLabel ? rawLabel.slice(0, 255) : null;
+  const rawDocType = typeof req.body?.documentType === 'string' ? req.body.documentType.trim() : '';
+  const docTypeOverride = rawDocType || null;
+  const applicationIdRaw = normalisePositiveInteger(req.body?.applicationId);
+  const interventionIdRaw = normalisePositiveInteger(req.body?.interventionId || req.body?.linkedInterventionId);
+  let applicationId = applicationIdRaw;
+  let interventionId = interventionIdRaw;
+  if (interventionId) {
+    applicationId = null;
+  } else if (applicationId) {
+    interventionId = null;
+  }
+
+  try {
+    const [[doc]] = await pool.query(
+      `SELECT id, case_id, application_id, linked_intervention_id, applicant_user_id, user_id, origin_message_id,
+              source, file_name, file_path, mime_type, label, metadata, document_category, size_bytes, checksum_sha256
+         FROM iset_document
+        WHERE id = ? AND status = 'active'
+        LIMIT 1`,
+      [documentId]
+    );
+    if (!doc) {
+      return res.status(404).json({ error: 'document_not_found' });
+    }
+
+    const docType = docTypeOverride || doc.document_category || parseMetadata(doc.metadata)?.document_type || null;
+    if (docType) {
+      try {
+        const [[docTypeRow]] = await pool.query(
+          'SELECT COALESCE(scope, "application") AS scope FROM document_type WHERE code = ? AND is_active = 1 LIMIT 1',
+          [docType]
+        );
+        if (!docTypeRow) {
+          return res.status(400).json({ error: 'invalid_document_type' });
+        }
+        if (docTypeRow.scope === 'client') {
+          applicationId = null;
+          interventionId = null;
+        }
+      } catch (err) {
+        console.error('[admin:documents:duplicate] doc type lookup failed', err);
+        return res.status(500).json({ error: 'document_type_lookup_failed' });
+      }
+    }
+
+    const metadataObj = parseMetadata(doc.metadata) || {};
+    const nextLabel = labelOverride || doc.label || doc.file_name || 'Document';
+    metadataObj.label = nextLabel;
+    if (docType) metadataObj.document_type = docType;
+    const metadata = JSON.stringify(metadataObj);
+    const uploaderUserId = resolveAdminActorUserId(req);
+    const nextPath = await duplicateDocumentFile({
+      filePath: doc.file_path,
+      fileName: doc.file_name,
+      applicantUserId: doc.applicant_user_id || uploaderUserId || null,
+    });
+    const [result] = await pool.query(
+      `INSERT INTO iset_document
+         (case_id, application_id, linked_intervention_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)`,
+      [
+        doc.case_id || null,
+        applicationId,
+        interventionId,
+        doc.applicant_user_id || null,
+        uploaderUserId,
+        doc.source || 'manual_upload',
+        doc.file_name,
+        nextPath,
+        doc.mime_type || null,
+        nextLabel,
+        metadata,
+        doc.size_bytes || null,
+        doc.checksum_sha256 || null,
+        docType,
+      ]
+    );
+    const insertId = result?.insertId || null;
+    const [[row]] = await pool.query(
+      `SELECT id, case_id, application_id, linked_intervention_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
+         FROM iset_document
+        WHERE id = ?
+        LIMIT 1`,
+      [insertId]
+    );
+    return res.json({ ok: true, document: row });
+  } catch (err) {
+    console.error('[admin:documents:duplicate] error', err);
+    return res.status(500).json({ error: 'failed_to_duplicate_document' });
   }
 });
 
@@ -20624,11 +20894,21 @@ app.get('/api/applicants/:id/applications', async (req, res) => {
 app.get('/api/applicants/:id/document-checklist', async (req, res) => {
   const applicantId = normalisePositiveInteger(req.params.id);
   const applicationId = normalisePositiveInteger(req.query.applicationId);
+  const interventionId = normalisePositiveInteger(req.query.interventionId);
+  const stageRaw = typeof req.query.stage === 'string' ? req.query.stage.trim().toLowerCase() : '';
   if (!applicantId) {
     return res.status(400).json({ error: 'invalid_applicant_id' });
   }
   try {
-    const checklist = await loadChecklistConfig();
+    const isIntervention = Boolean(interventionId);
+    const checklistKey = isIntervention ? CHECKLIST_INTERVENTION_KEY : CHECKLIST_KEY;
+    let checklist = await loadChecklistConfig(checklistKey);
+    if (!checklist && isIntervention) {
+      checklist = await loadChecklistConfig(CHECKLIST_KEY);
+    }
+    if (!checklist) {
+      checklist = loadChecklistConfigFromFile();
+    }
     if (!checklist || !Array.isArray(checklist.items)) {
       return res.status(200).json({ items: [], missingRequiredCount: 0 });
     }
@@ -20639,11 +20919,25 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     );
     const applicantApplicationCount = Number(appCountRow?.cnt || 0);
     const [docs] = await pool.query(
-      `SELECT id, file_name, file_path, label, metadata, document_category, source, application_id, created_at AS uploaded_at
-        FROM iset_document
-       WHERE applicant_user_id = ? AND status = 'active'`,
+      `SELECT id, file_name, file_path, label, metadata, document_category, source, application_id, linked_intervention_id, created_at AS uploaded_at
+         FROM iset_document
+        WHERE applicant_user_id = ? AND status = 'active'`,
       [applicantId]
     );
+    let interventionMetadata = null;
+    if (isIntervention) {
+      const [[interventionRow]] = await pool.query(
+        `SELECT metadata_json
+           FROM iset_case_intervention
+          WHERE id = ?
+          LIMIT 1`,
+        [interventionId]
+      );
+      if (!interventionRow) {
+        return res.status(404).json({ error: 'intervention_not_found' });
+      }
+      interventionMetadata = parseMetadata(interventionRow.metadata_json) || {};
+    }
     const applicationAnswerMeta = await loadApplicationAnswers({ applicantId, applicationId });
     const applicationAnswers = applicationAnswerMeta.answers;
     const applicationExists = Boolean(
@@ -20681,6 +20975,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
         source: doc.source,
         uploaded_at: doc.uploaded_at,
         application_id: doc.application_id || null,
+        linked_intervention_id: doc.linked_intervention_id || null,
         scope,
         docTypes,
       };
@@ -20741,7 +21036,12 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       const matchesType = d.docTypes.some(t => types.includes(t));
       if (!matchesType) return false;
       const scope = d.scope || 'application';
-      if (!applicationId || scope === 'client') return true;
+      if (scope === 'client') return true;
+      if (isIntervention) {
+        const docInterventionId = normalisePositiveInteger(d.linked_intervention_id);
+        return docInterventionId !== null && docInterventionId === interventionId;
+      }
+      if (!applicationId) return true;
       const docAppId = normalisePositiveInteger(d.application_id);
       if (docAppId !== null) return docAppId === applicationId;
       // Gracefully allow legacy application-scoped docs without an application_id when the applicant has only one application.
@@ -20755,7 +21055,98 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       return 'missing';
     };
 
-    const items = checklist.items.map(item => {
+    if (isIntervention) {
+      const parseMoney = value => {
+        if (value === null || typeof value === 'undefined') return 0;
+        if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+        const cleaned = String(value).replace(/[^0-9.]/g, '');
+        if (!cleaned) return 0;
+        const parsed = Number.parseFloat(cleaned);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const snapshot = interventionMetadata?.snapshot || {};
+      const institutionValue =
+        snapshot.institution ||
+        interventionMetadata?.institution ||
+        interventionMetadata?.trainingInstitution ||
+        '';
+      const hasInstitution =
+        typeof institutionValue === 'string' ? Boolean(institutionValue.trim()) : Boolean(institutionValue);
+      const livingAllowanceValue = parseMoney(
+        snapshot?.itp?.living ??
+          interventionMetadata?.itp?.living ??
+          snapshot?.itp?.livingAllowance ??
+          interventionMetadata?.itp?.livingAllowance ??
+          0
+      );
+      const hasLivingAllowance = livingAllowanceValue > 0;
+      const includeEiVerification = stageRaw && stageRaw !== 'draft';
+      const interventionItems = [
+        {
+          id: 'band-funding-letter',
+          label: 'Band funding confirmation or denial letter',
+          required: true,
+          minCount: 1,
+          documentTypes: ['band_funding_confirmation', 'band_funding_denial'],
+          sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
+        },
+        {
+          id: 'intervention-acceptance-letter',
+          label: 'Letter of Acceptance (current year/term)',
+          required: hasInstitution,
+          documentTypes: ['acceptance_letter'],
+          sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
+        },
+        {
+          id: 'intervention-financial-overview',
+          label: 'ISET Financial Overview (monthly budget)',
+          required: hasLivingAllowance,
+          documentTypes: ['financial_overview'],
+          sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
+        },
+        {
+          id: 'intervention-financial-evidence',
+          label: 'Financial Evidence (expenses / supporting)',
+          required: hasLivingAllowance,
+          minCount: 1,
+          documentTypes: ['financial_evidence'],
+          sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
+        },
+      ];
+      if (includeEiVerification) {
+        interventionItems.push({
+          id: 'intervention-ei-verification',
+          label: 'EI Eligibility Verification',
+          required: true,
+          documentTypes: ['ei_verification'],
+          sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
+        });
+      }
+      const items = interventionItems.map(item => {
+        const docTypes = Array.isArray(item.documentTypes) ? item.documentTypes.map(String) : [];
+        const sources = Array.isArray(item.sources) ? item.sources : [];
+        const required = item.required !== false;
+        const minCount = Number.isFinite(Number(item.minCount)) ? Number(item.minCount) : 1;
+        const matchedCount = matchesForTypes(docTypes).length;
+        const status = computeStatus(required, matchedCount, minCount);
+        return {
+          id: item.id,
+          label: item.label,
+          required,
+          minCount,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources,
+        };
+      });
+      const missingRequiredCount = items.filter(i => i.required && i.status !== 'complete').length;
+      return res.json({ items, missingRequiredCount });
+    }
+
+    let filteredItems = checklist.items;
+
+    const items = filteredItems.map(item => {
       const normalizedId = normaliseId(item.id);
       const baseRequired = item.required !== false;
       const sources = Array.isArray(item.sources) ? item.sources : [];
@@ -20764,6 +21155,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       let effectiveMinCount = Number.isFinite(Number(item.minCount)) ? Number(item.minCount) : 1;
 
       const appSatisfied =
+        !isIntervention &&
         sources.includes('application_form') &&
         (docTypes.includes('application_form')
           ? applicationExists
@@ -21076,6 +21468,7 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
   const applicantId = normalisePositiveInteger(req.params.id);
   const applicationFilterId = normalisePositiveInteger(req.query.applicationId);
   const caseFilterId = normalisePositiveInteger(req.query.caseId);
+  const interventionFilterId = normalisePositiveInteger(req.query.interventionId);
   if (!applicantId) {
     return res.status(400).json({ error: 'invalid_applicant_id' });
   }
@@ -21086,6 +21479,9 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
     if (caseFilterId) {
       whereClauses.push('d.case_id = ?');
       params.push(caseFilterId);
+    } else if (interventionFilterId) {
+      whereClauses.push('d.linked_intervention_id = ?');
+      params.push(interventionFilterId);
     } else if (applicationFilterId) {
       whereClauses.push('(d.application_id = ? OR c.application_id = ?)');
       params.push(applicationFilterId, applicationFilterId);
@@ -21097,6 +21493,7 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
           d.case_id,
           c.case_number,
           d.application_id,
+          d.linked_intervention_id,
           d.file_name,
           d.file_path,
           d.label,
@@ -21335,6 +21732,11 @@ app.get('/api/cases', async (req, res) => {
                 'planned',
                 'planning',
                 'draft',
+                'submitted',
+                'in_review',
+                'changes_requested',
+                'approved',
+                'ready_to_close',
                 'in_progress',
                 'in-progress',
                 'inprogress',
@@ -24155,6 +24557,13 @@ app.patch('/api/interventions/:id', async (req, res) => {
     const metadata = safeJsonParse(interventionRow.metadata_json, null) || {};
     const metadataPayload =
       body.metadata && typeof body.metadata === 'object' ? body.metadata : null;
+    if (metadataPayload) {
+      Object.entries(metadataPayload).forEach(([key, value]) => {
+        if (typeof value === 'undefined') return;
+        metadata[key] = value;
+      });
+      metadataChanged = true;
+    }
     const planMetadata = safeJsonParse(planRow?.metadata_json, null) || {};
     const existingPostingContext =
       normalizePostingContext(metadata.postingContext) ||
@@ -25161,6 +25570,7 @@ app.patch('/api/action-plans/:id', async (req, res) => {
     if (summary !== null && typeof summary !== 'undefined') {
       metadata.summary = summary || null;
     }
+    const esdcExisting = safeJsonParse(planRow.esdc_action_plan_json, {}) || {};
     const existingPostingContext =
       normalizePostingContext(metadata.postingContext) ||
       normalizePostingContext(esdcExisting.postingContext) ||
@@ -25214,8 +25624,6 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       const code = normaliseCode(value, set);
       return code;
     };
-
-    const esdcExisting = safeJsonParse(planRow.esdc_action_plan_json, {}) || {};
 
     const budgetPot = (() => {
       if (typeof req.body.budgetPot === 'undefined') return esdcExisting.budgetPot || planRow.budget_pot || null;
@@ -32476,6 +32884,7 @@ app.post('/api/render-njk', (req, res) => {
 app.get('/api/admin/messages/:id/attachments', async (req, res) => {
   const messageId = req.params.id;
   const caseIdFromQuery = req.query.case_id ? parseInt(req.query.case_id, 10) : null;
+  const interventionIdFromQuery = normalisePositiveInteger(req.query.intervention_id || req.query.interventionId);
   try {
     // Get all attachments for this message
     const [attachments] = await pool.query(
@@ -32521,7 +32930,9 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
       }
     }
 
-    const resolvedApplicationId = caseApplicationId || message.application_id || null;
+    const resolvedApplicationId = interventionIdFromQuery
+      ? null
+      : caseApplicationId || message.application_id || null;
     if (!applicantUserId) {
       applicantUserId =
         message.applicant_user_id ||
@@ -32558,12 +32969,13 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
 
         try {
           const [insertResult] = await pool.query(
-            `INSERT INTO iset_document (case_id, application_id, applicant_user_id, user_id, origin_message_id, source, file_name, file_path, label, created_at)
-             VALUES (?, ?, ?, ?, ?, 'secure_message_attachment', ?, ?, 'Secure Message Attachment', ?)
-             ON DUPLICATE KEY UPDATE applicant_user_id = VALUES(applicant_user_id), application_id = VALUES(application_id), user_id = VALUES(user_id), origin_message_id = VALUES(origin_message_id), updated_at = NOW()` ,
+            `INSERT INTO iset_document (case_id, application_id, linked_intervention_id, applicant_user_id, user_id, origin_message_id, source, file_name, file_path, label, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'secure_message_attachment', ?, ?, 'Secure Message Attachment', ?)
+             ON DUPLICATE KEY UPDATE applicant_user_id = VALUES(applicant_user_id), application_id = VALUES(application_id), linked_intervention_id = VALUES(linked_intervention_id), user_id = VALUES(user_id), origin_message_id = VALUES(origin_message_id), updated_at = NOW()` ,
             [
               caseId,
               resolvedApplicationId,
+              interventionIdFromQuery,
               docApplicantUserId,
               docUserId,
               messageId,

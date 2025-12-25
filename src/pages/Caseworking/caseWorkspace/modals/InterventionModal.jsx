@@ -19,7 +19,7 @@ import { apiFetch } from "../../../../auth/apiClient.js";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import { formatCurrencyDisplay, getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat.js";
 
-const STATUS_OPTIONS = [
+const BASE_STATUS_OPTIONS = [
   { value: "planned", label: "Planned" },
   { value: "in_progress", label: "In progress" },
   { value: "suspended", label: "Suspended" },
@@ -37,7 +37,19 @@ const RECURRING_PERIOD_OPTIONS = [
   { value: "quarterly", label: "Quarterly" },
 ];
 
-const OPEN_INTERVENTION_STATUSES = new Set(["planned", "in_progress", "suspended"]);
+const OPEN_INTERVENTION_STATUSES = new Set([
+  "draft",
+  "submitted",
+  "in_review",
+  "changes_requested",
+  "approved",
+  "rejected",
+  "planned",
+  "in_progress",
+  "suspended",
+  "ready_to_close",
+]);
+const CLOSED_INTERVENTION_STATUSES = new Set(["completed", "cancelled"]);
 const IN_PROGRESS_OUTCOME = "2";
 const DEFAULT_CLOSED_OUTCOME = "1";
 const POSTING_CONTEXT_OPTIONS = [
@@ -153,7 +165,12 @@ const normaliseStatus = value => {
   return status;
 };
 
-const isClosedStatusValue = status => !OPEN_INTERVENTION_STATUSES.has(normaliseStatus(status));
+const formatStatusLabel = value =>
+  String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, char => char.toUpperCase());
+
+const isClosedStatusValue = status => CLOSED_INTERVENTION_STATUSES.has(normaliseStatus(status));
 
 const ensureOutcomeForStatus = (status, currentOutcome) => {
   const normalized = normaliseStatus(status);
@@ -385,9 +402,18 @@ const InterventionModal = ({
     return formatted;
   }, [codeOptions, form.code]);
 
+  const statusOptions = useMemo(() => {
+    const options = [...BASE_STATUS_OPTIONS];
+    const current = normaliseStatus(form.status);
+    if (current && !options.some(option => option.value === current)) {
+      options.push({ value: current, label: formatStatusLabel(current), disabled: true });
+    }
+    return options;
+  }, [form.status]);
+
   const selectedStatusOption = useMemo(
-    () => STATUS_OPTIONS.find(option => option.value === form.status) || STATUS_OPTIONS[0],
-    [form.status]
+    () => statusOptions.find(option => option.value === normaliseStatus(form.status)) || statusOptions[0],
+    [statusOptions, form.status]
   );
 
   const selectedCloseStatusOption = useMemo(
@@ -1120,7 +1146,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                 <Select
                   selectedOption={selectedStatusOption}
                   onChange={({ detail }) => handleChange("status", detail.selectedOption?.value || "planned")}
-                  options={STATUS_OPTIONS}
+                  options={statusOptions}
                   disabled={isReadOnly}
                 />
               </FormField>
@@ -1353,70 +1379,6 @@ const applyFieldSideEffects = (draft, field, value) => {
               />
             </FormField>
           </SpaceBetween>
-          {mode === "edit" && (isClosing || isClosedIntervention) && (
-            <SpaceBetween size="s">
-              <Header variant="h3">Close intervention</Header>
-              {showCloseGuidance && isClosing && canClose && (
-                <Alert
-                  type={isDirty ? "warning" : "info"}
-                  dismissible
-                  dismissAriaLabel="Dismiss close guidance"
-                  onDismiss={() => setShowCloseGuidance(false)}
-                >
-                  {isDirty
-                    ? "Save your pending changes before closing this intervention."
-                    : "Select an outcome above, choose the final status, and capture completion details to record this intervention."}
-                </Alert>
-              )}
-            <ColumnLayout columns={3} variant="text-grid">
-              <FormField label="ESDC outcome" description="Required to close.">
-                <Select
-                  selectedOption={selectedCloseOutcomeOption}
-                  onChange={({ detail }) =>
-                    handleCloseChange("outcome", detail.selectedOption?.value || "")
-                  }
-                  options={outcomeSelectOptions}
-                  filteringType="auto"
-                  disabled={isReadOnly || !canClose}
-                />
-              </FormField>
-              <FormField label="Closure status">
-                <Select
-                  selectedOption={selectedCloseStatusOption}
-                  onChange={({ detail }) =>
-                    handleCloseChange("status", detail.selectedOption?.value || "completed")
-                    }
-                    options={CLOSE_STATUS_OPTIONS}
-                  disabled={isReadOnly || !canClose}
-                  />
-                </FormField>
-                <FormField
-                  label="Completion date"
-                  description="Required. Must match the final intervention end date."
-                >
-                  <DatePicker
-                    value={closeForm.completionDate}
-                    onChange={({ detail }) => handleCloseChange("completionDate", detail.value)}
-                    placeholder="YYYY-MM-DD"
-                    disabled={isReadOnly || !canClose}
-                />
-              </FormField>
-              <FormField
-                  label="Actual cost"
-                  description="Whole dollars 0–999999. Leave blank if not applicable."
-                >
-                  <Input
-                    value={getCurrencyInputDisplayValue(closeForm.actualAmount, isActualCostFocused)}
-                    onChange={({ detail }) => handleCloseChange("actualAmount", detail.value)}
-                    onFocus={() => setIsActualCostFocused(true)}
-                    onBlur={() => setIsActualCostFocused(false)}
-                    placeholder="e.g. 4200"
-                    disabled={isReadOnly || !canClose}
-                  />
-                </FormField>
-              </ColumnLayout>
-            </SpaceBetween>
-          )}
         </SpaceBetween>
       </SpaceBetween>
     </Modal>

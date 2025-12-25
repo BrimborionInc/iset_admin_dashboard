@@ -77,6 +77,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     if (workspaceCaseData) return workspaceCaseData;
     return null;
   }, [propCaseData, workspaceCaseData]);
+  const selectedInterventionId = workspace?.selectedInterventionId ?? null;
 
   const rawCaseId =
     caseData?.id ??
@@ -101,6 +102,12 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     rawApplicantUserId == null || rawApplicantUserId === '' || Number.isNaN(applicantUserIdNum)
       ? null
       : applicantUserIdNum;
+
+  const selectedInterventionNum = Number(selectedInterventionId);
+  const interventionId =
+    selectedInterventionId == null || selectedInterventionId === '' || Number.isNaN(selectedInterventionNum)
+      ? null
+      : selectedInterventionNum;
 
   const applicantName =
     caseData?.applicant_name ??
@@ -468,7 +475,11 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     let cancelled = false;
     setAttachmentsLoading(true);
     setAttachmentsError(null);
-    apiFetch(`/api/admin/messages/${selectedMessage.id}/attachments?case_id=${caseId}`)
+    const params = new URLSearchParams({ case_id: String(caseId) });
+    if (interventionId) {
+      params.set('intervention_id', String(interventionId));
+    }
+    apiFetch(`/api/admin/messages/${selectedMessage.id}/attachments?${params.toString()}`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to load attachments');
         return res.json();
@@ -502,7 +513,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     return () => {
       cancelled = true;
     };
-  }, [viewModalOpen, selectedMessage?.id, caseId, applicantUserId]);
+  }, [viewModalOpen, selectedMessage?.id, caseId, applicantUserId, interventionId]);
 
   const handleCloseModal = () => {
     setViewModalOpen(false);

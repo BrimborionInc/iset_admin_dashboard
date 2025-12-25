@@ -19,7 +19,16 @@ import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 import { apiFetch } from "../../../../auth/apiClient.js";
 
 const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
-  const { caseData, isLoading, error, markReadyToClose, closeCase, reopenCase, refresh } = useCaseWorkspace();
+  const {
+    caseData,
+    isLoading,
+    error,
+    markReadyToClose,
+    closeCase,
+    reopenCase,
+    refresh,
+    selectedActionPlanId,
+  } = useCaseWorkspace();
   const [actionError, setActionError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [validationModal, setValidationModal] = useState({
@@ -58,6 +67,19 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     }
     return date.toLocaleString();
   };
+  const formatDate = value => {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+    return date.toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" });
+  };
+  const formatCurrency = value => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return "—";
+    return `$${numeric.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   const rawStatus = typeof caseData?.status === "string" ? caseData.status.trim().toLowerCase() : "";
   const normalizedStatus = rawStatus.replace(/-/g, "_");
@@ -91,8 +113,279 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   })();
   const caseNumber = caseData?.caseNumber || (caseData?.id ? `CASE-${caseData.id}` : "-");
   const clientName = caseData?.client?.name ?? "Unknown client";
+  const formatPlanStatus = value => {
+    if (!value) return "Unknown";
+    return String(value)
+      .trim()
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, char => char.toUpperCase());
+  };
+  const selectedPlan = useMemo(() => {
+    const plans = caseData?.actionPlans || [];
+    if (!plans.length) return null;
+    if (selectedActionPlanId) {
+      return plans.find(plan => String(plan.id) === String(selectedActionPlanId)) || null;
+    }
+    const activePlan = plans.find(plan => String(plan.status || "").toLowerCase() === "active");
+    return activePlan || plans[0];
+  }, [caseData, selectedActionPlanId]);
+  const selectedPlanSummary = useMemo(() => {
+    if (!selectedPlan) return "—";
+    const planLabel = selectedPlan.title || `Action Plan ${selectedPlan.id}`;
+    const status = formatPlanStatus(selectedPlan.status);
+    const stream = selectedPlan.fundingStream || selectedPlan.funding_stream || "—";
+    return `${planLabel} · ${status} · ${stream}`;
+  }, [selectedPlan]);
+  const interventionCostTotals = useMemo(() => {
+    const plans = caseData?.actionPlans || [];
+    const toNumberOrNull = value => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    };
+    const getPlannedCost = item =>
+      toNumberOrNull(
+        item?.plannedCost ??
+          item?.cost ??
+          item?.budgetAmount ??
+          item?.approvedAmount ??
+          item?.intervention_cost ??
+          item?.interventionCost
+      );
+    const getActualCost = item => toNumberOrNull(item?.actualAmount);
+    const totals = {
+      overall: { committed: 0, actual: 0, count: 0 },
+      byPlan: new Map(),
+    };
+    plans.forEach(plan => {
+      const interventions = Array.isArray(plan.interventions) ? plan.interventions : [];
+      const planTotals = { committed: 0, actual: 0, count: interventions.length };
+      interventions.forEach(intervention => {
+        totals.overall.count += 1;
+        const planned = getPlannedCost(intervention);
+        const actual = getActualCost(intervention);
+        if (planned !== null) {
+          totals.overall.committed += planned;
+          planTotals.committed += planned;
+        }
+        if (actual !== null) {
+          totals.overall.actual += actual;
+          planTotals.actual += actual;
+        }
+      });
+      totals.byPlan.set(String(plan.id), planTotals);
+    });
+    return totals;
+  }, [caseData]);
+  const fundingSnapshotSummary = useMemo(() => {
+    const financeSummary = caseData?.finance;
+    const pots = Array.isArray(financeSummary?.pots) ? financeSummary.pots : [];
+    const pickSummaryValue = (...candidates) => {
+      const candidate = candidates.find(value => Number.isFinite(Number(value)));
+      if (candidate === undefined) return null;
+      return Number(candidate);
+    };
+    const sumPotValues = key =>
+      pots.reduce((acc, pot) => {
+        const numeric = Number(pot?.[key]);
+        return acc + (Number.isFinite(numeric) ? numeric : 0);
+      }, 0);
+    const overallCommitted =
+      pickSummaryValue(financeSummary?.committed) ??
+      (pots.length ? sumPotValues("committed") : null) ??
+      interventionCostTotals.overall.committed;
+    const overallActual =
+      pickSummaryValue(financeSummary?.actuals, financeSummary?.actual, financeSummary?.spent) ??
+      (pots.length ? sumPotValues("actual") : null) ??
+      interventionCostTotals.overall.actual;
+    const overallRemaining =
+      overallCommitted !== null && overallActual !== null ? overallCommitted - overallActual : null;
+    const hasOverall =
+      Number.isFinite(overallCommitted) ||
+      Number.isFinite(overallActual) ||
+      interventionCostTotals.overall.count > 0;
+    let planLine = "Plan: —";
+    if (selectedPlan) {
+      const planTotals = interventionCostTotals.byPlan.get(String(selectedPlan.id)) || {
+        committed: 0,
+        actual: 0,
+        count: 0,
+      };
+      const planRemaining = planTotals.committed - planTotals.actual;
+      planLine = `Plan: ${formatCurrency(planTotals.committed)} committed · ${formatCurrency(
+        planTotals.actual
+      )} actual · ${formatCurrency(planRemaining)} remaining`;
+    }
+    if (!hasOverall && !selectedPlan) return "—";
+    const overallLine = `Overall: ${formatCurrency(overallCommitted)} committed · ${formatCurrency(
+      overallActual
+    )} actual · ${formatCurrency(overallRemaining)} remaining`;
+    return (
+      <Box>
+        <div>{overallLine}</div>
+        <div style={{ color: "var(--color-text-body-secondary)", fontSize: "12px" }}>{planLine}</div>
+      </Box>
+    );
+  }, [caseData, interventionCostTotals, selectedPlan]);
+  const nextKeyDate = useMemo(() => {
+    const plans = caseData?.actionPlans || [];
+    const candidates = [];
+    plans.forEach(plan => {
+      if (plan?.endDate) {
+        candidates.push({
+          date: plan.endDate,
+          label: "Action plan end",
+          name: plan.title || (plan.id ? `Action Plan ${plan.id}` : ""),
+        });
+      }
+      const interventions = Array.isArray(plan.interventions) ? plan.interventions : [];
+      interventions.forEach(intervention => {
+        const interventionName = intervention?.title || intervention?.code || "Intervention";
+        if (intervention?.startDate) {
+          candidates.push({
+            date: intervention.startDate,
+            label: "Intervention start",
+            name: interventionName,
+          });
+        }
+        if (intervention?.endDate) {
+          candidates.push({
+            date: intervention.endDate,
+            label: "Intervention end",
+            name: interventionName,
+          });
+        }
+      });
+    });
+    const parsed = candidates
+      .map(candidate => {
+        const time = new Date(candidate.date).getTime();
+        if (!Number.isFinite(time)) return null;
+        return { ...candidate, time };
+      })
+      .filter(Boolean);
+    if (!parsed.length) return null;
+    const now = Date.now();
+    const upcoming = parsed.filter(item => item.time >= now).sort((a, b) => a.time - b.time);
+    if (upcoming.length) return upcoming[0];
+    return parsed.sort((a, b) => a.time - b.time)[0];
+  }, [caseData]);
+  const nextKeyDateSummary = useMemo(() => {
+    if (!nextKeyDate) return "—";
+    return (
+      <Box>
+        <div>{formatDate(nextKeyDate.date)}</div>
+        <div style={{ color: "var(--color-text-body-secondary)", fontSize: "12px" }}>
+          {nextKeyDate.label}
+          {nextKeyDate.name ? ` · ${nextKeyDate.name}` : ""}
+        </div>
+      </Box>
+    );
+  }, [nextKeyDate]);
+  const lastActivity = useMemo(() => {
+    const plans = caseData?.actionPlans || [];
+    const candidates = [];
+    plans.forEach(plan => {
+      const planStamp = plan?.updatedAt || plan?.createdAt || null;
+      if (planStamp) {
+        candidates.push({
+          when: planStamp,
+          label: "Action plan update",
+          name: plan.title || (plan.id ? `Action Plan ${plan.id}` : ""),
+          who: plan?.owner?.name || plan?.updatedBy || plan?.updatedByName || null,
+        });
+      }
+      const interventions = Array.isArray(plan.interventions) ? plan.interventions : [];
+      interventions.forEach(intervention => {
+        const interventionStamp = intervention?.updatedAt || intervention?.createdAt || null;
+        if (!interventionStamp) return;
+        candidates.push({
+          when: interventionStamp,
+          label: "Intervention update",
+          name: intervention?.title || intervention?.code || "Intervention",
+          who:
+            intervention?.updatedBy?.name ||
+            intervention?.updatedBy ||
+            intervention?.updatedByName ||
+            intervention?.createdBy ||
+            null,
+        });
+      });
+    });
+    const parsed = candidates
+      .map(item => {
+        const time = new Date(item.when).getTime();
+        if (!Number.isFinite(time)) return null;
+        return { ...item, time };
+      })
+      .filter(Boolean);
+    if (!parsed.length) return null;
+    return parsed.sort((a, b) => b.time - a.time)[0];
+  }, [caseData]);
+  const lastActivitySummary = useMemo(() => {
+    if (!lastActivity) return "—";
+    const who = lastActivity.who ? ` · ${lastActivity.who}` : "";
+    return (
+      <Box>
+        <div>{formatDateTime(lastActivity.when)}</div>
+        <div style={{ color: "var(--color-text-body-secondary)", fontSize: "12px" }}>
+          {lastActivity.label}
+          {lastActivity.name ? ` · ${lastActivity.name}` : ""}
+          {who}
+        </div>
+      </Box>
+    );
+  }, [lastActivity]);
+  const interventionRollup = useMemo(() => {
+    const plans = caseData?.actionPlans || [];
+    const counts = {
+      total: 0,
+      draft: 0,
+      submitted: 0,
+      approved: 0,
+      inProgress: 0,
+      closed: 0,
+    };
+    const normaliseStatus = value =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[-\s]+/g, "_");
+    plans.forEach(plan => {
+      const interventions = Array.isArray(plan.interventions) ? plan.interventions : [];
+      interventions.forEach(intervention => {
+        counts.total += 1;
+        const status = normaliseStatus(intervention?.status);
+        if (status === "draft") {
+          counts.draft += 1;
+        } else if (["submitted", "in_review", "changes_requested"].includes(status)) {
+          counts.submitted += 1;
+        } else if (["approved", "planned"].includes(status)) {
+          counts.approved += 1;
+        } else if (["in_progress", "suspended", "ready_to_close"].includes(status)) {
+          counts.inProgress += 1;
+        } else if (["completed", "cancelled", "canceled", "rejected"].includes(status)) {
+          counts.closed += 1;
+        }
+      });
+    });
+    return counts;
+  }, [caseData]);
+  const interventionRollupSummary = useMemo(() => {
+    if (!interventionRollup.total) return "0 total";
+    return (
+      <Box>
+        <div>{`${interventionRollup.total} total`}</div>
+        <div style={{ color: "var(--color-text-body-secondary)", fontSize: "12px" }}>
+          {`Draft ${interventionRollup.draft} · Submitted ${interventionRollup.submitted} · Approved ${interventionRollup.approved} · In progress ${interventionRollup.inProgress} · Closed ${interventionRollup.closed}`}
+        </div>
+      </Box>
+    );
+  }, [interventionRollup]);
   const quickActions = useMemo(() => {
-    const items = [{ id: "assign", text: "Assign / reassign" }];
+    const items = [
+      { id: "assign", text: "Assign / reassign" },
+      { id: "propose-intervention", text: "Propose intervention" },
+    ];
     if (statusKey === "ready_to_close") {
       items.push({ id: "close-case", text: "Close case" });
     } else if (statusKey === "closed") {
@@ -133,16 +426,23 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     return [
       { label: "Client name", value: clientName },
       { label: "Case number", value: caseNumber },
+      { label: "Case Manager", value: caseData?.owner?.name ?? "Unassigned" },
       { label: "Status", value: statusIndicator },
-      { label: "Owner", value: caseData?.owner?.name ?? "Unassigned" },
-      { label: "Last updated", value: formatDateTime(caseData?.updatedAt) },
+      { label: "Action plan", value: selectedPlanSummary },
+      { label: "Interventions", value: interventionRollupSummary },
+      { label: "Funding", value: fundingSnapshotSummary },
+      { label: "Next key date", value: nextKeyDateSummary },
+      { label: "Last activity", value: lastActivitySummary },
       {
         label: "ILMP validation",
-        value: <StatusIndicator type={ilmpStatusSummary.type}>{ilmpStatusSummary.label}</StatusIndicator>,
-      },
-      {
-        label: "ILMP validated",
-        value: ilmpLastValidated,
+        value: (
+          <Box>
+            <StatusIndicator type={ilmpStatusSummary.type}>{ilmpStatusSummary.label}</StatusIndicator>
+            <Box fontSize="body-s" color="text-body-secondary">
+              Last validated: {ilmpLastValidated}
+            </Box>
+          </Box>
+        ),
       },
       {
         label: "Finance validation",
@@ -158,6 +458,11 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     ilmpStatusSummary,
     ilmpLastValidated,
     financeStatusSummary,
+    selectedPlanSummary,
+    interventionRollupSummary,
+    fundingSnapshotSummary,
+    nextKeyDateSummary,
+    lastActivitySummary,
   ]);
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
@@ -398,9 +703,32 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         }
       } else if (detail.id === "reopen-case") {
         setReopenModalOpen(true);
+      } else if (detail.id === "propose-intervention") {
+        setActionError(null);
+        const planId = selectedActionPlanId || caseData?.actionPlans?.[0]?.id || null;
+        if (!planId) {
+          setActionError("Select an action plan before proposing an intervention.");
+          return;
+        }
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("iset:intervention-assessment:new", {
+              detail: { planId },
+            })
+          );
+        }
       }
     },
-    [markReadyToClose, closeCase, refresh, openValidationModal, buildValidationSummary, loadAssignable]
+    [
+      markReadyToClose,
+      closeCase,
+      refresh,
+      openValidationModal,
+      buildValidationSummary,
+      loadAssignable,
+      selectedActionPlanId,
+      caseData,
+    ]
   );
 
   return (

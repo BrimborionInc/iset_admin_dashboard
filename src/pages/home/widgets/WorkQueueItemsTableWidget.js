@@ -213,7 +213,12 @@ const getStatusInfo = (row) => {
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase());
   const isUnassignedCase = rawStatus === 'submitted' && !row.assigned_user_id;
+  const isInterventionApproval =
+    row?.bucketId === 'interventions-awaiting-approval' ||
+    row?.type === 'InterventionApproval' ||
+    row?.type === 'Intervention';
   const eligibilityMissing =
+    !isInterventionApproval &&
     !row.assessment_esdc_eligibility &&
     ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(rawStatus);
   const statusType = (() => {
@@ -420,6 +425,7 @@ const columnKeysByType = {
   Conflict: ['title', 'staff', 'role', 'region', 'details', 'signedAt', 'actions'],
   Eligibility: ['title', 'sin', 'region', 'owner', 'status', 'dueDate', 'actions'],
   AwaitingApproval: ['title', 'owner', 'recommendation', 'intervention', 'cost', 'startDate', 'status', 'dueDate', 'actions'],
+  InterventionApproval: ['title', 'owner', 'intervention', 'cost', 'startDate', 'status', 'dueDate', 'actions'],
   Exception: ['title', 'notes', 'region', 'owner', 'status', 'dueDate', 'actions'],
   Escalation: ['title', 'notes', 'region', 'owner', 'status', 'dueDate', 'actions']
 };
@@ -873,6 +879,9 @@ const WorkQueueItemsTableWidget = ({
                         </Link>
                       </SpaceBetween>
                     );
+                  }
+                  if (item.bucketId === 'interventions-awaiting-approval') {
+                    return null;
                   }
                   if (item.bucketId === 'overdue') {
                     return null;

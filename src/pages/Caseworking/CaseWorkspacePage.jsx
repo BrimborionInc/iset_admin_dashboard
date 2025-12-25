@@ -177,6 +177,12 @@ const defaultLayout = [
   { id: "secure-messaging", rowSpan: 4, columnSpan: 2 },
 ];
 
+const proposeInterventionLayout = [
+  { id: "caseHeader", rowSpan: 2, columnSpan: 4 },
+  { id: "participantDetails", rowSpan: 7, columnSpan: 2 },
+  { id: "interventionAssessment", rowSpan: 7, columnSpan: 2 },
+];
+
 const exportLayout = items =>
   items.map(({ id, rowSpan, columnSpan, columnOffset }) => ({
     id,
@@ -356,6 +362,11 @@ const CaseWorkspacePage = ({
       const enhancedActions = {
         ...actions,
         removeItem: () => {
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("iset-case-workspace:widget-removed", { detail: { id: item.id } })
+            );
+          }
           if (actions && typeof actions.removeItem === "function") {
             actions.removeItem();
           } else {
@@ -405,16 +416,47 @@ const CaseWorkspacePage = ({
     }
   }, [paletteItems, setAvailableItems, setSplitPanelOpen]);
 
+  const addWidgetToLayout = useCallback((widgetId, overrides = {}) => {
+    if (!widgetId || !widgetRegistry[widgetId]) return;
+    setLayout(current => {
+      const existing = current.find(item => item.id === widgetId);
+      const nextItem = {
+        id: widgetId,
+        rowSpan: overrides.rowSpan ?? existing?.rowSpan,
+        columnSpan: overrides.columnSpan ?? existing?.columnSpan,
+        columnOffset: overrides.columnOffset ?? existing?.columnOffset,
+      };
+      if (existing) {
+        const next = current.map(item => (item.id === widgetId ? nextItem : item));
+        return areLayoutsEqual(current, next) ? current : next;
+      }
+      return [...current, nextItem];
+    });
+  }, []);
+
   useEffect(() => {
     const openHandler = () => openPalette();
     const resetHandler = () => resetLayout();
+    const proposeHandler = () => {
+      setLayout(current =>
+        areLayoutsEqual(current, proposeInterventionLayout) ? current : [...proposeInterventionLayout]
+      );
+    };
+    const addWidgetHandler = event => {
+      const detail = event?.detail || {};
+      addWidgetToLayout(detail.id, detail);
+    };
     window.addEventListener("iset-case-workspace:openPalette", openHandler);
     window.addEventListener("iset-case-workspace:resetLayout", resetHandler);
+    window.addEventListener("iset:intervention-assessment:new", proposeHandler);
+    window.addEventListener("iset-case-workspace:add-widget", addWidgetHandler);
     return () => {
       window.removeEventListener("iset-case-workspace:openPalette", openHandler);
       window.removeEventListener("iset-case-workspace:resetLayout", resetHandler);
+      window.removeEventListener("iset:intervention-assessment:new", proposeHandler);
+      window.removeEventListener("iset-case-workspace:add-widget", addWidgetHandler);
     };
-  }, [openPalette, resetLayout]);
+  }, [addWidgetToLayout, openPalette, resetLayout]);
 
   return (
     <CaseWorkspaceProvider caseId={caseId}>

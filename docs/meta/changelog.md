@@ -37,3 +37,12 @@ Format: YYYY-MM-DD - Category: Short description
 
 ## 2025-12-04
 - Docs: Added auto-assignment notes (config in admin, execution in portal ingest) and clarified province sourcing from submission payload.
+
+## 2025-12-23
+- Feature: Case workspace intervention assessment now supports submit-for-approval from the proposal wizard, and the interventions table surfaces submitted status with a status filter.
+- Fix: Intervention proposals block new wizard creation when a draft/submitted proposal exists and allow read-only viewing for non-draft statuses.
+- Feature: Regional Manager work queue now pulls intervention approval items/counts from the dashboard endpoint.
+- Fix: Intervention approval queue now reads from the correct intervention columns in `iset_case_intervention`.
+- Fix: Intervention approval queue items now open the case workspace instead of the application assessment view.
+- UX: Proposed Intervention widget now uses the wizard for draft/submitted interventions and a read-only form for other statuses.
+- Feature: Submitted intervention proposals remain in the wizard for RM/PA/SA review, with EI verification and decision steps captured in review metadata.

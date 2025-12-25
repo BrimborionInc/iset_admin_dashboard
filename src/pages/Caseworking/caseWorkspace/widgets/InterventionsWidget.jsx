@@ -11,6 +11,7 @@ import {
   Link,
   Modal,
   Pagination,
+  SegmentedControl,
   SpaceBetween,
   StatusIndicator,
   Table,
@@ -39,12 +40,71 @@ const formatDate = value => {
   return date.toLocaleDateString();
 };
 
-const normaliseStatus = status => (status || "").toLowerCase();
+const parseMetadata = value => {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
+const stripCodePrefix = value => {
+  if (!value) return "";
+  return String(value)
+    .replace(/^\s*\d+\s*[-\u2013\u2014:]\s*/, "")
+    .trim();
+};
+
+const normaliseStatus = status => {
+  const value = String(status || "").trim().toLowerCase();
+  const aliases = {
+    planning: "planned",
+    "in-review": "in_review",
+    "in review": "in_review",
+    "changes-requested": "changes_requested",
+    "changes requested": "changes_requested",
+    active: "in_progress",
+    inprogress: "in_progress",
+    "in-progress": "in_progress",
+    progress: "in_progress",
+    "on-hold": "suspended",
+    on_hold: "suspended",
+    "ready-to-close": "ready_to_close",
+    "ready to close": "ready_to_close",
+    readyclose: "ready_to_close",
+    complete: "completed",
+    closed: "completed",
+    done: "completed",
+    finished: "completed",
+    canceled: "cancelled",
+  };
+  return aliases[value] || value;
+};
+
+const getEiStatusValue = item => {
+  const metadata = parseMetadata(item?.metadata);
+  const review = metadata?.review || {};
+  return review.eiStatus || review.ei_status || "";
+};
+
+const getStatusDisplayLabel = item => {
+  const value = normaliseStatus(item?.status);
+  if (value === "submitted") {
+    const hasEiStatus = Boolean(getEiStatusValue(item));
+    return `Submitted - EI ${hasEiStatus ? "verified" : "unverified"}`;
+  }
+  return formatLabel(item?.status);
+};
 const isClosedStatus = status => ["completed", "cancelled"].includes(normaliseStatus(status));
 const isOpenStatus = status => ["planned", "in_progress", "suspended"].includes(normaliseStatus(status));
 const isClosableStatus = status => ["in_progress", "suspended"].includes(normaliseStatus(status));
 const isPlannedStatus = status => normaliseStatus(status) === "planned";
 const isDraftStatus = status => normaliseStatus(status) === "draft";
+const isBlockingProposalStatus = status => ["draft", "submitted"].includes(normaliseStatus(status));
+const isProposalWorkflowStatus = status =>
+  ["draft", "submitted", "in_review", "changes_requested"].includes(normaliseStatus(status));
 
 const statusIndicatorType = status => {
   const value = (status || "").toLowerCase();
@@ -110,9 +170,16 @@ const PAGE_SIZE_OPTIONS = [
   { label: "20 interventions", value: 20 },
   { label: "50 interventions", value: 50 },
 ];
+const STATUS_FILTER_OPTIONS = [
+  { id: "all", text: "All" },
+  { id: "draft", text: "Draft" },
+  { id: "submitted", text: "Submitted" },
+  { id: "planned", text: "Planned" },
+  { id: "in_progress", text: "In progress" },
+  { id: "closed", text: "Closed" },
+];
 const ALL_COLUMN_IDS = [
   "code",
-  "title",
   "status",
   "dates",
   "outcome",
@@ -121,7 +188,7 @@ const ALL_COLUMN_IDS = [
   "compliance",
   "actions",
 ];
-const REQUIRED_COLUMN_IDS = new Set(["code", "title", "actions"]);
+const REQUIRED_COLUMN_IDS = new Set(["code", "actions"]);
 
 const DEFAULT_PREFERENCES = {
   pageSize: DEFAULT_PAGE_SIZE,
@@ -268,8 +335,9 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     searchNocCodes,
     setSelectedActionPlanId,
     refresh,
+    selectedInterventionId,
+    setSelectedInterventionId,
   } = useCaseWorkspace();
-  const [selectedInterventionId, setSelectedInterventionId] = useState(null);
   const [formMode, setFormMode] = useState(null);
   const [startInCloseMode, setStartInCloseMode] = useState(false);
   const [forceReadOnly, setForceReadOnly] = useState(false);
@@ -294,6 +362,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [visibleColumns, setVisibleColumns] = useState(initialPreferences.visibleColumns);
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
   const [columnWidths, setColumnWidths] = useState(() => loadStoredColumnWidths());
+  const [statusFilter, setStatusFilter] = useState("all");
   const preloadCodesAttemptedRef = useRef(false);
   const preloadOutcomesAttemptedRef = useRef(false);
 
@@ -301,7 +370,14 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     () => caseData?.actionPlans?.find(plan => plan.id === selectedActionPlanId),
     [caseData, selectedActionPlanId]
   );
+  const prevPlanIdRef = useRef(activePlan?.id ?? null);
   const activePlanRef = useRef(activePlan);
+  const hasBlockingProposal = useMemo(() => {
+    const plans = caseData?.actionPlans || [];
+    return plans.some(plan =>
+      (plan.interventions || []).some(intervention => isBlockingProposalStatus(intervention?.status))
+    );
+  }, [caseData]);
 
   const interventions = activePlan?.interventions ?? [];
   const selectedIntervention = useMemo(
@@ -310,13 +386,16 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   );
 
   useEffect(() => {
+    const currentPlanId = activePlan?.id ?? null;
+    if (prevPlanIdRef.current === currentPlanId) return;
+    prevPlanIdRef.current = currentPlanId;
     setSelectedInterventionId(null);
     setFormMode(null);
     setSuccessMessage(null);
     setErrorMessage(null);
     setStartInCloseMode(false);
     setForceReadOnly(false);
-  }, [activePlan?.id]);
+  }, [activePlan?.id, setSelectedInterventionId]);
 
   useEffect(() => {
     persistPreferences({ pageSize, visibleColumns });
@@ -489,8 +568,8 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       }
       const valueStr = String(value).trim();
       if (!valueStr) return;
-      const padded = valueStr.length === 1 ? `0${valueStr}` : valueStr;
-      map.set(valueStr, `${padded} - ${label}`);
+      const cleanedLabel = stripCodePrefix(label);
+      map.set(valueStr, cleanedLabel || label);
     });
     return map;
   }, [interventionCodes]);
@@ -512,7 +591,31 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     return map;
   }, [interventionOutcomes]);
 
-  const filteredInterventions = useMemo(() => interventions, [interventions]);
+  const getTypeLabel = useCallback(
+    item => {
+      if (!item) return "-";
+      const codeValue = item.code !== undefined && item.code !== null ? String(item.code).trim() : "";
+      const label = codeValue ? codeLabelMap.get(codeValue) : null;
+      if (label) return label;
+      const fromTitle = stripCodePrefix(item.title);
+      if (fromTitle) return fromTitle;
+      return codeValue || "-";
+    },
+    [codeLabelMap]
+  );
+
+  const filteredInterventions = useMemo(() => {
+    if (statusFilter === "all") {
+      return interventions;
+    }
+    return interventions.filter(item => {
+      const value = normaliseStatus(item?.status);
+      if (statusFilter === "closed") {
+        return isClosedStatus(value);
+      }
+      return value === statusFilter;
+    });
+  }, [interventions, statusFilter]);
 
   const totalMatches = filteredInterventions.length;
   const pagesCount = totalMatches ? Math.ceil(totalMatches / pageSize) : 1;
@@ -522,6 +625,10 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setCurrentPageIndex(pagesCount);
     }
   }, [currentPageIndex, pagesCount]);
+
+  useEffect(() => {
+    setCurrentPageIndex(1);
+  }, [statusFilter]);
 
   const paginatedInterventions = useMemo(() => {
     if (!filteredInterventions.length) {
@@ -557,9 +664,9 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const canCloseSelected =
     canModify && !!selectedIntervention && isClosableStatus(selectedIntervention?.status);
 
-  const dispatchDraftSelection = useCallback(
+  const dispatchWizardSelection = useCallback(
     intervention => {
-      if (!intervention?.id || !isDraftStatus(intervention.status)) return;
+      if (!intervention?.id) return;
       if (typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("iset:intervention-assessment:select", {
@@ -574,16 +681,24 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     [activePlan?.id]
   );
 
-  const resumeDraft = useCallback(
+  const openInterventionInWizard = useCallback(
     intervention => {
       if (!intervention?.id) return;
       setSelectedInterventionId(intervention.id);
       setFormMode(null);
       setStartInCloseMode(false);
       setForceReadOnly(false);
-      dispatchDraftSelection(intervention);
+      dispatchWizardSelection(intervention);
     },
-    [dispatchDraftSelection]
+    [dispatchWizardSelection]
+  );
+
+  const resumeDraft = useCallback(
+    intervention => {
+      if (!intervention?.id) return;
+      openInterventionInWizard(intervention);
+    },
+    [openInterventionInWizard]
   );
 
   const getInterventionActionItems = useCallback(
@@ -591,15 +706,22 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       if (!intervention) return [];
       const status = intervention.status;
       if (isDraftStatus(status)) {
-        return [{ id: "resume", text: "Resume draft" }];
+        return [
+          { id: "resume", text: "Resume draft" },
+          { id: "delete", text: "Delete intervention" },
+        ];
       }
       const items = [{ id: "view", text: "View intervention" }];
       if (canModify) {
-        if (isPlannedStatus(status)) {
+        const normalized = normaliseStatus(status);
+        if (["approved", "planned"].includes(normalized)) {
           items.push({ id: "activate", text: "Activate intervention" });
-          items.push({ id: "delete", text: "Delete intervention" });
-        } else if (isClosableStatus(status)) {
+        }
+        if (["in_progress", "suspended"].includes(normalized)) {
           items.push({ id: "close", text: "Close intervention" });
+        }
+        if (["submitted", "in_review", "changes_requested", "approved", "rejected", "planned"].includes(normalized)) {
+          items.push({ id: "delete", text: "Delete intervention" });
         }
       }
       return items;
@@ -610,6 +732,10 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const openDraftWizard = () => {
     if (!activePlan) {
       setErrorMessage("Select an action plan before starting a proposal.");
+      return;
+    }
+    if (hasBlockingProposal) {
+      setErrorMessage("A draft or submitted proposal already exists. Resume it from the table.");
       return;
     }
     setStartInCloseMode(false);
@@ -626,37 +752,35 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     }
   };
 
-  const openViewModal = useCallback(
+  const openWizardView = useCallback(
     (interventionToView = null) => {
-      if (!activePlan) {
-        setErrorMessage("Select an action plan before viewing interventions.");
-        return;
-      }
       const target = interventionToView || selectedIntervention;
       if (!target) {
         setErrorMessage("Select an intervention to view.");
         return;
       }
-      setStartInCloseMode(false);
-      setForceReadOnly(!canModify || !isOpenStatus(target.status));
       setSuccessMessage(null);
       setErrorMessage(null);
+      if (isProposalWorkflowStatus(target.status)) {
+        openInterventionInWizard(target);
+        return;
+      }
+      setStartInCloseMode(false);
+      setForceReadOnly(!canModify);
       if (!selectedIntervention || target.id !== selectedInterventionId) {
         setSelectedInterventionId(target.id);
       }
       setFormMode("edit");
     },
     [
-      activePlan,
       canModify,
+      openInterventionInWizard,
       selectedIntervention,
       selectedInterventionId,
-      setErrorMessage,
       setForceReadOnly,
       setFormMode,
       setSelectedInterventionId,
       setStartInCloseMode,
-      setSuccessMessage,
     ]
   );
 
@@ -774,8 +898,9 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setErrorMessage("Select an intervention to activate.");
       return;
     }
-    if (!isPlannedStatus(target.status)) {
-      setErrorMessage("Only planned interventions can be activated.");
+    const normalized = normaliseStatus(target.status);
+    if (!["planned", "approved"].includes(normalized)) {
+      setErrorMessage("Only approved or planned interventions can be activated.");
       return;
     }
     setErrorMessage(null);
@@ -819,22 +944,16 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     const baseColumns = [
       {
         id: "code",
-        header: "Code",
+        header: "Type",
         cell: item => {
-          const value = item.code !== undefined && item.code !== null ? String(item.code) : "";
-          if (!value) return "-";
-          const label = codeLabelMap.get(value) ?? value;
+          const label = getTypeLabel(item);
           return (
             <Link
               href="#"
               ariaLabel={`View intervention ${label}`}
               onFollow={event => {
                 event.preventDefault();
-                if (isDraftStatus(item.status)) {
-                  resumeDraft(item);
-                  return;
-                }
-                openViewModal(item);
+                openWizardView(item);
               }}
             >
               {label}
@@ -844,34 +963,11 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         isRowHeader: true,
       },
       {
-        id: "title",
-        header: "Description",
-        cell: item =>
-          item.title ? (
-            <Link
-              href="#"
-              ariaLabel={`View intervention ${item.title}`}
-              onFollow={event => {
-                event.preventDefault();
-                if (isDraftStatus(item.status)) {
-                  resumeDraft(item);
-                  return;
-                }
-                openViewModal(item);
-              }}
-            >
-              {item.title}
-            </Link>
-          ) : (
-            "-"
-          ),
-      },
-      {
         id: "status",
         header: "Status",
         cell: item => (
           <StatusIndicator type={statusIndicatorType(item.status)}>
-            {formatLabel(item.status)}
+            {getStatusDisplayLabel(item)}
           </StatusIndicator>
         ),
       },
@@ -928,7 +1024,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           if (!items.length) {
             return <span style={{ color: "var(--color-text-body-secondary)" }}>None</span>;
           }
-          const label = item.title || codeLabelMap.get(String(item.code ?? "")) || item.code || "intervention";
+          const label = getTypeLabel(item) || "intervention";
           return (
             <ButtonDropdown
               ariaLabel={`Actions for ${label}`}
@@ -940,11 +1036,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                 if (detail?.id === "resume") {
                   resumeDraft(item);
                 } else if (detail?.id === "view") {
-                  if (isDraftStatus(item.status)) {
-                    resumeDraft(item);
-                    return;
-                  }
-                  openViewModal(item);
+                  openWizardView(item);
                 } else if (detail?.id === "close") {
                   openCloseModal(item);
                 } else if (detail?.id === "activate") {
@@ -974,7 +1066,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     columnWidthsMap,
     getInterventionActionItems,
     formMode,
-    openViewModal,
+    openWizardView,
     openCloseModal,
     resumeDraft,
     setSelectedInterventionId,
@@ -1131,10 +1223,10 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           actions={
             <Button
               iconName="add-plus"
-              disabled={!canModify}
+              disabled={!canModify || hasBlockingProposal}
               onClick={openDraftWizard}
             >
-              New intervention
+              Propose intervention
             </Button>
           }
         >
@@ -1174,6 +1266,20 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             {errorMessage}
           </Alert>
         )}
+        {hasBlockingProposal && (
+          <Alert type="info" header="Proposal in progress">
+            A draft or submitted proposal already exists for this case. Resume it from the table before starting another.
+          </Alert>
+        )}
+        {activePlan ? (
+          <SegmentedControl
+            selectedId={statusFilter}
+            options={STATUS_FILTER_OPTIONS}
+            onChange={({ detail }) => setStatusFilter(detail.selectedId)}
+            ariaLabel="Filter interventions by status"
+            size="small"
+          />
+        ) : null}
         {activePlan ? (
           <Table
             trackBy="id"
@@ -1187,17 +1293,6 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             onSelectionChange={({ detail }) => {
               const item = detail.selectedItems?.[0];
               setSelectedInterventionId(item?.id ?? null);
-              if (item && isDraftStatus(item.status)) {
-                resumeDraft(item);
-              }
-            }}
-            onRowClick={({ detail }) => {
-              const item = detail?.item;
-              if (!item?.id) return;
-              setSelectedInterventionId(item.id);
-              if (isDraftStatus(item.status)) {
-                resumeDraft(item);
-              }
             }}
             columnDefinitions={visibleColumnDefinitions}
             preferences={preferencesComponent}
@@ -1263,8 +1358,9 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       >
         <SpaceBetween size="s">
           <Box>
-            Delete this intervention? Only planned interventions can be deleted. Completed or cancelled
-            interventions should be closed instead to maintain history.
+            Delete this intervention? Draft, submitted, in-review, changes requested, approved, rejected,
+            and planned interventions can be deleted. Active or closed interventions should be closed
+            instead to maintain history.
           </Box>
           {pendingDelete ? (
             <Box>

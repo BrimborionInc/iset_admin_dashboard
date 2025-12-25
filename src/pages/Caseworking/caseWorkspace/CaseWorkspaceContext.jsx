@@ -2,6 +2,18 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { apiFetch } from "../../../auth/apiClient.js";
 
 const LIVE_CASES_STORAGE_KEY = "iset-demo-use-live-cases";
+const interventionWizardStepStore = new Map();
+const interventionWizardDraftStore = new Map();
+const interventionWizardLastKeyByCase = new Map();
+
+const cloneWizardDraft = value => {
+  if (!value || typeof value !== "object") return value;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return { ...value };
+  }
+};
 
 const normaliseInterventionStatus = status => {
   if (!status) return "planned";
@@ -499,7 +511,15 @@ const CaseWorkspaceContext = createContext({
   loadNocVersions: () => Promise.resolve([]),
   searchNocCodes: () => Promise.resolve([]),
   selectedActionPlanId: null,
+  selectedInterventionId: null,
   setSelectedActionPlanId: () => {},
+  getInterventionWizardStep: () => null,
+  getInterventionWizardKeyForCase: () => null,
+  getInterventionWizardDraft: () => null,
+  setInterventionWizardStep: () => {},
+  setInterventionWizardDraft: () => {},
+  clearInterventionWizardStep: () => {},
+  clearInterventionWizardDraft: () => {},
 });
 
 export const CaseWorkspaceProvider = ({ caseId, children }) => {
@@ -509,6 +529,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     error: null,
   });
   const [selectedActionPlanId, setSelectedActionPlanId] = useState(null);
+  const [selectedInterventionId, setSelectedInterventionId] = useState(null);
   const [useLiveData, setUseLiveData] = useState(() => getStoredLivePreference());
   const [interventionCodes, setInterventionCodes] = useState([]);
   const [interventionCodesLoaded, setInterventionCodesLoaded] = useState(false);
@@ -522,6 +543,61 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
   const [nocVersions, setNocVersions] = useState([]);
   const [nocVersionsLoaded, setNocVersionsLoaded] = useState(false);
   const [nocVersionsLoading, setNocVersionsLoading] = useState(false);
+  const getInterventionWizardStep = useCallback(key => {
+    if (!key) return null;
+    return interventionWizardStepStore.get(String(key)) || null;
+  }, []);
+  const getInterventionWizardKeyForCase = useCallback(caseIdKey => {
+    if (!caseIdKey) return null;
+    return interventionWizardLastKeyByCase.get(String(caseIdKey)) || null;
+  }, []);
+  const getInterventionWizardDraft = useCallback(key => {
+    if (!key) return null;
+    const stored = interventionWizardDraftStore.get(String(key));
+    return stored ? cloneWizardDraft(stored) : null;
+  }, []);
+  const setInterventionWizardStep = useCallback((key, step) => {
+    if (!key) return;
+    const normalizedKey = String(key);
+    const caseKey = normalizedKey.split(":")[0] || normalizedKey;
+    if (!step) {
+      interventionWizardStepStore.delete(normalizedKey);
+      return;
+    }
+    interventionWizardStepStore.set(normalizedKey, step);
+    interventionWizardLastKeyByCase.set(caseKey, normalizedKey);
+  }, []);
+  const setInterventionWizardDraft = useCallback((key, draft) => {
+    if (!key) return;
+    const normalizedKey = String(key);
+    const caseKey = normalizedKey.split(":")[0] || normalizedKey;
+    if (!draft) {
+      interventionWizardDraftStore.delete(normalizedKey);
+      return;
+    }
+    interventionWizardDraftStore.set(normalizedKey, cloneWizardDraft(draft));
+    interventionWizardLastKeyByCase.set(caseKey, normalizedKey);
+  }, []);
+  const clearInterventionWizardStep = useCallback(key => {
+    if (!key) {
+      interventionWizardStepStore.clear();
+      interventionWizardLastKeyByCase.clear();
+      return;
+    }
+    const normalizedKey = String(key);
+    const caseKey = normalizedKey.split(":")[0] || normalizedKey;
+    interventionWizardStepStore.delete(normalizedKey);
+    if (interventionWizardLastKeyByCase.get(caseKey) === normalizedKey) {
+      interventionWizardLastKeyByCase.delete(caseKey);
+    }
+  }, []);
+  const clearInterventionWizardDraft = useCallback(key => {
+    if (!key) {
+      interventionWizardDraftStore.clear();
+      return;
+    }
+    interventionWizardDraftStore.delete(String(key));
+  }, []);
 
   const resolveCaseIdentifier = useCallback(() => {
     const payload = state.caseData || {};
@@ -1593,7 +1669,16 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     closeActionPlan,
     selectedActionPlanId,
     setSelectedActionPlanId,
-  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, markReadyToClose, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, deleteActionPlan, deleteIntervention, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, selectedActionPlanId]);
+    selectedInterventionId,
+    setSelectedInterventionId,
+    getInterventionWizardStep,
+    getInterventionWizardKeyForCase,
+    getInterventionWizardDraft,
+    setInterventionWizardStep,
+    setInterventionWizardDraft,
+    clearInterventionWizardStep,
+    clearInterventionWizardDraft,
+  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, markReadyToClose, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, deleteActionPlan, deleteIntervention, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, selectedActionPlanId, selectedInterventionId, getInterventionWizardStep, getInterventionWizardKeyForCase, getInterventionWizardDraft, setInterventionWizardStep, setInterventionWizardDraft, clearInterventionWizardStep, clearInterventionWizardDraft]);
 
   return (
     <CaseWorkspaceContext.Provider value={contextValue}>

@@ -152,7 +152,7 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
     id: 'INT-118',
     title: 'Intervention · Welding simulator upgrade',
     bucketId: 'interventions-awaiting-approval',
-    type: 'Intervention',
+    type: 'InterventionApproval',
     applicant: 'Coastal Welding Program',
     region: 'Vancouver Island',
     owner: 'S. Chao',
@@ -204,7 +204,6 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
 ];
 
 const DISABLED_BUCKET_IDS = new Set([
-  'interventions-awaiting-approval',
   'agreement-package-issues',
   'reporting-ilmp-issues',
   'stuck-files'

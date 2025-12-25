@@ -64,6 +64,16 @@ const formatDate = value => {
     : date.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
 };
 
+const parseMetadata = value => {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
 const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) => {
   const workspace = useCaseWorkspace();
   const caseData = useMemo(() => {
@@ -73,6 +83,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     }
     return null;
   }, [propCaseData, workspace]);
+  const isCaseWorkspace = Boolean(workspace?.caseData);
+  const selectedInterventionId = workspace?.selectedInterventionId ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -131,11 +143,25 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [editDocument, setEditDocument] = useState(null);
   const [editCategory, setEditCategory] = useState('');
   const [editCategoryError, setEditCategoryError] = useState('');
+  const [editAttachType, setEditAttachType] = useState('none');
+  const [editAttachTarget, setEditAttachTarget] = useState('');
+  const [editAttachError, setEditAttachError] = useState('');
   const [pendingCategory, setPendingCategory] = useState('');
   const [pendingCategoryError, setPendingCategoryError] = useState('');
   const [pendingApplication, setPendingApplication] = useState('');
   const [pendingApplicationError, setPendingApplicationError] = useState('');
+  const [pendingIntervention, setPendingIntervention] = useState('');
+  const [pendingInterventionError, setPendingInterventionError] = useState('');
   const [selectedApplicationFilter, setSelectedApplicationFilter] = useState('');
+  const [selectedInterventionFilter, setSelectedInterventionFilter] = useState('');
+  const [duplicateModalVisible, setDuplicateModalVisible] = useState(false);
+  const [duplicateDocument, setDuplicateDocument] = useState(null);
+  const [duplicateLabel, setDuplicateLabel] = useState('');
+  const [duplicateCategory, setDuplicateCategory] = useState('');
+  const [duplicateAttachType, setDuplicateAttachType] = useState('application');
+  const [duplicateAttachTarget, setDuplicateAttachTarget] = useState('');
+  const [duplicateError, setDuplicateError] = useState('');
+  const [duplicateSubmitting, setDuplicateSubmitting] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState(() => {
     if (typeof window === 'undefined') return ALL_COLUMN_IDS;
     try {
@@ -179,6 +205,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const nextUploadLabelRef = useRef('');
   const nextUploadCategoryRef = useRef('');
   const nextUploadApplicationIdRef = useRef('');
+  const nextUploadInterventionIdRef = useRef('');
   const applicantUserId =
     caseData?.applicant_user_id ??
     caseData?.applicantUserId ??
@@ -197,6 +224,45 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     workspace?.application_id ??
     workspace?.applicationId ??
     null;
+  const interventionOptions = useMemo(() => {
+    const plans = caseData?.actionPlans || [];
+    const options = [];
+    plans.forEach(plan => {
+      const planLabel = plan?.title || plan?.name || '';
+      const list = Array.isArray(plan?.interventions) ? plan.interventions : [];
+      list.forEach(intervention => {
+        if (!intervention?.id) return;
+        const title = intervention.title || intervention.code || `Intervention ${intervention.id}`;
+        const description = planLabel ? `Plan: ${planLabel}` : undefined;
+        options.push({
+          value: String(intervention.id),
+          label: title,
+          description,
+          status: intervention.status || null
+        });
+      });
+    });
+    return options;
+  }, [caseData]);
+  const interventionOptionMap = useMemo(() => {
+    const map = new Map();
+    interventionOptions.forEach(option => {
+      map.set(String(option.value), option);
+    });
+    return map;
+  }, [interventionOptions]);
+
+  const resolveDocumentType = useCallback(item => {
+    if (!item) return '';
+    if (typeof item.document_category === 'string' && item.document_category) {
+      return item.document_category;
+    }
+    const meta = parseMetadata(item.metadata);
+    if (meta && typeof meta.document_type === 'string') {
+      return meta.document_type;
+    }
+    return '';
+  }, []);
   const loadApplicantApplications = useCallback(async () => {
     if (!applicantUserId) {
       setApplicationOptions([]);
@@ -299,7 +365,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
 
   const loadDocuments = useCallback(
     async (options = {}) => {
-      const { silent = false, applicationId: applicationIdOverride } = options;
+      const { silent = false, applicationId: applicationIdOverride, interventionId: interventionIdOverride } = options;
+      const filterInterventionId =
+        typeof interventionIdOverride === 'string' || typeof interventionIdOverride === 'number'
+          ? String(interventionIdOverride || '')
+          : selectedInterventionFilter;
       const filterApplicationId =
         typeof applicationIdOverride === 'string' || typeof applicationIdOverride === 'number'
           ? String(applicationIdOverride || '')
@@ -317,7 +387,13 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       }
       setError(null);
       try {
-        const query = filterApplicationId ? `?applicationId=${encodeURIComponent(filterApplicationId)}` : '';
+        const params = new URLSearchParams();
+        if (isCaseWorkspace && filterInterventionId) {
+          params.set('interventionId', filterInterventionId);
+        } else if (!isCaseWorkspace && filterApplicationId) {
+          params.set('applicationId', filterApplicationId);
+        }
+        const query = params.toString() ? `?${params.toString()}` : '';
         const res = await apiFetch(`/api/applicants/${applicantUserId}/documents${query}`);
         if (!res.ok) throw new Error('Failed to load supporting documents');
         const data = await res.json().catch(() => []);
@@ -332,7 +408,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         }
       }
     },
-    [applicantUserId, selectedApplicationFilter]
+    [applicantUserId, isCaseWorkspace, selectedApplicationFilter, selectedInterventionFilter]
   );
 
   const loadChecklist = useCallback(async () => {
@@ -341,10 +417,29 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       setMissingRequiredCount(0);
       return;
     }
+    const selectedIntervention =
+      isCaseWorkspace && selectedInterventionFilter
+        ? interventionOptions.find(opt => opt.value === selectedInterventionFilter) || null
+        : null;
+    if (isCaseWorkspace && !selectedIntervention) {
+      setChecklistItems([]);
+      setMissingRequiredCount(0);
+      setChecklistLoading(false);
+      return;
+    }
     setChecklistLoading(true);
     setChecklistError(null);
     try {
-      const query = applicationId ? `?applicationId=${encodeURIComponent(applicationId)}` : '';
+      const params = new URLSearchParams();
+      if (isCaseWorkspace && selectedIntervention?.value) {
+        params.set('interventionId', selectedIntervention.value);
+        const statusValue = String(selectedIntervention.status || '').toLowerCase();
+        const stage = statusValue && statusValue !== 'draft' ? 'submitted' : 'draft';
+        params.set('stage', stage);
+      } else if (applicationId) {
+        params.set('applicationId', String(applicationId));
+      }
+      const query = params.toString() ? `?${params.toString()}` : '';
       const res = await apiFetch(`/api/applicants/${applicantUserId}/document-checklist${query}`);
       if (!res.ok) throw new Error('Failed to load checklist');
       const payload = await res.json().catch(() => ({ items: [], missingRequiredCount: 0 }));
@@ -355,7 +450,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     } finally {
       setChecklistLoading(false);
     }
-  }, [applicantUserId, applicationId]);
+  }, [applicantUserId, applicationId, interventionOptions, isCaseWorkspace, selectedInterventionFilter]);
 
   useEffect(() => {
     if (!applicantUserId) {
@@ -368,7 +463,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     }
     loadDocuments();
     loadChecklist();
-  }, [applicantUserId, loadDocuments, loadChecklist]);
+  }, [applicantUserId, isCaseWorkspace, selectedApplicationFilter, selectedInterventionFilter, loadDocuments, loadChecklist]);
 
   useEffect(() => {
     if (!applicantUserId) {
@@ -377,10 +472,29 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       setPendingApplication('');
       return;
     }
-    setSelectedApplicationFilter('');
+    if (!isCaseWorkspace) {
+      setSelectedApplicationFilter('');
+    }
     setPendingApplication(applicationId ? String(applicationId) : '');
     loadApplicantApplications();
-  }, [applicantUserId, applicationId, loadApplicantApplications]);
+  }, [applicantUserId, applicationId, isCaseWorkspace, loadApplicantApplications]);
+
+  useEffect(() => {
+    if (!isCaseWorkspace) {
+      setSelectedInterventionFilter('');
+      setPendingIntervention('');
+      return;
+    }
+    if (selectedInterventionId) {
+      const value = String(selectedInterventionId);
+      setSelectedInterventionFilter(value);
+      setPendingIntervention(value);
+      return;
+    }
+    if (!selectedInterventionFilter && interventionOptions.length) {
+      setSelectedInterventionFilter(interventionOptions[0].value);
+    }
+  }, [isCaseWorkspace, selectedInterventionId, selectedInterventionFilter, interventionOptions]);
 
   useEffect(() => {
     if (!applicantUserId || typeof window === 'undefined') return;
@@ -447,18 +561,39 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     }
     setLabelError('');
     setPendingApplicationError('');
-    const initialApplication =
-      selectedApplicationFilter ||
-      (applicationId ? String(applicationId) : '') ||
-      (applicationOptions.length === 1 ? applicationOptions[0].value : '');
-    setPendingApplication(initialApplication || '');
+    setPendingInterventionError('');
+    setPendingCategoryError('');
+    if (isCaseWorkspace) {
+      const initialIntervention =
+        selectedInterventionFilter ||
+        (selectedInterventionId ? String(selectedInterventionId) : '') ||
+        (interventionOptions.length === 1 ? interventionOptions[0].value : '');
+      setPendingIntervention(initialIntervention || '');
+    } else {
+      const initialApplication =
+        selectedApplicationFilter ||
+        (applicationId ? String(applicationId) : '') ||
+        (applicationOptions.length === 1 ? applicationOptions[0].value : '');
+      setPendingApplication(initialApplication || '');
+    }
     setLabelModalVisible(true);
     setPendingLabel(prev => prev || '');
-  }, [applicantUserId, uploading, selectedApplicationFilter, applicationId, applicationOptions]);
+  }, [
+    applicantUserId,
+    uploading,
+    isCaseWorkspace,
+    selectedApplicationFilter,
+    selectedInterventionFilter,
+    selectedInterventionId,
+    applicationId,
+    applicationOptions,
+    interventionOptions
+  ]);
   const handleLabelModalDismiss = useCallback(() => {
     setLabelModalVisible(false);
     setLabelError('');
     setPendingApplicationError('');
+    setPendingInterventionError('');
     setPendingCategoryError('');
   }, []);
   const handleLabelConfirm = useCallback(() => {
@@ -473,24 +608,23 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       return;
     }
     const scope = getDocumentTypeScope(categoryTrimmed);
-    let targetApplicationId =
-      pendingApplication ||
-      selectedApplicationFilter ||
-      (applicationOptions.length === 1 ? applicationOptions[0].value : '') ||
-      (applicationId ? String(applicationId) : '');
-    if (scope === 'application' && !targetApplicationId) {
-      setPendingApplicationError('Select which application this upload belongs to.');
-      return;
-    }
-    if (scope === 'client') {
-      targetApplicationId = '';
+    let targetApplicationId = '';
+    let targetInterventionId = '';
+    if (scope === 'application') {
+      if (isCaseWorkspace) {
+        targetInterventionId = (pendingIntervention || '').trim();
+      } else {
+        targetApplicationId = (pendingApplication || '').trim();
+      }
     }
     nextUploadLabelRef.current = trimmed;
     nextUploadCategoryRef.current = categoryTrimmed;
     nextUploadApplicationIdRef.current = targetApplicationId || '';
+    nextUploadInterventionIdRef.current = targetInterventionId || '';
     setLabelError('');
     setPendingCategoryError('');
     setPendingApplicationError('');
+    setPendingInterventionError('');
     setLabelModalVisible(false);
     if (fileInputRef.current) {
       fileInputRef.current.click();
@@ -499,9 +633,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     pendingLabel,
     pendingCategory,
     pendingApplication,
-    selectedApplicationFilter,
-    applicationOptions,
-    applicationId,
+    pendingIntervention,
+    isCaseWorkspace,
     getDocumentTypeScope
   ]);
   const handleFileSelected = useCallback(
@@ -524,6 +657,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         if (caseId) formData.append('caseId', caseId);
         const applicationIdForUpload = (nextUploadApplicationIdRef.current || '').trim();
         if (applicationIdForUpload) formData.append('applicationId', applicationIdForUpload);
+        const interventionIdForUpload = (nextUploadInterventionIdRef.current || '').trim();
+        if (interventionIdForUpload) formData.append('interventionId', interventionIdForUpload);
         const labelForUpload = (nextUploadLabelRef.current || '').trim() || file.name;
         formData.append('label', labelForUpload);
         const categoryForUpload = (nextUploadCategoryRef.current || '').trim();
@@ -558,7 +693,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             throw new Error('Unable to determine which applicant this upload belongs to.');
           }
           if (errorCode === 'application_required_for_document') {
-            throw new Error('Select an application for this document type before uploading.');
+            throw new Error('Select an application or intervention for this document type before uploading.');
           }
           if (errorCode === 'invalid_document_type') {
             throw new Error('The selected document type is not valid or inactive.');
@@ -578,12 +713,14 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         nextUploadLabelRef.current = '';
         nextUploadCategoryRef.current = '';
         nextUploadApplicationIdRef.current = '';
+        nextUploadInterventionIdRef.current = '';
         setPendingLabel('');
         setPendingCategory('');
         setPendingApplication(applicationId ? String(applicationId) : '');
+        setPendingIntervention(selectedInterventionId ? String(selectedInterventionId) : '');
       }
     },
-    [applicantUserId, caseId, applicationId, loadDocuments, loadChecklist]
+    [applicantUserId, caseId, applicationId, selectedInterventionId, loadDocuments, loadChecklist]
   );
   const handleInlineEdit = useCallback(
     async (item, column, newValue) => {
@@ -676,26 +813,29 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
 
   const openEditModal = useCallback(item => {
     if (!item || !item.id) return;
-    const parsedMeta = (() => {
-      const raw = item.metadata;
-      if (!raw) return null;
-      if (typeof raw === 'object') return raw;
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return null;
+    const nextType = resolveDocumentType(item);
+    const scope = getDocumentTypeScope(nextType);
+    let attachType = 'none';
+    let attachTarget = '';
+    if (scope === 'application') {
+      if (item.linked_intervention_id) {
+        attachType = 'intervention';
+        attachTarget = String(item.linked_intervention_id);
+      } else if (item.application_id) {
+        attachType = 'application';
+        attachTarget = String(item.application_id);
       }
-    })();
-    const typeFromMeta = parsedMeta && typeof parsedMeta.document_type === 'string' ? parsedMeta.document_type : '';
-    const typeFromCategory = typeof item.document_category === 'string' ? item.document_category : '';
-    const nextType = typeFromCategory || typeFromMeta || '';
+    }
     setEditDocument(item);
     setEditLabel(item.label || item.file_name || '');
     setEditLabelError('');
     setEditCategory(nextType);
     setEditCategoryError('');
+    setEditAttachType(attachType);
+    setEditAttachTarget(attachTarget);
+    setEditAttachError('');
     setEditModalVisible(true);
-  }, []);
+  }, [getDocumentTypeScope, resolveDocumentType]);
 
   const handleEditDismiss = useCallback(() => {
     setEditModalVisible(false);
@@ -704,6 +844,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     setEditLabelError('');
     setEditCategory('');
     setEditCategoryError('');
+    setEditAttachType('none');
+    setEditAttachTarget('');
+    setEditAttachError('');
   }, []);
 
   const handleEditSave = useCallback(async () => {
@@ -723,11 +866,35 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     }
     setEditLabelError('');
     setEditCategoryError('');
+    setEditAttachError('');
+    const scope = getDocumentTypeScope(trimmedType);
+    let applicationId = null;
+    let interventionId = null;
+    if (scope === 'application') {
+      if (editAttachType === 'application') {
+        if (!editAttachTarget) {
+          setEditAttachError('Select which application this document should be attached to.');
+          return;
+        }
+        applicationId = editAttachTarget;
+      } else if (editAttachType === 'intervention') {
+        if (!editAttachTarget) {
+          setEditAttachError('Select which intervention this document should be attached to.');
+          return;
+        }
+        interventionId = editAttachTarget;
+      }
+    }
     try {
       const res = await apiFetch(`/api/documents/${editDocument.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: trimmedLabel, documentType: trimmedType })
+        body: JSON.stringify({
+          label: trimmedLabel,
+          documentType: trimmedType,
+          applicationId: applicationId || null,
+          interventionId: interventionId || null
+        })
       });
       if (!res || !res.ok) {
         let payload = null;
@@ -744,7 +911,133 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     } catch (err) {
       setEditLabelError(err?.message || 'Failed to update document.');
     }
-  }, [editLabel, editCategory, editDocument, loadDocuments, loadChecklist, handleEditDismiss]);
+  }, [
+    editLabel,
+    editCategory,
+    editDocument,
+    editAttachType,
+    editAttachTarget,
+    getDocumentTypeScope,
+    loadDocuments,
+    loadChecklist,
+    handleEditDismiss
+  ]);
+
+  const openDuplicateModal = useCallback(item => {
+    if (!item || !item.id) return;
+    const nextType = resolveDocumentType(item);
+    const scope = getDocumentTypeScope(nextType);
+    let attachType = 'none';
+    let attachTarget = '';
+    if (scope === 'application') {
+      if (item.linked_intervention_id) {
+        attachType = 'intervention';
+        attachTarget = String(item.linked_intervention_id);
+      } else if (item.application_id) {
+        attachType = 'application';
+        attachTarget = String(item.application_id);
+      } else if (selectedInterventionFilter) {
+        attachType = 'intervention';
+        attachTarget = String(selectedInterventionFilter);
+      } else if (applicationId) {
+        attachType = 'application';
+        attachTarget = String(applicationId);
+      }
+    }
+    setDuplicateDocument(item);
+    setDuplicateLabel(item.label || item.file_name || '');
+    setDuplicateCategory(nextType);
+    setDuplicateAttachType(attachType);
+    setDuplicateAttachTarget(attachTarget);
+    setDuplicateError('');
+    setDuplicateModalVisible(true);
+  }, [applicationId, getDocumentTypeScope, resolveDocumentType, selectedInterventionFilter]);
+
+  const handleDuplicateDismiss = useCallback(() => {
+    setDuplicateModalVisible(false);
+    setDuplicateDocument(null);
+    setDuplicateLabel('');
+    setDuplicateCategory('');
+    setDuplicateAttachType('application');
+    setDuplicateAttachTarget('');
+    setDuplicateError('');
+    setDuplicateSubmitting(false);
+  }, []);
+
+  const handleDuplicateConfirm = useCallback(async () => {
+    if (!duplicateDocument?.id) {
+      setDuplicateError('Missing document reference.');
+      return;
+    }
+    const trimmedLabel = (duplicateLabel || '').trim();
+    const trimmedType = (duplicateCategory || '').trim();
+    if (!trimmedLabel) {
+      setDuplicateError('Enter a document label.');
+      return;
+    }
+    if (!trimmedType) {
+      setDuplicateError('Select a document type.');
+      return;
+    }
+    const scope = getDocumentTypeScope(trimmedType);
+    let applicationIdForCopy = null;
+    let interventionIdForCopy = null;
+    if (scope === 'application') {
+      if (duplicateAttachType === 'application') {
+        if (!duplicateAttachTarget) {
+          setDuplicateError('Select which application this document should be attached to.');
+          return;
+        }
+        applicationIdForCopy = duplicateAttachTarget;
+      } else if (duplicateAttachType === 'intervention') {
+        if (!duplicateAttachTarget) {
+          setDuplicateError('Select which intervention this document should be attached to.');
+          return;
+        }
+        interventionIdForCopy = duplicateAttachTarget;
+      }
+    }
+    setDuplicateSubmitting(true);
+    setDuplicateError('');
+    try {
+      const res = await apiFetch(`/api/documents/${duplicateDocument.id}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: trimmedLabel,
+          documentType: trimmedType,
+          applicationId: applicationIdForCopy || null,
+          interventionId: interventionIdForCopy || null
+        })
+      });
+      if (!res || !res.ok) {
+        let payload = null;
+        try {
+          payload = await res.json();
+        } catch (_) {
+          payload = null;
+        }
+        throw new Error(payload?.message || 'Failed to duplicate document.');
+      }
+      await loadDocuments({ silent: true });
+      await loadChecklist();
+      handleDuplicateDismiss();
+    } catch (err) {
+      setDuplicateError(err?.message || 'Failed to duplicate document.');
+    } finally {
+      setDuplicateSubmitting(false);
+    }
+  }, [
+    duplicateDocument,
+    duplicateLabel,
+    duplicateCategory,
+    duplicateAttachType,
+    duplicateAttachTarget,
+    getDocumentTypeScope,
+    loadDocuments,
+    loadChecklist,
+    handleDuplicateDismiss
+  ]);
 
   const handleRefresh = () => {
     if (!applicantUserId) return;
@@ -752,13 +1045,23 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     loadChecklist();
   };
 
-  const handleDocumentFilterChange = useCallback(
+  const handleApplicationFilterChange = useCallback(
     ({ detail }) => {
       const next = detail?.selectedOption?.value || '';
       setSelectedApplicationFilter(next);
       loadDocuments({ silent: false, applicationId: next });
     },
     [loadDocuments]
+  );
+
+  const handleInterventionFilterChange = useCallback(
+    ({ detail }) => {
+      const next = detail?.selectedOption?.value || '';
+      setSelectedInterventionFilter(next);
+      loadDocuments({ silent: false, interventionId: next });
+      loadChecklist();
+    },
+    [loadDocuments, loadChecklist]
   );
 
   const baseColumnDefinitions = useMemo(
@@ -790,8 +1093,13 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         id: 'case_number',
         header: 'Case',
         cell: item => {
-          if (item.case_number) return item.case_number;
+          if (item.linked_intervention_id) {
+            const key = String(item.linked_intervention_id);
+            const option = interventionOptionMap.get(key);
+            return option?.label ? `Intervention: ${option.label}` : `Intervention ${key}`;
+          }
           if (item.application_id) return `Application ${item.application_id}`;
+          if (item.case_number) return item.case_number;
           return 'Client';
         }
       },
@@ -816,11 +1124,17 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           }
           const inFlight = !!pendingDownloads[item.id];
           const deleting = !!pendingDeletes[item.id];
+          const canDuplicate = item?.scope !== 'client';
           return (
             <SpaceBetween direction="horizontal" size="xs">
               <Button variant="inline-link" onClick={() => openEditModal(item)}>
                 Edit
               </Button>
+              {canDuplicate && (
+                <Button variant="inline-link" onClick={() => openDuplicateModal(item)}>
+                  Duplicate
+                </Button>
+              )}
               <Button
                 variant="inline-link"
                 onClick={() => handleViewDocument(item)}
@@ -842,7 +1156,15 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         }
       }
     ],
-    [handleViewDocument, openDeleteModal, pendingDownloads, pendingDeletes]
+    [
+      handleViewDocument,
+      openDeleteModal,
+      openDuplicateModal,
+      openEditModal,
+      pendingDownloads,
+      pendingDeletes,
+      interventionOptionMap
+    ]
   );
 
   const mergedColumnDefinitions = useMemo(
@@ -982,6 +1304,26 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     [applicationFilterOptions, selectedApplicationFilter]
   );
 
+  const interventionFilterOptions = useMemo(() => {
+    const opts = [{ value: '', label: 'All documents (client + all interventions)' }];
+    interventionOptions.forEach(opt => {
+      opts.push({
+        value: opt.value,
+        label: opt.label,
+        description: opt.description,
+        tags: opt.status ? [opt.status] : undefined
+      });
+    });
+    return opts;
+  }, [interventionOptions]);
+
+  const selectedInterventionFilterOption = useMemo(
+    () =>
+      interventionFilterOptions.find(opt => opt.value === selectedInterventionFilter) ||
+      interventionFilterOptions[0],
+    [interventionFilterOptions, selectedInterventionFilter]
+  );
+
   const applicationSelectOptions = useMemo(
     () =>
       applicationOptions.map(opt => ({
@@ -989,6 +1331,15 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         tags: opt.status ? [opt.status] : undefined
       })),
     [applicationOptions]
+  );
+
+  const interventionSelectOptions = useMemo(
+    () =>
+      interventionOptions.map(opt => ({
+        ...opt,
+        tags: opt.status ? [opt.status] : undefined
+      })),
+    [interventionOptions]
   );
 
   const preferencesComponent = (
@@ -1006,11 +1357,57 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   );
 
   const pendingDocScope = getDocumentTypeScope(pendingCategory);
+  const editDocType = editCategory || resolveDocumentType(editDocument);
+  const editDocScope = editDocType ? getDocumentTypeScope(editDocType) : 'application';
+  const editAttachTypeOptions = [
+    { value: 'none', label: 'No attachment (generic upload)' },
+    { value: 'application', label: 'Application', disabled: !applicationSelectOptions.length },
+    { value: 'intervention', label: 'Intervention', disabled: !interventionSelectOptions.length }
+  ];
+  const editSelectedApplicationOption =
+    applicationSelectOptions.find(opt => opt.value === editAttachTarget) || null;
+  const editSelectedInterventionOption =
+    interventionSelectOptions.find(opt => opt.value === editAttachTarget) || null;
+  const originalAttachType = editDocument?.linked_intervention_id
+    ? 'intervention'
+    : editDocument?.application_id
+    ? 'application'
+    : 'none';
+  const originalAttachTarget = editDocument?.linked_intervention_id
+    ? String(editDocument.linked_intervention_id)
+    : editDocument?.application_id
+    ? String(editDocument.application_id)
+    : '';
+  const editAssociationChanged =
+    editDocScope === 'application' &&
+    (editAttachType !== originalAttachType ||
+      (editAttachType !== 'none' && editAttachTarget && editAttachTarget !== originalAttachTarget));
+  const duplicateDocScope = getDocumentTypeScope(duplicateCategory);
+  const duplicateAttachTypeOptions = [
+    { value: 'none', label: 'No attachment (generic upload)' },
+    { value: 'application', label: 'Application', disabled: !applicationSelectOptions.length },
+    { value: 'intervention', label: 'Intervention', disabled: !interventionSelectOptions.length }
+  ];
+  const duplicateSelectedApplicationOption =
+    applicationSelectOptions.find(opt => opt.value === duplicateAttachTarget) || null;
+  const duplicateSelectedInterventionOption =
+    interventionSelectOptions.find(opt => opt.value === duplicateAttachTarget) || null;
+  const uploadApplicationOptions = useMemo(() => {
+    if (!applicationSelectOptions.length) {
+      return [{ value: '', label: 'No applications available' }];
+    }
+    return [{ value: '', label: 'No application (generic upload)' }, ...applicationSelectOptions];
+  }, [applicationSelectOptions]);
+  const uploadInterventionOptions = useMemo(() => {
+    if (!interventionSelectOptions.length) {
+      return [{ value: '', label: 'No interventions available' }];
+    }
+    return [{ value: '', label: 'No intervention (generic upload)' }, ...interventionSelectOptions];
+  }, [interventionSelectOptions]);
   const uploadSelectedApplicationOption =
-    applicationSelectOptions.find(opt => opt.value === pendingApplication) ||
-    (applicationSelectOptions.length
-      ? applicationSelectOptions[0]
-      : { value: '', label: applicationOptions.length ? 'Select application' : 'No applications available' });
+    uploadApplicationOptions.find(opt => opt.value === pendingApplication) || uploadApplicationOptions[0];
+  const uploadSelectedInterventionOption =
+    uploadInterventionOptions.find(opt => opt.value === pendingIntervention) || uploadInterventionOptions[0];
 
 
   return (
@@ -1064,27 +1461,52 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             placeholder="Select document type"
           />
         </FormField>
-        <FormField
-          label="Attach to application"
-          description={
-            pendingDocScope === 'client'
-              ? 'Client-scoped documents are reusable across all applications.'
-              : 'Select which application this document should be attached to.'
-          }
-          errorText={pendingApplicationError}
-        >
-          <Select
-            disabled={pendingDocScope === 'client'}
-            selectedOption={uploadSelectedApplicationOption}
-            onChange={({ detail }) => {
-              setPendingApplicationError('');
-              setPendingApplication(detail.selectedOption.value || '');
-            }}
-            options={applicationSelectOptions}
-            placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
-            loading={applicationsLoading}
-          />
-        </FormField>
+        {isCaseWorkspace ? (
+          <FormField
+            label="Attach to intervention"
+            description={
+              pendingDocScope === 'client'
+                ? 'Client-scoped documents are reusable and do not need an intervention.'
+                : 'Select which intervention this document should be attached to, or leave blank for a generic upload.'
+            }
+            errorText={pendingInterventionError}
+          >
+            <Select
+              disabled={pendingDocScope === 'client'}
+              selectedOption={uploadSelectedInterventionOption}
+              onChange={({ detail }) => {
+                setPendingInterventionError('');
+                setPendingIntervention(detail.selectedOption.value || '');
+              }}
+              options={uploadInterventionOptions}
+              placeholder={interventionSelectOptions.length ? 'Select intervention' : 'No interventions available'}
+              filteringType="none"
+            />
+          </FormField>
+        ) : (
+          <FormField
+            label="Attach to application"
+            description={
+              pendingDocScope === 'client'
+                ? 'Client-scoped documents are reusable across all applications.'
+                : 'Select which application this document should be attached to, or leave blank for a generic upload.'
+            }
+            errorText={pendingApplicationError}
+          >
+            <Select
+              disabled={pendingDocScope === 'client'}
+              selectedOption={uploadSelectedApplicationOption}
+              onChange={({ detail }) => {
+                setPendingApplicationError('');
+                setPendingApplication(detail.selectedOption.value || '');
+              }}
+              options={uploadApplicationOptions}
+              placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
+              loading={applicationsLoading}
+              filteringType="none"
+            />
+          </FormField>
+        )}
       </Modal>
       <Modal
         visible={deleteModalVisible}
@@ -1150,6 +1572,156 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
               placeholder="Select document type"
             />
           </FormField>
+          {editDocScope === 'application' && (
+            <>
+              <FormField
+                label="Attachment"
+                description="Application-scoped documents can be attached to an application, an intervention, or left unassigned."
+                errorText={editAttachError}
+              >
+                <Select
+                  selectedOption={editAttachTypeOptions.find(opt => opt.value === editAttachType) || editAttachTypeOptions[0]}
+                  onChange={({ detail }) => {
+                    const nextType = detail?.selectedOption?.value || 'none';
+                    setEditAttachType(nextType);
+                    setEditAttachTarget('');
+                    setEditAttachError('');
+                  }}
+                  options={editAttachTypeOptions}
+                  selectedAriaLabel="Selected attachment type"
+                  placeholder="Select attachment type"
+                />
+              </FormField>
+              {editAttachType === 'application' && (
+                <FormField label="Select application" errorText={editAttachError}>
+                  <Select
+                    selectedOption={editSelectedApplicationOption}
+                    onChange={({ detail }) => {
+                      setEditAttachError('');
+                      setEditAttachTarget(detail.selectedOption?.value || '');
+                    }}
+                    options={applicationSelectOptions}
+                    placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
+                    loading={applicationsLoading}
+                    filteringType="none"
+                  />
+                </FormField>
+              )}
+              {editAttachType === 'intervention' && (
+                <FormField label="Select intervention" errorText={editAttachError}>
+                  <Select
+                    selectedOption={editSelectedInterventionOption}
+                    onChange={({ detail }) => {
+                      setEditAttachError('');
+                      setEditAttachTarget(detail.selectedOption?.value || '');
+                    }}
+                    options={interventionSelectOptions}
+                    placeholder={interventionSelectOptions.length ? 'Select intervention' : 'No interventions available'}
+                    filteringType="none"
+                  />
+                </FormField>
+              )}
+              {editAssociationChanged && (
+                <Alert type="warning" header="Moving this document">
+                  Changing the attachment will remove this document from the original submission and may make it
+                  incomplete.
+                </Alert>
+              )}
+            </>
+          )}
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={duplicateModalVisible}
+        onDismiss={handleDuplicateDismiss}
+        closeAriaLabel="Close dialog"
+        header="Duplicate document"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={handleDuplicateDismiss}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleDuplicateConfirm} loading={duplicateSubmitting}>
+              Duplicate
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          {duplicateError && <Alert type="error">{duplicateError}</Alert>}
+          <FormField label="Document label">
+            <Input
+              value={duplicateLabel}
+              onChange={({ detail }) => setDuplicateLabel(detail.value)}
+              placeholder="Document label"
+              autoFocus
+            />
+          </FormField>
+          <FormField label="Document type">
+            <Select
+              selectedOption={documentTypeOptions.find(opt => opt.value === duplicateCategory) || documentTypeOptions[0]}
+              onChange={({ detail }) => setDuplicateCategory(detail.selectedOption.value || '')}
+              options={documentTypeOptions}
+              selectedAriaLabel="Selected document type"
+              placeholder="Select document type"
+            />
+          </FormField>
+          {duplicateDocScope === 'application' && (
+            <>
+              <FormField
+                label="Attach to"
+                description="Choose where the duplicated document should be attached."
+              >
+                <Select
+                  selectedOption={
+                    duplicateAttachTypeOptions.find(opt => opt.value === duplicateAttachType) ||
+                    duplicateAttachTypeOptions[0]
+                  }
+                  onChange={({ detail }) => {
+                    const nextType = detail?.selectedOption?.value || 'none';
+                    setDuplicateAttachType(nextType);
+                    setDuplicateAttachTarget('');
+                    setDuplicateError('');
+                  }}
+                  options={duplicateAttachTypeOptions}
+                  selectedAriaLabel="Selected attachment type"
+                  placeholder="Select attachment type"
+                />
+              </FormField>
+              {duplicateAttachType === 'application' && (
+                <FormField label="Select application">
+                  <Select
+                    selectedOption={duplicateSelectedApplicationOption}
+                    onChange={({ detail }) => {
+                      setDuplicateError('');
+                      setDuplicateAttachTarget(detail.selectedOption?.value || '');
+                    }}
+                    options={applicationSelectOptions}
+                    placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
+                    loading={applicationsLoading}
+                    filteringType="none"
+                  />
+                </FormField>
+              )}
+              {duplicateAttachType === 'intervention' && (
+                <FormField label="Select intervention">
+                  <Select
+                    selectedOption={duplicateSelectedInterventionOption}
+                    onChange={({ detail }) => {
+                      setDuplicateError('');
+                      setDuplicateAttachTarget(detail.selectedOption?.value || '');
+                    }}
+                    options={interventionSelectOptions}
+                    placeholder={interventionSelectOptions.length ? 'Select intervention' : 'No interventions available'}
+                    filteringType="none"
+                  />
+                </FormField>
+              )}
+            </>
+          )}
+          {duplicateDocScope === 'client' && (
+            <Alert type="info">Client-scoped documents do not need an application or intervention association.</Alert>
+          )}
         </SpaceBetween>
       </Modal>
       <BoardItem
@@ -1216,16 +1788,16 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     >
       <SpaceBetween size="s">
         <Box variant="small">
-          This widget displays all documents related to the applicant, including those submitted with the
-          application and any adopted secure message attachments.
+          This widget displays documents related to the applicant, including application, intervention, and secure
+          message attachments.
         </Box>
-        <FormField label="View documents for">
+        <FormField label={isCaseWorkspace ? 'View documents for intervention' : 'View documents for'}>
           <Select
-            selectedOption={selectedApplicationFilterOption}
-            onChange={handleDocumentFilterChange}
-            options={applicationFilterOptions}
+            selectedOption={isCaseWorkspace ? selectedInterventionFilterOption : selectedApplicationFilterOption}
+            onChange={isCaseWorkspace ? handleInterventionFilterChange : handleApplicationFilterChange}
+            options={isCaseWorkspace ? interventionFilterOptions : applicationFilterOptions}
             placeholder="All documents"
-            loading={applicationsLoading}
+            loading={!isCaseWorkspace && applicationsLoading}
             filteringType="none"
           />
         </FormField>
@@ -1283,6 +1855,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                     <Alert type="error" dismissible onDismiss={() => setChecklistError(null)}>
                       {checklistError}
                     </Alert>
+                  )}
+                  {isCaseWorkspace && !selectedInterventionFilter && (
+                    <Alert type="info">Select an intervention to view its checklist.</Alert>
                   )}
                   <Table
                     trackBy="id"
