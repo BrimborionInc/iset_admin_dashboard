@@ -494,6 +494,10 @@ const CaseWorkspaceContext = createContext({
   closeIntervention: () => Promise.resolve({}),
   runComplianceChecks: () => Promise.resolve(),
   prepareIlmpExport: () => Promise.resolve({}),
+  markReadyToClose: () => Promise.resolve({}),
+  closeCase: () => Promise.resolve({}),
+  reopenCase: () => Promise.resolve({}),
+  archiveCase: () => Promise.resolve({}),
   fetchActionPlanContext: () => Promise.resolve({}),
   upsertActionPlanReviewReminder: () => Promise.resolve(),
   saveCaseContext: () => Promise.resolve(),
@@ -1389,7 +1393,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     const response = await apiFetch(`/api/cases/${caseId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "active" }),
+      body: JSON.stringify({ status: "dormant" }),
     });
     let detail = null;
     try {
@@ -1414,8 +1418,49 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
         ...prev,
         caseData: {
           ...prev.caseData,
-          status: "active",
+          status: "dormant",
           closedAt: null,
+        },
+      };
+    });
+    return detail;
+  }, [apiFetch, caseId]);
+
+  const archiveCase = useCallback(async () => {
+    if (!caseId) {
+      const error = new Error("Case not loaded.");
+      error.status = 400;
+      throw error;
+    }
+    const response = await apiFetch(`/api/cases/${caseId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "archived" }),
+    });
+    let detail = null;
+    try {
+      detail = await response.json();
+    } catch (_) {
+      detail = null;
+    }
+    if (!response.ok) {
+      const message =
+        detail?.detail ||
+        detail?.message ||
+        detail?.error ||
+        `Failed to archive case (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      error.details = detail;
+      throw error;
+    }
+    setState(prev => {
+      if (!prev.caseData) return prev;
+      return {
+        ...prev,
+        caseData: {
+          ...prev.caseData,
+          status: "archived",
         },
       };
     });
@@ -1669,6 +1714,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     markReadyToClose,
     closeCase,
     reopenCase,
+    archiveCase,
     fetchActionPlanContext,
     upsertActionPlanReviewReminder,
     saveCaseContext,
@@ -1700,7 +1746,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     setInterventionWizardDraft,
     clearInterventionWizardStep,
     clearInterventionWizardDraft,
-  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, markReadyToClose, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, deleteActionPlan, deleteIntervention, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, selectedActionPlanId, selectedInterventionId, getInterventionWizardStep, getInterventionWizardKeyForCase, getInterventionWizardDraft, setInterventionWizardStep, setInterventionWizardDraft, clearInterventionWizardStep, clearInterventionWizardDraft]);
+  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, markReadyToClose, closeCase, reopenCase, archiveCase, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, deleteActionPlan, deleteIntervention, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, selectedActionPlanId, selectedInterventionId, getInterventionWizardStep, getInterventionWizardKeyForCase, getInterventionWizardDraft, setInterventionWizardStep, setInterventionWizardDraft, clearInterventionWizardStep, clearInterventionWizardDraft]);
 
   return (
     <CaseWorkspaceContext.Provider value={contextValue}>

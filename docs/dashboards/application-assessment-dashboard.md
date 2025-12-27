@@ -9,7 +9,7 @@ Operational dashboard for reviewing and adjudicating individual ISET application
 ## Current Board Items (production)
 | Title | File | Purpose / scope |
 |-------|------|-----------------|
-| Application Overview | `src/widgets/ApplicationOverviewWidget.js` | Case header with status badge, sysadmin-only status selector (others see read-only badge), and quick actions to suspend/resume/withdraw; shows reference # with copy control, locks awareness, assigned evaluator, timestamps. |
+| Application Overview | `src/widgets/ApplicationOverviewWidget.js` | Case header with status badge, sysadmin-only status selector (others see read-only badge), and layout quick actions (Review application, Documents and messages, Notes and case calendar, View audit trail); shows reference # with copy control, province/territory, document checklist completeness, lock owner/expiry, assigned evaluator, timestamps. |
 | ISET Application Form | `src/widgets/IsetApplicationFormWidget.js` | Read-only or lock-protected edit view of the submitted application; version history and restore; edit disabled when decision final or status=withdrawn. |
 | Application Assessment | `src/widgets/CoordinatorAssessmentWidget.js` | Assessment workflow (declaration, recommendations, NWAC review) with status progression rules and locking; submits to `/api/cases/:id`. |
 | Supporting Documents | `src/widgets/SupportingDocumentsWidget.js` | Unified document list across submissions and secure messages; refresh control. |

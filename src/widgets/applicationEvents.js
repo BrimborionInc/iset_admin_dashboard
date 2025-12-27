@@ -12,6 +12,8 @@ const STATUS_LABELS = {
   docs_requested: 'Action Required',
   'docs requested': 'Action Required',
   action_required: 'Action Required',
+  closure_notice: 'Closure Notice',
+  'closure notice': 'Closure Notice',
   approved: 'Approved',
   completed: 'Completed',
   rejected: 'Rejected',

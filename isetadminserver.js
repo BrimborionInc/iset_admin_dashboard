@@ -7080,6 +7080,8 @@ const APPLICATION_STATUS_HOLD_VALUES = [
   'action_required',
   'action required',
   'action required (docs requested)',
+  'closure_notice',
+  'closure notice',
   'pending info',
   'pending information',
   'info requested',
@@ -7098,6 +7100,8 @@ const APPLICATION_ASSESSMENT_STATUSES = new Set([
   'action_required',
   'action required',
   'action required (docs requested)',
+  'closure_notice',
+  'closure notice',
   'pending info',
   'pending information',
   'info requested',
@@ -7198,8 +7202,8 @@ async function recomputeCaseStatus(caseId, connection = null, options = {}) {
   }
 }
 
-async function buildClientProfileFromApplication(connection, applicationId) {
-  const applicationPayload = await readApplicationPayload(connection, applicationId, { forUpdate: true });
+async function buildClientProfileFromApplication(connection, applicationId, { forUpdate = false } = {}) {
+  const applicationPayload = await readApplicationPayload(connection, applicationId, { forUpdate });
   if (!applicationPayload) return null;
 
   let submissionRow = null;
@@ -7297,11 +7301,173 @@ async function buildClientProfileFromApplication(connection, applicationId) {
   };
 }
 
+async function findExistingClientMatchForApplication(connection, applicationId) {
+  if (!applicationId) return { clientId: null, matchSource: null };
+  const profile = await buildClientProfileFromApplication(connection, applicationId, { forUpdate: false });
+  if (!profile) return { clientId: null, matchSource: null };
+
+  const lowerFirst = profile.firstName.toLowerCase();
+  const lowerLast = profile.lastName.toLowerCase();
+  const sinHash = profile.sinHash || null;
+
+  let targetClientId = null;
+  let matchSource = null;
+
+  if (sinHash) {
+    const params = [sinHash];
+    let sql = `
+      SELECT id
+        FROM client
+       WHERE JSON_UNQUOTE(JSON_EXTRACT(address_json, '$.sinHash')) = ?
+    `;
+    if (profile.dob) {
+      sql += ' AND dob = ?';
+      params.push(profile.dob);
+    }
+    sql += ' LIMIT 1';
+    const [[bySinHash]] = await connection.query(sql, params);
+    if (bySinHash) {
+      targetClientId = bySinHash.id;
+      matchSource = 'sin_hash';
+    }
+  }
+
+  if (!targetClientId && sinHash) {
+    const [sinCandidates] = await connection.query(
+      `SELECT c.client_id, s.intake_payload
+         FROM iset_case c
+         JOIN iset_application a ON a.id = c.application_id
+         JOIN iset_application_submission s ON s.id = a.submission_id
+        WHERE c.client_id IS NOT NULL`
+    );
+    for (const row of sinCandidates) {
+      if (!row?.intake_payload || !row?.client_id) continue;
+      let payloadObj = null;
+      try {
+        payloadObj = typeof row.intake_payload === 'string'
+          ? JSON.parse(row.intake_payload)
+          : row.intake_payload;
+      } catch (_) {
+        payloadObj = null;
+      }
+      if (!payloadObj || typeof payloadObj !== 'object') continue;
+      const candidateSinDigits = cleanSin(extractSin({ payload: {}, answers: payloadObj, caseContext: {} }));
+      if (!candidateSinDigits || !isValidSin(candidateSinDigits)) continue;
+      const candidateHash = hashSin(candidateSinDigits);
+      if (candidateHash && candidateHash === sinHash) {
+        targetClientId = row.client_id;
+        matchSource = 'sin_submission';
+        break;
+      }
+    }
+  }
+
+  if (!targetClientId && profile.emailNormalized) {
+    const [[byEmail]] = await connection.query(
+      `SELECT id
+         FROM client
+        WHERE address_json IS NOT NULL
+          AND JSON_UNQUOTE(JSON_EXTRACT(address_json, '$.contact.emailNormalized')) = ?
+        LIMIT 1`,
+      [profile.emailNormalized]
+    );
+    if (byEmail) {
+      targetClientId = byEmail.id;
+      matchSource = 'email';
+    }
+  }
+
+  if (!targetClientId) {
+    if (profile.dob) {
+      const [[byNameDob]] = await connection.query(
+        `SELECT id
+           FROM client
+          WHERE LOWER(first_name) = ?
+            AND LOWER(last_name) = ?
+            AND dob = ?
+          LIMIT 1`,
+        [lowerFirst, lowerLast, profile.dob]
+      );
+      if (byNameDob) {
+        targetClientId = byNameDob.id;
+        matchSource = 'name_dob';
+      }
+    } else {
+      const [[byNameOnly]] = await connection.query(
+        `SELECT id
+           FROM client
+          WHERE LOWER(first_name) = ?
+            AND LOWER(last_name) = ?
+            AND dob IS NULL
+          LIMIT 1`,
+        [lowerFirst, lowerLast]
+      );
+      if (byNameOnly) {
+        targetClientId = byNameOnly.id;
+        matchSource = 'name_only';
+      }
+    }
+  }
+
+  return { clientId: targetClientId, matchSource };
+}
+
+async function findExistingClientCaseSummary(connection, { caseId, applicationId, clientId }) {
+  let matchedClientId = clientId || null;
+  let matchSource = matchedClientId ? 'linked' : null;
+  if (!matchedClientId && applicationId) {
+    const match = await findExistingClientMatchForApplication(connection, applicationId);
+    if (match?.clientId) {
+      matchedClientId = match.clientId;
+      matchSource = match.matchSource;
+    }
+  }
+  if (!matchedClientId) {
+    return {
+      clientId: null,
+      matchSource,
+      hasPriorCase: false,
+      caseCount: 0,
+      priorCase: null
+    };
+  }
+
+  const [caseRows] = await connection.query(
+    `SELECT c.id, c.status, c.case_number, c.assigned_to_user_id, c.updated_at,
+            sp.display_name, sp.name, sp.email
+       FROM iset_case c
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE c.client_id = ?
+      ORDER BY c.updated_at DESC, c.id DESC`,
+    [matchedClientId]
+  );
+
+  const normalizedCaseId = Number(caseId);
+  const otherCases = caseRows.filter(row => {
+    const rowId = Number(row?.id);
+    return Number.isFinite(rowId) && Number.isFinite(normalizedCaseId)
+      ? rowId !== normalizedCaseId
+      : true;
+  });
+  const hasPriorCase = otherCases.length > 0;
+  const priorCase = hasPriorCase
+    ? (otherCases.find(row => row?.assigned_to_user_id) || otherCases[0])
+    : null;
+
+  return {
+    clientId: matchedClientId,
+    matchSource,
+    hasPriorCase,
+    caseCount: caseRows.length,
+    priorCase
+  };
+}
+
 async function ensureCaseClientLinkForApproval(connection, { caseId, applicationId, existingClientId, actorId = null, actorName = null }) {
   if (existingClientId) return existingClientId;
   if (!applicationId) return null;
 
-  const profile = await buildClientProfileFromApplication(connection, applicationId);
+  const profile = await buildClientProfileFromApplication(connection, applicationId, { forUpdate: true });
   if (!profile) {
     console.warn('[cases] unable to build client profile for application %s (case %s)', applicationId, caseId);
     return null;
@@ -25877,12 +26043,14 @@ app.get('/api/cases/:id', async (req, res) => {
       SELECT
         c.id,
         c.application_id,
+        c.client_id,
         c.assigned_to_user_id,
         sp.email AS assigned_user_email,
         c.status,
         a.status AS application_status,
         c.created_at,
         c.updated_at,
+        c.case_context_json,
         a.row_version AS application_row_version,
         al.owner_user_id AS lock_owner_id,
         al.owner_display_name AS lock_owner_name,
@@ -25966,7 +26134,7 @@ app.get('/api/cases/:id', async (req, res) => {
           existingCols = colRows.map(r => r.column_name);
         } catch (_) { /* ignore */ }
         const preferred = [
-          'id','application_id','assigned_to_user_id','status','priority','opened_at','closed_at','last_activity_at'
+          'id','application_id','client_id','assigned_to_user_id','status','priority','opened_at','closed_at','last_activity_at','case_context_json'
         ];
         const picked = preferred.filter(c => existingCols.includes(c));
         if (picked.length === 0) picked.push('id','application_id','status');
@@ -26043,6 +26211,48 @@ app.get('/api/cases/:id', async (req, res) => {
       } catch(_) {}
     }
 
+    try {
+      const existingClientSummary = await findExistingClientCaseSummary(pool, {
+        caseId: row.id,
+        applicationId: row.application_id,
+        clientId: row.client_id
+      });
+      row.existing_client_id = existingClientSummary.clientId || null;
+      row.existing_client_match_source = existingClientSummary.matchSource || null;
+      row.existing_client_has_prior_case = Boolean(existingClientSummary.hasPriorCase);
+      row.existing_client_case_count = Number(existingClientSummary.caseCount || 0);
+      if (existingClientSummary.priorCase) {
+        const prior = existingClientSummary.priorCase;
+        row.existing_client_prior_case_id = prior.id || null;
+        row.existing_client_prior_case_number = prior.case_number || null;
+        row.existing_client_prior_case_status = prior.status || null;
+        row.existing_client_prior_case_updated_at = prior.updated_at || null;
+        row.existing_client_prior_case_owner_name = prior.display_name || prior.name || null;
+        row.existing_client_prior_case_owner_email = prior.email || null;
+      } else {
+        row.existing_client_prior_case_id = null;
+        row.existing_client_prior_case_number = null;
+        row.existing_client_prior_case_status = null;
+        row.existing_client_prior_case_updated_at = null;
+        row.existing_client_prior_case_owner_name = null;
+        row.existing_client_prior_case_owner_email = null;
+      }
+    } catch (err) {
+      console.warn('[case:detail] existing client lookup failed:', err?.message || err);
+      row.existing_client_id = row.client_id || null;
+      row.existing_client_match_source = row.client_id ? 'linked' : null;
+      row.existing_client_has_prior_case = false;
+      row.existing_client_case_count = 0;
+      row.existing_client_prior_case_id = null;
+      row.existing_client_prior_case_number = null;
+      row.existing_client_prior_case_status = null;
+      row.existing_client_prior_case_updated_at = null;
+      row.existing_client_prior_case_owner_name = null;
+      row.existing_client_prior_case_owner_email = null;
+    }
+
+    row.caseContext = safeJsonParse(row.case_context_json, null) || null;
+    delete row.case_context_json;
     res.set('Cache-Control','no-store, max-age=0');
     res.status(200).json(row);
   } catch (error) {
@@ -33282,9 +33492,11 @@ app.put('/api/cases/:id', async (req, res) => {
 
   let conn;
   let beforeStatus = null;
+  let beforeApplicationStatus = null;
   let normalizedStatus;
   let normalizedStatusLower = null;
   let statusChanged = false;
+  let applicationStatusChanged = false;
   let bumpApplicationRowVersion = false;
   let newRowVersion = null;
   let applicationId = null;
@@ -33308,8 +33520,9 @@ app.put('/api/cases/:id', async (req, res) => {
     await conn.beginTransaction();
     await ensureAssessmentBudgetPotColumn(conn);
 
-  const [[existingCase]] = await conn.query(
-      `SELECT c.status, c.application_id, c.client_id, c.assigned_to_user_id, c.case_context_json, a.row_version,
+    const [[existingCase]] = await conn.query(
+      `SELECT c.status, c.application_id, c.client_id, c.assigned_to_user_id, c.case_context_json,
+              a.status AS application_status, a.row_version,
               al.owner_user_id AS lock_owner_user_id,
               al.owner_display_name AS lock_owner_display_name,
               al.owner_email AS lock_owner_email,
@@ -33326,6 +33539,7 @@ app.put('/api/cases/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Case not found', lock: null });
     }
     beforeStatus = existingCase.status || null;
+    beforeApplicationStatus = normaliseCaseStatusValue(existingCase.application_status) || existingCase.application_status || null;
     const beforeStatusLower = beforeStatus ? String(beforeStatus).toLowerCase() : null;
     const beforeStatusNormalised = normaliseCaseStatusValue(beforeStatus);
     const beforeClientId = existingCase.client_id || null;
@@ -33769,6 +33983,9 @@ app.put('/api/cases/:id', async (req, res) => {
     }
 
     if (applicationStatusToPersist && applicationId) {
+      if (applicationStatusToPersist !== beforeApplicationStatus) {
+        applicationStatusChanged = true;
+      }
       await conn.query('UPDATE iset_application SET status = ? WHERE id = ?', [applicationStatusToPersist, applicationId]);
       bumpApplicationRowVersion = true;
     }
@@ -33806,7 +34023,7 @@ app.put('/api/cases/:id', async (req, res) => {
   try {
     const conflictSummaryStaffId = Number.isFinite(identity.userId) ? Number(identity.userId) : 0;
     const [[caseRow]] = await pool.query(
-      `SELECT c.status, c.application_id,
+      `SELECT c.status, c.application_id, a.status AS application_status,
               COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
               COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
               a.row_version AS application_row_version,
@@ -33974,15 +34191,22 @@ app.put('/api/cases/:id', async (req, res) => {
     }
 
     const afterStatus = (normalizedStatus !== undefined ? normalizedStatus : caseRow.status) || caseRow.status;
+    const afterApplicationStatusRaw = applicationStatusToPersist || caseRow.application_status || beforeApplicationStatus || null;
+    const afterApplicationStatus = normaliseCaseStatusValue(afterApplicationStatusRaw) || afterApplicationStatusRaw || null;
     const { actorId, actorName } = resolveRequestActor(req);
     const trackingId = caseRow?.tracking_id || null;
 
-    if (statusChanged) {
+    const shouldEmitStatusEvent = applicationStatusChanged || statusChanged;
+    const statusEventFrom = applicationStatusChanged ? beforeApplicationStatus : beforeStatus;
+    const statusEventTo = applicationStatusChanged ? afterApplicationStatus : afterStatus;
+    const decisionStatus = applicationStatusChanged ? afterApplicationStatus : afterStatus;
+
+    if (shouldEmitStatusEvent) {
       try {
         await captureCaseEvent({
           type: 'status_changed',
           caseId,
-          payload: { from: beforeStatus || null, to: afterStatus, tracking_id: trackingId },
+          payload: { from: statusEventFrom || null, to: statusEventTo, tracking_id: trackingId },
           trackingId,
           actorId,
           actorName,
@@ -33993,7 +34217,7 @@ app.put('/api/cases/:id', async (req, res) => {
           pool,
           userId: caseRow?.applicant_user_id || null,
           trackingId,
-          status: afterStatus,
+          status: decisionStatus,
         });
       } catch (notifyErr) {
         console.error('[notifications] decision email failed', notifyErr?.message || notifyErr);

@@ -28,7 +28,7 @@ import CaseWorkspaceExportPreviewHelp from "../../helpPanelContents/caseWorkspac
 import CaseWorkspaceHelp from "../../helpPanelContents/caseWorkspaceHelp.js";
 import { CaseWorkspaceProvider } from "./caseWorkspace/CaseWorkspaceContext.jsx";
 
-const STORAGE_KEY = "iset-case-workspace-layout-v12";
+const STORAGE_KEY = "iset-case-workspace-layout-v13";
 
 const widgetRegistry = {
   "supporting-documents": {
@@ -172,16 +172,48 @@ const defaultLayout = [
   { id: "actionPlans", rowSpan: 4, columnSpan: 2 },
   { id: "case-calendar", rowSpan: 5, columnSpan: 2 },
   { id: "interventions", rowSpan: 4, columnSpan: 2 },
-  { id: "case-notes", rowSpan: 2, columnSpan: 2 },
+  { id: "case-notes", rowSpan: 5, columnSpan: 2 },
   { id: "supporting-documents", rowSpan: 3, columnSpan: 2 },
   { id: "secure-messaging", rowSpan: 4, columnSpan: 2 },
 ];
 
 const proposeInterventionLayout = [
-  { id: "caseHeader", rowSpan: 2, columnSpan: 4 },
+  { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
   { id: "participantDetails", rowSpan: 7, columnSpan: 2 },
   { id: "interventionAssessment", rowSpan: 7, columnSpan: 2 },
 ];
+
+const managePlansLayout = [
+  { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
+  { id: "actionPlans", rowSpan: 3, columnSpan: 4 },
+  { id: "interventions", rowSpan: 3, columnSpan: 4 },
+];
+
+const notesCalendarLayout = [
+  { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
+  { id: "case-notes", rowSpan: 6, columnSpan: 2 },
+  { id: "case-calendar", rowSpan: 6, columnSpan: 2 },
+];
+
+const documentsMessagesLayout = [
+  { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
+  { id: "supporting-documents", rowSpan: 6, columnSpan: 2 },
+  { id: "secure-messaging", rowSpan: 6, columnSpan: 2 },
+];
+
+const esdcValidationLayout = [
+  { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
+  { id: "compliancePanel", rowSpan: 6, columnSpan: 2 },
+  { id: "exportPreview", rowSpan: 6, columnSpan: 2 },
+];
+
+const QUICK_ACTION_LAYOUTS = {
+  managePlans: managePlansLayout,
+  notesCalendar: notesCalendarLayout,
+  documentsMessages: documentsMessagesLayout,
+  esdcValidation: esdcValidationLayout,
+  proposeIntervention: proposeInterventionLayout,
+};
 
 const exportLayout = items =>
   items.map(({ id, rowSpan, columnSpan, columnOffset }) => ({
@@ -421,13 +453,23 @@ const CaseWorkspacePage = ({
     });
   }, []);
 
+  const applyLayout = useCallback(nextLayout => {
+    if (!Array.isArray(nextLayout) || nextLayout.length === 0) return;
+    setLayout(current => (areLayoutsEqual(current, nextLayout) ? current : [...nextLayout]));
+  }, [setLayout]);
+
   useEffect(() => {
     const openHandler = () => openPalette();
     const resetHandler = () => resetLayout();
     const proposeHandler = () => {
-      setLayout(current =>
-        areLayoutsEqual(current, proposeInterventionLayout) ? current : [...proposeInterventionLayout]
-      );
+      applyLayout(proposeInterventionLayout);
+    };
+    const setLayoutHandler = event => {
+      const detail = event?.detail || {};
+      const nextLayout = Array.isArray(detail.layout) ? detail.layout : QUICK_ACTION_LAYOUTS[detail.layoutId];
+      if (nextLayout) {
+        applyLayout(nextLayout);
+      }
     };
     const addWidgetHandler = event => {
       const detail = event?.detail || {};
@@ -436,14 +478,16 @@ const CaseWorkspacePage = ({
     window.addEventListener("iset-case-workspace:openPalette", openHandler);
     window.addEventListener("iset-case-workspace:resetLayout", resetHandler);
     window.addEventListener("iset:intervention-assessment:new", proposeHandler);
+    window.addEventListener("iset-case-workspace:set-layout", setLayoutHandler);
     window.addEventListener("iset-case-workspace:add-widget", addWidgetHandler);
     return () => {
       window.removeEventListener("iset-case-workspace:openPalette", openHandler);
       window.removeEventListener("iset-case-workspace:resetLayout", resetHandler);
       window.removeEventListener("iset:intervention-assessment:new", proposeHandler);
+      window.removeEventListener("iset-case-workspace:set-layout", setLayoutHandler);
       window.removeEventListener("iset-case-workspace:add-widget", addWidgetHandler);
     };
-  }, [addWidgetToLayout, openPalette, resetLayout]);
+  }, [addWidgetToLayout, applyLayout, openPalette, resetLayout]);
 
   return (
     <CaseWorkspaceProvider caseId={caseId}>

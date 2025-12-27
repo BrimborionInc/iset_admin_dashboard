@@ -3,7 +3,7 @@ import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
 import { canCompleteOutcomeReview, getCaseStatusContext, getApplicationStatusContext } from '../utils/rbac';
-import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup, Autosuggest } from '@cloudscape-design/components';
+import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup, Autosuggest, StatusIndicator, Wizard } from '@cloudscape-design/components';
 import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
 
@@ -34,30 +34,84 @@ const POSTING_OPTIONS = [
   { value: 'internal', label: 'Internal (NWAC)' }
 ];
 
-const requiresNocForCode = (value) => {
+const RECURRING_PERIOD_OPTIONS = [
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'bi_weekly', label: 'Bi-weekly' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'quarterly', label: 'Quarterly' }
+];
+
+const EDUCATION_CODES = new Set([4, 5, 9, 10, 11, 12, 13]);
+const EMPLOYER_CODES = new Set([6, 7, 8, 17]);
+const WAGE_SUBSIDY_CODES = new Set([7, 8]);
+
+const isEducationCode = (value) => {
   if (!value) return false;
   const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric >= 6 && numeric <= 13;
+  return Number.isFinite(numeric) && EDUCATION_CODES.has(numeric);
 };
-const requiresInstitutionForCode = (value) => {
+const isEmployerCode = (value) => {
   if (!value) return false;
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return false;
-  return new Set([4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]).has(numeric);
+  return Number.isFinite(numeric) && EMPLOYER_CODES.has(numeric);
 };
+const isWageSubsidyCode = (value) => {
+  if (!value) return false;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && WAGE_SUBSIDY_CODES.has(numeric);
+};
+const requiresExternalPartnerForCode = (value) => isEducationCode(value) || isEmployerCode(value);
+const requiresNocForCode = (value) => isEmployerCode(value);
 
 const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
 const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
-const APPLICATION_OUTCOME_STATUSES = new Set(['pending_approval']);
 const OVERVIEW_WORD_LIMIT = 400;
 const EMPLOYMENT_GOALS_WORD_LIMIT = 400;
 const NOT_APPROVED_CASE_STATUS = 'in_review';
 const APPROVAL_COST_THRESHOLD = 25000;
+const ELIGIBILITY_ALLOWED_MIME_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/bmp',
+  'image/tiff'
+];
+const ELIGIBILITY_MAX_BYTES = 6 * 1024 * 1024;
 
-// Section header helper for consistent spacing
-const sectionHeader = (label) => (
-  <Box variant="h3" margin={{ top: 'l', bottom: 's' }}>{label}</Box>
-);
+const assessmentWizardStepStore = new Map();
+const assessmentWizardLastKeyByCase = new Map();
+
+const BASE_STEP_IDS = [
+  'eligibility',
+  'framing',
+  'rationale',
+  'barriers',
+  'priorities',
+  'otherFunding',
+  'type',
+  'childcare',
+  'previousIset',
+  'cost',
+  'docs',
+  'review'
+];
+const SUBMITTED_STEP_IDS = ['decision'];
+const STEP_LABELS = {
+  eligibility: 'EI Eligibility Check',
+  framing: 'What is being proposed?',
+  rationale: 'Why is this intervention needed?',
+  type: 'How will the intervention be delivered?',
+  childcare: 'Does the client need childcare?',
+  previousIset: 'Has the client received previous ISET funding?',
+  barriers: 'Barriers to employment',
+  priorities: 'Local area priorities (target areas)',
+  otherFunding: 'Other funding sources',
+  cost: 'What will it cost?',
+  docs: 'Do you have the right supporting documents?',
+  review: 'Review and submit',
+  decision: 'Approval and decision'
+};
+const REQUIRED_STEP_IDS = BASE_STEP_IDS.slice(0, BASE_STEP_IDS.length - 1);
 
 const scrollToPageTop = () => {
   if (typeof window !== 'undefined') {
@@ -140,6 +194,14 @@ const parseIsoDateToUtc = (value) => {
   return Date.UTC(yyyy, mm - 1, dd);
 };
 
+const formatCaseStatusLabel = (value) => {
+  if (!value) return '';
+  return String(value)
+    .trim()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
+};
+
 const calculateDurationDays = (start, end) => {
   const startUtc = parseIsoDateToUtc(start);
   const endUtc = parseIsoDateToUtc(end);
@@ -148,6 +210,20 @@ const calculateDurationDays = (start, end) => {
   const diff = Math.round((endUtc - startUtc) / (1000 * 60 * 60 * 24)) + 1;
   if (!Number.isFinite(diff) || diff < 0) return null;
   return diff;
+};
+
+const autoOccurrencesFromDates = (startDate, endDate, period) => {
+  if (!startDate || !endDate || !period) return null;
+  const startUtc = parseIsoDateToUtc(startDate);
+  const endUtc = parseIsoDateToUtc(endDate);
+  if (startUtc === null || endUtc === null) return null;
+  const diffMs = endUtc - startUtc;
+  if (diffMs < 0) return null;
+  const days = diffMs / (1000 * 60 * 60 * 24);
+  if (!Number.isFinite(days)) return null;
+  const periodDays = period === 'bi_weekly' ? 14 : period === 'monthly' ? 30 : period === 'quarterly' ? 90 : 7;
+  if (!periodDays) return null;
+  return Math.max(1, Math.ceil(days / periodDays));
 };
 
 const parseCurrencyToNumber = (value) => {
@@ -175,6 +251,13 @@ const formatCurrencyDisplay = (value) => {
   const num = parseCurrencyInput(value);
   if (num === null) return '';
   return `$ ${num.toFixed(2)}`;
+};
+
+const formatDocTypeLabel = (value) => {
+  if (!value) return '';
+  return String(value)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
 };
 
 const isEmptyString = (val) => val === null || val === undefined || val === '';
@@ -219,6 +302,7 @@ const mergeAssessmentState = (current, incoming) => {
     'endDate',
     'institution',
     'programName',
+    'deliveryMode',
     'recommendation',
     'justification',
     'nwacReviewStatus',
@@ -227,6 +311,10 @@ const mergeAssessmentState = (current, incoming) => {
     'interventionCode',
     'interventionDuration',
     'interventionCost',
+    'costType',
+    'recurringPeriod',
+    'recurringAmount',
+    'recurringOccurrences',
     'interventionPotId',
     'postingContext',
     'interventionNoc',
@@ -253,8 +341,20 @@ const mergeAssessmentState = (current, incoming) => {
     });
     next[key] = merged;
   };
-  mergeObj('itp', { tuition: '', books: '', materials: '', living: '' });
-  mergeObj('wage', { wages: '', mercs: '', nonwages: '', other: '' });
+  mergeObj('itp', { tuition: '', books: '', materials: '', living: '', details: '' });
+  mergeObj('wage', { wages: '', mercs: '', nonwages: '', other: '', subsidyDetails: '' });
+  if (!Object.prototype.hasOwnProperty.call(next, 'deliveryMode') || isEmptyString(incoming.deliveryMode)) {
+    next.deliveryMode = current?.deliveryMode || 'partner';
+  }
+  if (!Object.prototype.hasOwnProperty.call(next, 'costType') || isEmptyString(incoming.costType)) {
+    next.costType = current?.costType || 'one_time';
+  }
+  if (!next.itp || typeof next.itp !== 'object') {
+    next.itp = { tuition: '', books: '', materials: '', living: '', details: '' };
+  }
+  if (!next.wage || typeof next.wage !== 'object') {
+    next.wage = { wages: '', mercs: '', nonwages: '', other: '', subsidyDetails: '' };
+  }
 
   return next;
 };
@@ -274,8 +374,9 @@ const buildEmptyAssessment = () => ({
   endDate: '',
   institution: '',
   programName: '',
-  itp: { tuition: '', books: '', materials: '', living: '' },
-  wage: { wages: '', mercs: '', nonwages: '', other: '' },
+  itp: { tuition: '', books: '', materials: '', living: '', details: '' },
+  wage: { wages: '', mercs: '', nonwages: '', other: '', subsidyDetails: '' },
+  deliveryMode: 'partner',
   recommendation: '',
   justification: '',
   nwacReviewStatus: '',
@@ -284,6 +385,10 @@ const buildEmptyAssessment = () => ({
   interventionCode: '',
   interventionDuration: '',
   interventionCost: '',
+  costType: 'one_time',
+  recurringPeriod: '',
+  recurringAmount: '',
+  recurringOccurrences: '',
   interventionPotId: '',
   postingContext: '',
   interventionNoc: '',
@@ -332,6 +437,32 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [budgetPotLoading, setBudgetPotLoading] = useState(false);
   const [checklistCheckError, setChecklistCheckError] = useState(null);
   const [checkingChecklist, setCheckingChecklist] = useState(false);
+  const [documentChecklistItems, setDocumentChecklistItems] = useState([]);
+  const [documentChecklistMissingCount, setDocumentChecklistMissingCount] = useState(0);
+  const [documentChecklistLoading, setDocumentChecklistLoading] = useState(false);
+  const [documentChecklistError, setDocumentChecklistError] = useState(null);
+  const [showDocsInfoAlert, setShowDocsInfoAlert] = useState(true);
+  const [docsUploadLockedDismissed, setDocsUploadLockedDismissed] = useState(false);
+  const [checklistUploadError, setChecklistUploadError] = useState(null);
+  const [checklistUploadSuccess, setChecklistUploadSuccess] = useState(null);
+  const [checklistUploadModalVisible, setChecklistUploadModalVisible] = useState(false);
+  const [checklistUploadDocTypes, setChecklistUploadDocTypes] = useState([]);
+  const [checklistUploadDocType, setChecklistUploadDocType] = useState('');
+  const [checklistUploadLabel, setChecklistUploadLabel] = useState('');
+  const [checklistUploading, setChecklistUploading] = useState(false);
+  const [eiVerificationFile, setEiVerificationFile] = useState(null);
+  const [eiVerificationFileError, setEiVerificationFileError] = useState(null);
+  const [eiVerificationUploadError, setEiVerificationUploadError] = useState(null);
+  const [eiVerificationUploadSuccess, setEiVerificationUploadSuccess] = useState(null);
+  const [eiVerificationUploading, setEiVerificationUploading] = useState(false);
+  const eiVerificationFileInputRef = useRef(null);
+  const checklistFileInputRef = useRef(null);
+  const nextChecklistDocTypeRef = useRef('');
+  const nextChecklistLabelRef = useRef('');
+  const [currentStep, setCurrentStep] = useState(BASE_STEP_IDS[0]);
+  const [attemptedSteps, setAttemptedSteps] = useState({});
+  const wizardStepRestoreKeyRef = useRef(null);
+  const wizardStepRestoreStepsRef = useRef(null);
   const widgetRootRef = useRef(null);
   const alertAnchorRef = useRef(null);
   const previousAlertKeyRef = useRef(null);
@@ -360,7 +491,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const normalizedRole = (userRole || '').toString().trim().toLowerCase();
   const canonicalRole = normalizedRole === 'regional manager' ? 'regional coordinator' : normalizedRole;
   const isAssessor = canonicalRole === 'application assessor';
-  const isEligibilityAdmin = ['system administrator', 'program administrator', 'regional manager', 'regional coordinator'].includes(normalizedRole);
+  const isEligibilityAdmin = ['system administrator', 'program administrator', 'regional manager'].includes(normalizedRole);
+  const canUploadEiVerification = ['system administrator', 'program administrator', 'regional manager'].includes(normalizedRole);
   const numericInterventionCost = useMemo(() => parseCurrencyToNumber(assessment.interventionCost), [assessment.interventionCost]);
   const isHighCostApprovalBlocked = canonicalRole === 'regional coordinator' && Number.isFinite(numericInterventionCost) && numericInterventionCost >= APPROVAL_COST_THRESHOLD;
 
@@ -399,6 +531,36 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isPendingApprovalStatus = rawApplicationStatusNormalized === 'pending_approval';
   const applicantUserId = caseData?.applicant_user_id ?? caseData?.applicantUserId ?? null;
   const applicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
+  const caseId = caseData?.id ?? caseData?.case_id ?? null;
+  const existingClientInfo = useMemo(() => {
+    if (!caseData?.existing_client_has_prior_case) return null;
+    const priorCaseId = caseData?.existing_client_prior_case_id ?? null;
+    const priorCaseNumber = caseData?.existing_client_prior_case_number ?? null;
+    const priorCaseStatus = caseData?.existing_client_prior_case_status ?? null;
+    const priorCaseOwnerName = caseData?.existing_client_prior_case_owner_name ?? null;
+    const priorCaseOwnerEmail = caseData?.existing_client_prior_case_owner_email ?? null;
+    const managerLabel = (() => {
+      if (priorCaseOwnerName && priorCaseOwnerEmail && priorCaseOwnerName !== priorCaseOwnerEmail) {
+        return `${priorCaseOwnerName} (${priorCaseOwnerEmail})`;
+      }
+      return priorCaseOwnerName || priorCaseOwnerEmail || null;
+    })();
+    const caseLabel = priorCaseNumber
+      ? `Case ${priorCaseNumber}`
+      : priorCaseId
+        ? `Case ${priorCaseId}`
+        : 'Existing case';
+    const statusLabel = formatCaseStatusLabel(priorCaseStatus);
+    return {
+      caseLabel,
+      statusLabel,
+      managerLabel
+    };
+  }, [caseData]);
+  const wizardStepKey = useMemo(() => {
+    const baseId = caseData?.id ?? applicationId ?? application_id ?? null;
+    return baseId ? `assessment:${baseId}` : null;
+  }, [caseData?.id, applicationId, application_id]);
 
   const isDecisionFinal = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
   const isLockedStatus = APPLICATION_LOCKED_STATUSES.has(canonicalApplicationStatus);
@@ -407,6 +569,13 @@ const CoordinatorAssessmentWidget = forwardRef(
   const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus });
   const lacksOutcomePermission = Boolean(userRole) && isPendingApprovalStatus && !canManageOutcomeReview;
   const requiresNoc = useMemo(() => requiresNocForCode(assessment.interventionCode), [assessment.interventionCode]);
+  const isEducationIntervention = useMemo(() => isEducationCode(assessment.interventionCode), [assessment.interventionCode]);
+  const isEmployerIntervention = useMemo(() => isEmployerCode(assessment.interventionCode), [assessment.interventionCode]);
+  const isWageSubsidyIntervention = useMemo(() => isWageSubsidyCode(assessment.interventionCode), [assessment.interventionCode]);
+  const requiresExternalPartner = useMemo(
+    () => requiresExternalPartnerForCode(assessment.interventionCode),
+    [assessment.interventionCode]
+  );
   const normalizedConflictChoice = useMemo(
     () => normalizeConflictDeclarationChoice(conflictDeclarationChoice),
     [conflictDeclarationChoice]
@@ -415,6 +584,17 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isDeclarationGateActive = !conflictDeclarationSigned || hasDeclaredConflict;
   const eligibilitySet = Boolean(assessment.esdcEligibility);
   const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet;
+  const activeStepIds = useMemo(
+    () => (showNWACSection ? [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS] : BASE_STEP_IDS),
+    [showNWACSection]
+  );
+  const docsChecklistReady = Boolean(applicantUserId && applicationId);
+  const docsChecklistComplete = Boolean(
+    docsChecklistReady &&
+      documentChecklistMissingCount === 0 &&
+      !documentChecklistLoading &&
+      !documentChecklistError
+  );
   const dispatchSupportingDocsRefresh = useCallback(() => {
     if (typeof actions?.refreshChecklist === 'function') {
       actions.refreshChecklist().catch(() => {});
@@ -428,6 +608,10 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
     }
   }, [actions, applicantUserId]);
+  const openAssessmentWidget = useCallback((widgetId) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('applicationAssessment:palette:add', { detail: { id: widgetId } }));
+  }, []);
   useEffect(() => {
     setShowConflictAlert(true);
   }, [conflictDeclarationSigned, hasDeclaredConflict]);
@@ -532,39 +716,78 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
   }, [isAssessor, assessment.interventionPotId, assessment.postingContext]);
 
-  const buildAssessmentPayload = useCallback(() => ({
-    assessment_date_of_assessment: formatDate(assessment.dateOfAssessment) || null,
-    assessment_employment_goals: assessment.employmentGoals || null,
-    assessment_previous_iset: assessment.previousISET || null,
-    assessment_previous_iset_details: assessment.previousISETDetails || null,
-    assessment_employment_barriers: assessment.barriers || null,
-    assessment_local_area_priorities: assessment.priorities || null,
-    assessment_other_funding_details: assessment.otherFunding || null,
-    assessment_esdc_eligibility: assessment.esdcEligibility || null,
-    assessment_intervention_start_date: formatDate(assessment.startDate) || null,
-    assessment_intervention_end_date: formatDate(assessment.endDate) || null,
-    assessment_institution: assessment.institution || null,
-    assessment_program_name: assessment.programName || null,
-    assessment_itp: assessment.itp || [],
-    assessment_wage: assessment.wage || [],
-    assessment_recommendation: assessment.recommendation || null,
-    assessment_justification: assessment.justification || null,
-    assessment_nwac_review: assessment.nwacReview || null,
-    assessment_nwac_reason: assessment.nwacReason || null,
-    assessment_intervention_code: assessment.interventionCode || null,
-    assessment_intervention_duration_days: assessment.interventionDuration || null,
-    assessment_intervention_cost_total: (() => {
-      const val = parseCurrencyInput(assessment.interventionCost);
-      return val !== null ? String(val) : null;
-    })(),
-    assessment_intervention_pot_id: assessment.interventionPotId || null,
-    postingContext: assessment.postingContext || null,
-    assessment_intervention_related_noc: assessment.interventionNoc || null,
-    assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
-    assessment_childcare_need: assessment.childcareNeed || null,
-    assessment_childcare_funding_details: assessment.childcareFunding || null,
-    case_summary: assessment.overview || null
-  }), [assessment]);
+  const buildCostSettingsPayload = useCallback(() => {
+    const costType = assessment.costType === 'recurring' ? 'recurring' : 'one_time';
+    const recurringAmount = parseCurrencyInput(assessment.recurringAmount);
+    const recurringOccurrencesRaw = assessment.recurringOccurrences;
+    const recurringOccurrencesValue =
+      recurringOccurrencesRaw === '' || recurringOccurrencesRaw === null || typeof recurringOccurrencesRaw === 'undefined'
+        ? null
+        : Number(recurringOccurrencesRaw);
+    const recurringOccurrences = Number.isFinite(recurringOccurrencesValue) ? recurringOccurrencesValue : null;
+    const calculatedTotal = parseCurrencyInput(assessment.interventionCost);
+    const hasRecurrenceData =
+      costType === 'recurring' ||
+      Boolean(assessment.recurringPeriod) ||
+      recurringAmount !== null ||
+      recurringOccurrences !== null;
+    const hasCostData = calculatedTotal !== null;
+    if (!hasRecurrenceData && !hasCostData) return null;
+    return {
+      type: costType,
+      period: costType === 'recurring' ? assessment.recurringPeriod || '' : '',
+      amountPerPeriod: costType === 'recurring' ? recurringAmount : null,
+      occurrences: costType === 'recurring' ? recurringOccurrences : null,
+      calculatedTotal
+    };
+  }, [assessment]);
+
+  const buildAssessmentPayload = useCallback(() => {
+    const costSettingsPayload = buildCostSettingsPayload();
+    const payload = {
+      assessment_date_of_assessment: formatDate(assessment.dateOfAssessment) || null,
+      assessment_employment_goals: assessment.employmentGoals || null,
+      assessment_previous_iset: assessment.previousISET || null,
+      assessment_previous_iset_details: assessment.previousISETDetails || null,
+      assessment_employment_barriers: assessment.barriers || null,
+      assessment_local_area_priorities: assessment.priorities || null,
+      assessment_other_funding_details: assessment.otherFunding || null,
+      assessment_esdc_eligibility: assessment.esdcEligibility || null,
+      assessment_intervention_start_date: formatDate(assessment.startDate) || null,
+      assessment_intervention_end_date: formatDate(assessment.endDate) || null,
+      assessment_institution: assessment.institution || null,
+      assessment_program_name: assessment.programName || null,
+      assessment_itp: assessment.itp || [],
+      assessment_wage: assessment.wage || [],
+      assessment_recommendation: assessment.recommendation || null,
+      assessment_justification: assessment.justification || null,
+      assessment_nwac_review: assessment.nwacReview || null,
+      assessment_nwac_reason: assessment.nwacReason || null,
+      assessment_intervention_code: assessment.interventionCode || null,
+      assessment_intervention_duration_days: assessment.interventionDuration || null,
+      assessment_intervention_cost_total: (() => {
+        const val = parseCurrencyInput(assessment.interventionCost);
+        return val !== null ? String(val) : null;
+      })(),
+      assessment_intervention_pot_id: assessment.interventionPotId || null,
+      postingContext: assessment.postingContext || null,
+      assessment_intervention_related_noc: assessment.interventionNoc || null,
+      assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
+      assessment_childcare_need: assessment.childcareNeed || null,
+      assessment_childcare_funding_details: assessment.childcareFunding || null,
+      case_summary: assessment.overview || null
+    };
+    const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : null;
+    const normalizedMode = assessment.deliveryMode === 'in_house' ? 'in_house' : 'partner';
+    if (baseContext || normalizedMode || costSettingsPayload) {
+      payload.caseContext = {
+        ...(baseContext || {}),
+        assessmentDeliveryMode: normalizedMode,
+        assessmentCostSettings: costSettingsPayload
+      };
+    }
+    return payload;
+  }, [assessment, buildCostSettingsPayload, caseData?.caseContext]);
   const handlePostingContextErrors = useCallback((result) => {
     const code = result?.error || result?.code;
     if (['missing_internal_gl_code', 'missing_external_gl_code', 'posting_context_not_permitted'].includes(code)) {
@@ -579,24 +802,31 @@ const CoordinatorAssessmentWidget = forwardRef(
     () => CHILDCARE_OPTIONS.find(option => option.value === assessment.childcareNeed) || null,
     [assessment.childcareNeed]
   );
-  const hasInterventionCost = useMemo(() => {
+  const manualCostValue = useMemo(() => {
     const val = parseCurrencyInput(assessment.interventionCost);
-    return val !== null && Number.isFinite(val) && val > 0;
+    return val !== null && Number.isFinite(val) ? val : null;
   }, [assessment.interventionCost]);
   const selectedPostingContext = useMemo(
     () => POSTING_OPTIONS.find(opt => opt.value === assessment.postingContext) || null,
     [assessment.postingContext]
   );
+  const requiredDocumentChecklistItems = useMemo(
+    () => documentChecklistItems.filter(item => item?.required !== false),
+    [documentChecklistItems]
+  );
+  const checklistUploadDocTypeOptions = useMemo(
+    () =>
+      checklistUploadDocTypes.map(type => ({
+        value: type,
+        label: formatDocTypeLabel(type) || type
+      })),
+    [checklistUploadDocTypes]
+  );
   const canManageBudgetPotPending = useMemo(() => {
     const allowed = new Set(['system administrator', 'program administrator', 'regional manager', 'regional coordinator']);
     return allowed.has(normalizedRole);
   }, [normalizedRole]);
-  const showBudgetPot = hasInterventionCost;
-  const eligibilityGridDefinition = useMemo(
-    () => showBudgetPot ? [{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }] : [{ colspan: 6 }],
-    [showBudgetPot]
-  );
-  const requiresInstitution = useMemo(() => requiresInstitutionForCode(assessment.interventionCode), [assessment.interventionCode]);
+  const usesCostTables = isEducationIntervention || isEmployerIntervention;
   const showChildcareFunding = assessment.childcareNeed === 'yes';
   const showEndDate = Boolean(assessment.startDate);
   const dateGridDefinition = useMemo(
@@ -611,12 +841,28 @@ const CoordinatorAssessmentWidget = forwardRef(
     });
   }, [requiresNoc]);
   useEffect(() => {
-    if (requiresInstitution) return;
     setAssessment(prev => {
-      if (!prev.institution && !prev.programName) return prev;
-      return { ...prev, institution: '', programName: '' };
+      let changed = false;
+      const next = { ...prev };
+      if (!isEducationIntervention) {
+        if (next.itp?.details) {
+          next.itp = { ...next.itp, details: '' };
+          changed = true;
+        }
+      }
+      if (!(isEducationIntervention || isEmployerIntervention)) {
+        if (next.programName) {
+          next.programName = '';
+          changed = true;
+        }
+      }
+      if (!isWageSubsidyIntervention && next.wage?.subsidyDetails) {
+        next.wage = { ...next.wage, subsidyDetails: '' };
+        changed = true;
+      }
+      return changed ? next : prev;
     });
-  }, [requiresInstitution]);
+  }, [isEducationIntervention, isEmployerIntervention, isWageSubsidyIntervention]);
   useEffect(() => {
     if (assessment.childcareNeed === 'yes') return;
     setAssessment(prev => {
@@ -625,31 +871,74 @@ const CoordinatorAssessmentWidget = forwardRef(
     });
   }, [assessment.childcareNeed]);
   useEffect(() => {
-    if (hasInterventionCost) return;
+    if (!requiresExternalPartner) return;
     setAssessment(prev => {
-      if (!prev.interventionPotId) return prev;
-      return { ...prev, interventionPotId: '' };
+      if (prev.deliveryMode === 'partner') return prev;
+      return { ...prev, deliveryMode: 'partner' };
     });
-  }, [hasInterventionCost]);
-  const calculatedDuration = useMemo(() => {
-    const diff = calculateDurationDays(assessment.startDate, assessment.endDate);
-    return diff !== null ? String(diff) : null;
-  }, [assessment.startDate, assessment.endDate]);
+  }, [requiresExternalPartner]);
+  useEffect(() => {
+    if (assessment.deliveryMode !== 'in_house') return;
+    setAssessment(prev => {
+      if (!prev.institution && !prev.wage?.subsidyDetails) return prev;
+      return { ...prev, institution: '', wage: { ...prev.wage, subsidyDetails: '' } };
+    });
+  }, [assessment.deliveryMode]);
   const calculatedFundingTotal = useMemo(() => {
+    if (!usesCostTables) return null;
     const itp = assessment.itp || {};
     const wage = assessment.wage || {};
-    const total =
-      parseCurrencyToNumber(itp.tuition) +
-      parseCurrencyToNumber(itp.books) +
-      parseCurrencyToNumber(itp.materials) +
-      parseCurrencyToNumber(itp.living) +
-      parseCurrencyToNumber(wage.wages) +
-      parseCurrencyToNumber(wage.mercs) +
-      parseCurrencyToNumber(wage.nonwages) +
-      parseCurrencyToNumber(wage.other);
+    const itpTotal = isEducationIntervention
+      ? parseCurrencyToNumber(itp.tuition) +
+        parseCurrencyToNumber(itp.books) +
+        parseCurrencyToNumber(itp.materials) +
+        parseCurrencyToNumber(itp.living)
+      : 0;
+    const wageTotal = isEmployerIntervention
+      ? parseCurrencyToNumber(wage.wages) +
+        parseCurrencyToNumber(wage.mercs) +
+        parseCurrencyToNumber(wage.nonwages) +
+        parseCurrencyToNumber(wage.other)
+      : 0;
+    const total = itpTotal + wageTotal;
     if (!Number.isFinite(total) || total <= 0) return null;
     return String(Math.round(total));
-  }, [assessment.itp, assessment.wage]);
+  }, [assessment.itp, assessment.wage, isEducationIntervention, isEmployerIntervention, usesCostTables]);
+  const tableCostValue = useMemo(() => {
+    if (!calculatedFundingTotal) return null;
+    const val = parseCurrencyInput(calculatedFundingTotal);
+    return val !== null && Number.isFinite(val) ? val : null;
+  }, [calculatedFundingTotal]);
+  const effectiveCostValue = manualCostValue !== null ? manualCostValue : tableCostValue;
+  const decisionHasCost = effectiveCostValue !== null && Number.isFinite(effectiveCostValue) && effectiveCostValue > 0;
+  const showDecisionBudgetPot = assessment.nwacReviewStatus === 'approve' && decisionHasCost;
+  useEffect(() => {
+    if (assessment.nwacReviewStatus === 'approve' && decisionHasCost) return;
+    setAssessment(prev => {
+      if (!prev.interventionPotId && !prev.postingContext) return prev;
+      return { ...prev, interventionPotId: '', postingContext: '' };
+    });
+  }, [assessment.nwacReviewStatus, decisionHasCost]);
+  const showRecurrenceGroup = effectiveCostValue !== null && Number.isFinite(effectiveCostValue) && effectiveCostValue > 0;
+  const isRecurringCost = assessment.costType === 'recurring';
+  const isRecurringSchedule = showRecurrenceGroup && isRecurringCost;
+  const selectedRecurrencePeriodOption = useMemo(
+    () => RECURRING_PERIOD_OPTIONS.find(option => option.value === assessment.recurringPeriod) || null,
+    [assessment.recurringPeriod]
+  );
+  const recurringAmountValue = parseCurrencyInput(assessment.recurringAmount);
+  const recurringOccurrencesValue = (() => {
+    const raw = assessment.recurringOccurrences;
+    if (raw === '' || raw === null || typeof raw === 'undefined') return null;
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : null;
+  })();
+  const recurringTotal = useMemo(() => {
+    if (!isRecurringSchedule) return null;
+    if (!Number.isFinite(recurringAmountValue) || !Number.isFinite(recurringOccurrencesValue)) return null;
+    const total = recurringAmountValue * recurringOccurrencesValue;
+    return Number.isFinite(total) ? total : null;
+  }, [isRecurringSchedule, recurringAmountValue, recurringOccurrencesValue]);
   const fetchNocSuggestions = useCallback(
     async (queryText) => {
       if (!requiresNoc || !assessment.interventionNocVersion) {
@@ -729,6 +1018,10 @@ const CoordinatorAssessmentWidget = forwardRef(
     () => countWords(assessment.employmentGoals),
     [assessment.employmentGoals]
   );
+  const hasAttemptedSteps = useMemo(
+    () => Object.values(attemptedSteps).some(Boolean),
+    [attemptedSteps]
+  );
   const isDeclarationSubmissionDisabled =
     !hasDeclarationChoice ||
     (hasDeclaredConflict && !conflictDetailsNormalized) ||
@@ -776,6 +1069,27 @@ const CoordinatorAssessmentWidget = forwardRef(
       return '';
     })();
 
+    const contextDeliveryMode = (() => {
+      const raw = caseData?.caseContext?.assessmentDeliveryMode || caseData?.caseContext?.deliveryMode;
+      if (typeof raw !== 'string') return '';
+      const normalized = raw.trim().toLowerCase();
+      return normalized === 'in_house' || normalized === 'partner' ? normalized : '';
+    })();
+    const contextCostSettings = (() => {
+      const raw = caseData?.caseContext?.assessmentCostSettings;
+      return raw && typeof raw === 'object' ? raw : null;
+    })();
+    const contextCostType = contextCostSettings?.type === 'recurring' ? 'recurring' : 'one_time';
+    const contextRecurringPeriod = typeof contextCostSettings?.period === 'string' ? contextCostSettings.period : '';
+    const contextRecurringAmount =
+      contextCostSettings?.amountPerPeriod !== null && typeof contextCostSettings?.amountPerPeriod !== 'undefined'
+        ? String(contextCostSettings.amountPerPeriod)
+        : '';
+    const contextRecurringOccurrences =
+      contextCostSettings?.occurrences !== null && typeof contextCostSettings?.occurrences !== 'undefined'
+        ? String(contextCostSettings.occurrences)
+        : '';
+
     const placeholders = {
       dateOfAssessment: caseData.assessment_date_of_assessment || '',
       clientName: caseData.assigned_user_email || '',
@@ -811,8 +1125,9 @@ const CoordinatorAssessmentWidget = forwardRef(
       endDate: formatDate(caseData.assessment_intervention_end_date) || '',
       institution: caseData?.assessment_institution || caseData?.institution || '',
       programName: caseData?.assessment_program_name || '',
-      itp: parseOrDefault(caseData.assessment_itp, { tuition: '', books: '', materials: '', living: '' }),
-      wage: parseOrDefault(caseData.assessment_wage, { wages: '', mercs: '', nonwages: '', other: '' }),
+      deliveryMode: contextDeliveryMode || 'partner',
+      itp: parseOrDefault(caseData.assessment_itp, { tuition: '', books: '', materials: '', living: '', details: '' }),
+      wage: parseOrDefault(caseData.assessment_wage, { wages: '', mercs: '', nonwages: '', other: '', subsidyDetails: '' }),
       recommendation: caseData.assessment_recommendation || '',
       justification: caseData.assessment_justification || '',
       nwacReview: caseData.assessment_nwac_review || '',
@@ -821,6 +1136,10 @@ const CoordinatorAssessmentWidget = forwardRef(
       interventionCode: caseData.assessment_intervention_code != null ? String(caseData.assessment_intervention_code) : '',
       interventionDuration: caseData.assessment_intervention_duration_days != null ? String(caseData.assessment_intervention_duration_days) : '',
       interventionCost: caseData.assessment_intervention_cost_total != null ? String(caseData.assessment_intervention_cost_total) : '',
+      costType: contextCostType,
+      recurringPeriod: contextRecurringPeriod,
+      recurringAmount: contextRecurringAmount,
+      recurringOccurrences: contextRecurringOccurrences,
       interventionPotId: (() => {
         if (caseData.assessment_intervention_pot_id != null) {
           return String(caseData.assessment_intervention_pot_id);
@@ -874,6 +1193,349 @@ const CoordinatorAssessmentWidget = forwardRef(
     setShowNWACSection(shouldShowOutcome);
     setLocalAssessmentSubmitted(pendingApproval || isDecisionFinal);
   }, [isDecisionFinal, isPendingApprovalStatus]);
+
+  // UI logic: once status reaches pending approval or a final decision, lock assessment fields and surface NWAC review
+  const isAssessmentSubmitted = isPendingApprovalStatus;
+  const isReviewComplete = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
+  const assessmentSubmitted = localAssessmentSubmitted || isAssessmentSubmitted || isReviewComplete || isDecisionFinal || isLockedStatus || lockedByAnotherUser;
+  // Disable all fields (including NWAC) if review is complete, a final decision exists, status is locked, conflict not signed, or eligibility not set
+  const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal;
+  const isAssessmentDisabled = baseAssessmentLocked || isEligibilityGateActive || (assessmentSubmitted && !isEditingAssessment);
+  const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canManageOutcomeReview;
+  const isEligibilityDisabled = baseAssessmentLocked || isDeclarationGateActive || !isEligibilityAdmin;
+
+  useEffect(() => {
+    if (!isRecurringSchedule || isAssessmentDisabled) return;
+    if (!assessment.startDate || !assessment.endDate || !assessment.recurringPeriod) return;
+    const nextOccurrences = autoOccurrencesFromDates(assessment.startDate, assessment.endDate, assessment.recurringPeriod);
+    if (nextOccurrences === null) return;
+    if (String(nextOccurrences) === String(assessment.recurringOccurrences || '')) return;
+    setAssessment(prev => ({ ...prev, recurringOccurrences: String(nextOccurrences) }));
+  }, [
+    assessment.endDate,
+    assessment.recurringOccurrences,
+    assessment.recurringPeriod,
+    assessment.startDate,
+    isAssessmentDisabled,
+    isRecurringSchedule
+  ]);
+
+  useEffect(() => {
+    if (!isRecurringSchedule || isAssessmentDisabled) return;
+    if (recurringTotal === null || !Number.isFinite(recurringTotal) || recurringTotal <= 0) return;
+    const formatted = formatCurrencyDisplay(recurringTotal);
+    setAssessment(prev => (prev.interventionCost === formatted ? prev : { ...prev, interventionCost: formatted }));
+  }, [isAssessmentDisabled, isRecurringSchedule, recurringTotal]);
+
+  const resolveStoredWizardStep = useCallback((key, allowedSteps) => {
+    if (!key) return null;
+    const stored = assessmentWizardStepStore.get(String(key));
+    if (!stored) return null;
+    return allowedSteps.includes(stored) ? stored : null;
+  }, []);
+
+  useEffect(() => {
+    if (!wizardStepKey) return;
+    const stepSignature = activeStepIds.join('|');
+    const keyChanged = wizardStepRestoreKeyRef.current !== wizardStepKey;
+    const stepsChanged = wizardStepRestoreStepsRef.current !== stepSignature;
+    if (!keyChanged && !stepsChanged) return;
+    wizardStepRestoreKeyRef.current = wizardStepKey;
+    wizardStepRestoreStepsRef.current = stepSignature;
+    const storedStep = resolveStoredWizardStep(wizardStepKey, activeStepIds);
+    if (storedStep && storedStep !== currentStep) {
+      setCurrentStep(storedStep);
+      return;
+    }
+    if (!activeStepIds.includes(currentStep)) {
+      setCurrentStep(BASE_STEP_IDS[0]);
+    }
+  }, [wizardStepKey, activeStepIds, currentStep, resolveStoredWizardStep]);
+
+  useEffect(() => {
+    if (!wizardStepKey) return;
+    const normalizedKey = String(wizardStepKey);
+    assessmentWizardStepStore.set(normalizedKey, currentStep);
+    const caseKey = normalizedKey.split(':')[1] || normalizedKey;
+    assessmentWizardLastKeyByCase.set(caseKey, normalizedKey);
+  }, [wizardStepKey, currentStep]);
+
+  const loadDocumentChecklist = useCallback(async () => {
+    if (!applicantUserId) {
+      setDocumentChecklistItems([]);
+      setDocumentChecklistMissingCount(0);
+      setDocumentChecklistError(null);
+      return;
+    }
+    setDocumentChecklistLoading(true);
+    setDocumentChecklistError(null);
+    try {
+      const query = applicationId ? `?applicationId=${encodeURIComponent(applicationId)}` : '';
+      const res = await apiFetch(`/api/applicants/${applicantUserId}/document-checklist${query}`);
+      if (!res.ok) {
+        throw new Error('Failed to load document checklist.');
+      }
+      const payload = await res.json().catch(() => ({ items: [], missingRequiredCount: 0 }));
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      setDocumentChecklistItems(items);
+      setDocumentChecklistMissingCount(Number(payload.missingRequiredCount) || 0);
+    } catch (err) {
+      setDocumentChecklistError(err?.message || 'Checklist check failed.');
+      setDocumentChecklistItems([]);
+      setDocumentChecklistMissingCount(0);
+    } finally {
+      setDocumentChecklistLoading(false);
+    }
+  }, [applicantUserId, applicationId]);
+
+  useEffect(() => {
+    if (currentStep !== 'docs') return;
+    loadDocumentChecklist();
+  }, [currentStep, loadDocumentChecklist]);
+
+  const handleChecklistRefresh = useCallback(() => {
+    setChecklistUploadError(null);
+    setChecklistUploadSuccess(null);
+    loadDocumentChecklist();
+  }, [loadDocumentChecklist]);
+
+  const handleChecklistUploadClick = useCallback(
+    item => {
+      if (isAssessmentDisabled) return;
+      setChecklistUploadError(null);
+      setChecklistUploadSuccess(null);
+      if (!docsChecklistReady) {
+        setChecklistUploadError('Save progress to enable uploads and checklist validation.');
+        return;
+      }
+      const rawDocTypes = Array.isArray(item?.documentTypes) ? item.documentTypes.filter(Boolean) : [];
+      const docTypes = canUploadEiVerification
+        ? rawDocTypes
+        : rawDocTypes.filter(type => type !== 'ei_verification');
+      if (!docTypes.length) {
+        if (!canUploadEiVerification && rawDocTypes.includes('ei_verification')) {
+          setChecklistUploadError('EI verification uploads are restricted to admins and regional managers.');
+          return;
+        }
+        setChecklistUploadError('No document type is configured for this checklist item.');
+        return;
+      }
+      const label = item?.label || 'Supporting document';
+      if (docTypes.length === 1) {
+        nextChecklistDocTypeRef.current = docTypes[0];
+        nextChecklistLabelRef.current = label;
+        if (checklistFileInputRef.current) {
+          checklistFileInputRef.current.click();
+        }
+        return;
+      }
+      setChecklistUploadDocTypes(docTypes);
+      setChecklistUploadDocType(docTypes[0] || '');
+      setChecklistUploadLabel(label);
+      setChecklistUploadModalVisible(true);
+    },
+    [canUploadEiVerification, docsChecklistReady, isAssessmentDisabled]
+  );
+
+  const handleChecklistUploadModalDismiss = useCallback(() => {
+    setChecklistUploadModalVisible(false);
+    setChecklistUploadDocTypes([]);
+    setChecklistUploadDocType('');
+    setChecklistUploadLabel('');
+    setChecklistUploadError(null);
+  }, []);
+
+  const handleChecklistUploadModalConfirm = useCallback(() => {
+    if (!checklistUploadDocType) {
+      setChecklistUploadError('Select a document type to continue.');
+      return;
+    }
+    nextChecklistDocTypeRef.current = checklistUploadDocType;
+    nextChecklistLabelRef.current = checklistUploadLabel || 'Supporting document';
+    handleChecklistUploadModalDismiss();
+    if (checklistFileInputRef.current) {
+      checklistFileInputRef.current.click();
+    }
+  }, [checklistUploadDocType, checklistUploadLabel, handleChecklistUploadModalDismiss]);
+
+  const handleChecklistFileSelected = useCallback(
+    async event => {
+      const input = event?.target;
+      const file = input?.files?.[0] || null;
+      if (input) {
+        input.value = '';
+      }
+      if (!file) return;
+      if (!applicantUserId) {
+        setChecklistUploadError('Unable to determine the applicant for this upload.');
+        return;
+      }
+      if (!docsChecklistReady) {
+        setChecklistUploadError('Save progress to enable uploads and checklist validation.');
+        return;
+      }
+      const docType = nextChecklistDocTypeRef.current;
+      if (!docType) {
+        setChecklistUploadError('Select a document type to continue.');
+        return;
+      }
+      setChecklistUploading(true);
+      setChecklistUploadError(null);
+      setChecklistUploadSuccess(null);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (caseId) formData.append('caseId', caseId);
+        if (applicationId) formData.append('applicationId', String(applicationId));
+        formData.append('label', nextChecklistLabelRef.current || file.name);
+        formData.append('documentType', docType);
+        const response = await apiFetch(`/api/applicants/${applicantUserId}/documents/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        if (!response || !response.ok) {
+          let payload = null;
+          try {
+            payload = await response.json();
+          } catch (_) {
+            payload = null;
+          }
+          const errorCode = payload?.error || null;
+          if (errorCode === 'unsupported_file_type') {
+            throw new Error('That file type is not allowed. Please upload a PDF or image.');
+          }
+          if (errorCode === 'file_too_large') {
+            const maxBytes = payload?.maxBytes;
+            const maxMb = maxBytes ? Math.ceil(Number(maxBytes) / (1024 * 1024)) : null;
+            throw new Error(
+              maxMb
+                ? `The file is too large. The maximum supported size is ${maxMb} MB.`
+                : 'The file is too large to upload.'
+            );
+          }
+          if (errorCode === 'application_required_for_document') {
+            throw new Error('Save progress to create the application record before uploading this document.');
+          }
+          if (errorCode === 'invalid_document_type') {
+            throw new Error('The selected document type is not valid or inactive.');
+          }
+          if (errorCode === 'document_type_lookup_failed') {
+            throw new Error('Unable to validate the document type. Try again.');
+          }
+          throw new Error(payload?.message || 'Failed to upload document.');
+        }
+        dispatchSupportingDocsRefresh();
+        setChecklistUploadSuccess(`Uploaded ${file.name}.`);
+        await loadDocumentChecklist();
+      } catch (err) {
+        setChecklistUploadError(err?.message || 'Failed to upload document.');
+      } finally {
+        setChecklistUploading(false);
+        nextChecklistDocTypeRef.current = '';
+        nextChecklistLabelRef.current = '';
+      }
+    },
+    [applicantUserId, applicationId, caseId, dispatchSupportingDocsRefresh, docsChecklistReady, loadDocumentChecklist]
+  );
+
+  const handleEiVerificationFileChange = useCallback(event => {
+    const input = event?.target;
+    const file = input?.files?.[0] || null;
+    if (input) {
+      input.value = '';
+    }
+    setEiVerificationUploadError(null);
+    setEiVerificationUploadSuccess(null);
+    if (!file) {
+      setEiVerificationFile(null);
+      setEiVerificationFileError(null);
+      return;
+    }
+    if (!ELIGIBILITY_ALLOWED_MIME_TYPES.includes(file.type)) {
+      setEiVerificationFile(null);
+      setEiVerificationFileError('Only PDF, JPG, PNG, BMP, or TIFF files are allowed.');
+      return;
+    }
+    if (file.size > ELIGIBILITY_MAX_BYTES) {
+      setEiVerificationFile(null);
+      setEiVerificationFileError('File is too large (max 6 MB).');
+      return;
+    }
+    setEiVerificationFile(file);
+    setEiVerificationFileError(null);
+  }, []);
+
+  const uploadEiVerificationIfSelected = useCallback(async () => {
+    if (isAssessmentDisabled || !canUploadEiVerification) return true;
+    if (!eiVerificationFile) {
+      return true;
+    }
+    if (!assessment.esdcEligibility) {
+      setEiVerificationUploadError('Select an eligibility value to upload the document.');
+      return false;
+    }
+    if (!applicantUserId) {
+      setEiVerificationUploadError('Unable to determine the applicant for this upload.');
+      return false;
+    }
+    if (!applicationId) {
+      setEiVerificationUploadError('Unable to determine the application for this upload.');
+      return false;
+    }
+    setEiVerificationUploading(true);
+    setEiVerificationUploadError(null);
+    setEiVerificationUploadSuccess(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', eiVerificationFile);
+      formData.append('label', 'EI Verification');
+      formData.append('documentType', 'ei_verification');
+      if (caseId) formData.append('caseId', caseId);
+      formData.append('applicationId', applicationId);
+      const response = await apiFetch(`/api/applicants/${applicantUserId}/documents/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!response || !response.ok) {
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch (_) {
+          payload = null;
+        }
+        const errorCode = payload?.error || null;
+        if (errorCode === 'unsupported_file_type') {
+          throw new Error('That file type is not allowed. Please upload a PDF or image.');
+        }
+        if (errorCode === 'file_too_large') {
+          throw new Error('The file is too large to upload.');
+        }
+        if (errorCode === 'application_required_for_document') {
+          throw new Error('Select an application before uploading this document.');
+        }
+        if (errorCode === 'invalid_document_type') {
+          throw new Error('The EI Verification document type is not available.');
+        }
+        throw new Error(payload?.message || 'Failed to upload EI verification document.');
+      }
+      if (typeof window !== 'undefined') {
+        try {
+          const detail = applicantUserId ? { applicantUserId } : undefined;
+          window.dispatchEvent(new CustomEvent(SUPPORTING_DOCS_REFRESH_EVENT, { detail }));
+        } catch (_) {}
+      }
+      const uploadedName = eiVerificationFile?.name || 'document';
+      setEiVerificationUploadSuccess(`Uploaded ${uploadedName}.`);
+      setEiVerificationFile(null);
+      setEiVerificationFileError(null);
+      return true;
+    } catch (err) {
+      setEiVerificationUploadError(err?.message || 'Failed to upload EI verification document.');
+      return false;
+    } finally {
+      setEiVerificationUploading(false);
+    }
+  }, [apiFetch, applicantUserId, applicationId, assessment.esdcEligibility, canUploadEiVerification, caseId, eiVerificationFile, isAssessmentDisabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1004,7 +1666,7 @@ const CoordinatorAssessmentWidget = forwardRef(
 
     loadInterventionCodes();
     loadNocVersions();
-    if (hasInterventionCost) {
+    if (decisionHasCost) {
       loadBudgetPots();
     } else {
       setBudgetPotOptions([]);
@@ -1013,7 +1675,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     return () => {
       cancelled = true;
     };
-  }, [assessment.esdcEligibility, normalizedProvince, hasInterventionCost, assessment.interventionPotId, deriveFundingStreamFromEligibility]);
+  }, [assessment.esdcEligibility, normalizedProvince, decisionHasCost, assessment.interventionPotId, deriveFundingStreamFromEligibility]);
 
   useEffect(() => {
     setNocSuggestions([]);
@@ -1080,9 +1742,27 @@ const CoordinatorAssessmentWidget = forwardRef(
         nextAssessment.interventionNoc = '';
         nextAssessment.interventionNocVersion = '';
       }
-      if (field === 'interventionCode' && !requiresInstitutionForCode(value)) {
+      if (field === 'interventionCode') {
+        const educationCode = isEducationCode(value);
+        const employerCode = isEmployerCode(value);
+        nextAssessment.deliveryMode = 'partner';
         nextAssessment.institution = '';
-        nextAssessment.programName = '';
+        nextAssessment.programName = educationCode || employerCode ? nextAssessment.programName : '';
+        nextAssessment.itp = { ...nextAssessment.itp, details: educationCode ? nextAssessment.itp?.details || '' : '' };
+        nextAssessment.wage = { ...nextAssessment.wage, subsidyDetails: '' };
+      }
+      if (field === 'costType') {
+        if (value === 'one_time') {
+          nextAssessment.recurringPeriod = '';
+          nextAssessment.recurringAmount = '';
+          nextAssessment.recurringOccurrences = '';
+        } else if (value === 'recurring' && !nextAssessment.recurringPeriod) {
+          nextAssessment.recurringPeriod = 'weekly';
+        }
+      }
+      if (field === 'deliveryMode' && value === 'in_house') {
+        nextAssessment.institution = '';
+        nextAssessment.wage = { ...nextAssessment.wage, subsidyDetails: '' };
       }
       if (field === 'startDate' && !value) {
         nextAssessment.endDate = '';
@@ -1102,7 +1782,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         const { postingContext: _ignore, ...rest } = fieldErrors;
         setFieldErrors(rest);
       }
-      if (hasSubmitted) {
+      if (hasSubmitted || hasAttemptedSteps) {
         setFieldErrors(validateAssessment(nextAssessment));
       }
       return nextAssessment;
@@ -1361,8 +2041,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!assessment.interventionCode) {
       errors.interventionCode = 'Select an intervention code.';
     }
-    const numericCode = Number(assessment.interventionCode);
-    const requiresNocCode = Number.isFinite(numericCode) && numericCode >= 6 && numericCode <= 13;
+    const requiresNocCode = requiresNocForCode(assessment.interventionCode);
     if (requiresNocCode) {
       if (!assessment.interventionNocVersion) {
         errors.interventionNocVersion = 'Select a NOC version for this intervention code.';
@@ -1371,10 +2050,31 @@ const CoordinatorAssessmentWidget = forwardRef(
         errors.interventionNoc = 'Select a NOC code for this intervention.';
       }
     }
-    // 15. Optional numeric fields
-    if (assessment.interventionDuration && !/^\d+$/.test(assessment.interventionDuration.trim())) {
-      errors.interventionDuration = 'Duration must be a whole number of days.';
+    const educationCode = isEducationCode(assessment.interventionCode);
+    const employerCode = isEmployerCode(assessment.interventionCode);
+    const wageSubsidyCode = isWageSubsidyCode(assessment.interventionCode);
+    if (educationCode) {
+      if (!assessment.institution || !assessment.institution.trim()) {
+        errors.institution = 'Training institution is required for this intervention code.';
+      }
+      if (!assessment.itp?.details || !assessment.itp.details.trim()) {
+        errors.itpDetails = 'ITP details are required for this intervention code.';
+      }
     }
+    if (employerCode) {
+      if (!assessment.institution || !assessment.institution.trim()) {
+        errors.institution = 'Employer / delivery partner is required for this intervention code.';
+      }
+      if (wageSubsidyCode && (!assessment.wage?.subsidyDetails || !assessment.wage.subsidyDetails.trim())) {
+        errors.wageSubsidyDetails = 'Wage subsidy details are required for this intervention code.';
+      }
+    }
+    if (!educationCode && !employerCode && assessment.deliveryMode !== 'in_house') {
+      if (!assessment.institution || !assessment.institution.trim()) {
+        errors.institution = 'Delivery partner / provider is required when using external delivery.';
+      }
+    }
+    // 15. Optional numeric fields
     let parsedInterventionCost = null;
     if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
       parsedInterventionCost = parseCurrencyInput(assessment.interventionCost);
@@ -1478,12 +2178,8 @@ const CoordinatorAssessmentWidget = forwardRef(
         }
       } catch (_) {}
 
-      // 1. If assessment_date_of_assessment is missing, set to today (2025-06-11)
-      let dateOfAssessment = assessment.dateOfAssessment;
-      if (!dateOfAssessment) {
-        dateOfAssessment = '2025-06-11';
-      }
-      dateOfAssessment = formatDate(dateOfAssessment);
+      // 1. Always stamp assessment date on submit.
+      const dateOfAssessment = formatDate(new Date());
 
       // 2. Save assessment (PUT /api/cases/:id)
       const versionToken = Number(latestRowVersion || caseData?.application_row_version || 0);
@@ -1601,22 +2297,22 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   // Enhanced handleItp and handleWage to clear funding error if valid
   const handleItp = (field, value) => {
-    setAssessment(a => ({ ...a, itp: { ...a.itp, [field]: value } }));
-    if (hasSubmitted) {
-      setFieldErrors(prev => {
-        const next = { ...prev };
-        return next;
-      });
-    }
+    setAssessment(prev => {
+      const next = { ...prev, itp: { ...prev.itp, [field]: value } };
+      if (hasSubmitted || hasAttemptedSteps) {
+        setFieldErrors(validateAssessment(next));
+      }
+      return next;
+    });
   };
   const handleWage = (field, value) => {
-    setAssessment(a => ({ ...a, wage: { ...a.wage, [field]: value } }));
-    if (hasSubmitted) {
-      setFieldErrors(prev => {
-        const next = { ...prev };
-        return next;
-      });
-    }
+    setAssessment(prev => {
+      const next = { ...prev, wage: { ...prev.wage, [field]: value } };
+      if (hasSubmitted || hasAttemptedSteps) {
+        setFieldErrors(validateAssessment(next));
+      }
+      return next;
+    });
   };
 
   const handleSave = async () => {
@@ -1626,6 +2322,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     setAlert(null);
     try {
+      await uploadEiVerificationIfSelected();
       const payload = buildAssessmentPayload();
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return;
@@ -1705,16 +2402,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
   };
 
-  // UI logic: once status reaches pending approval or a final decision, lock assessment fields and surface NWAC review
-  const isAssessmentSubmitted = isPendingApprovalStatus;
-  const isReviewComplete = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
-  const assessmentSubmitted = localAssessmentSubmitted || isAssessmentSubmitted || isReviewComplete || isDecisionFinal || isLockedStatus || lockedByAnotherUser;
-  // Disable all fields (including NWAC) if review is complete, a final decision exists, status is locked, conflict not signed, or eligibility not set
-  const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal;
-  const isAssessmentDisabled = baseAssessmentLocked || isEligibilityGateActive || (assessmentSubmitted && !isEditingAssessment);
-  const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canManageOutcomeReview;
-  const isEligibilityDisabled = baseAssessmentLocked || isDeclarationGateActive || !isEligibilityAdmin;
-
   // Lock editing state if final decision has been recorded
   useEffect(() => {
     if (isDecisionFinal || isLockedStatus || lockedByAnotherUser) {
@@ -1740,23 +2427,88 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     return errors;
   };
+  const shouldShowStepErrors = useCallback(
+    (stepId) => hasSubmitted || attemptedSteps[stepId],
+    [hasSubmitted, attemptedSteps]
+  );
+  const validateWizardStep = useCallback(
+    (stepId) => {
+      if (isAssessmentDisabled && stepId !== 'decision' && stepId !== 'eligibility') {
+        return true;
+      }
+      const errors = validateAssessment(assessment);
+      if (stepId === 'eligibility') {
+        return !errors.esdcEligibility;
+      }
+      if (stepId === 'framing') {
+        return !errors.interventionCode && !errors.startDate && !errors.endDate;
+      }
+      if (stepId === 'rationale') {
+        return !errors.overview && !errors.employmentGoals;
+      }
+      if (stepId === 'type') {
+        return !errors.interventionNocVersion && !errors.interventionNoc && !errors.institution && !errors.itpDetails && !errors.wageSubsidyDetails;
+      }
+      if (stepId === 'childcare') {
+        return true;
+      }
+      if (stepId === 'previousIset') {
+        return !errors.previousISETDetails;
+      }
+      if (stepId === 'barriers') {
+        return !errors.barriers;
+      }
+      if (stepId === 'priorities') {
+        return true;
+      }
+      if (stepId === 'otherFunding') {
+        return true;
+      }
+      if (stepId === 'cost') {
+        return !errors.interventionDuration && !errors.interventionCost && !errors.interventionPotId && !errors.postingContext;
+      }
+      if (stepId === 'docs') {
+        return assessmentSubmitted ? true : docsChecklistComplete;
+      }
+      if (stepId === 'review') {
+        const requiredStepsValid = REQUIRED_STEP_IDS.every(id => validateWizardStep(id));
+        return requiredStepsValid && !errors.recommendation && !errors.justification;
+      }
+      if (stepId === 'decision') {
+        if (isNWACFieldsDisabled || !canManageOutcomeReview) return true;
+        const outcomeErrors = validateNWACReview(assessment);
+        return Object.keys(outcomeErrors).length === 0;
+      }
+      return false;
+    },
+    [
+      assessment,
+      assessmentSubmitted,
+      canManageOutcomeReview,
+      docsChecklistComplete,
+      isAssessmentDisabled,
+      isNWACFieldsDisabled,
+      validateAssessment,
+      validateNWACReview
+    ]
+  );
+  const isWizardStepValid = useCallback((stepId) => validateWizardStep(stepId), [validateWizardStep]);
 
   const validateOutcomeBeforeApprove = () => {
     setHasSubmitted(true);
     setValidationAlert(null);
     const errors = validateNWACReview(assessment);
-    let costForPotValidation = null;
     if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
-      costForPotValidation = parseCurrencyInput(assessment.interventionCost);
-      if (costForPotValidation === null || !Number.isFinite(costForPotValidation) || costForPotValidation < 0) {
+      const parsedCost = parseCurrencyInput(assessment.interventionCost);
+      if (parsedCost === null || !Number.isFinite(parsedCost) || parsedCost < 0) {
         errors.interventionCost = 'Enter a valid amount in dollars.';
       }
     }
     const isOutcomeApproved = assessment.nwacReviewStatus === 'approve';
-    if (isOutcomeApproved && costForPotValidation !== null && Number.isFinite(costForPotValidation) && costForPotValidation !== 0 && !assessment.interventionPotId) {
+    if (isOutcomeApproved && decisionHasCost && !assessment.interventionPotId) {
       errors.interventionPotId = 'Select a budget pot for the intervention cost.';
     }
-    if (isOutcomeApproved && assessment.interventionPotId && !assessment.postingContext) {
+    if (isOutcomeApproved && decisionHasCost && assessment.interventionPotId && !assessment.postingContext) {
       errors.postingContext = 'Select how this pot is paid from.';
     }
     setFieldErrors(errors);
@@ -1787,18 +2539,17 @@ const CoordinatorAssessmentWidget = forwardRef(
     setHasSubmitted(true);
     setValidationAlert(null);
     const errors = validateNWACReview(assessment);
-    let costForPotValidation = null;
     const isOutcomeApproved = assessment.nwacReviewStatus === 'approve';
     if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
-      costForPotValidation = parseCurrencyInput(assessment.interventionCost);
-      if (costForPotValidation === null || !Number.isFinite(costForPotValidation) || costForPotValidation < 0) {
+      const parsedCost = parseCurrencyInput(assessment.interventionCost);
+      if (parsedCost === null || !Number.isFinite(parsedCost) || parsedCost < 0) {
         errors.interventionCost = 'Enter a valid amount in dollars.';
       }
     }
-    if (isOutcomeApproved && costForPotValidation !== null && Number.isFinite(costForPotValidation) && costForPotValidation !== 0 && !assessment.interventionPotId) {
+    if (isOutcomeApproved && decisionHasCost && !assessment.interventionPotId) {
       errors.interventionPotId = 'Select a budget pot for the intervention cost.';
     }
-    if (isOutcomeApproved && assessment.interventionPotId && !assessment.postingContext) {
+    if (isOutcomeApproved && decisionHasCost && assessment.interventionPotId && !assessment.postingContext) {
       errors.postingContext = 'Select how this pot is paid from.';
     }
     setFieldErrors(errors);
@@ -1820,6 +2571,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!lockCheck.ok) return;
     const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
     const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
+    const costSettingsPayload = buildCostSettingsPayload();
     const payload = {
       assessment_date_of_assessment: formatDate(assessment.dateOfAssessment) || null,
       assessment_employment_goals: assessment.employmentGoals || null,
@@ -1856,6 +2608,15 @@ const CoordinatorAssessmentWidget = forwardRef(
       status: assessment.nwacReviewStatus === 'approve' ? 'initiated' : NOT_APPROVED_CASE_STATUS,
       applicationStatus: assessment.nwacReviewStatus === 'approve' ? 'approved' : 'in_review'
     };
+    const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : null;
+    const normalizedMode = assessment.deliveryMode === 'in_house' ? 'in_house' : 'partner';
+    if (baseContext || normalizedMode || costSettingsPayload) {
+      payload.caseContext = {
+        ...(baseContext || {}),
+        assessmentDeliveryMode: normalizedMode,
+        assessmentCostSettings: costSettingsPayload
+      };
+    }
     const requestBody = { ...payload };
     if (versionToken > 0) {
       requestBody.expectedRowVersion = versionToken;
@@ -1961,6 +2722,29 @@ const CoordinatorAssessmentWidget = forwardRef(
       await handleComplete();
     }
   };
+  const handleWizardNavigate = async ({ detail }) => {
+    const { requestedStepIndex } = detail || {};
+    if (requestedStepIndex < 0 || requestedStepIndex >= activeStepIds.length) return;
+    const requestedStepId = activeStepIds[requestedStepIndex];
+    const currentIdx = activeStepIds.indexOf(currentStep);
+    if (requestedStepIndex > currentIdx) {
+      if (!isAssessmentDisabled || currentStep === 'eligibility') {
+        setAttemptedSteps(prev => ({ ...prev, [currentStep]: true }));
+        setFieldErrors(validateAssessment(assessment));
+        const valid = validateWizardStep(currentStep);
+        if (!valid) {
+          return;
+        }
+        if (!isAssessmentDisabled && currentStep === 'eligibility') {
+          const uploadOk = await uploadEiVerificationIfSelected();
+          if (!uploadOk) {
+            return;
+          }
+        }
+      }
+    }
+    setCurrentStep(requestedStepId);
+  };
 
   const headerElement = (
     <Header
@@ -1974,16 +2758,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
           )}
           {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
-            <Button variant="primary" disabled={!isChanged} onClick={handleSave}>Save</Button>
-          )}
-          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
-            <Button variant="normal" disabled={!isChanged} onClick={handleCancel}>Cancel</Button>
-          )}
-          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
-            <Button variant="primary" onClick={handleSubmit}>Submit</Button>
-          )}
-          {!isEligibilityGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && (
-            <Button variant="primary" onClick={handleApproveClick} disabled={!isPendingApprovalStatus || !canManageOutcomeReview || checkingChecklist}>Approve / Mark Not Approved</Button>
+            <Button variant="primary" disabled={!isChanged} onClick={handleSave}>Save Progress</Button>
           )}
         </SpaceBetween>
       }
@@ -2021,32 +2796,1289 @@ const CoordinatorAssessmentWidget = forwardRef(
     />
   );
 
-  const renderRecommendationSection = () => (
-    <>
-      {sectionHeader("Assessor's Recommendation")}
-      <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-        <FormField label="Recommendation" errorText={hasSubmitted && fieldErrors.recommendation ? fieldErrors.recommendation : undefined}
-          description="Select your recommendation for this application. If not recommending funding, provide an alternative or rationale below.">
+  const renderRecommendationSection = () => {
+    const showReviewErrors = shouldShowStepErrors('review');
+    return (
+      <>
+        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+          <FormField
+            label="Recommendation"
+            errorText={showReviewErrors && fieldErrors.recommendation ? fieldErrors.recommendation : undefined}
+            description="Select your recommendation for this application. If not recommending funding, provide an alternative or rationale below."
+          >
+            <Select
+              selectedOption={RECOMMEND_OPTIONS.find(o => o.value === assessment.recommendation) || null}
+              onChange={({ detail }) => handleField('recommendation', detail.selectedOption.value)}
+              options={RECOMMEND_OPTIONS}
+              placeholder="Select recommendation"
+              ariaLabel="Recommendation"
+              data-error-focus={showReviewErrors && fieldErrors.recommendation ? 'true' : undefined}
+              tabIndex={-1}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+          <FormField
+            label="Justification"
+            stretch={true}
+            errorText={showReviewErrors && fieldErrors.justification ? fieldErrors.justification : undefined}
+            description="Provide a clear justification for your recommendation, referencing the client's needs, goals, and eligibility."
+          >
+            <Box width="100%">
+              <Textarea
+                value={assessment.justification}
+                onChange={({ detail }) => handleField('justification', detail.value)}
+                data-error-focus={showReviewErrors && fieldErrors.justification ? 'true' : undefined}
+                tabIndex={-1}
+                readOnly={isAssessmentDisabled}
+                disabled={isAssessmentDisabled}
+              />
+            </Box>
+          </FormField>
+        </Grid>
+      </>
+    );
+  };
+  const showEligibilityErrors = shouldShowStepErrors('eligibility');
+  const showFramingErrors = shouldShowStepErrors('framing');
+  const showRationaleErrors = shouldShowStepErrors('rationale');
+  const showTypeErrors = shouldShowStepErrors('type');
+  const showPreviousIsetErrors = shouldShowStepErrors('previousIset');
+  const showBarriersErrors = shouldShowStepErrors('barriers');
+  const showCostErrors = shouldShowStepErrors('cost');
+  const showDecisionErrors = shouldShowStepErrors('decision');
+
+  const eligibilityStepContent = (
+    <SpaceBetween size="l">
+      {canUploadEiVerification && (
+        <input
+          type="file"
+          ref={eiVerificationFileInputRef}
+          style={{ display: 'none' }}
+          accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+          onChange={handleEiVerificationFileChange}
+        />
+      )}
+      {canUploadEiVerification && !applicationId && (
+        <Alert
+          type="error"
+          header="Application record required"
+        >
+          Save progress to associate this assessment with an application before uploading EI verification documents.
+        </Alert>
+      )}
+      {canUploadEiVerification && eiVerificationUploadError && (
+        <Alert
+          type="error"
+          statusIconAriaLabel="Error"
+          dismissible
+          onDismiss={() => setEiVerificationUploadError(null)}
+        >
+          {eiVerificationUploadError}
+        </Alert>
+      )}
+      {canUploadEiVerification && eiVerificationUploadSuccess && (
+        <Alert
+          type="success"
+          statusIconAriaLabel="Success"
+          dismissible
+          onDismiss={() => setEiVerificationUploadSuccess(null)}
+        >
+          {eiVerificationUploadSuccess}
+        </Alert>
+      )}
+      <Grid gridDefinition={[{ colspan: 6 }]}>
+        <FormField
+          label="Eligibility"
+          errorText={showEligibilityErrors && fieldErrors.esdcEligibility ? fieldErrors.esdcEligibility : undefined}
+          description="Select the client's eligibility category for ESDC funding."
+        >
           <Select
-            selectedOption={RECOMMEND_OPTIONS.find(o => o.value === assessment.recommendation) || null}
-            onChange={({ detail }) => handleField('recommendation', detail.selectedOption.value)}
-            options={RECOMMEND_OPTIONS}
-            placeholder="Select recommendation"
-            ariaLabel="Recommendation"
-            data-error-focus={hasSubmitted && fieldErrors.recommendation ? 'true' : undefined}
+            selectedOption={ESDC_OPTIONS.find(o => o.value === assessment.esdcEligibility) || null}
+            onChange={({ detail }) => {
+              handleField('esdcEligibility', detail.selectedOption.value);
+              setEiVerificationUploadError(null);
+              setEiVerificationUploadSuccess(null);
+            }}
+            options={ESDC_OPTIONS}
+            placeholder="Select eligibility"
+            ariaLabel="Eligibility"
+            data-error-focus={showEligibilityErrors && fieldErrors.esdcEligibility ? 'true' : undefined}
             tabIndex={-1}
+            disabled={isEligibilityDisabled}
+          />
+        </FormField>
+      </Grid>
+      {canUploadEiVerification && (
+        <FormField label="EI Verification document" errorText={eiVerificationFileError} stretch>
+          <Box variant="small" color="text-body-secondary">
+            Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
+          </Box>
+          <SpaceBetween size="xs" direction="horizontal">
+            <Button
+              onClick={() => eiVerificationFileInputRef.current && eiVerificationFileInputRef.current.click()}
+              disabled={isAssessmentDisabled || eiVerificationUploading || !applicationId || !applicantUserId}
+            >
+              Choose file
+            </Button>
+            <Box>{eiVerificationFile ? eiVerificationFile.name : 'No file selected'}</Box>
+          </SpaceBetween>
+          <Box variant="small" color="text-body-secondary">
+            Upload happens when you continue or save.
+          </Box>
+        </FormField>
+      )}
+    </SpaceBetween>
+  );
+
+  const framingStepContent = (
+    <SpaceBetween size="l">
+      <Grid gridDefinition={[{ colspan: 6 }]}>
+        <FormField
+          label="Intervention Code"
+          description="Select the intervention type recommended for this client."
+          errorText={showFramingErrors && fieldErrors.interventionCode ? fieldErrors.interventionCode : undefined}
+        >
+          <Select
+            selectedOption={selectedInterventionCodeOption}
+            onChange={({ detail }) => handleField('interventionCode', detail.selectedOption?.value || '')}
+            options={interventionCodes}
+            placeholder={interventionCodesLoading ? 'Loading intervention codes...' : 'Select intervention code'}
+            statusType={interventionCodesLoading ? 'loading' : 'finished'}
+            filteringType="auto"
+            data-error-focus={showFramingErrors && fieldErrors.interventionCode ? 'true' : undefined}
             disabled={isAssessmentDisabled}
           />
         </FormField>
-        <FormField label="Justification" stretch={true} errorText={hasSubmitted && fieldErrors.justification ? fieldErrors.justification : undefined}
-          description="Provide a clear justification for your recommendation, referencing the client's needs, goals, and eligibility.">
+      </Grid>
+      <Grid gridDefinition={dateGridDefinition}>
+        <FormField
+          label="Start Date"
+          errorText={showFramingErrors && fieldErrors.startDate ? fieldErrors.startDate : undefined}
+          description="Enter the planned start date for the intervention or training."
+        >
+          <DatePicker
+            onChange={({ detail }) => handleField('startDate', detail.value)}
+            value={assessment.startDate}
+            ariaLabel="Start Date"
+            data-error-focus={showFramingErrors && fieldErrors.startDate ? 'true' : undefined}
+            tabIndex={-1}
+            readOnly={isAssessmentDisabled}
+            disabled={isAssessmentDisabled}
+          />
+        </FormField>
+        {showEndDate && (
+          <FormField
+            label="End Date"
+            errorText={showFramingErrors && fieldErrors.endDate ? fieldErrors.endDate : undefined}
+            description="Enter the planned end date for the intervention or training."
+          >
+            <DatePicker
+              onChange={({ detail }) => handleField('endDate', detail.value)}
+              value={assessment.endDate}
+              ariaLabel="End Date"
+              data-error-focus={showFramingErrors && fieldErrors.endDate ? 'true' : undefined}
+              tabIndex={-1}
+              readOnly={isAssessmentDisabled || !assessment.startDate}
+              disabled={isAssessmentDisabled || !assessment.startDate}
+              placeholder={assessment.startDate ? undefined : 'Set a start date first'}
+            />
+          </FormField>
+        )}
+      </Grid>
+    </SpaceBetween>
+  );
+
+  const rationaleStepContent = (
+    <SpaceBetween size="l">
+      {existingClientInfo && (
+        <Alert type="info" header="Existing client on file">
+          {`This participant already has a case on file (${existingClientInfo.caseLabel}${existingClientInfo.statusLabel ? ` • Status: ${existingClientInfo.statusLabel}` : ''}).`}
+        </Alert>
+      )}
+      {existingClientInfo?.managerLabel && (
+        <Grid gridDefinition={[{ colspan: 6 }]}>
+          <FormField label="Current Case Manager">
+            <Box padding={{ vertical: 'xs' }}>{existingClientInfo.managerLabel}</Box>
+          </FormField>
+        </Grid>
+      )}
+      <Grid gridDefinition={[{ colspan: 12 }]}>
+        <FormField
+          label="Client Application Overview & Request"
+          stretch={true}
+          errorText={showRationaleErrors && fieldErrors.overview ? fieldErrors.overview : undefined}
+          description="Summarize the client's application, background, and the specific request or intervention being considered. Include any relevant context from the application form."
+          constraintText={`${overviewWordCount}/${OVERVIEW_WORD_LIMIT} words maximum`}
+        >
           <Box width="100%">
-            <Textarea  value={assessment.justification} onChange={({ detail }) => handleField('justification', detail.value)} data-error-focus={hasSubmitted && fieldErrors.justification ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
+            <Textarea
+              placeholder={initialAssessment.overview}
+              value={assessment.overview}
+              onChange={({ detail }) => handleField('overview', detail.value)}
+              data-error-focus={showRationaleErrors && fieldErrors.overview ? 'true' : undefined}
+              tabIndex={-1}
+              readOnly={isAssessmentDisabled}
+              disabled={isAssessmentDisabled}
+            />
           </Box>
         </FormField>
       </Grid>
+      <Grid gridDefinition={[{ colspan: 12 }]}>
+        <FormField
+          label="Client’s Employment Goal(s)"
+          stretch={true}
+          errorText={showRationaleErrors && fieldErrors.employmentGoals ? fieldErrors.employmentGoals : undefined}
+          description="Describe the client's short- and long-term employment goals as discussed during assessment. Reference the goals stated in the application form if available."
+          constraintText={`${employmentGoalsWordCount}/${EMPLOYMENT_GOALS_WORD_LIMIT} words maximum`}
+        >
+          <Box width="100%">
+            <Textarea
+              placeholder={initialAssessment.employmentGoals}
+              value={assessment.employmentGoals}
+              onChange={({ detail }) => handleField('employmentGoals', detail.value)}
+              data-error-focus={showRationaleErrors && fieldErrors.employmentGoals ? 'true' : undefined}
+              tabIndex={-1}
+              readOnly={isAssessmentDisabled}
+              disabled={isAssessmentDisabled}
+            />
+          </Box>
+        </FormField>
+      </Grid>
+    </SpaceBetween>
+  );
+
+  const typeStepContent = (
+    <SpaceBetween size="l">
+      {!requiresExternalPartner && (
+        <FormField
+          label="Delivery mode"
+          description="Choose how this will run. Training codes need an education provider; employer codes need a host/employer with NOC details."
+        >
+          <Select
+            selectedOption={
+              assessment.deliveryMode !== 'in_house'
+                ? { value: 'partner', label: 'External delivery partner' }
+                : { value: 'in_house', label: 'In-house (no external partner)' }
+            }
+            onChange={({ detail }) => handleField('deliveryMode', detail.selectedOption?.value || 'partner')}
+            options={[
+              { value: 'partner', label: 'External delivery partner' },
+              { value: 'in_house', label: 'In-house (no external partner)' }
+            ]}
+            disabled={isAssessmentDisabled}
+          />
+        </FormField>
+      )}
+
+      {isEducationIntervention && (
+        <SpaceBetween size="s">
+          <ColumnLayout columns={2} variant="text-grid">
+            <FormField
+              label="Institution"
+              description="Training provider or school delivering the program."
+              errorText={showTypeErrors && fieldErrors.institution ? fieldErrors.institution : undefined}
+            >
+              <Input
+                value={assessment.institution}
+                onChange={({ detail }) => handleField('institution', detail.value)}
+                data-error-focus={showTypeErrors && fieldErrors.institution ? 'true' : undefined}
+                disabled={isAssessmentDisabled}
+              />
+            </FormField>
+            <FormField
+              label="Program name (optional)"
+              description="Course, credential, or stream name."
+            >
+              <Input
+                value={assessment.programName}
+                onChange={({ detail }) => handleField('programName', detail.value)}
+                disabled={isAssessmentDisabled}
+              />
+            </FormField>
+          </ColumnLayout>
+          <FormField
+            label="In-Training Plan (ITP) details"
+            description="Outline curriculum, milestones, supports, materials, and how this leads to the employment goal."
+            errorText={showTypeErrors && fieldErrors.itpDetails ? fieldErrors.itpDetails : undefined}
+          >
+            <Textarea
+              value={assessment.itp?.details || ''}
+              rows={3}
+              onChange={({ detail }) => handleItp('details', detail.value)}
+              placeholder="Summarize training plan, key milestones, supports, or materials."
+              data-error-focus={showTypeErrors && fieldErrors.itpDetails ? 'true' : undefined}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+        </SpaceBetween>
+      )}
+
+      {isEmployerIntervention && (
+        <SpaceBetween size="s">
+          <ColumnLayout columns={2} variant="text-grid">
+            <FormField
+              label="Employer / delivery partner"
+              description="Employer or host organization providing the placement."
+              errorText={showTypeErrors && fieldErrors.institution ? fieldErrors.institution : undefined}
+            >
+              <Input
+                value={assessment.institution}
+                onChange={({ detail }) => handleField('institution', detail.value)}
+                data-error-focus={showTypeErrors && fieldErrors.institution ? 'true' : undefined}
+                disabled={isAssessmentDisabled}
+              />
+            </FormField>
+            <FormField
+              label="Program name (optional)"
+              description="Job title, role, or program name if defined by the employer."
+            >
+              <Input
+                value={assessment.programName}
+                onChange={({ detail }) => handleField('programName', detail.value)}
+                disabled={isAssessmentDisabled}
+              />
+            </FormField>
+          </ColumnLayout>
+          <ColumnLayout columns={2} variant="text-grid">
+            <FormField
+              label="NOC version"
+              description="Select the NOC version used for this job/placement."
+              errorText={showTypeErrors && fieldErrors.interventionNocVersion ? fieldErrors.interventionNocVersion : undefined}
+            >
+              <Select
+                selectedOption={selectedNocVersionOption}
+                onChange={({ detail }) => handleField('interventionNocVersion', detail.selectedOption?.value || '')}
+                options={nocVersions}
+                placeholder={nocVersionsLoading ? 'Loading NOC versions...' : 'Select NOC version'}
+                statusType={nocVersionsLoading ? 'loading' : 'finished'}
+                filteringType="auto"
+                data-error-focus={showTypeErrors && fieldErrors.interventionNocVersion ? 'true' : undefined}
+                disabled={isAssessmentDisabled || nocVersionsLoading}
+              />
+            </FormField>
+            <FormField
+              label="NOC code"
+              description="Search by code or title; aligns to the job/placement."
+              errorText={showTypeErrors && fieldErrors.interventionNoc ? fieldErrors.interventionNoc : undefined}
+            >
+              <Autosuggest
+                value={assessment.interventionNoc || ''}
+                onChange={({ detail }) => {
+                  const inputValue = detail.value || '';
+                  handleField('interventionNoc', inputValue);
+                  if (inputValue.length >= 2) {
+                    fetchNocSuggestions(inputValue);
+                  } else {
+                    setNocSuggestions([]);
+                  }
+                }}
+                onSelect={({ detail }) => handleField('interventionNoc', detail.value || '')}
+                onLoadItems={({ detail }) => {
+                  if (detail.filteringText) {
+                    fetchNocSuggestions(detail.filteringText);
+                  }
+                }}
+                options={nocSuggestions}
+                statusType={nocSuggestionsLoading ? 'loading' : 'finished'}
+                expandToViewport
+                placeholder={
+                  assessment.interventionNocVersion
+                    ? 'Type to search NOC code'
+                    : 'Select a NOC version first'
+                }
+                empty="No NOC codes found."
+                disabled={isAssessmentDisabled || !assessment.interventionNocVersion}
+                enteredTextLabel={value => `Use "${value}"`}
+                data-error-focus={showTypeErrors && fieldErrors.interventionNoc ? 'true' : undefined}
+              />
+            </FormField>
+          </ColumnLayout>
+          {isWageSubsidyIntervention && (
+            <FormField
+              label="Wage subsidy details"
+              errorText={showTypeErrors && fieldErrors.wageSubsidyDetails ? fieldErrors.wageSubsidyDetails : undefined}
+            >
+              <Textarea
+                value={assessment.wage?.subsidyDetails || ''}
+                rows={3}
+                onChange={({ detail }) => handleWage('subsidyDetails', detail.value)}
+                placeholder="Employer, wage subsidy amount/percentage, duration, expectations."
+                data-error-focus={showTypeErrors && fieldErrors.wageSubsidyDetails ? 'true' : undefined}
+                disabled={isAssessmentDisabled}
+              />
+            </FormField>
+          )}
+        </SpaceBetween>
+      )}
+
+      {!isEducationIntervention && !isEmployerIntervention && (
+        assessment.deliveryMode === 'partner' ? (
+          <FormField
+            label="Delivery partner / provider"
+            errorText={showTypeErrors && fieldErrors.institution ? fieldErrors.institution : undefined}
+          >
+            <Input
+              value={assessment.institution}
+              onChange={({ detail }) => handleField('institution', detail.value)}
+              placeholder="Training institution, employer, or provider"
+              data-error-focus={showTypeErrors && fieldErrors.institution ? 'true' : undefined}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+        ) : (
+          <Alert type="info" header="In-house delivery">
+            No external delivery partner needed for this intervention.
+          </Alert>
+        )
+      )}
+    </SpaceBetween>
+  );
+
+  const childcareStepContent = (
+    <SpaceBetween size="l">
+      <Grid gridDefinition={[{ colspan: 6 }]}>
+        <FormField label="Childcare Need" description="Indicate if childcare is required to participate in the intervention.">
+          <Select
+            selectedOption={selectedChildcareOption}
+            onChange={({ detail }) => handleField('childcareNeed', detail.selectedOption?.value || '')}
+            options={CHILDCARE_OPTIONS}
+            placeholder="Select childcare need"
+            disabled={isAssessmentDisabled}
+          />
+        </FormField>
+      </Grid>
+      {showChildcareFunding && (
+        <Grid gridDefinition={[{ colspan: 12 }]}>
+          <FormField
+            label="Childcare Funding Details (optional)"
+            description="Provide any known childcare supports (existing or requested)."
+          >
+            <Textarea
+              value={assessment.childcareFunding || ''}
+              onChange={({ detail }) => handleField('childcareFunding', detail.value)}
+              disabled={isAssessmentDisabled || assessment.childcareNeed !== 'yes'}
+            />
+          </FormField>
+        </Grid>
+      )}
+    </SpaceBetween>
+  );
+
+  const toggleBarrier = (barrier, checked) => {
+    const current = Array.isArray(assessment.barriers) ? assessment.barriers : [];
+    const next = checked
+      ? Array.from(new Set([...current, barrier]))
+      : current.filter(item => item !== barrier);
+    handleField('barriers', next);
+  };
+
+  const togglePriority = (priority, checked) => {
+    const current = Array.isArray(assessment.priorities) ? assessment.priorities : [];
+    const next = checked
+      ? Array.from(new Set([...current, priority]))
+      : current.filter(item => item !== priority);
+    handleField('priorities', next);
+  };
+
+  const previousIsetStepContent = (
+    <SpaceBetween size="l">
+      <Grid gridDefinition={[{ colspan: 6 }]}>
+        <FormField
+          label="Has the client received previous ISET funding?"
+          description="Select yes if the client has received ISET-funded supports in the past."
+        >
+          <Select
+            selectedOption={CHILDCARE_OPTIONS.find(option => option.value === assessment.previousISET) || null}
+            onChange={({ detail }) => handleField('previousISET', detail.selectedOption?.value || '')}
+            options={CHILDCARE_OPTIONS}
+            placeholder="Select"
+            disabled={isAssessmentDisabled}
+          />
+        </FormField>
+      </Grid>
+      {assessment.previousISET === 'yes' && (
+        <Grid gridDefinition={[{ colspan: 12 }]}>
+          <FormField
+            label="Previous ISET funding details"
+            description="Provide program names, dates, and outcomes for prior ISET-funded interventions."
+            errorText={showPreviousIsetErrors && fieldErrors.previousISETDetails ? fieldErrors.previousISETDetails : undefined}
+          >
+            <Textarea
+              value={assessment.previousISETDetails || ''}
+              onChange={({ detail }) => handleField('previousISETDetails', detail.value)}
+              data-error-focus={showPreviousIsetErrors && fieldErrors.previousISETDetails ? 'true' : undefined}
+              tabIndex={-1}
+              readOnly={isAssessmentDisabled}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+        </Grid>
+      )}
+    </SpaceBetween>
+  );
+
+  const barriersStepContent = (
+    <SpaceBetween size="l">
+      <FormField
+        label="Select barriers"
+        description="Select all barriers that apply to this client."
+        errorText={showBarriersErrors && fieldErrors.barriers ? fieldErrors.barriers : undefined}
+      >
+        <div
+          data-error-focus={showBarriersErrors && fieldErrors.barriers ? 'true' : undefined}
+          tabIndex={-1}
+        >
+          <ColumnLayout columns={2} variant="text-grid">
+            {BARRIERS.map(barrier => (
+              <Checkbox
+                key={barrier}
+                checked={(assessment.barriers || []).includes(barrier)}
+                onChange={({ detail }) => toggleBarrier(barrier, detail.checked)}
+                disabled={isAssessmentDisabled}
+              >
+                {barrier}
+              </Checkbox>
+            ))}
+          </ColumnLayout>
+        </div>
+      </FormField>
+    </SpaceBetween>
+  );
+
+  const prioritiesStepContent = (
+    <SpaceBetween size="l">
+      <FormField label="Select local priorities" description="Select all target areas that apply.">
+        <ColumnLayout columns={2} variant="text-grid">
+          {PRIORITIES.map(priority => (
+            <Checkbox
+              key={priority}
+              checked={(assessment.priorities || []).includes(priority)}
+              onChange={({ detail }) => togglePriority(priority, detail.checked)}
+              disabled={isAssessmentDisabled}
+            >
+              {priority}
+            </Checkbox>
+          ))}
+        </ColumnLayout>
+      </FormField>
+    </SpaceBetween>
+  );
+
+  const otherFundingStepContent = (
+    <SpaceBetween size="l">
+      <Grid gridDefinition={[{ colspan: 12 }]}>
+        <FormField
+          label="Funding source details"
+          description="Capture band try-first funding, EI/CRF stream notes, or other sponsors supporting this request."
+        >
+          <Textarea
+            value={assessment.otherFunding || ''}
+            onChange={({ detail }) => handleField('otherFunding', detail.value)}
+            readOnly={isAssessmentDisabled}
+            disabled={isAssessmentDisabled}
+          />
+        </FormField>
+      </Grid>
+    </SpaceBetween>
+  );
+
+  const interventionCostLabel = usesCostTables ? 'Intervention Cost (total)' : 'Planned cost';
+  const interventionCostDescription = isRecurringSchedule
+    ? 'Calculated from the recurring schedule below.'
+    : usesCostTables
+      ? calculatedFundingTotal
+        ? `Optional. Auto-calculated from funding tables: $${calculatedFundingTotal}. Adjust if needed.`
+        : 'Optional. Enter the total planned cost (whole dollars).'
+      : `Enter the total cost for this intervention${selectedInterventionCodeOption?.label ? ` (${selectedInterventionCodeOption.label})` : ''}. Leave this blank if the intervention has no cost.`;
+  const interventionCostPlaceholder = usesCostTables ? 'e.g. $4,200.00' : '$0.00';
+  const displayInterventionCost = isRecurringSchedule && recurringTotal
+    ? formatCurrencyDisplay(recurringTotal)
+    : assessment.interventionCost;
+  const costSummaryGridDefinition = [{ colspan: 12 }];
+
+  const costStepContent = (
+    <SpaceBetween size="l">
+      {isEducationIntervention && (
+        <>
+          <Box margin={{ top: 's' }}>
+            <Header variant="h3">Individual Training Purchase (ITP)</Header>
+          </Box>
+          <Table
+            stripedRows
+            columnDefinitions={[
+              { id: 'category', header: 'Funding Category', cell: item => item.label },
+              { id: 'requested', header: 'Funding Requested', cell: item => (
+                <Input
+                  type="text"
+                  value={assessment.itp?.[item.key] || ''}
+                  onChange={({ detail }) => {
+                    const raw = detail.value.replace(/[^\d.]/g, '');
+                    handleItp(item.key, raw);
+                  }}
+                  onBlur={({ detail }) => {
+                    const raw = assessment.itp?.[item.key] || '';
+                    const num = raw ? parseFloat(raw) : '';
+                    const formatted = num !== '' && !isNaN(num) ? `$ ${num.toFixed(2)}` : '';
+                    handleItp(item.key, formatted);
+                  }}
+                  ariaLabel={item.label}
+                  readOnly={isAssessmentDisabled}
+                  disabled={isAssessmentDisabled}
+                />
+              ) },
+              { id: 'actions', header: 'Actions', cell: item => (
+                isAssessmentDisabled ? null : (
+                  <Button size="small" variant="inline-link" onClick={() => handleItp(item.key, '')}>Clear</Button>
+                )
+              ) }
+            ]}
+            items={[
+              { key: 'tuition', label: 'Tuition' },
+              { key: 'books', label: 'Books' },
+              { key: 'materials', label: 'Materials' },
+              { key: 'living', label: 'Living Allowance' }
+            ]}
+            variant="embedded"
+            header={null}
+            footer={
+              <>
+                <Box fontWeight="bold" textAlign="right">
+                  Total Intervention Cost: $
+                  {(
+                    Number((assessment.itp?.tuition || '').replace(/[^\d.]/g, '')) +
+                    Number((assessment.itp?.books || '').replace(/[^\d.]/g, '')) +
+                    Number((assessment.itp?.materials || '').replace(/[^\d.]/g, '')) +
+                    Number((assessment.itp?.living || '').replace(/[^\d.]/g, ''))
+                  ).toFixed(2)}
+                </Box>
+              </>
+            }
+          />
+        </>
+      )}
+      {isEmployerIntervention && (
+        <>
+          <Box margin={{ top: 'l', bottom: 's' }}>
+            <Header variant="h3">Targeted Wage Subsidy / Job Creation Partnership</Header>
+          </Box>
+          <Table
+            stripedRows
+            columnDefinitions={[
+              { id: 'category', header: 'Funding Category', cell: item => item.label },
+              { id: 'requested', header: 'Funding Requested', cell: item => (
+                <Input
+                  type="text"
+                  value={assessment.wage?.[item.key] || ''}
+                  onChange={({ detail }) => {
+                    if (item.key === 'other') {
+                      handleWage(item.key, detail.value);
+                    } else {
+                      const raw = detail.value.replace(/[^\d.]/g, '');
+                      handleWage(item.key, raw);
+                    }
+                  }}
+                  onBlur={({ detail }) => {
+                    if (item.key === 'other') return;
+                    const raw = assessment.wage?.[item.key] || '';
+                    const num = raw ? parseFloat(raw) : '';
+                    const formatted = num !== '' && !isNaN(num) ? `$ ${num.toFixed(2)}` : '';
+                    handleWage(item.key, formatted);
+                  }}
+                  ariaLabel={item.label}
+                  readOnly={isAssessmentDisabled}
+                  disabled={isAssessmentDisabled}
+                />
+              ) },
+              { id: 'actions', header: 'Actions', cell: item => (
+                isAssessmentDisabled ? null : (
+                  <Button size="small" variant="inline-link" onClick={() => handleWage(item.key, '')}>Clear</Button>
+                )
+              ) }
+            ]}
+            items={[
+              { key: 'wages', label: 'Wages' },
+              { key: 'mercs', label: 'MERCs' },
+              { key: 'nonwages', label: 'Non-Wages' },
+              { key: 'other', label: 'Other' }
+            ]}
+            variant="embedded"
+            header={null}
+            footer={
+              <>
+                <Box fontWeight="bold" textAlign="right">
+                  Total Intervention Cost: $
+                  {(
+                    Number((assessment.wage?.wages || '').replace(/[^\d.]/g, '')) +
+                    Number((assessment.wage?.mercs || '').replace(/[^\d.]/g, '')) +
+                    Number((assessment.wage?.nonwages || '').replace(/[^\d.]/g, '')) +
+                    Number((assessment.wage?.other || '').replace(/[^\d.]/g, ''))
+                  ).toFixed(2)}
+                </Box>
+              </>
+            }
+          />
+        </>
+      )}
+      {!isRecurringSchedule && (
+        <>
+          <Grid gridDefinition={costSummaryGridDefinition}>
+            <FormField
+              label={interventionCostLabel}
+              description={interventionCostDescription}
+              errorText={showCostErrors && fieldErrors.interventionCost ? fieldErrors.interventionCost : undefined}
+              secondaryControl={
+                !isAssessmentDisabled && calculatedFundingTotal && assessment.interventionCost !== calculatedFundingTotal ? (
+                  <Button size="small" onClick={() => handleField('interventionCost', formatCurrencyDisplay(calculatedFundingTotal))}>
+                    Use {formatCurrencyDisplay(calculatedFundingTotal) || calculatedFundingTotal}
+                  </Button>
+                ) : null
+              }
+            >
+              <Input
+                inputMode="decimal"
+                value={displayInterventionCost || ''}
+                onChange={({ detail }) => handleField('interventionCost', detail.value.replace(/[^\d.]/g, ''))}
+                onBlur={() => {
+                  const formatted = formatCurrencyDisplay(assessment.interventionCost);
+                  if (formatted) {
+                    handleField('interventionCost', formatted);
+                  }
+                }}
+                placeholder={interventionCostPlaceholder}
+                data-error-focus={showCostErrors && fieldErrors.interventionCost ? 'true' : undefined}
+                disabled={isAssessmentDisabled}
+              />
+            </FormField>
+          </Grid>
+        </>
+      )}
+      {showRecurrenceGroup && (
+        <>
+          <FormField label="Cost type">
+            <RadioGroup
+              onChange={({ detail }) => handleField('costType', detail.value)}
+              value={assessment.costType || 'one_time'}
+              items={[
+                { value: 'one_time', label: 'One-time total' },
+                { value: 'recurring', label: 'Recurring schedule' }
+              ]}
+              disabled={isAssessmentDisabled}
+            />
+          </FormField>
+          {isRecurringSchedule && (
+            <>
+              <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+                <FormField label="Recurrence period">
+                  <Select
+                    selectedOption={selectedRecurrencePeriodOption}
+                    onChange={({ detail }) => handleField('recurringPeriod', detail.selectedOption?.value || '')}
+                    options={RECURRING_PERIOD_OPTIONS}
+                    placeholder="Select recurrence period"
+                    disabled={isAssessmentDisabled}
+                  />
+                </FormField>
+                <FormField label="Amount per period">
+                  <Input
+                    value={assessment.recurringAmount || ''}
+                    onChange={({ detail }) => handleField('recurringAmount', detail.value.replace(/[^\d.]/g, ''))}
+                    onBlur={() => {
+                      const formatted = formatCurrencyDisplay(assessment.recurringAmount);
+                      if (formatted) {
+                        handleField('recurringAmount', formatted);
+                      }
+                    }}
+                    inputMode="decimal"
+                    placeholder="e.g. 150.00"
+                    readOnly={isAssessmentDisabled}
+                    disabled={isAssessmentDisabled}
+                  />
+                </FormField>
+              </Grid>
+              <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+                <FormField
+                  label="Number of occurrences"
+                  description="Auto-calculated from dates and recurrence."
+                >
+                  <Input
+                    value={assessment.recurringOccurrences || ''}
+                    readOnly
+                    disabled
+                  />
+                </FormField>
+                <FormField
+                  label={interventionCostLabel}
+                  description="Calculated total based on recurring schedule."
+                  errorText={showCostErrors && fieldErrors.interventionCost ? fieldErrors.interventionCost : undefined}
+                >
+                  <Input
+                    value={displayInterventionCost || ''}
+                    data-error-focus={showCostErrors && fieldErrors.interventionCost ? 'true' : undefined}
+                    readOnly
+                    disabled
+                  />
+                </FormField>
+              </Grid>
+            </>
+          )}
+        </>
+      )}
+    </SpaceBetween>
+  );
+
+  const docsStepContent = (
+    <SpaceBetween size="m">
+      <input
+        type="file"
+        ref={checklistFileInputRef}
+        style={{ display: 'none' }}
+        accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+        onChange={handleChecklistFileSelected}
+      />
+      {showDocsInfoAlert && (
+        <Alert
+          type="info"
+          header="Supporting documents"
+          dismissible
+          onDismiss={() => setShowDocsInfoAlert(false)}
+        >
+          Do not submit this assessment until all required documents are obtained. Missing checklist items below link
+          directly to uploads, and the checklist refreshes automatically after new uploads.
+        </Alert>
+      )}
+      {!applicantUserId && (
+        <Alert type="info" header="Checklist unavailable" statusIconAriaLabel="Info">
+          Checklist items are not available until the applicant is linked to this case.
+        </Alert>
+      )}
+      {applicantUserId && !docsChecklistReady && !docsUploadLockedDismissed && (
+        <Alert
+          type="error"
+          header="Save progress to enable uploads"
+          dismissible
+          onDismiss={() => setDocsUploadLockedDismissed(true)}
+        >
+          Save progress to link the application record before uploading documents and validating the checklist.
+        </Alert>
+      )}
+      {checklistUploadError && (
+        <Alert
+          type="error"
+          statusIconAriaLabel="Error"
+          dismissible
+          onDismiss={() => setChecklistUploadError(null)}
+        >
+          {checklistUploadError}
+        </Alert>
+      )}
+      {checklistUploadSuccess && (
+        <Alert
+          type="success"
+          statusIconAriaLabel="Success"
+          dismissible
+          onDismiss={() => setChecklistUploadSuccess(null)}
+        >
+          {checklistUploadSuccess}
+        </Alert>
+      )}
+      <SpaceBetween size="s">
+        {documentChecklistError && (
+          <Alert type="error" dismissible onDismiss={() => setDocumentChecklistError(null)}>
+            {documentChecklistError}
+          </Alert>
+        )}
+        <Box>
+          <Header
+            variant="h3"
+            description={
+              !applicantUserId
+                ? 'Link an applicant to load the checklist.'
+                : !docsChecklistReady
+                  ? 'Save progress to load the checklist for this assessment.'
+                  : documentChecklistLoading
+                    ? 'Loading checklist...'
+                    : documentChecklistMissingCount > 0
+                      ? `${documentChecklistMissingCount} required item${documentChecklistMissingCount === 1 ? '' : 's'} missing`
+                      : 'All required checklist items are complete.'
+            }
+            actions={
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button
+                  variant="icon"
+                  iconName="refresh"
+                  ariaLabel="Refresh checklist"
+                  onClick={handleChecklistRefresh}
+                  disabled={documentChecklistLoading || !docsChecklistReady}
+                />
+                <Link
+                  href="#supporting-documents"
+                  onFollow={event => {
+                    event.preventDefault();
+                    openAssessmentWidget('supporting-documents');
+                  }}
+                >
+                  Open Supporting Documents
+                </Link>
+                <Link
+                  href="#secure-messaging"
+                  onFollow={event => {
+                    event.preventDefault();
+                    openAssessmentWidget('secure-messaging');
+                  }}
+                >
+                  Open Secure Messaging
+                </Link>
+              </SpaceBetween>
+            }
+          >
+            Checklist
+          </Header>
+          <Table
+            trackBy="id"
+            variant="embedded"
+            loading={documentChecklistLoading}
+            loadingText="Loading checklist"
+            items={requiredDocumentChecklistItems}
+            columnDefinitions={[
+              {
+                id: 'label',
+                header: 'Item',
+                minWidth: 240,
+                cell: item => {
+                  const rawDocTypes = Array.isArray(item?.documentTypes) ? item.documentTypes.filter(Boolean) : [];
+                  const allowedDocTypes = canUploadEiVerification
+                    ? rawDocTypes
+                    : rawDocTypes.filter(type => type !== 'ei_verification');
+                  const isRestricted = !allowedDocTypes.length;
+                  if (item.status !== 'complete' && !isRestricted) {
+                    return (
+                      <Button
+                        variant="inline-link"
+                        onClick={() => handleChecklistUploadClick(item)}
+                        disabled={!docsChecklistReady || isAssessmentDisabled || checklistUploading}
+                      >
+                        {item.label || item.id}
+                      </Button>
+                    );
+                  }
+                  return item.label || item.id;
+                }
+              },
+              {
+                id: 'status',
+                header: 'Status',
+                minWidth: 160,
+                cell: item => {
+                  if (item.status === 'complete') return <StatusIndicator type="success">Complete</StatusIndicator>;
+                  if (item.status === 'missing') return <StatusIndicator type="error">Missing</StatusIndicator>;
+                  if (item.status === 'in_progress') return <StatusIndicator type="info">In progress</StatusIndicator>;
+                  return <StatusIndicator type="pending">Pending</StatusIndicator>;
+                }
+              }
+            ]}
+            empty={<Box textAlign="center">No checklist items required.</Box>}
+          />
+        </Box>
+      </SpaceBetween>
+    </SpaceBetween>
+  );
+
+  const reviewAssessmentDate = assessment.dateOfAssessment || 'Set on submit';
+  const reviewBarriers = assessment.barriers?.length ? assessment.barriers.join(', ') : 'None';
+  const reviewPriorities = assessment.priorities?.length ? assessment.priorities.join(', ') : 'None';
+  const reviewPreviousIset = assessment.previousISET === 'yes' ? 'Yes' : assessment.previousISET === 'no' ? 'No' : '—';
+  const reviewChildcareNeed = assessment.childcareNeed === 'yes' ? 'Yes' : assessment.childcareNeed === 'no' ? 'No' : '—';
+  const reviewPostingContext = selectedPostingContext?.label || (assessment.postingContext ? formatCaseStatusLabel(assessment.postingContext) : '—');
+  const reviewNoc = assessment.interventionNoc
+    ? `${assessment.interventionNoc}${assessment.interventionNocVersion ? ` (${assessment.interventionNocVersion})` : ''}`
+    : assessment.interventionNocVersion
+      ? `NOC version ${assessment.interventionNocVersion}`
+      : '—';
+  const reviewDeliveryMode = assessment.deliveryMode === 'in_house' ? 'In-house (no external partner)' : 'External delivery partner';
+  const reviewItpDetails = assessment.itp?.details || '—';
+  const reviewWageSubsidyDetails = assessment.wage?.subsidyDetails || '—';
+  const reviewCostType = showRecurrenceGroup ? (isRecurringCost ? 'Recurring schedule' : 'One-time total') : '—';
+  const reviewRecurrencePeriod = selectedRecurrencePeriodOption?.label || (assessment.recurringPeriod ? formatCaseStatusLabel(assessment.recurringPeriod) : '—');
+  const reviewRecurrenceAmount = assessment.recurringAmount ? formatCurrencyDisplay(assessment.recurringAmount) : '—';
+  const reviewRecurrenceOccurrences = assessment.recurringOccurrences || '—';
+  const reviewRecurrenceTotal = recurringTotal !== null
+    ? formatCurrencyDisplay(recurringTotal)
+    : formatCurrencyDisplay(assessment.interventionCost) || '—';
+
+  const reviewStepContent = (
+    <SpaceBetween size="m">
+      {!showNWACSection && (
+        <Alert type="info" header="Outcome notice" statusIconAriaLabel="Info">
+          Outcome notice will be available after the assessment is submitted.
+        </Alert>
+      )}
+      <ColumnLayout columns={2} variant="text-grid">
+        <Box>
+          <Header variant="h4">Assessment</Header>
+          <div>Date of assessment: {reviewAssessmentDate}</div>
+          <div>Overview: {assessment.overview || '—'}</div>
+          <div>Employment goals: {assessment.employmentGoals || '—'}</div>
+          <div>Barriers: {reviewBarriers}</div>
+          <div>Local priorities: {reviewPriorities}</div>
+        </Box>
+        <Box>
+          <Header variant="h4">Client context</Header>
+          <div>Eligibility: {assessment.esdcEligibility || '—'}</div>
+          <div>Childcare need: {reviewChildcareNeed}</div>
+          <div>Childcare funding: {assessment.childcareFunding || '—'}</div>
+          <div>Previous ISET funding: {reviewPreviousIset}</div>
+          <div>Previous ISET details: {assessment.previousISETDetails || '—'}</div>
+          <div>Other funding sources: {assessment.otherFunding || '—'}</div>
+        </Box>
+        <Box>
+          <Header variant="h4">Delivery details</Header>
+          <div>Intervention code: {selectedInterventionCodeOption?.label || assessment.interventionCode || '—'}</div>
+          <div>Delivery mode: {reviewDeliveryMode}</div>
+          <div>Provider: {assessment.institution || '—'}</div>
+          <div>Program name: {assessment.programName || '—'}</div>
+          <div>NOC: {reviewNoc}</div>
+          {isEducationIntervention && <div>ITP details: {reviewItpDetails}</div>}
+          {isWageSubsidyIntervention && <div>Wage subsidy details: {reviewWageSubsidyDetails}</div>}
+          <div>Start: {assessment.startDate || '—'}</div>
+          <div>End: {assessment.endDate || 'Not set'}</div>
+        </Box>
+        <Box>
+          <Header variant="h4">Costs</Header>
+          <div>Total cost: {formatCurrencyDisplay(displayInterventionCost) || '—'}</div>
+          <div>Cost type: {reviewCostType}</div>
+          {isRecurringSchedule && (
+            <>
+              <div>Recurrence period: {reviewRecurrencePeriod}</div>
+              <div>Amount per period: {reviewRecurrenceAmount}</div>
+              <div>Occurrences: {reviewRecurrenceOccurrences}</div>
+              <div>Recurring total: {reviewRecurrenceTotal}</div>
+            </>
+          )}
+          <div>Budget pot: {selectedBudgetPotOption?.label || '—'}</div>
+          <div>Paid from: {reviewPostingContext}</div>
+        </Box>
+      </ColumnLayout>
+      {!assessmentSubmitted && renderRecommendationSection()}
+    </SpaceBetween>
+  );
+
+  const checklistUploadModal = (
+    <Modal
+      visible={checklistUploadModalVisible}
+      onDismiss={handleChecklistUploadModalDismiss}
+      header="Select document type"
+      footer={
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button variant="link" onClick={handleChecklistUploadModalDismiss}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleChecklistUploadModalConfirm}>
+            Upload
+          </Button>
+        </SpaceBetween>
+      }
+    >
+      <SpaceBetween size="s">
+        {checklistUploadError && (
+          <Alert type="error" dismissible onDismiss={() => setChecklistUploadError(null)}>
+            {checklistUploadError}
+          </Alert>
+        )}
+        <Box>
+          {checklistUploadLabel ? `Uploading for: ${checklistUploadLabel}` : 'Choose a document type to upload.'}
+        </Box>
+        <FormField label="Document type">
+          <Select
+            selectedOption={
+              checklistUploadDocTypeOptions.find(option => option.value === checklistUploadDocType) || null
+            }
+            onChange={({ detail }) => setChecklistUploadDocType(detail?.selectedOption?.value || '')}
+            options={checklistUploadDocTypeOptions}
+            placeholder="Select document type"
+          />
+        </FormField>
+      </SpaceBetween>
+    </Modal>
+  );
+
+  const decisionStepContent = (
+    <>
+      <Box
+        style={
+          isNWACFieldsDisabled || isOutcomeNoticeDisabled
+            ? { opacity: 0.6, pointerEvents: 'none' }
+            : undefined
+        }
+        aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
+      >
+        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+          <FormField label="Funding Decision" errorText={showDecisionErrors && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}>
+            <SpaceBetween direction="horizontal" size="xs">
+              <RadioGroup
+                value={assessment.nwacReviewStatus || ''}
+                onChange={({ detail }) => {
+                  if (detail.value === 'approve' && isHighCostApprovalBlocked) {
+                    setValidationAlert([`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`]);
+                    return;
+                  }
+                  if (isNWACFieldsDisabled) return;
+                  if (detail.value === 'approve' && assessment.nwacReason) {
+                    setShowApproveConfirmModal(true);
+                  } else {
+                    handleField('nwacReviewStatus', detail.value);
+                    if (detail.value === 'approve') handleField('nwacReason', '');
+                  }
+                }}
+                items={[
+                  { value: 'approve', label: 'Approved' },
+                  { value: 'reject', label: 'Not Approved' }
+                ]}
+                ariaLabel="NWAC Review Status"
+                data-error-focus={showDecisionErrors && fieldErrors.nwacReviewStatus ? 'true' : undefined}
+                disabled={isNWACFieldsDisabled}
+                readOnly={isNWACFieldsDisabled}
+                style={isNWACFieldsDisabled ? { opacity: 0.4 } : undefined}
+              />
+            </SpaceBetween>
+          </FormField>
+          <FormField label="Assessment Assurance" errorText={showDecisionErrors && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}>
+            <Select
+              selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
+              onChange={({ detail }) => {
+                if (isNWACFieldsDisabled) return;
+                handleField('nwacReview', detail.selectedOption.value);
+              }}
+              options={[
+                { label: 'Agree with Coordinator Recommendation', value: 'agree' },
+                { label: 'Disagree with Coordinator Recommendation', value: 'disagree' }
+              ]}
+              placeholder="Select review outcome"
+              data-error-focus={showDecisionErrors && fieldErrors.nwacReview ? 'true' : undefined}
+              disabled={isNWACFieldsDisabled}
+            />
+          </FormField>
+        </Grid>
+        {assessment.nwacReviewStatus === 'reject' && (
+          <Grid gridDefinition={[{ colspan: 12 }]}>
+            <FormField label="Reason for Not Approving" stretch={true} >
+              <Box width="100%">
+                <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
+                  if (isNWACFieldsDisabled) return;
+                  handleField('nwacReason', detail.value);
+                }} data-error-focus={showDecisionErrors && fieldErrors.nwacReason ? 'true' : undefined} disabled={isNWACFieldsDisabled} />
+              </Box>
+            </FormField>
+          </Grid>
+        )}
+        {showDecisionBudgetPot && (
+          <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+            <FormField
+              label="Budget Pot"
+              description="Assign the pot that will fund this intervention."
+              errorText={showDecisionErrors && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
+            >
+              <Select
+                placeholder={
+                  !decisionHasCost
+                    ? 'Not assigned for zero-cost interventions'
+                    : budgetPotLoading
+                      ? 'Loading budget pots'
+                      : 'Select budget pot'
+                }
+                selectedOption={selectedBudgetPotOption}
+                options={budgetPotOptions}
+                statusType={budgetPotLoading ? 'loading' : 'finished'}
+                loadingText="Loading budget pots"
+                onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
+                data-error-focus={showDecisionErrors && fieldErrors.interventionPotId ? 'true' : undefined}
+                disabled={
+                  baseAssessmentLocked ||
+                  isEligibilityGateActive ||
+                  (!canManageBudgetPotPending && isAssessmentDisabled) ||
+                  !decisionHasCost
+                }
+              />
+            </FormField>
+            <FormField
+              label="Paid from"
+              description="Select whether this pot is charged externally or internally."
+              errorText={showDecisionErrors && fieldErrors.postingContext ? fieldErrors.postingContext : undefined}
+            >
+              {isAssessor ? (
+                <Input value="External (region/PTMA)" readOnly disabled={!assessment.interventionPotId || !decisionHasCost || isAssessmentDisabled} />
+              ) : (
+                <Select
+                  selectedOption={selectedPostingContext}
+                  options={POSTING_OPTIONS}
+                  onChange={({ detail }) => handleField('postingContext', detail.selectedOption?.value || '')}
+                  placeholder="Select"
+                  data-error-focus={showDecisionErrors && fieldErrors.postingContext ? 'true' : undefined}
+                  disabled={
+                    !assessment.interventionPotId ||
+                    !decisionHasCost ||
+                    lockedByAnotherUser ||
+                    isLockedStatus ||
+                    isDecisionFinal ||
+                    (isAssessmentDisabled && !canManageBudgetPotPending)
+                  }
+                />
+              )}
+            </FormField>
+          </Grid>
+        )}
+      </Box>
+      <Modal
+        visible={showApproveConfirmModal}
+        onDismiss={() => setShowApproveConfirmModal(false)}
+        header="Clear not-approved reason?"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="primary" onClick={() => {
+              if (isNWACFieldsDisabled) {
+                setShowApproveConfirmModal(false);
+                return;
+              }
+              handleField('nwacReason', '');
+              handleField('nwacReviewStatus', 'approve');
+              setShowApproveConfirmModal(false);
+            }}>Clear and Approve</Button>
+            <Button variant="normal" onClick={() => setShowApproveConfirmModal(false)}>Cancel</Button>
+          </SpaceBetween>
+        }
+      >
+        <Box>Switching to "Approve" will clear the reason for not approving. Do you want to continue?</Box>
+      </Modal>
     </>
   );
+
+  const stepDefinitionById = {
+    eligibility: { title: STEP_LABELS.eligibility, content: eligibilityStepContent, isOptional: false },
+    framing: { title: STEP_LABELS.framing, content: framingStepContent, isOptional: false },
+    rationale: { title: STEP_LABELS.rationale, content: rationaleStepContent, isOptional: false },
+    type: { title: STEP_LABELS.type, content: typeStepContent, isOptional: false },
+    childcare: { title: STEP_LABELS.childcare, content: childcareStepContent, isOptional: false },
+    previousIset: { title: STEP_LABELS.previousIset, content: previousIsetStepContent, isOptional: false },
+    barriers: { title: STEP_LABELS.barriers, content: barriersStepContent, isOptional: false },
+    priorities: { title: STEP_LABELS.priorities, content: prioritiesStepContent, isOptional: false },
+    otherFunding: { title: STEP_LABELS.otherFunding, content: otherFundingStepContent, isOptional: false },
+    cost: { title: STEP_LABELS.cost, content: costStepContent, isOptional: false },
+    docs: { title: STEP_LABELS.docs, content: docsStepContent, isOptional: false },
+    review: { title: STEP_LABELS.review, content: reviewStepContent, isOptional: false },
+    decision: { title: STEP_LABELS.decision, content: decisionStepContent, isOptional: false }
+  };
+
+  const steps = activeStepIds
+    .map(stepId => {
+      const definition = stepDefinitionById[stepId];
+      if (!definition) return null;
+      return { id: stepId, ...definition };
+    })
+    .filter(Boolean);
+
+  const activeStepIndex = Math.max(activeStepIds.indexOf(currentStep), 0);
+  const canSubmitAssessment = !isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment);
+  const canSubmitOutcome = !isEligibilityGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && canManageOutcomeReview && !checkingChecklist;
+  const wizardSubmitHandler = showNWACSection ? (canSubmitOutcome ? handleApproveClick : undefined) : (canSubmitAssessment ? handleSubmit : undefined);
+  const wizardSubmitLabel = showNWACSection ? 'Approve / Mark Not Approved' : 'Submit assessment';
 
   if (isDeclarationGateActive) {
     return (
@@ -2207,594 +4239,30 @@ const CoordinatorAssessmentWidget = forwardRef(
             <Box margin={{ bottom: 's' }} />
           </>
         )}
-        {isEligibilityGateActive ? null : (
-        <>
-        {sectionHeader('Outcome Notice')}
-        {!showNWACSection && (
-          <Box color="text-status-inactive" margin={{ top: 'm', bottom: 's' }}>
-            Outcome notice will be available after the assessment is submitted.
-          </Box>
-        )}
-        {showNWACSection && (
-          <>
-            <Box
-              style={
-                isNWACFieldsDisabled || isOutcomeNoticeDisabled
-                  ? { opacity: 0.6, pointerEvents: 'none' }
-                  : undefined
-              }
-              aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
-            >
-              <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-                <FormField label="Funding Decision" errorText={hasSubmitted && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}>
-                  <SpaceBetween direction="horizontal" size="xs">
-                    <RadioGroup
-                      value={assessment.nwacReviewStatus || ''}
-                      onChange={({ detail }) => {
-                        if (detail.value === 'approve' && isHighCostApprovalBlocked) {
-                          setValidationAlert([`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`]);
-                          return;
-                        }
-                        if (isNWACFieldsDisabled) return;
-                        if (detail.value === 'approve' && assessment.nwacReason) {
-                          setShowApproveConfirmModal(true);
-                        } else {
-                          handleField('nwacReviewStatus', detail.value);
-                          if (detail.value === 'approve') handleField('nwacReason', '');
-                        }
-                      }}
-                      items={[
-                        { value: 'approve', label: 'Approved' },
-                        { value: 'reject', label: 'Not Approved' }
-                      ]}
-                      ariaLabel="NWAC Review Status"
-                      data-error-focus={hasSubmitted && fieldErrors.nwacReviewStatus ? 'true' : undefined}
-                      disabled={isNWACFieldsDisabled}
-                      readOnly={isNWACFieldsDisabled}
-                      style={isNWACFieldsDisabled ? { opacity: 0.4 } : undefined}
-                    />
-                  </SpaceBetween>
-                </FormField>
-                <FormField label="Assessment Assurance" errorText={hasSubmitted && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}>
-                  <Select
-                    selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
-                    onChange={({ detail }) => {
-                      if (isNWACFieldsDisabled) return;
-                      handleField('nwacReview', detail.selectedOption.value);
-                    }}
-                    options={[
-                      { label: 'Agree with Coordinator Recommendation', value: 'agree' },
-                      { label: 'Disagree with Coordinator Recommendation', value: 'disagree' }
-                    ]}
-                    placeholder="Select review outcome"
-                    data-error-focus={hasSubmitted && fieldErrors.nwacReview ? 'true' : undefined}
-                    disabled={isNWACFieldsDisabled}
-                  />
-                </FormField>
-              </Grid>
-              {assessment.nwacReviewStatus === 'reject' && (
-                <Grid gridDefinition={[{ colspan: 12 }]}>
-                  <FormField label="Reason for Not Approving" stretch={true} >
-                    <Box width="100%">
-                      <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
-                        if (isNWACFieldsDisabled) return;
-                        handleField('nwacReason', detail.value);
-                      }} data-error-focus={hasSubmitted && fieldErrors.nwacReason ? 'true' : undefined} disabled={isNWACFieldsDisabled} />
-                    </Box>
-                  </FormField>
-                </Grid>
-              )}
-            </Box>
-            <Modal
-              visible={showApproveConfirmModal}
-              onDismiss={() => setShowApproveConfirmModal(false)}
-              header="Clear not-approved reason?"
-              footer={
-                <SpaceBetween direction="horizontal" size="xs">
-                  <Button variant="primary" onClick={() => {
-                    if (isNWACFieldsDisabled) {
-                      setShowApproveConfirmModal(false);
-                      return;
-                    }
-                    handleField('nwacReason', '');
-                    handleField('nwacReviewStatus', 'approve');
-                    setShowApproveConfirmModal(false);
-                  }}>Clear and Approve</Button>
-                  <Button variant="normal" onClick={() => setShowApproveConfirmModal(false)}>Cancel</Button>
-                </SpaceBetween>
-              }
-            >
-              <Box>Switching to "Approve" will clear the reason for not approving. Do you want to continue?</Box>
-            </Modal>
-          </>
-        )}
-        </>
-        )}
-        {sectionHeader('ESDC Eligibility')}
-        <Grid gridDefinition={eligibilityGridDefinition}>
-          <FormField
-            label="Eligibility"
-            errorText={hasSubmitted && fieldErrors.esdcEligibility ? fieldErrors.esdcEligibility : undefined}
-            description="Select the client's eligibility category for ESDC funding."
-          >
-            <Select
-              selectedOption={ESDC_OPTIONS.find(o => o.value === assessment.esdcEligibility) || null}
-              onChange={({ detail }) => handleField('esdcEligibility', detail.selectedOption.value)}
-              options={ESDC_OPTIONS}
-              placeholder="Select eligibility"
-              ariaLabel="Eligibility"
-              data-error-focus={hasSubmitted && fieldErrors.esdcEligibility ? 'true' : undefined}
-              tabIndex={-1}
-              disabled={isEligibilityDisabled}
-            />
-          </FormField>
-          {showBudgetPot && (
-            <>
-              <FormField
-                label="Budget Pot"
-                description="Assign the pot that will fund this intervention."
-                errorText={hasSubmitted && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
-              >
-                <Select
-                  placeholder={
-                    !hasInterventionCost
-                      ? 'Not assigned for zero-cost interventions'
-                      : budgetPotLoading
-                        ? 'Loading budget pots'
-                        : 'Select budget pot'
-                  }
-                  selectedOption={selectedBudgetPotOption}
-                  options={budgetPotOptions}
-                  statusType={budgetPotLoading ? 'loading' : 'finished'}
-                  loadingText="Loading budget pots"
-                  onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
-                  data-error-focus={hasSubmitted && fieldErrors.interventionPotId ? 'true' : undefined}
-                  disabled={
-                    baseAssessmentLocked ||
-                    isEligibilityGateActive ||
-                    (!canManageBudgetPotPending && isAssessmentDisabled) ||
-                    !hasInterventionCost
-                  }
-                />
-              </FormField>
-              <FormField
-                label="Paid from"
-                description="Select whether this pot is charged externally or internally."
-                errorText={hasSubmitted && fieldErrors.postingContext ? fieldErrors.postingContext : undefined}
-              >
-                {isAssessor ? (
-                  <Input value="External (region/PTMA)" readOnly disabled={!assessment.interventionPotId || !hasInterventionCost || isAssessmentDisabled} />
-                ) : (
-                  <Select
-                    selectedOption={selectedPostingContext}
-                    options={POSTING_OPTIONS}
-                    onChange={({ detail }) => handleField('postingContext', detail.selectedOption?.value || '')}
-                    placeholder="Select"
-                    data-error-focus={hasSubmitted && fieldErrors.postingContext ? 'true' : undefined}
-                    disabled={
-                      !assessment.interventionPotId ||
-                      !hasInterventionCost ||
-                      lockedByAnotherUser ||
-                      isLockedStatus ||
-                      isDecisionFinal ||
-                      (isAssessmentDisabled && !canManageBudgetPotPending)
-                    }
-                  />
-                )}
-              </FormField>
-            </>
-          )}
-        </Grid>
-        {!eligibilitySet && <Box margin={{ bottom: 'l' }} />}
-        {sectionHeader('Assessment Overview')}
-        <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}>
-          <FormField label="Date of Assessment">
-            <DatePicker onChange={({ detail }) => handleField('dateOfAssessment', detail.value)} value={assessment.dateOfAssessment} readOnly={assessmentSubmitted} disabled={isAssessmentDisabled} />
-          </FormField>
-          <FormField label="Current Case Manager">
-            <Box padding={{ vertical: 'xs' }}>{assessment.clientName || 'Not assigned'}</Box>
-          </FormField>
-        </Grid>
-        <Grid gridDefinition={[{ colspan: 12 }]}> 
-          <FormField label="Client Application Overview & Request" stretch={true} errorText={hasSubmitted && fieldErrors.overview ? fieldErrors.overview : undefined}
-            description="Summarize the client's application, background, and the specific request or intervention being considered. Include any relevant context from the application form."
-            constraintText={`${overviewWordCount}/${OVERVIEW_WORD_LIMIT} words maximum`}>
-            <Box width="100%">
-              <Textarea placeholder={initialAssessment.overview} value={assessment.overview} onChange={({ detail }) => handleField('overview', detail.value)} data-error-focus={hasSubmitted && fieldErrors.overview ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
-            </Box>
-          </FormField>
-        </Grid>
-        <Grid gridDefinition={[{ colspan: 12 }]}> 
-          <FormField label="Client’s Employment Goal(s)" stretch={true} errorText={hasSubmitted && fieldErrors.employmentGoals ? fieldErrors.employmentGoals : undefined}
-            description="Describe the client's short- and long-term employment goals as discussed during assessment. Reference the goals stated in the application form if available."
-            constraintText={`${employmentGoalsWordCount}/${EMPLOYMENT_GOALS_WORD_LIMIT} words maximum`}>
-            <Box width="100%">
-              <Textarea placeholder={initialAssessment.employmentGoals} value={assessment.employmentGoals} onChange={({ detail }) => handleField('employmentGoals', detail.value)} data-error-focus={hasSubmitted && fieldErrors.employmentGoals ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
-            </Box>
-          </FormField>
-        </Grid>
-        {sectionHeader('Previous ISET Funding')}
-        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
-          <FormField label="Was the Client previously funded under the ISET Program?"
-            description="Indicate if the client has received ISET funding in the past. If yes, provide details below.">
-            <Checkbox checked={assessment.previousISET === 'yes'} onChange={({ detail }) => handleField('previousISET', detail.checked ? 'yes' : 'no')} disabled={isAssessmentDisabled}>Yes</Checkbox>
-          </FormField>
-          {assessment.previousISET === 'yes' ? (
-            <Grid gridDefinition={[{ colspan: 12 }]}> 
-              <FormField label="If Yes, provide dates and specifics" stretch={true} errorText={hasSubmitted && fieldErrors.previousISETDetails ? fieldErrors.previousISETDetails : undefined}
-                description="List the dates and details of any previous ISET funding the client has received.">
-                <Box width="100%">
-                  <Textarea value={assessment.previousISETDetails} onChange={({ detail }) => handleField('previousISETDetails', detail.value)} data-error-focus={hasSubmitted && fieldErrors.previousISETDetails ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
-                </Box>
-              </FormField>
-            </Grid>
-          ) : (
-            <div />  // placeholder to satisfy two-column grid
-          )}
-        </Grid>
-        {sectionHeader('Barriers to Employment')}
-        <Grid gridDefinition={[{ colspan: 12 }]}> 
-          <FormField label="Barriers (select all that apply)" errorText={hasSubmitted && fieldErrors.barriers ? fieldErrors.barriers : undefined}
-            description="Select all barriers that may impact the client's ability to obtain or maintain employment. These may be self-identified or observed during assessment.">
-            <ColumnLayout columns={3} borders="horizontal">
-              {BARRIERS.map((barrier, index) => (
-                <Checkbox
-                  key={barrier}
-                  checked={Array.isArray(assessment.barriers) && assessment.barriers.includes(barrier)}
-                  data-error-focus={hasSubmitted && fieldErrors.barriers && index === 0 ? 'true' : undefined}
-                  onChange={({ detail }) => {
-                    const next = Array.isArray(assessment.barriers) ? assessment.barriers : [];
-                    handleField('barriers', detail.checked ? [...next, barrier] : next.filter(b => b !== barrier));
-                  }}
-                  disabled={isAssessmentDisabled}
-                >{barrier}</Checkbox>
-              ))}
-            </ColumnLayout>
-          </FormField>
-        </Grid>
-        {sectionHeader('Local Area Priorities (Target Areas)')}
-        <Grid gridDefinition={[{ colspan: 12 }]}> 
-          <FormField label="Priority Population Groups (select all that apply)"
-            description="Identify if the client belongs to any priority population groups targeted by your local area or program.">
-            <ColumnLayout columns={3} borders="horizontal">
-              {PRIORITIES.map(priority => (
-                <Checkbox
-                  key={priority}
-                  checked={Array.isArray(assessment.priorities) && assessment.priorities.includes(priority)}
-                  onChange={({ detail }) => {
-                    const next = Array.isArray(assessment.priorities) ? assessment.priorities : [];
-                    handleField('priorities', detail.checked ? [...next, priority] : next.filter(p => p !== priority));
-                  }}
-                  disabled={isAssessmentDisabled}
-                >{priority}</Checkbox>
-              ))}
-            </ColumnLayout>
-          </FormField>
-        </Grid>
-        {sectionHeader('Other Funding Sources')}
-        <Grid gridDefinition={[{ colspan: 12 }]}> 
-          <FormField label="Has the Client received any other sources of funding for this intervention?" stretch={true}
-            description="Describe any other funding the client has received or applied for in relation to this intervention.">
-            <Box width="100%">
-              <Textarea placeholder={initialAssessment.otherFunding} value={assessment.otherFunding} onChange={({ detail }) => handleField('otherFunding', detail.value)} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
-            </Box>
-          </FormField>
-        </Grid>
-        {sectionHeader('Intervention Recommendation')}
-        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-          <FormField
-            label="Intervention Code"
-            description="Select the intervention type recommended for this client."
-            errorText={hasSubmitted && fieldErrors.interventionCode ? fieldErrors.interventionCode : undefined}
-          >
-            <Select
-              selectedOption={selectedInterventionCodeOption}
-              onChange={({ detail }) => handleField('interventionCode', detail.selectedOption?.value || '')}
-              options={interventionCodes}
-              placeholder={interventionCodesLoading ? 'Loading intervention codes...' : 'Select intervention code'}
-              statusType={interventionCodesLoading ? 'loading' : 'finished'}
-              filteringType="auto"
-              data-error-focus={hasSubmitted && fieldErrors.interventionCode ? 'true' : undefined}
-              disabled={isAssessmentDisabled}
-            />
-          </FormField>
-          <FormField label="Childcare Need" description="Indicate if childcare is required to participate in the intervention.">
-            <Select
-              selectedOption={selectedChildcareOption}
-              onChange={({ detail }) => handleField('childcareNeed', detail.selectedOption?.value || '')}
-              options={CHILDCARE_OPTIONS}
-              placeholder="Select childcare need"
-              disabled={isAssessmentDisabled}
-            />
-          </FormField>
-        </Grid>
-        {showChildcareFunding && (
-          <Grid gridDefinition={[{ colspan: 12 }]}>
-            <FormField
-              label="Childcare Funding Details (optional)"
-              description="Provide any known childcare supports (existing or requested)."
-            >
-              <Textarea
-                value={assessment.childcareFunding || ''}
-                onChange={({ detail }) => handleField('childcareFunding', detail.value)}
-                disabled={isAssessmentDisabled || assessment.childcareNeed !== 'yes'}
-              />
-            </FormField>
-          </Grid>
-        )}
-        <Grid gridDefinition={dateGridDefinition}> 
-          <FormField label="Start Date" errorText={hasSubmitted && fieldErrors.startDate ? fieldErrors.startDate : undefined}
-            description="Enter the planned start date for the intervention or training.">
-            <DatePicker onChange={({ detail }) => handleField('startDate', detail.value)} value={assessment.startDate} ariaLabel="Start Date" data-error-focus={hasSubmitted && fieldErrors.startDate ? 'true' : undefined} tabIndex={-1} readOnly={isAssessmentDisabled} disabled={isAssessmentDisabled} />
-          </FormField>
-          {showEndDate && (
-            <FormField label="End Date" errorText={hasSubmitted && fieldErrors.endDate ? fieldErrors.endDate : undefined}
-              description="Enter the planned end date for the intervention or training.">
-              <DatePicker
-                onChange={({ detail }) => handleField('endDate', detail.value)}
-                value={assessment.endDate}
-                ariaLabel="End Date"
-                data-error-focus={hasSubmitted && fieldErrors.endDate ? 'true' : undefined}
-                tabIndex={-1}
-                readOnly={isAssessmentDisabled || !assessment.startDate}
-                disabled={isAssessmentDisabled || !assessment.startDate}
-                placeholder={assessment.startDate ? undefined : 'Set a start date first'}
-              />
-            </FormField>
-          )}
-        </Grid>
-        {requiresInstitution && (
-          <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}> 
-            <FormField label="Training Institution/Employer" errorText={hasSubmitted && fieldErrors.institution ? fieldErrors.institution : undefined}
-              description="Provide the training institution or employer, if applicable.">
-              <Input
-                value={assessment.institution}
-                onChange={({ detail }) => handleField('institution', detail.value)}
-                ariaLabel="Training Institution/Employer"
-                data-error-focus={hasSubmitted && fieldErrors.institution ? 'true' : undefined}
-                tabIndex={-1}
-                readOnly={isAssessmentDisabled || !requiresInstitution}
-                disabled={isAssessmentDisabled || !requiresInstitution}
-              />
-            </FormField>
-            <FormField label="Program Name" errorText={hasSubmitted && fieldErrors.programName ? fieldErrors.programName : undefined}
-              description="Enter the program or position name, if known.">
-              <Input
-                value={assessment.programName}
-                onChange={({ detail }) => handleField('programName', detail.value)}
-                ariaLabel="Program Name"
-                data-error-focus={hasSubmitted && fieldErrors.programName ? 'true' : undefined}
-                tabIndex={-1}
-                readOnly={isAssessmentDisabled || !requiresInstitution}
-                disabled={isAssessmentDisabled || !requiresInstitution}
-              />
-            </FormField>
-          </Grid>
-        )}
-        {requiresNoc && (
-          <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-            <FormField
-              label="NOC Version"
-              description="Required only when the intervention code is 6–13."
-              errorText={hasSubmitted && fieldErrors.interventionNocVersion ? fieldErrors.interventionNocVersion : undefined}
-            >
-              <Select
-                selectedOption={selectedNocVersionOption}
-                onChange={({ detail }) => handleField('interventionNocVersion', detail.selectedOption?.value || '')}
-                options={nocVersions}
-                placeholder={nocVersionsLoading ? 'Loading NOC versions...' : 'Select NOC version'}
-                statusType={nocVersionsLoading ? 'loading' : 'finished'}
-                filteringType="auto"
-                data-error-focus={hasSubmitted && fieldErrors.interventionNocVersion ? 'true' : undefined}
-                disabled={!requiresNoc || isAssessmentDisabled || nocVersionsLoading}
-              />
-            </FormField>
-            <FormField
-              label="NOC Code"
-              description={requiresNoc ? 'Search by code or title to select the appropriate NOC.' : 'Optional unless the intervention code is 6–13.'}
-              errorText={hasSubmitted && fieldErrors.interventionNoc ? fieldErrors.interventionNoc : undefined}
-            >
-              <Autosuggest
-                value={assessment.interventionNoc || ''}
-                onChange={({ detail }) => {
-                  const inputValue = detail.value || '';
-                  handleField('interventionNoc', inputValue);
-                  if (inputValue.length >= 2) {
-                    fetchNocSuggestions(inputValue);
-                  } else {
-                    setNocSuggestions([]);
-                  }
-                }}
-                onSelect={({ detail }) => handleField('interventionNoc', detail.value || '')}
-                onLoadItems={({ detail }) => {
-                  if (detail.filteringText) {
-                    fetchNocSuggestions(detail.filteringText);
-                  }
-                }}
-                options={nocSuggestions}
-                statusType={nocSuggestionsLoading ? 'loading' : 'finished'}
-                expandToViewport
-                placeholder={
-                  requiresNoc
-                    ? assessment.interventionNocVersion
-                      ? 'Type to search NOC code'
-                      : 'Select a NOC version first'
-                    : 'Not required'
-                }
-                empty={requiresNoc ? 'No NOC codes found.' : 'NOC selection not required.'}
-                disabled={!requiresNoc || isAssessmentDisabled || !assessment.interventionNocVersion}
-                enteredTextLabel={value => `Use "${value}"`}
-                data-error-focus={hasSubmitted && fieldErrors.interventionNoc ? 'true' : undefined}
-              />
-            </FormField>
-          </Grid>
-        )}
-        <Box margin={{ top: 'l', bottom: 's' }}>
-          <Header variant="h3">Individual Training Purchase (ITP)</Header>
-        </Box>
-        <Table
-          stripedRows
-          columnDefinitions={[
-            { id: 'category', header: 'Funding Category', cell: item => item.label },
-            { id: 'requested', header: 'Funding Requested', cell: item => (
-              <Input
-                type="text"
-                value={assessment.itp?.[item.key] || ''}
-                onChange={({ detail }) => {
-                  const raw = detail.value.replace(/[^\d.]/g, '');
-                  handleItp(item.key, raw);
-                }}
-                onBlur={({ detail }) => {
-                  const raw = assessment.itp?.[item.key] || '';
-                  const num = raw ? parseFloat(raw) : '';
-                  const formatted = num !== '' && !isNaN(num) ? `$ ${num.toFixed(2)}` : '';
-                  handleItp(item.key, formatted);
-                }}
-                ariaLabel={item.label}
-                readOnly={isAssessmentDisabled}
-                disabled={isAssessmentDisabled}
-              />
-            ) },
-            { id: 'actions', header: 'Actions', cell: item => (
-              isAssessmentDisabled ? null : (
-                <Button size="small" variant="inline-link" onClick={() => handleItp(item.key, '')}>Clear</Button>
-              )
-            ) }
-          ]}
-          items={[
-            { key: 'tuition', label: 'Tuition' },
-            { key: 'books', label: 'Books' },
-            { key: 'materials', label: 'Materials' },
-            { key: 'living', label: 'Living Allowance' }
-          ]}
-          variant="embedded"
-          header={null}
-          footer={
-            <>
-              <Box fontWeight="bold" textAlign="right">
-                Total Intervention Cost: $
-                {(
-                  Number((assessment.itp?.tuition || '').replace(/[^\d.]/g, '')) +
-                  Number((assessment.itp?.books || '').replace(/[^\d.]/g, '')) +
-                  Number((assessment.itp?.materials || '').replace(/[^\d.]/g, '')) +
-                  Number((assessment.itp?.living || '').replace(/[^\d.]/g, ''))
-                ).toFixed(2)}
-              </Box>
-            </>
-          }
+        <Wizard
+          activeStepIndex={activeStepIndex}
+          isLoadingNextStep={lockingAssessment || checkingChecklist || eiVerificationUploading}
+          onNavigate={handleWizardNavigate}
+          onSubmit={wizardSubmitHandler}
+          onCancel={canSubmitAssessment ? handleCancel : undefined}
+          steps={steps.map(step => ({
+            title: step.title,
+            content: step.content,
+            isOptional: step.isOptional,
+            errorText:
+              attemptedSteps[step.id] && !isWizardStepValid(step.id)
+                ? step.id === 'review'
+                  ? 'Complete required fields before submitting.'
+                  : 'Complete required fields before continuing.'
+                : undefined,
+          }))}
+          submitButtonText={wizardSubmitHandler ? wizardSubmitLabel : 'Read only'}
+          cancelButtonText={canSubmitAssessment ? 'Cancel' : undefined}
+          nextButtonText="Next"
+          previousButtonText="Previous"
+          secondaryActions={null}
         />
-        <Box margin={{ top: 'l', bottom: 's' }}>
-          <Header variant="h3">Targeted Wage Subsidy / Job Creation Partnership</Header>
-        </Box>
-        <Table
-          stripedRows
-          columnDefinitions={[
-            { id: 'category', header: 'Funding Category', cell: item => item.label },
-            { id: 'requested', header: 'Funding Requested', cell: item => (
-              <Input
-                type="text"
-                value={assessment.wage?.[item.key] || ''}
-                onChange={({ detail }) => {
-                  if (item.key === 'other') {
-                    handleWage(item.key, detail.value);
-                  } else {
-                    const raw = detail.value.replace(/[^\d.]/g, '');
-                    handleWage(item.key, raw);
-                  }
-                }}
-                onBlur={({ detail }) => {
-                  if (item.key === 'other') return;
-                  const raw = assessment.wage?.[item.key] || '';
-                  const num = raw ? parseFloat(raw) : '';
-                  const formatted = num !== '' && !isNaN(num) ? `$ ${num.toFixed(2)}` : '';
-                  handleWage(item.key, formatted);
-                }}
-                ariaLabel={item.label}
-                readOnly={isAssessmentDisabled}
-                disabled={isAssessmentDisabled}
-              />
-            ) },
-            { id: 'actions', header: 'Actions', cell: item => (
-              isAssessmentDisabled ? null : (
-                <Button size="small" variant="inline-link" onClick={() => handleWage(item.key, '')}>Clear</Button>
-              )
-            ) }
-          ]}
-          items={[
-            { key: 'wages', label: 'Wages' },
-            { key: 'mercs', label: 'MERCs' },
-            { key: 'nonwages', label: 'Non-Wages' },
-            { key: 'other', label: 'Other' }
-          ]}
-          variant="embedded"
-          header={null}
-          footer={
-            <>
-              <Box fontWeight="bold" textAlign="right">
-                Total Intervention Cost: $
-                {(
-                  Number((assessment.wage?.wages || '').replace(/[^\d.]/g, '')) +
-                  Number((assessment.wage?.mercs || '').replace(/[^\d.]/g, '')) +
-                  Number((assessment.wage?.nonwages || '').replace(/[^\d.]/g, '')) +
-                  Number((assessment.wage?.other || '').replace(/[^\d.]/g, ''))
-                ).toFixed(2)}
-              </Box>
-            </>
-          }
-        />
-        {sectionHeader('Intervention Summary')}
-        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-          <FormField
-            label="Intervention Duration (days)"
-            description={calculatedDuration ? `Optional. Calculated from start/end dates: ${calculatedDuration} day(s).` : 'Optional. Enter the number of days the intervention will run.'}
-            errorText={hasSubmitted && fieldErrors.interventionDuration ? fieldErrors.interventionDuration : undefined}
-            secondaryControl={
-              !isAssessmentDisabled && calculatedDuration && assessment.interventionDuration !== calculatedDuration ? (
-                <Button size="small" onClick={() => handleField('interventionDuration', calculatedDuration)}>
-                  Use {calculatedDuration}
-                </Button>
-              ) : null
-            }
-          >
-            <Input
-              inputMode="numeric"
-              value={assessment.interventionDuration || ''}
-              onChange={({ detail }) => handleField('interventionDuration', detail.value.replace(/[^\d]/g, ''))}
-              placeholder="e.g. 120"
-              data-error-focus={hasSubmitted && fieldErrors.interventionDuration ? 'true' : undefined}
-              disabled={isAssessmentDisabled}
-            />
-          </FormField>
-          <FormField
-            label="Intervention Cost (total)"
-            description={calculatedFundingTotal ? `Optional. Auto-calculated from funding tables: $${calculatedFundingTotal}. Adjust if needed.` : 'Optional. Enter the total planned cost (whole dollars).' }
-            errorText={hasSubmitted && fieldErrors.interventionCost ? fieldErrors.interventionCost : undefined}
-            secondaryControl={
-              !isAssessmentDisabled && calculatedFundingTotal && assessment.interventionCost !== calculatedFundingTotal ? (
-                <Button size="small" onClick={() => handleField('interventionCost', formatCurrencyDisplay(calculatedFundingTotal))}>
-                  Use {formatCurrencyDisplay(calculatedFundingTotal) || calculatedFundingTotal}
-                </Button>
-              ) : null
-            }
-          >
-            <Input
-              inputMode="decimal"
-              value={assessment.interventionCost || ''}
-              onChange={({ detail }) => handleField('interventionCost', detail.value.replace(/[^\d.]/g, ''))}
-              onBlur={() => {
-                const formatted = formatCurrencyDisplay(assessment.interventionCost);
-                if (formatted) {
-                  handleField('interventionCost', formatted);
-                }
-              }}
-              placeholder="e.g. $4,200.00"
-              data-error-focus={hasSubmitted && fieldErrors.interventionCost ? 'true' : undefined}
-              disabled={isAssessmentDisabled}
-            />
-          </FormField>
-        </Grid>
-
-        {!assessmentSubmitted && renderRecommendationSection()}
+        {checklistUploadModal}
         <Modal
           visible={showCancelModal}
           onDismiss={() => setShowCancelModal(false)}
@@ -2876,7 +4344,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             </SpaceBetween>
           }
         >
-          <Box>Are you sure you want to edit the previously submitted assessment? This will allow you to make changes and resubmit. Your changes will not be saved until you click Save or Submit.</Box>
+          <Box>Are you sure you want to edit the previously submitted assessment? This will allow you to make changes and resubmit. Your changes will not be saved until you click Save Progress or Submit.</Box>
         </Modal>
         <Modal
           visible={conflictHoldModalVisible}

@@ -5,7 +5,7 @@ import { BoardItem } from '@cloudscape-design/board-components';
 import {
   Header,
   Box,
-  KeyValuePairs,
+  ColumnLayout,
   Badge,
   Spinner,
   ButtonDropdown,
@@ -17,13 +17,15 @@ import {
   Modal,
   Link,
   Input,
-  Textarea
+  Textarea,
+  StatusIndicator
 } from '@cloudscape-design/components';
 import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
 import { apiFetch } from '../auth/apiClient';
 import ApplicationOverviewHelp from '../helpPanelContents/applicationOverviewHelp';
 import useCurrentUser from '../hooks/useCurrentUser';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
+import { toCanonicalRole } from '../context/RoleMatrixContext';
 import {
   canEditCaseStatus,
   getCaseStatusContext,
@@ -60,7 +62,7 @@ function statusColor(status = '') {
   const normalized = normalizeClosedStatus(status);
   if (['approved', 'completed'].includes(normalized)) return 'green';
   if (['submitted', 'in review', 'in_review', 'in progress', 'pending', 'assigned', 'pending_approval'].includes(normalized)) return 'blue';
-  if (['docs requested', 'docs_requested', 'action required', 'action required (docs requested)'].includes(normalized)) return 'severity-high';
+  if (['docs requested', 'docs_requested', 'action required', 'action required (docs requested)', 'closure notice', 'closure_notice'].includes(normalized)) return 'severity-high';
   if (['rejected', 'declined', 'errored'].includes(normalized)) return 'red';
   if (['closed', 'inactive', 'archived'].includes(normalized)) return 'grey';
   return 'grey';
@@ -72,11 +74,46 @@ const ASSESSMENT_STATUSES = new Set([
   'in_review', 'in review',
   'docs_requested', 'docs requested',
   'action_required', 'action required', 'action required (docs requested)',
+  'closure_notice', 'closure notice',
   'pending info', 'pending information', 'info requested', 'information requested',
   'on hold', 'on_hold'
 ]);
+const APPLICATION_TERMINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
+const ASSIGN_BLOCKED_STATUSES = new Set(['approved', 'archived', 'closed']);
+const CLOSURE_NOTICE_ELIGIBLE_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval']);
+const RESUME_REVIEW_STATUSES = new Set(['docs_requested', 'closure_notice']);
+const CLOSE_ALLOWED_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice']);
+const ARCHIVE_ALLOWED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed']);
 
-const FINAL_APPLICATION_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
+const APPLICATION_LAYOUT_ACTIONS = [
+  {
+    id: 'review-assessment',
+    text: 'Review application',
+    description: 'Focus on the submitted application and assessment.',
+  },
+  {
+    id: 'documents-messages',
+    text: 'Documents and messages',
+    description: 'Switch to supporting documents and secure messaging.',
+  },
+  {
+    id: 'notes-calendar',
+    text: 'Notes and case calendar',
+    description: 'Review notes alongside upcoming reminders.',
+  },
+  {
+    id: 'audit-trail',
+    text: 'View audit trail',
+    description: 'Review the application with the events timeline.',
+  },
+];
+
+const APPLICATION_LAYOUT_ACTION_MAP = {
+  'review-assessment': 'reviewAssessment',
+  'documents-messages': 'documentsMessages',
+  'notes-calendar': 'notesCalendar',
+  'audit-trail': 'auditTrail',
+};
 
 const toDate = value => {
   const d = value ? new Date(value) : null;
@@ -96,7 +133,7 @@ const getStatusInfo = (row) => {
     if (['approved', 'completed'].includes(rawStatus)) return 'success';
     if (['rejected', 'declined'].includes(rawStatus)) return 'error';
     if (['closed', 'cancelled'].includes(rawStatus)) return 'info';
-    if (['docs_requested', 'action_required'].includes(rawStatus)) return 'warning';
+    if (['docs_requested', 'action_required', 'closure_notice', 'closure notice'].includes(rawStatus)) return 'warning';
     return isUnassignedCase || rawStatus === 'new' ? 'pending' : 'info';
   })();
   const statusLabel = isUnassignedCase ? `${label} • Unassigned` : label;
@@ -123,12 +160,6 @@ const formatRoleLabel = (roleKey) => {
     .filter(Boolean)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
-};
-
-const isNonTerminalApplicationStatus = (status) => {
-  if (!status) return true;
-  const key = status.toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
-  return !FINAL_APPLICATION_STATUSES.has(key);
 };
 
 const computeSlaMeta = (application, slaTargets, rawStatus, isAssigned) => {
@@ -164,6 +195,7 @@ const APPLICATION_STATUS_OPTIONS = [
   { label: 'Submitted', value: 'submitted' },
   { label: 'In Review', value: 'in_review' },
   { label: 'Action Required', value: 'docs_requested' },
+  { label: 'Closure Notice', value: 'closure_notice' },
   { label: 'Pending Approval', value: 'pending_approval' },
   { label: 'Approved', value: 'approved' },
   { label: 'Completed', value: 'completed' },
@@ -177,6 +209,36 @@ const APPLICATION_STATUS_LABEL_MAP = APPLICATION_STATUS_OPTIONS.reduce((acc, opt
   return acc;
 }, {});
 APPLICATION_STATUS_LABEL_MAP.withdrawn = 'Closed';
+
+const buildCanadaRegionLookup = (rows = []) => {
+  const lookup = {};
+  if (!Array.isArray(rows)) return lookup;
+  rows.forEach(row => {
+    const code = row?.code ? String(row.code).trim().toUpperCase() : '';
+    const name = row?.name_en ? String(row.name_en).trim() : '';
+    if (code && name) {
+      lookup[code] = name;
+    }
+    if (name) {
+      lookup[name.toLowerCase()] = name;
+    }
+  });
+  return lookup;
+};
+
+const extractRegionCode = value => {
+  if (!value) return '';
+  const trimmed = String(value).trim();
+  if (!trimmed) return '';
+  if (/^[a-z]{2}$/i.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
+  const token = trimmed.split(/[\s-]/)[0];
+  if (token && /^[a-z]{2}$/i.test(token)) {
+    return token.toUpperCase();
+  }
+  return '';
+};
 
 const formatStatusLabel = value => {
   if (!value) return 'Unknown';
@@ -199,6 +261,17 @@ const ApplicationOverviewWidget = ({
   applicationRowVersion,
   onRowVersionUpdate,
 }) => {
+  const DetailItem = ({ label, value }) => (
+    <SpaceBetween size="xxs">
+      <Box color="text-body-secondary" fontSize="body-s">{label}</Box>
+      {React.isValidElement(value) ? (
+        value
+      ) : (
+        <Box fontWeight="bold">{value ?? '-'}</Box>
+      )}
+    </SpaceBetween>
+  );
+
   const [application, setApplication] = useState(null);
   const [loading, setLoading] = useState(Boolean(application_id));
   const [error, setError] = useState(null);
@@ -210,6 +283,21 @@ const ApplicationOverviewWidget = ({
   const [escalation, setEscalation] = useState(null);
   const [escalationLoading, setEscalationLoading] = useState(false);
   const [quickActionNote, setQuickActionNote] = useState('');
+  const [assignModalVisible, setAssignModalVisible] = useState(false);
+  const [assignableStaff, setAssignableStaff] = useState([]);
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [assignError, setAssignError] = useState(null);
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
+  const [selectedAssignee, setSelectedAssignee] = useState(null);
+  const [regionLookup, setRegionLookup] = useState(() => {
+    if (typeof window !== 'undefined' && window.__ISET_CANADA_REGION_LOOKUP) {
+      return window.__ISET_CANADA_REGION_LOOKUP;
+    }
+    return null;
+  });
+  const [checklistMissingCount, setChecklistMissingCount] = useState(null);
+  const [checklistLoading, setChecklistLoading] = useState(false);
+  const [checklistRefreshKey, setChecklistRefreshKey] = useState(0);
   const [rowVersion, setRowVersion] = useState(() => {
     const fromProp = Number(applicationRowVersion || 0);
     const fromCase = Number(caseData?.application_row_version || 0);
@@ -219,9 +307,15 @@ const ApplicationOverviewWidget = ({
   const {
     userId: currentUserId,
     displayName: currentUserName,
-    role: currentUserRole
+    role: currentUserRole,
+    regionId: currentUserRegionId,
   } = useCurrentUser();
   const userRole = currentUserRole || '';
+  const canonicalRole = toCanonicalRole(userRole || '');
+  const canonicalRoleKey = canonicalizeRole(canonicalRole || '');
+  const isSystemAdminRole = canonicalRole === 'System Administrator';
+  const isProgramAdminRole = canonicalRole === 'Program Administrator';
+  const isRegionalManagerRole = canonicalRole === 'Regional Coordinator';
   const [confirmStatusChange, setConfirmStatusChange] = useState(null);
   const {
     lockState,
@@ -234,13 +328,17 @@ const ApplicationOverviewWidget = ({
     if (lockState.owned && lockState.lock) {
       return lockState.lock;
     }
-    if (application?.lock_owner_id || application?.lock_owner_name || application?.lock_owner_email) {
+    const lockOwnerId = application?.lock_owner_id ?? caseData?.lock_owner_id;
+    const lockOwnerName = application?.lock_owner_name ?? caseData?.lock_owner_name;
+    const lockOwnerEmail = application?.lock_owner_email ?? caseData?.lock_owner_email;
+    const lockExpiresAt = application?.lock_expires_at ?? caseData?.lock_expires_at;
+    if (lockOwnerId || lockOwnerName || lockOwnerEmail) {
       return {
         applicationId: application_id || null,
-        ownerUserId: application?.lock_owner_id ? String(application.lock_owner_id) : null,
-        ownerDisplayName: application?.lock_owner_name || null,
-        ownerEmail: application?.lock_owner_email || null,
-        expiresAt: application?.lock_expires_at || null,
+        ownerUserId: lockOwnerId != null ? String(lockOwnerId) : null,
+        ownerDisplayName: lockOwnerName || null,
+        ownerEmail: lockOwnerEmail || null,
+        expiresAt: lockExpiresAt || null,
         acquiredAt: null,
         ttlMinutes: null,
         heartbeatMinutes: null,
@@ -253,6 +351,10 @@ const ApplicationOverviewWidget = ({
     application?.lock_owner_email,
     application?.lock_owner_id,
     application?.lock_owner_name,
+    caseData?.lock_expires_at,
+    caseData?.lock_owner_email,
+    caseData?.lock_owner_id,
+    caseData?.lock_owner_name,
     application_id,
     lockState.lock,
     lockState.owned
@@ -260,6 +362,17 @@ const ApplicationOverviewWidget = ({
   const lockOwnerId = activeLock?.ownerUserId ? String(activeLock.ownerUserId) : null;
   const lockHeldByCurrentUser = Boolean(isLockedByMe || (currentUserId && lockOwnerId && String(currentUserId) === lockOwnerId));
   const lockedByAnotherUser = Boolean(lockOwnerId && !lockHeldByCurrentUser);
+  const lockOwnerLabel = useMemo(() => {
+    if (!activeLock) return '';
+    if (lockHeldByCurrentUser) {
+      return currentUserName || 'You';
+    }
+    return activeLock.ownerDisplayName || activeLock.ownerEmail || activeLock.ownerUserId || 'Unknown';
+  }, [activeLock, currentUserName, lockHeldByCurrentUser]);
+  const lockExpiresLabel = useMemo(() => {
+    if (!activeLock?.expiresAt) return '';
+    return formatDateTime(activeLock.expiresAt);
+  }, [activeLock?.expiresAt]);
   const [lockAlertDismissed, setLockAlertDismissed] = useState(false);
   const lockAlertMessage = useMemo(() => {
     const lockExpiresAt = activeLock?.expiresAt ? new Date(activeLock.expiresAt) : null;
@@ -289,6 +402,26 @@ const ApplicationOverviewWidget = ({
       setRowVersion(incoming);
     }
   }, [applicationRowVersion, rowVersion]);
+
+  useEffect(() => {
+    if (regionLookup || typeof window === 'undefined') return;
+    let cancelled = false;
+    apiFetch('/api/regions/canada')
+      .then(res => {
+        if (!res.ok) throw new Error('Region lookup failed');
+        return res.json();
+      })
+      .then(rows => {
+        if (cancelled) return;
+        const lookup = buildCanadaRegionLookup(rows);
+        window.__ISET_CANADA_REGION_LOOKUP = lookup;
+        setRegionLookup(lookup);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [regionLookup]);
 
   const fetchEscalation = useCallback(async () => {
     if (!application_id) {
@@ -483,17 +616,106 @@ const ApplicationOverviewWidget = ({
       answers: rawAnswers && typeof rawAnswers === 'object' ? rawAnswers : {},
     };
   }, [application]);
+  const applicantUserId = useMemo(
+    () =>
+      caseData?.applicant_user_id ??
+      caseData?.applicantUserId ??
+      application?.applicant_user_id ??
+      application?.applicantUserId ??
+      null,
+    [application, caseData]
+  );
+  const provinceSource = useMemo(
+    () =>
+      caseData?.application_address_province ||
+      caseData?.application_province_fallback ||
+      caseData?.submission_address_province ||
+      caseData?.address_province ||
+      answers['address-province'] ||
+      answers['province'] ||
+      application?.address_province ||
+      application?.application_address_province ||
+      application?.application_province ||
+      application?.province ||
+      null,
+    [answers, application, caseData]
+  );
+  const provinceLabel = useMemo(() => {
+    if (!provinceSource) return '';
+    const raw = String(provinceSource).trim();
+    if (!raw) return '';
+    const code = extractRegionCode(raw);
+    if (regionLookup) {
+      if (code && regionLookup[code]) {
+        return `${regionLookup[code]} (${code})`;
+      }
+      const byName = regionLookup[raw.toLowerCase()];
+      if (byName) {
+        return code ? `${byName} (${code})` : byName;
+      }
+    }
+    return code || raw;
+  }, [provinceSource, regionLookup]);
+
+  useEffect(() => {
+    if (!applicantUserId) {
+      setChecklistMissingCount(null);
+      setChecklistLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setChecklistLoading(true);
+    const query = application_id ? `?applicationId=${application_id}` : '';
+    apiFetch(`/api/applicants/${applicantUserId}/document-checklist${query}`)
+      .then(res => {
+        if (!res.ok) throw new Error('Checklist lookup failed');
+        return res.json();
+      })
+      .then(payload => {
+        if (cancelled) return;
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        const reported = Number(payload?.missingRequiredCount);
+        const computed = items.filter(item => item && item.required !== false && item.status !== 'complete').length;
+        const missingCount = Number.isFinite(reported) ? reported : computed;
+        setChecklistMissingCount(missingCount);
+      })
+      .catch(() => {
+        if (!cancelled) setChecklistMissingCount(null);
+      })
+      .finally(() => {
+        if (!cancelled) setChecklistLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [applicantUserId, application_id, checklistRefreshKey]);
+
+  useEffect(() => {
+    if (!applicantUserId || typeof window === 'undefined') return;
+    const handleRefresh = event => {
+      const targetApplicant = event?.detail?.applicantUserId;
+      if (targetApplicant && String(targetApplicant) !== String(applicantUserId)) return;
+      setChecklistRefreshKey(key => key + 1);
+    };
+    window.addEventListener('iset:supporting-documents:refresh', handleRefresh);
+    return () => window.removeEventListener('iset:supporting-documents:refresh', handleRefresh);
+  }, [applicantUserId]);
 
   const fallbackStatusRaw = statusValue || applicationStatusFromCase || application?.status || '';
   const fallbackStatus = normalizeClosedStatus(fallbackStatusRaw);
+  const normalizedStatusKey = (fallbackStatus || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
   const statusContext = getCaseStatusContext(fallbackStatus);
-  const roleAccess = getRoleGroups(userRole);
+  const roleAccess = getRoleGroups(canonicalRole || userRole);
   const { canonicalStatus, isFinalStatus } = statusContext;
-  const { isSystemAdministratorRole, isAdminRole } = roleAccess;
-  const rawRoleKey = canonicalizeRole(userRole);
-  const roleKey = normalizeEscalationRole(rawRoleKey);
+  const {
+    isSystemAdministratorRole,
+    isAdminRole,
+    isRegionalCoordinatorRole,
+    isApplicationAssessorRole
+  } = roleAccess;
+  const roleKey = normalizeEscalationRole(canonicalRoleKey);
   const canEditStatus = isSystemAdministratorRole && canEditCaseStatus({
-    role: userRole,
+    role: canonicalRole || userRole,
     status: fallbackStatus,
     hasCase: Boolean(caseData?.id),
   });
@@ -504,84 +726,73 @@ const ApplicationOverviewWidget = ({
   const badgeLabel = statusLabel;
   const badgeColor = statusColor(statusOption?.value || fallbackStatus || 'unknown');
   const statusSelectDisabled = !canEditStatus || savingStatus || lockedByAnotherUser;
-  const canRunQuickActions = !lockedByAnotherUser;
-  const nonTerminalStatus = isNonTerminalApplicationStatus(fallbackStatus);
   const hasOpenEscalation = escalation && escalation.state && escalation.state !== 'resolved';
   const escalationOwnerRole = normalizeEscalationRole(canonicalizeRole(escalation?.current_owner_role || escalation?.currentOwnerRole));
-  const isEscalationOwner = hasOpenEscalation && (isSystemAdministratorRole || (roleKey && roleKey === escalationOwnerRole));
+  const isEscalationOwner = Boolean(hasOpenEscalation && escalationOwnerRole && escalationOwnerRole === roleKey);
   const escalationBadgeLabel = hasOpenEscalation
     ? `Escalated to ${formatRoleLabel(escalationOwnerRole || escalation?.target_role || escalation?.targetRole || '')}`
     : null;
-
-  const statusKey = (fallbackStatus || '').toLowerCase();
-  const normalizedStatusKey = (fallbackStatus || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
-  const quickActionItems = [];
-  const canRunStatusQuickActions = isSystemAdministratorRole;
-
-  if (canRunStatusQuickActions) {
-    if (statusKey === 'in_review' || normalizedStatusKey === 'in_review' || normalizedStatusKey === 'pending_approval') {
-      quickActionItems.push({
-        id: 'suspend',
-        text: 'Suspend Application',
-        description: 'Move to Action Required when you need more information from the applicant.'
-      });
-    }
-    if (statusKey === 'docs_requested' || normalizedStatusKey === 'docs_requested') {
-      quickActionItems.push({
-        id: 'resume',
-        text: 'Resume Application',
-        description: 'Return to In Review after applicant provides requested information.'
-      });
-    }
-    if (
-      ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(statusKey) ||
-      ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(normalizedStatusKey)
-    ) {
-      quickActionItems.push({
-        id: 'close',
-        text: 'Close Application',
-        description: 'Mark the application as closed.'
-      });
-    }
-  }
-
   const escalationTargetRoleLabel = roleKey === 'regional_manager' ? 'Program Administrator' : 'Regional Manager';
-  const canCreateEscalation =
-    nonTerminalStatus &&
-    !hasOpenEscalation &&
-    (roleKey === 'coordinator' || roleKey === 'regional_manager' || isSystemAdministratorRole);
+  const hasCaseId = Boolean(caseData?.id);
+  const canAssign = hasCaseId && !ASSIGN_BLOCKED_STATUSES.has(normalizedStatusKey) && (isAdminRole || isRegionalCoordinatorRole);
+  const canPutOnClosureNotice = hasCaseId && CLOSURE_NOTICE_ELIGIBLE_STATUSES.has(normalizedStatusKey);
+  const canResumeReview = hasCaseId && RESUME_REVIEW_STATUSES.has(normalizedStatusKey);
+  const canCloseApplication = hasCaseId && CLOSE_ALLOWED_STATUSES.has(normalizedStatusKey) && (isAdminRole || isRegionalCoordinatorRole);
+  const canArchiveApplication = hasCaseId && ARCHIVE_ALLOWED_STATUSES.has(normalizedStatusKey) && isAdminRole;
+  const canReopenClosed = hasCaseId && normalizedStatusKey === 'closed' && isAdminRole;
+  const canReopenArchived = hasCaseId && normalizedStatusKey === 'archived' && isSystemAdministratorRole;
+  const canReopenApplication = canReopenClosed || canReopenArchived;
+  const canEscalate = hasCaseId && !APPLICATION_TERMINAL_STATUSES.has(normalizedStatusKey) && !hasOpenEscalation && (isApplicationAssessorRole || isRegionalCoordinatorRole);
+  const canEscalateUp = hasOpenEscalation && isEscalationOwner && roleKey === 'regional_manager';
   const canRespondEscalation = hasOpenEscalation && isEscalationOwner;
-
-  if (canCreateEscalation) {
-    quickActionItems.push({
-      id: 'escalate',
-      text: `Escalate to ${escalationTargetRoleLabel}`,
-      description: `Send this application to the ${escalationTargetRoleLabel} for review.`,
-      type: 'escalation'
-    });
-  }
-  if (canRespondEscalation) {
-    quickActionItems.push({
-      id: 'respond_escalation',
-      text: 'Respond to escalation',
-      description: 'Add guidance or next steps and return it to the requester.',
-      type: 'escalation'
-    });
-    if (roleKey === 'regional_manager') {
-      quickActionItems.push({
-        id: 'escalate_up',
-        text: 'Escalate to Program Administrator',
-        description: 'Forward this escalation to Program Administrators.',
-        type: 'escalation'
-      });
+  const canResolveEscalation = hasOpenEscalation && isEscalationOwner;
+  const quickActionItems = useMemo(() => {
+    const items = [];
+    if (canAssign) {
+      items.push({ id: 'assign', text: 'Assign / reassign' });
     }
-    quickActionItems.push({
-      id: 'resolve_escalation',
-      text: 'Resolve escalation',
-      description: 'Close the escalation after addressing the issue.',
-      type: 'escalation'
-    });
-  }
+    if (canPutOnClosureNotice) {
+      items.push({ id: 'closure-notice', text: 'Put on closure notice' });
+    }
+    if (canResumeReview) {
+      items.push({ id: 'resume-review', text: 'Resume review' });
+    }
+    if (canCloseApplication) {
+      items.push({ id: 'close', text: 'Close application' });
+    }
+    if (canArchiveApplication) {
+      items.push({ id: 'archive', text: 'Archive application' });
+    }
+    if (canReopenApplication) {
+      items.push({ id: 'reopen', text: 'Reopen application' });
+    }
+    if (canEscalate) {
+      items.push({ id: 'escalate', text: `Escalate to ${escalationTargetRoleLabel}` });
+    }
+    if (canRespondEscalation) {
+      items.push({ id: 'respond-escalation', text: 'Respond to escalation' });
+    }
+    if (canResolveEscalation) {
+      items.push({ id: 'resolve-escalation', text: 'Resolve escalation' });
+    }
+    if (canEscalateUp) {
+      items.push({ id: 'escalate-up', text: 'Escalate to Program Administrator' });
+    }
+    items.push(...APPLICATION_LAYOUT_ACTIONS);
+    return items;
+  }, [
+    canAssign,
+    canPutOnClosureNotice,
+    canResumeReview,
+    canCloseApplication,
+    canArchiveApplication,
+    canReopenApplication,
+    canEscalate,
+    canRespondEscalation,
+    canResolveEscalation,
+    canEscalateUp,
+    escalationTargetRoleLabel,
+  ]);
 
   const handleConfirmDismiss = () => setConfirmStatusChange(null);
   const [quickActionConfirm, setQuickActionConfirm] = useState(null);
@@ -591,9 +802,108 @@ const ApplicationOverviewWidget = ({
     APPLICATION_STATUS_OPTIONS.find(option => option.value === value) ||
     { value, label: formatStatusLabel(value) };
 
+  const loadAssignable = useCallback(async () => {
+    setAssignLoading(true);
+    setAssignError(null);
+    try {
+      const res = await apiFetch('/api/staff/assignable');
+      if (!res.ok) {
+        throw new Error('assignable_fetch_failed');
+      }
+      const data = await res.json();
+      const rawStaff = Array.isArray(data) ? data : [];
+      const filteredStaff = rawStaff.filter(staff => {
+        if (isSystemAdminRole) return true;
+        if (isProgramAdminRole) {
+          const staffRole = toCanonicalRole(staff?.role || staff?.primary_role || staff?.primaryRole || '');
+          return staffRole !== 'System Administrator';
+        }
+        if (isRegionalManagerRole) {
+          const staffRegion = Number(staff?.region_id ?? staff?.regionId ?? null);
+          const userRegion = Number(currentUserRegionId ?? null);
+          return Number.isFinite(staffRegion) && Number.isFinite(userRegion) && staffRegion === userRegion;
+        }
+        return false;
+      });
+      const options = filteredStaff.map(staff => ({
+        label: `${staff.display_name || staff.email || staff.id} (${staff.role || 'Staff'})`,
+        value: String(staff.id),
+      }));
+      setAssignableStaff(options);
+      const currentOwnerId =
+        caseData?.assigned_user_id ??
+        caseData?.assigned_to_user_id ??
+        caseData?.assignedUserId ??
+        caseData?.owner?.id ??
+        null;
+      if (currentOwnerId && options.some(option => option.value === String(currentOwnerId))) {
+        setSelectedAssignee(options.find(option => option.value === String(currentOwnerId)) || null);
+      }
+    } catch (err) {
+      setAssignableStaff([]);
+      setAssignError('Unable to load assignable staff.');
+    } finally {
+      setAssignLoading(false);
+    }
+  }, [
+    caseData?.assigned_user_id,
+    caseData?.assigned_to_user_id,
+    caseData?.assignedUserId,
+    caseData?.owner?.id,
+    currentUserRegionId,
+    isProgramAdminRole,
+    isRegionalManagerRole,
+    isSystemAdminRole,
+  ]);
+
+  const handleAssignSubmit = useCallback(async () => {
+    const caseId = caseData?.id;
+    if (!caseId || !selectedAssignee?.value) {
+      setAssignError('Select an assignee.');
+      return;
+    }
+    setAssignSubmitting(true);
+    setAssignError(null);
+    try {
+      const response = await apiFetch(`/api/cases/${caseId}/assign`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignee_id: selectedAssignee.value }),
+      });
+      if (!response.ok) {
+        throw new Error('assign_failed');
+      }
+      setAssignModalVisible(false);
+      setSelectedAssignee(null);
+      if (typeof actions?.refreshCaseData === 'function') {
+        await actions.refreshCaseData();
+      } else {
+        await fetchLatestApplication();
+      }
+    } catch (err) {
+      setAssignError('Assignment failed. Please try again.');
+    } finally {
+      setAssignSubmitting(false);
+    }
+  }, [actions, caseData?.id, fetchLatestApplication, selectedAssignee]);
+
+  const requestLayoutSwitch = useCallback(layoutId => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(
+      new CustomEvent('applicationAssessment:set-layout', {
+        detail: { layoutId },
+      })
+    );
+  }, []);
+
   const handleQuickActionSelect = ({ detail }) => {
     const actionId = detail?.id;
-    if (!actionId || !canRunQuickActions) return;
+    if (!actionId) return;
+    const layoutId = APPLICATION_LAYOUT_ACTION_MAP[actionId];
+    if (layoutId) {
+      requestLayoutSwitch(layoutId);
+      return;
+    }
     if (lockedByAnotherUser) {
       setStatusFeedback({
         type: 'warning',
@@ -602,44 +912,93 @@ const ApplicationOverviewWidget = ({
       return;
     }
 
-    const buildConfirm = (title, body, targetStatus) => ({
+    const buildConfirm = ({ title, body, targetStatus, actionLabel, noteHint, confirmWord, resolveEscalation }) => ({
       type: 'status',
       title,
       body,
       targetStatus,
       targetOption: selectOptionByValue(targetStatus),
+      actionLabel,
+      requireNote: true,
+      noteHint,
+      confirmWord,
+      resolveEscalation
     });
 
-    if (actionId === 'suspend') {
-      setQuickActionConfirmInput('');
-      setQuickActionConfirm(buildConfirm(
-        'Suspend application',
-        'Suspending will set the application to Action Required so the applicant can provide additional information or documents.',
-        'docs_requested'
-      ));
+    if (actionId === 'assign') {
+      setAssignError(null);
+      setSelectedAssignee(null);
+      setAssignModalVisible(true);
+      loadAssignable().catch(() => {});
       return;
     }
 
-    if (actionId === 'resume') {
+    if (actionId === 'closure-notice') {
       setQuickActionConfirmInput('');
-      setQuickActionConfirm(buildConfirm(
-        'Resume application',
-        'Resuming returns the application to In Review so you can continue the evaluation after receiving the requested information.',
-        'in_review'
-      ));
+      setQuickActionNote('');
+      setQuickActionConfirm(buildConfirm({
+        title: 'Put on closure notice',
+        body: 'Use this when the applicant has not responded or supplied key documents. This keeps the application open while it is flagged for closure.',
+        targetStatus: 'closure_notice',
+        actionLabel: 'Closure notice',
+        noteHint: 'Include that if the applicant does not respond, escalate to a manager or admin for closure.'
+      }));
+      return;
+    }
+
+    if (actionId === 'resume-review') {
+      setQuickActionConfirmInput('');
+      setQuickActionNote('');
+      setQuickActionConfirm(buildConfirm({
+        title: 'Resume review',
+        body: 'Resume review and return this application to In Review.',
+        targetStatus: 'in_review',
+        actionLabel: 'Resume review'
+      }));
       return;
     }
 
     if (actionId === 'close') {
       setQuickActionConfirmInput('');
-      setQuickActionConfirm({
-        ...buildConfirm(
-          'Close application',
-          'Closing will move this application to Closed. Once closed it cannot be processed further. Use this when the applicant requests closure or is no longer pursuing the application.',
-          'closed'
-        ),
-        confirmWord: 'close',
-      });
+      setQuickActionNote('');
+      setQuickActionConfirm(buildConfirm({
+        title: 'Close application',
+        body: 'Closing will move this application to Closed. Use this when the applicant requests closure or is no longer pursuing the application.',
+        targetStatus: 'closed',
+        actionLabel: 'Close application',
+        resolveEscalation: true
+      }));
+      return;
+    }
+
+    if (actionId === 'archive') {
+      if (hasOpenEscalation) {
+        setStatusFeedback({
+          type: 'info',
+          content: 'Archiving is blocked while an escalation is open. Resolve the escalation before archiving.',
+        });
+        return;
+      }
+      setQuickActionConfirmInput('');
+      setQuickActionNote('');
+      setQuickActionConfirm(buildConfirm({
+        title: 'Archive application',
+        body: 'Archiving hides this application from standard views until restored by an administrator.',
+        targetStatus: 'archived',
+        actionLabel: 'Archive application'
+      }));
+      return;
+    }
+
+    if (actionId === 'reopen') {
+      setQuickActionConfirmInput('');
+      setQuickActionNote('');
+      setQuickActionConfirm(buildConfirm({
+        title: 'Reopen application',
+        body: 'Reopening will return this application to In Review.',
+        targetStatus: 'in_review',
+        actionLabel: 'Reopen application'
+      }));
       return;
     }
 
@@ -656,7 +1015,7 @@ const ApplicationOverviewWidget = ({
       return;
     }
 
-    if (actionId === 'respond_escalation') {
+    if (actionId === 'respond-escalation') {
       setQuickActionConfirmInput('');
       setQuickActionNote('');
       setQuickActionConfirm({
@@ -669,7 +1028,7 @@ const ApplicationOverviewWidget = ({
       return;
     }
 
-    if (actionId === 'resolve_escalation') {
+    if (actionId === 'resolve-escalation') {
       setQuickActionConfirmInput('');
       setQuickActionNote('');
       setQuickActionConfirm({
@@ -677,13 +1036,12 @@ const ApplicationOverviewWidget = ({
         actionId: 'resolve',
         title: 'Resolve escalation',
         body: 'Resolving will close the escalation. Add a brief note describing the resolution.',
-        requireNote: true,
-        confirmWord: 'resolve'
+        requireNote: true
       });
       return;
     }
 
-    if (actionId === 'escalate_up') {
+    if (actionId === 'escalate-up') {
       setQuickActionConfirmInput('');
       setQuickActionNote('');
       setQuickActionConfirm({
@@ -709,9 +1067,66 @@ const ApplicationOverviewWidget = ({
   const confirmCurrentLabel = badgeLabel || formatStatusLabel(canonicalStatus) || 'current status';
   const quickModalVisible = Boolean(quickActionConfirm);
 
-  const runStatusUpdate = async (nextStatus, nextOption) => {
+  const buildActionNote = ({ actionLabel, fromStatus, toStatus, note }) => {
+    const fromLabel = formatStatusLabel(fromStatus);
+    const toLabel = formatStatusLabel(toStatus);
+    const trimmedNote = (note || '').trim();
+    const action = actionLabel || 'Status update';
+    if (!trimmedNote) {
+      return `${action} (${fromLabel} -> ${toLabel})`;
+    }
+    return `${action} (${fromLabel} -> ${toLabel}): ${trimmedNote}`;
+  };
+
+  const saveCaseNote = async ({ caseId, actionLabel, fromStatus, toStatus, note }) => {
+    const trimmed = (note || '').trim();
+    if (!trimmed) return true;
+    const body = buildActionNote({ actionLabel, fromStatus, toStatus, note: trimmed });
+    const response = await apiFetch(`/api/cases/${caseId}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body })
+    });
+    if (!response.ok) {
+      throw new Error('note_save_failed');
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('case-notes-refresh', { detail: { caseId } }));
+      window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId } }));
+    }
+    return true;
+  };
+
+  const resolveEscalationIfNeeded = async (note) => {
+    if (!hasOpenEscalation || !escalation?.id) return;
+    const response = await apiFetch(`/api/escalations/${escalation.id}/respond`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'resolve', note: (note || '').trim(), disposition: 'resolve' })
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const message = body?.message || body?.error || 'Failed to resolve escalation.';
+      throw new Error(message);
+    }
+  };
+
+  const runStatusUpdate = async (nextStatus, nextOption, options = {}) => {
+    const {
+      note = '',
+      actionLabel = '',
+      resolveEscalation = false,
+      blockOnEscalation = false,
+    } = options;
     if (!caseData?.id) {
       setStatusFeedback({ type: 'error', content: 'Case details are unavailable; cannot update status.' });
+      return;
+    }
+    if (blockOnEscalation && hasOpenEscalation) {
+      setStatusFeedback({
+        type: 'info',
+        content: 'This action is blocked while an escalation is open. Resolve the escalation before proceeding.',
+      });
       return;
     }
     const previousStatus = statusValue;
@@ -721,6 +1136,7 @@ const ApplicationOverviewWidget = ({
     setStatusValue(nextStatus);
     setSavingStatus(true);
     let releaseAfter = false;
+    let noteSaved = true;
     try {
       if (!lockState.owned) {
         const lockResult = await acquireLock();
@@ -737,8 +1153,12 @@ const ApplicationOverviewWidget = ({
         refreshLockHeartbeat().catch(() => {});
       }
 
+      if (resolveEscalation) {
+        await resolveEscalationIfNeeded(note);
+      }
+
       const expectedRowVersion = Number(rowVersion || caseData?.application_row_version || application?.row_version || 0);
-      const payload = { status: nextStatus, applicationStatus: nextStatus };
+      const payload = { applicationStatus: nextStatus };
       if (expectedRowVersion > 0) {
         payload.expectedRowVersion = expectedRowVersion;
       }
@@ -791,6 +1211,18 @@ const ApplicationOverviewWidget = ({
         throw new Error(message);
       }
 
+      try {
+        await saveCaseNote({
+          caseId: caseData.id,
+          actionLabel: actionLabel || label,
+          fromStatus: previousStatus || '',
+          toStatus: nextStatus,
+          note,
+        });
+      } catch (_) {
+        noteSaved = false;
+      }
+
       await fetchLatestApplication();
       if (typeof actions?.refreshCaseData === 'function') {
         try {
@@ -799,7 +1231,18 @@ const ApplicationOverviewWidget = ({
           // ignore refresh failures, local state already updated
         }
       }
-      setStatusFeedback({ type: 'success', content: `Application status updated to ${label}.` });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId: caseData.id } }));
+      }
+      await fetchEscalation().catch(() => {});
+      if (!noteSaved) {
+        setStatusFeedback({
+          type: 'warning',
+          content: `Application status updated to ${label}, but the note could not be saved. Please add the note manually.`,
+        });
+      } else {
+        setStatusFeedback({ type: 'success', content: `Application status updated to ${label}.` });
+      }
     } catch (err) {
       manualStatusRef.current = null;
       setStatusValue(previousStatus);
@@ -936,7 +1379,7 @@ const ApplicationOverviewWidget = ({
     }
 
     const canonicalNextStatus = getCaseStatusContext(nextStatus).canonicalStatus;
-    if (!isStatusTransitionAllowed({ role: userRole, fromStatus: canonicalStatus, toStatus: canonicalNextStatus })) {
+    if (!isStatusTransitionAllowed({ role: canonicalRole || userRole, fromStatus: canonicalStatus, toStatus: canonicalNextStatus })) {
       setStatusFeedback({
         type: 'info',
         content: 'That status change is not available for your role.',
@@ -1017,6 +1460,7 @@ const ApplicationOverviewWidget = ({
   const phoneNumber = caseData?.applicant_phone || answers['telephone-day'] || answers['telephone-alt'];
   if (phoneNumber) overviewItems.push({ label: 'Phone', value: phoneNumber });
 
+  if (provinceLabel) overviewItems.push({ label: 'Province / Territory', value: provinceLabel });
 
   if (application?.created_at) overviewItems.push({ label: 'Received At', value: formatDateTime(application.created_at) });
   if (application?.updated_at) overviewItems.push({ label: 'Last Updated', value: formatDateTime(application.updated_at) });
@@ -1037,6 +1481,24 @@ const ApplicationOverviewWidget = ({
     });
   }
 
+  if (applicantUserId) {
+    let checklistValue = 'Unavailable';
+    if (checklistLoading) {
+      checklistValue = 'Loading...';
+    } else if (Number.isFinite(checklistMissingCount)) {
+      if (checklistMissingCount > 0) {
+        checklistValue = (
+          <Badge color="severity-high">
+            {`${checklistMissingCount} missing`}
+          </Badge>
+        );
+      } else {
+        checklistValue = <Badge color="green">Complete</Badge>;
+      }
+    }
+    overviewItems.push({ label: 'Document Checklist', value: checklistValue });
+  }
+
   const assignedName = caseData?.assigned_user_name || application?.assigned_evaluator?.name;
   const assignedEmail = caseData?.assigned_user_email || application?.assigned_evaluator?.email;
   if (assignedName || assignedEmail) {
@@ -1048,6 +1510,15 @@ const ApplicationOverviewWidget = ({
     overviewItems.push({ label: 'Assigned PTMA', value: caseData.assigned_user_ptma_name });
   }
 
+  if (activeLock) {
+    if (lockOwnerLabel) {
+      overviewItems.push({ label: 'Lock Owner', value: lockOwnerLabel });
+    }
+    if (lockExpiresLabel) {
+      overviewItems.push({ label: 'Lock Expires', value: lockExpiresLabel });
+    }
+  }
+
   // Removed separate caseStatusSection; status selector now inline in overviewItems
 
   const overviewContent = loading ? (
@@ -1057,7 +1528,11 @@ const ApplicationOverviewWidget = ({
   ) : error ? (
     <Box color="text-status-critical">{error}</Box>
   ) : overviewItems.length ? (
-  <KeyValuePairs columns={5} items={overviewItems} />
+    <ColumnLayout columns={6} minColumnWidth={160} variant="text-grid" borders="vertical">
+      {overviewItems.map(item => (
+        <DetailItem key={item.label} label={item.label} value={item.value} />
+      ))}
+    </ColumnLayout>
   ) : (
     <Box color="text-status-inactive">No overview data available.</Box>
   );
@@ -1077,7 +1552,7 @@ const ApplicationOverviewWidget = ({
                     onItemClick={handleQuickActionSelect}
                     ariaLabel="Quick actions"
                     expandToViewport
-                    disabled={!canRunQuickActions || savingStatus || quickActionItems.length === 0}
+                    disabled={savingStatus || quickActionItems.length === 0}
                   >
                     Quick actions
                   </ButtonDropdown>
@@ -1142,6 +1617,54 @@ const ApplicationOverviewWidget = ({
           </Alert>
         )}
         {overviewContent}
+        <Modal
+          visible={assignModalVisible}
+          onDismiss={() => {
+            if (assignSubmitting) return;
+            setAssignModalVisible(false);
+            setSelectedAssignee(null);
+            setAssignError(null);
+          }}
+          header="Assign / reassign application"
+          closeAriaLabel="Close assign modal"
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button
+                onClick={() => {
+                  if (assignSubmitting) return;
+                  setAssignModalVisible(false);
+                  setSelectedAssignee(null);
+                  setAssignError(null);
+                }}
+                disabled={assignSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button variant="primary" loading={assignSubmitting} onClick={handleAssignSubmit}>
+                Save
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            {assignError ? <StatusIndicator type="error">{assignError}</StatusIndicator> : null}
+            <FormField
+              label="Assignee"
+              description="Select the staff member who will own this application."
+              stretch
+            >
+              <Select
+                placeholder={assignLoading ? 'Loading staff...' : 'Select assignee'}
+                selectedOption={selectedAssignee}
+                options={assignableStaff}
+                onChange={({ detail }) => setSelectedAssignee(detail.selectedOption || null)}
+                statusType={assignLoading ? 'loading' : 'finished'}
+                filteringType="auto"
+                disabled={assignLoading}
+              />
+            </FormField>
+          </SpaceBetween>
+        </Modal>
         {confirmModalVisible && (
           <Modal
             visible={confirmModalVisible}
@@ -1213,10 +1736,19 @@ const ApplicationOverviewWidget = ({
                       return;
                     }
                     const targetOption = quickActionConfirm?.targetOption;
+                    const note = quickActionNote;
+                    const actionLabel = quickActionConfirm?.actionLabel;
+                    const resolveEscalation = Boolean(quickActionConfirm?.resolveEscalation);
+                    const blockOnEscalation = Boolean(quickActionConfirm?.blockOnEscalation);
                     setQuickActionConfirm(null);
                     setQuickActionConfirmInput('');
                     setQuickActionNote('');
-                    runStatusUpdate(quickActionConfirm.targetStatus, targetOption);
+                    runStatusUpdate(quickActionConfirm.targetStatus, targetOption, {
+                      note,
+                      actionLabel,
+                      resolveEscalation,
+                      blockOnEscalation,
+                    });
                   }}
                   loading={savingStatus}
                   disabled={
@@ -1239,7 +1771,10 @@ const ApplicationOverviewWidget = ({
                 </Box>
               ) : null}
               {quickActionConfirm?.requireNote ? (
-                <FormField label="Notes" description="Provide context for this action.">
+                <FormField
+                  label="Notes"
+                  description={quickActionConfirm?.noteHint || 'Provide context for this action.'}
+                >
                   <Textarea
                     value={quickActionNote}
                     onChange={e => setQuickActionNote(e.detail.value || '')}

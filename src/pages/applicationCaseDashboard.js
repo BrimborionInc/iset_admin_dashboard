@@ -92,6 +92,37 @@ const defaultLayout = [
   { id: 'application-events', rowSpan: 5, columnSpan: 4 },
 ];
 
+const reviewAssessmentLayout = [
+  { id: 'application-overview', rowSpan: 3, columnSpan: 4 },
+  { id: 'iset-application-form', rowSpan: 6, columnSpan: 2 },
+  { id: 'coordinator-assessment', rowSpan: 6, columnSpan: 2 },
+];
+
+const documentsMessagesLayout = [
+  { id: 'application-overview', rowSpan: 3, columnSpan: 4 },
+  { id: 'supporting-documents', rowSpan: 6, columnSpan: 2 },
+  { id: 'secure-messaging', rowSpan: 6, columnSpan: 2 },
+];
+
+const notesCalendarLayout = [
+  { id: 'application-overview', rowSpan: 3, columnSpan: 4 },
+  { id: 'case-notes', rowSpan: 6, columnSpan: 2 },
+  { id: 'case-calendar', rowSpan: 6, columnSpan: 2 },
+];
+
+const auditTrailLayout = [
+  { id: 'application-overview', rowSpan: 3, columnSpan: 4 },
+  { id: 'iset-application-form', rowSpan: 6, columnSpan: 2 },
+  { id: 'application-events', rowSpan: 6, columnSpan: 2 },
+];
+
+const QUICK_ACTION_LAYOUTS = {
+  reviewAssessment: reviewAssessmentLayout,
+  documentsMessages: documentsMessagesLayout,
+  notesCalendar: notesCalendarLayout,
+  auditTrail: auditTrailLayout,
+};
+
 const exportLayout = (items = []) =>
   items.map(({ id, rowSpan, columnSpan, columnOffset }) => ({
     id,
@@ -258,6 +289,14 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     } catch (_) {}
   }, [setAvailableItems]);
 
+  const applyLayout = useCallback(
+    nextLayout => {
+      if (!Array.isArray(nextLayout) || nextLayout.length === 0) return;
+      setLayout(current => (areLayoutsEqual(current, nextLayout) ? current : [...nextLayout]));
+    },
+    [setLayout]
+  );
+
   const openPalette = useCallback(() => {
     if (typeof setAvailableItems === 'function') {
       try {
@@ -272,13 +311,22 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   useEffect(() => {
     const handleOpenPalette = () => openPalette();
     const handleResetLayout = () => resetLayout();
+    const handleSetLayout = event => {
+      const detail = event?.detail || {};
+      const nextLayout = Array.isArray(detail.layout) ? detail.layout : QUICK_ACTION_LAYOUTS[detail.layoutId];
+      if (nextLayout) {
+        applyLayout(nextLayout);
+      }
+    };
     window.addEventListener('applicationAssessment:openPalette', handleOpenPalette);
     window.addEventListener('applicationAssessment:resetLayout', handleResetLayout);
+    window.addEventListener('applicationAssessment:set-layout', handleSetLayout);
     return () => {
       window.removeEventListener('applicationAssessment:openPalette', handleOpenPalette);
       window.removeEventListener('applicationAssessment:resetLayout', handleResetLayout);
+      window.removeEventListener('applicationAssessment:set-layout', handleSetLayout);
     };
-  }, [openPalette, resetLayout]);
+  }, [applyLayout, openPalette, resetLayout]);
 
   const handleCaseUpdate = updates => {
     setCaseData(prev => {

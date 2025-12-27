@@ -17,6 +17,8 @@ import {
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 import { apiFetch } from "../../../../auth/apiClient.js";
+import useCurrentUser from "../../../../hooks/useCurrentUser.js";
+import { toCanonicalRole } from "../../../../context/RoleMatrixContext.js";
 
 const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
@@ -26,9 +28,11 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     markReadyToClose,
     closeCase,
     reopenCase,
+    archiveCase,
     refresh,
     selectedActionPlanId,
   } = useCaseWorkspace();
+  const currentUser = useCurrentUser();
   const [actionError, setActionError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [validationModal, setValidationModal] = useState({
@@ -41,12 +45,18 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [modalLoading, setModalLoading] = useState(false);
   const [headerWarnings, setHeaderWarnings] = useState([]);
   const [reopenModalOpen, setReopenModalOpen] = useState(false);
+  const [archiveModalOpen, setArchiveModalOpen] = useState(false);
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [assignableStaff, setAssignableStaff] = useState([]);
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState(null);
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [selectedAssignee, setSelectedAssignee] = useState(null);
+  const canonicalRole = toCanonicalRole(currentUser?.role || null);
+  const isSystemAdmin = canonicalRole === "System Administrator";
+  const isProgramAdmin = canonicalRole === "Program Administrator";
+  const isRegionalManager = canonicalRole === "Regional Coordinator";
+  const currentRegionId = currentUser?.regionId ?? null;
 
   const DetailItem = ({ label, value }) => (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
@@ -382,19 +392,54 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     );
   }, [interventionRollup]);
   const quickActions = useMemo(() => {
-    const items = [
-      { id: "assign", text: "Assign / reassign" },
-      { id: "propose-intervention", text: "Propose intervention" },
-    ];
-    if (statusKey === "ready_to_close") {
-      items.push({ id: "close-case", text: "Close case" });
-    } else if (statusKey === "closed") {
-      items.push({ id: "reopen-case", text: "Re-open case" });
-    } else {
-      items.push({ id: "close", text: "Mark ready to close" });
+    const items = [];
+    const hasCase = Boolean(caseData?.id);
+    const isReadyToClose = statusKey === "ready_to_close";
+    const isClosed = statusKey === "closed";
+    const isArchived = statusKey === "archived";
+    const isActive = statusKey === "active";
+    const isDormant = statusKey === "dormant";
+    const isInitiated = statusKey === "initiated";
+    const canAssign = hasCase && !isArchived && (isSystemAdmin || isProgramAdmin || isRegionalManager);
+    const canPropose = hasCase && (isInitiated || isActive || isDormant);
+    const canMarkReady = hasCase && (isActive || isDormant);
+    const canClose = hasCase && isReadyToClose && (isSystemAdmin || isProgramAdmin || isRegionalManager);
+    const canArchive = hasCase && isClosed && (isSystemAdmin || isProgramAdmin);
+    const canReopenClosed = hasCase && (isReadyToClose || isClosed) && (isSystemAdmin || isProgramAdmin);
+    const canReopenArchived = hasCase && isArchived && isSystemAdmin;
+    const canReopen = canReopenClosed || canReopenArchived;
+
+    if (canAssign) {
+      items.push({ id: "assign", text: "Assign / reassign" });
     }
+    if (canPropose) {
+      items.push({ id: "propose-intervention", text: "Propose new intervention" });
+    }
+    items.push({ id: "manage-plans-interventions", text: "Manage plans and interventions" });
+    items.push({ id: "view-notes-calendar", text: "View notes and case calendar" });
+    items.push({ id: "documents-messages", text: "Documents and messages" });
+    items.push({ id: "esdc-validation", text: "ESDC validation" });
+    if (canMarkReady) {
+      items.push({ id: "mark-ready-to-close", text: "Mark ready to close" });
+    }
+    if (canClose) {
+      items.push({ id: "close-case", text: "Close case" });
+    }
+    if (canArchive) {
+      items.push({ id: "archive-case", text: "Archive case" });
+    }
+    if (canReopen) {
+      items.push({ id: "reopen-case", text: "Reopen case" });
+    }
+
     return items;
-  }, [statusKey]);
+  }, [
+    caseData?.id,
+    statusKey,
+    isSystemAdmin,
+    isProgramAdmin,
+    isRegionalManager,
+  ]);
 
   const compliance = caseData?.compliance ?? {};
   const mapValidationStatus = status => {
@@ -603,12 +648,24 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         throw new Error("assignable_fetch_failed");
       }
       const data = await res.json();
-      const options = Array.isArray(data)
-        ? data.map(staff => ({
-            label: `${staff.display_name || staff.email || staff.id} (${staff.role || "Staff"})`,
-            value: String(staff.id),
-          }))
-        : [];
+      const rawStaff = Array.isArray(data) ? data : [];
+      const filteredStaff = rawStaff.filter(staff => {
+        if (isSystemAdmin) return true;
+        if (isProgramAdmin) {
+          const staffRole = toCanonicalRole(staff?.role || staff?.primary_role || staff?.primaryRole || "");
+          return staffRole !== "System Administrator";
+        }
+        if (isRegionalManager) {
+          const staffRegion = Number(staff?.region_id ?? staff?.regionId ?? null);
+          const userRegion = Number(currentRegionId ?? null);
+          return Number.isFinite(staffRegion) && Number.isFinite(userRegion) && staffRegion === userRegion;
+        }
+        return false;
+      });
+      const options = filteredStaff.map(staff => ({
+        label: `${staff.display_name || staff.email || staff.id} (${staff.role || "Staff"})`,
+        value: String(staff.id),
+      }));
       setAssignableStaff(options);
       const currentOwnerId = caseData?.owner?.id ? String(caseData.owner.id) : null;
       if (currentOwnerId && options.some(opt => opt.value === currentOwnerId)) {
@@ -620,7 +677,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     } finally {
       setAssignLoading(false);
     }
-  }, [caseData?.owner?.id]);
+  }, [caseData?.owner?.id, currentRegionId, isProgramAdmin, isRegionalManager, isSystemAdmin]);
 
   const handleAssignSubmit = useCallback(async () => {
     const caseId = caseData?.id;
@@ -649,6 +706,15 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     }
   }, [caseData?.id, selectedAssignee, refresh]);
 
+  const requestLayoutSwitch = useCallback(layoutId => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("iset-case-workspace:set-layout", {
+        detail: { layoutId },
+      })
+    );
+  }, []);
+
   const handleQuickAction = useCallback(
     async ({ detail }) => {
       if (!detail?.id) return;
@@ -657,7 +723,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         setSelectedAssignee(null);
         setAssignModalVisible(true);
         loadAssignable().catch(() => {});
-      } else if (detail.id === "close") {
+      } else if (detail.id === "mark-ready-to-close") {
         setActionError(null);
         setActionLoading(true);
         try {
@@ -695,6 +761,8 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         }
       } else if (detail.id === "reopen-case") {
         setReopenModalOpen(true);
+      } else if (detail.id === "archive-case") {
+        setArchiveModalOpen(true);
       } else if (detail.id === "propose-intervention") {
         setActionError(null);
         const planId = selectedActionPlanId || caseData?.actionPlans?.[0]?.id || null;
@@ -709,6 +777,14 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
             })
           );
         }
+      } else if (detail.id === "manage-plans-interventions") {
+        requestLayoutSwitch("managePlans");
+      } else if (detail.id === "view-notes-calendar") {
+        requestLayoutSwitch("notesCalendar");
+      } else if (detail.id === "documents-messages") {
+        requestLayoutSwitch("documentsMessages");
+      } else if (detail.id === "esdc-validation") {
+        requestLayoutSwitch("esdcValidation");
       }
     },
     [
@@ -720,6 +796,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       loadAssignable,
       selectedActionPlanId,
       caseData,
+      requestLayoutSwitch,
     ]
   );
 
@@ -885,6 +962,45 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
                 <Box color="text-body-secondary">No warnings detected.</Box>
               )}
             </div>
+          </SpaceBetween>
+        </Modal>
+        <Modal
+          visible={archiveModalOpen}
+          onDismiss={() => setArchiveModalOpen(false)}
+          header="Archive case"
+          closeAriaLabel="Dismiss archive case confirmation"
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => setArchiveModalOpen(false)} disabled={actionLoading}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={actionLoading}
+                onClick={async () => {
+                  if (actionLoading) return;
+                  setActionError(null);
+                  setActionLoading(true);
+                  try {
+                    await archiveCase();
+                    await refresh();
+                  } catch (err) {
+                    setActionError(err?.message || "Failed to archive case.");
+                  } finally {
+                    setActionLoading(false);
+                    setArchiveModalOpen(false);
+                  }
+                }}
+              >
+                Archive case
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="m">
+            <Box>
+              Archive this case? It will be hidden from standard views until restored by a System Administrator.
+            </Box>
           </SpaceBetween>
         </Modal>
         <Modal

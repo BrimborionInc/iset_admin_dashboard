@@ -2,6 +2,20 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2025-12-26
+- UX: Application assessment cost step now supports recurring cost scheduling (period, amount, occurrences) tied to the total cost input.
+- Fix: Case detail payload now includes case context so assessment delivery mode persists after save/refresh.
+- UX: Removed the intervention duration input from the application assessment cost step.
+- UX: Reduced redundant section headings inside the application assessment wizard steps.
+- UX: Moved budget pot selection into the approval/decision step for application assessments.
+- UX: Application assessment checklist step now supports checklist-driven uploads, matching the proposed intervention workflow.
+- UX: Application assessment wizard now blocks advancement past the checklist step until required items are complete for draft assessments.
+- UX: Approval/decision step now reveals budget pot fields only when approved with a non-zero cost and clears them otherwise.
+- UX: Application assessment quick actions now include layout presets for review, documents/messages, and notes/calendar views.
+- UX: Application assessment quick actions now include a View audit trail layout preset.
+- UX: Application overview key/value layout now supports up to six columns.
+- UX: Application overview now shows province/territory, document checklist completeness, and lock owner/expiry.
+
 ## 2025-01-05
 - Authoring: Default Value fields now accept `{data_key}` placeholders to prefill from another field in the same workflow.
 

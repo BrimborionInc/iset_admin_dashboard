@@ -11,6 +11,7 @@ Last Updated: 2025-11-24
 ## Assessor experience
 - When opening an application in the workspace, surface a notice if the client already has a case (e.g., banner/bell with a link to the case workspace and last status/date).
 - The notice should be acknowledged before approval so the reuse decision is deliberate.
+  - Implementation note: existing-client detection in the admin backend matches by SIN hash (preferred), prior submission SIN scan, email, then name + DOB (fallback to name-only). The assessment UI should only flag "existing client" when another case already exists for that matched client and show the current case manager if assigned.
 
 ## Approval flow
 - On approval, if a case exists: prompt “Reuse existing case (recommended)” vs “Create new case (rare)”. Default to reuse.

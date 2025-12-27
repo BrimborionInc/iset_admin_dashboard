@@ -140,6 +140,7 @@ const ASSESSMENT_STATUSES = new Set([
   'in_review', 'in review',
   'docs_requested', 'docs requested',
   'action_required', 'action required', 'action required (docs requested)',
+  'closure_notice', 'closure notice',
   'pending info', 'pending information', 'info requested', 'information requested',
   'on hold', 'on_hold'
 ]);
@@ -153,13 +154,13 @@ const getStatusInfo = (row) => {
   const isUnassignedCase = rawStatus === 'submitted' && !row.assigned_user_id;
   const eligibilityMissing =
     !row.assessment_esdc_eligibility &&
-    ['submitted', 'in_review', 'docs_requested', 'pending_approval'].includes(rawStatus);
+    ['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice'].includes(rawStatus);
   const statusType = (() => {
     if (['approved', 'completed'].includes(rawStatus)) return 'success';
     if (['rejected', 'declined'].includes(rawStatus)) return 'error';
     if (['closed', 'cancelled'].includes(rawStatus)) return 'info';
     if (eligibilityMissing) return 'warning';
-    if (['docs_requested', 'action_required'].includes(rawStatus)) return 'warning';
+    if (['docs_requested', 'action_required', 'closure_notice', 'closure notice'].includes(rawStatus)) return 'warning';
     return isUnassignedCase || rawStatus === 'new' ? 'pending' : 'info';
   })();
   const qualifiers = [];

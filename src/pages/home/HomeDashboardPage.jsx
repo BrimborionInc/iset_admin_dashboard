@@ -1175,6 +1175,7 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
         'in_review', 'in review',
         'docs_requested', 'docs requested',
         'action_required', 'action required', 'action required (docs requested)',
+        'closure_notice', 'closure notice',
         'pending info', 'pending information', 'info requested', 'information requested',
         'on hold', 'on_hold'
     ]);
