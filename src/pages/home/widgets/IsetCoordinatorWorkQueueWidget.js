@@ -1,32 +1,32 @@
 import React, { useMemo } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Box, ButtonDropdown, Cards, Header, SpaceBetween } from '@cloudscape-design/components';
+import { Box, Button, ButtonDropdown, Cards, Header, SpaceBetween } from '@cloudscape-design/components';
 
 export const ISET_COORDINATOR_BUCKETS = [
   {
     id: 'my-new-applications',
-    label: 'My New Applications',
-    description: 'Assigned submissions without an acknowledged/contacted action yet; initial contact due within five business days.'
+    label: 'My Applications',
+    description: 'Applications assigned to you that need action or follow-up.'
   },
   {
     id: 'missing-docs',
     label: 'Missing Docs / Follow-ups Needed',
-    description: 'Files in pending or missing-docs status where required items and follow-ups are outstanding.'
+    description: 'Applications waiting on documents or a response from the applicant.'
   },
   {
     id: 'ei-consent-verification',
-    label: 'EI Consent / EI Verification Pending',
-    description: 'EI stream blocked until signed consent is on file and the EI request is sent/returned.'
+    label: 'EI Verification Pending',
+    description: 'Applications waiting on EI consent or verification before they can move forward.'
   },
   {
     id: 'file-complete-processing-due',
-    label: 'File Complete: Processing Due',
-    description: 'Files marked complete now within the processing window for assessment/recommendation.'
+    label: 'Ready to assess',
+    description: 'Assigned applications ready for assessment after EI verification is complete.'
   },
   {
     id: 'approvals-pipeline',
-    label: 'Approvals Pipeline',
-    description: 'Ready to submit to NWAC, awaiting decision, or returned for requested changes.'
+    label: 'Awaiting Approval',
+    description: 'Assessments submitted for review and approval.'
   },
   {
     id: 'funding-agreements',
@@ -55,7 +55,18 @@ export const ISET_COORDINATOR_BUCKETS = [
   }
 ];
 
-const DISABLED_BUCKET_IDS = new Set(ISET_COORDINATOR_BUCKETS.map(bucket => bucket.id));
+const ENABLED_BUCKET_IDS = new Set([
+  'my-new-applications',
+  'missing-docs',
+  'ei-consent-verification',
+  'file-complete-processing-due',
+  'approvals-pipeline',
+  'funding-agreements',
+  'active-clients-checkins'
+]);
+const DISABLED_BUCKET_IDS = new Set(
+  ISET_COORDINATOR_BUCKETS.map(bucket => bucket.id).filter(id => !ENABLED_BUCKET_IDS.has(id))
+);
 
 export const ISET_COORDINATOR_SAMPLE_ITEMS = [
   {
@@ -69,7 +80,7 @@ export const ISET_COORDINATOR_SAMPLE_ITEMS = [
     status: 'Submitted',
     dueDate: '2025-03-24',
     submittedAt: '2025-03-17',
-    summary: 'Newly assigned; no acknowledgement recorded yet.',
+    summary: 'Assigned application awaiting review.',
     workspacePath: '/case-assignment-dashboard'
   },
   {
@@ -108,10 +119,10 @@ export const ISET_COORDINATOR_SAMPLE_ITEMS = [
     applicant: 'K. Whitehorse',
     region: 'Yukon',
     owner: 'You',
-    status: 'Complete',
+    status: 'In review',
     dueDate: '2025-03-28',
     submittedAt: '2025-02-28',
-    summary: 'All docs in; processing window active.',
+    summary: 'EI verification complete; ready for assessment.',
     workspacePath: '/case-assignment-dashboard'
   },
   {
@@ -122,10 +133,10 @@ export const ISET_COORDINATOR_SAMPLE_ITEMS = [
     applicant: 'L. Stonechild',
     region: 'Central',
     owner: 'You',
-    status: 'Ready for NWAC submission',
+    status: 'Pending approval',
     dueDate: '2025-03-21',
     submittedAt: '2025-02-24',
-    summary: 'Assessment and recommendation drafted; package ready.',
+    summary: 'Assessment submitted and awaiting approval decision.',
     workspacePath: '/case-assignment-dashboard'
   },
   {
@@ -146,14 +157,17 @@ export const ISET_COORDINATOR_SAMPLE_ITEMS = [
     id: 'INT-430',
     title: 'INT-430 · Training follow-up',
     bucketId: 'active-clients-checkins',
-    type: 'Intervention',
+    type: 'InterventionMilestone',
     applicant: 'M. Petahtegoose',
     region: 'Ontario',
     owner: 'You',
-    status: 'Active',
+    status: 'In progress',
     dueDate: '2025-03-20',
     submittedAt: '2025-02-10',
     summary: 'Monthly check-in due; milestone start next week.',
+    intervention_label: 'Training follow-up',
+    milestoneLabel: 'Start due in 6 days',
+    milestoneStatus: 'severity-low',
     workspacePath: '/case-assignment-dashboard'
   },
   {
@@ -221,24 +235,45 @@ const settingsDropdown = actions =>
     />
   ) : undefined;
 
-const IsetCoordinatorWorkQueueWidget = ({ countsByBucket = {}, actions }) => {
+const IsetCoordinatorWorkQueueWidget = ({
+  selectedBucketId,
+  onSelectBucket,
+  countsByBucket = {},
+  items = [],
+  actions,
+  onRefresh
+}) => {
   const bucketCounts = useMemo(() => {
     return ISET_COORDINATOR_BUCKETS.map(bucket => {
       const override = countsByBucket[bucket.id];
       const parsed = Number(override);
+      const derivedCount = items.filter(item => item.bucketId === bucket.id).length;
+      const isDisabled = DISABLED_BUCKET_IDS.has(bucket.id);
       return {
         ...bucket,
-        count: Number.isFinite(parsed) ? parsed : '-'
+        count: isDisabled ? '-' : (Number.isFinite(parsed) ? parsed : derivedCount)
       };
     });
-  }, [countsByBucket]);
+  }, [countsByBucket, items]);
+
+  const selectedBucket =
+    bucketCounts.find(bucket => bucket.id === selectedBucketId) || bucketCounts[0] || null;
 
   return (
     <BoardItem
       header={
         <Header
           variant="h2"
-          description="Scaffolded ISET Coordinator work queues; selection is disabled until data wiring is complete."
+          description="Select a work queue to view the assigned items."
+          actions={
+            typeof onRefresh === 'function'
+              ? (
+                <Button iconName="refresh" onClick={() => onRefresh()}>
+                  Refresh
+                </Button>
+              )
+              : undefined
+          }
         >
           Work Queue (ISET Coordinator)
         </Header>
@@ -280,14 +315,19 @@ const IsetCoordinatorWorkQueueWidget = ({ countsByBucket = {}, actions }) => {
           items={bucketCounts}
           selectionType="single"
           trackBy="id"
-          selectedItems={[]}
+          selectedItems={selectedBucket ? [selectedBucket] : []}
           entireCardClickable
           isItemDisabled={item => DISABLED_BUCKET_IDS.has(item.id)}
-          onSelectionChange={() => {}}
+          onSelectionChange={({ detail }) => {
+            const next = detail.selectedItems?.[0];
+            if (next?.id && !DISABLED_BUCKET_IDS.has(next.id) && typeof onSelectBucket === 'function') {
+              onSelectBucket(next.id);
+            }
+          }}
           empty={<Box variant="p">No queues available for this role.</Box>}
         />
         <Box fontSize="body-s" color="text-status-inactive">
-          Buckets are placeholders; enable selection once queue feeds and filters are wired.
+          Additional queues will be enabled as their feeds are wired.
         </Box>
       </SpaceBetween>
     </BoardItem>

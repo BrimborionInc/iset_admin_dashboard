@@ -3806,11 +3806,6 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const reviewStepContent = (
     <SpaceBetween size="m">
-      {!showNWACSection && (
-        <Alert type="info" header="Outcome notice" statusIconAriaLabel="Info">
-          Outcome notice will be available after the assessment is submitted.
-        </Alert>
-      )}
       <ColumnLayout columns={2} variant="text-grid">
         <Box>
           <Header variant="h4">Assessment</Header>

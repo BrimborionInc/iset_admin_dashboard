@@ -209,6 +209,17 @@ const DISABLED_BUCKET_IDS = new Set([
   'stuck-files'
 ]);
 
+const getWorkspacePath = item => {
+  if (item?.workspacePath) return item.workspacePath;
+  const caseId = item?.case_id || item?.caseId || null;
+  if (!caseId) return null;
+  const type = (item?.type || '').toString().trim().toLowerCase();
+  if (type.includes('intervention') || type.includes('case')) {
+    return `/cases/${caseId}`;
+  }
+  return `/application-case/${caseId}`;
+};
+
 const toBoardItemI18n = () => ({
   dragHandleAriaLabel: 'Drag handle',
   dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
@@ -374,14 +385,28 @@ export const ProgramAdminWorkItemsWidget = ({
               {
                 id: 'title',
                 header: 'Item',
-                cell: item => (
-                  <SpaceBetween size="xxs">
-                    <Box fontWeight="bold">{item.title}</Box>
-                    <Box fontSize="body-s" color="text-status-inactive">
-                      {item.summary}
-                    </Box>
-                  </SpaceBetween>
-                )
+                cell: item => {
+                  const workspacePath = getWorkspacePath(item);
+                  return (
+                    <SpaceBetween size="xxs">
+                      <Box fontWeight="bold">
+                        <Link
+                          href={workspacePath || '#'}
+                          onFollow={event => {
+                            if (!workspacePath) {
+                              event.preventDefault();
+                            }
+                          }}
+                        >
+                          {item.title || '—'}
+                        </Link>
+                      </Box>
+                      <Box fontSize="body-s" color="text-status-inactive">
+                        {item.summary}
+                      </Box>
+                    </SpaceBetween>
+                  );
+                }
               },
               { id: 'type', header: 'Type', cell: item => item.type || '—' },
               { id: 'owner', header: 'Owner', cell: item => item.owner || 'Unassigned' },
@@ -425,7 +450,18 @@ export const ProgramAdminWorkItemsWidget = ({
                   <Badge>{selectedBucket?.label || 'Queue'}</Badge>
                   <Badge>{selectedItem.type || 'Item'}</Badge>
                 </SpaceBetween>
-                <Box fontWeight="bold">{selectedItem.title}</Box>
+                <Box fontWeight="bold">
+                  <Link
+                    href={getWorkspacePath(selectedItem) || '#'}
+                    onFollow={event => {
+                      if (!getWorkspacePath(selectedItem)) {
+                        event.preventDefault();
+                      }
+                    }}
+                  >
+                    {selectedItem.title || '—'}
+                  </Link>
+                </Box>
                 <Box fontSize="body-s">{selectedItem.summary}</Box>
                 <ColumnLayout columns={2} variant="text-grid" minColumnWidth={200}>
                   <div>
@@ -450,7 +486,18 @@ export const ProgramAdminWorkItemsWidget = ({
                   </div>
                   <div>
                     <Box variant="awsui-key-label">Applicant</Box>
-                    <Box>{selectedItem.applicant || '—'}</Box>
+                    <Box>
+                      <Link
+                        href={getWorkspacePath(selectedItem) || '#'}
+                        onFollow={event => {
+                          if (!getWorkspacePath(selectedItem)) {
+                            event.preventDefault();
+                          }
+                        }}
+                      >
+                        {selectedItem.applicant || '—'}
+                      </Link>
+                    </Box>
                   </div>
                 </ColumnLayout>
                 <SpaceBetween size="xs" direction="horizontal">
@@ -465,13 +512,13 @@ export const ProgramAdminWorkItemsWidget = ({
                   <Button
                     variant="primary"
                     iconName="external"
-                    href={selectedItem.workspacePath}
+                    href={getWorkspacePath(selectedItem) || '#'}
                     onClick={event => {
-                      if (!selectedItem.workspacePath) {
+                      if (!getWorkspacePath(selectedItem)) {
                         event.preventDefault();
                       }
                     }}
-                    disabled={!selectedItem.workspacePath}
+                    disabled={!getWorkspacePath(selectedItem)}
                   >
                     Open workspace
                   </Button>
@@ -479,8 +526,8 @@ export const ProgramAdminWorkItemsWidget = ({
                 <Box fontSize="body-s" color="text-status-inactive">
                   Actions are scaffolded; wire these buttons to the application or case workspace once the endpoints are ready.
                 </Box>
-                <Link href={selectedItem.workspacePath || '#'} onFollow={event => {
-                  if (!selectedItem.workspacePath) {
+                <Link href={getWorkspacePath(selectedItem) || '#'} onFollow={event => {
+                  if (!getWorkspacePath(selectedItem)) {
                     event.preventDefault();
                   }
                 }}>

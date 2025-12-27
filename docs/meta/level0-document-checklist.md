@@ -32,7 +32,7 @@ Working log for implementing document labeling and future checklist support acro
 - Data store: `iset_document` includes `label`, `document_category`, `metadata`; see dumps in `docs/data/DB-Structure-Dump/`.
 
 ## Checklist doc types (in UI dropdown)
-application_form (legacy), ei_consent, ei_verification, indigenous_declaration, conflict_of_interest, identity_document, supporting_evidence, client_acknowledgement, release_student_info, media_consent, financial_overview, financial_records (income evidence), financial_evidence (expense evidence), statement_of_account, acceptance_letter, band_funding_confirmation, band_funding_denial, medical_documentation, resume, case_assessment, funding_agreement, attendance_form.
+application_form (legacy), ei_consent, ei_verification, indigenous_declaration, conflict_of_interest, identity_document, supporting_evidence, client_acknowledgement, release_student_info, media_consent, financial_overview, financial_records (income evidence), financial_evidence (expense evidence), statement_of_account, acceptance_letter, band_funding_confirmation, band_funding_denial, medical_documentation, resume, case_assessment, funding_agreement, attendance_form, receipt.
 
 ## Progress log
 - 2025-11-25: Supporting Documents widget now opens a label modal before file selection; uploads send the provided label and reset after upload; table shows label as first column (falls back to filename only if label absent). Metadata envelope still pending.

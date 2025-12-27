@@ -19,6 +19,12 @@ Key columns:
 - `file_path` canonical relative path (unique) + `file_name` original display name.
 - `status` for archival / soft delete.
 
+## Source Values
+- `application_submission`: Uploaded or generated as part of the original application submission.
+- `secure_message_attachment`: Attached to a secure message in the admin workspace.
+- `system_generated`: Generated from signed digital forms (displayed as "Digitally signed" in the UI).
+- `manual_upload`: Uploaded directly by staff in the admin workspace.
+
 ## Endpoint Changes
 - `GET /api/applicants/:id/documents` now queries `iset_document` where `applicant_user_id = :id AND status='active'`.
 - `GET /api/admin/messages/:id/attachments` auto-inserts (upserts) each attachment into `iset_document` when a `case_id` query param is provided, updating applicant/application/user columns if they were previously null.

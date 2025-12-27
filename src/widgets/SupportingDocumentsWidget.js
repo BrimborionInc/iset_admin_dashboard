@@ -53,6 +53,7 @@ const DOCUMENT_TYPE_OPTIONS_FALLBACK = [
   { value: 'case_assessment', label: 'Case manager assessment', scope: 'application' },
   { value: 'funding_agreement', label: 'Funding agreement', scope: 'application' },
   { value: 'attendance_form', label: 'Attendance form', scope: 'application' },
+  { value: 'receipt', label: 'Receipt', scope: 'application' },
   { value: 'voided_cheque', label: 'Voided cheque', scope: 'client' }
 ];
 
@@ -72,6 +73,25 @@ const parseMetadata = value => {
   } catch {
     return null;
   }
+};
+
+const SOURCE_LABELS = {
+  application_submission: 'Application submission',
+  secure_message_attachment: 'Message attachment',
+  manual_upload: 'Manual upload',
+  system_generated: 'Digitally signed'
+};
+
+const formatSourceLabel = source => {
+  if (!source) return '';
+  const normalized = String(source).trim().toLowerCase();
+  if (!normalized) return '';
+  return SOURCE_LABELS[normalized] || normalized.replace(/_/g, ' ');
+};
+
+const formatApplicationStatus = value => {
+  if (!value) return '';
+  return String(value).trim().replace(/_/g, ' ');
 };
 
 const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) => {
@@ -278,17 +298,17 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         .filter(item => item && item.applicationId)
         .map(item => {
           const value = String(item.applicationId);
-          const label =
-            item.caseNumber || item.referenceNumber
-              ? item.caseNumber
-                ? `Case ${item.caseNumber}`
-                : `Application ${item.referenceNumber}`
-              : `Application ${value}`;
-          const description = item.caseNumber
-            ? item.referenceNumber
+          const reference = item.referenceNumber || item.caseNumber || value;
+          const label = isCaseWorkspace
+            ? item.caseNumber
+              ? `Case ${item.caseNumber}`
+              : `Application ${reference}`
+            : `Application ${reference}`;
+          const description = isCaseWorkspace
+            ? item.caseNumber && item.referenceNumber
               ? `Application ${item.referenceNumber}`
               : null
-            : null;
+            : formatApplicationStatus(item.applicationStatus) || null;
           return {
             value,
             label,
@@ -311,7 +331,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     } finally {
       setApplicationsLoading(false);
     }
-  }, [applicantUserId, applicationId]);
+  }, [applicantUserId, applicationId, isCaseWorkspace]);
   const getDocumentTypeScope = useCallback(
     code => {
       const match = documentTypeOptions.find(opt => opt.value === code);
@@ -1064,6 +1084,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     [loadDocuments, loadChecklist]
   );
 
+  const hasMultipleApplications = applicationOptions.length > 1;
+
   const baseColumnDefinitions = useMemo(
     () => [
       {
@@ -1091,19 +1113,25 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       },
       {
         id: 'case_number',
-        header: 'Case',
+        header: isCaseWorkspace ? 'Case' : 'Application',
         cell: item => {
           if (item.linked_intervention_id) {
             const key = String(item.linked_intervention_id);
             const option = interventionOptionMap.get(key);
             return option?.label ? `Intervention: ${option.label}` : `Intervention ${key}`;
           }
-          if (item.application_id) return `Application ${item.application_id}`;
+          const referenceNumber = item.reference_number || item.referenceNumber || null;
+          if (!isCaseWorkspace) {
+            if (referenceNumber) return referenceNumber;
+            if (item.application_id) return `Application ${item.application_id}`;
+          }
           if (item.case_number) return item.case_number;
+          if (referenceNumber) return referenceNumber;
+          if (item.application_id) return `Application ${item.application_id}`;
           return 'Client';
         }
       },
-      { id: 'source', header: 'Source', cell: item => (item.source || '').replace(/_/g, ' ') },
+      { id: 'source', header: 'Source', cell: item => formatSourceLabel(item.source) },
       {
         id: 'scope',
         header: 'Scope',
@@ -1125,33 +1153,39 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           const inFlight = !!pendingDownloads[item.id];
           const deleting = !!pendingDeletes[item.id];
           const canDuplicate = item?.scope !== 'client';
+          const allowDuplicate = canDuplicate && (isCaseWorkspace || hasMultipleApplications);
+          const actionItems = [
+            { id: 'edit', text: 'Edit' },
+            ...(allowDuplicate ? [{ id: 'duplicate', text: 'Duplicate' }] : []),
+            { id: 'view', text: inFlight ? 'View (loading...)' : 'View', disabled: inFlight },
+            { id: 'delete', text: deleting ? 'Delete (in progress...)' : 'Delete', disabled: deleting }
+          ];
           return (
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="inline-link" onClick={() => openEditModal(item)}>
-                Edit
-              </Button>
-              {canDuplicate && (
-                <Button variant="inline-link" onClick={() => openDuplicateModal(item)}>
-                  Duplicate
-                </Button>
-              )}
-              <Button
-                variant="inline-link"
-                onClick={() => handleViewDocument(item)}
-                disabled={inFlight}
-                loading={inFlight}
-              >
-                View
-              </Button>
-              <Button
-                variant="inline-link"
-                disabled={deleting}
-                loading={deleting}
-                onClick={() => openDeleteModal(item)}
-              >
-                Delete
-              </Button>
-            </SpaceBetween>
+            <ButtonDropdown
+              ariaLabel={`Actions for ${item.label || item.file_name || 'document'}`}
+              items={actionItems}
+              expandToViewport
+              onItemClick={({ detail }) => {
+                switch (detail.id) {
+                  case 'edit':
+                    openEditModal(item);
+                    break;
+                  case 'duplicate':
+                    openDuplicateModal(item);
+                    break;
+                  case 'view':
+                    handleViewDocument(item);
+                    break;
+                  case 'delete':
+                    openDeleteModal(item);
+                    break;
+                  default:
+                    break;
+                }
+              }}
+            >
+              Actions
+            </ButtonDropdown>
           );
         }
       }
@@ -1163,7 +1197,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       openEditModal,
       pendingDownloads,
       pendingDeletes,
-      interventionOptionMap
+      interventionOptionMap,
+      isCaseWorkspace,
+      hasMultipleApplications
     ]
   );
 
@@ -1287,11 +1323,18 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const applicationFilterOptions = useMemo(() => {
     const opts = [{ value: '', label: 'All documents (client + all applications)' }];
     applicationOptions.forEach(opt => {
+      const statusLabel = formatApplicationStatus(opt.status || '').toLowerCase();
+      const description = typeof opt.description === 'string' ? opt.description.trim() : '';
+      const descriptionLower = description.toLowerCase();
+      const showStatusTag =
+        opt.status &&
+        (!descriptionLower ||
+          (descriptionLower !== statusLabel && descriptionLower !== String(opt.status).toLowerCase()));
       opts.push({
         value: opt.value,
         label: opt.label,
         description: opt.description,
-        tags: opt.status ? [opt.status] : undefined
+        tags: showStatusTag ? [opt.status] : undefined
       });
     });
     return opts;
@@ -1326,10 +1369,19 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
 
   const applicationSelectOptions = useMemo(
     () =>
-      applicationOptions.map(opt => ({
-        ...opt,
-        tags: opt.status ? [opt.status] : undefined
-      })),
+      applicationOptions.map(opt => {
+        const statusLabel = formatApplicationStatus(opt.status || '').toLowerCase();
+        const description = typeof opt.description === 'string' ? opt.description.trim() : '';
+        const descriptionLower = description.toLowerCase();
+        const showStatusTag =
+          opt.status &&
+          (!descriptionLower ||
+            (descriptionLower !== statusLabel && descriptionLower !== String(opt.status).toLowerCase()));
+        return {
+          ...opt,
+          tags: showStatusTag ? [opt.status] : undefined
+        };
+      }),
     [applicationOptions]
   );
 

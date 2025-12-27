@@ -1131,7 +1131,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
             {alert.content}
           </Alert>
         ))}
-        <Box variant="small">The table shows applications in your purview. Program Admins can see all applications. Regional Managers can see applications assigned to them or to coordinators in their region. ISET Coordinators can only see applications assigned to them.</Box>
+        <Box variant="small">This table lists the applications you can work on. Program Admins see all applications, Regional Managers see their assigned and regional coordinator files, and ISET Coordinators see only their assigned applications.</Box>
         <Box>
           <SpaceBetween direction="vertical" size="xs">
             {loading ? (
@@ -1157,7 +1157,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
                 onColumnWidthsChange={handleColumnWidthsChange}
                 stickyHeader
                 stripedRows
-                empty={<Box textAlign="center">No cases</Box>}
+                empty={<Box textAlign="center">No applications</Box>}
                 ariaLabels={{
                   tableLabel: 'Cases table',
                   header: 'Cases',

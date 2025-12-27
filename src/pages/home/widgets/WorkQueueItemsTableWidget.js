@@ -42,6 +42,17 @@ const toDate = value => {
   return d && !Number.isNaN(d.getTime()) ? d : null;
 };
 
+const getWorkspacePath = item => {
+  if (item?.workspacePath) return item.workspacePath;
+  const caseId = item?.case_id || item?.caseId || null;
+  if (!caseId) return null;
+  const type = (item?.type || '').toString().trim().toLowerCase();
+  if (type.includes('intervention') || type.includes('case')) {
+    return `/cases/${caseId}`;
+  }
+  return `/application-case/${caseId}`;
+};
+
 const PROVINCE_LABELS = {
   ab: 'Alberta',
   bc: 'British Columbia',
@@ -141,6 +152,48 @@ const normalizeClosedStatus = status => {
   return key === 'withdrawn' ? 'closed' : key;
 };
 
+const normalizeStatusKey = status =>
+  (status || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
+
+const getDaysAgo = value => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const diffDays = Math.floor((Date.now() - date.getTime()) / 86400000);
+  return Math.max(diffDays, 0);
+};
+
+const formatDaysAgo = value => {
+  const days = getDaysAgo(value);
+  if (days === null) return null;
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+};
+
+const statusColor = (status = '') => {
+  const normalized = normalizeClosedStatus(status);
+  if (['approved', 'completed'].includes(normalized)) return 'green';
+  if ([
+    'submitted',
+    'in review',
+    'in_review',
+    'in progress',
+    'in_progress',
+    'pending',
+    'assigned',
+    'pending_approval',
+    'ready_to_close',
+    'ready to close'
+  ].includes(normalized)) {
+    return 'blue';
+  }
+  if (['docs requested', 'docs_requested', 'action required', 'action required (docs requested)', 'closure notice', 'closure_notice'].includes(normalized)) {
+    return 'severity-high';
+  }
+  if (['rejected', 'declined', 'errored'].includes(normalized)) return 'red';
+  if (['closed', 'inactive', 'archived'].includes(normalized)) return 'grey';
+  return 'grey';
+};
+
 const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
 const DECISION_STATUSES = new Set(['pending_approval']);
 const ASSESSMENT_STATUSES = new Set([
@@ -156,6 +209,28 @@ const SLA_DEFAULT_DAYS = {
   assignment: 3,
   assessment: 10,
   program_decision: 2
+};
+
+const SLA_STAGE_LABELS = {
+  assignment: 'Assignment',
+  assessment: 'Assessment',
+  program_decision: 'Decision'
+};
+
+const formatSlaTargetLabel = meta => {
+  if (!meta) return 'Unknown';
+  const stageLabel = SLA_STAGE_LABELS[meta.stage] || 'SLA';
+  if (meta.deltaDays === null || meta.deltaDays === undefined) {
+    return meta.label || `${stageLabel} target unknown`;
+  }
+  if (meta.deltaDays > 0) {
+    return `${stageLabel} due in ${meta.deltaDays} day${meta.deltaDays === 1 ? '' : 's'}`;
+  }
+  if (meta.deltaDays === 0) {
+    return `${stageLabel} due today`;
+  }
+  const overdueDays = Math.abs(meta.deltaDays);
+  return `${stageLabel} ${overdueDays} day${overdueDays === 1 ? '' : 's'} overdue`;
 };
 
 const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
@@ -262,19 +337,34 @@ const columnDefinitionsByKey = {
   title: {
     id: 'title',
     header: 'Item',
-    cell: item => (
-      <SpaceBetween size="xxs">
-        <Box fontWeight="bold">{item.applicant || item.applicant_name || item.applicantName || item.title || item.id}</Box>
-        <Box fontSize="body-s" color="text-status-inactive">
-          {[
-            item.trackingId || item.id || null,
-            formatDateOnly(item.submittedAt || item.receivedAt)
-              ? `Received ${formatDateOnly(item.submittedAt || item.receivedAt)}`
-              : null
-          ].filter(Boolean).join(' · ') || '—'}
-        </Box>
-      </SpaceBetween>
-    ),
+    cell: item => {
+      const displayName = item.applicant || item.applicant_name || item.applicantName || item.title || item.id || '—';
+      const workspacePath = getWorkspacePath(item);
+      return (
+        <SpaceBetween size="xxs">
+          <Box fontWeight="bold">
+            <Link
+              href={workspacePath || '#'}
+              onFollow={event => {
+                if (!workspacePath) {
+                  event.preventDefault();
+                }
+              }}
+            >
+              {displayName}
+            </Link>
+          </Box>
+          <Box fontSize="body-s" color="text-status-inactive">
+            {[
+              item.trackingId || item.id || null,
+              formatDateOnly(item.submittedAt || item.receivedAt)
+                ? `Received ${formatDateOnly(item.submittedAt || item.receivedAt)}`
+                : null
+            ].filter(Boolean).join(' · ') || '—'}
+          </Box>
+        </SpaceBetween>
+      );
+    },
     sortingField: 'applicant'
   },
   recommendation: {
@@ -404,9 +494,9 @@ const columnDefinitionsByKey = {
     header: 'Actions',
     cell: item => (
       <Link
-        href={item.workspacePath || '#'}
+        href={getWorkspacePath(item) || '#'}
         onFollow={event => {
-          if (!item.workspacePath) {
+          if (!getWorkspacePath(item)) {
             event.preventDefault();
           }
         }}
@@ -420,6 +510,7 @@ const columnDefinitionsByKey = {
 const columnKeysByType = {
   Application: ['title', 'region', 'owner', 'status', 'dueDate', 'actions'],
   Intervention: ['title', 'region', 'owner', 'status', 'dueDate', 'actions'],
+  InterventionMilestone: ['title', 'intervention', 'region', 'status', 'dueDate', 'actions'],
   Agreement: ['title', 'owner', 'status', 'dueDate', 'actions'],
   Reporting: ['title', 'region', 'status', 'dueDate', 'actions'],
   File: ['title', 'owner', 'status', 'dueDate', 'actions'],
@@ -685,16 +776,77 @@ const WorkQueueItemsTableWidget = ({
   }, [decisionModalVisible, selectedBudgetPot, budgetPotOptions, decisionTarget, applicantProvinceCode]);
 
   const columnDefinitions = useMemo(() => {
-    const keys = buildColumns(itemTypes);
+    let keys = buildColumns(itemTypes);
+    const isMilestoneQueue =
+      selectedBucketId === 'active-clients-checkins' ||
+      (itemTypes.length === 1 && itemTypes[0] === 'InterventionMilestone');
+    if (isAssessor) {
+      keys = keys.filter(key => key !== 'owner');
+    }
     const widthsMap = new Map(columnWidths.map(entry => [entry.id, entry.width]));
     return keys
       .map(key => {
         const base = columnDefinitionsByKey[key];
         if (!base) return null;
         const widthOverride = widthsMap.get(base.id);
-        if (base.id === 'dueDate') {
+        if (base.id === 'intervention' && isMilestoneQueue) {
           return {
             ...base,
+            width: widthOverride,
+            header: 'Intervention'
+          };
+        }
+        if (base.id === 'status') {
+          return {
+            ...base,
+            width: widthOverride,
+            cell: item => {
+              const statusInfo = getStatusInfo(item);
+              const normalizedKey = normalizeStatusKey(statusInfo.rawStatus || item.status || '');
+              const isDocsRequestedStatus = ['docs_requested', 'action_required', 'action_required_(docs_requested)'].includes(normalizedKey);
+              const docsRequestedSince =
+                item.updatedAt ||
+                item.updated_at ||
+                item.last_activity_at ||
+                item.submittedAt ||
+                item.receivedAt ||
+                item.submitted_at ||
+                item.created_at ||
+                null;
+              const docsRequestedDays = isDocsRequestedStatus ? getDaysAgo(docsRequestedSince) : null;
+              const docsRequestedSuffix = isDocsRequestedStatus ? formatDaysAgo(docsRequestedSince) : null;
+              const badgeLabel = isDocsRequestedStatus
+                ? `Docs Requested${docsRequestedSuffix ? ` ${docsRequestedSuffix}` : ''}`
+                : statusInfo.statusLabel;
+              const docsRequestedColor = (() => {
+                if (!isDocsRequestedStatus || docsRequestedDays === null) return null;
+                if (docsRequestedDays > 28) return 'severity-critical';
+                if (docsRequestedDays >= 15) return 'severity-high';
+                if (docsRequestedDays >= 7) return 'severity-medium';
+                if (docsRequestedDays >= 3) return 'severity-low';
+                return 'grey';
+              })();
+              const badgeColor = docsRequestedColor || statusColor(statusInfo.rawStatus || item.status || 'unknown');
+              return <Badge color={badgeColor}>{badgeLabel}</Badge>;
+            }
+          };
+        }
+        if (base.id === 'dueDate') {
+          if (isMilestoneQueue) {
+            return {
+              ...base,
+              header: 'Milestone',
+              width: widthOverride,
+              cell: item => {
+                const label = item.milestoneLabel || formatDateOnly(item.dueDate) || '—';
+                const color = item.milestoneStatus || 'grey';
+                return <Badge color={color}>{label}</Badge>;
+              }
+            };
+          }
+          return {
+            ...base,
+            header: 'SLA Target',
             width: widthOverride,
             cell: item => {
               const meta = computeSlaMeta(
@@ -703,21 +855,22 @@ const WorkQueueItemsTableWidget = ({
                 normalizeClosedStatus(item.status || 'submitted'),
                 Boolean(item.assigned_user_id)
               );
-              const title = `SLA (${meta.stage || 'unknown'}): ${meta.label} | Age: ${meta.ageDays ?? 'n/a'}d | Due: ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`;
+              const label = formatSlaTargetLabel(meta);
+              const title = `SLA (${meta.stage || 'unknown'}): ${label} | Age: ${meta.ageDays ?? 'n/a'}d | Due: ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`;
               const badge = (() => {
                 switch (meta.status) {
                   case 'critical-overdue':
-                    return <Badge color="severity-critical">{meta.label}</Badge>;
+                    return <Badge color="severity-critical">{label}</Badge>;
                   case 'high-overdue':
-                    return <Badge color="severity-high">{meta.label}</Badge>;
+                    return <Badge color="severity-high">{label}</Badge>;
                   case 'due-today':
-                    return <Badge color="severity-medium">{meta.label}</Badge>;
+                    return <Badge color="severity-medium">{label}</Badge>;
                   case 'due-soon':
-                    return <Badge color="severity-low">{meta.label}</Badge>;
+                    return <Badge color="severity-low">{label}</Badge>;
                   case 'ok':
-                    return <Badge color="green">{meta.label}</Badge>;
+                    return <Badge color="green">{label}</Badge>;
                   default:
-                    return <Badge color="grey">{meta.label || 'Unknown'}</Badge>;
+                    return <Badge color="grey">{label || 'Unknown'}</Badge>;
                 }
               })();
               return (
@@ -732,182 +885,188 @@ const WorkQueueItemsTableWidget = ({
           return {
             ...base,
             width: widthOverride,
-            cell: item => (
-              <SpaceBetween size="xs" direction="horizontal" alignItems="center">
-                <Link
-                  href={item.workspacePath || '#'}
-                  onFollow={event => {
-                    if (!item.workspacePath) {
-                      event.preventDefault();
-                    }
-                  }}
-                >
-                  Open workspace
-                </Link>
-                {(() => {
-                  const isEscalationBucket = item.bucketId === 'exceptions-escalations';
-                  const canEscalationActions = role === 'Program Administrator' || role === 'Regional Coordinator';
-                  if (isEscalationBucket && canEscalationActions) {
-                    return (
-                      <SpaceBetween size="xxs" direction="horizontal">
-                        <Link
-                          href="#"
-                          onFollow={event => {
-                            event.preventDefault();
-                            fireEscalationAction(item, 'respond');
-                          }}
-                        >
-                          Respond
-                        </Link>
-                        {role === 'Regional Coordinator' && (
+            cell: item => {
+              const workspacePath = getWorkspacePath(item);
+              return (
+                <SpaceBetween size="xs" direction="horizontal" alignItems="center">
+                  <Link
+                    href={workspacePath || '#'}
+                    onFollow={event => {
+                      if (!workspacePath) {
+                        event.preventDefault();
+                      }
+                    }}
+                  >
+                    Open workspace
+                  </Link>
+                  {(() => {
+                    const isEscalationBucket = item.bucketId === 'exceptions-escalations';
+                    const canEscalationActions = role === 'Program Administrator' || role === 'Regional Coordinator';
+                    if (isEscalationBucket && canEscalationActions) {
+                      return (
+                        <SpaceBetween size="xxs" direction="horizontal">
                           <Link
                             href="#"
                             onFollow={event => {
                               event.preventDefault();
-                              fireEscalationAction(item, 'escalate_up');
+                              fireEscalationAction(item, 'respond');
                             }}
                           >
-                            Escalate to Program Admin
+                            Respond
                           </Link>
-                        )}
-                        <Link
-                          href="#"
-                          onFollow={event => {
-                            event.preventDefault();
-                            fireEscalationAction(item, 'resolve');
-                          }}
-                        >
-                          Resolve
-                        </Link>
-                      </SpaceBetween>
-                    );
-                  }
-                  if (item.bucketId === 'unresolved-conflicts') {
+                          {role === 'Regional Coordinator' && (
+                            <Link
+                              href="#"
+                              onFollow={event => {
+                                event.preventDefault();
+                                fireEscalationAction(item, 'escalate_up');
+                              }}
+                            >
+                              Escalate to Program Admin
+                            </Link>
+                          )}
+                          <Link
+                            href="#"
+                            onFollow={event => {
+                              event.preventDefault();
+                              fireEscalationAction(item, 'resolve');
+                            }}
+                          >
+                            Resolve
+                          </Link>
+                        </SpaceBetween>
+                      );
+                    }
+                    if (item.bucketId === 'unresolved-conflicts') {
+                      return (
+                        <SpaceBetween size="xxs" direction="horizontal">
+                          <Link
+                            href="#"
+                            onFollow={event => {
+                              event.preventDefault();
+                              setAssignTarget(item);
+                              setAssignModalVisible(true);
+                            }}
+                          >
+                            Reassign
+                          </Link>
+                          <Link
+                            href="#"
+                            onFollow={event => {
+                              event.preventDefault();
+                              setResolveTarget(item);
+                            }}
+                          >
+                            Resolve
+                          </Link>
+                        </SpaceBetween>
+                      );
+                    }
+                    if (item.bucketId === 'ei-eligibility-checks') {
+                      return (
+                        <SpaceBetween size="xxs" direction="horizontal">
+                          <Link
+                            href="#"
+                            onFollow={event => {
+                              event.preventDefault();
+                              setEligibilityTarget(item);
+                              setSelectedEligibility(
+                                item.assessment_esdc_eligibility
+                                  ? { value: item.assessment_esdc_eligibility, label: item.assessment_esdc_eligibility }
+                                  : null
+                              );
+                              const applicantIdFromItem =
+                                item.applicant_user_id ||
+                                item.applicantUserId ||
+                                item.user_id ||
+                                item.userId ||
+                                null;
+                              setEligibilityApplicantId(applicantIdFromItem);
+                              setEligibilityFile(null);
+                              setEligibilityFileError(null);
+                              setEligibilityError(null);
+                              setEligibilityModalVisible(true);
+                            }}
+                          >
+                            Set Eligibility
+                          </Link>
+                        </SpaceBetween>
+                      );
+                    }
+                    if (item.bucketId === 'applications-awaiting-approval') {
+                      return (
+                        <SpaceBetween size="xxs" direction="horizontal">
+                          <Link
+                            href="#"
+                            onFollow={event => {
+                              event.preventDefault();
+                              setDecisionTarget(item);
+                              setSelectedDecision(null);
+                              setDecisionReason('');
+                              setSelectedAssurance(null);
+                              setDecisionError(null);
+                              setPostingContextError(null);
+                              const existingPosting =
+                                item.assessment_posting_context ||
+                                item.postingContext ||
+                                item.posting_context ||
+                                null;
+                              const normalizedPosting =
+                                typeof existingPosting === 'string' && ['external', 'internal'].includes(existingPosting.trim().toLowerCase())
+                                  ? existingPosting.trim().toLowerCase()
+                                  : 'external';
+                              setPostingContextValue(isAssessor ? 'external' : normalizedPosting);
+                              const existingPotId = item.assessment_intervention_pot_id || item.assessment_budget_pot_id || null;
+                              setSelectedBudgetPot(
+                                existingPotId ? { value: String(existingPotId), label: String(existingPotId) } : null
+                              );
+                              setDecisionModalVisible(true);
+                              if (!budgetPotOptions.length) {
+                                setBudgetPotLoading(true);
+                                apiFetch('/api/reference/budget-pots-lite?chargeableOnly=1')
+                                  .then(res => (res.ok ? res.json() : []))
+                                  .then(list => setBudgetPotOptions(toBudgetPotOptions(list)))
+                                  .catch(() => setBudgetPotOptions([]))
+                                  .finally(() => setBudgetPotLoading(false));
+                              }
+                            }}
+                          >
+                            Make Decision
+                          </Link>
+                        </SpaceBetween>
+                      );
+                    }
+                    if (item.bucketId === 'interventions-awaiting-approval') {
+                      return null;
+                    }
+                    if (item.bucketId === 'overdue') {
+                      return null;
+                    }
+                    if (isAssessor) {
+                      return null;
+                    }
                     return (
-                      <SpaceBetween size="xxs" direction="horizontal">
-                        <Link
-                          href="#"
-                          onFollow={event => {
-                            event.preventDefault();
-                            setAssignTarget(item);
-                            setAssignModalVisible(true);
-                          }}
-                        >
-                          Reassign
-                        </Link>
-                        <Link
-                          href="#"
-                          onFollow={event => {
-                            event.preventDefault();
-                            setResolveTarget(item);
-                          }}
-                        >
-                          Resolve
-                        </Link>
-                      </SpaceBetween>
+                      <Link
+                        href="#"
+                        onFollow={event => {
+                          event.preventDefault();
+                          setAssignTarget(item);
+                          setAssignModalVisible(true);
+                        }}
+                      >
+                        Assign
+                      </Link>
                     );
-                  }
-                  if (item.bucketId === 'ei-eligibility-checks') {
-                    return (
-                      <SpaceBetween size="xxs" direction="horizontal">
-                        <Link
-                          href="#"
-                          onFollow={event => {
-                            event.preventDefault();
-                            setEligibilityTarget(item);
-                            setSelectedEligibility(
-                              item.assessment_esdc_eligibility
-                                ? { value: item.assessment_esdc_eligibility, label: item.assessment_esdc_eligibility }
-                                : null
-                            );
-                            const applicantIdFromItem =
-                              item.applicant_user_id ||
-                              item.applicantUserId ||
-                              item.user_id ||
-                              item.userId ||
-                              null;
-                            setEligibilityApplicantId(applicantIdFromItem);
-                            setEligibilityFile(null);
-                            setEligibilityFileError(null);
-                            setEligibilityError(null);
-                            setEligibilityModalVisible(true);
-                          }}
-                        >
-                          Set Eligibility
-                        </Link>
-                      </SpaceBetween>
-                    );
-                  }
-                  if (item.bucketId === 'applications-awaiting-approval') {
-                    return (
-                      <SpaceBetween size="xxs" direction="horizontal">
-                        <Link
-                          href="#"
-                          onFollow={event => {
-                            event.preventDefault();
-                            setDecisionTarget(item);
-                            setSelectedDecision(null);
-                            setDecisionReason('');
-                            setSelectedAssurance(null);
-                            setDecisionError(null);
-                            setPostingContextError(null);
-                            const existingPosting =
-                              item.assessment_posting_context ||
-                              item.postingContext ||
-                              item.posting_context ||
-                              null;
-                            const normalizedPosting =
-                              typeof existingPosting === 'string' && ['external', 'internal'].includes(existingPosting.trim().toLowerCase())
-                                ? existingPosting.trim().toLowerCase()
-                                : 'external';
-                            setPostingContextValue(isAssessor ? 'external' : normalizedPosting);
-                            const existingPotId = item.assessment_intervention_pot_id || item.assessment_budget_pot_id || null;
-                            setSelectedBudgetPot(
-                              existingPotId ? { value: String(existingPotId), label: String(existingPotId) } : null
-                            );
-                            setDecisionModalVisible(true);
-                            if (!budgetPotOptions.length) {
-                              setBudgetPotLoading(true);
-                              apiFetch('/api/reference/budget-pots-lite?chargeableOnly=1')
-                                .then(res => (res.ok ? res.json() : []))
-                                .then(list => setBudgetPotOptions(toBudgetPotOptions(list)))
-                                .catch(() => setBudgetPotOptions([]))
-                                .finally(() => setBudgetPotLoading(false));
-                            }
-                          }}
-                        >
-                          Make Decision
-                        </Link>
-                      </SpaceBetween>
-                    );
-                  }
-                  if (item.bucketId === 'interventions-awaiting-approval') {
-                    return null;
-                  }
-                  if (item.bucketId === 'overdue') {
-                    return null;
-                  }
-                  return (
-                    <Link
-                      href="#"
-                      onFollow={event => {
-                        event.preventDefault();
-                        setAssignTarget(item);
-                        setAssignModalVisible(true);
-                      }}
-                    >
-                      Assign
-                    </Link>
-                  );
-                })()}
-              </SpaceBetween>
-            )
+                  })()}
+                </SpaceBetween>
+              );
+            }
           };
         }
         return widthOverride ? { ...base, width: widthOverride } : base;
       })
       .filter(Boolean);
-  }, [itemTypes, slaTargets, columnWidths, budgetPotOptions.length, role]);
+  }, [itemTypes, selectedBucketId, slaTargets, columnWidths, budgetPotOptions.length, role, isAssessor]);
 
   const selectedItems = useMemo(() => {
     if (!selectedItemId) return [];

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
   Header,
@@ -20,6 +20,7 @@ import {
 import { apiFetch } from '../auth/apiClient';
 import SecureMessagesHelpPanelContent from '../helpPanelContents/secureMessagesHelpPanelContent';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
+import { getApplicationStatusContext } from '../utils/rbac';
 
 const TAB_IDS = {
   inbox: 'inbox',
@@ -69,9 +70,17 @@ const buildAttachmentUrl = filePath => {
   return `${base}${filePath.startsWith('/') ? '' : '/'}${filePath}`;
 };
 
-const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCaseData }) => {
+const SecureMessagingWidget = ({
+  actions = {},
+  toggleHelpPanel,
+  caseData: propCaseData,
+  refreshCaseData,
+  onCaseUpdate,
+  applicationRowVersion
+}) => {
   const workspace = useCaseWorkspace();
   const workspaceCaseData = workspace && typeof workspace === 'object' ? workspace.caseData || null : null;
+  const isCaseWorkspace = Boolean(workspaceCaseData);
   const caseData = useMemo(() => {
     if (propCaseData) return propCaseData;
     if (workspaceCaseData) return workspaceCaseData;
@@ -88,6 +97,32 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     null;
   const caseIdNum = Number(rawCaseId);
   const caseId = rawCaseId == null || rawCaseId === '' || Number.isNaN(caseIdNum) ? null : caseIdNum;
+
+  const rawApplicationId =
+    caseData?.application_id ??
+    caseData?.applicationId ??
+    workspaceCaseData?.application_id ??
+    workspaceCaseData?.applicationId ??
+    workspace?.application_id ??
+    workspace?.applicationId ??
+    null;
+  const applicationIdNum = Number(rawApplicationId);
+  const applicationId =
+    rawApplicationId == null || rawApplicationId === '' || Number.isNaN(applicationIdNum)
+      ? null
+      : applicationIdNum;
+
+  const applicationStatusRaw =
+    caseData?.applicationStatus ??
+    caseData?.application_status ??
+    workspaceCaseData?.applicationStatus ??
+    workspaceCaseData?.application_status ??
+    null;
+  const applicationStatusContext = useMemo(
+    () => getApplicationStatusContext(applicationStatusRaw),
+    [applicationStatusRaw]
+  );
+  const canonicalApplicationStatus = applicationStatusContext?.canonicalStatus || null;
 
   const rawApplicantUserId =
     caseData?.applicant_user_id ??
@@ -162,6 +197,121 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
   const [workflowsLoading, setWorkflowsLoading] = useState(false);
   const [workflowsError, setWorkflowsError] = useState(null);
   const [selectedWorkflowIds, setSelectedWorkflowIds] = useState([]);
+  const reviewResumeInFlight = useRef(false);
+  const resumeReviewStatuses = useMemo(
+    () => new Set(['docs_requested', 'action_required', 'action_required_(docs_requested)']),
+    []
+  );
+
+  const updateStatusToDocsRequested = useCallback(async () => {
+    if (!caseId) return;
+    if (!['submitted', 'in_review'].includes(canonicalApplicationStatus || '')) return;
+    let releaseLock = false;
+    try {
+      if (applicationId) {
+        const lockResponse = await apiFetch(`/api/locks/application/${applicationId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        if (!lockResponse.ok) {
+          return;
+        }
+        releaseLock = true;
+      }
+      const payload = { applicationStatus: 'docs_requested' };
+      const rowVersion =
+        Number(caseData?.application_row_version ?? caseData?.applicationRowVersion ?? applicationRowVersion ?? 0) || 0;
+      if (rowVersion > 0) {
+        payload.expectedRowVersion = rowVersion;
+      }
+      const response = await apiFetch(`/api/cases/${caseId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        return;
+      }
+      if (typeof refreshCaseData === 'function') {
+        try { await refreshCaseData(); } catch (_) {}
+      } else if (typeof onCaseUpdate === 'function') {
+        onCaseUpdate({ applicationStatus: 'docs_requested', application_status: 'docs_requested' });
+      }
+    } finally {
+      if (applicationId && releaseLock) {
+        try {
+          await apiFetch(`/api/locks/application/${applicationId}`, { method: 'DELETE' });
+        } catch (_) {}
+      }
+    }
+  }, [
+    caseId,
+    applicationId,
+    canonicalApplicationStatus,
+    caseData?.applicationRowVersion,
+    caseData?.application_row_version,
+    applicationRowVersion,
+    refreshCaseData,
+    onCaseUpdate
+  ]);
+
+  const updateStatusToInReview = useCallback(async () => {
+    if (!caseId) return;
+    if (!resumeReviewStatuses.has(canonicalApplicationStatus || '')) return;
+    if (reviewResumeInFlight.current) return;
+    reviewResumeInFlight.current = true;
+    let releaseLock = false;
+    try {
+      if (applicationId) {
+        const lockResponse = await apiFetch(`/api/locks/application/${applicationId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        if (!lockResponse.ok) {
+          return;
+        }
+        releaseLock = true;
+      }
+      const payload = { applicationStatus: 'in_review' };
+      const rowVersion =
+        Number(caseData?.application_row_version ?? caseData?.applicationRowVersion ?? applicationRowVersion ?? 0) || 0;
+      if (rowVersion > 0) {
+        payload.expectedRowVersion = rowVersion;
+      }
+      const response = await apiFetch(`/api/cases/${caseId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        return;
+      }
+      if (typeof refreshCaseData === 'function') {
+        try { await refreshCaseData(); } catch (_) {}
+      } else if (typeof onCaseUpdate === 'function') {
+        onCaseUpdate({ applicationStatus: 'in_review', application_status: 'in_review' });
+      }
+    } finally {
+      if (applicationId && releaseLock) {
+        try {
+          await apiFetch(`/api/locks/application/${applicationId}`, { method: 'DELETE' });
+        } catch (_) {}
+      }
+      reviewResumeInFlight.current = false;
+    }
+  }, [
+    caseId,
+    applicationId,
+    canonicalApplicationStatus,
+    caseData?.applicationRowVersion,
+    caseData?.application_row_version,
+    applicationRowVersion,
+    refreshCaseData,
+    onCaseUpdate,
+    resumeReviewStatuses
+  ]);
 
   useEffect(() => {
     setFilteringText('');
@@ -193,6 +343,15 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
             })
           : items;
         setMessages(scopedItems);
+        const signingRequests = scopedItems
+          .flatMap(item => (Array.isArray(item?.attachments) ? item.attachments : []))
+          .filter(att => att && att.workflow_id);
+        if (signingRequests.length) {
+          const allSigned = signingRequests.every(att => String(att.status || '').trim().toLowerCase() === 'signed');
+          if (allSigned) {
+            await updateStatusToInReview();
+          }
+        }
 
       } catch (err) {
         setLoadError(err?.message || 'Failed to load messages');
@@ -204,7 +363,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
         }
       }
     },
-    [caseId]
+    [caseId, updateStatusToInReview]
   );
 
   useEffect(() => {
@@ -571,21 +730,28 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
     setComposeError(null);
     try {
       const attachmentsPayload = selectedWorkflowIds.map(id => ({ workflow_id: id }));
+      const payload = {
+        subject,
+        body,
+        urgent: composeUrgent,
+        toDisplayName: toName,
+        fromDisplayName: fromName,
+        attachments: attachmentsPayload
+      };
+      if (!isCaseWorkspace && applicationId) {
+        payload.applicationId = applicationId;
+      }
       const response = await apiFetch(`/api/cases/${caseId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject,
-          body,
-          urgent: composeUrgent,
-          toDisplayName: toName,
-          fromDisplayName: fromName,
-          attachments: attachmentsPayload
-        })
+        body: JSON.stringify(payload)
       });
       if (!response.ok) {
         const detail = await response.text().catch(() => '');
         throw new Error(detail || 'Failed to send message');
+      }
+      if (attachmentsPayload.length > 0) {
+        await updateStatusToDocsRequested();
       }
       setComposeModalOpen(false);
       setComposeSubject('');
@@ -1026,6 +1192,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData: propCa
                   value: wf.id,
                   description: wf.type === 'consent-cm-prefill' ? 'Form (CM prefill)' : 'Form (No prefill)'
                 }))}
+                keepOpen={false} 
                 onChange={({ detail }) => {
                   setSelectedWorkflowIds(detail.selectedOptions.map(opt => opt.value));
                 }}

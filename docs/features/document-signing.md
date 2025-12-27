@@ -27,6 +27,8 @@ Last Updated: 2025-12-10
 - Fields: `id`, `name`, `version`, `languageVariants`, `schema` (components array or multi-step), `mergeFields` (e.g., participant name, case file id), `allowedSigners` (participant + optional staff/co-signer), `prefillSchema` (fields case managers populate and lock).
 - Authoring location: stored with intake schemas for parity; avoid duplicating renderer logic or creating a separate template system.
 - Workflow type flag: add `workflowType` metadata with values `main-intake`, `consent-no-prefill`, or `consent-cm-prefill` (labels: “Main Intake”, “Consent Form (No prefill)”, “Consent Form (CM prefill)”) to distinguish the primary intake from consent/document flows and to drive routing/permissions.
+- CM prefill (funding agreement): HTML blocks may include `{{token}}` placeholders. The admin backend resolves them when creating the signing request (client name, case manager signature/date, institution, program, dates, funding amounts, and other line items from intervention/assessment).
+- Conditional HTML blocks: use `<!-- IF token --> ... <!-- END token -->` to hide sections (e.g., living allowance) when the token resolves to empty.
 
 ## Sending UX (high level)
 - Case manager composes a secure message and picks one or more workflows flagged with `workflowType=consent-no-prefill` or `workflowType=consent-cm-prefill` from a picker; they can still edit subject/body (e.g., “please sign this form”).

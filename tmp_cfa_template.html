@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Client Funding Agreement</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 16px;
+      line-height: 1.35;
+      font-size: 14px;
+    }
+
+    h1 {
+      font-size: 16px;
+      margin-bottom: 12px;
+    }
+
+    .field {
+      margin-bottom: 10px;
+    }
+
+    .field-row {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 10px;
+    }
+
+    .field-row .field {
+      flex: 1;
+      margin-bottom: 0;
+    }
+
+    .label {
+      font-weight: bold;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .line {
+      border-bottom: 1px solid #000;
+      min-height: 18px;
+      padding: 2px 4px;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 8px;
+    }
+
+    th, td {
+      border: 1px solid #000;
+      padding: 6px;
+      font-size: 13px;
+    }
+
+    th {
+      text-align: left;
+      font-weight: bold;
+    }
+
+    .amount {
+      width: 30%;
+      white-space: nowrap;
+    }
+
+    .note {
+      font-size: 12px;
+      margin-top: 6px;
+    }
+
+    .signature-block {
+      margin-top: 18px;
+    }
+
+    .signature-panel {
+      border: 1px solid #9ba7b6;
+      border-radius: 6px;
+      padding: 12px;
+      max-width: 520px;
+    }
+
+    .signature-line {
+      min-height: 24px;
+      padding: 4px 6px;
+      border-bottom: 1px solid #9ba7b6;
+    }
+
+    .signature-name {
+      font-family: 'Segoe Script', 'Lucida Handwriting', cursive;
+      font-size: 18px;
+    }
+
+    .signature-meta {
+      font-size: 12px;
+      color: #4b5563;
+      margin-top: 6px;
+    }
+
+    .footer {
+      font-size: 12px;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>CLIENT FUNDING AGREEMENT</h1>
+
+<div class="field">
+  <span class="label">Client Name (please print)</span>
+  <div class="line">{{client_name}}</div>
+</div>
+
+<div class="field-row">
+  <div class="field">
+    <span class="label">Eligible Educational/Training Institution</span>
+    <div class="line">{{institution}}</div>
+  </div>
+  <div class="field">
+    <span class="label">Eligible Program</span>
+    <div class="line">{{program_name}}</div>
+  </div>
+</div>
+
+<div class="field-row">
+  <div class="field">
+    <span class="label">Start Date</span>
+    <div class="line">{{start_date}}</div>
+  </div>
+  <div class="field">
+    <span class="label">End Date</span>
+    <div class="line">{{end_date}}</div>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Expense*</th>
+      <th class="amount">Amount</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>Tuition</td><td>{{tuition_amount}}</td></tr>
+    <tr><td>Books / Program Materials</td><td>{{books_amount}}</td></tr>
+    <tr><td>School Fees</td><td>{{materials_amount}}</td></tr>
+    <!-- IF other_item_amount --><tr><td>{{other_item_label}}</td><td>{{other_item_amount}}</td></tr><!-- END other_item_amount -->
+    <tr><td>&nbsp;</td><td></td></tr>
+    <tr><td><strong>Total</strong></td><td>{{total_amount}}</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <strong>**</strong> Payment of tuition-related expenses will be paid to the Educational/Training institution named above,
+  and reimbursed to the Client only with original paid receipts.
+</div>
+
+<!-- IF living_amount -->
+<h2>Living Allowance (if applicable)</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Monthly Approved Amount</th>
+      <th>Approved for Month / Year**</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>{{living_amount}}</td><td></td></tr>
+    <tr><td></td><td></td></tr>
+    <tr><td></td><td></td></tr>
+    <tr><td></td><td></td></tr>
+    <tr><td></td><td></td></tr>
+    <tr><td></td><td></td></tr>
+    <tr><td></td><td></td></tr>
+    <tr><td></td><td></td></tr>
+    <tr><td></td><td></td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <strong>*</strong> Client Monthly Attendance Report MUST be submitted before a living allowance is paid.
+</div>
+<div class="note">
+  <strong>**</strong> It takes 4?6 business days to process your living allowance after receiving your Attendance Report.
+</div>
+<!-- END living_amount -->
+
+<p style="margin-top:14px;">
+  I, as the Client receiving funding under the Indigenous Skills and Employment Training program and signing my name below,
+  understand and acknowledge that any false or misleading statements and/or omission of information may result in
+  suspension or revocation of this funding agreement and repayment of funds to Employment and Social Development Canada (ESDC).
+</p>
+
+<div class="signature-block">
+  <span class="label">Case Manager Signature</span>
+  <div class="signature-panel">
+    <div class="signature-line signature-name">{{case_manager_signature}}</div>
+    <div class="signature-meta">Signed on {{case_manager_signed_date}}</div>
+  </div>
+</div>
+
+
+</body>
+</html>

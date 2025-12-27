@@ -3865,6 +3865,231 @@ function summariseAssessmentFunding(assessmentRow) {
   };
 }
 
+function parseAssessmentFundingPayload(rawPayload) {
+  const payload = safeJsonParse(rawPayload, null);
+  if (!payload || typeof payload !== 'object') return null;
+  const toAmount = value => {
+    const amount = normaliseCurrencyAmount(value);
+    return amount > 0 ? amount : null;
+  };
+  const tuition = toAmount(payload.tuition);
+  const books = toAmount(payload.books);
+  const materials = toAmount(payload.materials);
+  const living = toAmount(payload.living);
+  if (tuition === null && books === null && materials === null && living === null) return null;
+  return { tuition, books, materials, living };
+}
+
+function formatFundingCurrency(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  return `$${amount.toFixed(2)}`;
+}
+
+function formatFundingDate(value) {
+  const dateValue = toDateOnly(value);
+  return dateValue || '';
+}
+
+function resolveApplicantNameFromPayload(payload, fallback) {
+  if (!payload || typeof payload !== 'object') return fallback || null;
+  const first =
+    payload['first-name'] ||
+    payload['first_name'] ||
+    payload?.personal?.firstName ||
+    payload?.personal?.first_name ||
+    null;
+  const last =
+    payload['last-name'] ||
+    payload['last_name'] ||
+    payload?.personal?.lastName ||
+    payload?.personal?.last_name ||
+    null;
+  const consentName = payload?.consent?.name || payload?.indigenous_declaration?.name || null;
+  const combined = [first, last].filter(Boolean).join(' ').trim();
+  const resolved = (combined || consentName || '').trim();
+  return resolved || fallback || null;
+}
+
+function resolveFundingAgreementTokens({
+  applicantName,
+  caseManagerName,
+  caseManagerSignedDate,
+  interventionLabel,
+  assessmentRow,
+  interventionRow,
+  interventionMetadata,
+  interventionEsdc
+}) {
+  const assessmentFunding = parseAssessmentFundingPayload(assessmentRow?.itp_payload);
+  const metadataFunding = interventionMetadata && typeof interventionMetadata === 'object'
+    ? (interventionMetadata.funding || interventionMetadata.fundingBreakdown || null)
+    : null;
+  const toAmount = value => {
+    const amount = normaliseCurrencyAmount(value);
+    return amount > 0 ? amount : null;
+  };
+  const funding = {
+    tuition: toAmount(metadataFunding?.tuition ?? assessmentFunding?.tuition),
+    books: toAmount(metadataFunding?.books ?? assessmentFunding?.books),
+    materials: toAmount(metadataFunding?.materials ?? assessmentFunding?.materials),
+    living: toAmount(metadataFunding?.living ?? assessmentFunding?.living)
+  };
+  const lineTotal = [funding.tuition, funding.books, funding.materials]
+    .filter(value => Number.isFinite(value))
+    .reduce((sum, value) => sum + value, 0);
+  const interventionCost =
+    toAmount(interventionRow?.intervention_cost) ??
+    toAmount(interventionRow?.budget_amount) ??
+    toAmount(interventionRow?.approved_amount) ??
+    toAmount(interventionEsdc?.interventionCost) ??
+    toAmount(assessmentRow?.intervention_cost_total);
+  let total = null;
+  if (Number.isFinite(interventionCost)) {
+    total = interventionCost;
+  }
+  if (lineTotal > 0) {
+    total = total === null ? lineTotal : Math.max(total, lineTotal);
+  }
+  const otherItemAmount =
+    total !== null && total > lineTotal + 0.01 ? (total - lineTotal) : null;
+  const cleanedLabel =
+    normaliseString(interventionLabel || '')?.replace(/\s*intervention$/i, '') || '';
+
+  const programName =
+    interventionMetadata?.programName ||
+    interventionMetadata?.program_name ||
+    assessmentRow?.program_name ||
+    null;
+  const institution =
+    interventionMetadata?.trainingInstitution ||
+    interventionMetadata?.training_institution ||
+    assessmentRow?.institution ||
+    null;
+  const startDate =
+    interventionRow?.start_date ||
+    interventionEsdc?.interventionStartDate ||
+    assessmentRow?.intervention_start_date ||
+    null;
+  const endDate =
+    interventionRow?.end_date ||
+    interventionEsdc?.interventionEndDate ||
+    assessmentRow?.intervention_end_date ||
+    null;
+
+  return {
+    client_name: applicantName || '',
+    case_manager_signature: caseManagerName || '',
+    case_manager_signed_date: caseManagerSignedDate || '',
+    institution: institution || '',
+    program_name: programName || '',
+    start_date: formatFundingDate(startDate),
+    end_date: formatFundingDate(endDate),
+    tuition_amount: formatFundingCurrency(funding.tuition),
+    books_amount: formatFundingCurrency(funding.books),
+    materials_amount: formatFundingCurrency(funding.materials),
+    total_amount: formatFundingCurrency(total),
+    living_amount: formatFundingCurrency(funding.living),
+    other_item_label: cleanedLabel || '',
+    other_item_amount: formatFundingCurrency(otherItemAmount)
+  };
+}
+
+function applyConditionalTemplateBlocks(value, tokens) {
+  if (!value || typeof value !== 'string') return value;
+  const hasValue = (tokenValue) => {
+    if (tokenValue === null || typeof tokenValue === 'undefined') return false;
+    if (typeof tokenValue === 'string') return tokenValue.trim().length > 0;
+    if (typeof tokenValue === 'number') return Number.isFinite(tokenValue) && tokenValue > 0;
+    if (Array.isArray(tokenValue)) return tokenValue.length > 0;
+    return true;
+  };
+  return value.replace(/<!--\s*IF\s+([a-zA-Z0-9_]+)\s*-->([\s\S]*?)<!--\s*END\s+\1\s*-->/g, (match, key, inner) => {
+    return hasValue(tokens?.[key]) ? inner : '';
+  });
+}
+
+function replaceTemplateTokens(value, tokens) {
+  if (!value || typeof value !== 'string') return value;
+  const conditioned = applyConditionalTemplateBlocks(value, tokens);
+  return conditioned.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
+    if (!Object.prototype.hasOwnProperty.call(tokens, key)) return '';
+    const tokenValue = tokens[key];
+    if (tokenValue === null || typeof tokenValue === 'undefined') return '';
+    return escapeHtml(String(tokenValue));
+  });
+}
+
+function replaceTokensInI18n(value, tokens) {
+  if (!value) return value;
+  if (typeof value === 'string') return replaceTemplateTokens(value, tokens);
+  if (typeof value === 'object') {
+    const next = { ...value };
+    ['en', 'fr'].forEach(lang => {
+      if (typeof next[lang] === 'string') {
+        next[lang] = replaceTemplateTokens(next[lang], tokens);
+      }
+    });
+    return next;
+  }
+  return value;
+}
+
+function applyPrefillTokensToSchema(schema, tokens) {
+  if (!schema || !Array.isArray(schema.steps)) return schema;
+  const steps = schema.steps.map(step => {
+    if (!step || !Array.isArray(step.components)) return step;
+    const components = step.components.map(comp => {
+      if (!comp || comp.type !== 'paragraph') return comp;
+      const next = { ...comp };
+      if (next.html) next.html = replaceTokensInI18n(next.html, tokens);
+      if (next.text) next.text = replaceTokensInI18n(next.text, tokens);
+      return next;
+    });
+    return { ...step, components };
+  });
+  return { ...schema, steps };
+}
+
+async function resolveStaffDisplayName(pool, req) {
+  const direct = normaliseString(req?.staffProfile?.display_name || req?.staffProfile?.name || null);
+  if (direct) return direct;
+  const staffId = normalisePositiveInteger(req?.staffProfile?.id || req?.auth?.staffProfileId || null);
+  if (staffId) {
+    try {
+      const [[row]] = await pool.query(
+        'SELECT display_name, name FROM staff_profiles WHERE id = ? LIMIT 1',
+        [staffId]
+      );
+      const name = normaliseString(row?.display_name || row?.name || null);
+      if (name) return name;
+    } catch (_) { /* ignore lookup errors */ }
+  }
+  const sub = req?.auth?.sub || null;
+  if (sub) {
+    try {
+      const [[row]] = await pool.query(
+        'SELECT display_name, name FROM staff_profiles WHERE cognito_sub = ? LIMIT 1',
+        [sub]
+      );
+      const name = normaliseString(row?.display_name || row?.name || null);
+      if (name) return name;
+    } catch (_) { /* ignore lookup errors */ }
+  }
+  const email = req?.auth?.email || req?.auth?.claims?.email || req?.auth?.claims?.Email || null;
+  if (email) {
+    try {
+      const [[row]] = await pool.query(
+        'SELECT display_name, name FROM staff_profiles WHERE LOWER(email) = LOWER(?) LIMIT 1',
+        [email]
+      );
+      const name = normaliseString(row?.display_name || row?.name || null);
+      if (name) return name;
+    } catch (_) { /* ignore lookup errors */ }
+  }
+  return normaliseString(req?.auth?.name || null) || null;
+}
+
 const AUTO_PLAN_METADATA_SOURCE = 'auto_assessment';
 
 function pruneNullish(value) {
@@ -4559,6 +4784,16 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   ].filter(Boolean);
   const interventionTitle = interventionTitleCandidates.length ? interventionTitleCandidates[0] : 'Initial Intervention';
 
+  const assessmentFunding = parseAssessmentFundingPayload(assessmentRow.itp_payload);
+  const fundingSnapshot = (() => {
+    if (!assessmentFunding && (computedCost === null || !Number.isFinite(computedCost))) return null;
+    const base = assessmentFunding ? { ...assessmentFunding } : {};
+    if (computedCost !== null && Number.isFinite(computedCost)) {
+      base.total = computedCost;
+    }
+    return base;
+  })();
+
   const interventionMetadata = pruneNullish({
     source: AUTO_PLAN_METADATA_SOURCE,
     title: interventionTitle,
@@ -4572,6 +4807,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     cost: computedCost || null,
     potId: validatedBudgetPotId || null,
     budgetPotId: validatedBudgetPotId || null,
+    funding: fundingSnapshot || null,
     compliance: { ilmp: 'pending', finance: 'pending' },
     generatedAt: now.toISOString(),
   });
@@ -15027,6 +15263,7 @@ app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
       a.id AS application_id,
       a.status AS application_status,
       a.created_at AS submitted_at,
+      a.updated_at AS application_updated_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
       c.assigned_to_user_id,
       sp.email AS assigned_user_email,
@@ -15284,6 +15521,107 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
     }
     console.error('[intervention-approval-items] fetch failed:', err.message);
     return res.status(500).json({ error: 'intervention_approval_items_fetch_failed', message: err.message });
+  }
+});
+
+// Active interventions with milestones due (for ISET Coordinators)
+app.get('/api/dashboard/intervention-milestone-items', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role !== 'Application Assessor') {
+    return res.json({ role, items: [] });
+  }
+  const context = await resolveApplicationAssessorContext(req);
+  const staffId = context?.staffProfileId || null;
+  if (!context?.valid || !staffId) {
+    return res.json({ role, items: [] });
+  }
+
+  const rawWindow = Number(req.query?.windowDays ?? 14);
+  const windowDays = Number.isFinite(rawWindow) && rawWindow > 0 ? Math.min(Math.floor(rawWindow), 90) : 14;
+  const windowDate = new Date();
+  windowDate.setDate(windowDate.getDate() + windowDays);
+  const windowDateValue = windowDate.toISOString().slice(0, 10);
+
+  const statusExpr = `REPLACE(LOWER(TRIM(ci.status)), ' ', '_')`;
+  const excludedStatuses = ['planned', 'cancelled', 'completed'];
+  const statusPlaceholders = excludedStatuses.map(() => '?').join(',');
+  const sql = `
+    SELECT
+      ci.id AS intervention_id,
+      ci.case_id,
+      ci.action_plan_id,
+      ci.intervention_code AS intervention_code,
+      ci.intervention_type AS intervention_type,
+      JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
+      ci.status AS intervention_status,
+      ci.start_date AS intervention_start_date,
+      ci.end_date AS intervention_end_date,
+      COALESCE(ci.updated_at, ci.created_at) AS submitted_at,
+      c.case_number,
+      c.assigned_to_user_id,
+      sp.email AS assigned_user_email,
+      sp.primary_role AS assigned_user_role,
+      a.id AS application_id,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."address-province"')) AS submission_address_province,
+      ic.label AS intervention_label
+    FROM iset_case_intervention ci
+    JOIN iset_case c ON c.id = ci.case_id
+    LEFT JOIN iset_application a ON c.application_id = a.id
+    LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
+    WHERE c.assigned_to_user_id = ?
+      AND ${statusExpr} NOT IN (${statusPlaceholders})
+      AND (ci.start_date IS NOT NULL OR ci.end_date IS NOT NULL)
+      AND (
+        (ci.start_date IS NOT NULL AND DATE(ci.start_date) <= ?)
+        OR (ci.end_date IS NOT NULL AND DATE(ci.end_date) <= ?)
+      )
+    ORDER BY COALESCE(ci.end_date, ci.start_date) ASC, ci.id ASC
+    LIMIT 200
+  `;
+  const params = [staffId, ...excludedStatuses, windowDateValue, windowDateValue];
+  try {
+    const [rows] = await pool.query(sql, params);
+    const items = Array.isArray(rows) ? rows.map(r => {
+      const preferred = normaliseString(r.submission_preferred_name);
+      const first = normaliseString(r.submission_first_name);
+      const last = normaliseString(r.submission_last_name);
+      const full = [first, last].filter(Boolean).join(' ').trim();
+      const applicantName = full || preferred || normaliseString(r.tracking_id) || 'Applicant';
+      const interventionLabel = normaliseString(r.intervention_label) || normaliseString(r.intervention_title) || null;
+      return {
+        interventionId: r.intervention_id || null,
+        caseId: r.case_id || null,
+        caseNumber: r.case_number || null,
+        applicationId: r.application_id || null,
+        trackingId: r.tracking_id || null,
+        applicantName,
+        applicant_name: applicantName,
+        address_province: normaliseString(r.submission_address_province) || null,
+        status: normaliseString(r.intervention_status) || null,
+        submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
+        owner: r.assigned_user_email || null,
+        assigned_user_id: r.assigned_to_user_id || null,
+        assigned_user_email: r.assigned_user_email || null,
+        assigned_user_role: r.assigned_user_role || null,
+        intervention_code: r.intervention_code || null,
+        intervention_label: interventionLabel,
+        intervention_start_date: r.intervention_start_date || null,
+        intervention_end_date: r.intervention_end_date || null
+      };
+    }) : [];
+    return res.json({ role, windowDays, items });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      return res.json({ role, windowDays, items: [] });
+    }
+    console.error('[intervention-milestone-items] fetch failed:', err.message);
+    return res.status(500).json({ error: 'intervention_milestone_items_fetch_failed', message: err.message });
   }
 });
 
@@ -21669,9 +22007,15 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
           d.metadata,
           d.document_category,
           d.source,
-          d.created_at AS uploaded_at
+          d.created_at AS uploaded_at,
+          COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+            s.reference_number
+          ) AS reference_number
        FROM iset_document d
        LEFT JOIN iset_case c ON c.id = d.case_id
+       LEFT JOIN iset_application a ON a.id = COALESCE(d.application_id, c.application_id)
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        ${whereSql}
        ORDER BY d.created_at DESC`,
       params
@@ -21955,6 +22299,7 @@ app.get('/api/cases', async (req, res) => {
         cl.aboriginal_group AS client_aboriginal_group,
         JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
         a.created_at AS submitted_at,
+        a.updated_at AS application_updated_at,
         JSON_EXTRACT(a.payload_json, '$') AS payload_json,
         COALESCE(
           NULLIF(cl.last_name, ''),
@@ -28730,10 +29075,107 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       }
     }
 
+    const needsFundingAgreementPrefill = attachmentRows.some(
+      row => row.workflow_type === 'consent-cm-prefill' && row.document_type === 'funding_agreement'
+    );
+    let fundingAgreementTokens = null;
+    if (needsFundingAgreementPrefill) {
+      const caseManagerName = await resolveStaffDisplayName(pool, req);
+      const caseManagerSignedDate = formatFundingDate(new Date());
+      const [[assessmentRow]] = await pool.query(
+        `SELECT program_name, institution, intervention_start_date, intervention_end_date, itp_payload, intervention_cost_total
+           FROM iset_case_assessment
+          WHERE case_id = ?
+          LIMIT 1`,
+        [caseId]
+      );
+      const [interventionRows] = await pool.query(
+        `SELECT id, status, start_date, end_date, intervention_cost, budget_amount, approved_amount,
+                intervention_code, intervention_type, metadata_json, esdc_intervention_json, created_at
+           FROM iset_case_intervention
+          WHERE case_id = ?
+          ORDER BY created_at DESC`,
+        [caseId]
+      );
+      let interventionRow = null;
+      if (Array.isArray(interventionRows) && interventionRows.length) {
+        interventionRow = interventionRows.find(row => {
+          const status = normaliseInterventionStatus(row.status);
+          return status !== 'cancelled';
+        }) || interventionRows[0];
+      }
+      const interventionMetadata = safeJsonParse(interventionRow?.metadata_json, {}) || {};
+      const interventionEsdc = safeJsonParse(interventionRow?.esdc_intervention_json, {}) || {};
+      const interventionCodeRaw =
+        interventionRow?.intervention_code ??
+        interventionRow?.intervention_type ??
+        interventionEsdc?.interventionCode ??
+        interventionMetadata?.code ??
+        null;
+      let interventionLabel = null;
+      if (interventionCodeRaw !== null && typeof interventionCodeRaw !== 'undefined') {
+        interventionLabel = await fetchInterventionCodeLabel(pool, interventionCodeRaw);
+      }
+      if (!interventionLabel) {
+        const title = normaliseString(interventionMetadata?.title || '');
+        interventionLabel = title ? title.replace(/\s*intervention$/i, '') : null;
+      }
+      let submissionPayload = null;
+      if (caseRow?.application_id) {
+        const [[submissionRow]] = await pool.query(
+          `SELECT s.intake_payload
+             FROM iset_application a
+             JOIN iset_application_submission s ON s.id = a.submission_id
+            WHERE a.id = ?
+            LIMIT 1`,
+          [caseRow.application_id]
+        );
+        submissionPayload = safeJsonParse(submissionRow?.intake_payload, null);
+      }
+      const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
+      const contextNameCandidates = [
+        caseContext?.preferredName,
+        caseContext?.preferred_name,
+        caseContext?.firstName && caseContext?.lastName
+          ? `${caseContext.firstName} ${caseContext.lastName}`
+          : null,
+        caseContext?.first_name && caseContext?.last_name
+          ? `${caseContext.first_name} ${caseContext.last_name}`
+          : null
+      ];
+      const fallbackName = contextNameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
+      const applicantName = resolveApplicantNameFromPayload(submissionPayload, fallbackName);
+      fundingAgreementTokens = resolveFundingAgreementTokens({
+        applicantName,
+        caseManagerName,
+        caseManagerSignedDate,
+        interventionLabel,
+        assessmentRow,
+        interventionRow,
+        interventionMetadata,
+        interventionEsdc
+      });
+    }
+
+    const requestedApplicationId = normalisePositiveInteger(req.body?.applicationId);
+    const caseApplicationId = normalisePositiveInteger(caseRow?.application_id);
+    const messageApplicationId =
+      requestedApplicationId && caseApplicationId && requestedApplicationId === caseApplicationId
+        ? requestedApplicationId
+        : null;
+    if (requestedApplicationId && messageApplicationId === null) {
+      console.warn(
+        '[messages] ignoring applicationId mismatch for case %s (requested %s, case %s)',
+        caseId,
+        requestedApplicationId,
+        caseApplicationId
+      );
+    }
+
     const [result] = await pool.query(
       `INSERT INTO messages (sender_id, recipient_id, case_id, application_id, subject, body, status, deleted, urgent, created_at)
        VALUES (?, ?, ?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
-      [senderId, recipientId, caseId, caseRow?.application_id || null, subjectValue, bodyValue, !!urgent]
+      [senderId, recipientId, caseId, messageApplicationId, subjectValue, bodyValue, !!urgent]
     );
 
     // Create signing requests and link to message
@@ -28753,6 +29195,14 @@ app.post('/api/cases/:id/messages', async (req, res) => {
           } catch (schemaErr) {
             console.warn('[signing_request] failed to build schema for workflow', wf.id, schemaErr?.message || schemaErr);
           }
+        }
+        if (
+          resolvedSchema &&
+          fundingAgreementTokens &&
+          wf.workflow_type === 'consent-cm-prefill' &&
+          wf.document_type === 'funding_agreement'
+        ) {
+          resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, fundingAgreementTokens);
         }
         const attachmentMeta = attachments.find(a => parseInt(a?.workflow_id, 10) === wf.id) || {};
         const docType =
@@ -32649,6 +33099,15 @@ app.get('/api/applications', async (req, res) => {
         JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."address-province"'))
       ) AS address_province,
       ca.esdc_eligibility AS assessment_esdc_eligibility,
+      ca.intervention_cost_total AS assessment_intervention_cost_total,
+      ca.intervention_budget_pot_id AS assessment_intervention_pot_id,
+      (
+        SELECT COUNT(*)
+          FROM iset_document dfa
+         WHERE dfa.status = 'active'
+           AND dfa.document_category = 'funding_agreement'
+           AND (dfa.application_id = a.id OR dfa.case_id = c.id)
+      ) AS funding_agreement_count,
       a.created_at AS submitted_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS preferred_name,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"')) AS applicant_first_name,
@@ -32716,6 +33175,9 @@ app.get('/api/applications', async (req, res) => {
           JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."address-province"'))
         ) AS address_province,
         NULL AS assessment_esdc_eligibility,
+        NULL AS assessment_intervention_cost_total,
+        NULL AS assessment_intervention_pot_id,
+        0 AS funding_agreement_count,
         a.created_at AS submitted_at,
         JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS preferred_name,
         JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"')) AS applicant_first_name,
@@ -32793,6 +33255,8 @@ app.get('/api/applications', async (req, res) => {
         assigned_user_email: r.assigned_user_email || null,
         assigned_user_role: r.assigned_user_role || null,
         submitted_at: r.submitted_at,
+        application_updated_at: r.application_updated_at || null,
+        last_activity_at: r.last_activity_at || null,
         ptma_codes: null, // legacy field removed; placeholder for future taxonomy
         region: null, // region derivation TBD (could parse from application payload or staff profile)
         is_unassigned: r.is_unassigned_submission === 1,
@@ -32804,7 +33268,10 @@ app.get('/api/applications', async (req, res) => {
         is_locked: Boolean(lockOwnerId),
         applicant_name: applicantName,
         address_province: r.address_province || null,
-        assessment_esdc_eligibility: r.assessment_esdc_eligibility || null
+        assessment_esdc_eligibility: r.assessment_esdc_eligibility || null,
+        assessment_intervention_cost_total: r.assessment_intervention_cost_total ?? null,
+        assessment_intervention_pot_id: r.assessment_intervention_pot_id ?? null,
+        funding_agreement_count: r.funding_agreement_count ?? 0
       };
     });
     res.json({ count, rows: rowsOut });
@@ -33375,6 +33842,40 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
         WHERE id = ?`,
       [JSON.stringify(payload), payload.artifact_url || null, id]
     );
+    const caseId = Number(row.case_id);
+    if (Number.isInteger(caseId) && caseId > 0) {
+      const normalizeStatusKey = value =>
+        (value || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
+      const [[caseRow]] = await pool.query(
+        `SELECT c.application_id, a.status AS application_status
+           FROM iset_case c
+           JOIN iset_application a ON a.id = c.application_id
+          WHERE c.id = ?
+          LIMIT 1`,
+        [caseId]
+      );
+      const statusKey = normalizeStatusKey(caseRow?.application_status || '');
+      const resumeStatuses = new Set(['docs_requested', 'action_required', 'action_required_(docs_requested)']);
+      if (resumeStatuses.has(statusKey)) {
+        const [[pendingRow]] = await pool.query(
+          `SELECT COUNT(*) AS pending_count
+             FROM signing_request
+            WHERE case_id = ?
+              AND status <> 'signed'`,
+          [caseId]
+        );
+        const pendingCount = Number(pendingRow?.pending_count || 0);
+        if (pendingCount === 0 && caseRow?.application_id) {
+          await pool.query(
+            `UPDATE iset_application
+                SET status = 'in_review',
+                    row_version = row_version + 1
+              WHERE id = ?`,
+            [caseRow.application_id]
+          );
+        }
+      }
+    }
     res.json({ id, status: 'signed' });
   } catch (err) {
     console.error('POST /api/signing-requests/:id/sign failed', err);

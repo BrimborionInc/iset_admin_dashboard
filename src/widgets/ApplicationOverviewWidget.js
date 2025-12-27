@@ -53,6 +53,21 @@ function formatDateTime(value) {
   });
 }
 
+function getDaysAgo(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const now = Date.now();
+  const diffDays = Math.floor((now - date.getTime()) / 86400000);
+  return Math.max(diffDays, 0);
+}
+
+function formatDaysAgo(value) {
+  const days = getDaysAgo(value);
+  if (days === null) return null;
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
 function normalizeClosedStatus(status) {
   const key = (status || '').toString().trim().toLowerCase();
   return key === 'withdrawn' ? 'closed' : key;
@@ -184,8 +199,16 @@ const computeSlaMeta = (application, slaTargets, rawStatus, isAssigned) => {
   const due = toDate(application?.sla_due_at) || new Date(submitted.getTime() + targetDays * 86400000);
   const diffDays = Math.floor((due.getTime() - nowMs) / 86400000);
   const stageLabel = targetKey === 'program_decision' ? 'Decision' : targetKey === 'assessment' ? 'Assessment' : 'Assignment';
-  if (diffDays < -4) return { label: `${stageLabel} ${Math.abs(diffDays)} days overdue`, color: 'severity-critical' };
-  if (diffDays < 0) return { label: `${stageLabel} ${Math.abs(diffDays)} days overdue`, color: 'severity-high' };
+  if (diffDays < 0) {
+    const overdueDays = Math.abs(diffDays);
+    let color = 'grey';
+    if (overdueDays > 28) color = 'severity-critical';
+    else if (overdueDays >= 15) color = 'severity-high';
+    else if (overdueDays >= 7) color = 'severity-medium';
+    else if (overdueDays >= 3) color = 'severity-low';
+    const label = `${stageLabel} ${overdueDays} day${overdueDays === 1 ? '' : 's'} overdue`;
+    return { label, color };
+  }
   if (diffDays === 0) return { label: `${stageLabel} due today`, color: 'severity-medium' };
   if (diffDays <= 3) return { label: `${stageLabel} due in ${diffDays} days`, color: 'severity-low' };
   return { label: `${stageLabel} due in ${diffDays} days`, color: 'green' };
@@ -723,8 +746,24 @@ const ApplicationOverviewWidget = ({
   const statusOption = APPLICATION_STATUS_OPTIONS.find(option => option.value === fallbackStatus);
   const statusLabel = statusOption?.label || formatStatusLabel(fallbackStatus);
   const selectedStatusOption = statusOption || (fallbackStatus ? { label: statusLabel, value: fallbackStatus } : null);
-  const badgeLabel = statusLabel;
-  const badgeColor = statusColor(statusOption?.value || fallbackStatus || 'unknown');
+  const docsRequestedSince = application?.updated_at || caseData?.updated_at || application?.created_at || null;
+  const isDocsRequestedStatus = ['docs_requested', 'action_required', 'action_required_(docs_requested)'].includes(normalizedStatusKey);
+  const docsRequestedDays = isDocsRequestedStatus ? getDaysAgo(docsRequestedSince) : null;
+  const docsRequestedSuffix = docsRequestedDays !== null
+    ? `${docsRequestedDays} day${docsRequestedDays === 1 ? '' : 's'} ago`
+    : null;
+  const badgeLabel = isDocsRequestedStatus
+    ? `Docs Requested${docsRequestedSuffix ? ` ${docsRequestedSuffix}` : ''}`
+    : statusLabel;
+  const docsRequestedColor = (() => {
+    if (!isDocsRequestedStatus || docsRequestedDays === null) return null;
+    if (docsRequestedDays > 28) return 'severity-critical';
+    if (docsRequestedDays >= 15) return 'severity-high';
+    if (docsRequestedDays >= 7) return 'severity-medium';
+    if (docsRequestedDays >= 3) return 'severity-low';
+    return 'grey';
+  })();
+  const badgeColor = docsRequestedColor || statusColor(statusOption?.value || fallbackStatus || 'unknown');
   const statusSelectDisabled = !canEditStatus || savingStatus || lockedByAnotherUser;
   const hasOpenEscalation = escalation && escalation.state && escalation.state !== 'resolved';
   const escalationOwnerRole = normalizeEscalationRole(canonicalizeRole(escalation?.current_owner_role || escalation?.currentOwnerRole));

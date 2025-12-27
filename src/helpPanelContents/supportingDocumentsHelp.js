@@ -2,63 +2,103 @@ import React from 'react';
 
 const SupportingDocumentsHelp = () => (
   <div>
-    <h2>Supporting documents library</h2>
+    <h2>Supporting documents</h2>
     <p>
-      This table lists every file attached to the applicant, whether it was uploaded during intake or added later
-      from secure messaging. Use it to verify eligibility proofs, download evidence, and confirm the latest
-      submissions.
+      This widget is the single place to view, organize, and verify files tied to the applicant. It pulls together
+      original application uploads, secure message attachments, and digitally signed forms so you can confirm eligibility
+      evidence and track what is still missing.
     </p>
 
-    <h3>Key features</h3>
+    <h3>How to use this widget</h3>
     <ul>
       <li>
-        <strong>Document catalogue:</strong> View filenames, their source (application upload vs. secure message),
-        and the date they were received.
+        <strong>Filter the view:</strong> Use the “View documents for” selector to focus on a specific application
+        (application workspace) or intervention (case workspace). “All documents” includes client files plus all
+        applications or interventions.
       </li>
       <li>
-        <strong>Document labels:</strong> Use inline edit on “Document label” to give files a meaningful name (e.g., “Government ID”).
-        Manual uploads prompt for a label; multi-file uploads automatically suffix the label (Label, Label (1), Label (2), …).
+        <strong>Switch tabs:</strong> The <em>Documents</em> tab shows the file list; the <em>Checklist</em> tab shows
+        required items and whether each is complete, missing, or in progress.
       </li>
       <li>
-        <strong>One-click download:</strong> Open a document in a new tab to review or save it locally. Downloads
-        use secure, time-limited links.
-      </li>
-      <li>
-        <strong>Auto-refresh:</strong> When a new attachment arrives through secure messaging, the list refreshes on
-        its own so you do not miss new evidence.
-      </li>
-      <li>
-        <strong>Safe delete:</strong> Deleting requires typing <code>delete</code> to confirm. Use only when you are sure a document should be removed.
+        <strong>Refresh:</strong> Use the refresh button after new uploads or signed forms arrive to pull in the latest files.
       </li>
     </ul>
 
-    <h3>When to use</h3>
+    <h3>Document list columns</h3>
     <ul>
-      <li>Confirm identity, residency, and program eligibility documents before approving funding.</li>
-      <li>Double-check that all required paperwork has arrived after requesting additional information.</li>
-      <li>Provide auditors with a quick index of what was supplied by the applicant.</li>
+      <li>
+        <strong>Document label:</strong> Human-friendly label you can edit inline to make the file easy to recognize.
+      </li>
+      <li>
+        <strong>File Name:</strong> Original filename as uploaded or generated.
+      </li>
+      <li>
+        <strong>Application / Case:</strong> Shows the application reference number in the application workspace or the
+        case number in the case workspace. Intervention documents appear as “Intervention: Sample intervention”.
+      </li>
+      <li>
+        <strong>Source:</strong> Where the file came from. Common values are Application submission, Message attachment,
+        Digitally signed, and Manual upload.
+      </li>
+      <li>
+        <strong>Scope:</strong> Client documents apply to all applications; Application documents apply to a specific
+        application or intervention.
+      </li>
+      <li>
+        <strong>Uploaded:</strong> Date the file was added to the system.
+      </li>
+      <li>
+        <strong>Actions:</strong> Edit metadata, duplicate to another application or intervention (when available),
+        view the file, or delete it.
+      </li>
     </ul>
 
-    <h3>Good to know</h3>
+    <h3>Uploading and managing documents</h3>
     <ul>
       <li>
-        If a file shows as <em>Unavailable</em>, ask the applicant to re-upload or contact support for recovery.
+        <strong>Upload:</strong> Choose a label and document type, then attach it to an application or intervention.
+        Client-scoped documents do not need an attachment and are reusable across applications.
       </li>
       <li>
-        The widget is applicant-centric—switching cases loads the new applicant’s document list automatically.
+        <strong>Duplicate:</strong> Use this to reuse the same file across applications or interventions. The option
+        appears only when duplication is possible (for example, when the applicant has multiple applications).
       </li>
       <li>
-        Downloads respect your session permissions; if a link expires, refresh the page and try again.
+        <strong>Delete:</strong> Deleting requires typing <code>delete</code>. Use it only when the file should no longer
+        be part of the official record.
+      </li>
+    </ul>
+
+    <h3>Checklist tips</h3>
+    <ul>
+      <li>
+        Checklist status updates based on document type and attachment. If a document is not counting, confirm it is
+        tagged with the correct document type and attached to the right application or intervention.
+      </li>
+      <li>
+        In the case workspace, select an intervention to view its checklist.
+      </li>
+    </ul>
+
+    <h3>Troubleshooting</h3>
+    <ul>
+      <li>
+        <strong>Unavailable:</strong> The file link is missing. Ask the applicant to re-upload or contact support.
+      </li>
+      <li>
+        <strong>Expired download:</strong> Refresh the page to get a new secure download link.
       </li>
     </ul>
   </div>
 );
 
 SupportingDocumentsHelp.aiContext = `
-You are assisting an ISET program staff member reviewing the Supporting Documents widget. Explain how to confirm the
-latest uploads, download evidence, and understand document sources. Clarify that document labels can be edited inline
-and that multi-file uploads suffix labels automatically; manual uploads prompt for labels. Note that delete is gated by
-typing “delete” and should be used sparingly. Offer practical advice for handling missing or outdated files.
+You are assisting an ISET program staff member using the Supporting Documents widget. Explain how to filter by application
+or intervention, interpret the Documents and Checklist tabs, and what each column means. Clarify sources (application
+submission, message attachment, digitally signed, manual upload), scope (client vs application), and how to upload,
+edit, duplicate, view, or delete documents. Note that duplicate only appears when reuse is possible and delete requires
+typing "delete". Offer troubleshooting for missing checklist counts and unavailable files.
 `;
 
 export default SupportingDocumentsHelp;

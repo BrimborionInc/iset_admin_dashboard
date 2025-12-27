@@ -22,14 +22,18 @@ Stored in `iset_application.status` (varchar). Canonical values:
 | `submitted` | Applicant completed the public portal submission. | Auto-ingest of `iset_application_submission`. |
 | `in_review` | Case staff has claimed the application and is performing assessment work. | Manual assignment or clerical updates (optional). |
 | `docs_requested` (aka “Action Required”) | Additional information is needed from the applicant. | Manual status update from Application Overview widget. |
+| `closure_notice` | Closure notice sent; awaiting applicant response before closing. | Application Overview quick action. |
 | `pending_approval` | Assessor submitted their review; awaiting NWAC outcome decision. | `CoordinatorAssessmentWidget.handleSubmit`. |
 | `approved` | NWAC outcome marked as approved. | `CoordinatorAssessmentWidget.handleComplete` with `approve`. |
 | `completed` | Post-approval processing completed (future use). | Finance/closure flows. |
 | `rejected` | NWAC outcome rejected. | `CoordinatorAssessmentWidget.handleComplete` with `reject`. |
+| `declined` | Legacy decision status treated as rejected/terminal. | Legacy/imported records. |
+| `cancelled` | Legacy terminal status for cancelled applications. | Legacy/imported records. |
 | `closed` | Application closed (e.g., applicant withdrew or file closed administratively). | Manual status change or automation. |
 | `archived` | Historical record retained, no further action. | Manual administrative action. |
+| `withdrawn` | Applicant withdrew; normalized to `closed` in UI. | Legacy/imported records or portal withdrawal. |
 
-> **Canonicalisation:** `getApplicationStatusContext()` (in `src/utils/rbac.js`) lowercases and underscores incoming values; synonyms such as `"action_required"` and `"submitted"` are preserved. When comparing statuses always pass through this helper.
+> **Normalization:** `getApplicationStatusContext()` (in `src/utils/rbac.js`) lowercases/underscores incoming values and maps `withdrawn` to `closed`. SLA and queue logic also treat hold variants (`action_required`, `docs requested`, `closure notice`, `pending info`, `information requested`, `on_hold`) as assessment/hold states (see `APPLICATION_STATUS_HOLD_VALUES` in `isetadminserver.js`).
 
 ### 2.2 Case Statuses
 Stored in `iset_case.status`. Canonical set defined in `CASE_STATUS_DERIVED_VALUES` (see `isetadminserver.js`):
@@ -80,6 +84,7 @@ The set is intentionally broad to accommodate funder reporting requirements; cas
 2. **Assessment Submitted** (`pending_approval`): triggered in `CoordinatorAssessmentWidget.handleSubmit`, which sends `status: 'pending_approval'` via `PUT /api/cases/:id`. Backend persists the new application status and recalculates action plan-derived case status (which typically remains `pending_approval` until approval).
 3. **Outcome Decision** (`approved` / `rejected`): `handleComplete` sends the final status; backend updates `iset_application.status` and recomputes the case status. When the outcome is **approved** the server also seeds an initial action plan and intervention from the NWAC recommendation. As of 2026‑02 the auto-generated plan always starts in `draft` (regardless of the recommended start date) and the intervention in `planned`, keeping the case in `initiated` until a caseworker explicitly activates the plan.
 4. **Manual Overrides**: The Application Overview widget can POST/PUT `status` changes via `PUT /api/cases/:id`. Locks ensure only one user manipulates state at a time.
+5. **Secure Messaging with forms**: Sending a secure message with attached forms from the Application Workspace while status is `submitted` or `in_review` updates the application status to `docs_requested` to reflect that applicant action is needed.
 
 ### 3.2 Case Status Derivation
 Implemented in `recomputeCaseStatus(caseId)` (see `isetadminserver.js`):
