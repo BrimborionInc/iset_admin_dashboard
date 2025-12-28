@@ -37,20 +37,48 @@
       margin-bottom: 4px;
     }
 
+    .field-panel {
+      border: 1px solid #9ba7b6;
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #fff;
+    }
+
+    .field-value {
+      min-height: 24px;
+      padding: 4px 6px;
+      border-bottom: 1px solid #9ba7b6;
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .field-label {
+      font-size: 12px;
+      color: #4b5563;
+      margin-top: 6px;
+    }
+
     .line {
       border-bottom: 1px solid #000;
       min-height: 18px;
       padding: 2px 4px;
     }
 
+    .table-panel {
+      border: 1px solid #9ba7b6;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 8px;
+      background: #fff;
+    }
+
     table {
       border-collapse: collapse;
       width: 100%;
-      margin-top: 8px;
     }
 
     th, td {
-      border: 1px solid #000;
+      border: 1px solid #9ba7b6;
       padding: 6px;
       font-size: 13px;
     }
@@ -58,6 +86,7 @@
     th {
       text-align: left;
       font-weight: bold;
+      background: #f6f7f9;
     }
 
     .amount {
@@ -79,6 +108,7 @@
       border-radius: 6px;
       padding: 12px;
       max-width: 520px;
+      background: #fff;
     }
 
     .signature-line {
@@ -106,51 +136,61 @@
 </head>
 <body>
 
-<h1>CLIENT FUNDING AGREEMENT</h1>
-
 <div class="field">
-  <span class="label">Client Name (please print)</span>
-  <div class="line">{{client_name}}</div>
-</div>
-
-<div class="field-row">
-  <div class="field">
-    <span class="label">Eligible Educational/Training Institution</span>
-    <div class="line">{{institution}}</div>
-  </div>
-  <div class="field">
-    <span class="label">Eligible Program</span>
-    <div class="line">{{program_name}}</div>
+  <div class="field-panel">
+    <div class="field-value">{{client_name}}</div>
+    <div class="field-label">Client Name (please print)</div>
   </div>
 </div>
 
 <div class="field-row">
   <div class="field">
-    <span class="label">Start Date</span>
-    <div class="line">{{start_date}}</div>
+    <div class="field-panel">
+      <div class="field-value">{{institution}}</div>
+      <div class="field-label">Eligible Educational/Training Institution</div>
+    </div>
   </div>
   <div class="field">
-    <span class="label">End Date</span>
-    <div class="line">{{end_date}}</div>
+    <div class="field-panel">
+      <div class="field-value">{{program_name}}</div>
+      <div class="field-label">Eligible Program</div>
+    </div>
   </div>
 </div>
 
-<table>
-  <thead>
-    <tr>
-      <th>Expense*</th>
-      <th class="amount">Amount</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr><td>Tuition</td><td>{{tuition_amount}}</td></tr>
-    <tr><td>Books / Program Materials</td><td>{{books_amount}}</td></tr>
-    <tr><td>School Fees</td><td>{{materials_amount}}</td></tr>
-    <!-- IF other_item_amount --><tr><td>{{other_item_label}}</td><td>{{other_item_amount}}</td></tr><!-- END other_item_amount -->
-    <tr><td>&nbsp;</td><td></td></tr>
-    <tr><td><strong>Total</strong></td><td>{{total_amount}}</td></tr>
-  </tbody>
-</table>
+<div class="field-row">
+  <div class="field">
+    <div class="field-panel">
+      <div class="field-value">{{start_date}}</div>
+      <div class="field-label">Start Date</div>
+    </div>
+  </div>
+  <div class="field">
+    <div class="field-panel">
+      <div class="field-value">{{end_date}}</div>
+      <div class="field-label">End Date</div>
+    </div>
+  </div>
+</div>
+
+<div class="table-panel">
+  <table>
+    <thead>
+      <tr>
+        <th>Expense*</th>
+        <th class="amount">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Tuition</td><td>{{tuition_amount}}</td></tr>
+      <tr><td>Books / Program Materials</td><td>{{books_amount}}</td></tr>
+      <tr><td>School Fees</td><td>{{materials_amount}}</td></tr>
+      <!-- IF other_item_amount --><tr><td>{{other_item_label}}</td><td>{{other_item_amount}}</td></tr><!-- END other_item_amount -->
+      <tr><td>&nbsp;</td><td></td></tr>
+      <tr><td><strong>Total</strong></td><td>{{total_amount}}</td></tr>
+    </tbody>
+  </table>
+</div>
 
 <div class="note">
   <strong>**</strong> Payment of tuition-related expenses will be paid to the Educational/Training institution named above,
@@ -160,25 +200,19 @@
 <!-- IF living_amount -->
 <h2>Living Allowance (if applicable)</h2>
 
-<table>
-  <thead>
-    <tr>
-      <th>Monthly Approved Amount</th>
-      <th>Approved for Month / Year**</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr><td>{{living_amount}}</td><td></td></tr>
-    <tr><td></td><td></td></tr>
-    <tr><td></td><td></td></tr>
-    <tr><td></td><td></td></tr>
-    <tr><td></td><td></td></tr>
-    <tr><td></td><td></td></tr>
-    <tr><td></td><td></td></tr>
-    <tr><td></td><td></td></tr>
-    <tr><td></td><td></td></tr>
-  </tbody>
-</table>
+<div class="table-panel">
+  <table>
+    <thead>
+      <tr>
+        <th>Monthly Approved Amount</th>
+        <th>Approved for Month / Year**</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{{living_rows_html}}}
+    </tbody>
+  </table>
+</div>
 
 <div class="note">
   <strong>*</strong> Client Monthly Attendance Report MUST be submitted before a living allowance is paid.

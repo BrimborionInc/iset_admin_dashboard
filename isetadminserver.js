@@ -3891,6 +3891,73 @@ function formatFundingDate(value) {
   return dateValue || '';
 }
 
+function calculateInclusiveMonthCount(startDate, endDate) {
+  const start = parseDate(startDate);
+  const end = parseDate(endDate);
+  if (!start || !end) return null;
+  if (end.getTime() < start.getTime()) return null;
+  const count =
+    (end.getFullYear() - start.getFullYear()) * 12 +
+    (end.getMonth() - start.getMonth()) +
+    1;
+  return Number.isFinite(count) && count > 0 ? count : null;
+}
+
+function buildMonthLabels(startDate, endDate) {
+  const count = calculateInclusiveMonthCount(startDate, endDate);
+  if (!count) return [];
+  const labels = [];
+  const start = parseDate(startDate);
+  if (!start) return labels;
+  let year = start.getFullYear();
+  let month = start.getMonth();
+  const maxMonths = Math.min(count, 120);
+  for (let i = 0; i < maxMonths; i += 1) {
+    const labelDate = new Date(Date.UTC(year, month, 1));
+    labels.push(labelDate.toLocaleString('en-CA', { month: 'long', year: 'numeric' }));
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return labels;
+}
+
+function resolveFundingOccurrences({ startDate, endDate, interventionMetadata, interventionEsdc, assessmentRow }) {
+  const toNumber = value => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
+  const directCandidates = [
+    toNumber(interventionMetadata?.costSettings?.occurrences),
+    toNumber(interventionMetadata?.recurrence?.occurrences),
+    toNumber(interventionEsdc?.interventionDurationMonths),
+    toNumber(interventionEsdc?.durationMonths),
+  ];
+  const direct = directCandidates.find(value => value && value > 0);
+  if (direct) return Math.round(direct);
+  const byDates = calculateInclusiveMonthCount(startDate, endDate);
+  if (byDates) return byDates;
+  const durationDays = toNumber(assessmentRow?.intervention_duration_days);
+  if (durationDays && durationDays > 0) {
+    return Math.max(1, Math.round(durationDays / 30));
+  }
+  return null;
+}
+
+function buildLivingAllowanceRows({ startDate, endDate, amount }) {
+  const formattedAmount = formatFundingCurrency(amount);
+  if (!formattedAmount) return '';
+  const labels = buildMonthLabels(startDate, endDate);
+  if (!labels.length) {
+    return `<tr><td>${formattedAmount}</td><td></td></tr>`;
+  }
+  return labels
+    .map(label => `<tr><td>${formattedAmount}</td><td>${escapeHtml(label)}</td></tr>`)
+    .join('');
+}
+
 function resolveApplicantNameFromPayload(payload, fallback) {
   if (!payload || typeof payload !== 'object') return fallback || null;
   const first =
@@ -3933,26 +4000,78 @@ function resolveFundingAgreementTokens({
     tuition: toAmount(metadataFunding?.tuition ?? assessmentFunding?.tuition),
     books: toAmount(metadataFunding?.books ?? assessmentFunding?.books),
     materials: toAmount(metadataFunding?.materials ?? assessmentFunding?.materials),
-    living: toAmount(metadataFunding?.living ?? assessmentFunding?.living)
+    living: toAmount(metadataFunding?.living ?? assessmentFunding?.living),
+    total: toAmount(metadataFunding?.total)
   };
-  const lineTotal = [funding.tuition, funding.books, funding.materials]
-    .filter(value => Number.isFinite(value))
-    .reduce((sum, value) => sum + value, 0);
   const interventionCost =
     toAmount(interventionRow?.intervention_cost) ??
     toAmount(interventionRow?.budget_amount) ??
     toAmount(interventionRow?.approved_amount) ??
     toAmount(interventionEsdc?.interventionCost) ??
     toAmount(assessmentRow?.intervention_cost_total);
-  let total = null;
-  if (Number.isFinite(interventionCost)) {
-    total = interventionCost;
+  const startDate =
+    interventionRow?.start_date ||
+    interventionEsdc?.interventionStartDate ||
+    assessmentRow?.intervention_start_date ||
+    null;
+  const endDate =
+    interventionRow?.end_date ||
+    interventionEsdc?.interventionEndDate ||
+    assessmentRow?.intervention_end_date ||
+    null;
+  const occurrences = resolveFundingOccurrences({
+    startDate,
+    endDate,
+    interventionMetadata,
+    interventionEsdc,
+    assessmentRow
+  });
+  const perPeriodSum = [funding.tuition, funding.books, funding.materials]
+    .filter(value => Number.isFinite(value))
+    .reduce((sum, value) => sum + value, 0);
+  const totalCandidate =
+    (Number.isFinite(funding.total) ? funding.total : null) ??
+    (Number.isFinite(interventionCost) ? interventionCost : null);
+  let useRecurringLineItems = Boolean(occurrences && occurrences > 1 && perPeriodSum > 0);
+  if (useRecurringLineItems && Number.isFinite(totalCandidate)) {
+    const recurringTotal = perPeriodSum * occurrences;
+    const diffRecurring = Math.abs(totalCandidate - recurringTotal);
+    const diffSingle = Math.abs(totalCandidate - perPeriodSum);
+    useRecurringLineItems = diffRecurring <= diffSingle;
   }
-  if (lineTotal > 0) {
-    total = total === null ? lineTotal : Math.max(total, lineTotal);
+  const multiplier = useRecurringLineItems ? occurrences : 1;
+  const computeLineTotal = value =>
+    Number.isFinite(value) ? value * (Number.isFinite(multiplier) ? multiplier : 1) : null;
+  const tuitionTotal = computeLineTotal(funding.tuition);
+  const booksTotal = computeLineTotal(funding.books);
+  const materialsTotal = computeLineTotal(funding.materials);
+  const lineTotal = [tuitionTotal, booksTotal, materialsTotal]
+    .filter(value => Number.isFinite(value))
+    .reduce((sum, value) => sum + value, 0);
+  const hasBreakdown = [tuitionTotal, booksTotal, materialsTotal]
+    .some(value => Number.isFinite(value) && value > 0);
+  const livingTotal = Number.isFinite(funding.living) && occurrences && occurrences > 0
+    ? funding.living * occurrences
+    : Number.isFinite(funding.living)
+      ? funding.living
+      : null;
+  let otherItemAmount = null;
+  let expenseTotal = lineTotal > 0 ? lineTotal : null;
+  if (!hasBreakdown) {
+    let nonLivingTotal = Number.isFinite(totalCandidate) ? totalCandidate : null;
+    if (
+      Number.isFinite(nonLivingTotal) &&
+      Number.isFinite(livingTotal) &&
+      livingTotal > 0 &&
+      nonLivingTotal > livingTotal
+    ) {
+      nonLivingTotal -= livingTotal;
+    }
+    if (Number.isFinite(nonLivingTotal) && nonLivingTotal > 0) {
+      otherItemAmount = nonLivingTotal;
+      expenseTotal = nonLivingTotal;
+    }
   }
-  const otherItemAmount =
-    total !== null && total > lineTotal + 0.01 ? (total - lineTotal) : null;
   const cleanedLabel =
     normaliseString(interventionLabel || '')?.replace(/\s*intervention$/i, '') || '';
 
@@ -3966,16 +4085,11 @@ function resolveFundingAgreementTokens({
     interventionMetadata?.training_institution ||
     assessmentRow?.institution ||
     null;
-  const startDate =
-    interventionRow?.start_date ||
-    interventionEsdc?.interventionStartDate ||
-    assessmentRow?.intervention_start_date ||
-    null;
-  const endDate =
-    interventionRow?.end_date ||
-    interventionEsdc?.interventionEndDate ||
-    assessmentRow?.intervention_end_date ||
-    null;
+  const livingRowsHtml = buildLivingAllowanceRows({
+    startDate,
+    endDate,
+    amount: funding.living
+  });
 
   return {
     client_name: applicantName || '',
@@ -3985,13 +4099,14 @@ function resolveFundingAgreementTokens({
     program_name: programName || '',
     start_date: formatFundingDate(startDate),
     end_date: formatFundingDate(endDate),
-    tuition_amount: formatFundingCurrency(funding.tuition),
-    books_amount: formatFundingCurrency(funding.books),
-    materials_amount: formatFundingCurrency(funding.materials),
-    total_amount: formatFundingCurrency(total),
+    tuition_amount: formatFundingCurrency(tuitionTotal),
+    books_amount: formatFundingCurrency(booksTotal),
+    materials_amount: formatFundingCurrency(materialsTotal),
+    total_amount: formatFundingCurrency(expenseTotal),
     living_amount: formatFundingCurrency(funding.living),
     other_item_label: cleanedLabel || '',
-    other_item_amount: formatFundingCurrency(otherItemAmount)
+    other_item_amount: formatFundingCurrency(otherItemAmount),
+    living_rows_html: livingRowsHtml
   };
 }
 
@@ -4012,7 +4127,13 @@ function applyConditionalTemplateBlocks(value, tokens) {
 function replaceTemplateTokens(value, tokens) {
   if (!value || typeof value !== 'string') return value;
   const conditioned = applyConditionalTemplateBlocks(value, tokens);
-  return conditioned.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
+  const withRaw = conditioned.replace(/\{\{\{\s*([a-zA-Z0-9_]+)\s*\}\}\}/g, (match, key) => {
+    if (!Object.prototype.hasOwnProperty.call(tokens, key)) return '';
+    const tokenValue = tokens[key];
+    if (tokenValue === null || typeof tokenValue === 'undefined') return '';
+    return String(tokenValue);
+  });
+  return withRaw.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
     if (!Object.prototype.hasOwnProperty.call(tokens, key)) return '';
     const tokenValue = tokens[key];
     if (tokenValue === null || typeof tokenValue === 'undefined') return '';
@@ -28999,7 +29120,8 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     urgent,
     toDisplayName,
     fromDisplayName,
-    attachments
+    attachments,
+    interventionId
   } = req.body || {};
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
   const subjectValue = typeof subject === 'string' ? subject.trim() : '';
@@ -29075,6 +29197,7 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       }
     }
 
+    const requestedInterventionId = normalisePositiveInteger(interventionId);
     const needsFundingAgreementPrefill = attachmentRows.some(
       row => row.workflow_type === 'consent-cm-prefill' && row.document_type === 'funding_agreement'
     );
@@ -29089,20 +29212,41 @@ app.post('/api/cases/:id/messages', async (req, res) => {
           LIMIT 1`,
         [caseId]
       );
-      const [interventionRows] = await pool.query(
-        `SELECT id, status, start_date, end_date, intervention_cost, budget_amount, approved_amount,
-                intervention_code, intervention_type, metadata_json, esdc_intervention_json, created_at
-           FROM iset_case_intervention
-          WHERE case_id = ?
-          ORDER BY created_at DESC`,
-        [caseId]
-      );
       let interventionRow = null;
-      if (Array.isArray(interventionRows) && interventionRows.length) {
-        interventionRow = interventionRows.find(row => {
-          const status = normaliseInterventionStatus(row.status);
-          return status !== 'cancelled';
-        }) || interventionRows[0];
+      if (requestedInterventionId) {
+        const [[selectedIntervention]] = await pool.query(
+          `SELECT id, status, start_date, end_date, intervention_cost, budget_amount, approved_amount,
+                  intervention_code, intervention_type, metadata_json, esdc_intervention_json, created_at
+             FROM iset_case_intervention
+            WHERE id = ? AND case_id = ?
+            LIMIT 1`,
+          [requestedInterventionId, caseId]
+        );
+        if (selectedIntervention) {
+          interventionRow = selectedIntervention;
+        } else {
+          console.warn(
+            '[messages] ignoring interventionId mismatch for case %s (requested %s)',
+            caseId,
+            requestedInterventionId
+          );
+        }
+      }
+      if (!interventionRow) {
+        const [interventionRows] = await pool.query(
+          `SELECT id, status, start_date, end_date, intervention_cost, budget_amount, approved_amount,
+                  intervention_code, intervention_type, metadata_json, esdc_intervention_json, created_at
+             FROM iset_case_intervention
+            WHERE case_id = ?
+            ORDER BY created_at DESC`,
+          [caseId]
+        );
+        if (Array.isArray(interventionRows) && interventionRows.length) {
+          interventionRow = interventionRows.find(row => {
+            const status = normaliseInterventionStatus(row.status);
+            return status !== 'cancelled';
+          }) || interventionRows[0];
+        }
       }
       const interventionMetadata = safeJsonParse(interventionRow?.metadata_json, {}) || {};
       const interventionEsdc = safeJsonParse(interventionRow?.esdc_intervention_json, {}) || {};

@@ -174,6 +174,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [pendingInterventionError, setPendingInterventionError] = useState('');
   const [selectedApplicationFilter, setSelectedApplicationFilter] = useState('');
   const [selectedInterventionFilter, setSelectedInterventionFilter] = useState('');
+  const [interventionSelectionMode, setInterventionSelectionMode] = useState('auto');
+  const lastInterventionContextRef = useRef('');
   const [duplicateModalVisible, setDuplicateModalVisible] = useState(false);
   const [duplicateDocument, setDuplicateDocument] = useState(null);
   const [duplicateLabel, setDuplicateLabel] = useState('');
@@ -503,18 +505,35 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     if (!isCaseWorkspace) {
       setSelectedInterventionFilter('');
       setPendingIntervention('');
+      setInterventionSelectionMode('auto');
+      lastInterventionContextRef.current = '';
       return;
     }
     if (selectedInterventionId) {
       const value = String(selectedInterventionId);
-      setSelectedInterventionFilter(value);
-      setPendingIntervention(value);
+      const previous = lastInterventionContextRef.current;
+      const shouldSync =
+        interventionSelectionMode !== 'manual' ||
+        selectedInterventionFilter === previous ||
+        selectedInterventionFilter === value;
+      if (shouldSync) {
+        setSelectedInterventionFilter(value);
+        setPendingIntervention(value);
+        setInterventionSelectionMode('auto');
+      }
+      lastInterventionContextRef.current = value;
       return;
     }
-    if (!selectedInterventionFilter && interventionOptions.length) {
+    if (!selectedInterventionFilter && interventionOptions.length && interventionSelectionMode !== 'manual') {
       setSelectedInterventionFilter(interventionOptions[0].value);
     }
-  }, [isCaseWorkspace, selectedInterventionId, selectedInterventionFilter, interventionOptions]);
+  }, [
+    isCaseWorkspace,
+    selectedInterventionId,
+    selectedInterventionFilter,
+    interventionOptions,
+    interventionSelectionMode
+  ]);
 
   useEffect(() => {
     if (!applicantUserId || typeof window === 'undefined') return;
@@ -1077,6 +1096,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const handleInterventionFilterChange = useCallback(
     ({ detail }) => {
       const next = detail?.selectedOption?.value || '';
+      setInterventionSelectionMode('manual');
       setSelectedInterventionFilter(next);
       loadDocuments({ silent: false, interventionId: next });
       loadChecklist();

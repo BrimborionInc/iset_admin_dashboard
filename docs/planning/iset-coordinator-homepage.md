@@ -124,3 +124,18 @@ Last Updated: 2025-12-27
 - 2025-12-27: Scoped Payments & Proof Due to missing attendance reports or required receipts tied to releasing funds.
 - 2025-12-27: Requested dedicated receipt document type for Payments & Proof Due; awaiting code/label confirmation before adding.
 - 2025-12-27: Added receipt document type (code `receipt`, label “Receipt”, scope application) and updated Supporting Documents fallback list + checklist doc list.
+- 2025-12-27: Confirmed Client Funding Agreement HTML updates were applied directly to the DB step_component (workflow 45).
+- 2025-12-27: Extracted CFA HTML from step_component 3346 into `tmp_cfa_template.html` for temporary file-based editing.
+- 2025-12-27: Updated CFA top fields to use rounded signature-style panels with labels beneath the line in `tmp_cfa_template.html`.
+- 2025-12-27: User began a new CFA formatting request but the prompt cut off; awaiting clarification.
+- 2025-12-27: User asked where HTML override saves in `PropertiesPanel.js` and about prior encoding issues; responding with code location and context.
+- 2025-12-27: Rounded CFA tables by wrapping in a bordered panel with rounded corners in `tmp_cfa_template.html`.
+- 2025-12-27: Matched CFA field panels/signature panel to the white table background in `tmp_cfa_template.html`.
+- 2025-12-27: Removed the duplicate “CLIENT FUNDING AGREEMENT” heading from `tmp_cfa_template.html`.
+- 2025-12-27: Increased top field value font size/weight for emphasis in `tmp_cfa_template.html`.
+- 2025-12-27: Fixed Supporting Documents intervention filter to stop resetting to the workspace-selected intervention after user selection.
+- 2025-12-27: Added CFA prefill wiring to pass the selected intervention from case workspace messages and use it for funding agreement token resolution.
+- 2025-12-27: Updated CFA prefill to multiply per-period funding by recurrence, suppress extra expense rows when a breakdown exists, and generate living-allowance rows per month via raw HTML tokens.
+- 2025-12-27: DB check: CFA step_component HTML still has static living-allowance rows (no `living_rows_html` token) even though intervention metadata has monthly living funding and dates.
+- 2025-12-27: User will re-save the updated CFA HTML and retest the living-allowance table rendering.
+- 2025-12-27: User confirmed CFA rendering looks good after the HTML update.

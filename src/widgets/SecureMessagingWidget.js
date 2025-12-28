@@ -741,6 +741,9 @@ const SecureMessagingWidget = ({
       if (!isCaseWorkspace && applicationId) {
         payload.applicationId = applicationId;
       }
+      if (isCaseWorkspace && interventionId) {
+        payload.interventionId = interventionId;
+      }
       const response = await apiFetch(`/api/cases/${caseId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
