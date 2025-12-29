@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Case Manager Assessment</title>
+  <style>
+    :root{
+      --ink: #111111;
+      --muted: #555555;
+      --line: #cccccc;
+      --sans: Arial, Helvetica, sans-serif;
+    }
+
+    html, body { margin: 0; padding: 0; }
+    body{
+      font-family: var(--sans);
+      color: var(--ink);
+      background: #ffffff;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .wrap{
+      max-width: 900px;
+      margin: 10px auto;
+      padding: 0 12px 24px;
+    }
+
+    .paper{
+      background: #ffffff;
+    }
+
+    .header{
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 10px;
+    }
+
+    .header-row{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo{
+      height: 32px;
+      width: auto;
+    }
+
+    .header h1{
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: .2px;
+    }
+
+    .header .sub{
+      margin-top: 2px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .content{
+      padding: 0;
+    }
+
+    .section{
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+
+    .section:first-child{
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+
+    .section h2{
+      margin: 0 0 6px;
+      font-size: 13px;
+    }
+
+    .hint{
+      margin: 4px 0 6px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .grid-2{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    @media (max-width: 720px){
+      .grid-2{ grid-template-columns: 1fr; }
+    }
+
+    .field{
+      margin-bottom: 6px;
+    }
+
+    .field label{
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+
+    .field input[type="text"],
+    .field input[type="date"],
+    .field input[type="number"],
+    .field textarea,
+    .field select{
+      width: 100%;
+      box-sizing: border-box;
+      padding: 4px 6px;
+      border: 1px solid var(--line);
+      font-size: 12px;
+      background: #ffffff;
+    }
+
+    .field textarea{
+      min-height: 60px;
+      resize: vertical;
+    }
+
+    .checks, .radios{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 10px;
+      margin-top: 4px;
+    }
+
+    @media (max-width: 720px){
+      .checks, .radios{ grid-template-columns: 1fr; }
+    }
+
+    .check{
+      display: flex;
+      gap: 6px;
+      align-items: flex-start;
+    }
+
+    .check input{ margin-top: 2px; }
+    .check .txt{ font-size: 12px; }
+    .check .subtxt{ font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    .callout{
+      padding: 0;
+      border: none;
+    }
+
+    .callout strong{ display:block; margin-bottom: 2px; }
+    .callout p{ margin: 0; color: var(--muted); font-size: 11px; }
+
+    .breakdown{
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+    }
+
+    .breakdown th,
+    .breakdown td{
+      border: 1px solid var(--line);
+      padding: 6px;
+      vertical-align: top;
+    }
+
+    .breakdown th{
+      text-align: left;
+      font-size: 11px;
+      background: #f7f7f7;
+    }
+
+    .money{
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 4px;
+    }
+
+    .pill{
+      display:inline-block;
+      padding: 2px 6px;
+      border: 1px solid var(--line);
+      font-size: 10px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    .footer{
+      margin-top: 10px;
+      padding-top: 6px;
+      border-top: 1px solid var(--line);
+      font-size: 10px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="paper">
+      <div class="header">
+        <div class="header-row">
+          <img class="logo" data-field="nwac_logo" alt="NWAC logo" />
+          <div>
+            <h1>CASE MANAGER ASSESSMENT</h1>
+            <div class="sub">Coordinator / Case Manager Assessment Form</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="content">
+        <div class="section">
+          <div class="grid-2">
+            <div class="field">
+              <label for="dateOfAssessment">Date of Assessment</label>
+              <!-- FIELD: date_of_assessment -->
+              <input id="dateOfAssessment" type="date" data-field="date_of_assessment" />
+            </div>
+
+            <div class="field">
+              <label for="clientName">Client Name</label>
+              <!-- FIELD: client_name -->
+              <input id="clientName" type="text" data-field="client_name" placeholder="Enter client name" />
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="callout">
+              <strong>Conflict of interest / bias confirmation</strong>
+              <div class="check" style="margin-top:10px;">
+                <!-- FIELD: conflict_of_interest_confirmed -->
+                <input id="coiConfirmed" type="checkbox" data-field="conflict_of_interest_confirmed" />
+                <label class="txt" for="coiConfirmed" style="margin:0;">
+                  As the Client Case Manager, I confirm that I have no actual, potential, or perceived conflict of interest or bias in relation to this client’s application, assessment and funding, and I have not provided, or attempted to assign the client with priority or preferential treatment outside of the established assessment process.
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Client application overview</h2>
+          <div class="hint">Provide an overview of the client file; their request; overview of previous training, education and employment; labour market research; trending careers, training or employment program.</div>
+          <div class="field">
+            <!-- FIELD: client_application_overview -->
+            <textarea data-field="client_application_overview" placeholder="Write overview here..."></textarea>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Training and employment goal</h2>
+          <div class="field">
+            <label for="trainingGoal">What is the Client’s Training and Employment Goal as it relates to ISET support?</label>
+            <!-- FIELD: training_employment_goal -->
+            <textarea id="trainingGoal" data-field="training_employment_goal" placeholder="Describe the goal..."></textarea>
+          </div>
+
+          <div class="grid-2" style="margin-top:14px;">
+            <div class="field">
+              <label>Was the Client previously funded under the ISET Program?</label>
+              <div class="radios">
+                <div class="check">
+                  <!-- FIELD: previously_funded_iset_yes -->
+                  <input type="radio" name="prevFunded" id="prevFundedYes" data-field="previously_funded_iset" value="yes" />
+                  <label class="txt" for="prevFundedYes" style="margin:0;">Yes</label>
+                </div>
+                <div class="check">
+                  <!-- FIELD: previously_funded_iset_no -->
+                  <input type="radio" name="prevFunded" id="prevFundedNo" data-field="previously_funded_iset" value="no" />
+                  <label class="txt" for="prevFundedNo" style="margin:0;">No</label>
+                </div>
+              </div>
+              <div class="hint" style="margin-top:10px;">If yes, include year, program, and funding amount(s).</div>
+              <!-- FIELD: previously_funded_iset_details -->
+              <input type="text" data-field="previously_funded_iset_details" placeholder="Year / program / amount(s)" />
+            </div>
+
+            <div class="field">
+              <label for="otherFundingSources">Has the Client received any other sources of funding for this intervention?</label>
+              <div class="hint">If yes, provide details.</div>
+              <!-- FIELD: other_funding_sources_details -->
+              <textarea id="otherFundingSources" data-field="other_funding_sources_details" placeholder="Details..."></textarea>
+            </div>
+          </div>
+
+          <div class="callout" style="margin-top:14px;">
+            <strong>Note</strong>
+            <p>
+              If Client is receiving funding from another ISET Holder, you MUST compose a letter to the Client and the other ISET Holder detailing what each program will be funding, if eligible.
+            </p>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Barriers to labour market entry</h2>
+          <div class="hint">Select all that apply.</div>
+
+          <div class="checks">
+            <div class="check"><input type="checkbox" data-field="barriers_none" id="bNone"><label class="txt" for="bNone" style="margin:0;">None</label></div>
+            <div class="check"><input type="checkbox" data-field="barriers_education" id="bEdu"><label class="txt" for="bEdu" style="margin:0;">Education</label></div>
+            <div class="check"><input type="checkbox" data-field="barriers_lack_marketable_skills" id="bSkills"><label class="txt" for="bSkills" style="margin:0;">Lack of Marketable Skills</label></div>
+            <div class="check"><input type="checkbox" data-field="barriers_lack_work_experience" id="bWorkExp"><label class="txt" for="bWorkExp" style="margin:0;">Lack of Work Experience</label></div>
+
+            <div class="check"><input type="checkbox" data-field="barriers_remoteness" id="bRemote"><label class="txt" for="bRemote" style="margin:0;">Remoteness</label></div>
+            <div class="check"><input type="checkbox" data-field="barriers_lack_transportation" id="bTrans"><label class="txt" for="bTrans" style="margin:0;">Lack of Transportation</label></div>
+            <div class="check"><input type="checkbox" data-field="barriers_economic" id="bEcon"><label class="txt" for="bEcon" style="margin:0;">Economic</label></div>
+            <div class="check"><input type="checkbox" data-field="barriers_language" id="bLang"><label class="txt" for="bLang" style="margin:0;">Language</label></div>
+
+            <div class="check"><input type="checkbox" data-field="barriers_lack_labour_force_attachment" id="bAttach"><label class="txt" for="bAttach" style="margin:0;">Lack of Labour Force Attachment</label></div>
+            <div class="check"><input type="checkbox" data-field="barriers_dependent_care" id="bDepCare"><label class="txt" for="bDepCare" style="margin:0;">Dependent Care</label></div>
+            <div class="check"><input type="checkbox" data-field="barriers_health" id="bHealth"><label class="txt" for="bHealth" style="margin:0;">Physical, emotional, or mental health</label></div>
+
+            <div class="check">
+              <input type="checkbox" data-field="barriers_other" id="bOther">
+              <div>
+                <label class="txt" for="bOther" style="margin:0;">Other</label>
+                <div class="subtxt">Please specify</div>
+                <!-- FIELD: barriers_other_specify -->
+                <input type="text" data-field="barriers_other_specify" placeholder="Other barrier..." />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Local area priorities (target areas)</h2>
+
+          <div class="checks">
+            <div class="check"><input type="checkbox" data-field="priorities_off_reserve" id="pOff"><label class="txt" for="pOff" style="margin:0;">Off Reserve</label></div>
+            <div class="check"><input type="checkbox" data-field="priorities_single_parent_family" id="pSingle"><label class="txt" for="pSingle" style="margin:0;">Single Parent Family</label></div>
+            <div class="check"><input type="checkbox" data-field="priorities_woman_over_45" id="pWoman45"><label class="txt" for="pWoman45" style="margin:0;">Woman over 45</label></div>
+
+            <div class="check"><input type="checkbox" data-field="priorities_literacy" id="pLit"><label class="txt" for="pLit" style="margin:0;">Literacy</label></div>
+            <div class="check"><input type="checkbox" data-field="priorities_youth" id="pYouth"><label class="txt" for="pYouth" style="margin:0;">Youth</label></div>
+            <div class="check"><input type="checkbox" data-field="priorities_unskilled_clerical_service_worker" id="pClerical"><label class="txt" for="pClerical" style="margin:0;">Unskilled Clerical/Service Worker</label></div>
+
+            <div class="check"><input type="checkbox" data-field="priorities_no_grade_12" id="pNo12"><label class="txt" for="pNo12" style="margin:0;">No Grade 12</label></div>
+            <div class="check"><input type="checkbox" data-field="priorities_unskilled_labourer" id="pLabour"><label class="txt" for="pLabour" style="margin:0;">Unskilled Labourer</label></div>
+            <div class="check"><input type="checkbox" data-field="priorities_non_targeted" id="pNon"><label class="txt" for="pNon" style="margin:0;">Non-Targeted</label></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>ESDC eligibility</h2>
+          <div class="hint">Select one.</div>
+
+          <div class="radios">
+            <div class="check">
+              <!-- FIELD: esdc_eligibility_crf -->
+              <input type="radio" name="esdcEligibility" id="eCRF" data-field="esdc_eligibility" value="crf">
+              <label class="txt" for="eCRF" style="margin:0;">CRF</label>
+            </div>
+            <div class="check">
+              <!-- FIELD: esdc_eligibility_ei_active_claim -->
+              <input type="radio" name="esdcEligibility" id="eEIActive" data-field="esdc_eligibility" value="ei_active_claim">
+              <label class="txt" for="eEIActive" style="margin:0;">EI Active Claim</label>
+            </div>
+            <div class="check">
+              <!-- FIELD: esdc_eligibility_ei_reach_back -->
+              <input type="radio" name="esdcEligibility" id="eReach" data-field="esdc_eligibility" value="ei_reach_back">
+              <label class="txt" for="eReach" style="margin:0;">EI Reach Back</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Intervention details</h2>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="intStart">Intervention Start Date</label>
+              <!-- FIELD: intervention_start_date -->
+              <input id="intStart" type="date" data-field="intervention_start_date" />
+            </div>
+            <div class="field">
+              <label for="intEnd">Intervention End Date</label>
+              <!-- FIELD: intervention_end_date -->
+              <input id="intEnd" type="date" data-field="intervention_end_date" />
+            </div>
+
+            <div class="field">
+              <label for="institution">Training Institution / Employer</label>
+              <!-- FIELD: training_institution_or_employer -->
+              <input id="institution" type="text" data-field="training_institution_or_employer" placeholder="Institution / employer name" />
+            </div>
+
+            <div class="field">
+              <label for="programName">Program Name</label>
+              <!-- FIELD: program_name -->
+              <input id="programName" type="text" data-field="program_name" placeholder="Program name" />
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Intervention breakdown <span class="pill">ITP vs Wage Subsidy / JCP</span></h2>
+
+          <table class="breakdown" aria-label="Intervention breakdown table">
+            <thead>
+              <tr>
+                <th colspan="2">Individual Training Purchase (ITP)</th>
+                <th colspan="2">Targeted Wage Subsidy / Job Creation Partnership</th>
+              </tr>
+              <tr>
+                <th>Funding category</th>
+                <th>Funding requested</th>
+                <th>Funding category</th>
+                <th>Funding requested</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Tuition</td>
+                <td class="money">
+                  <!-- FIELD: itp_tuition_amount -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="itp_tuition_amount" placeholder="0.00" /></div>
+                </td>
+                <td>Wages</td>
+                <td class="money">
+                  <!-- FIELD: wage_wages_amount -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="wage_wages_amount" placeholder="0.00" /></div>
+                </td>
+              </tr>
+
+              <tr>
+                <td>Books / Materials</td>
+                <td class="money">
+                  <!-- FIELD: itp_books_materials_amount -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="itp_books_materials_amount" placeholder="0.00" /></div>
+                </td>
+                <td>MERCs</td>
+                <td class="money">
+                  <!-- FIELD: wage_mercs_amount -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="wage_mercs_amount" placeholder="0.00" /></div>
+                </td>
+              </tr>
+
+              <tr>
+                <td>Living Allowance <span class="hint" style="display:inline; margin:0;">(Amount × # of months)</span></td>
+                <td class="money">
+                  <!-- FIELD: itp_living_allowance_amount -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="itp_living_allowance_amount" placeholder="0.00" /></div>
+                </td>
+                <td>Non-wages</td>
+                <td class="money">
+                  <!-- FIELD: wage_non_wages_amount -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="wage_non_wages_amount" placeholder="0.00" /></div>
+                </td>
+              </tr>
+
+              <tr>
+                <td>Childcare <span class="hint" style="display:inline; margin:0;">(Amount × # of months)</span></td>
+                <td class="money">
+                  <!-- FIELD: itp_childcare_amount -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="itp_childcare_amount" placeholder="0.00" /></div>
+                </td>
+                <td>Other (specify)</td>
+                <td class="money">
+                  <!-- FIELD: wage_other_1_specify -->
+                  <input type="text" data-field="wage_other_1_specify" placeholder="Describe..." />
+                  <!-- FIELD: wage_other_1_amount -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="wage_other_1_amount" placeholder="0.00" /></div>
+                </td>
+              </tr>
+
+              <tr>
+                <td>Other (specify)</td>
+                <td class="money">
+                  <!-- FIELD: itp_other_specify -->
+                  <input type="text" data-field="itp_other_specify" placeholder="Describe..." />
+                  <!-- FIELD: itp_other_amount -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="itp_other_amount" placeholder="0.00" /></div>
+                </td>
+                <td>Other (specify)</td>
+                <td class="money">
+                  <!-- FIELD: wage_other_2_specify -->
+                  <input type="text" data-field="wage_other_2_specify" placeholder="Describe..." />
+                  <!-- FIELD: wage_other_2_amount -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="wage_other_2_amount" placeholder="0.00" /></div>
+                </td>
+              </tr>
+
+              <tr>
+                <td><strong>Total intervention cost</strong></td>
+                <td class="money">
+                  <!-- FIELD: itp_total_cost -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="itp_total_cost" placeholder="0.00" /></div>
+                </td>
+                <td><strong>Total intervention cost</strong></td>
+                <td class="money">
+                  <!-- FIELD: wage_total_cost -->
+                  <div class="prefix"><span>$</span><input type="text" data-field="wage_total_cost" placeholder="0.00" /></div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="section">
+          <h2>Case Manager recommendation and justification</h2>
+          <div class="hint">Select one option and provide written justification.</div>
+
+          <div class="radios" style="margin-bottom:12px;">
+            <div class="check">
+              <!-- FIELD: recommendation_fund -->
+              <input type="radio" name="recommendation" id="recFund" data-field="recommendation" value="fund">
+              <label class="txt" for="recFund" style="margin:0;">I recommend funding this intervention</label>
+            </div>
+
+            <div class="check">
+              <!-- FIELD: recommendation_do_not_fund -->
+              <input type="radio" name="recommendation" id="recNoFund" data-field="recommendation" value="do_not_fund">
+              <label class="txt" for="recNoFund" style="margin:0;">I DO NOT recommend funding this Client</label>
+            </div>
+
+            <div class="check">
+              <!-- FIELD: recommendation_alternative -->
+              <input type="radio" name="recommendation" id="recAlt" data-field="recommendation" value="alternative">
+              <label class="txt" for="recAlt" style="margin:0;">I recommend an alternative intervention</label>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="justification">Written justification</label>
+            <!-- FIELD: recommendation_justification -->
+            <textarea id="justification" data-field="recommendation_justification" placeholder="Write justification..."></textarea>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Agreement with coordinator recommendation</h2>
+          <div class="radios">
+            <div class="check">
+              <!-- FIELD: agree_with_coordinator_yes -->
+              <input type="radio" name="agreeCoordinator" id="agreeYes" data-field="agree_with_coordinator" value="agree">
+              <label class="txt" for="agreeYes" style="margin:0;">I Agree with Coordinator Recommendation</label>
+            </div>
+            <div class="check">
+              <!-- FIELD: agree_with_coordinator_no -->
+              <input type="radio" name="agreeCoordinator" id="agreeNo" data-field="agree_with_coordinator" value="disagree">
+              <label class="txt" for="agreeNo" style="margin:0;">I Disagree with Coordinator Recommendation</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h2>Reason for denial by NWAC (if applicable)</h2>
+          <div class="field">
+            <!-- FIELD: denial_reason -->
+            <textarea data-field="denial_reason" placeholder="Reason for denial..."></textarea>
+          </div>
+
+          <div class="footer">
+            NWAC wishes to acknowledge support for this project through the Government of Canada’s ISET Program.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

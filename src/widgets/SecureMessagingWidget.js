@@ -63,6 +63,22 @@ const isUnread = message => {
 
 const resolveList = data => (Array.isArray(data) ? data : []);
 
+const normalizeStatusValue = (value) => {
+  if (!value) return '';
+  return String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+};
+
+const LETTER_DOC_TYPES = new Set(['assessment_approval_letter', 'assessment_denial_letter']);
+const APPROVED_CASE_STATUSES = new Set([
+  'initiated',
+  'active',
+  'dormant',
+  'ready_to_close',
+  'closed',
+  'archived',
+  'approved'
+]);
+
 const buildAttachmentUrl = filePath => {
   if (!filePath) return '#';
   const base = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
@@ -123,6 +139,26 @@ const SecureMessagingWidget = ({
     [applicationStatusRaw]
   );
   const canonicalApplicationStatus = applicationStatusContext?.canonicalStatus || null;
+  const caseStatusNormalized = normalizeStatusValue(
+    caseData?.status ?? workspaceCaseData?.status ?? null
+  );
+  const decisionOutcome = useMemo(() => {
+    const appStatus = normalizeStatusValue(canonicalApplicationStatus || applicationStatusRaw);
+    if (!appStatus) return null;
+    if (appStatus === 'approved') return 'approved';
+    if (appStatus === 'rejected' || appStatus === 'declined') return 'denied';
+    if (appStatus === 'decision_ready' || appStatus === 'completed') {
+      if (APPROVED_CASE_STATUSES.has(caseStatusNormalized)) return 'approved';
+      if (caseStatusNormalized === 'in_review') return 'denied';
+      return null;
+    }
+    return null;
+  }, [applicationStatusRaw, canonicalApplicationStatus, caseStatusNormalized]);
+  const allowedLetterDocTypes = useMemo(() => {
+    if (decisionOutcome === 'approved') return new Set(['assessment_approval_letter']);
+    if (decisionOutcome === 'denied') return new Set(['assessment_denial_letter']);
+    return new Set();
+  }, [decisionOutcome]);
 
   const rawApplicantUserId =
     caseData?.applicant_user_id ??
@@ -389,7 +425,8 @@ const SecureMessagingWidget = ({
         .map(r => ({
           id: r.id,
           name: r.name || `Workflow ${r.id}`,
-          type: (r.workflow_type || r.workflowType || '').trim()
+          type: (r.workflow_type || r.workflowType || '').trim(),
+          documentType: (r.document_type || r.documentType || '').trim()
         }))
         .filter(r => r.type === 'consent-no-prefill' || r.type === 'consent-cm-prefill');
       setWorkflowOptions(filtered);
@@ -400,6 +437,23 @@ const SecureMessagingWidget = ({
       setWorkflowsLoading(false);
     }
   }, []);
+  const filteredWorkflowOptions = useMemo(
+    () =>
+      workflowOptions.filter(wf => {
+        if (!wf.documentType) return true;
+        if (!LETTER_DOC_TYPES.has(wf.documentType)) return true;
+        return allowedLetterDocTypes.has(wf.documentType);
+      }),
+    [allowedLetterDocTypes, workflowOptions]
+  );
+  useEffect(() => {
+    if (!selectedWorkflowIds.length) return;
+    const allowedIds = new Set(filteredWorkflowOptions.map(wf => wf.id));
+    setSelectedWorkflowIds(prev => {
+      const next = prev.filter(id => allowedIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [filteredWorkflowOptions, selectedWorkflowIds.length]);
 
   useEffect(() => {
     let active = true;
@@ -1175,7 +1229,7 @@ const SecureMessagingWidget = ({
               <Box><Spinner size="normal" /> Loading forms…</Box>
             ) : workflowsError ? (
               <Box color="text-status-critical">{workflowsError}</Box>
-            ) : workflowOptions.length === 0 ? (
+            ) : filteredWorkflowOptions.length === 0 ? (
               <Box color="text-body-secondary">No eligible forms (type “Form”) available.</Box>
             ) : (
               <Multiselect
@@ -1183,14 +1237,14 @@ const SecureMessagingWidget = ({
                 inlineTokens
                 tokenLimit={0}
                 disableBrowserAutocorrect
-                selectedOptions={workflowOptions
+                selectedOptions={filteredWorkflowOptions
                   .filter(wf => selectedWorkflowIds.includes(wf.id))
                   .map(wf => ({
                     label: wf.name,
                     value: wf.id,
                     description: wf.type === 'consent-cm-prefill' ? 'Form (CM prefill)' : 'Form (No prefill)'
                   }))}
-                options={workflowOptions.map(wf => ({
+                options={filteredWorkflowOptions.map(wf => ({
                   label: wf.name,
                   value: wf.id,
                   description: wf.type === 'consent-cm-prefill' ? 'Form (CM prefill)' : 'Form (No prefill)'
@@ -1201,6 +1255,11 @@ const SecureMessagingWidget = ({
                 }}
                 disabled={composeSending}
               />
+            )}
+            {filteredWorkflowOptions.length === 0 && workflowOptions.some(wf => LETTER_DOC_TYPES.has(wf.documentType)) && (
+              <Box color="text-body-secondary" fontSize="body-s">
+                Decision letter forms are available only after a decision has been recorded.
+              </Box>
             )}
           </div>
           <Checkbox

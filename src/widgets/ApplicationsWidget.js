@@ -135,7 +135,7 @@ const normalizeClosedStatus = (status) => {
 };
 
 const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
-const DECISION_STATUSES = new Set(['pending_approval']);
+const DECISION_STATUSES = new Set(['pending_approval', 'decision_ready']);
 const ASSESSMENT_STATUSES = new Set([
   'in_review', 'in review',
   'docs_requested', 'docs requested',

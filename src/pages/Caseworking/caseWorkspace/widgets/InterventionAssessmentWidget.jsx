@@ -2539,7 +2539,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
                   ? "Loading checklist..."
                   : missingRequiredCount > 0
                     ? `${missingRequiredCount} required item${missingRequiredCount === 1 ? "" : "s"} missing`
-                    : "All required checklist items are complete."
+                    : <StatusIndicator type="success">All required checklist items are complete.</StatusIndicator>
             }
             actions={
               <SpaceBetween direction="horizontal" size="xs">

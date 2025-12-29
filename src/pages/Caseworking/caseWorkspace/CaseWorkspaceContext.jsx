@@ -400,6 +400,7 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
     "assessment_previous_iset",
     "assessment_previous_iset_details",
     "assessment_employment_barriers",
+    "assessment_employment_barriers_other_details",
     "assessment_local_area_priorities",
     "assessment_other_funding_details",
     "assessment_esdc_eligibility",

@@ -76,7 +76,7 @@ function normalizeClosedStatus(status) {
 function statusColor(status = '') {
   const normalized = normalizeClosedStatus(status);
   if (['approved', 'completed'].includes(normalized)) return 'green';
-  if (['submitted', 'in review', 'in_review', 'in progress', 'pending', 'assigned', 'pending_approval'].includes(normalized)) return 'blue';
+  if (['submitted', 'in review', 'in_review', 'in progress', 'pending', 'assigned', 'pending_approval', 'decision_ready'].includes(normalized)) return 'blue';
   if (['docs requested', 'docs_requested', 'action required', 'action required (docs requested)', 'closure notice', 'closure_notice'].includes(normalized)) return 'severity-high';
   if (['rejected', 'declined', 'errored'].includes(normalized)) return 'red';
   if (['closed', 'inactive', 'archived'].includes(normalized)) return 'grey';
@@ -84,7 +84,7 @@ function statusColor(status = '') {
 }
 
 const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
-const DECISION_STATUSES = new Set(['pending_approval']);
+const DECISION_STATUSES = new Set(['pending_approval', 'decision_ready']);
 const ASSESSMENT_STATUSES = new Set([
   'in_review', 'in review',
   'docs_requested', 'docs requested',
@@ -220,6 +220,7 @@ const APPLICATION_STATUS_OPTIONS = [
   { label: 'Action Required', value: 'docs_requested' },
   { label: 'Closure Notice', value: 'closure_notice' },
   { label: 'Pending Approval', value: 'pending_approval' },
+  { label: 'Decision Ready', value: 'decision_ready' },
   { label: 'Approved', value: 'approved' },
   { label: 'Completed', value: 'completed' },
   { label: 'Rejected', value: 'rejected' },
@@ -951,14 +952,14 @@ const ApplicationOverviewWidget = ({
       return;
     }
 
-    const buildConfirm = ({ title, body, targetStatus, actionLabel, noteHint, confirmWord, resolveEscalation }) => ({
+    const buildConfirm = ({ title, body, targetStatus, actionLabel, noteHint, confirmWord, resolveEscalation, requireNote = true }) => ({
       type: 'status',
       title,
       body,
       targetStatus,
       targetOption: selectOptionByValue(targetStatus),
       actionLabel,
-      requireNote: true,
+      requireNote,
       noteHint,
       confirmWord,
       resolveEscalation
@@ -992,7 +993,8 @@ const ApplicationOverviewWidget = ({
         title: 'Resume review',
         body: 'Resume review and return this application to In Review.',
         targetStatus: 'in_review',
-        actionLabel: 'Resume review'
+        actionLabel: 'Resume review',
+        requireNote: false
       }));
       return;
     }

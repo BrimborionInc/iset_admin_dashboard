@@ -15,7 +15,7 @@
       "label": "EI Consent Form",
       "required": true,
       "documentTypes": ["ei_consent"],
-      "sources": ["application_form"]
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
     },
     {
       "id": "ei-verification",
@@ -38,7 +38,7 @@
       "label": "Conflict of Interest Form",
       "required": true,
       "documentTypes": ["conflict_of_interest"],
-      "sources": ["application_form"]
+      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
     },
     {
       "id": "identity-document",
@@ -137,7 +137,21 @@
       "label": "Case Manager Assessment (summary/recommendation)",
       "required": true,
       "documentTypes": ["case_assessment"],
-      "sources": ["manual_upload", "secure_message_attachment"]
+      "sources": ["manual_upload", "secure_message_attachment", "system_generated"]
+    },
+    {
+      "id": "assessment-approval-letter",
+      "label": "Assessment approval letter",
+      "required": true,
+      "documentTypes": ["assessment_approval_letter"],
+      "sources": ["manual_upload", "secure_message_attachment", "system_generated"]
+    },
+    {
+      "id": "assessment-denial-letter",
+      "label": "Assessment denial letter",
+      "required": true,
+      "documentTypes": ["assessment_denial_letter"],
+      "sources": ["manual_upload", "secure_message_attachment", "system_generated"]
     },
     {
       "id": "funding-agreement",

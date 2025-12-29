@@ -1314,7 +1314,10 @@ const IsetApplicationFormWidget = ({
 
   const diff = useMemo(() => answersDiff(answers, editableAnswers), [answers, editableAnswers]);
   const hasDirtyFields = isEditing && Object.keys(diff).length > 0;
-  const isDecisionFinal = ['approved', 'rejected'].includes((caseData?.status || '').toLowerCase());
+  const decisionStatusSource = caseData?.applicationStatus || caseData?.application_status || caseData?.status || '';
+  const isDecisionFinal = ['approved', 'rejected', 'declined', 'decision_ready', 'completed'].includes(
+    decisionStatusSource.toLowerCase()
+  );
   const activeLock = useMemo(() => {
     if (lockState.owned && lockState.lock) {
       return lockState.lock;

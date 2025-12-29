@@ -63,8 +63,11 @@ const isWageSubsidyCode = (value) => {
 const requiresExternalPartnerForCode = (value) => isEducationCode(value) || isEmployerCode(value);
 const requiresNocForCode = (value) => isEmployerCode(value);
 
+const DECISION_READY_STATUS = 'decision_ready';
 const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
-const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
+const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived', DECISION_READY_STATUS]);
+const DECISION_READY_STATUSES = new Set([DECISION_READY_STATUS, 'approved']);
+const APPROVED_CASE_STATUSES = new Set(['initiated', 'active', 'dormant', 'ready_to_close', 'closed', 'archived', 'approved']);
 const OVERVIEW_WORD_LIMIT = 400;
 const EMPLOYMENT_GOALS_WORD_LIMIT = 400;
 const NOT_APPROVED_CASE_STATUS = 'in_review';
@@ -96,6 +99,7 @@ const BASE_STEP_IDS = [
   'review'
 ];
 const SUBMITTED_STEP_IDS = ['decision'];
+const COMMUNICATION_STEP_IDS = ['communication'];
 const STEP_LABELS = {
   eligibility: 'EI Eligibility Check',
   framing: 'What is being proposed?',
@@ -109,8 +113,14 @@ const STEP_LABELS = {
   cost: 'What will it cost?',
   docs: 'Do you have the right supporting documents?',
   review: 'Review and submit',
-  decision: 'Approval and decision'
+  decision: 'Approval and decision',
+  communication: 'Communication & agreement'
 };
+const COMMUNICATION_DOC_TYPES = new Set([
+  'assessment_approval_letter',
+  'assessment_denial_letter',
+  'funding_agreement'
+]);
 const REQUIRED_STEP_IDS = BASE_STEP_IDS.slice(0, BASE_STEP_IDS.length - 1);
 
 const scrollToPageTop = () => {
@@ -296,6 +306,7 @@ const mergeAssessmentState = (current, incoming) => {
     'employmentGoals',
     'previousISET',
     'previousISETDetails',
+    'barriersOther',
     'otherFunding',
     'esdcEligibility',
     'startDate',
@@ -341,8 +352,8 @@ const mergeAssessmentState = (current, incoming) => {
     });
     next[key] = merged;
   };
-  mergeObj('itp', { tuition: '', books: '', materials: '', living: '', details: '' });
-  mergeObj('wage', { wages: '', mercs: '', nonwages: '', other: '', subsidyDetails: '' });
+  mergeObj('itp', { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' });
+  mergeObj('wage', { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' });
   if (!Object.prototype.hasOwnProperty.call(next, 'deliveryMode') || isEmptyString(incoming.deliveryMode)) {
     next.deliveryMode = current?.deliveryMode || 'partner';
   }
@@ -350,10 +361,10 @@ const mergeAssessmentState = (current, incoming) => {
     next.costType = current?.costType || 'one_time';
   }
   if (!next.itp || typeof next.itp !== 'object') {
-    next.itp = { tuition: '', books: '', materials: '', living: '', details: '' };
+    next.itp = { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' };
   }
   if (!next.wage || typeof next.wage !== 'object') {
-    next.wage = { wages: '', mercs: '', nonwages: '', other: '', subsidyDetails: '' };
+    next.wage = { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' };
   }
 
   return next;
@@ -367,6 +378,7 @@ const buildEmptyAssessment = () => ({
   previousISET: '',
   previousISETDetails: '',
   barriers: [],
+  barriersOther: '',
   priorities: [],
   otherFunding: '',
   esdcEligibility: '',
@@ -374,8 +386,8 @@ const buildEmptyAssessment = () => ({
   endDate: '',
   institution: '',
   programName: '',
-  itp: { tuition: '', books: '', materials: '', living: '', details: '' },
-  wage: { wages: '', mercs: '', nonwages: '', other: '', subsidyDetails: '' },
+  itp: { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' },
+  wage: { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' },
   deliveryMode: 'partner',
   recommendation: '',
   justification: '',
@@ -397,11 +409,44 @@ const buildEmptyAssessment = () => ({
   childcareFunding: ''
 });
 
+const DEFAULT_ORG_NAME = 'NWAC ISET Program';
+const buildEmptyDecisionLetterDraft = () => ({
+  decision_date: '',
+  letter_title: '',
+  decision_intro: '',
+  decision_label: '',
+  decision_reason: '',
+  next_step_1: '',
+  next_step_2: '',
+  coordinator_name: '',
+  organization_name: ''
+});
+const buildEmptyDecisionLetterDrafts = () => ({
+  approval: buildEmptyDecisionLetterDraft(),
+  denial: buildEmptyDecisionLetterDraft()
+});
+const extractJsonFromAi = (value) => {
+  if (!value || typeof value !== 'string') return null;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    const match = value.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
+};
+
 const CoordinatorAssessmentWidget = forwardRef(
   ({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate, applicationRowVersion, onRowVersionUpdate }, ref) => {
   // State for form fields
   const [assessment, setAssessment] = useState(() => buildEmptyAssessment());
   const [initialAssessment, setInitialAssessment] = useState(() => buildEmptyAssessment());
+  const [letterDrafts, setLetterDrafts] = useState(() => buildEmptyDecisionLetterDrafts());
+  const [initialLetterDrafts, setInitialLetterDrafts] = useState(() => buildEmptyDecisionLetterDrafts());
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [alert, setAlert] = useState(null);
   const [applicationRowVersionState, setApplicationRowVersion] = useState(() =>
@@ -422,6 +467,13 @@ const CoordinatorAssessmentWidget = forwardRef(
     [onRowVersionUpdate]
   );
   const [isChanged, setIsChanged] = useState(false);
+  const [draftingLetter, setDraftingLetter] = useState(false);
+  const [draftingLetterError, setDraftingLetterError] = useState(null);
+  const [sendingLetter, setSendingLetter] = useState(false);
+  const [sendingLetterError, setSendingLetterError] = useState(null);
+  const [letterWorkflows, setLetterWorkflows] = useState({ approval: null, denial: null });
+  const [letterWorkflowsLoading, setLetterWorkflowsLoading] = useState(false);
+  const [letterWorkflowsError, setLetterWorkflowsError] = useState(null);
   const [showNWACSection, setShowNWACSection] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [hasSubmitted, setHasSubmitted] = useState(false);
@@ -529,9 +581,55 @@ const CoordinatorAssessmentWidget = forwardRef(
   const applicationStatusContext = getApplicationStatusContext(rawApplicationStatus);
   const canonicalApplicationStatus = applicationStatusContext.canonicalStatus || canonicalCaseStatusSnapshot;
   const isPendingApprovalStatus = rawApplicationStatusNormalized === 'pending_approval';
+  const normalizedApplicationStatus = rawApplicationStatusNormalized || canonicalApplicationStatus || '';
+  const isDecisionReadyStatus = DECISION_READY_STATUSES.has(normalizedApplicationStatus);
+  const isCompletedStatus = normalizedApplicationStatus === 'completed';
+  const decisionOutcome = useMemo(() => {
+    const decision = assessment.nwacReviewStatus;
+    if (decision === 'approve') return 'approved';
+    if (decision === 'reject') return 'denied';
+    if (decision === 'push_back') return null;
+    if (rawApplicationStatusNormalized === 'approved') return 'approved';
+    if (rawApplicationStatusNormalized === 'rejected' || rawApplicationStatusNormalized === 'declined') return 'denied';
+    if (rawApplicationStatusNormalized === 'decision_ready' || rawApplicationStatusNormalized === 'completed') {
+      const caseStatusNorm = String(canonicalCaseStatusSnapshot || rawCaseStatusSnapshot || '').trim().toLowerCase();
+      if (APPROVED_CASE_STATUSES.has(caseStatusNorm)) return 'approved';
+      if (caseStatusNorm === NOT_APPROVED_CASE_STATUS) return 'denied';
+    }
+    return null;
+  }, [assessment.nwacReviewStatus, rawApplicationStatusNormalized, canonicalCaseStatusSnapshot, rawCaseStatusSnapshot]);
+  const activeLetterKey = decisionOutcome === 'approved' ? 'approval' : decisionOutcome === 'denied' ? 'denial' : null;
   const applicantUserId = caseData?.applicant_user_id ?? caseData?.applicantUserId ?? null;
   const applicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
   const caseId = caseData?.id ?? caseData?.case_id ?? null;
+  const applicantName = useMemo(() => {
+    const ctx = caseData?.caseContext || {};
+    const personal = ctx.applicationPersonal || {};
+    const answers = ctx.applicationAnswers || {};
+    const candidates = [
+      caseData?.applicant_name,
+      caseData?.applicantName,
+      ctx.preferredName,
+      ctx.preferred_name,
+      answers['preferred-name'],
+      answers['preferred_name'],
+      personal.preferred_name,
+      personal.preferredName,
+      personal.first_name && personal.last_name ? `${personal.first_name} ${personal.last_name}` : null,
+      personal.firstName && personal.lastName ? `${personal.firstName} ${personal.lastName}` : null
+    ];
+    return candidates.map(v => (typeof v === 'string' ? v.trim() : v)).find(Boolean) || '';
+  }, [caseData]);
+  const trackingReference = useMemo(() => {
+    const candidates = [
+      caseData?.tracking_id,
+      caseData?.trackingId,
+      caseData?.submission_reference,
+      caseData?.reference_number,
+      caseData?.case_number
+    ];
+    return candidates.map(v => (typeof v === 'string' ? v.trim() : v)).find(Boolean) || '';
+  }, [caseData]);
   const existingClientInfo = useMemo(() => {
     if (!caseData?.existing_client_has_prior_case) return null;
     const priorCaseId = caseData?.existing_client_prior_case_id ?? null;
@@ -556,14 +654,14 @@ const CoordinatorAssessmentWidget = forwardRef(
       statusLabel,
       managerLabel
     };
-  }, [caseData]);
+  }, [caseData, currentUserName]);
   const wizardStepKey = useMemo(() => {
     const baseId = caseData?.id ?? applicationId ?? application_id ?? null;
     return baseId ? `assessment:${baseId}` : null;
   }, [caseData?.id, applicationId, application_id]);
 
-  const isDecisionFinal = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
-  const isLockedStatus = APPLICATION_LOCKED_STATUSES.has(canonicalApplicationStatus);
+  const isDecisionFinal = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
+  const isLockedStatus = APPLICATION_LOCKED_STATUSES.has(normalizedApplicationStatus);
   const showOutcomeByStatus = isPendingApprovalStatus;
   const isOutcomeNoticeDisabled = isDecisionFinal;
   const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus });
@@ -584,10 +682,12 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isDeclarationGateActive = !conflictDeclarationSigned || hasDeclaredConflict;
   const eligibilitySet = Boolean(assessment.esdcEligibility);
   const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet;
-  const activeStepIds = useMemo(
-    () => (showNWACSection ? [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS] : BASE_STEP_IDS),
-    [showNWACSection]
-  );
+  const showCommunicationStep = isDecisionReadyStatus || isCompletedStatus;
+  const activeStepIds = useMemo(() => {
+    if (!showNWACSection) return BASE_STEP_IDS;
+    const afterSubmit = [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS];
+    return showCommunicationStep ? [...afterSubmit, ...COMMUNICATION_STEP_IDS] : afterSubmit;
+  }, [showNWACSection, showCommunicationStep]);
   const docsChecklistReady = Boolean(applicantUserId && applicationId);
   const docsChecklistComplete = Boolean(
     docsChecklistReady &&
@@ -612,6 +712,44 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent('applicationAssessment:palette:add', { detail: { id: widgetId } }));
   }, []);
+  useEffect(() => {
+    if (!showCommunicationStep) return;
+    let cancelled = false;
+    const loadLetterWorkflows = async () => {
+      setLetterWorkflowsLoading(true);
+      setLetterWorkflowsError(null);
+      try {
+        const resp = await apiFetch('/api/workflows');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json().catch(() => []);
+        const rows = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        const filtered = rows
+          .map(r => ({
+            id: r.id,
+            workflowType: (r.workflow_type || r.workflowType || '').trim(),
+            documentType: (r.document_type || r.documentType || '').trim()
+          }))
+          .filter(r => r.workflowType === 'consent-no-prefill' || r.workflowType === 'consent-cm-prefill');
+        const approval = filtered.find(r => r.documentType === 'assessment_approval_letter');
+        const denial = filtered.find(r => r.documentType === 'assessment_denial_letter');
+        if (!cancelled) {
+          setLetterWorkflows({
+            approval: approval?.id || null,
+            denial: denial?.id || null
+          });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setLetterWorkflowsError(err?.message || 'Failed to load letter workflows.');
+          setLetterWorkflows({ approval: null, denial: null });
+        }
+      } finally {
+        if (!cancelled) setLetterWorkflowsLoading(false);
+      }
+    };
+    loadLetterWorkflows();
+    return () => { cancelled = true; };
+  }, [showCommunicationStep]);
   useEffect(() => {
     setShowConflictAlert(true);
   }, [conflictDeclarationSigned, hasDeclaredConflict]);
@@ -750,6 +888,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       assessment_previous_iset: assessment.previousISET || null,
       assessment_previous_iset_details: assessment.previousISETDetails || null,
       assessment_employment_barriers: assessment.barriers || null,
+      assessment_employment_barriers_other_details: assessment.barriersOther || null,
       assessment_local_area_priorities: assessment.priorities || null,
       assessment_other_funding_details: assessment.otherFunding || null,
       assessment_esdc_eligibility: assessment.esdcEligibility || null,
@@ -779,15 +918,17 @@ const CoordinatorAssessmentWidget = forwardRef(
     };
     const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : null;
     const normalizedMode = assessment.deliveryMode === 'in_house' ? 'in_house' : 'partner';
-    if (baseContext || normalizedMode || costSettingsPayload) {
+    const includeLetterDrafts = letterDrafts && typeof letterDrafts === 'object';
+    if (baseContext || normalizedMode || costSettingsPayload || includeLetterDrafts) {
       payload.caseContext = {
         ...(baseContext || {}),
         assessmentDeliveryMode: normalizedMode,
-        assessmentCostSettings: costSettingsPayload
+        assessmentCostSettings: costSettingsPayload,
+        ...(includeLetterDrafts ? { decisionLetterDrafts: letterDrafts } : {})
       };
     }
     return payload;
-  }, [assessment, buildCostSettingsPayload, caseData?.caseContext]);
+  }, [assessment, buildCostSettingsPayload, caseData?.caseContext, letterDrafts]);
   const handlePostingContextErrors = useCallback((result) => {
     const code = result?.error || result?.code;
     if (['missing_internal_gl_code', 'missing_external_gl_code', 'posting_context_not_permitted'].includes(code)) {
@@ -810,9 +951,31 @@ const CoordinatorAssessmentWidget = forwardRef(
     () => POSTING_OPTIONS.find(opt => opt.value === assessment.postingContext) || null,
     [assessment.postingContext]
   );
+  const isCommunicationStep = currentStep === 'communication';
   const requiredDocumentChecklistItems = useMemo(
     () => documentChecklistItems.filter(item => item?.required !== false),
     [documentChecklistItems]
+  );
+  const communicationChecklistItems = useMemo(
+    () => documentChecklistItems.filter(item => {
+      const types = Array.isArray(item?.documentTypes) ? item.documentTypes : [];
+      return types.some(type => COMMUNICATION_DOC_TYPES.has(type));
+    }),
+    [documentChecklistItems]
+  );
+  const requiredCommunicationChecklistItems = useMemo(
+    () => communicationChecklistItems.filter(item => item?.required !== false),
+    [communicationChecklistItems]
+  );
+  const communicationChecklistMissingCount = useMemo(
+    () => requiredCommunicationChecklistItems.filter(item => item?.status !== 'complete').length,
+    [requiredCommunicationChecklistItems]
+  );
+  const communicationChecklistComplete = Boolean(
+    docsChecklistReady &&
+      communicationChecklistMissingCount === 0 &&
+      !documentChecklistLoading &&
+      !documentChecklistError
   );
   const checklistUploadDocTypeOptions = useMemo(
     () =>
@@ -871,6 +1034,14 @@ const CoordinatorAssessmentWidget = forwardRef(
     });
   }, [assessment.childcareNeed]);
   useEffect(() => {
+    const hasOtherBarrier = Array.isArray(assessment.barriers) && assessment.barriers.includes('Other');
+    if (hasOtherBarrier) return;
+    setAssessment(prev => {
+      if (!prev.barriersOther) return prev;
+      return { ...prev, barriersOther: '' };
+    });
+  }, [assessment.barriers]);
+  useEffect(() => {
     if (!requiresExternalPartner) return;
     setAssessment(prev => {
       if (prev.deliveryMode === 'partner') return prev;
@@ -892,13 +1063,16 @@ const CoordinatorAssessmentWidget = forwardRef(
       ? parseCurrencyToNumber(itp.tuition) +
         parseCurrencyToNumber(itp.books) +
         parseCurrencyToNumber(itp.materials) +
-        parseCurrencyToNumber(itp.living)
+        parseCurrencyToNumber(itp.living) +
+        parseCurrencyToNumber(itp.childcare) +
+        parseCurrencyToNumber(itp.otherAmount)
       : 0;
     const wageTotal = isEmployerIntervention
       ? parseCurrencyToNumber(wage.wages) +
         parseCurrencyToNumber(wage.mercs) +
         parseCurrencyToNumber(wage.nonwages) +
-        parseCurrencyToNumber(wage.other)
+        parseCurrencyToNumber(wage.other1Amount) +
+        parseCurrencyToNumber(wage.other2Amount)
       : 0;
     const total = itpTotal + wageTotal;
     if (!Number.isFinite(total) || total <= 0) return null;
@@ -1028,6 +1202,16 @@ const CoordinatorAssessmentWidget = forwardRef(
     lockedByAnotherUser ||
     isSigningDeclaration;
 
+  const activeLetterDraft = useMemo(() => {
+    if (!activeLetterKey) return buildEmptyDecisionLetterDraft();
+    return letterDrafts?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
+  }, [activeLetterKey, letterDrafts]);
+  const letterWorkflowId = activeLetterKey ? letterWorkflows?.[activeLetterKey] : null;
+  const isLetterEditingDisabled = lockedByAnotherUser || isCompletedStatus;
+  const canGenerateLetterDraft = Boolean(activeLetterKey) && !isLetterEditingDisabled && !draftingLetter;
+  const canSaveLetterDraft = Boolean(activeLetterKey) && !isLetterEditingDisabled;
+  const canSendLetter = Boolean(activeLetterKey) && !isLetterEditingDisabled && !!letterWorkflowId && !sendingLetter;
+
   useEffect(() => {
     const incoming = Number(caseData?.application_row_version || 0);
     if (incoming) {
@@ -1052,20 +1236,30 @@ const CoordinatorAssessmentWidget = forwardRef(
     const parseOrDefault = (val, def) => {
       if (!val) return def;
       try {
-        if (typeof val === 'string') return JSON.parse(val);
-        if (typeof val === 'object') return val;
-      } catch (e) { return def; }
+        const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+        if (parsed && typeof parsed === 'object') {
+          return { ...def, ...parsed };
+        }
+      } catch (_) {
+        return def;
+      }
       return def;
     };
     const derivedOutcomeStatus = (() => {
       if (caseData?.assessment_nwac_review_status) {
         return String(caseData.assessment_nwac_review_status);
       }
-      const statusNorm = typeof canonicalApplicationStatus === 'string'
-        ? canonicalApplicationStatus.trim().toLowerCase()
+      const statusNorm = typeof rawApplicationStatusNormalized === 'string'
+        ? rawApplicationStatusNormalized.trim().toLowerCase()
+        : (typeof canonicalApplicationStatus === 'string' ? canonicalApplicationStatus.trim().toLowerCase() : '');
+      const caseStatusNorm = typeof caseData?.status === 'string'
+        ? caseData.status.trim().toLowerCase()
         : '';
       if (statusNorm === 'approved') return 'approve';
       if (statusNorm === 'rejected') return 'reject';
+      if (statusNorm === 'decision_ready' || statusNorm === 'completed') {
+        return APPROVED_CASE_STATUSES.has(caseStatusNorm) ? 'approve' : 'reject';
+      }
       return '';
     })();
 
@@ -1116,6 +1310,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       barriers: Array.isArray(caseData?.assessment_employment_barriers)
         ? caseData.assessment_employment_barriers
         : (Array.isArray(caseData?.employment_barriers) ? caseData.employment_barriers : []),
+      barriersOther: caseData?.assessment_employment_barriers_other_details || '',
       priorities: Array.isArray(caseData?.assessment_local_area_priorities)
         ? caseData.assessment_local_area_priorities
         : [],
@@ -1126,8 +1321,8 @@ const CoordinatorAssessmentWidget = forwardRef(
       institution: caseData?.assessment_institution || caseData?.institution || '',
       programName: caseData?.assessment_program_name || '',
       deliveryMode: contextDeliveryMode || 'partner',
-      itp: parseOrDefault(caseData.assessment_itp, { tuition: '', books: '', materials: '', living: '', details: '' }),
-      wage: parseOrDefault(caseData.assessment_wage, { wages: '', mercs: '', nonwages: '', other: '', subsidyDetails: '' }),
+      itp: parseOrDefault(caseData.assessment_itp, { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' }),
+      wage: parseOrDefault(caseData.assessment_wage, { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' }),
       recommendation: caseData.assessment_recommendation || '',
       justification: caseData.assessment_justification || '',
       nwacReview: caseData.assessment_nwac_review || '',
@@ -1184,23 +1379,81 @@ const CoordinatorAssessmentWidget = forwardRef(
     setConflictDeclarationChoice(incomingConflictChoice);
     setConflictDeclarationDetails(caseData?.assessment_conflict_declaration_details || '');
     setDeclarationError(null);
+
+    const contextDrafts =
+      caseData?.caseContext?.decisionLetterDrafts ||
+      caseData?.caseContext?.decision_letter_drafts ||
+      caseData?.caseContext?.decisionLetter ||
+      caseData?.caseContext?.decision_letter ||
+      null;
+    const normalizeDraft = (draft, defaults) => {
+      const src = draft && typeof draft === 'object' ? draft : {};
+      return {
+        decision_date: src.decision_date || defaults.decision_date || '',
+        letter_title: src.letter_title || defaults.letter_title || '',
+        decision_intro: src.decision_intro || defaults.decision_intro || '',
+        decision_label: src.decision_label || defaults.decision_label || '',
+        decision_reason: src.decision_reason || defaults.decision_reason || '',
+        next_step_1: src.next_step_1 || defaults.next_step_1 || '',
+        next_step_2: src.next_step_2 || defaults.next_step_2 || '',
+        coordinator_name: src.coordinator_name || defaults.coordinator_name || '',
+        organization_name: src.organization_name || defaults.organization_name || ''
+      };
+    };
+    const baseDecisionDate = formatDate(caseData?.assessment_date_of_assessment || new Date());
+    const defaultApproval = {
+      decision_date: baseDecisionDate,
+      letter_title: 'Letter of Approval',
+      decision_intro: '',
+      decision_label: 'Approved',
+      decision_reason: caseData?.assessment_justification || '',
+      next_step_1: '',
+      next_step_2: '',
+      coordinator_name: currentUserName || '',
+      organization_name: DEFAULT_ORG_NAME
+    };
+    const defaultDenial = {
+      decision_date: baseDecisionDate,
+      letter_title: 'Letter of Denial',
+      decision_intro: '',
+      decision_label: 'Not approved',
+      decision_reason: caseData?.assessment_nwac_reason || '',
+      next_step_1: '',
+      next_step_2: '',
+      coordinator_name: currentUserName || '',
+      organization_name: DEFAULT_ORG_NAME
+    };
+    const mergedDrafts = {
+      approval: normalizeDraft(contextDrafts?.approval || contextDrafts?.approved, defaultApproval),
+      denial: normalizeDraft(contextDrafts?.denial || contextDrafts?.denied || contextDrafts?.rejected, defaultDenial)
+    };
+    setLetterDrafts(mergedDrafts);
+    setInitialLetterDrafts(mergedDrafts);
   }, [caseData]);
 
-  // Show NWAC section after submission, review completion, final decision, or outcome-ready status
+  // Show NWAC section after submission, review completion, or outcome-ready status
   useEffect(() => {
     const pendingApproval = isPendingApprovalStatus;
-    const shouldShowOutcome = pendingApproval || isDecisionFinal;
+    const shouldShowOutcome = pendingApproval || isDecisionFinal || isDecisionReadyStatus;
     setShowNWACSection(shouldShowOutcome);
-    setLocalAssessmentSubmitted(pendingApproval || isDecisionFinal);
-  }, [isDecisionFinal, isPendingApprovalStatus]);
+    setLocalAssessmentSubmitted(pendingApproval || isDecisionFinal || isDecisionReadyStatus);
+  }, [isDecisionFinal, isDecisionReadyStatus, isPendingApprovalStatus]);
 
   // UI logic: once status reaches pending approval or a final decision, lock assessment fields and surface NWAC review
   const isAssessmentSubmitted = isPendingApprovalStatus;
-  const isReviewComplete = APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus);
-  const assessmentSubmitted = localAssessmentSubmitted || isAssessmentSubmitted || isReviewComplete || isDecisionFinal || isLockedStatus || lockedByAnotherUser;
+  const isReviewComplete = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
+  const assessmentSubmitted =
+    localAssessmentSubmitted ||
+    isAssessmentSubmitted ||
+    isReviewComplete ||
+    isDecisionFinal ||
+    isDecisionReadyStatus ||
+    isLockedStatus ||
+    lockedByAnotherUser;
   // Disable all fields (including NWAC) if review is complete, a final decision exists, status is locked, conflict not signed, or eligibility not set
-  const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal;
+  const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || isDecisionReadyStatus;
   const isAssessmentDisabled = baseAssessmentLocked || isEligibilityGateActive || (assessmentSubmitted && !isEditingAssessment);
+  const checklistUploadsLocked = isAssessmentDisabled && !isCommunicationStep;
   const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canManageOutcomeReview;
   const isEligibilityDisabled = baseAssessmentLocked || isDeclarationGateActive || !isEligibilityAdmin;
 
@@ -1289,7 +1542,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, [applicantUserId, applicationId]);
 
   useEffect(() => {
-    if (currentStep !== 'docs') return;
+    if (!['docs', 'communication'].includes(currentStep)) return;
     loadDocumentChecklist();
   }, [currentStep, loadDocumentChecklist]);
 
@@ -1301,7 +1554,7 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const handleChecklistUploadClick = useCallback(
     item => {
-      if (isAssessmentDisabled) return;
+      if (isAssessmentDisabled && !isCommunicationStep) return;
       setChecklistUploadError(null);
       setChecklistUploadSuccess(null);
       if (!docsChecklistReady) {
@@ -1334,7 +1587,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       setChecklistUploadLabel(label);
       setChecklistUploadModalVisible(true);
     },
-    [canUploadEiVerification, docsChecklistReady, isAssessmentDisabled]
+    [canUploadEiVerification, docsChecklistReady, isAssessmentDisabled, isCommunicationStep]
   );
 
   const handleChecklistUploadModalDismiss = useCallback(() => {
@@ -1683,9 +1936,10 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   // Track changes
   useEffect(() => {
-    const changed = JSON.stringify(assessment) !== JSON.stringify(initialAssessment);
-    setIsChanged(changed);
-  }, [assessment, initialAssessment]);
+    const assessmentChanged = JSON.stringify(assessment) !== JSON.stringify(initialAssessment);
+    const letterChanged = JSON.stringify(letterDrafts) !== JSON.stringify(initialLetterDrafts);
+    setIsChanged(assessmentChanged || letterChanged);
+  }, [assessment, initialAssessment, letterDrafts, initialLetterDrafts]);
 
   useEffect(() => {
     if (!alertAnchorRef.current) return;
@@ -1732,7 +1986,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (field === 'previousISET' && value !== 'yes') {
         nextAssessment.previousISETDetails = '';
       }
-      if (field === 'nwacReviewStatus' && value !== 'reject') {
+      if (field === 'nwacReviewStatus' && value !== 'reject' && value !== 'push_back') {
         nextAssessment.nwacReason = '';
       }
       if (field === 'childcareNeed' && value !== 'yes') {
@@ -1791,6 +2045,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const handleCancel = () => setShowCancelModal(true);
   const confirmCancel = () => {
     setAssessment(initialAssessment);
+    setLetterDrafts(initialLetterDrafts);
     setShowCancelModal(false);
     setAlert(null);
     setIsEditingAssessment(false);
@@ -2006,6 +2261,8 @@ const CoordinatorAssessmentWidget = forwardRef(
     // 3. Barriers
     if (!Array.isArray(assessment.barriers) || assessment.barriers.length === 0) {
       errors.barriers = 'Select at least one barrier to employment.';
+    } else if (assessment.barriers.includes('Other') && !assessment.barriersOther?.trim()) {
+      errors.barriersOther = 'Provide details for the "Other" barrier.';
     }
     // 4. ESDC Eligibility
     if (!assessment.esdcEligibility) {
@@ -2315,6 +2572,242 @@ const CoordinatorAssessmentWidget = forwardRef(
     });
   };
 
+  const updateLetterDraftField = (field, value) => {
+    if (!activeLetterKey) return;
+    setLetterDrafts(prev => ({
+      ...prev,
+      [activeLetterKey]: {
+        ...(prev?.[activeLetterKey] || buildEmptyDecisionLetterDraft()),
+        [field]: value
+      }
+    }));
+  };
+
+  const persistLetterDraft = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!caseId) return { ok: false };
+      const lockCheck = await ensureLockForOperation();
+      if (!lockCheck.ok) return { ok: false };
+      const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
+      const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : {};
+      const updatedContext = {
+        ...baseContext,
+        decisionLetterDrafts: letterDrafts
+      };
+      const payload = { caseContext: updatedContext };
+      if (versionToken > 0) {
+        payload.expectedRowVersion = versionToken;
+      }
+      const res = await apiFetch(`/api/cases/${caseId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
+        if (latestVersion) updateRowVersion(latestVersion);
+        if (!silent) {
+          setAlert({
+            type: 'warning',
+            content: 'Another user updated this case. The latest data has been reloaded; review it and try again.',
+            dismissible: true,
+            statusIconAriaLabel: 'Warning'
+          });
+        }
+        return { ok: false };
+      }
+      if (!res.ok || !result?.success) {
+        if (!silent) {
+          setAlert({
+            type: 'error',
+            content: result?.error || 'Failed to save the letter draft.',
+            dismissible: true,
+            statusIconAriaLabel: 'Error'
+          });
+        }
+        return { ok: false };
+      }
+      const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
+      if (updatedRowVersion) updateRowVersion(updatedRowVersion);
+      setInitialLetterDrafts(letterDrafts);
+      if (!silent) {
+        setAlert({
+          type: 'success',
+          content: 'Letter draft saved.',
+          dismissible: true,
+          statusIconAriaLabel: 'Success'
+        });
+      }
+      return { ok: true };
+    },
+    [applicationRowVersionState, caseData?.application_row_version, caseData?.caseContext, caseId, ensureLockForOperation, letterDrafts, updateRowVersion]
+  );
+
+  const handleGenerateLetterDraft = async () => {
+    if (!activeLetterKey) {
+      setDraftingLetterError('Select a decision outcome before generating a draft.');
+      return;
+    }
+    setDraftingLetter(true);
+    setDraftingLetterError(null);
+    try {
+      const toAmount = (value) => {
+        const amount = parseCurrencyToNumber(value);
+        return amount > 0 ? amount : null;
+      };
+      const itp = assessment.itp || {};
+      const wage = assessment.wage || {};
+      const fundingBreakdown = {
+        tuition: toAmount(itp.tuition),
+        books: toAmount(itp.books),
+        materials: toAmount(itp.materials),
+        living: toAmount(itp.living),
+        childcare: toAmount(itp.childcare),
+        other_label: itp.otherLabel || null,
+        other_amount: toAmount(itp.otherAmount),
+        wage_subsidy: toAmount(wage.wages),
+        wage_mercs: toAmount(wage.mercs),
+        wage_non_wages: toAmount(wage.nonwages),
+        wage_other_1_label: wage.other1Label || null,
+        wage_other_1_amount: toAmount(wage.other1Amount),
+        wage_other_2_label: wage.other2Label || null,
+        wage_other_2_amount: toAmount(wage.other2Amount)
+      };
+      const totalFunding = Number.isFinite(numericInterventionCost) && numericInterventionCost > 0
+        ? numericInterventionCost
+        : null;
+      const recurringDetails = assessment.costType === 'recurring'
+        ? {
+          period: assessment.recurringPeriod || null,
+          amount: toAmount(assessment.recurringAmount),
+          occurrences: assessment.recurringOccurrences ? Number(assessment.recurringOccurrences) : null
+        }
+        : null;
+      const decisionLabel = activeLetterKey === 'approval' ? 'Approval' : 'Denial';
+      const reasonSeed = activeLetterKey === 'approval' ? assessment.justification : assessment.nwacReason;
+      const contextPayload = {
+        decision: decisionLabel,
+        applicant_name: applicantName || null,
+        tracking_id: trackingReference || null,
+        case_number: caseData?.case_number || null,
+        assessment_summary: assessment.overview || null,
+        employment_goals: assessment.employmentGoals || null,
+        program_name: assessment.programName || null,
+        institution: assessment.institution || null,
+        intervention_type_label: selectedInterventionCodeOption?.label || null,
+        intervention_code: assessment.interventionCode || null,
+        delivery_mode: assessment.deliveryMode || null,
+        intervention_start_date: assessment.startDate || null,
+        intervention_end_date: assessment.endDate || null,
+        intervention_cost_total: totalFunding || assessment.interventionCost || null,
+        recurring_details: recurringDetails,
+        funding_breakdown: fundingBreakdown,
+        decision_reason_seed: reasonSeed || null
+      };
+      const prompt = `Draft a concise ${decisionLabel.toLowerCase()} letter for the NWAC ISET program. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2. Keep each field brief and professional. If funding amounts or dates are provided, mention them clearly in the decision_reason or next steps. Use the context below and omit unknown details.\n\nContext:\n${JSON.stringify(contextPayload, null, 2)}`;
+      const resp = await apiFetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            { role: 'system', content: 'You draft decision letters for program applicants. Respond only with JSON, no markdown.' },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.3
+        })
+      });
+      if (!resp.ok) {
+        const detail = await resp.text().catch(() => '');
+        throw new Error(detail || 'AI draft failed.');
+      }
+      const data = await resp.json().catch(() => ({}));
+      const content = data?.choices?.[0]?.message?.content || '';
+      const parsed = extractJsonFromAi(content);
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('AI draft returned invalid JSON.');
+      }
+      setLetterDrafts(prev => {
+        const current = prev?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
+        const nextSteps = Array.isArray(parsed.next_steps || parsed.nextSteps) ? (parsed.next_steps || parsed.nextSteps) : [];
+        return {
+          ...prev,
+          [activeLetterKey]: {
+            ...current,
+            letter_title: parsed.letter_title || current.letter_title,
+            decision_intro: parsed.decision_intro || current.decision_intro,
+            decision_label: parsed.decision_label || current.decision_label,
+            decision_reason: parsed.decision_reason || current.decision_reason,
+            next_step_1: parsed.next_step_1 || nextSteps[0] || current.next_step_1,
+            next_step_2: parsed.next_step_2 || nextSteps[1] || current.next_step_2
+          }
+        };
+      });
+    } catch (err) {
+      setDraftingLetterError(err?.message || 'Failed to generate a letter draft.');
+    } finally {
+      setDraftingLetter(false);
+    }
+  };
+
+  const handleSendDecisionLetter = async () => {
+    if (!caseId || !activeLetterKey) {
+      setSendingLetterError('Select a decision outcome before sending the letter.');
+      return;
+    }
+    if (!letterWorkflowId) {
+      setSendingLetterError('Letter workflow is not configured yet.');
+      return;
+    }
+    setSendingLetter(true);
+    setSendingLetterError(null);
+    try {
+      const saved = await persistLetterDraft({ silent: true });
+      if (!saved.ok) {
+        throw new Error('Save the letter draft before sending.');
+      }
+      const subject =
+        activeLetterKey === 'approval'
+          ? 'Letter of Approval'
+          : 'Letter of Denial';
+      const body =
+        activeLetterKey === 'approval'
+          ? 'Please review your approval letter in the portal.'
+          : 'Please review your decision letter in the portal.';
+      const payload = {
+        subject,
+        body,
+        urgent: false,
+        toDisplayName: applicantName || 'Applicant',
+        fromDisplayName: currentUserName || 'Case Worker',
+        attachments: [{ workflow_id: letterWorkflowId }]
+      };
+      if (applicationId) {
+        payload.applicationId = applicationId;
+      }
+      const response = await apiFetch(`/api/cases/${caseId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(detail || 'Failed to send the decision letter.');
+      }
+      setAlert({
+        type: 'success',
+        content: 'Decision letter sent to the applicant.',
+        dismissible: true,
+        statusIconAriaLabel: 'Success'
+      });
+      dispatchSupportingDocsRefresh();
+    } catch (err) {
+      setSendingLetterError(err?.message || 'Failed to send the decision letter.');
+    } finally {
+      setSendingLetter(false);
+    }
+  };
+
   const handleSave = async () => {
     if (lockedByAnotherUser) {
       showLockAlert({ reason: 'owned_by_other', lock: activeLock }, 'warning');
@@ -2386,6 +2879,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
       setAlert({ type: 'success', content: 'Assessment saved successfully. All changes have been recorded.', dismissible: true, statusIconAriaLabel: 'Success' });
       setInitialAssessment(assessment);
+      setInitialLetterDrafts(letterDrafts);
       setIsChanged(false);
       scrollAfterAction();
       // Refresh caseData from backend to reflect latest changes
@@ -2416,14 +2910,17 @@ const CoordinatorAssessmentWidget = forwardRef(
   // For NWAC review validation
   const validateNWACReview = (assessment) => {
     const errors = {};
-    if (!assessment.nwacReviewStatus) {
+    const decision = assessment.nwacReviewStatus;
+    if (!decision) {
       errors.nwacReviewStatus = 'Funding decision selection is required.';
     }
-    if (!assessment.nwacReview) {
+    if (decision && decision !== 'push_back' && !assessment.nwacReview) {
       errors.nwacReview = 'Assessment assurance outcome is required.';
     }
-    if (assessment.nwacReviewStatus === 'reject' && (!assessment.nwacReason || !assessment.nwacReason.trim())) {
-      errors.nwacReason = 'Reason for not approving is required.';
+    if ((decision === 'reject' || decision === 'push_back') && (!assessment.nwacReason || !assessment.nwacReason.trim())) {
+      errors.nwacReason = decision === 'push_back'
+        ? 'Reason for push back is required.'
+        : 'Reason for not approving is required.';
     }
     return errors;
   };
@@ -2433,7 +2930,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   );
   const validateWizardStep = useCallback(
     (stepId) => {
-      if (isAssessmentDisabled && stepId !== 'decision' && stepId !== 'eligibility') {
+      if (isAssessmentDisabled && !['decision', 'eligibility', 'communication'].includes(stepId)) {
         return true;
       }
       const errors = validateAssessment(assessment);
@@ -2479,12 +2976,16 @@ const CoordinatorAssessmentWidget = forwardRef(
         const outcomeErrors = validateNWACReview(assessment);
         return Object.keys(outcomeErrors).length === 0;
       }
+      if (stepId === 'communication') {
+        return communicationChecklistComplete;
+      }
       return false;
     },
     [
       assessment,
       assessmentSubmitted,
       canManageOutcomeReview,
+      communicationChecklistComplete,
       docsChecklistComplete,
       isAssessmentDisabled,
       isNWACFieldsDisabled,
@@ -2539,7 +3040,9 @@ const CoordinatorAssessmentWidget = forwardRef(
     setHasSubmitted(true);
     setValidationAlert(null);
     const errors = validateNWACReview(assessment);
-    const isOutcomeApproved = assessment.nwacReviewStatus === 'approve';
+    const decision = assessment.nwacReviewStatus;
+    const isOutcomeApproved = decision === 'approve';
+    const isOutcomePushBack = decision === 'push_back';
     if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
       const parsedCost = parseCurrencyInput(assessment.interventionCost);
       if (parsedCost === null || !Number.isFinite(parsedCost) || parsedCost < 0) {
@@ -2578,6 +3081,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       assessment_previous_iset: assessment.previousISET || null,
       assessment_previous_iset_details: assessment.previousISETDetails || null,
       assessment_employment_barriers: assessment.barriers || null,
+      assessment_employment_barriers_other_details: assessment.barriersOther || null,
       assessment_local_area_priorities: assessment.priorities || null,
       assessment_other_funding_details: assessment.otherFunding || null,
       assessment_esdc_eligibility: assessment.esdcEligibility || null,
@@ -2605,8 +3109,9 @@ const CoordinatorAssessmentWidget = forwardRef(
       assessment_childcare_funding_details: assessment.childcareFunding || null,
       case_summary: assessment.overview || null,
       assessment_submit_action: true,
-      status: assessment.nwacReviewStatus === 'approve' ? 'initiated' : NOT_APPROVED_CASE_STATUS,
-      applicationStatus: assessment.nwacReviewStatus === 'approve' ? 'approved' : 'in_review'
+      assessment_nwac_review_status: decision || null,
+      status: isOutcomeApproved ? 'initiated' : NOT_APPROVED_CASE_STATUS,
+      applicationStatus: isOutcomePushBack ? 'in_review' : DECISION_READY_STATUS
     };
     const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : null;
     const normalizedMode = assessment.deliveryMode === 'in_house' ? 'in_house' : 'partner';
@@ -2685,15 +3190,19 @@ const CoordinatorAssessmentWidget = forwardRef(
       setFieldErrors({});
       setHasSubmitted(false);
       scrollAfterAction();
+      const decisionMessage = (() => {
+        if (isOutcomePushBack) return 'Decision pushed back. Application returned to In review.';
+        if (isOutcomeApproved) return 'Decision recorded. Prepare the approval letter and funding agreement.';
+        return 'Decision recorded. Prepare the denial letter.';
+      })();
       setAlert({
         type: 'success',
-        content: assessment.nwacReviewStatus === 'approve'
-          ? 'Outcome notice complete. Application approved.'
-          : 'Outcome notice complete. Application not approved; status returned to In review.',
+        content: decisionMessage,
         dismissible: true,
         statusIconAriaLabel: 'Success'
       });
       setInitialAssessment(a => ({ ...a, ...payload }));
+      setInitialLetterDrafts(letterDrafts);
       setIsChanged(false);
       setValidationAlert(null);
       if (releaseAfterSuccess) {
@@ -2720,6 +3229,80 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
     } else {
       await handleComplete();
+    }
+  };
+
+  const handleCommunicationComplete = async () => {
+    if (!showCommunicationStep || isCompletedStatus) {
+      return;
+    }
+    setHasSubmitted(true);
+    const checklistOk = await runDocumentChecklist(null, { allowBypass: false });
+    if (!checklistOk) return;
+    const lockCheck = await ensureLockForOperation();
+    if (!lockCheck.ok) return;
+    const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
+    const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
+    const payload = { applicationStatus: 'completed' };
+    if (versionToken > 0) {
+      payload.expectedRowVersion = versionToken;
+    }
+    try {
+      const res = await apiFetch(`/api/cases/${caseData.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
+        if (latestVersion) updateRowVersion(latestVersion);
+        if (typeof actions?.refreshCaseData === 'function') {
+          try {
+            await actions.refreshCaseData();
+          } catch (_) {}
+        }
+        setAlert({
+          type: 'warning',
+          content: 'Another user updated this case. The latest data has been reloaded; review it and try again.',
+          dismissible: true,
+          statusIconAriaLabel: 'Warning'
+        });
+        scrollAfterAction();
+        return;
+      }
+      if (!res.ok || !result?.success) {
+        throw new Error(result?.error || 'Failed to mark communication complete.');
+      }
+      const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
+      if (updatedRowVersion) {
+        updateRowVersion(updatedRowVersion);
+      }
+      if (typeof onCaseUpdate === 'function') {
+        const updates = { applicationStatus: 'completed' };
+        if (updatedRowVersion) updates.application_row_version = updatedRowVersion;
+        onCaseUpdate(updates);
+      }
+      if (typeof actions?.refreshCaseData === 'function') {
+        try {
+          await actions.refreshCaseData();
+        } catch (_) {}
+      }
+      dispatchSupportingDocsRefresh();
+      setAlert({
+        type: 'success',
+        content: 'Communication complete. Application marked as completed.',
+        dismissible: true,
+        statusIconAriaLabel: 'Success'
+      });
+      setHasSubmitted(false);
+      scrollAfterAction();
+      if (releaseAfterSuccess) {
+        releaseLock({ silent: true }).catch(() => {});
+      }
+    } catch (err) {
+      setAlert({ type: 'error', content: err.message || 'Failed to complete communication.', dismissible: true, statusIconAriaLabel: 'Error' });
+      scrollAfterAction();
     }
   };
   const handleWizardNavigate = async ({ detail }) => {
@@ -3342,6 +3925,19 @@ const CoordinatorAssessmentWidget = forwardRef(
           </ColumnLayout>
         </div>
       </FormField>
+      {(assessment.barriers || []).includes('Other') && (
+        <FormField
+          label="Other barrier details"
+          errorText={showBarriersErrors && fieldErrors.barriersOther ? fieldErrors.barriersOther : undefined}
+        >
+          <Input
+            value={assessment.barriersOther || ''}
+            onChange={({ detail }) => handleField('barriersOther', detail.value)}
+            placeholder="Describe the other barrier"
+            disabled={isAssessmentDisabled}
+          />
+        </FormField>
+      )}
     </SpaceBetween>
   );
 
@@ -3408,27 +4004,57 @@ const CoordinatorAssessmentWidget = forwardRef(
             columnDefinitions={[
               { id: 'category', header: 'Funding Category', cell: item => item.label },
               { id: 'requested', header: 'Funding Requested', cell: item => (
-                <Input
-                  type="text"
-                  value={assessment.itp?.[item.key] || ''}
-                  onChange={({ detail }) => {
-                    const raw = detail.value.replace(/[^\d.]/g, '');
-                    handleItp(item.key, raw);
-                  }}
-                  onBlur={({ detail }) => {
-                    const raw = assessment.itp?.[item.key] || '';
-                    const num = raw ? parseFloat(raw) : '';
-                    const formatted = num !== '' && !isNaN(num) ? `$ ${num.toFixed(2)}` : '';
-                    handleItp(item.key, formatted);
-                  }}
-                  ariaLabel={item.label}
-                  readOnly={isAssessmentDisabled}
-                  disabled={isAssessmentDisabled}
-                />
+                (() => {
+                  const amountKey = item.amountKey || item.key;
+                  const amountValue = assessment.itp?.[amountKey] || '';
+                  const amountInput = (
+                    <Input
+                      type="text"
+                      value={amountValue}
+                      onChange={({ detail }) => {
+                        const raw = detail.value.replace(/[^\d.]/g, '');
+                        handleItp(amountKey, raw);
+                      }}
+                      onBlur={() => {
+                        const raw = assessment.itp?.[amountKey] || '';
+                        const num = raw ? parseFloat(raw) : '';
+                        const formatted = num !== '' && !isNaN(num) ? `$ ${num.toFixed(2)}` : '';
+                        handleItp(amountKey, formatted);
+                      }}
+                      ariaLabel={item.label}
+                      readOnly={isAssessmentDisabled}
+                      disabled={isAssessmentDisabled}
+                    />
+                  );
+                  if (!item.labelKey) return amountInput;
+                  return (
+                    <SpaceBetween size="xs">
+                      <Input
+                        value={assessment.itp?.[item.labelKey] || ''}
+                        onChange={({ detail }) => handleItp(item.labelKey, detail.value)}
+                        placeholder="Describe..."
+                        ariaLabel={`${item.label} description`}
+                        readOnly={isAssessmentDisabled}
+                        disabled={isAssessmentDisabled}
+                      />
+                      {amountInput}
+                    </SpaceBetween>
+                  );
+                })()
               ) },
               { id: 'actions', header: 'Actions', cell: item => (
                 isAssessmentDisabled ? null : (
-                  <Button size="small" variant="inline-link" onClick={() => handleItp(item.key, '')}>Clear</Button>
+                  <Button
+                    size="small"
+                    variant="inline-link"
+                    onClick={() => {
+                      const amountKey = item.amountKey || item.key;
+                      if (item.labelKey) handleItp(item.labelKey, '');
+                      handleItp(amountKey, '');
+                    }}
+                  >
+                    Clear
+                  </Button>
                 )
               ) }
             ]}
@@ -3436,7 +4062,9 @@ const CoordinatorAssessmentWidget = forwardRef(
               { key: 'tuition', label: 'Tuition' },
               { key: 'books', label: 'Books' },
               { key: 'materials', label: 'Materials' },
-              { key: 'living', label: 'Living Allowance' }
+              { key: 'living', label: 'Living Allowance' },
+              { key: 'childcare', label: 'Childcare' },
+              { label: 'Other (specify)', labelKey: 'otherLabel', amountKey: 'otherAmount' }
             ]}
             variant="embedded"
             header={null}
@@ -3448,7 +4076,9 @@ const CoordinatorAssessmentWidget = forwardRef(
                     Number((assessment.itp?.tuition || '').replace(/[^\d.]/g, '')) +
                     Number((assessment.itp?.books || '').replace(/[^\d.]/g, '')) +
                     Number((assessment.itp?.materials || '').replace(/[^\d.]/g, '')) +
-                    Number((assessment.itp?.living || '').replace(/[^\d.]/g, ''))
+                    Number((assessment.itp?.living || '').replace(/[^\d.]/g, '')) +
+                    Number((assessment.itp?.childcare || '').replace(/[^\d.]/g, '')) +
+                    Number((assessment.itp?.otherAmount || '').replace(/[^\d.]/g, ''))
                   ).toFixed(2)}
                 </Box>
               </>
@@ -3466,32 +4096,57 @@ const CoordinatorAssessmentWidget = forwardRef(
             columnDefinitions={[
               { id: 'category', header: 'Funding Category', cell: item => item.label },
               { id: 'requested', header: 'Funding Requested', cell: item => (
-                <Input
-                  type="text"
-                  value={assessment.wage?.[item.key] || ''}
-                  onChange={({ detail }) => {
-                    if (item.key === 'other') {
-                      handleWage(item.key, detail.value);
-                    } else {
-                      const raw = detail.value.replace(/[^\d.]/g, '');
-                      handleWage(item.key, raw);
-                    }
-                  }}
-                  onBlur={({ detail }) => {
-                    if (item.key === 'other') return;
-                    const raw = assessment.wage?.[item.key] || '';
-                    const num = raw ? parseFloat(raw) : '';
-                    const formatted = num !== '' && !isNaN(num) ? `$ ${num.toFixed(2)}` : '';
-                    handleWage(item.key, formatted);
-                  }}
-                  ariaLabel={item.label}
-                  readOnly={isAssessmentDisabled}
-                  disabled={isAssessmentDisabled}
-                />
+                (() => {
+                  const amountKey = item.amountKey || item.key;
+                  const amountValue = assessment.wage?.[amountKey] || '';
+                  const amountInput = (
+                    <Input
+                      type="text"
+                      value={amountValue}
+                      onChange={({ detail }) => {
+                        const raw = detail.value.replace(/[^\d.]/g, '');
+                        handleWage(amountKey, raw);
+                      }}
+                      onBlur={() => {
+                        const raw = assessment.wage?.[amountKey] || '';
+                        const num = raw ? parseFloat(raw) : '';
+                        const formatted = num !== '' && !isNaN(num) ? `$ ${num.toFixed(2)}` : '';
+                        handleWage(amountKey, formatted);
+                      }}
+                      ariaLabel={item.label}
+                      readOnly={isAssessmentDisabled}
+                      disabled={isAssessmentDisabled}
+                    />
+                  );
+                  if (!item.labelKey) return amountInput;
+                  return (
+                    <SpaceBetween size="xs">
+                      <Input
+                        value={assessment.wage?.[item.labelKey] || ''}
+                        onChange={({ detail }) => handleWage(item.labelKey, detail.value)}
+                        placeholder="Describe..."
+                        ariaLabel={`${item.label} description`}
+                        readOnly={isAssessmentDisabled}
+                        disabled={isAssessmentDisabled}
+                      />
+                      {amountInput}
+                    </SpaceBetween>
+                  );
+                })()
               ) },
               { id: 'actions', header: 'Actions', cell: item => (
                 isAssessmentDisabled ? null : (
-                  <Button size="small" variant="inline-link" onClick={() => handleWage(item.key, '')}>Clear</Button>
+                  <Button
+                    size="small"
+                    variant="inline-link"
+                    onClick={() => {
+                      const amountKey = item.amountKey || item.key;
+                      if (item.labelKey) handleWage(item.labelKey, '');
+                      handleWage(amountKey, '');
+                    }}
+                  >
+                    Clear
+                  </Button>
                 )
               ) }
             ]}
@@ -3499,7 +4154,8 @@ const CoordinatorAssessmentWidget = forwardRef(
               { key: 'wages', label: 'Wages' },
               { key: 'mercs', label: 'MERCs' },
               { key: 'nonwages', label: 'Non-Wages' },
-              { key: 'other', label: 'Other' }
+              { label: 'Other (specify)', labelKey: 'other1Label', amountKey: 'other1Amount' },
+              { label: 'Other (specify)', labelKey: 'other2Label', amountKey: 'other2Amount' }
             ]}
             variant="embedded"
             header={null}
@@ -3511,7 +4167,8 @@ const CoordinatorAssessmentWidget = forwardRef(
                     Number((assessment.wage?.wages || '').replace(/[^\d.]/g, '')) +
                     Number((assessment.wage?.mercs || '').replace(/[^\d.]/g, '')) +
                     Number((assessment.wage?.nonwages || '').replace(/[^\d.]/g, '')) +
-                    Number((assessment.wage?.other || '').replace(/[^\d.]/g, ''))
+                    Number((assessment.wage?.other1Amount || '').replace(/[^\d.]/g, '')) +
+                    Number((assessment.wage?.other2Amount || '').replace(/[^\d.]/g, ''))
                   ).toFixed(2)}
                 </Box>
               </>
@@ -3627,13 +4284,6 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const docsStepContent = (
     <SpaceBetween size="m">
-      <input
-        type="file"
-        ref={checklistFileInputRef}
-        style={{ display: 'none' }}
-        accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
-        onChange={handleChecklistFileSelected}
-      />
       {showDocsInfoAlert && (
         <Alert
           type="info"
@@ -3680,6 +4330,139 @@ const CoordinatorAssessmentWidget = forwardRef(
           {checklistUploadSuccess}
         </Alert>
       )}
+      <Box>
+        <Header
+          variant="h3"
+          description={
+            activeLetterKey
+              ? `Draft and send the ${activeLetterKey === 'approval' ? 'approval' : 'denial'} letter.`
+              : 'Record an approval or denial before drafting the letter.'
+          }
+          actions={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                onClick={handleGenerateLetterDraft}
+                disabled={!canGenerateLetterDraft || letterWorkflowsLoading}
+                loading={draftingLetter}
+              >
+                Generate draft
+              </Button>
+              <Button
+                onClick={() => persistLetterDraft({ silent: false })}
+                disabled={!canSaveLetterDraft}
+              >
+                Save draft
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleSendDecisionLetter}
+                disabled={!canSendLetter}
+                loading={sendingLetter}
+              >
+                Send letter
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          Decision letter
+        </Header>
+        {letterWorkflowsError && (
+          <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setLetterWorkflowsError(null)}>
+            {letterWorkflowsError}
+          </Alert>
+        )}
+        {draftingLetterError && (
+          <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setDraftingLetterError(null)}>
+            {draftingLetterError}
+          </Alert>
+        )}
+        {sendingLetterError && (
+          <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setSendingLetterError(null)}>
+            {sendingLetterError}
+          </Alert>
+        )}
+        {!activeLetterKey && (
+          <Alert type="info" statusIconAriaLabel="Info">
+            Decision letters are available once an approval or denial has been recorded.
+          </Alert>
+        )}
+        {activeLetterKey && (
+          <SpaceBetween size="m">
+            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+              <FormField label="Decision date">
+                <DatePicker
+                  value={activeLetterDraft.decision_date || ''}
+                  onChange={({ detail }) => updateLetterDraftField('decision_date', detail.value)}
+                  placeholder="YYYY-MM-DD"
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+              <FormField label="Letter title">
+                <Input
+                  value={activeLetterDraft.letter_title || ''}
+                  onChange={({ detail }) => updateLetterDraftField('letter_title', detail.value)}
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+            </Grid>
+            <FormField label="Intro paragraph">
+              <Textarea
+                value={activeLetterDraft.decision_intro || ''}
+                onChange={({ detail }) => updateLetterDraftField('decision_intro', detail.value)}
+                rows={3}
+                disabled={isLetterEditingDisabled}
+              />
+            </FormField>
+            <FormField label="Decision label">
+              <Input
+                value={activeLetterDraft.decision_label || ''}
+                onChange={({ detail }) => updateLetterDraftField('decision_label', detail.value)}
+                disabled={isLetterEditingDisabled}
+              />
+            </FormField>
+            <FormField label="Decision reason">
+              <Textarea
+                value={activeLetterDraft.decision_reason || ''}
+                onChange={({ detail }) => updateLetterDraftField('decision_reason', detail.value)}
+                rows={3}
+                disabled={isLetterEditingDisabled}
+              />
+            </FormField>
+            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+              <FormField label="Next step 1">
+                <Input
+                  value={activeLetterDraft.next_step_1 || ''}
+                  onChange={({ detail }) => updateLetterDraftField('next_step_1', detail.value)}
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+              <FormField label="Next step 2">
+                <Input
+                  value={activeLetterDraft.next_step_2 || ''}
+                  onChange={({ detail }) => updateLetterDraftField('next_step_2', detail.value)}
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+            </Grid>
+            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+              <FormField label="Coordinator name">
+                <Input
+                  value={activeLetterDraft.coordinator_name || ''}
+                  onChange={({ detail }) => updateLetterDraftField('coordinator_name', detail.value)}
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+              <FormField label="Organization name">
+                <Input
+                  value={activeLetterDraft.organization_name || ''}
+                  onChange={({ detail }) => updateLetterDraftField('organization_name', detail.value)}
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+            </Grid>
+          </SpaceBetween>
+        )}
+      </Box>
       <SpaceBetween size="s">
         {documentChecklistError && (
           <Alert type="error" dismissible onDismiss={() => setDocumentChecklistError(null)}>
@@ -3698,7 +4481,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                     ? 'Loading checklist...'
                     : documentChecklistMissingCount > 0
                       ? `${documentChecklistMissingCount} required item${documentChecklistMissingCount === 1 ? '' : 's'} missing`
-                      : 'All required checklist items are complete.'
+                      : <StatusIndicator type="success">All required checklist items are complete.</StatusIndicator>
             }
             actions={
               <SpaceBetween direction="horizontal" size="xs">
@@ -3751,10 +4534,146 @@ const CoordinatorAssessmentWidget = forwardRef(
                   const isRestricted = !allowedDocTypes.length;
                   if (item.status !== 'complete' && !isRestricted) {
                     return (
+                        <Button
+                          variant="inline-link"
+                          onClick={() => handleChecklistUploadClick(item)}
+                          disabled={!docsChecklistReady || checklistUploadsLocked || checklistUploading}
+                        >
+                          {item.label || item.id}
+                        </Button>
+                    );
+                  }
+                  return item.label || item.id;
+                }
+              },
+              {
+                id: 'status',
+                header: 'Status',
+                minWidth: 160,
+                cell: item => {
+                  if (item.status === 'complete') return <StatusIndicator type="success">Complete</StatusIndicator>;
+                  if (item.status === 'missing') return <StatusIndicator type="error">Missing</StatusIndicator>;
+                  if (item.status === 'in_progress') return <StatusIndicator type="info">In progress</StatusIndicator>;
+                  return <StatusIndicator type="pending">Pending</StatusIndicator>;
+                }
+              }
+            ]}
+            empty={<Box textAlign="center">No checklist items required.</Box>}
+          />
+        </Box>
+      </SpaceBetween>
+    </SpaceBetween>
+  );
+
+  const communicationStepContent = (
+    <SpaceBetween size="m">
+      <Alert
+        type="info"
+        header="Decision communication"
+      >
+        Upload the assessment approval or denial letter and ensure any required agreements are signed before completing this step.
+      </Alert>
+      {!applicantUserId && (
+        <Alert type="info" header="Checklist unavailable" statusIconAriaLabel="Info">
+          Checklist items are not available until the applicant is linked to this case.
+        </Alert>
+      )}
+      {applicantUserId && !docsChecklistReady && (
+        <Alert type="error" header="Save progress to enable uploads">
+          Save progress to link the application record before uploading documents and validating the checklist.
+        </Alert>
+      )}
+      {checklistUploadError && (
+        <Alert
+          type="error"
+          statusIconAriaLabel="Error"
+          dismissible
+          onDismiss={() => setChecklistUploadError(null)}
+        >
+          {checklistUploadError}
+        </Alert>
+      )}
+      {checklistUploadSuccess && (
+        <Alert
+          type="success"
+          statusIconAriaLabel="Success"
+          dismissible
+          onDismiss={() => setChecklistUploadSuccess(null)}
+        >
+          {checklistUploadSuccess}
+        </Alert>
+      )}
+      <SpaceBetween size="s">
+        {documentChecklistError && (
+          <Alert type="error" dismissible onDismiss={() => setDocumentChecklistError(null)}>
+            {documentChecklistError}
+          </Alert>
+        )}
+        <Box>
+          <Header
+            variant="h3"
+            description={
+              !applicantUserId
+                ? 'Link an applicant to load the checklist.'
+                : !docsChecklistReady
+                  ? 'Save progress to load the checklist for this assessment.'
+                  : documentChecklistLoading
+                    ? 'Loading checklist...'
+                    : communicationChecklistMissingCount > 0
+                      ? `${communicationChecklistMissingCount} required item${communicationChecklistMissingCount === 1 ? '' : 's'} missing`
+                      : <StatusIndicator type="success">All required items are complete.</StatusIndicator>
+            }
+            actions={
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button
+                  variant="icon"
+                  iconName="refresh"
+                  ariaLabel="Refresh checklist"
+                  onClick={handleChecklistRefresh}
+                  disabled={documentChecklistLoading || !docsChecklistReady}
+                />
+                <Link
+                  href="#supporting-documents"
+                  onFollow={event => {
+                    event.preventDefault();
+                    openAssessmentWidget('supporting-documents');
+                  }}
+                >
+                  Open Supporting Documents
+                </Link>
+                <Link
+                  href="#secure-messaging"
+                  onFollow={event => {
+                    event.preventDefault();
+                    openAssessmentWidget('secure-messaging');
+                  }}
+                >
+                  Open Secure Messaging
+                </Link>
+              </SpaceBetween>
+            }
+          >
+            Communication checklist
+          </Header>
+          <Table
+            trackBy="id"
+            variant="embedded"
+            loading={documentChecklistLoading}
+            loadingText="Loading checklist"
+            items={requiredCommunicationChecklistItems}
+            columnDefinitions={[
+              {
+                id: 'label',
+                header: 'Item',
+                minWidth: 240,
+                cell: item => {
+                  const rawDocTypes = Array.isArray(item?.documentTypes) ? item.documentTypes.filter(Boolean) : [];
+                  if (item.status !== 'complete' && rawDocTypes.length > 0) {
+                    return (
                       <Button
                         variant="inline-link"
                         onClick={() => handleChecklistUploadClick(item)}
-                        disabled={!docsChecklistReady || isAssessmentDisabled || checklistUploading}
+                        disabled={!docsChecklistReady || checklistUploadsLocked || checklistUploading}
                       >
                         {item.label || item.id}
                       </Button>
@@ -3784,6 +4703,7 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const reviewAssessmentDate = assessment.dateOfAssessment || 'Set on submit';
   const reviewBarriers = assessment.barriers?.length ? assessment.barriers.join(', ') : 'None';
+  const reviewBarriersOther = (assessment.barriers || []).includes('Other') ? (assessment.barriersOther || '—') : null;
   const reviewPriorities = assessment.priorities?.length ? assessment.priorities.join(', ') : 'None';
   const reviewPreviousIset = assessment.previousISET === 'yes' ? 'Yes' : assessment.previousISET === 'no' ? 'No' : '—';
   const reviewChildcareNeed = assessment.childcareNeed === 'yes' ? 'Yes' : assessment.childcareNeed === 'no' ? 'No' : '—';
@@ -3813,6 +4733,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           <div>Overview: {assessment.overview || '—'}</div>
           <div>Employment goals: {assessment.employmentGoals || '—'}</div>
           <div>Barriers: {reviewBarriers}</div>
+          {reviewBarriersOther && <div>Other barrier details: {reviewBarriersOther}</div>}
           <div>Local priorities: {reviewPriorities}</div>
         </Box>
         <Box>
@@ -3921,11 +4842,13 @@ const CoordinatorAssessmentWidget = forwardRef(
                   } else {
                     handleField('nwacReviewStatus', detail.value);
                     if (detail.value === 'approve') handleField('nwacReason', '');
+                    if (detail.value === 'push_back') handleField('nwacReview', '');
                   }
                 }}
                 items={[
                   { value: 'approve', label: 'Approved' },
-                  { value: 'reject', label: 'Not Approved' }
+                  { value: 'reject', label: 'Not Approved' },
+                  { value: 'push_back', label: 'Push back to coordinator' }
                 ]}
                 ariaLabel="NWAC Review Status"
                 data-error-focus={showDecisionErrors && fieldErrors.nwacReviewStatus ? 'true' : undefined}
@@ -3948,13 +4871,16 @@ const CoordinatorAssessmentWidget = forwardRef(
               ]}
               placeholder="Select review outcome"
               data-error-focus={showDecisionErrors && fieldErrors.nwacReview ? 'true' : undefined}
-              disabled={isNWACFieldsDisabled}
+              disabled={isNWACFieldsDisabled || assessment.nwacReviewStatus === 'push_back'}
             />
           </FormField>
         </Grid>
-        {assessment.nwacReviewStatus === 'reject' && (
+        {['reject', 'push_back'].includes(assessment.nwacReviewStatus) && (
           <Grid gridDefinition={[{ colspan: 12 }]}>
-            <FormField label="Reason for Not Approving" stretch={true} >
+            <FormField
+              label={assessment.nwacReviewStatus === 'push_back' ? 'Reason for Push Back' : 'Reason for Not Approving'}
+              stretch={true}
+            >
               <Box width="100%">
                 <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
                   if (isNWACFieldsDisabled) return;
@@ -4058,7 +4984,8 @@ const CoordinatorAssessmentWidget = forwardRef(
     cost: { title: STEP_LABELS.cost, content: costStepContent, isOptional: false },
     docs: { title: STEP_LABELS.docs, content: docsStepContent, isOptional: false },
     review: { title: STEP_LABELS.review, content: reviewStepContent, isOptional: false },
-    decision: { title: STEP_LABELS.decision, content: decisionStepContent, isOptional: false }
+    decision: { title: STEP_LABELS.decision, content: decisionStepContent, isOptional: false },
+    communication: { title: STEP_LABELS.communication, content: communicationStepContent, isOptional: false }
   };
 
   const steps = activeStepIds
@@ -4072,8 +4999,13 @@ const CoordinatorAssessmentWidget = forwardRef(
   const activeStepIndex = Math.max(activeStepIds.indexOf(currentStep), 0);
   const canSubmitAssessment = !isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment);
   const canSubmitOutcome = !isEligibilityGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && canManageOutcomeReview && !checkingChecklist;
-  const wizardSubmitHandler = showNWACSection ? (canSubmitOutcome ? handleApproveClick : undefined) : (canSubmitAssessment ? handleSubmit : undefined);
-  const wizardSubmitLabel = showNWACSection ? 'Approve / Mark Not Approved' : 'Submit assessment';
+  const canSubmitCommunication = isCommunicationStep && showCommunicationStep && !lockedByAnotherUser && !isCompletedStatus && !checkingChecklist;
+  const wizardSubmitHandler = isCommunicationStep
+    ? (canSubmitCommunication ? handleCommunicationComplete : undefined)
+    : (showNWACSection ? (canSubmitOutcome ? handleApproveClick : undefined) : (canSubmitAssessment ? handleSubmit : undefined));
+  const wizardSubmitLabel = isCommunicationStep
+    ? 'Mark communication complete'
+    : (showNWACSection ? 'Approve / Mark Not Approved' : 'Submit assessment');
 
   if (isDeclarationGateActive) {
     return (
@@ -4234,6 +5166,13 @@ const CoordinatorAssessmentWidget = forwardRef(
             <Box margin={{ bottom: 's' }} />
           </>
         )}
+        <input
+          type="file"
+          ref={checklistFileInputRef}
+          style={{ display: 'none' }}
+          accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+          onChange={handleChecklistFileSelected}
+        />
         <Wizard
           activeStepIndex={activeStepIndex}
           isLoadingNextStep={lockingAssessment || checkingChecklist || eiVerificationUploading}

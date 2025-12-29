@@ -181,6 +181,7 @@ const statusColor = (status = '') => {
     'pending',
     'assigned',
     'pending_approval',
+    'decision_ready',
     'ready_to_close',
     'ready to close'
   ].includes(normalized)) {
@@ -195,7 +196,7 @@ const statusColor = (status = '') => {
 };
 
 const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
-const DECISION_STATUSES = new Set(['pending_approval']);
+const DECISION_STATUSES = new Set(['pending_approval', 'decision_ready']);
 const ASSESSMENT_STATUSES = new Set([
   'in_review', 'in review',
   'docs_requested', 'docs requested',
@@ -1278,6 +1279,9 @@ const WorkQueueItemsTableWidget = ({
     const caseId = decisionTarget?.case_id || decisionTarget?.caseId;
     const applicationId = decisionTarget?.application_id || decisionTarget?.applicationId;
     const decisionValue = selectedDecision?.value;
+    const isApprove = decisionValue === 'approve';
+    const isReject = decisionValue === 'reject';
+    const isPushBack = decisionValue === 'push_back';
     const assuranceValue = selectedAssurance?.value;
     const potId = selectedBudgetPot?.value || null;
     const postingContext = isAssessor ? 'external' : postingContextValue || 'external';
@@ -1286,8 +1290,10 @@ const WorkQueueItemsTableWidget = ({
       setDecisionError(`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`);
       return;
     }
-    const requiresBudgetPot = decisionValue === 'approve' && hasInterventionCost;
-    if (!caseId || !decisionValue || !assuranceValue || (decisionValue === 'reject' && !decisionReason.trim())) {
+    const requiresBudgetPot = isApprove && hasInterventionCost;
+    const requiresAssurance = Boolean(decisionValue && !isPushBack);
+    const requiresReason = Boolean(isReject || isPushBack);
+    if (!caseId || !decisionValue || (requiresAssurance && !assuranceValue) || (requiresReason && !decisionReason.trim())) {
       setDecisionError('Fill in all required fields.');
       return;
     }
@@ -1307,14 +1313,14 @@ const WorkQueueItemsTableWidget = ({
         });
       }
       const payload = {
-        assessment_nwac_review_status: decisionValue === 'approve' ? 'approve' : 'reject',
-        assessment_nwac_review: assuranceValue,
-        assessment_nwac_reason: decisionValue === 'reject' ? decisionReason : null,
+        assessment_nwac_review_status: decisionValue,
+        assessment_nwac_review: requiresAssurance ? assuranceValue : null,
+        assessment_nwac_reason: requiresReason ? decisionReason : null,
         assessment_intervention_pot_id: requiresBudgetPot ? potId : null,
         assessment_esdc_eligibility: assessmentEligibility,
         postingContext: requiresBudgetPot ? postingContext : null,
-        status: decisionValue === 'approve' ? 'approved' : 'in_review',
-        applicationStatus: decisionValue === 'approve' ? 'approved' : 'in_review'
+        status: isApprove ? 'initiated' : 'in_review',
+        applicationStatus: (isApprove || isReject) ? 'decision_ready' : 'in_review'
       };
       const response = await apiFetch(`/api/cases/${caseId}`, {
         method: 'PUT',
@@ -1589,17 +1595,24 @@ const WorkQueueItemsTableWidget = ({
                   setDecisionError(`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`);
                   return;
                 }
+                if (detail.selectedOption?.value === 'push_back') {
+                  setSelectedAssurance(null);
+                }
                 setDecisionError(null);
                 setSelectedDecision(detail.selectedOption || null);
               }}
               options={[
                 { label: 'Approved', value: 'approve' },
-                { label: 'Not Approved', value: 'reject' }
+                { label: 'Not Approved', value: 'reject' },
+                { label: 'Push back to review', value: 'push_back' }
               ]}
             />
           </FormField>
-          {selectedDecision?.value === 'reject' && (
-            <FormField label="Reason for not approving" stretch>
+          {['reject', 'push_back'].includes(selectedDecision?.value) && (
+            <FormField
+              label={selectedDecision?.value === 'push_back' ? 'Reason for push back' : 'Reason for not approving'}
+              stretch
+            >
               <Textarea
                 value={decisionReason}
                 onChange={({ detail }) => setDecisionReason(detail.value)}
@@ -1607,17 +1620,19 @@ const WorkQueueItemsTableWidget = ({
               />
             </FormField>
           )}
-          <FormField label="Assessment Assurance" stretch>
-            <Select
-              placeholder="Select assurance"
-              selectedOption={selectedAssurance}
-              onChange={({ detail }) => setSelectedAssurance(detail.selectedOption || null)}
-              options={[
-                { label: 'Agree with recommendation', value: 'agree' },
-                { label: 'Disagree with recommendation', value: 'disagree' }
-              ]}
-            />
-          </FormField>
+          {selectedDecision?.value !== 'push_back' && (
+            <FormField label="Assessment Assurance" stretch>
+              <Select
+                placeholder="Select assurance"
+                selectedOption={selectedAssurance}
+                onChange={({ detail }) => setSelectedAssurance(detail.selectedOption || null)}
+                options={[
+                  { label: 'Agree with recommendation', value: 'agree' },
+                  { label: 'Disagree with recommendation', value: 'disagree' }
+                ]}
+              />
+            </FormField>
+          )}
           {selectedDecision?.value === 'approve' && hasInterventionCost && (
             <>
               <FormField

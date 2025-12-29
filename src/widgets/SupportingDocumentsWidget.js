@@ -51,6 +51,8 @@ const DOCUMENT_TYPE_OPTIONS_FALLBACK = [
   { value: 'medical_documentation', label: 'Medical documentation', scope: 'application' },
   { value: 'resume', label: 'Resume', scope: 'client' },
   { value: 'case_assessment', label: 'Case manager assessment', scope: 'application' },
+  { value: 'assessment_approval_letter', label: 'Assessment approval letter', scope: 'application' },
+  { value: 'assessment_denial_letter', label: 'Assessment denial letter', scope: 'application' },
   { value: 'funding_agreement', label: 'Funding agreement', scope: 'application' },
   { value: 'attendance_form', label: 'Attendance form', scope: 'application' },
   { value: 'receipt', label: 'Receipt', scope: 'application' },

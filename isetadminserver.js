@@ -26,6 +26,7 @@ const ENSURED_HISTORY_EVENT_TYPE_ENUM = { prepared: false };
 const INTAKE_ROOT = path.resolve(__dirname, '..', 'ISET-intake');
 const INTAKE_UPLOADS_ROOT = path.join(INTAKE_ROOT, 'uploads');
 const ADMIN_MANUAL_UPLOAD_DIR = path.join(INTAKE_UPLOADS_ROOT, 'manual');
+const ASSESSMENT_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_assessment_template.html');
 const ADMIN_UPLOAD_ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
   'image/jpeg',
@@ -556,6 +557,198 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+let cachedAssessmentTemplateHtml = null;
+
+function getAssessmentTemplateHtml() {
+  if (cachedAssessmentTemplateHtml) return cachedAssessmentTemplateHtml;
+  try {
+    cachedAssessmentTemplateHtml = fs.readFileSync(ASSESSMENT_PDF_TEMPLATE_PATH, 'utf8');
+  } catch (err) {
+    console.error('[assessment-pdf] template load failed:', err?.message || err);
+    cachedAssessmentTemplateHtml = null;
+  }
+  return cachedAssessmentTemplateHtml;
+}
+
+const normalizeYesNoValue = (value) => {
+  if (value === null || typeof value === 'undefined') return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return 'yes';
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return 'no';
+  return null;
+};
+
+const normalizeRecommendationValue = (value) => {
+  const normalized = (value || '').toString().trim().toLowerCase();
+  if (['recommend', 'fund', 'approve'].includes(normalized)) return 'fund';
+  if (['no_recommend', 'do_not_fund', 'reject', 'decline'].includes(normalized)) return 'do_not_fund';
+  if (normalized === 'alternative') return 'alternative';
+  return null;
+};
+
+const normalizeEsdcEligibilityValue = (value) => {
+  const normalized = (value || '').toString().trim().toLowerCase().replace(/\s+/g, '_');
+  if (normalized === 'crf') return 'crf';
+  if (['ei_active_claim', 'ei_active', 'ei_claim'].includes(normalized)) return 'ei_active_claim';
+  if (['ei_reach_back', 'ei_reachback'].includes(normalized)) return 'ei_reach_back';
+  return null;
+};
+
+const parseCurrencyValue = (value) => {
+  if (value === null || typeof value === 'undefined' || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const cleaned = String(value).replace(/[^0-9.-]/g, '');
+  if (!cleaned) return null;
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : null;
+};
+
+const formatCurrencyValue = (value) => {
+  const num = parseCurrencyValue(value);
+  if (num === null) return '';
+  return num.toFixed(2);
+};
+
+const sumCurrencyValues = (...values) => {
+  let total = 0;
+  let hasValue = false;
+  for (const value of values) {
+    const num = parseCurrencyValue(value);
+    if (num === null) continue;
+    total += num;
+    hasValue = true;
+  }
+  return hasValue ? total : null;
+};
+
+const setTemplateField = ($, field, value) => {
+  const selection = $(`[data-field="${field}"]`);
+  if (!selection.length) return;
+  selection.each((_idx, node) => {
+    const el = $(node);
+    const tag = (node.tagName || '').toLowerCase();
+    if (tag === 'input') {
+      const inputType = (el.attr('type') || '').toLowerCase();
+      if (inputType === 'checkbox') {
+        if (value) {
+          el.attr('checked', 'checked');
+        } else {
+          el.removeAttr('checked');
+        }
+        return;
+      }
+      if (inputType === 'radio') {
+        const optionValue = el.attr('value');
+        if (value !== null && typeof value !== 'undefined' && String(optionValue) === String(value)) {
+          el.attr('checked', 'checked');
+        } else {
+          el.removeAttr('checked');
+        }
+        return;
+      }
+      el.attr('value', value === null || typeof value === 'undefined' ? '' : String(value));
+      return;
+    }
+    if (tag === 'textarea') {
+      el.text(value === null || typeof value === 'undefined' ? '' : String(value));
+      return;
+    }
+    if (tag === 'img') {
+      const src = value === null || typeof value === 'undefined' ? '' : String(value);
+      if (src) {
+        el.attr('src', src);
+      } else {
+        el.removeAttr('src');
+      }
+      return;
+    }
+  });
+};
+
+const buildAssessmentPdfHtml = ({ templateHtml, fields }) => {
+  const $ = cheerio.load(templateHtml);
+  Object.entries(fields).forEach(([field, value]) => {
+    setTemplateField($, field, value);
+  });
+  return $.html();
+};
+
+async function storeAssessmentPdfDocument({
+  applicationId,
+  caseId,
+  applicantUserId,
+  actorUserId,
+  trackingId,
+  pdfBuffer
+}) {
+  if (!applicationId || !pdfBuffer) return null;
+  const documentType = 'case_assessment';
+  const label = 'Case manager assessment';
+  const displayName = `case-manager-assessment-${trackingId || applicationId}.pdf`;
+  const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
+  const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
+  const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
+  const normalizedActorUserId = normalisePositiveInteger(actorUserId);
+  const storageMode = resolveUploadStorageMode();
+  let relativePath = null;
+  if (storageMode === 's3') {
+    const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+    if (DRIVER !== 's3') {
+      throw new Error('s3_upload_unavailable');
+    }
+    const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
+    const presigned = await presignPut({ key, contentType: 'application/pdf' });
+    await axios.put(presigned.url, pdfBuffer, {
+      headers: {
+        ...(presigned.headers || {}),
+        'Content-Type': 'application/pdf',
+        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+      }
+    });
+    relativePath = key;
+  } else {
+    const safeName = sanitiseUploadFilename(displayName);
+    const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, safeName);
+    await fs.promises.writeFile(targetPath, pdfBuffer);
+    relativePath = toIntakeRelativePath(targetPath);
+  }
+  if (!relativePath) {
+    throw new Error('path_resolution_failed');
+  }
+
+  await pool.query(
+    `UPDATE iset_document
+        SET status = 'archived', updated_at = NOW()
+      WHERE application_id = ?
+        AND document_category = ?
+        AND status = 'active'`,
+    [applicationId, documentType]
+  );
+
+  const metadata = JSON.stringify({ label, document_type: documentType });
+  const insertPayload = [
+    caseId || null,
+    applicationId,
+    normalizedApplicantUserId,
+    normalizedActorUserId,
+    displayName,
+    relativePath,
+    'application/pdf',
+    label,
+    metadata,
+    sizeBytes,
+    checksum,
+    documentType
+  ];
+  const [result] = await pool.query(
+    `INSERT INTO iset_document
+       (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+     VALUES (?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+    insertPayload
+  );
+  return result?.insertId || null;
+}
+
 const CONSENT_PARAGRAPHS = [
   "I, the undersigned, give my expressed and informed consent to the Native Women's Association of Canada and/or its sub-agreement holders to the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET), to collect personal or sensitive information as it relates to my request for funding under the ISET program funded by Employment and Social Development Canada (ESDC). My consent extends to providing my Social Insurance Number (SIN), to determine my eligibility for interventions such as skills training and wage subsidies as part of the Labour Market Development Agreements (LMDA) program.",
   'I acknowledge that the information is collected and administered in accordance with the Privacy Act (R.S.C. 1985, c P-21), the Department Employment and Social Development Canada Act (S.C. 2005, c.34), and the Access to Information Act (R.S.C., 1985, c.A-1). Information collected is to be used to determine eligibility for the ISET program; to measure results of this Agreement and evaluate its success; evaluate the effectiveness of the Program in achieving its objective; and, to meet its obligations of accountability by reporting on the results of the Program.',
@@ -583,6 +776,21 @@ const CONFLICT_OPTION_LABELS = {
   no_conflict: 'I have no conflicts of interest or biases to declare',
   conflict: 'I wish to declare the following potential conflicts or biases'
 };
+
+const NWAC_LOGO_PATH = path.join(__dirname, 'public', 'nwac-logo.png');
+let nwacLogoDataUriCache = null;
+
+function getNwacLogoDataUri() {
+  if (nwacLogoDataUriCache !== null) return nwacLogoDataUriCache;
+  try {
+    const logoBuffer = fs.readFileSync(NWAC_LOGO_PATH);
+    nwacLogoDataUriCache = `data:image/png;base64,${logoBuffer.toString('base64')}`;
+  } catch (err) {
+    console.warn('[assessment-pdf] Unable to load NWAC logo:', err.message);
+    nwacLogoDataUriCache = '';
+  }
+  return nwacLogoDataUriCache;
+}
 
 const CONSENT_LOGO_PATH = path.join(__dirname, 'public', 'nwac-consent-logo.png');
 let consentLogoDataUriCache = null;
@@ -614,6 +822,196 @@ function formatSignatureDate(value) {
 
 function formatMultilineHtml(value) {
   return escapeHtml(value || '').replace(/\r?\n/g, '<br />');
+}
+
+async function fetchAssessmentApplicantContext({ applicationId, applicantUserId }) {
+  let applicantName = null;
+  let trackingId = null;
+  let resolvedApplicantUserId = normalisePositiveInteger(applicantUserId);
+  if (applicationId) {
+    try {
+      const [[row]] = await pool.query(
+        `SELECT
+           COALESCE(
+             NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')), ''),
+             NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.full_name')), ''),
+             NULLIF(TRIM(CONCAT_WS(' ',
+               COALESCE(
+                 NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')), ''),
+                 NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.first_name')), '')
+               ),
+               COALESCE(
+                 NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')), ''),
+                 NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.last_name')), '')
+               )
+             )), ''),
+             u.name
+           ) AS applicant_name,
+           COALESCE(
+             NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')), ''),
+             s.reference_number
+           ) AS tracking_id,
+           COALESCE(
+             NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id')), ''),
+             s.user_id
+           ) AS applicant_user_id
+         FROM iset_application a
+         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+         LEFT JOIN user u ON u.id = s.user_id
+         WHERE a.id = ?
+         LIMIT 1`,
+        [applicationId]
+      );
+      applicantName = normaliseString(row?.applicant_name);
+      trackingId = normaliseString(row?.tracking_id);
+      if (!resolvedApplicantUserId) {
+        resolvedApplicantUserId = normalisePositiveInteger(row?.applicant_user_id);
+      }
+    } catch (err) {
+      console.warn('[assessment-pdf] failed to resolve applicant context:', err?.message || err);
+    }
+  }
+  if (!applicantName && resolvedApplicantUserId) {
+    try {
+      const [[userRow]] = await pool.query('SELECT name FROM user WHERE id = ? LIMIT 1', [resolvedApplicantUserId]);
+      applicantName = normaliseString(userRow?.name);
+    } catch (_) {}
+  }
+  return { applicantName, trackingId, applicantUserId: resolvedApplicantUserId };
+}
+
+function buildAssessmentPdfFields({
+  caseRow,
+  applicantName
+}) {
+  const barriers = Array.isArray(caseRow?.assessment_employment_barriers)
+    ? caseRow.assessment_employment_barriers
+    : [];
+  const priorities = Array.isArray(caseRow?.assessment_local_area_priorities)
+    ? caseRow.assessment_local_area_priorities
+    : [];
+  const normalizeListValue = value => (value || '').toString().trim().toLowerCase();
+  const barrierSet = new Set(barriers.map(normalizeListValue));
+  const prioritySet = new Set(priorities.map(normalizeListValue));
+  const barriersOtherDetails = normaliseString(caseRow?.assessment_employment_barriers_other_details);
+  const hasOtherBarrier = barrierSet.has('other') || Boolean(barriersOtherDetails);
+  const itp = caseRow?.assessment_itp && typeof caseRow.assessment_itp === 'object' ? caseRow.assessment_itp : {};
+  const wage = caseRow?.assessment_wage && typeof caseRow.assessment_wage === 'object' ? caseRow.assessment_wage : {};
+  const booksMaterialsTotal = sumCurrencyValues(itp.books, itp.materials);
+  const itpTotal = sumCurrencyValues(
+    itp.tuition,
+    itp.books,
+    itp.materials,
+    itp.living,
+    itp.childcare,
+    itp.otherAmount
+  );
+  const wageTotal = sumCurrencyValues(
+    wage.wages,
+    wage.mercs,
+    wage.nonwages,
+    wage.other1Amount,
+    wage.other2Amount
+  );
+  const recommendationValue = normalizeRecommendationValue(caseRow?.assessment_recommendation);
+  const previouslyFundedValue = normalizeYesNoValue(caseRow?.assessment_previous_iset);
+  const esdcEligibilityValue = normalizeEsdcEligibilityValue(caseRow?.assessment_esdc_eligibility);
+  const agreeCoordinatorValue = caseRow?.assessment_nwac_review ? String(caseRow.assessment_nwac_review).trim() : null;
+
+  const barrierFields = {
+    barriers_none: barrierSet.has('none'),
+    barriers_education: barrierSet.has('education'),
+    barriers_lack_marketable_skills: barrierSet.has('lack of marketable skills'),
+    barriers_lack_work_experience: barrierSet.has('lack of work experience'),
+    barriers_remoteness: barrierSet.has('remoteness'),
+    barriers_lack_transportation: barrierSet.has('lack of transportation'),
+    barriers_economic: barrierSet.has('economic'),
+    barriers_language: barrierSet.has('language'),
+    barriers_lack_labour_force_attachment: barrierSet.has('lack of labour force attachment'),
+    barriers_dependent_care: barrierSet.has('dependent care'),
+    barriers_health: barrierSet.has('physical, emotional, or mental health'),
+    barriers_other: hasOtherBarrier
+  };
+
+  const priorityFields = {
+    priorities_off_reserve: prioritySet.has('off reserve'),
+    priorities_single_parent_family: prioritySet.has('single parent family'),
+    priorities_woman_over_45: prioritySet.has('woman over 45'),
+    priorities_literacy: prioritySet.has('literacy'),
+    priorities_youth: prioritySet.has('youth'),
+    priorities_unskilled_clerical_service_worker: prioritySet.has('unskilled clerical/service worker'),
+    priorities_no_grade_12: prioritySet.has('no grade 12'),
+    priorities_unskilled_labourer: prioritySet.has('unskilled labourer'),
+    priorities_non_targeted: prioritySet.has('non-targeted')
+  };
+
+  return {
+    nwac_logo: getNwacLogoDataUri(),
+    date_of_assessment: toDateOnlyString(caseRow?.assessment_date_of_assessment),
+    client_name: applicantName || '',
+    conflict_of_interest_confirmed: Boolean(caseRow?.assessment_conflict_declaration_signed),
+    client_application_overview: caseRow?.case_summary || caseRow?.overview || '',
+    training_employment_goal: caseRow?.assessment_employment_goals || '',
+    previously_funded_iset: previouslyFundedValue,
+    previously_funded_iset_details: caseRow?.assessment_previous_iset_details || '',
+    other_funding_sources_details: caseRow?.assessment_other_funding_details || '',
+    esdc_eligibility: esdcEligibilityValue,
+    intervention_start_date: toDateOnlyString(caseRow?.assessment_intervention_start_date),
+    intervention_end_date: toDateOnlyString(caseRow?.assessment_intervention_end_date),
+    training_institution_or_employer: caseRow?.assessment_institution || '',
+    program_name: caseRow?.assessment_program_name || '',
+    itp_tuition_amount: formatCurrencyValue(itp.tuition),
+    itp_books_materials_amount: booksMaterialsTotal === null ? '' : formatCurrencyValue(booksMaterialsTotal),
+    itp_living_allowance_amount: formatCurrencyValue(itp.living),
+    itp_childcare_amount: formatCurrencyValue(itp.childcare),
+    itp_other_specify: itp.otherLabel || '',
+    itp_other_amount: formatCurrencyValue(itp.otherAmount),
+    itp_total_cost: itpTotal === null ? '' : formatCurrencyValue(itpTotal),
+    wage_wages_amount: formatCurrencyValue(wage.wages),
+    wage_mercs_amount: formatCurrencyValue(wage.mercs),
+    wage_non_wages_amount: formatCurrencyValue(wage.nonwages),
+    wage_other_1_specify: wage.other1Label || '',
+    wage_other_1_amount: formatCurrencyValue(wage.other1Amount),
+    wage_other_2_specify: wage.other2Label || '',
+    wage_other_2_amount: formatCurrencyValue(wage.other2Amount),
+    wage_total_cost: wageTotal === null ? '' : formatCurrencyValue(wageTotal),
+    recommendation: recommendationValue,
+    recommendation_justification: caseRow?.assessment_justification || '',
+    agree_with_coordinator: agreeCoordinatorValue,
+    denial_reason: caseRow?.assessment_nwac_reason || '',
+    barriers_other_specify: barriersOtherDetails || '',
+    ...barrierFields,
+    ...priorityFields
+  };
+}
+
+async function generateAssessmentPdfBuffer({ caseRow, applicantName }) {
+  const templateHtml = getAssessmentTemplateHtml();
+  if (!templateHtml) {
+    throw new Error('assessment_template_missing');
+  }
+  const fields = buildAssessmentPdfFields({ caseRow, applicantName });
+  const html = buildAssessmentPdfHtml({ templateHtml, fields });
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' }
+    });
+    await page.close();
+    return pdfBuffer;
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (_) {}
+    }
+  }
 }
 
 const ISET_TEST_DATA_TABLE_ORDER = [
@@ -3783,14 +4181,14 @@ const ASSESSMENT_ITP_LABELS = {
   tuition: 'Tuition',
   books: 'Books',
   materials: 'Materials',
-  living: 'Living allowance'
+  living: 'Living allowance',
+  childcare: 'Childcare'
 };
 
 const ASSESSMENT_WAGE_LABELS = {
   wages: 'Wages',
   mercs: 'MERCs',
-  nonwages: 'Non-wages',
-  other: 'Other wage supports'
+  nonwages: 'Non-wages'
 };
 
 function normaliseCurrencyAmount(value) {
@@ -3837,6 +4235,10 @@ function summariseAssessmentFunding(assessmentRow) {
         addCategory(label, itpPayload[key]);
       }
     });
+    if (Object.prototype.hasOwnProperty.call(itpPayload, 'otherAmount')) {
+      const otherLabel = normaliseString(itpPayload.otherLabel) || 'Other';
+      addCategory(otherLabel, itpPayload.otherAmount);
+    }
   }
 
   let wagePayload = assessmentRow.wage_payload;
@@ -3853,6 +4255,18 @@ function summariseAssessmentFunding(assessmentRow) {
         addCategory(label, wagePayload[key]);
       }
     });
+    const hasOther1 = Object.prototype.hasOwnProperty.call(wagePayload, 'other1Amount');
+    const hasOther2 = Object.prototype.hasOwnProperty.call(wagePayload, 'other2Amount');
+    if (hasOther1) {
+      const fallbackLabel = hasOther2 ? 'Other wage support 1' : 'Other wage support';
+      const label = normaliseString(wagePayload.other1Label) || fallbackLabel;
+      addCategory(label, wagePayload.other1Amount);
+    }
+    if (hasOther2) {
+      const fallbackLabel = hasOther1 ? 'Other wage support 2' : 'Other wage support';
+      const label = normaliseString(wagePayload.other2Label) || fallbackLabel;
+      addCategory(label, wagePayload.other2Amount);
+    }
   }
 
   if (total <= 0 || categories.length === 0) {
@@ -3876,8 +4290,12 @@ function parseAssessmentFundingPayload(rawPayload) {
   const books = toAmount(payload.books);
   const materials = toAmount(payload.materials);
   const living = toAmount(payload.living);
-  if (tuition === null && books === null && materials === null && living === null) return null;
-  return { tuition, books, materials, living };
+  const childcare = toAmount(payload.childcare);
+  const otherAmount = toAmount(payload.otherAmount);
+  if (tuition === null && books === null && materials === null && living === null && childcare === null && otherAmount === null) {
+    return null;
+  }
+  return { tuition, books, materials, living, childcare, otherAmount };
 }
 
 function formatFundingCurrency(value) {
@@ -4001,6 +4419,8 @@ function resolveFundingAgreementTokens({
     books: toAmount(metadataFunding?.books ?? assessmentFunding?.books),
     materials: toAmount(metadataFunding?.materials ?? assessmentFunding?.materials),
     living: toAmount(metadataFunding?.living ?? assessmentFunding?.living),
+    childcare: toAmount(metadataFunding?.childcare ?? assessmentFunding?.childcare),
+    otherAmount: toAmount(metadataFunding?.otherAmount ?? assessmentFunding?.otherAmount),
     total: toAmount(metadataFunding?.total)
   };
   const interventionCost =
@@ -4107,6 +4527,63 @@ function resolveFundingAgreementTokens({
     other_item_label: cleanedLabel || '',
     other_item_amount: formatFundingCurrency(otherItemAmount),
     living_rows_html: livingRowsHtml
+  };
+}
+
+const DEFAULT_DECISION_LETTER_ORG = 'NWAC ISET Program';
+function normaliseDecisionLetterDraft(rawDraft) {
+  if (!rawDraft || typeof rawDraft !== 'object') return {};
+  return {
+    decision_date: normaliseString(rawDraft.decision_date),
+    letter_title: normaliseString(rawDraft.letter_title),
+    decision_intro: normaliseString(rawDraft.decision_intro),
+    decision_label: normaliseString(rawDraft.decision_label),
+    decision_reason: normaliseString(rawDraft.decision_reason),
+    next_step_1: normaliseString(rawDraft.next_step_1),
+    next_step_2: normaliseString(rawDraft.next_step_2),
+    coordinator_name: normaliseString(rawDraft.coordinator_name),
+    organization_name: normaliseString(rawDraft.organization_name)
+  };
+}
+
+function resolveDecisionLetterDrafts(caseContext = {}) {
+  const raw =
+    caseContext.decisionLetterDrafts ||
+    caseContext.decision_letter_drafts ||
+    caseContext.decisionLetter ||
+    caseContext.decision_letter ||
+    {};
+  const approval = normaliseDecisionLetterDraft(raw.approval || raw.approved || {});
+  const denial = normaliseDecisionLetterDraft(raw.denial || raw.denied || raw.rejected || {});
+  return { approval, denial };
+}
+
+function resolveDecisionLetterTokens({
+  draft,
+  docType,
+  applicantName,
+  trackingId,
+  caseNumber,
+  coordinatorName
+}) {
+  const isApproval = docType === 'assessment_approval_letter';
+  const titleFallback = isApproval ? 'Letter of Approval' : 'Letter of Denial';
+  const labelFallback = isApproval ? 'Approved' : 'Not approved';
+  const safe = value => normaliseString(value) || '';
+  const effectiveDraft = draft && typeof draft === 'object' ? draft : {};
+  return {
+    decision_date: safe(effectiveDraft.decision_date) || formatFundingDate(new Date()),
+    applicant_name: safe(applicantName),
+    tracking_id: safe(trackingId),
+    case_number: safe(caseNumber),
+    letter_title: safe(effectiveDraft.letter_title) || titleFallback,
+    decision_intro: safe(effectiveDraft.decision_intro),
+    decision_label: safe(effectiveDraft.decision_label) || labelFallback,
+    decision_reason: safe(effectiveDraft.decision_reason),
+    next_step_1: safe(effectiveDraft.next_step_1),
+    next_step_2: safe(effectiveDraft.next_step_2),
+    coordinator_name: safe(effectiveDraft.coordinator_name) || safe(coordinatorName),
+    organization_name: safe(effectiveDraft.organization_name) || DEFAULT_DECISION_LETTER_ORG
   };
 }
 
@@ -7448,7 +7925,7 @@ const APPLICATION_STATUS_HOLD_VALUES = [
 ];
 const APPLICATION_STATUS_HOLD_VALUES_LOWER = APPLICATION_STATUS_HOLD_VALUES.map(v => v.toLowerCase());
 const APPLICATION_COMPLETE_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'withdrawn', 'cancelled', 'closed', 'archived']);
-const APPLICATION_DECISION_STATUSES = new Set(['pending_approval']);
+const APPLICATION_DECISION_STATUSES = new Set(['pending_approval', 'decision_ready']);
 const APPLICATION_ASSESSMENT_STATUSES = new Set([
   'in_review',
   'in review',
@@ -21577,8 +22054,8 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     const assessmentComplete = Boolean(applicationAnswerMeta.assessmentComplete);
     const caseStatusRaw = applicationAnswerMeta.caseStatus || '';
     const applicationStatusRaw = applicationAnswerMeta.applicationStatus || applicationAnswerMeta.caseStatus || '';
-    const caseStatusLower = String(caseStatusRaw || '').toLowerCase();
-    const applicationStatusLower = String(applicationStatusRaw || '').toLowerCase();
+    const caseStatusLower = normaliseCaseStatusValue(caseStatusRaw) || '';
+    const applicationStatusLower = normaliseCaseStatusValue(applicationStatusRaw) || '';
     const assessmentLivingAllowance = Number(applicationAnswerMeta.assessmentLivingAllowance || 0);
     const assessmentDurationDays = Number.isFinite(Number(applicationAnswerMeta.assessmentDurationDays))
       ? Number(applicationAnswerMeta.assessmentDurationDays)
@@ -21628,13 +22105,21 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     const trainingProgramSet = new Set(['skills_development', 'tws', 'jcp', 'group']);
     const isTrainingProgram = trainingProgramSet.has(targetProgramValue);
     const assessmentHasLivingAllowance = assessmentLivingAllowance > 0;
-    const applicationApproved = applicationStatusLower === 'approved';
+    const decisionReady = applicationStatusLower === 'decision_ready';
+    const legacyApproved = applicationStatusLower === 'approved';
+    const completedStatus = applicationStatusLower === 'completed';
+    const hasDecisionOutcome = decisionReady || legacyApproved || completedStatus;
+    const caseStatusApproved = CASE_STATUS_INITIATED_SEEDS.has(caseStatusLower);
+    const decisionApproved = legacyApproved || (hasDecisionOutcome && caseStatusApproved);
+    const decisionDenied = hasDecisionOutcome && !decisionApproved;
     const approvalOrLater = (() => {
       if (applicationStatusLower) {
         return (
           applicationStatusLower === CASE_STATUS_DERIVED_VALUES.pendingApproval ||
           applicationStatusLower === 'pending_approval' ||
-          applicationStatusLower === 'approved'
+          applicationStatusLower === 'decision_ready' ||
+          applicationStatusLower === 'approved' ||
+          applicationStatusLower === 'completed'
         );
       }
       return (
@@ -21645,7 +22130,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     })();
     const postApproval = (() => {
       if (applicationStatusLower) {
-        return applicationStatusLower === 'approved';
+        return decisionApproved || (applicationStatusLower === 'completed' && caseStatusApproved);
       }
       return (
         caseStatusLower === CASE_STATUS_DERIVED_VALUES.initiated ||
@@ -21863,7 +22348,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
 
       if (normalizedId === 'statement-of-account') {
         const hasCosts = assessmentHasTrainingCosts || (assessmentCostTotal !== null && assessmentCostTotal > 0);
-        effectiveRequired = applicationApproved && hasCosts;
+        effectiveRequired = decisionApproved && hasCosts;
         const matchedCount = baseMatches.length;
         const status = computeStatus(effectiveRequired, matchedCount, 1);
         return {
@@ -22014,8 +22499,40 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
         };
       }
 
+      if (normalizedId === 'assessment-approval-letter') {
+        effectiveRequired = decisionApproved;
+        const matchedCount = baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
+      if (normalizedId === 'assessment-denial-letter') {
+        effectiveRequired = decisionDenied;
+        const matchedCount = baseMatches.length;
+        const status = computeStatus(effectiveRequired, matchedCount, 1);
+        return {
+          id: item.id,
+          label: item.label,
+          required: effectiveRequired,
+          minCount: 1,
+          matchedCount,
+          status,
+          documentTypes: docTypes,
+          sources
+        };
+      }
+
       if (normalizedId === 'funding-agreement') {
-        effectiveRequired = applicationApproved;
+        effectiveRequired = decisionApproved;
         const matchedCount = baseMatches.length;
         const status = computeStatus(effectiveRequired, matchedCount, 1);
         return {
@@ -23476,8 +23993,8 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       console.warn('[workspace] failed to load assessment for case', caseId, err);
     }
 
-    const DEFAULT_ITP_PAYLOAD = { tuition: '', books: '', materials: '', living: '' };
-    const DEFAULT_WAGE_PAYLOAD = { wages: '', mercs: '', nonwages: '', other: '' };
+    const DEFAULT_ITP_PAYLOAD = { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' };
+    const DEFAULT_WAGE_PAYLOAD = { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' };
 
     const employmentBarriers = parseArrayField(
       firstDefined(assessmentRow?.employment_barriers, row.assessment_employment_barriers)
@@ -23509,6 +24026,9 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     );
     const interventionNocVersionValue = toTrimmedStringOrNull(
       firstDefined(caseContext?.employmentNocVersion, assessmentRow?.intervention_related_noc_version, row.assessment_intervention_related_noc_version)
+    );
+    const barriersOtherDetailsValue = toTrimmedStringOrNull(
+      firstDefined(assessmentRow?.employment_barriers_other_details, row.assessment_employment_barriers_other_details)
     );
 
     const rawAssessmentItp = parseJsonField(
@@ -23554,6 +24074,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     response.assessment_previous_iset_details =
       firstDefined(caseContext?.previousIsetDetails, assessmentRow?.previous_iset_details, row.assessment_previous_iset_details) ?? null;
     response.assessment_employment_barriers = employmentBarriers;
+    response.assessment_employment_barriers_other_details = barriersOtherDetailsValue;
     response.assessment_local_area_priorities = localAreaPriorities;
     response.assessment_other_funding_details =
       firstDefined(caseContext?.otherFunding, assessmentRow?.other_funding_details, row.assessment_other_funding_details) ?? null;
@@ -23855,6 +24376,7 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
          previous_iset,
          previous_iset_details,
          employment_barriers,
+         employment_barriers_other_details,
          local_area_priorities,
          other_funding_details,
          esdc_eligibility,
@@ -24054,6 +24576,7 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
       assessment_previous_iset: normaliseYesNo(firstDefined(caseContext?.previousIset, assessmentRow?.previous_iset)),
       assessment_previous_iset_details: caseContext?.previousIsetDetails || assessmentRow?.previous_iset_details || null,
       assessment_employment_barriers: employmentBarriers,
+      assessment_employment_barriers_other_details: assessmentRow?.employment_barriers_other_details || null,
       assessment_local_area_priorities: localAreaPriorities,
       assessment_other_funding_details: caseContext?.otherFunding || assessmentRow?.other_funding_details || null,
       assessment_esdc_eligibility: normaliseString(assessmentRow?.esdc_eligibility) || null,
@@ -26534,6 +27057,7 @@ app.get('/api/cases/:id', async (req, res) => {
         ca.previous_iset AS assessment_previous_iset,
         ca.previous_iset_details AS assessment_previous_iset_details,
         ca.employment_barriers AS assessment_employment_barriers,
+        ca.employment_barriers_other_details AS assessment_employment_barriers_other_details,
         ca.local_area_priorities AS assessment_local_area_priorities,
         ca.other_funding_details AS assessment_other_funding_details,
         ca.esdc_eligibility AS assessment_esdc_eligibility,
@@ -29136,6 +29660,8 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     // Resolve applicant user id
     const [[caseRow]] = await pool.query(
       `SELECT c.application_id,
+              c.status AS case_status,
+              a.status AS application_status,
               s.user_id AS applicant_user_id,
               s.reference_number AS submission_reference,
               c.case_number,
@@ -29151,6 +29677,28 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     );
     const recipientId = caseRow?.applicant_user_id || null;
     if (!recipientId) return res.status(404).json({ error: 'applicant_not_found' });
+    const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
+    const ctxPersonal = caseContext.applicationPersonal || {};
+    const ctxAnswers = caseContext.applicationAnswers || {};
+    const contextNameCandidates = [
+      ctxPersonal.preferred_name,
+      ctxPersonal.preferredName,
+      caseContext.preferredName,
+      ctxAnswers['preferred-name'],
+      ctxAnswers['preferred_name'],
+      ctxPersonal.first_name && ctxPersonal.last_name
+        ? `${ctxPersonal.first_name} ${ctxPersonal.last_name}`
+        : null,
+      ctxPersonal.firstName && ctxPersonal.lastName
+        ? `${ctxPersonal.firstName} ${ctxPersonal.lastName}`
+        : null,
+    ];
+    const contextApplicantName =
+      contextNameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
+    const trackingReference =
+      normaliseString(caseRow?.submission_reference) ||
+      normaliseString(caseRow?.case_number) ||
+      (caseId ? `CASE-${caseId}` : null);
 
     // Resolve sender user id from Cognito auth context (create if missing)
     const email = req?.auth?.email || null;
@@ -29176,6 +29724,7 @@ app.post('/api/cases/:id/messages', async (req, res) => {
 
     // Resolve eligible workflow attachments (consent forms only)
     let attachmentRows = [];
+    let decisionLetterTokensByWorkflowId = new Map();
     if (Array.isArray(attachments) && attachments.length) {
       const wfIds = attachments
         .map(a => parseInt(a?.workflow_id, 10))
@@ -29194,6 +29743,70 @@ app.post('/api/cases/:id/messages', async (req, res) => {
             document_type: r.document_type || null
           }))
           .filter(r => r.workflow_type === 'consent-no-prefill' || r.workflow_type === 'consent-cm-prefill');
+      }
+    }
+    if (attachmentRows.length) {
+      const letterDocTypes = new Set(['assessment_approval_letter', 'assessment_denial_letter']);
+      const approvedCaseStatuses = new Set([
+        'initiated',
+        'active',
+        'dormant',
+        'ready_to_close',
+        'closed',
+        'archived',
+        'approved'
+      ]);
+      const normalizeStatusValue = value => {
+        if (!value) return '';
+        return String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+      };
+      const resolveDecisionOutcome = (applicationStatusRaw, caseStatusRaw) => {
+        const appStatus = normalizeStatusValue(applicationStatusRaw);
+        const caseStatus = normalizeStatusValue(caseStatusRaw);
+        if (!appStatus) return null;
+        if (appStatus === 'approved') return 'approved';
+        if (appStatus === 'rejected' || appStatus === 'declined') return 'denied';
+        if (appStatus === 'decision_ready' || appStatus === 'completed') {
+          if (approvedCaseStatuses.has(caseStatus)) return 'approved';
+          if (caseStatus === 'in_review') return 'denied';
+          return null;
+        }
+        return null;
+      };
+      const letterAttachments = attachmentRows.filter(row => letterDocTypes.has(row.document_type));
+      if (letterAttachments.length) {
+        const decisionOutcome = resolveDecisionOutcome(caseRow?.application_status, caseRow?.case_status);
+        const allowedDocTypes = decisionOutcome === 'approved'
+          ? new Set(['assessment_approval_letter'])
+          : decisionOutcome === 'denied'
+            ? new Set(['assessment_denial_letter'])
+            : new Set();
+        const invalidLetters = letterAttachments.filter(row => !allowedDocTypes.has(row.document_type));
+        if (!allowedDocTypes.size || invalidLetters.length) {
+          return res.status(422).json({
+            error: 'invalid_letter_attachment',
+            message: 'Decision letter forms can only be sent for the current application decision.'
+          });
+        }
+        const decisionDrafts = resolveDecisionLetterDrafts(caseContext);
+        const applicantNameToken = normaliseString(toNameValue) || contextApplicantName || normaliseString(caseRow?.applicant_email) || null;
+        const coordinatorNameToken = normaliseString(fromNameValue) || null;
+        letterAttachments.forEach((letter) => {
+          const draft = letter.document_type === 'assessment_approval_letter'
+            ? decisionDrafts.approval
+            : decisionDrafts.denial;
+          decisionLetterTokensByWorkflowId.set(
+            letter.id,
+            resolveDecisionLetterTokens({
+              draft,
+              docType: letter.document_type,
+              applicantName: applicantNameToken,
+              trackingId: trackingReference,
+              caseNumber: caseRow?.case_number,
+              coordinatorName: coordinatorNameToken
+            })
+          );
+        });
       }
     }
 
@@ -29340,6 +29953,9 @@ app.post('/api/cases/:id/messages', async (req, res) => {
             console.warn('[signing_request] failed to build schema for workflow', wf.id, schemaErr?.message || schemaErr);
           }
         }
+        if (resolvedSchema && decisionLetterTokensByWorkflowId.has(wf.id)) {
+          resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, decisionLetterTokensByWorkflowId.get(wf.id));
+        }
         if (
           resolvedSchema &&
           fundingAgreementTokens &&
@@ -29385,30 +30001,6 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       actorName ||
       req?.auth?.name ||
       null;
-
-    const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
-    const ctxPersonal = caseContext.applicationPersonal || {};
-    const ctxAnswers = caseContext.applicationAnswers || {};
-    const contextNameCandidates = [
-      ctxPersonal.preferred_name,
-      ctxPersonal.preferredName,
-      caseContext.preferredName,
-      ctxAnswers['preferred-name'],
-      ctxAnswers['preferred_name'],
-      ctxPersonal.first_name && ctxPersonal.last_name
-        ? `${ctxPersonal.first_name} ${ctxPersonal.last_name}`
-        : null,
-      ctxPersonal.firstName && ctxPersonal.lastName
-        ? `${ctxPersonal.firstName} ${ctxPersonal.lastName}`
-        : null,
-    ];
-    const contextApplicantName =
-      contextNameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
-
-    const trackingReference =
-      normaliseString(caseRow?.submission_reference) ||
-      normaliseString(caseRow?.case_number) ||
-      (caseId ? `CASE-${caseId}` : null);
 
     const effectiveApplicantName =
       toNameValue ||
@@ -33229,7 +33821,7 @@ app.get('/api/applications', async (req, res) => {
     // Base case + application join using new lean model.
     // Assignment user now from staff_profiles (nullable); tracking_id fallback derived from payload_json->submission_snapshot.reference_number if tracking_id column absent.
     // We'll attempt to select a.tracking_id; if schema lacks it, COALESCE will choose JSON extracted value.
-    let baseSql = `SELECT c.id AS case_id, c.application_id, a.status AS application_status, c.assigned_to_user_id,
+    let baseSql = `SELECT c.id AS case_id, c.application_id, a.status AS application_status, c.status AS case_status, c.assigned_to_user_id,
       c.created_at AS opened_at, c.updated_at AS last_activity_at,
       sp.email AS assigned_user_email, sp.primary_role AS assigned_user_role,
       sp.id AS staff_profile_id,
@@ -33310,7 +33902,7 @@ app.get('/api/applications', async (req, res) => {
     // Add unassigned submissions (applications without case) for elevated roles.
     if (role === 'Program Administrator' || role === 'System Administrator') {
       finalSql = `(${baseSql})\nUNION ALL\n(
-        SELECT NULL AS case_id, a.id AS application_id, a.status AS application_status, NULL AS assigned_to_user_id, NULL AS opened_at, NULL AS last_activity_at,
+        SELECT NULL AS case_id, a.id AS application_id, a.status AS application_status, NULL AS case_status, NULL AS assigned_to_user_id, NULL AS opened_at, NULL AS last_activity_at,
         NULL AS assigned_user_email, NULL AS assigned_user_role, NULL AS staff_profile_id,
         NULL AS lock_owner_id, NULL AS lock_owner_name, NULL AS lock_owner_email, NULL AS lock_expires_at,
   JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
@@ -33395,6 +33987,7 @@ app.get('/api/applications', async (req, res) => {
         tracking_id: r.tracking_id,
         status: appStatus,
         application_status: appStatus,
+        case_status: r.case_status || null,
         assigned_user_id: r.assigned_to_user_id,
         assigned_user_email: r.assigned_user_email || null,
         assigned_user_role: r.assigned_user_role || null,
@@ -34296,6 +34889,7 @@ app.put('/api/cases/:id', async (req, res) => {
       'assessment_previous_iset',
       'assessment_previous_iset_details',
       'assessment_employment_barriers',
+      'assessment_employment_barriers_other_details',
       'assessment_local_area_priorities',
       'assessment_other_funding_details',
       'assessment_esdc_eligibility',
@@ -34424,6 +35018,7 @@ app.put('/api/cases/:id', async (req, res) => {
     addIfPresent('assessment_previous_iset', 'previous_iset', toTinyInt);
     addIfPresent('assessment_previous_iset_details', 'previous_iset_details', toNull);
     addIfPresent('assessment_employment_barriers', 'employment_barriers', val => toJsonValue(val ?? null, []));
+    addIfPresent('assessment_employment_barriers_other_details', 'employment_barriers_other_details', toNull);
     addIfPresent('assessment_local_area_priorities', 'local_area_priorities', val => toJsonValue(val ?? null, []));
     addIfPresent('assessment_other_funding_details', 'other_funding_details', toNull);
     addIfPresent('assessment_esdc_eligibility', 'esdc_eligibility', toNull);
@@ -34431,8 +35026,26 @@ app.put('/api/cases/:id', async (req, res) => {
     addIfPresent('assessment_intervention_end_date', 'intervention_end_date', toNull);
     addIfPresent('assessment_institution', 'institution', toNull);
     addIfPresent('assessment_program_name', 'program_name', toNull);
-    addIfPresent('assessment_itp', 'itp_payload', val => toJsonValue(val ?? null, { tuition: '', books: '', materials: '', living: '' }));
-    addIfPresent('assessment_wage', 'wage_payload', val => toJsonValue(val ?? null, { wages: '', mercs: '', nonwages: '', other: '' }));
+    addIfPresent('assessment_itp', 'itp_payload', val => toJsonValue(val ?? null, {
+      tuition: '',
+      books: '',
+      materials: '',
+      living: '',
+      childcare: '',
+      otherLabel: '',
+      otherAmount: '',
+      details: ''
+    }));
+    addIfPresent('assessment_wage', 'wage_payload', val => toJsonValue(val ?? null, {
+      wages: '',
+      mercs: '',
+      nonwages: '',
+      other1Label: '',
+      other1Amount: '',
+      other2Label: '',
+      other2Amount: '',
+      subsidyDetails: ''
+    }));
     addIfPresent('assessment_recommendation', 'recommendation', toNull);
     addIfPresent('assessment_justification', 'justification', toNull);
     addIfPresent('assessment_nwac_review', 'nwac_review', toNull);
@@ -34591,7 +35204,7 @@ app.put('/api/cases/:id', async (req, res) => {
 
     const targetStatus = statusToPersist || beforeStatusNormalised;
 
-    if (applicationStatusToPersist === 'approved') {
+    if (applicationStatusToPersist === 'approved' || (applicationStatusToPersist === 'decision_ready' && targetStatus === CASE_STATUS_DERIVED_VALUES.initiated)) {
       const approvalUserId = identity && typeof identity.userId !== 'undefined'
         ? Number(identity.userId)
         : null;
@@ -34672,25 +35285,26 @@ app.put('/api/cases/:id', async (req, res) => {
               COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
               COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
               a.row_version AS application_row_version,
-              ca.date_of_assessment,
-              ca.overview,
-              ca.employment_goals,
-              ca.previous_iset,
-              ca.previous_iset_details,
-              ca.employment_barriers,
-              ca.local_area_priorities,
-              ca.other_funding_details,
-              ca.esdc_eligibility,
-              ca.intervention_start_date,
-              ca.intervention_end_date,
-              ca.institution,
-              ca.program_name,
-              ca.itp_payload,
-              ca.wage_payload,
-              ca.recommendation,
-              ca.justification,
-              ca.nwac_review,
-              ca.nwac_reason,
+              ca.date_of_assessment AS assessment_date_of_assessment,
+              ca.overview AS case_summary,
+              ca.employment_goals AS assessment_employment_goals,
+              ca.previous_iset AS assessment_previous_iset,
+              ca.previous_iset_details AS assessment_previous_iset_details,
+              ca.employment_barriers AS assessment_employment_barriers,
+              ca.employment_barriers_other_details AS assessment_employment_barriers_other_details,
+              ca.local_area_priorities AS assessment_local_area_priorities,
+              ca.other_funding_details AS assessment_other_funding_details,
+              ca.esdc_eligibility AS assessment_esdc_eligibility,
+              ca.intervention_start_date AS assessment_intervention_start_date,
+              ca.intervention_end_date AS assessment_intervention_end_date,
+              ca.institution AS assessment_institution,
+              ca.program_name AS assessment_program_name,
+              ca.itp_payload AS assessment_itp,
+              ca.wage_payload AS assessment_wage,
+              ca.recommendation AS assessment_recommendation,
+              ca.justification AS assessment_justification,
+              ca.nwac_review AS assessment_nwac_review,
+              ca.nwac_reason AS assessment_nwac_reason,
               ca.intervention_code AS assessment_intervention_code,
               ca.intervention_outcome_code AS assessment_intervention_outcome_code,
               ca.intervention_duration_days AS assessment_intervention_duration_days,
@@ -34725,6 +35339,12 @@ app.put('/api/cases/:id', async (req, res) => {
             : caseRow.assessment_employment_barriers)
         : [];
     } catch { caseRow.assessment_employment_barriers = []; }
+    if (typeof caseRow.assessment_employment_barriers_other_details === 'string') {
+      const trimmed = caseRow.assessment_employment_barriers_other_details.trim();
+      caseRow.assessment_employment_barriers_other_details = trimmed || null;
+    } else if (caseRow.assessment_employment_barriers_other_details === undefined) {
+      caseRow.assessment_employment_barriers_other_details = null;
+    }
     try {
       caseRow.assessment_local_area_priorities = caseRow.assessment_local_area_priorities
         ? (typeof caseRow.assessment_local_area_priorities === 'string'
@@ -34737,15 +35357,15 @@ app.put('/api/cases/:id', async (req, res) => {
         ? (typeof caseRow.assessment_itp === 'string'
             ? JSON.parse(caseRow.assessment_itp)
             : caseRow.assessment_itp)
-        : { tuition: '', books: '', materials: '', living: '' };
-    } catch { caseRow.assessment_itp = { tuition: '', books: '', materials: '', living: '' }; }
+        : { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' };
+    } catch { caseRow.assessment_itp = { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' }; }
     try {
       caseRow.assessment_wage = caseRow.assessment_wage
         ? (typeof caseRow.assessment_wage === 'string'
             ? JSON.parse(caseRow.assessment_wage)
             : caseRow.assessment_wage)
-        : { wages: '', mercs: '', nonwages: '', other: '' };
-    } catch { caseRow.assessment_wage = { wages: '', mercs: '', nonwages: '', other: '' }; }
+        : { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' };
+    } catch { caseRow.assessment_wage = { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' }; }
     if (caseRow.assessment_previous_iset !== null && caseRow.assessment_previous_iset !== undefined) {
       caseRow.assessment_previous_iset = Number(caseRow.assessment_previous_iset);
     }
@@ -34910,6 +35530,32 @@ app.put('/api/cases/:id', async (req, res) => {
         hasJustification,
         trackingId,
       });
+    }
+
+    const submittedStatus = normaliseCaseStatusValue(body.status) || normaliseCaseStatusValue(body.applicationStatus);
+    const shouldGenerateAssessmentPdf =
+      assessmentSubmitted && submittedStatus === 'pending_approval' && Number.isFinite(Number(caseRow?.application_id));
+    if (shouldGenerateAssessmentPdf) {
+      try {
+        const applicantContext = await fetchAssessmentApplicantContext({
+          applicationId: caseRow.application_id,
+          applicantUserId: caseRow.applicant_user_id
+        });
+        const pdfBuffer = await generateAssessmentPdfBuffer({
+          caseRow,
+          applicantName: applicantContext.applicantName
+        });
+        await storeAssessmentPdfDocument({
+          applicationId: caseRow.application_id,
+          caseId,
+          applicantUserId: applicantContext.applicantUserId,
+          actorUserId: actorId,
+          trackingId: applicantContext.trackingId || trackingId,
+          pdfBuffer
+        });
+      } catch (err) {
+        console.error('[assessment-pdf] generation failed:', err?.message || err);
+      }
     }
 
     if (body.assessment_nwac_review) {

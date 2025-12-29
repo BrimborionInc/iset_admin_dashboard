@@ -97,11 +97,11 @@ const WIDGET_REGISTRY = {
 };
 
 const STORAGE_PREFIX = 'admin-home-layout-v5';
-const ISET_COORDINATOR_STATUS_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice', 'pending_approval'].join(',');
+const ISET_COORDINATOR_STATUS_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice', 'pending_approval', 'decision_ready'].join(',');
 const ISET_COORDINATOR_EI_ELIGIBILITY_FILTER = ISET_COORDINATOR_STATUS_FILTER;
 const ISET_COORDINATOR_READY_TO_ASSESS_FILTER = ['submitted', 'in_review'].join(',');
 const ISET_COORDINATOR_APPROVALS_FILTER = ['pending_approval'].join(',');
-const ISET_COORDINATOR_FUNDING_AGREEMENTS_FILTER = ['approved'].join(',');
+const ISET_COORDINATOR_FUNDING_AGREEMENTS_FILTER = ['decision_ready', 'approved'].join(',');
 const ISET_COORDINATOR_MILESTONE_WINDOW_DAYS = 14;
 const ISET_COORDINATOR_MISSING_DOCS_FILTER = [
     'docs_requested',
@@ -1895,7 +1895,7 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
         };
     }
     let targetKey = 'assignment';
-    const DECISION_STATUSES = new Set(['pending_approval']);
+    const DECISION_STATUSES = new Set(['pending_approval', 'decision_ready']);
     const ASSESSMENT_STATUSES = new Set([
         'in_review', 'in review',
         'docs_requested', 'docs requested',
