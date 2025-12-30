@@ -1,180 +1,206 @@
 {
   "id": "iset-compliance-v1",
   "label": "ISET Compliance Checklist",
-  "version": "2025-11-25",
-  "items": [
+  "version": "2026-01-20",
+  "gates": [
     {
-      "id": "client-application",
-      "label": "Completed Client Application",
-      "required": true,
-      "documentTypes": ["application_form"],
-      "sources": ["application_form"]
+      "id": "submit_assessment",
+      "label": "Needed to Submit Assessment",
+      "statusScope": "application",
+      "statuses": [
+        "submitted",
+        "in_review",
+        "docs_requested",
+        "closure_notice",
+        "pending_approval"
+      ],
+      "items": [
+        {
+          "id": "client-application",
+          "label": "Completed Client Application (submitted)",
+          "sources": ["application_form"],
+          "required": true,
+          "documentTypes": ["application_form"]
+        },
+        {
+          "id": "ei-consent",
+          "label": "EI Consent Form",
+          "sources": ["application_form"],
+          "required": true,
+          "documentTypes": ["ei_consent"]
+        },
+        {
+          "id": "ei-verification",
+          "label": "EI Eligibility Verification (coordinator request)",
+          "notes": "Should accompany EI consent.",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["ei_verification"]
+        },
+        {
+          "id": "indigenous-declaration",
+          "label": "Indigenous Self-Declaration (intake form) and/or two reference letters",
+          "notes": "Two reference letters acceptable when no Status/Treaty card.",
+          "sources": ["application_form", "application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["indigenous_declaration", "identity_document"]
+        },
+        {
+          "id": "conflict-of-interest",
+          "label": "Conflict of Interest Form",
+          "sources": ["application_form"],
+          "required": true,
+          "documentTypes": ["conflict_of_interest"]
+        },
+        {
+          "id": "identity-two-ids",
+          "label": "Two pieces of ID (front/back)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "minCount": 2,
+          "documentTypes": ["identity_document"]
+        },
+        {
+          "id": "status-card-or-reference",
+          "label": "Status or Treaty Card (or two Letters of Reference)",
+          "notes": "If no status card, two letters of reference are required.",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "minCount": 2,
+          "documentTypes": ["status_card", "letter_of_reference"]
+        },
+        {
+          "id": "band-funding-confirmation",
+          "label": "Band funding confirmation letter",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["band_funding_confirmation"]
+        },
+        {
+          "id": "band-funding-denial",
+          "label": "Band funding denial letter",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["band_funding_denial"]
+        },
+        {
+          "id": "acceptance-letter",
+          "label": "Letter of Acceptance (current year/term)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["acceptance_letter"]
+        },
+        {
+          "id": "media-consent",
+          "label": "Client consent for use of image/video/audio (if applicable)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": false,
+          "documentTypes": ["media_consent"]
+        },
+        {
+          "id": "financial-overview",
+          "label": "ISET Financial Overview (monthly budget)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["financial_overview"]
+        },
+        {
+          "id": "financial-records",
+          "label": "Income verification (self/spouse: last 3 pay stubs, CTB, ROE, T4s, etc.)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "minCount": 3,
+          "documentTypes": ["financial_records", "financial_evidence"]
+        },
+        {
+          "id": "financial-evidence",
+          "label": "Expense verification (lease/mortgage; 3 months utilities; childcare, etc.)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["financial_evidence"]
+        },
+        {
+          "id": "resume",
+          "label": "Current resume",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["resume"]
+        },
+        {
+          "id": "medical-documentation",
+          "label": "Medical documentation for disability support",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["medical_documentation"]
+        }
+      ]
     },
     {
-      "id": "ei-consent",
-      "label": "EI Consent Form",
-      "required": true,
-      "documentTypes": ["ei_consent"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+      "id": "enable_funding",
+      "label": "Needed to Enable Funding",
+      "statusScope": "application",
+      "statuses": ["decision_ready"],
+      "items": [
+        {
+          "id": "client-acknowledgement",
+          "label": "Client Acknowledgement of Funding Source (signed/dated)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["client_acknowledgement"]
+        },
+        {
+          "id": "release-student-info",
+          "label": "Authorization for the Release of ISET Client Information",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["iset_client_info_release"]
+        },
+        {
+          "id": "social-assistance-letter",
+          "label": "Social Assistance letter from caseworker (for top-up, if applicable)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": false,
+          "documentTypes": ["supporting_evidence"]
+        },
+        {
+          "id": "case-manager-assessment",
+          "label": "Case Manager Assessment (summary/recommendation)",
+          "sources": ["manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["case_assessment"]
+        },
+        {
+          "id": "funding-agreement",
+          "label": "Client Funding Agreement (signed/dated)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["funding_agreement"]
+        }
+      ]
     },
     {
-      "id": "ei-verification",
-      "label": "EI Eligibility Verification",
-      "required": true,
-      "documentTypes": ["ei_verification"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
-      "notes": "Should accompany EI consent."
-    },
-    {
-      "id": "indigenous-declaration",
-      "label": "Indigenous Self-Declaration",
-      "required": true,
-      "documentTypes": ["indigenous_declaration"],
-      "sources": ["application_form", "application_submission", "manual_upload", "secure_message_attachment"],
-      "notes": "Two reference letters acceptable when no Status/Treaty card."
-    },
-    {
-      "id": "conflict-of-interest",
-      "label": "Conflict of Interest Form",
-      "required": true,
-      "documentTypes": ["conflict_of_interest"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "identity-document",
-      "label": "Identity Document (government ID)",
-      "required": true,
-      "documentTypes": ["identity_document"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "band-funding-confirmation",
-      "label": "Band Funding Confirmation Letter",
-      "required": true,
-      "documentTypes": ["band_funding_confirmation"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "band-funding-denial",
-      "label": "Band Funding Denial Letter",
-      "required": true,
-      "documentTypes": ["band_funding_denial"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "acceptance-letter",
-      "label": "Letter of Acceptance (current year/term)",
-      "required": true,
-      "documentTypes": ["acceptance_letter"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "statement-of-account",
-      "label": "Statement of Account (tuition, books, fees, equipment)",
-      "required": true,
-      "documentTypes": ["statement_of_account"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "client-acknowledgement",
-      "label": "Client Acknowledgement of Funding Source (signed/dated)",
-      "required": true,
-      "documentTypes": ["client_acknowledgement"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "release-student-info",
-      "label": "Client Authorization for Release of Student Information",
-      "required": true,
-      "documentTypes": ["release_student_info"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "media-consent",
-      "label": "Client consent for use of image/video/audio (if applicable)",
-      "required": false,
-      "documentTypes": ["media_consent"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "financial-overview",
-      "label": "ISET Financial Overview (monthly budget)",
-      "required": true,
-      "documentTypes": ["financial_overview"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "financial-records",
-      "label": "Financial Records (income evidence)",
-      "required": true,
-      "documentTypes": ["financial_records"],
-      "minCount": 3,
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "financial-evidence",
-      "label": "Financial Evidence (expenses / supporting)",
-      "required": true,
-      "documentTypes": ["financial_evidence"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "supporting-evidence",
-      "label": "Supporting Evidence (e.g. Social Assistance letter)",
-      "required": false,
-      "documentTypes": ["supporting_evidence"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "resume",
-      "label": "Current resume",
-      "required": true,
-      "documentTypes": ["resume"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "case-assessment",
-      "label": "Case Manager Assessment (summary/recommendation)",
-      "required": true,
-      "documentTypes": ["case_assessment"],
-      "sources": ["manual_upload", "secure_message_attachment", "system_generated"]
-    },
-    {
-      "id": "assessment-approval-letter",
-      "label": "Assessment approval letter",
-      "required": true,
-      "documentTypes": ["assessment_approval_letter"],
-      "sources": ["manual_upload", "secure_message_attachment", "system_generated"]
-    },
-    {
-      "id": "assessment-denial-letter",
-      "label": "Assessment denial letter",
-      "required": true,
-      "documentTypes": ["assessment_denial_letter"],
-      "sources": ["manual_upload", "secure_message_attachment", "system_generated"]
-    },
-    {
-      "id": "funding-agreement",
-      "label": "Client Funding Agreement (signed/dated)",
-      "required": true,
-      "documentTypes": ["funding_agreement"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
-    },
-    {
-      "id": "attendance-form",
-      "label": "Attendance Form",
-      "required": true,
-      "documentTypes": ["attendance_form"],
-      "minCount": 1,
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
-      "notes": "Expect one per allowance month."
-    },
-    {
-      "id": "medical-documentation",
-      "label": "Medical documentation for disability support",
-      "required": true,
-      "documentTypes": ["medical_documentation"],
-      "sources": ["application_submission", "manual_upload", "secure_message_attachment"]
+      "id": "release_payments",
+      "label": "Needed to Release Payments",
+      "statusScope": "case",
+      "statuses": ["initiated", "active", "dormant", "ready_to_close"],
+      "items": [
+        {
+          "id": "statement-of-account",
+          "label": "Statement of Account (tuition, books, fees, equipment)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["statement_of_account"]
+        },
+        {
+          "id": "attendance-forms",
+          "label": "Monthly Attendance Forms (one per living allowance month)",
+          "notes": "Expect one per allowance month.",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "minCount": 1,
+          "documentTypes": ["attendance_form"]
+        }
+      ]
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "id": "training-modules-2025",
-  "title": "ISET Orientation Training Modules (2025-2026)",
+  "title": "ISET Orientation Guidance Modules (2025-2026)",
   "version": "2025-12-13-enhanced-noARMS-fixed-v3",
   "source": {
     "deckId": "TRAINING MODULES - September 2025",
@@ -32,14 +32,14 @@
       "slides": [
         {
           "id": "s1-indigenous-skills-and-employment-training-iset-orientation-t",
-          "title": "Indigenous Skills and Employment Training (ISET) Orientation Training Modules 2025-2026",
+          "title": "Indigenous Skills and Employment Training (ISET) Orientation Guidance Modules 2025-2026",
           "source": {
             "slideNumber": 1
           },
           "content": [
             {
               "type": "p",
-              "text": "Indigenous Skills and Employment Training (ISET) Orientation Training Modules 2025-2026"
+              "text": "Indigenous Skills and Employment Training (ISET) Orientation Guidance Modules 2025-2026"
             },
             {
               "type": "p",
@@ -48,7 +48,7 @@
             {
               "type": "bullets",
               "items": [
-                "This in-tool training is written for ISET Coordinators/Case Managers doing day-to-day intake, assessment, approvals, payments, and case management.",
+                "This in-tool guidance is written for ISET Coordinators/Case Managers doing day-to-day intake, assessment, approvals, payments, and case management.",
                 "File lifecycle reference (use as a checklist \u2014 not every client file includes every step, and some steps repeat when information is missing): Digital application intake received \u2192 assign to the appropriate Regional Manager (automatic or manual) \u2192 Regional Manager may reassign to an ISET Coordinator \u2192 Program Administrator initiates EI eligibility verification and records the outcome (only after obtaining the required client consent; if consent is missing, request it) \u2192 assigned staff sign a Conflict of Interest declaration before substantive review \u2192 Program Administrator evaluates any declared conflict and either clears it or reassigns the application \u2192 request missing documents (repeat until complete or close) \u2192 confirm overall eligibility \u2192 assess employability needs \u2192 develop/confirm action plan + intervention \u2192 submit recommendation \u2192 NWAC decision \u2192 funding agreement \u2192 deliver supports/payments (track attendance and receipts where applicable) \u2192 follow-up and file closure \u2192 reporting (including ILMP submissions through the ESDC portal when an action plan/intervention is activated and when it is closed, as applicable).",
                 "What \u201cnot every file includes every step\u201d means in practice: Some files end early (e.g., ineligible or incomplete). Some steps repeat (e.g., requesting missing documents, revising an action plan, or updating a recommendation). Some steps are conditional (e.g., EI verification only when applicable and only with the required consent; attendance tracking only when a support requires it). If a conflict of interest is declared, the file is reassigned before work continues.",
                 "Tip: When you\u2019re unsure, document your reasoning in the client file and escalate early (before committing funding)."
@@ -2926,7 +2926,7 @@
               "type": "bullets",
               "items": [
                 "The Case Manager shall provide their recommendation for funding based on the application, documentation, research and conversations with the Client.",
-                "Recommendation must align with eligibility and funding criteria as established by ESDC and/or these training modules.",
+                "Recommendation must align with eligibility and funding criteria as established by ESDC and/or these guidance modules.",
                 "Recommendation must include 'justification' for the decision; not just, \u201cI recommend we fund this client.\u201d It should include such justification as, \u201cI spoke with the Client and understand their goals, career path; I researched x, y, z; etc.\u201d",
                 "The Case Manager does not have to recommend to fund every application or to provide a living allowance.",
                 "The Case Manager may recommend an alternate intervention:",

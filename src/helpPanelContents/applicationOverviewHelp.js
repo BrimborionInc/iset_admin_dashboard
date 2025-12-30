@@ -4,50 +4,51 @@ const ApplicationOverviewHelp = () => (
   <div>
     <h2>Application overview at a glance</h2>
     <p>
-      This card summarises the most important details about the applicant and where the case sits in the
-      workflow. Use it to confirm ownership, current status, and contact information before diving into the other
-      widgets.
+      This widget summarizes the most important details about the application and where it sits in the workflow.
+      Use it to confirm status, ownership, SLA timing, and key identifiers before diving into the other widgets.
     </p>
 
     <h3>What you can do here</h3>
     <ul>
       <li>
-        <strong>Check status:</strong> The coloured badge reflects the current case status. If your
-        permissions allow, use the status selector to move the file to the next milestone.
+        <strong>Check status:</strong> The badge shows the current application status. If your role allows, use
+        the selector to update status and trigger downstream updates.
       </li>
       <li>
-        <strong>Validate identifiers:</strong> Quickly find the reference number, tracking ID, and submission
-        timestamps that applicants may quote.
+        <strong>Validate identifiers:</strong> Copy the reference number, contact email, or phone details for
+        quick confirmation with the applicant.
       </li>
       <li>
-        <strong>Confirm ownership:</strong> See who is assigned to the case, the corresponding PTMA, and contact
-        details for the applicant.
+        <strong>Confirm ownership:</strong> See the assigned evaluator and PTMA, along with any active locks.
+        Use quick actions to assign or reassign when permitted.
       </li>
       <li>
-        <strong>Spot freshness:</strong> Received and last-updated dates help you decide whether a refresh is
-        needed before taking action.
+        <strong>Track timing:</strong> SLA status, received date, and last updated timestamps help you prioritize
+        and confirm data freshness.
+      </li>
+      <li>
+        <strong>Monitor checklist status:</strong> The document checklist summary shows whether required items are
+        complete or still missing.
+      </li>
+      <li>
+        <strong>Act quickly:</strong> The Quick actions menu includes assignment, closure notice, escalation,
+        and layout presets for common review flows.
       </li>
     </ul>
 
     <h3>Tips</h3>
     <ul>
-      <li>Changes made here update the case immediately for everyone viewing the dashboard.</li>
-      <li>
-        When reassigning a case elsewhere, update the status so downstream automations send the correct
-        notifications.
-      </li>
-      <li>
-        If a field looks empty, open the ISET Application Form widget to review the full submission for that
-        information.
-      </li>
+      <li>Status changes are recorded in the Events Timeline, so confirm the update there after saving.</li>
+      <li>Escalations block some actions until resolved; respond or resolve before closing or archiving.</li>
+      <li>If a field is missing, open the ISET Application Form widget to review the full submission.</li>
     </ul>
   </div>
 );
 
 ApplicationOverviewHelp.aiContext = `
-You are assisting an ISET program coordinator who is looking at the Application Overview widget. Explain what the
-status badge and selector do, how to confirm applicant/contact details, and when to refresh or escalate. Focus on
-practical operational guidance, not developer implementation details.
+You are assisting an ISET program coordinator using the Application Overview widget. Explain the status badge and
+selector, SLA timing, assignment and escalation quick actions, document checklist summary, and where to confirm identifiers and contact details.
+Keep guidance operational and aligned with the visible controls.
 `;
 
 export default ApplicationOverviewHelp;

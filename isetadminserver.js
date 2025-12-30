@@ -51,9 +51,11 @@ const CHECKLIST_SCOPE = 'checklist';
 const CHECKLIST_KEY = 'checklist.compliance.iset';
 const CHECKLIST_INTERVENTION_KEY = 'checklist.compliance.iset.intervention';
 const CHECKLIST_FALLBACK_PATH = path.join(__dirname, 'src', 'server', 'config', 'checklists', 'iset-compliance.json');
+const CHECKLIST_INTERVENTION_FALLBACK_PATH = path.join(__dirname, 'src', 'server', 'config', 'checklists', 'iset-intervention.json');
 
 const CHECKLIST_CACHE_TTL_MS = 30 * 1000;
 const checklistCacheByKey = new Map();
+const checklistTemplateCache = new Map();
 let hasAssessmentBudgetPotColumn = null;
 const ILMP_SCHEMA_VERSION = '1.4';
 
@@ -96,6 +98,18 @@ function loadChecklistConfigFromFile(filePath = CHECKLIST_FALLBACK_PATH) {
   }
 }
 
+function loadChecklistTemplate(filePath) {
+  if (!filePath) return null;
+  if (checklistTemplateCache.has(filePath)) {
+    return checklistTemplateCache.get(filePath);
+  }
+  const parsed = loadChecklistConfigFromFile(filePath);
+  if (parsed) {
+    checklistTemplateCache.set(filePath, parsed);
+  }
+  return parsed;
+}
+
 async function loadChecklistConfig(key = CHECKLIST_KEY) {
   const now = Date.now();
   const cacheKey = key || CHECKLIST_KEY;
@@ -122,6 +136,183 @@ async function loadChecklistConfig(key = CHECKLIST_KEY) {
     checklistCacheByKey.set(cacheKey, { ts: now, data: null });
     return null;
   }
+}
+
+function normaliseChecklistId(value) {
+  return String(value || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+function normaliseChecklistStatus(value) {
+  return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function normaliseChecklistItem(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id || '').trim();
+  const label = String(raw.label || '').trim();
+  if (!id || !label) return null;
+  const documentTypes = Array.isArray(raw.documentTypes)
+    ? raw.documentTypes.map(String).map(t => t.trim()).filter(Boolean)
+    : [];
+  const sources = Array.isArray(raw.sources)
+    ? raw.sources.map(String).map(s => s.trim()).filter(Boolean)
+    : [];
+  const minCountValue = Number(raw.minCount);
+  const minCount = Number.isFinite(minCountValue) && minCountValue > 0 ? minCountValue : undefined;
+  const notes = typeof raw.notes === 'string' ? raw.notes.trim() : '';
+  return {
+    ...raw,
+    id,
+    label,
+    required: raw.required !== false,
+    documentTypes,
+    sources,
+    ...(minCount ? { minCount } : {}),
+    ...(notes ? { notes } : {})
+  };
+}
+
+function normaliseChecklistGate(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id || '').trim();
+  const label = String(raw.label || '').trim();
+  if (!id || !label) return null;
+  const statusScope = String(raw.statusScope || 'application').trim();
+  const statuses = Array.isArray(raw.statuses)
+    ? raw.statuses.map(s => String(s).trim()).filter(Boolean)
+    : [];
+  const items = Array.isArray(raw.items) ? raw.items.map(normaliseChecklistItem).filter(Boolean) : [];
+  return {
+    ...raw,
+    id,
+    label,
+    statusScope: statusScope || 'application',
+    statuses,
+    items
+  };
+}
+
+function moveChecklistItem(config, { itemId, fromGateId, toGateId }) {
+  if (!config || !Array.isArray(config.gates)) return config;
+  const fromGate = config.gates.find(gate => gate && gate.id === fromGateId);
+  const toGate = config.gates.find(gate => gate && gate.id === toGateId);
+  if (!fromGate || !toGate) return config;
+  const fromItems = Array.isArray(fromGate.items) ? fromGate.items : [];
+  const toItems = Array.isArray(toGate.items) ? toGate.items : [];
+  const normalizedTargetId = normaliseChecklistId(itemId);
+  const index = fromItems.findIndex(item => normaliseChecklistId(item?.id) === normalizedTargetId);
+  if (index < 0) return config;
+  const [moved] = fromItems.splice(index, 1);
+  const alreadyExists = toItems.some(item => normaliseChecklistId(item?.id) === normalizedTargetId);
+  if (!alreadyExists && moved) {
+    toItems.push(moved);
+  }
+  fromGate.items = fromItems;
+  toGate.items = toItems;
+  return config;
+}
+
+function applyChecklistMigrations(config) {
+  if (!config || !Array.isArray(config.gates)) return config;
+  moveChecklistItem(config, {
+    itemId: 'client-acknowledgement',
+    fromGateId: 'submit_assessment',
+    toGateId: 'enable_funding'
+  });
+  return config;
+}
+
+function applyChecklistTemplate(rawItems = [], templateConfig) {
+  const cleanedItems = Array.isArray(rawItems) ? rawItems.map(normaliseChecklistItem).filter(Boolean) : [];
+  if (!templateConfig || !Array.isArray(templateConfig.gates)) {
+    return {
+      id: templateConfig?.id || 'checklist',
+      label: templateConfig?.label || 'Checklist',
+      version: templateConfig?.version || '',
+      gates: [{
+        id: 'default',
+        label: 'Checklist',
+        statusScope: 'application',
+        statuses: [],
+        items: cleanedItems
+      }]
+    };
+  }
+  const itemsById = new Map(cleanedItems.map(item => [normaliseChecklistId(item.id), item]));
+  const usedIds = new Set();
+  const gates = templateConfig.gates.map(gate => {
+    const gateItems = Array.isArray(gate.items)
+      ? gate.items.map(item => {
+        const key = normaliseChecklistId(item.id);
+        const match = itemsById.get(key);
+        if (match) usedIds.add(key);
+        return match || null;
+      }).filter(Boolean)
+      : [];
+    return {
+      ...gate,
+      items: gateItems
+    };
+  });
+  const extras = cleanedItems.filter(item => !usedIds.has(normaliseChecklistId(item.id)));
+  if (extras.length && gates.length) {
+    gates[0] = {
+      ...gates[0],
+      items: [...(gates[0].items || []), ...extras]
+    };
+  }
+  return {
+    ...templateConfig,
+    gates
+  };
+}
+
+function coerceChecklistConfig(raw, templateConfig) {
+  if (!raw || typeof raw !== 'object') {
+    return applyChecklistMigrations(templateConfig || null);
+  }
+  if (Array.isArray(raw.gates)) {
+    const gates = raw.gates.map(normaliseChecklistGate).filter(Boolean);
+    const next = {
+      ...raw,
+      id: raw.id || templateConfig?.id || 'checklist',
+      label: raw.label || templateConfig?.label || 'Checklist',
+      version: raw.version || templateConfig?.version || '',
+      gates
+    };
+    return applyChecklistMigrations(next);
+  }
+  if (Array.isArray(raw.items)) {
+    return applyChecklistMigrations(applyChecklistTemplate(raw.items, templateConfig || null));
+  }
+  return applyChecklistMigrations(templateConfig || raw || null);
+}
+
+function resolveChecklistGate(checklist, { applicationStatus, caseStatus, interventionStatus } = {}) {
+  if (!checklist || !Array.isArray(checklist.gates)) return null;
+  for (const gate of checklist.gates) {
+    if (!gate || !Array.isArray(gate.items)) continue;
+    const statuses = Array.isArray(gate.statuses) ? gate.statuses : [];
+    if (!statuses.length) return gate;
+    const scope = gate.statusScope || 'application';
+    const currentStatus =
+      scope === 'case' ? caseStatus :
+      scope === 'intervention' ? interventionStatus :
+      applicationStatus;
+    if (!currentStatus) continue;
+    const normalizedCurrent = normaliseChecklistStatus(currentStatus);
+    const matches = statuses.some(status => normaliseChecklistStatus(status) === normalizedCurrent);
+    if (matches) return gate;
+  }
+  return null;
+}
+
+function clearChecklistCache(key) {
+  if (!key) {
+    checklistCacheByKey.clear();
+    return;
+  }
+  checklistCacheByKey.delete(key);
 }
 
 async function loadDocumentTypeScopeMap(executor = pool) {
@@ -4571,6 +4762,9 @@ function resolveDecisionLetterTokens({
   const labelFallback = isApproval ? 'Approved' : 'Not approved';
   const safe = value => normaliseString(value) || '';
   const effectiveDraft = draft && typeof draft === 'object' ? draft : {};
+  const nextStep1 = safe(effectiveDraft.next_step_1);
+  const nextStep2 = safe(effectiveDraft.next_step_2);
+  const showNextSteps = isApproval && (nextStep1 || nextStep2);
   return {
     decision_date: safe(effectiveDraft.decision_date) || formatFundingDate(new Date()),
     applicant_name: safe(applicantName),
@@ -4580,11 +4774,153 @@ function resolveDecisionLetterTokens({
     decision_intro: safe(effectiveDraft.decision_intro),
     decision_label: safe(effectiveDraft.decision_label) || labelFallback,
     decision_reason: safe(effectiveDraft.decision_reason),
-    next_step_1: safe(effectiveDraft.next_step_1),
-    next_step_2: safe(effectiveDraft.next_step_2),
+    next_step_1: nextStep1,
+    next_step_2: nextStep2,
+    show_next_steps: showNextSteps ? 'yes' : '',
     coordinator_name: safe(effectiveDraft.coordinator_name) || safe(coordinatorName),
     organization_name: safe(effectiveDraft.organization_name) || DEFAULT_DECISION_LETTER_ORG
   };
+}
+
+async function resolveDecisionLetterTokensForSigningRequest({ pool, caseId, createdByUserId, docType }) {
+  if (!caseId || !docType) return null;
+  const [[caseRow]] = await pool.query(
+    `SELECT c.case_number,
+            c.case_context_json,
+            s.reference_number,
+            s.intake_payload,
+            applicant.email AS applicant_email
+       FROM iset_case c
+       LEFT JOIN iset_application a ON c.application_id = a.id
+       LEFT JOIN iset_application_submission s ON a.submission_id = s.id
+       LEFT JOIN user applicant ON s.user_id = applicant.id
+      WHERE c.id = ?
+      LIMIT 1`,
+    [caseId]
+  );
+  if (!caseRow) return null;
+  const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
+  const decisionDrafts = resolveDecisionLetterDrafts(caseContext);
+  const draft = docType === 'assessment_approval_letter' ? decisionDrafts.approval : decisionDrafts.denial;
+  const submissionPayload = safeJsonParse(caseRow?.intake_payload, null);
+  const ctxPersonal = caseContext?.applicationPersonal || {};
+  const ctxAnswers = caseContext?.applicationAnswers || {};
+  const contextNameCandidates = [
+    ctxPersonal.preferred_name,
+    ctxPersonal.preferredName,
+    caseContext.preferredName,
+    ctxAnswers['preferred-name'],
+    ctxAnswers['preferred_name'],
+    ctxPersonal.first_name && ctxPersonal.last_name
+      ? `${ctxPersonal.first_name} ${ctxPersonal.last_name}`
+      : null,
+    ctxPersonal.firstName && ctxPersonal.lastName
+      ? `${ctxPersonal.firstName} ${ctxPersonal.lastName}`
+      : null,
+    caseContext.firstName && caseContext.lastName
+      ? `${caseContext.firstName} ${caseContext.lastName}`
+      : null,
+    caseContext.first_name && caseContext.last_name
+      ? `${caseContext.first_name} ${caseContext.last_name}`
+      : null
+  ];
+  const fallbackName = contextNameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
+  const applicantName =
+    resolveApplicantNameFromPayload(submissionPayload, fallbackName) ||
+    normaliseString(caseRow?.applicant_email) ||
+    null;
+
+  let coordinatorName = null;
+  if (createdByUserId) {
+    const [[userRow]] = await pool.query(
+      'SELECT name, email FROM user WHERE id = ? LIMIT 1',
+      [createdByUserId]
+    );
+    coordinatorName = normaliseString(userRow?.name || userRow?.email || null);
+  }
+
+  const trackingReference =
+    normaliseString(caseRow?.reference_number) ||
+    normaliseString(caseRow?.case_number) ||
+    (caseId ? `CASE-${caseId}` : null);
+  return resolveDecisionLetterTokens({
+    draft,
+    docType,
+    applicantName,
+    trackingId: trackingReference,
+    caseNumber: caseRow?.case_number,
+    coordinatorName
+  });
+}
+
+function extractDecisionLetterComponentText(comp) {
+  const values = [];
+  const pushValue = (value) => {
+    if (!value) return;
+    if (typeof value === 'string') {
+      values.push(value);
+      return;
+    }
+    if (typeof value === 'object') {
+      Object.values(value).forEach(entry => {
+        if (typeof entry === 'string') values.push(entry);
+      });
+    }
+  };
+  pushValue(comp?.text);
+  pushValue(comp?.html);
+  pushValue(comp?.label?.text);
+  pushValue(comp?.label);
+  return values;
+}
+
+function normaliseDecisionLetterText(value) {
+  if (!value) return '';
+  return String(value)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function shouldPruneDecisionLetterComponent(comp) {
+  const texts = extractDecisionLetterComponentText(comp)
+    .map(normaliseDecisionLetterText)
+    .filter(Boolean);
+  if (!texts.length) return false;
+  const isLong = (value) => {
+    const words = value.split(/\s+/).filter(Boolean);
+    return words.length > 8 || value.length > 80;
+  };
+  if (texts.some(isLong)) return false;
+  const dropExact = new Set([
+    'decision',
+    'reasons',
+    'reason',
+    'approved',
+    'not approved',
+    'denied',
+    'rejected'
+  ]);
+  return texts.some(text => {
+    const lowered = text.toLowerCase();
+    const normalized = lowered.replace(/[:.]+$/g, '').trim();
+    const words = normalized.split(/\s+/).filter(Boolean);
+    const isShort = words.length <= 4 && normalized.length <= 40;
+    if (!isShort) return false;
+    if (normalized === 'case number') return true;
+    if (dropExact.has(normalized)) return true;
+    return false;
+  });
+}
+
+function pruneDecisionLetterSchema(schema) {
+  if (!schema || !Array.isArray(schema.steps)) return schema;
+  const steps = schema.steps.map(step => {
+    if (!step || !Array.isArray(step.components)) return step;
+    const components = step.components.filter(comp => !shouldPruneDecisionLetterComponent(comp));
+    return { ...step, components };
+  });
+  return { ...schema, steps };
 }
 
 function applyConditionalTemplateBlocks(value, tokens) {
@@ -13282,6 +13618,120 @@ app.patch('/api/config/runtime/backend-jobs', async (req, res) => {
   } catch (err) {
     console.error('[backend-jobs] config update failed:', err);
     res.status(500).json({ error: 'backend_jobs_config_update_failed', message: err.message });
+  }
+});
+
+function validateChecklistConfigPayload(raw, { allowEmptyStatuses = false } = {}) {
+  if (!raw || typeof raw !== 'object') {
+    return { ok: false, error: 'invalid_payload', message: 'Checklist payload is missing or invalid.' };
+  }
+  const id = String(raw.id || '').trim() || 'checklist';
+  const label = String(raw.label || '').trim() || 'Checklist';
+  const version = typeof raw.version === 'string' ? raw.version.trim() : '';
+  const gates = Array.isArray(raw.gates) ? raw.gates.map(normaliseChecklistGate).filter(Boolean) : [];
+  if (!gates.length) {
+    return { ok: false, error: 'gates_required', message: 'At least one gate is required.' };
+  }
+  for (const gate of gates) {
+    const scope = gate.statusScope || 'application';
+    if (!['application', 'case', 'intervention'].includes(scope)) {
+      return { ok: false, error: 'invalid_status_scope', message: `Invalid status scope: ${scope}` };
+    }
+    if (!allowEmptyStatuses && (!Array.isArray(gate.statuses) || gate.statuses.length === 0)) {
+      return { ok: false, error: 'gate_statuses_required', message: `Gate "${gate.label}" needs at least one status.` };
+    }
+    if (!Array.isArray(gate.items)) {
+      return { ok: false, error: 'gate_items_required', message: `Gate "${gate.label}" must include items.` };
+    }
+    for (const item of gate.items) {
+      if (!item || typeof item !== 'object') {
+        return { ok: false, error: 'invalid_item', message: `Gate "${gate.label}" has an invalid item.` };
+      }
+      if (!item.id || !item.label) {
+        return { ok: false, error: 'item_fields_required', message: `Every item in "${gate.label}" needs an id and label.` };
+      }
+      if (!Array.isArray(item.documentTypes) || item.documentTypes.length === 0) {
+        return { ok: false, error: 'item_doc_types_required', message: `Item "${item.label}" needs at least one document type.` };
+      }
+    }
+  }
+  return { ok: true, value: { id, label, version, gates } };
+}
+
+async function readChecklistConfigSnapshot(key, fallbackPath) {
+  const template = loadChecklistTemplate(fallbackPath);
+  const raw = await loadChecklistConfig(key);
+  if (raw) {
+    return { config: coerceChecklistConfig(raw, template), source: 'db' };
+  }
+  const fallback = loadChecklistConfigFromFile(fallbackPath);
+  return {
+    config: coerceChecklistConfig(fallback, template),
+    source: fallback ? 'file' : 'missing'
+  };
+}
+
+async function writeChecklistConfigSnapshot(key, config) {
+  await ensureRuntimeConfigTable();
+  await pool.query(
+    'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+    [CHECKLIST_SCOPE, key, JSON.stringify(config)]
+  );
+  clearChecklistCache(key);
+  return config;
+}
+
+app.get('/api/config/runtime/checklists', async (_req, res) => {
+  try {
+    const [application, intervention] = await Promise.all([
+      readChecklistConfigSnapshot(CHECKLIST_KEY, CHECKLIST_FALLBACK_PATH),
+      readChecklistConfigSnapshot(CHECKLIST_INTERVENTION_KEY, CHECKLIST_INTERVENTION_FALLBACK_PATH)
+    ]);
+    res.json({
+      application: application.config,
+      intervention: intervention.config,
+      source: {
+        application: application.source,
+        intervention: intervention.source
+      }
+    });
+  } catch (err) {
+    console.error('[checklist-config] fetch failed', err);
+    res.status(500).json({ error: 'checklist_config_fetch_failed', message: err.message });
+  }
+});
+
+app.patch('/api/config/runtime/checklists', async (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const body = req.body || {};
+    const updates = {};
+    if (body.application) {
+      const result = validateChecklistConfigPayload(body.application);
+      if (!result.ok) return res.status(400).json({ error: result.error, message: result.message });
+      updates[CHECKLIST_KEY] = result.value;
+    }
+    if (body.intervention) {
+      const result = validateChecklistConfigPayload(body.intervention);
+      if (!result.ok) return res.status(400).json({ error: result.error, message: result.message });
+      updates[CHECKLIST_INTERVENTION_KEY] = result.value;
+    }
+    const keys = Object.keys(updates);
+    if (!keys.length) {
+      return res.status(400).json({ error: 'no_updates', message: 'Provide checklist updates to save.' });
+    }
+    const results = {};
+    for (const key of keys) {
+      results[key] = await writeChecklistConfigSnapshot(key, updates[key]);
+    }
+    res.json({
+      ok: true,
+      application: results[CHECKLIST_KEY] || null,
+      intervention: results[CHECKLIST_INTERVENTION_KEY] || null
+    });
+  } catch (err) {
+    console.error('[checklist-config] update failed', err);
+    res.status(500).json({ error: 'checklist_config_update_failed', message: err.message });
   }
 });
 
@@ -22007,14 +22457,14 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
   try {
     const isIntervention = Boolean(interventionId);
     const checklistKey = isIntervention ? CHECKLIST_INTERVENTION_KEY : CHECKLIST_KEY;
+    const templatePath = isIntervention ? CHECKLIST_INTERVENTION_FALLBACK_PATH : CHECKLIST_FALLBACK_PATH;
+    const templateConfig = loadChecklistTemplate(templatePath);
     let checklist = await loadChecklistConfig(checklistKey);
-    if (!checklist && isIntervention) {
-      checklist = await loadChecklistConfig(CHECKLIST_KEY);
-    }
     if (!checklist) {
-      checklist = loadChecklistConfigFromFile();
+      checklist = loadChecklistConfigFromFile(templatePath);
     }
-    if (!checklist || !Array.isArray(checklist.items)) {
+    checklist = coerceChecklistConfig(checklist, templateConfig);
+    if (!checklist || (!Array.isArray(checklist.items) && !Array.isArray(checklist.gates))) {
       return res.status(200).json({ items: [], missingRequiredCount: 0 });
     }
     const docTypeScopeMap = await loadDocumentTypeScopeMap();
@@ -22030,9 +22480,10 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       [applicantId]
     );
     let interventionMetadata = null;
+    let interventionStatusLower = '';
     if (isIntervention) {
       const [[interventionRow]] = await pool.query(
-        `SELECT metadata_json
+        `SELECT status, metadata_json
            FROM iset_case_intervention
           WHERE id = ?
           LIMIT 1`,
@@ -22041,6 +22492,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       if (!interventionRow) {
         return res.status(404).json({ error: 'intervention_not_found' });
       }
+      interventionStatusLower = normaliseCaseStatusValue(interventionRow.status || stageRaw) || '';
       interventionMetadata = parseMetadata(interventionRow.metadata_json) || {};
     }
     const applicationAnswerMeta = await loadApplicationAnswers({ applicantId, applicationId });
@@ -22193,53 +22645,29 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
           0
       );
       const hasLivingAllowance = livingAllowanceValue > 0;
-      const includeEiVerification = stageRaw && stageRaw !== 'draft';
-      const interventionItems = [
-        {
-          id: 'band-funding-letter',
-          label: 'Band funding confirmation or denial letter',
-          required: true,
-          minCount: 1,
-          documentTypes: ['band_funding_confirmation', 'band_funding_denial'],
-          sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
-        },
-        {
-          id: 'intervention-acceptance-letter',
-          label: 'Letter of Acceptance (current year/term)',
-          required: hasInstitution,
-          documentTypes: ['acceptance_letter'],
-          sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
-        },
-        {
-          id: 'intervention-financial-overview',
-          label: 'ISET Financial Overview (monthly budget)',
-          required: hasLivingAllowance,
-          documentTypes: ['financial_overview'],
-          sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
-        },
-        {
-          id: 'intervention-financial-evidence',
-          label: 'Financial Evidence (expenses / supporting)',
-          required: hasLivingAllowance,
-          minCount: 1,
-          documentTypes: ['financial_evidence'],
-          sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
-        },
-      ];
-      if (includeEiVerification) {
-        interventionItems.push({
-          id: 'intervention-ei-verification',
-          label: 'EI Eligibility Verification',
-          required: true,
-          documentTypes: ['ei_verification'],
-          sources: ['application_submission', 'manual_upload', 'secure_message_attachment'],
-        });
-      }
-      const items = interventionItems.map(item => {
+      const gate = resolveChecklistGate(checklist, {
+        applicationStatus: applicationStatusLower,
+        caseStatus: caseStatusLower,
+        interventionStatus: interventionStatusLower
+      });
+      const filteredItems = Array.isArray(gate?.items)
+        ? gate.items
+        : (Array.isArray(checklist.items) ? checklist.items : []);
+      const items = filteredItems.map(item => {
+        const normalizedId = normaliseId(item.id);
         const docTypes = Array.isArray(item.documentTypes) ? item.documentTypes.map(String) : [];
         const sources = Array.isArray(item.sources) ? item.sources : [];
-        const required = item.required !== false;
-        const minCount = Number.isFinite(Number(item.minCount)) ? Number(item.minCount) : 1;
+        let required = item.required !== false;
+        let minCount = Number.isFinite(Number(item.minCount)) ? Number(item.minCount) : 1;
+        if (normalizedId === 'intervention-acceptance-letter') {
+          required = hasInstitution;
+        }
+        if (normalizedId === 'intervention-financial-overview' || normalizedId === 'intervention-financial-evidence') {
+          required = hasLivingAllowance;
+        }
+        if (normalizedId === 'intervention-financial-evidence' && minCount < 1) {
+          minCount = 1;
+        }
         const matchedCount = matchesForTypes(docTypes).length;
         const status = computeStatus(required, matchedCount, minCount);
         return {
@@ -22254,10 +22682,21 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
         };
       });
       const missingRequiredCount = items.filter(i => i.required && i.status !== 'complete').length;
-      return res.json({ items, missingRequiredCount });
+      return res.json({
+        items,
+        missingRequiredCount,
+        gateId: gate?.id || null,
+        gateLabel: gate?.label || null
+      });
     }
 
-    let filteredItems = checklist.items;
+    const gate = resolveChecklistGate(checklist, {
+      applicationStatus: applicationStatusLower,
+      caseStatus: caseStatusLower
+    });
+    let filteredItems = Array.isArray(gate?.items)
+      ? gate.items
+      : (Array.isArray(checklist.items) ? checklist.items : []);
 
     const items = filteredItems.map(item => {
       const normalizedId = normaliseId(item.id);
@@ -22602,7 +23041,12 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     });
 
     const missingRequiredCount = items.filter(i => i.required && i.status !== 'complete').length;
-    return res.json({ items, missingRequiredCount });
+    return res.json({
+      items,
+      missingRequiredCount,
+      gateId: gate?.id || null,
+      gateLabel: gate?.label || null
+    });
   } catch (err) {
     console.error('[checklist] compute failed', err);
     return res.status(500).json({ error: 'checklist_failed' });
@@ -29756,6 +30200,13 @@ app.post('/api/cases/:id/messages', async (req, res) => {
         'archived',
         'approved'
       ]);
+      const deniedCaseStatuses = new Set([
+        'in_review',
+        'pending_approval',
+        'pending',
+        'open',
+        'submitted'
+      ]);
       const normalizeStatusValue = value => {
         if (!value) return '';
         return String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -29768,7 +30219,7 @@ app.post('/api/cases/:id/messages', async (req, res) => {
         if (appStatus === 'rejected' || appStatus === 'declined') return 'denied';
         if (appStatus === 'decision_ready' || appStatus === 'completed') {
           if (approvedCaseStatuses.has(caseStatus)) return 'approved';
-          if (caseStatus === 'in_review') return 'denied';
+          if (deniedCaseStatuses.has(caseStatus)) return 'denied';
           return null;
         }
         return null;
@@ -29955,6 +30406,7 @@ app.post('/api/cases/:id/messages', async (req, res) => {
         }
         if (resolvedSchema && decisionLetterTokensByWorkflowId.has(wf.id)) {
           resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, decisionLetterTokensByWorkflowId.get(wf.id));
+          resolvedSchema = pruneDecisionLetterSchema(resolvedSchema);
         }
         if (
           resolvedSchema &&
@@ -34515,11 +34967,37 @@ app.get('/api/signing-requests/:id', async (req, res) => {
         meta = parsed?.meta || null;
       } catch (_) {}
     }
-    if (!steps && buildWorkflowSchema) {
+    const hasSteps = Array.isArray(steps) && steps.length > 0;
+    const hasEmptyComponents =
+      hasSteps &&
+      steps.every(step => !Array.isArray(step.components) || step.components.length === 0);
+    const shouldRebuild = !hasSteps || hasEmptyComponents;
+    if (shouldRebuild && buildWorkflowSchema) {
       try {
+        let docType = null;
+        try {
+          const [[wfRow]] = await pool.query(
+            'SELECT document_type FROM workflow WHERE id = ? LIMIT 1',
+            [row.workflow_id]
+          );
+          docType = wfRow?.document_type || null;
+        } catch (_) {}
         const schema = await buildWorkflowSchema({ pool, workflowId: row.workflow_id });
-        steps = schema.steps;
-        meta = schema.meta;
+        let resolvedSchema = { steps: schema.steps, meta: schema.meta };
+        if (docType === 'assessment_approval_letter' || docType === 'assessment_denial_letter') {
+          const tokens = await resolveDecisionLetterTokensForSigningRequest({
+            pool,
+            caseId: row.case_id,
+            createdByUserId: row.created_by_user_id,
+            docType
+          });
+          if (tokens) {
+            resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, tokens);
+            resolvedSchema = pruneDecisionLetterSchema(resolvedSchema);
+          }
+        }
+        steps = resolvedSchema.steps;
+        meta = resolvedSchema.meta;
         await pool.query(
           `UPDATE signing_request SET resolved_schema_json = ? WHERE id = ?`,
           [JSON.stringify({ steps, meta }), id]
@@ -35331,6 +35809,34 @@ app.put('/api/cases/:id', async (req, res) => {
         WHERE c.id = ?`,
       [conflictSummaryStaffId, caseId]
     );
+
+    const reviewStatus =
+      typeof body.assessment_nwac_review_status === 'string'
+        ? body.assessment_nwac_review_status.trim().toLowerCase()
+        : '';
+    const pushBackReason =
+      typeof body.assessment_nwac_reason === 'string'
+        ? body.assessment_nwac_reason.trim()
+        : '';
+    if (reviewStatus === 'push_back' && pushBackReason) {
+      const staffProfileId = req.staffProfile?.id || null;
+      const authorUserId = getAuthenticatedNumericUserId(req);
+      const noteBody = `Push back to ISET Coordinator/Case Manager: ${pushBackReason}`;
+      const trimmedNote =
+        noteBody.length > CASE_NOTE_MAX_LENGTH
+          ? noteBody.slice(0, CASE_NOTE_MAX_LENGTH)
+          : noteBody;
+      try {
+        await pool.query(
+          'INSERT INTO iset_case_note (case_id, author_staff_profile_id, author_user_id, body, is_internal, is_pinned, follow_up_at) VALUES (?,?,?,?,1,0,NULL)',
+          [caseId, staffProfileId, authorUserId, trimmedNote]
+        );
+      } catch (err) {
+        if (!isMissingTableErrorLocal(err)) {
+          console.warn('[case-notes] failed to add push back note', err?.message || err);
+        }
+      }
+    }
 
     try {
       caseRow.assessment_employment_barriers = caseRow.assessment_employment_barriers

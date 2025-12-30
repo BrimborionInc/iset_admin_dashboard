@@ -26,6 +26,7 @@ import SecretsWidget from "../widgets/SecretsWidget";
 import AppearanceWidget from "../widgets/AppearanceWidget";
 import BackendJobsWidget from "../widgets/BackendJobsWidget";
 import AutoAssignmentConfigWidget from "../widgets/AutoAssignmentConfigWidget";
+import DocumentChecklistConfigWidget from "../widgets/DocumentChecklistConfigWidget";
 import AiConfigWidgetHelp from "../helpPanelContents/aiConfigWidgetHelp";
 import AuthWidgetHelp from "../helpPanelContents/authWidgetHelp";
 import SessionAuditWidgetHelp from "../helpPanelContents/sessionAuditWidgetHelp";
@@ -36,6 +37,7 @@ import SecretsWidgetHelp from "../helpPanelContents/secretsWidgetHelp";
 import AppearanceWidgetHelp from "../helpPanelContents/appearanceWidgetHelp";
 import LockingSettingsHelp from "../helpPanelContents/lockingSettingsHelp";
 import BackendJobsWidgetHelp from "../helpPanelContents/backendJobsWidgetHelp";
+import DocumentChecklistConfigHelp from "../helpPanelContents/documentChecklistConfigHelp";
 import { apiFetch } from "../auth/apiClient";
 import {
   getIdTokenClaims,
@@ -120,7 +122,7 @@ const LOCKING_HEADER_DESCRIPTION =
 
 // Bump the layout storage key whenever the default layout changes so new widgets
 // (like Backend jobs) appear on the board instead of lingering in the palette.
-const STORAGE_KEY = "configuration-dashboard-layout-v3";
+const STORAGE_KEY = "configuration-dashboard-layout-v4";
 
 const widgetRegistry = {
   ai: {
@@ -200,6 +202,17 @@ const widgetRegistry = {
     helpTitle: "Backend jobs",
     aiContext: BackendJobsWidgetHelp?.aiContext,
   },
+  "document-checklists": {
+    id: "document-checklists",
+    defaultRowSpan: 6,
+    defaultColumnSpan: 2,
+    component: DocumentChecklistConfigWidget,
+    title: "Document checklists",
+    description: "Configure required documents by status gate for applications and interventions.",
+    helpComponent: DocumentChecklistConfigHelp,
+    helpTitle: "Document checklists",
+    aiContext: DocumentChecklistConfigHelp?.aiContext,
+  },
   env: {
     id: "env",
     defaultRowSpan: 4,
@@ -254,6 +267,7 @@ const defaultLayout = [
   { id: "sessionAudit", rowSpan: 3, columnSpan: 2 },
   { id: "cors", rowSpan: 2, columnSpan: 2 },
   { id: "backend-jobs", rowSpan: 2, columnSpan: 2 },
+  { id: "document-checklists", rowSpan: 6, columnSpan: 2 },
   { id: "autoAssignment", rowSpan: 4, columnSpan: 2 },
   { id: "env", rowSpan: 4, columnSpan: 2 },
   { id: "secrets", rowSpan: 3, columnSpan: 2 },
@@ -1714,6 +1728,14 @@ export default function ConfigurationSettings({
               metadata={metadata}
               toggleHelpPanel={toggleHelpPanel}
               headerActions={undefined}
+            />
+          );
+        case "document-checklists":
+          return (
+            <DocumentChecklistConfigWidget
+              actions={actions}
+              metadata={metadata}
+              toggleHelpPanel={toggleHelpPanel}
             />
           );
         default:

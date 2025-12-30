@@ -12,9 +12,8 @@ const SupportingDocumentsHelp = () => (
     <h3>How to use this widget</h3>
     <ul>
       <li>
-        <strong>Filter the view:</strong> Use the “View documents for” selector to focus on a specific application
-        (application workspace) or intervention (case workspace). “All documents” includes client files plus all
-        applications or interventions.
+        <strong>Filter the view:</strong> Use the selector to focus on a specific application (application workspace)
+        or intervention (case workspace). "All documents" includes client files plus all related records.
       </li>
       <li>
         <strong>Switch tabs:</strong> The <em>Documents</em> tab shows the file list; the <em>Checklist</em> tab shows
@@ -34,8 +33,8 @@ const SupportingDocumentsHelp = () => (
         <strong>File Name:</strong> Original filename as uploaded or generated.
       </li>
       <li>
-        <strong>Application / Case:</strong> Shows the application reference number in the application workspace or the
-        case number in the case workspace. Intervention documents appear as “Intervention: Sample intervention”.
+        <strong>Application / Case:</strong> Shows the application reference or case number. Intervention documents
+        appear as "Intervention: {name}" in the case workspace.
       </li>
       <li>
         <strong>Source:</strong> Where the file came from. Common values are Application submission, Message attachment,
@@ -51,6 +50,9 @@ const SupportingDocumentsHelp = () => (
       <li>
         <strong>Actions:</strong> Edit metadata, duplicate to another application or intervention (when available),
         view the file, or delete it.
+      </li>
+      <li>
+        <strong>Preferences:</strong> Use table preferences and column resizing to customize the view.
       </li>
     </ul>
 
@@ -98,7 +100,7 @@ You are assisting an ISET program staff member using the Supporting Documents wi
 or intervention, interpret the Documents and Checklist tabs, and what each column means. Clarify sources (application
 submission, message attachment, digitally signed, manual upload), scope (client vs application), and how to upload,
 edit, duplicate, view, or delete documents. Note that duplicate only appears when reuse is possible and delete requires
-typing "delete". Offer troubleshooting for missing checklist counts and unavailable files.
+typing "delete". Mention column preferences and resizing. Offer troubleshooting for missing checklist counts and unavailable files.
 `;
 
 export default SupportingDocumentsHelp;

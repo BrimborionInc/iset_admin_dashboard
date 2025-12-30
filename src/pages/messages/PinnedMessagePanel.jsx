@@ -155,7 +155,7 @@ const PinnedMessagePanel = () => {
   if (isComposing) {
     return (
       <SpaceBetween size="s">
-        <Box variant="p">{isReply ? 'Reply placeholder' : 'Secure messaging placeholder'}</Box>
+        <Box variant="p">{isReply ? 'Reply to the selected message.' : 'Compose a new secure message.'}</Box>
         <form>
           <SpaceBetween size="s">
             <FormField
@@ -173,6 +173,7 @@ const PinnedMessagePanel = () => {
                 placeholder="Choose recipients"
                 selectedAriaLabel="Selected"
                 tokenLimit={4}
+                keepOpen={false}
               />
             </FormField>
             <FormField label="Subject">
@@ -206,7 +207,7 @@ const PinnedMessagePanel = () => {
   if (!pinnedMessage || !pinnedMeta) {
     return (
       <SpaceBetween size="s">
-        <Box variant="p">Secure messaging placeholder</Box>
+        <Box variant="p">Start a new secure message to staff.</Box>
         <Button variant="primary" onClick={startNewMessage}>New message</Button>
       </SpaceBetween>
     );

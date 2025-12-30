@@ -16,6 +16,10 @@ Format: YYYY-MM-DD - Category: Short description
 - UX: Application overview key/value layout now supports up to six columns.
 - UX: Application overview now shows province/territory, document checklist completeness, and lock owner/expiry.
 
+## 2026-01-20
+- Feature: Configuration Settings now includes a Document Checklists widget to edit required documents per status gate for applications and interventions.
+- API: Checklist configuration can be persisted to runtime config for both application and intervention scopes.
+
 ## 2025-01-05
 - Authoring: Default Value fields now accept `{data_key}` placeholders to prefill from another field in the same workflow.
 

@@ -23,8 +23,8 @@ const CaseNotesHelp = () => (
         find.
       </li>
       <li>
-        <strong>Set follow-up dates:</strong> Adding a date will create a reminder on the Case calendar so deadlines do
-        not slip.
+        <strong>Set follow-up dates:</strong> Adding a date creates a reminder on the Case Calendar. Acknowledge the
+        reminder once the task is complete.
       </li>
       <li>
         <strong>Refresh anytime:</strong> Use the refresh icon after collaborating with others to see their latest
@@ -36,21 +36,21 @@ const CaseNotesHelp = () => (
     <ul>
       <li>Lead with the outcome or decision, then add relevant details.</li>
       <li>Record dates, follow-up owners, and deadlines where possible.</li>
-      <li>Avoid sensitive personal data—store documents in the Supporting Documents widget instead.</li>
+      <li>Avoid sensitive personal data - store documents in the Supporting Documents widget instead.</li>
     </ul>
 
     <h3>Need inspiration?</h3>
     <p>
-      Think of case notes as the hand-off briefing between teammates. A clear note answers “what changed, why it
-      matters, and what happens next.”
+      Think of case notes as the hand-off briefing between teammates. A clear note answers "what changed, why it
+      matters, and what happens next."
     </p>
   </div>
 );
 
 CaseNotesHelp.aiContext = `
 You are assisting an ISET program coordinator using the Case Notes widget. Explain how to add, edit, and pin notes,
-what information belongs in a note, and when to refresh. Emphasise collaborative record-keeping and avoiding
-sensitive data.
+how follow-up dates create reminders, and when to refresh. Emphasise collaborative record-keeping and avoiding
+sensitive data, and remind them they can acknowledge reminders once the task is complete.
 `;
 
 export default CaseNotesHelp;

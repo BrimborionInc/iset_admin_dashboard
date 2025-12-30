@@ -527,16 +527,32 @@ const InterventionModal = ({
 
   const autoOccurrencesFromDates = useCallback((startDate, endDate, period) => {
     if (!startDate || !endDate || !period) return null;
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
-    const ms = end.getTime() - start.getTime();
-    if (ms < 0) return null;
-    const days = ms / (1000 * 60 * 60 * 24);
-    if (!Number.isFinite(days)) return null;
-    const periodDays = period === "bi_weekly" ? 14 : period === "monthly" ? 30 : period === "quarterly" ? 90 : 7;
+    const parseIsoParts = (value) => {
+      const raw = String(value || "").trim();
+      const parts = raw.split("-");
+      if (parts.length !== 3) return null;
+      const [year, month, day] = parts.map(part => Number.parseInt(part, 10));
+      if (![year, month, day].every(Number.isFinite)) return null;
+      return { year, month, day };
+    };
+    const startParts = parseIsoParts(startDate);
+    const endParts = parseIsoParts(endDate);
+    if (!startParts || !endParts) return null;
+    const startUtc = Date.UTC(startParts.year, startParts.month - 1, startParts.day);
+    const endUtc = Date.UTC(endParts.year, endParts.month - 1, endParts.day);
+    if (!Number.isFinite(startUtc) || !Number.isFinite(endUtc)) return null;
+    if (endUtc < startUtc) return null;
+    const monthCount =
+      (endParts.year - startParts.year) * 12 +
+      (endParts.month - startParts.month) +
+      1;
+    if (period === "monthly") return Math.max(1, monthCount);
+    if (period === "quarterly") return Math.max(1, Math.ceil(monthCount / 3));
+    const diffDays = Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24)) + 1;
+    if (!Number.isFinite(diffDays) || diffDays < 1) return null;
+    const periodDays = period === "bi_weekly" ? 14 : period === "weekly" ? 7 : null;
     if (!periodDays) return null;
-    return Math.max(1, Math.ceil(days / periodDays));
+    return Math.max(1, Math.ceil(diffDays / periodDays));
   }, []);
 
   useEffect(() => {

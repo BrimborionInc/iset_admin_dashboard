@@ -1113,8 +1113,8 @@ const AppRoutes = ({
       <Route path="/documentation">
         {renderContent(
           DocumentationLibrary,
-          [{ text: 'Home', href: '/' }, { text: 'Training Materials', href: '/documentation' }],
-          'Training Materials',
+          [{ text: 'Home', href: '/' }, { text: 'Guidance Library', href: '/documentation' }],
+          'Guidance Library',
           'documentationLibrary',
           (
             <SpaceBetween size="xs" direction="horizontal">
@@ -1133,7 +1133,7 @@ const AppRoutes = ({
             </SpaceBetween>
           ),
           '',
-          "Quick links to the training materials and guides you use most often. Each card shows what the doc covers, who it's for, and where to open it."
+          "Quick links to guidance resources and reference guides you use most often. Each card shows what the doc covers, who it's for, and where to open it."
         )}
       </Route>
 

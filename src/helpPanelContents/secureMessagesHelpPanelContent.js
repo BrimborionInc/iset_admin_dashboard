@@ -30,10 +30,13 @@ const SecureMessagesHelpPanelContent = () => (
         Use <em>New Message</em> to start a conversation or reply in a thread to keep context together.
       </li>
       <li>
-        Mark a message as urgent when you need the applicant’s immediate attention.
+        Mark a message as urgent when you need the applicant's immediate attention.
       </li>
       <li>
         Attachments you open here are also copied to the Supporting Documents widget for future reference. Labels remain editable in Supporting Documents if you need to rename them.
+      </li>
+      <li>
+        Use search and filters to locate messages by subject, sender, or status.
       </li>
       <li>
         Refresh the inbox after expecting new information or when another team member has replied.
@@ -42,8 +45,8 @@ const SecureMessagesHelpPanelContent = () => (
 
     <h3>Working safely</h3>
     <ul>
-      <li>Keep messaging professional—conversations are part of the auditable case history.</li>
-      <li>Use Deleted &gt; Empty Items to permanently clear sensitive information once downstream tasks are done.</li>
+      <li>Keep messaging professional - conversations are part of the auditable case history.</li>
+      <li>Use Deleted &gt; Empty Items to permanently clear sensitive information once downstream tasks are done (type <strong>delete</strong> to confirm).</li>
       <li>If attachments fail to open, ask the applicant to resend or notify support for recovery.</li>
     </ul>
   </div>
@@ -51,7 +54,7 @@ const SecureMessagesHelpPanelContent = () => (
 
 SecureMessagesHelpPanelContent.aiContext = `
 You are assisting an ISET staff member using the Secure Messaging widget. Explain the purpose of each tab, how to
-compose and manage messages, and what happens to attachments. Clarify that attachments are adopted into Supporting Documents (labels can be edited there). Highlight best practices for urgency flags and for emptying deleted items.
+compose and manage messages, search/filter the inbox, and what happens to attachments. Clarify that attachments are adopted into Supporting Documents (labels can be edited there). Highlight best practices for urgency flags and for emptying deleted items (type "delete" to confirm).
 `;
 
 export default SecureMessagesHelpPanelContent;

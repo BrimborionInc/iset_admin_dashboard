@@ -23,7 +23,7 @@ const widgetRegistry = {
     defaultRowSpan: 6,
     defaultColumnSpan: 1,
     title: 'Library',
-    description: 'Browse training materials by category.',
+    description: 'Browse guidance resources by category.',
     component: null, // injected later
   },
   reader: {
@@ -78,7 +78,7 @@ const computePaletteItems = items =>
     }));
 
 const boardI18nStrings = {
-  empty: 'No widgets on the Training Materials dashboard. Use Add widget to add the library or reader.',
+  empty: 'No widgets on the Guidance Library dashboard. Use Add widget to add the library or reader.',
   loading: 'Loading widgets',
   columnAriaLabel: index => `Column ${index + 1}`,
   itemPositionAnnouncement: ({ currentColumn, currentIndex, currentRow }) =>
@@ -114,7 +114,7 @@ const boardI18nStrings = {
   liveAnnouncementDndCommitted: operation => `${operation} committed`,
   liveAnnouncementDndDiscarded: operation => `${operation} discarded`,
   liveAnnouncementItemRemoved: op => `Removed item ${op.item.data.title}.`,
-  navigationAriaLabel: 'Training Materials dashboard navigation',
+  navigationAriaLabel: 'Guidance Library dashboard navigation',
   navigationAriaDescription: 'Use arrow keys to move between widgets.',
   navigationItemAriaLabel: item => (item ? item.data.title : 'Empty'),
 };
@@ -395,7 +395,7 @@ const DocumentationLibrary = ({
 
   useEffect(() => {
     if (typeof updateBreadcrumbs === 'function') {
-      updateBreadcrumbs([{ text: 'Home', href: '/' }, { text: 'Training Materials', href: '/documentation' }]);
+      updateBreadcrumbs([{ text: 'Home', href: '/' }, { text: 'Guidance Library', href: '/documentation' }]);
     }
   }, [updateBreadcrumbs]);
 
@@ -533,7 +533,7 @@ const DocumentationLibrary = ({
       empty={
         <Container header={<Header variant="h2">No widgets</Header>}>
           <Box variant="p" color="text-body-secondary">
-            Add the library and reader widgets to start browsing the training materials.
+            Add the library and reader widgets to start browsing the guidance resources.
           </Box>
         </Container>
       }

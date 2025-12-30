@@ -113,14 +113,14 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
   const allNavItems = [
     {
       type: 'section',
-      text: 'Intake and Assessment',
+      text: 'New ISET Applications',
       items: [
         { type: 'link', text: 'Application Assessment', href: '/case-assignment-dashboard' },
       ],
     },
     {
       type: 'section',
-      text: 'Case Management',
+      text: 'Current ISET Clients',
       items: [
         { type: 'link', text: 'Case Management', href: '/iset/cases' },
         { type: 'link', text: 'My Case Queue', href: '/case-management' },
@@ -128,7 +128,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
     },
     {
       type: 'section',
-      text: 'Financial Management',
+      text: 'Budgets and Payments',
       items: [
         { type: 'link', text: 'Finance Overview', href: '/finance/overview' },
         { type: 'link', text: 'Budgets', href: '/finance/budgets' },
@@ -143,7 +143,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
     },
     {
       type: 'section',
-      text: 'Government Submissions',
+      text: 'Prepare ESDC XML',
       items: [
         { type: 'link', text: 'Overview', href: '/esdc/overview' },
         { type: 'link', text: 'ILMP Exports', href: '/esdc/participants' },
@@ -152,7 +152,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
     },
     {
       type: 'section',
-      text: 'Intake Workflow Studio',
+      text: 'Edit Digital Forms',
       items: [
         { type: 'link', text: 'Manage Intake Steps', href: '/manage-components' },
         { type: 'link', text: 'Manage Workflows', href: '/manage-workflows' },
@@ -204,7 +204,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       text: 'Support',
       defaultExpanded: false,
       items: [
-        { type: 'link', text: 'Training Materials', href: '/documentation' },
+        { type: 'link', text: 'Guidance', href: '/documentation' },
         { type: 'link', text: 'Tutorials', href: '/tutorials-dashboard' },
         { type: 'link', text: 'Help and Support', href: '/help-support-dashboard' },
       ],
@@ -338,7 +338,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
     <CloudscapeSideNavigation
       header={{
         href: '/',
-        text: 'ISET Admin',
+        text: 'Homepage',
       }}
       items={itemsWithExpandState}
       onChange={(e) => {

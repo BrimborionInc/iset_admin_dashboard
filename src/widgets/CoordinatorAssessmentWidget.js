@@ -227,13 +227,20 @@ const autoOccurrencesFromDates = (startDate, endDate, period) => {
   const startUtc = parseIsoDateToUtc(startDate);
   const endUtc = parseIsoDateToUtc(endDate);
   if (startUtc === null || endUtc === null) return null;
-  const diffMs = endUtc - startUtc;
-  if (diffMs < 0) return null;
-  const days = diffMs / (1000 * 60 * 60 * 24);
-  if (!Number.isFinite(days)) return null;
-  const periodDays = period === 'bi_weekly' ? 14 : period === 'monthly' ? 30 : period === 'quarterly' ? 90 : 7;
+  if (endUtc < startUtc) return null;
+  const start = new Date(startUtc);
+  const end = new Date(endUtc);
+  const monthCount =
+    (end.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+    (end.getUTCMonth() - start.getUTCMonth()) +
+    1;
+  if (period === 'monthly') return Math.max(1, monthCount);
+  if (period === 'quarterly') return Math.max(1, Math.ceil(monthCount / 3));
+  const diffDays = Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24)) + 1;
+  if (!Number.isFinite(diffDays) || diffDays < 1) return null;
+  const periodDays = period === 'bi_weekly' ? 14 : period === 'weekly' ? 7 : null;
   if (!periodDays) return null;
-  return Math.max(1, Math.ceil(days / periodDays));
+  return Math.max(1, Math.ceil(diffDays / periodDays));
 };
 
 const parseCurrencyToNumber = (value) => {
@@ -478,6 +485,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [fieldErrors, setFieldErrors] = useState({});
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [validationAlert, setValidationAlert] = useState(null);
+  const [isSubmittingAssessment, setIsSubmittingAssessment] = useState(false);
   const [isEditingAssessment, setIsEditingAssessment] = useState(false);
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
@@ -512,9 +520,11 @@ const CoordinatorAssessmentWidget = forwardRef(
   const nextChecklistDocTypeRef = useRef('');
   const nextChecklistLabelRef = useRef('');
   const [currentStep, setCurrentStep] = useState(BASE_STEP_IDS[0]);
+  const [wizardNavPriming, setWizardNavPriming] = useState(false);
   const [attemptedSteps, setAttemptedSteps] = useState({});
   const wizardStepRestoreKeyRef = useRef(null);
   const wizardStepRestoreStepsRef = useRef(null);
+  const wizardNavPrimeRef = useRef({ signature: null, restoreStep: null });
   const widgetRootRef = useRef(null);
   const alertAnchorRef = useRef(null);
   const previousAlertKeyRef = useRef(null);
@@ -543,8 +553,17 @@ const CoordinatorAssessmentWidget = forwardRef(
   const normalizedRole = (userRole || '').toString().trim().toLowerCase();
   const canonicalRole = normalizedRole === 'regional manager' ? 'regional coordinator' : normalizedRole;
   const isAssessor = canonicalRole === 'application assessor';
-  const isEligibilityAdmin = ['system administrator', 'program administrator', 'regional manager'].includes(normalizedRole);
-  const canUploadEiVerification = ['system administrator', 'program administrator', 'regional manager'].includes(normalizedRole);
+  const eligibilityRoleAllowlist = new Set([
+    'system administrator',
+    'program administrator',
+    'regional manager',
+    'regional coordinator',
+    'application assessor',
+    'iset coordinator',
+    'case manager'
+  ]);
+  const isEligibilityAdmin = eligibilityRoleAllowlist.has(normalizedRole);
+  const canUploadEiVerification = eligibilityRoleAllowlist.has(normalizedRole);
   const numericInterventionCost = useMemo(() => parseCurrencyToNumber(assessment.interventionCost), [assessment.interventionCost]);
   const isHighCostApprovalBlocked = canonicalRole === 'regional coordinator' && Number.isFinite(numericInterventionCost) && numericInterventionCost >= APPROVAL_COST_THRESHOLD;
 
@@ -1442,6 +1461,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   // UI logic: once status reaches pending approval or a final decision, lock assessment fields and surface NWAC review
   const isAssessmentSubmitted = isPendingApprovalStatus;
   const isReviewComplete = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
+  const shouldUnlockWizardNavigation = !isEditingAssessment && (isPendingApprovalStatus || isDecisionReadyStatus || isReviewComplete);
   const assessmentSubmitted =
     localAssessmentSubmitted ||
     isAssessmentSubmitted ||
@@ -1506,6 +1526,36 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, [wizardStepKey, activeStepIds, currentStep, resolveStoredWizardStep]);
 
   useEffect(() => {
+    if (!shouldUnlockWizardNavigation || activeStepIds.length < 2) return;
+    const signature = activeStepIds.join('|');
+    if (wizardNavPrimeRef.current.signature === signature) return;
+    const lastStepId = activeStepIds[activeStepIds.length - 1];
+    if (!lastStepId) {
+      wizardNavPrimeRef.current = { signature, restoreStep: null };
+      return;
+    }
+    if (currentStep !== lastStepId) {
+      wizardNavPrimeRef.current = { signature, restoreStep: currentStep };
+      setWizardNavPriming(true);
+      setCurrentStep(lastStepId);
+      return;
+    }
+    wizardNavPrimeRef.current = { signature, restoreStep: null };
+  }, [shouldUnlockWizardNavigation, activeStepIds, currentStep]);
+
+  useEffect(() => {
+    if (!wizardNavPriming) return;
+    const lastStepId = activeStepIds[activeStepIds.length - 1];
+    if (currentStep !== lastStepId) return;
+    const restoreStep = wizardNavPrimeRef.current.restoreStep;
+    wizardNavPrimeRef.current.restoreStep = null;
+    setWizardNavPriming(false);
+    if (restoreStep && restoreStep !== currentStep && activeStepIds.includes(restoreStep)) {
+      setCurrentStep(restoreStep);
+    }
+  }, [wizardNavPriming, activeStepIds, currentStep]);
+
+  useEffect(() => {
     if (!wizardStepKey) return;
     const normalizedKey = String(wizardStepKey);
     assessmentWizardStepStore.set(normalizedKey, currentStep);
@@ -1542,9 +1592,10 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, [applicantUserId, applicationId]);
 
   useEffect(() => {
+    if (wizardNavPriming) return;
     if (!['docs', 'communication'].includes(currentStep)) return;
     loadDocumentChecklist();
-  }, [currentStep, loadDocumentChecklist]);
+  }, [currentStep, loadDocumentChecklist, wizardNavPriming]);
 
   const handleChecklistRefresh = useCallback(() => {
     setChecklistUploadError(null);
@@ -1567,7 +1618,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         : rawDocTypes.filter(type => type !== 'ei_verification');
       if (!docTypes.length) {
         if (!canUploadEiVerification && rawDocTypes.includes('ei_verification')) {
-          setChecklistUploadError('EI verification uploads are restricted to admins and regional managers.');
+          setChecklistUploadError('EI verification uploads are restricted to Program Administrators, Regional Managers, and ISET Coordinators/Case Managers.');
           return;
         }
         setChecklistUploadError('No document type is configured for this checklist item.');
@@ -2397,159 +2448,164 @@ const CoordinatorAssessmentWidget = forwardRef(
       showLockAlert({ reason: 'owned_by_other', lock: activeLock }, 'warning');
       return;
     }
-    setHasSubmitted(true);
-    setValidationAlert(null);
-    const errors = validateAssessment(assessment);
-    setFieldErrors(errors);
-    if (Object.keys(errors).length > 0) {
-      setValidationAlert([...new Set(Object.values(errors))]);
-      // Scroll to first error field
-      setTimeout(() => {
-        const firstErrorField = document.querySelector('[data-error-focus="true"]');
-        if (firstErrorField) {
-          firstErrorField.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          if (typeof firstErrorField.focus === 'function') {
-            firstErrorField.focus();
+    setIsSubmittingAssessment(true);
+    try {
+      setHasSubmitted(true);
+      setValidationAlert(null);
+      const errors = validateAssessment(assessment);
+      setFieldErrors(errors);
+      if (Object.keys(errors).length > 0) {
+        setValidationAlert([...new Set(Object.values(errors))]);
+        // Scroll to first error field
+        setTimeout(() => {
+          const firstErrorField = document.querySelector('[data-error-focus="true"]');
+          if (firstErrorField) {
+            firstErrorField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (typeof firstErrorField.focus === 'function') {
+              firstErrorField.focus();
+            }
           }
-        }
-      }, 0);
-      return;
-    }
-
-    const submitAssessment = async () => {
-      // --- POST-VALIDATION WORKFLOW ---
-      const lockCheck = await ensureLockForOperation();
-      if (!lockCheck.ok) return;
-      const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
-      // Pull the freshest row_version before building the submit payload to avoid optimistic conflicts.
-      let latestRowVersion = applicationRowVersionState;
-      try {
-        const latest = typeof actions?.refreshCaseData === 'function' ? await actions.refreshCaseData() : null;
-        const refreshedVersion = Number(latest?.application_row_version || latest?.applicationRowVersion || 0);
-        if (refreshedVersion > 0) {
-          latestRowVersion = refreshedVersion;
-          updateRowVersion(refreshedVersion);
-          if (typeof onRowVersionUpdate === 'function') {
-            onRowVersionUpdate(refreshedVersion);
-          }
-        }
-      } catch (_) {}
-
-      // 1. Always stamp assessment date on submit.
-      const dateOfAssessment = formatDate(new Date());
-
-      // 2. Save assessment (PUT /api/cases/:id)
-      const versionToken = Number(latestRowVersion || caseData?.application_row_version || 0);
-      let nextApplicationStatus = caseData?.applicationStatus || caseData?.status || null;
-      const payload = {
-        ...buildAssessmentPayload(),
-        dateOfAssessment,
-        assessment_date_of_assessment: dateOfAssessment,
-      };
-      if (!APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus)) {
-        payload.status = 'pending_approval';
-        payload.applicationStatus = 'pending_approval';
-        nextApplicationStatus = 'pending_approval';
+        }, 0);
+        return;
       }
-      const requestBody = { ...payload };
-      if (versionToken > 0) {
-        requestBody.expectedRowVersion = versionToken;
-      }
-      try {
-        // Save assessment
-        const res = await apiFetch(`/api/cases/${caseData.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
-        });
-        let result = null;
+
+      const submitAssessment = async () => {
+        // --- POST-VALIDATION WORKFLOW ---
+        const lockCheck = await ensureLockForOperation();
+        if (!lockCheck.ok) return;
+        const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
+        // Pull the freshest row_version before building the submit payload to avoid optimistic conflicts.
+        let latestRowVersion = applicationRowVersionState;
         try {
-          result = await res.json();
-        } catch (_) {
-          result = null;
+          const latest = typeof actions?.refreshCaseData === 'function' ? await actions.refreshCaseData() : null;
+          const refreshedVersion = Number(latest?.application_row_version || latest?.applicationRowVersion || 0);
+          if (refreshedVersion > 0) {
+            latestRowVersion = refreshedVersion;
+            updateRowVersion(refreshedVersion);
+            if (typeof onRowVersionUpdate === 'function') {
+              onRowVersionUpdate(refreshedVersion);
+            }
+          }
+        } catch (_) {}
+
+        // 1. Always stamp assessment date on submit.
+        const dateOfAssessment = formatDate(new Date());
+
+        // 2. Save assessment (PUT /api/cases/:id)
+        const versionToken = Number(latestRowVersion || caseData?.application_row_version || 0);
+        let nextApplicationStatus = caseData?.applicationStatus || caseData?.status || null;
+        const payload = {
+          ...buildAssessmentPayload(),
+          dateOfAssessment,
+          assessment_date_of_assessment: dateOfAssessment,
+        };
+        if (!APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus)) {
+          payload.status = 'pending_approval';
+          payload.applicationStatus = 'pending_approval';
+          nextApplicationStatus = 'pending_approval';
         }
-        if (res.status === 423) {
-          showLockAlert({ reason: result?.reason || result?.error, lock: result?.lock });
-          setIsEditingAssessment(false);
-          releaseLock({ silent: true }).catch(() => {});
-          return;
+        const requestBody = { ...payload };
+        if (versionToken > 0) {
+          requestBody.expectedRowVersion = versionToken;
         }
-        if (res.status === 409) {
-          const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
-          if (latestVersion) updateRowVersion(latestVersion);
+        try {
+          // Save assessment
+          const res = await apiFetch(`/api/cases/${caseData.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+          });
+          let result = null;
+          try {
+            result = await res.json();
+          } catch (_) {
+            result = null;
+          }
+          if (res.status === 423) {
+            showLockAlert({ reason: result?.reason || result?.error, lock: result?.lock });
+            setIsEditingAssessment(false);
+            releaseLock({ silent: true }).catch(() => {});
+            return;
+          }
+          if (res.status === 409) {
+            const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
+            if (latestVersion) updateRowVersion(latestVersion);
+            if (typeof actions?.refreshCaseData === 'function') {
+              try {
+                await actions.refreshCaseData();
+              } catch (_) {}
+            }
+            setIsEditingAssessment(false);
+            setAlert({
+              type: 'warning',
+              content: 'Another user updated this assessment. The latest data has been reloaded; review it and try again.',
+              dismissible: true,
+              statusIconAriaLabel: 'Warning'
+            });
+            scrollAfterAction();
+            releaseLock({ silent: true }).catch(() => {});
+            return;
+          }
+          if (handlePostingContextErrors(result)) {
+            scrollAfterAction();
+            return;
+          }
+          if (!res.ok || !result?.success) {
+            throw new Error(result?.error || 'Failed to save assessment.');
+          }
+          const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
+          if (updatedRowVersion) {
+            updateRowVersion(updatedRowVersion);
+          }
+
+          // 3. Reload caseData (to update status, etc.)
+          const fallbackUpdates = {
+            status: payload.status ?? caseData?.status ?? null,
+            statusRaw: payload.status ?? caseData?.status ?? null,
+            applicationStatus: payload.applicationStatus ?? nextApplicationStatus ?? caseData?.applicationStatus ?? null,
+          };
+          if (updatedRowVersion) {
+            fallbackUpdates.application_row_version = updatedRowVersion;
+          }
+          if (typeof onCaseUpdate === 'function') {
+            onCaseUpdate(fallbackUpdates);
+          }
           if (typeof actions?.refreshCaseData === 'function') {
             try {
               await actions.refreshCaseData();
-            } catch (_) {}
+            } catch (_) {
+              // ignore refresh errors, fallback already applied
+            }
           }
+          dispatchSupportingDocsRefresh();
           setIsEditingAssessment(false);
+          setShowNWACSection(true);
+          setLocalAssessmentSubmitted(true);
+          setFieldErrors({});
+          setHasSubmitted(false);
+          scrollAfterAction();
           setAlert({
-            type: 'warning',
-            content: 'Another user updated this assessment. The latest data has been reloaded; review it and try again.',
+            type: 'success',
+            content: 'Assessment submitted successfully. Application status moved to Pending Approval. Assessments must be approved by an authorised NWAC representative. Your assessment has been flagged for their attention.',
             dismissible: true,
-            statusIconAriaLabel: 'Warning'
+            statusIconAriaLabel: 'Success'
           });
+          setValidationAlert(null);
+          if (releaseAfterSuccess) {
+            releaseLock({ silent: true }).catch(() => {});
+          }
+        } catch (err) {
+          setAlert({ type: 'error', content: err.message || 'Failed to submit assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
           scrollAfterAction();
-          releaseLock({ silent: true }).catch(() => {});
-          return;
         }
-        if (handlePostingContextErrors(result)) {
-          scrollAfterAction();
-          return;
-        }
-        if (!res.ok || !result?.success) {
-          throw new Error(result?.error || 'Failed to save assessment.');
-        }
-        const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
-        if (updatedRowVersion) {
-          updateRowVersion(updatedRowVersion);
-        }
-
-        // 3. Reload caseData (to update status, etc.)
-      const fallbackUpdates = {
-        status: payload.status ?? caseData?.status ?? null,
-        statusRaw: payload.status ?? caseData?.status ?? null,
-        applicationStatus: payload.applicationStatus ?? nextApplicationStatus ?? caseData?.applicationStatus ?? null,
       };
-        if (updatedRowVersion) {
-          fallbackUpdates.application_row_version = updatedRowVersion;
-        }
-        if (typeof onCaseUpdate === 'function') {
-          onCaseUpdate(fallbackUpdates);
-        }
-      if (typeof actions?.refreshCaseData === 'function') {
-        try {
-          await actions.refreshCaseData();
-        } catch (_) {
-          // ignore refresh errors, fallback already applied
-        }
-      }
-      dispatchSupportingDocsRefresh();
-      setIsEditingAssessment(false);
-      setShowNWACSection(true);
-      setLocalAssessmentSubmitted(true);
-      setFieldErrors({});
-      setHasSubmitted(false);
-        scrollAfterAction();
-        setAlert({
-          type: 'success',
-          content: 'Assessment submitted successfully. Application status moved to Pending Approval. Assessments must be approved by an authorised NWAC representative. Your assessment has been flagged for their attention.',
-          dismissible: true,
-          statusIconAriaLabel: 'Success'
-        });
-        setValidationAlert(null);
-        if (releaseAfterSuccess) {
-          releaseLock({ silent: true }).catch(() => {});
-        }
-      } catch (err) {
-        setAlert({ type: 'error', content: err.message || 'Failed to submit assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
-        scrollAfterAction();
-      }
-    };
 
-    const checklistOk = await runDocumentChecklist(submitAssessment, { allowBypass: false });
-    if (!checklistOk) return;
-    await submitAssessment();
+      const checklistOk = await runDocumentChecklist(submitAssessment, { allowBypass: false });
+      if (!checklistOk) return;
+      await submitAssessment();
+    } finally {
+      setIsSubmittingAssessment(false);
+    }
   };
 
   // Enhanced handleItp and handleWage to clear funding error if valid
@@ -2684,6 +2740,13 @@ const CoordinatorAssessmentWidget = forwardRef(
           occurrences: assessment.recurringOccurrences ? Number(assessment.recurringOccurrences) : null
         }
         : null;
+      const requiredDocs = requiredCommunicationChecklistItems
+        .map(item => item?.label || item?.id)
+        .filter(Boolean);
+      const missingDocs = requiredCommunicationChecklistItems
+        .filter(item => item?.status !== 'complete')
+        .map(item => item?.label || item?.id)
+        .filter(Boolean);
       const decisionLabel = activeLetterKey === 'approval' ? 'Approval' : 'Denial';
       const reasonSeed = activeLetterKey === 'approval' ? assessment.justification : assessment.nwacReason;
       const contextPayload = {
@@ -2703,9 +2766,14 @@ const CoordinatorAssessmentWidget = forwardRef(
         intervention_cost_total: totalFunding || assessment.interventionCost || null,
         recurring_details: recurringDetails,
         funding_breakdown: fundingBreakdown,
+        required_documents: requiredDocs,
+        missing_documents: missingDocs,
         decision_reason_seed: reasonSeed || null
       };
-      const prompt = `Draft a concise ${decisionLabel.toLowerCase()} letter for the NWAC ISET program. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2. Keep each field brief and professional. If funding amounts or dates are provided, mention them clearly in the decision_reason or next steps. Use the context below and omit unknown details.\n\nContext:\n${JSON.stringify(contextPayload, null, 2)}`;
+      const reasonInstruction = activeLetterKey === 'denial'
+        ? 'For denial letters, decision_reason must be based on decision_reason_seed (Reason for Not Approving). Do not introduce new reasons beyond that text.'
+        : 'Use decision_reason_seed as the basis for decision_reason when provided.';
+      const prompt = `Draft a concise ${decisionLabel.toLowerCase()} letter for the NWAC ISET program. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2. Keep each field brief and professional. ${reasonInstruction} If funding amounts are provided, mention them in the decision_intro or decision_reason. Next steps must focus on start/end dates and the documents required to release payment (use required_documents/missing_documents). Do not mention dollar amounts in next steps. Use the context below and omit unknown details.\n\nContext:\n${JSON.stringify(contextPayload, null, 2)}`;
       const resp = await apiFetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2727,9 +2795,15 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (!parsed || typeof parsed !== 'object') {
         throw new Error('AI draft returned invalid JSON.');
       }
+      const docList = requiredDocs.length ? requiredDocs.join(', ') : '';
+      const defaultDocStep = docList
+        ? `Please complete the required documents in your checklist (${docList}) so we can release payment.`
+        : 'Please complete the required documents in your checklist so we can release payment.';
       setLetterDrafts(prev => {
         const current = prev?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
         const nextSteps = Array.isArray(parsed.next_steps || parsed.nextSteps) ? (parsed.next_steps || parsed.nextSteps) : [];
+        const parsedStep2 = parsed.next_step_2 || nextSteps[1] || current.next_step_2;
+        const step2HasCost = typeof parsedStep2 === 'string' && /\$|cost|amount/i.test(parsedStep2);
         return {
           ...prev,
           [activeLetterKey]: {
@@ -2739,7 +2813,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             decision_label: parsed.decision_label || current.decision_label,
             decision_reason: parsed.decision_reason || current.decision_reason,
             next_step_1: parsed.next_step_1 || nextSteps[0] || current.next_step_1,
-            next_step_2: parsed.next_step_2 || nextSteps[1] || current.next_step_2
+            next_step_2: step2HasCost ? defaultDocStep : (parsedStep2 || defaultDocStep)
           }
         };
       });
@@ -3216,7 +3290,7 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const handleApproveClick = async () => {
     if (isHighCostApprovalBlocked) {
-      setValidationAlert([`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`]);
+      setValidationAlert([`Regional Managers cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to Program Administrators.`]);
       return;
     }
     const outcomeValid = validateOutcomeBeforeApprove();
@@ -3392,13 +3466,13 @@ const CoordinatorAssessmentWidget = forwardRef(
             <Select
               selectedOption={RECOMMEND_OPTIONS.find(o => o.value === assessment.recommendation) || null}
               onChange={({ detail }) => handleField('recommendation', detail.selectedOption.value)}
-              options={RECOMMEND_OPTIONS}
-              placeholder="Select recommendation"
-              ariaLabel="Recommendation"
-              data-error-focus={showReviewErrors && fieldErrors.recommendation ? 'true' : undefined}
-              tabIndex={-1}
-              disabled={isAssessmentDisabled}
-            />
+            options={RECOMMEND_OPTIONS}
+            placeholder="Select recommendation"
+            ariaLabel="Recommendation"
+            data-error-focus={showReviewErrors && fieldErrors.recommendation ? 'true' : undefined}
+            tabIndex={-1}
+            readOnly={isAssessmentDisabled}
+          />
           </FormField>
           <FormField
             label="Justification"
@@ -3413,7 +3487,6 @@ const CoordinatorAssessmentWidget = forwardRef(
                 data-error-focus={showReviewErrors && fieldErrors.justification ? 'true' : undefined}
                 tabIndex={-1}
                 readOnly={isAssessmentDisabled}
-                disabled={isAssessmentDisabled}
               />
             </Box>
           </FormField>
@@ -3487,7 +3560,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             ariaLabel="Eligibility"
             data-error-focus={showEligibilityErrors && fieldErrors.esdcEligibility ? 'true' : undefined}
             tabIndex={-1}
-            disabled={isEligibilityDisabled}
+            readOnly={isEligibilityDisabled}
           />
         </FormField>
       </Grid>
@@ -3529,7 +3602,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             statusType={interventionCodesLoading ? 'loading' : 'finished'}
             filteringType="auto"
             data-error-focus={showFramingErrors && fieldErrors.interventionCode ? 'true' : undefined}
-            disabled={isAssessmentDisabled}
+            readOnly={isAssessmentDisabled}
           />
         </FormField>
       </Grid>
@@ -3546,7 +3619,6 @@ const CoordinatorAssessmentWidget = forwardRef(
             data-error-focus={showFramingErrors && fieldErrors.startDate ? 'true' : undefined}
             tabIndex={-1}
             readOnly={isAssessmentDisabled}
-            disabled={isAssessmentDisabled}
           />
         </FormField>
         {showEndDate && (
@@ -3561,8 +3633,8 @@ const CoordinatorAssessmentWidget = forwardRef(
               ariaLabel="End Date"
               data-error-focus={showFramingErrors && fieldErrors.endDate ? 'true' : undefined}
               tabIndex={-1}
-              readOnly={isAssessmentDisabled || !assessment.startDate}
-              disabled={isAssessmentDisabled || !assessment.startDate}
+              readOnly={isAssessmentDisabled}
+              disabled={!assessment.startDate}
               placeholder={assessment.startDate ? undefined : 'Set a start date first'}
             />
           </FormField>
@@ -3601,7 +3673,6 @@ const CoordinatorAssessmentWidget = forwardRef(
               data-error-focus={showRationaleErrors && fieldErrors.overview ? 'true' : undefined}
               tabIndex={-1}
               readOnly={isAssessmentDisabled}
-              disabled={isAssessmentDisabled}
             />
           </Box>
         </FormField>
@@ -3622,7 +3693,6 @@ const CoordinatorAssessmentWidget = forwardRef(
               data-error-focus={showRationaleErrors && fieldErrors.employmentGoals ? 'true' : undefined}
               tabIndex={-1}
               readOnly={isAssessmentDisabled}
-              disabled={isAssessmentDisabled}
             />
           </Box>
         </FormField>
@@ -3648,7 +3718,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               { value: 'partner', label: 'External delivery partner' },
               { value: 'in_house', label: 'In-house (no external partner)' }
             ]}
-            disabled={isAssessmentDisabled}
+            readOnly={isAssessmentDisabled}
           />
         </FormField>
       )}
@@ -3665,7 +3735,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 value={assessment.institution}
                 onChange={({ detail }) => handleField('institution', detail.value)}
                 data-error-focus={showTypeErrors && fieldErrors.institution ? 'true' : undefined}
-                disabled={isAssessmentDisabled}
+                readOnly={isAssessmentDisabled}
               />
             </FormField>
             <FormField
@@ -3675,7 +3745,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               <Input
                 value={assessment.programName}
                 onChange={({ detail }) => handleField('programName', detail.value)}
-                disabled={isAssessmentDisabled}
+                readOnly={isAssessmentDisabled}
               />
             </FormField>
           </ColumnLayout>
@@ -3690,7 +3760,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               onChange={({ detail }) => handleItp('details', detail.value)}
               placeholder="Summarize training plan, key milestones, supports, or materials."
               data-error-focus={showTypeErrors && fieldErrors.itpDetails ? 'true' : undefined}
-              disabled={isAssessmentDisabled}
+              readOnly={isAssessmentDisabled}
             />
           </FormField>
         </SpaceBetween>
@@ -3708,7 +3778,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 value={assessment.institution}
                 onChange={({ detail }) => handleField('institution', detail.value)}
                 data-error-focus={showTypeErrors && fieldErrors.institution ? 'true' : undefined}
-                disabled={isAssessmentDisabled}
+                readOnly={isAssessmentDisabled}
               />
             </FormField>
             <FormField
@@ -3718,7 +3788,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               <Input
                 value={assessment.programName}
                 onChange={({ detail }) => handleField('programName', detail.value)}
-                disabled={isAssessmentDisabled}
+                readOnly={isAssessmentDisabled}
               />
             </FormField>
           </ColumnLayout>
@@ -3736,7 +3806,8 @@ const CoordinatorAssessmentWidget = forwardRef(
                 statusType={nocVersionsLoading ? 'loading' : 'finished'}
                 filteringType="auto"
                 data-error-focus={showTypeErrors && fieldErrors.interventionNocVersion ? 'true' : undefined}
-                disabled={isAssessmentDisabled || nocVersionsLoading}
+                readOnly={isAssessmentDisabled}
+                disabled={nocVersionsLoading}
               />
             </FormField>
             <FormField
@@ -3770,7 +3841,8 @@ const CoordinatorAssessmentWidget = forwardRef(
                     : 'Select a NOC version first'
                 }
                 empty="No NOC codes found."
-                disabled={isAssessmentDisabled || !assessment.interventionNocVersion}
+                readOnly={isAssessmentDisabled}
+                disabled={!assessment.interventionNocVersion}
                 enteredTextLabel={value => `Use "${value}"`}
                 data-error-focus={showTypeErrors && fieldErrors.interventionNoc ? 'true' : undefined}
               />
@@ -3787,7 +3859,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 onChange={({ detail }) => handleWage('subsidyDetails', detail.value)}
                 placeholder="Employer, wage subsidy amount/percentage, duration, expectations."
                 data-error-focus={showTypeErrors && fieldErrors.wageSubsidyDetails ? 'true' : undefined}
-                disabled={isAssessmentDisabled}
+                readOnly={isAssessmentDisabled}
               />
             </FormField>
           )}
@@ -3805,7 +3877,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               onChange={({ detail }) => handleField('institution', detail.value)}
               placeholder="Training institution, employer, or provider"
               data-error-focus={showTypeErrors && fieldErrors.institution ? 'true' : undefined}
-              disabled={isAssessmentDisabled}
+              readOnly={isAssessmentDisabled}
             />
           </FormField>
         ) : (
@@ -3826,7 +3898,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             onChange={({ detail }) => handleField('childcareNeed', detail.selectedOption?.value || '')}
             options={CHILDCARE_OPTIONS}
             placeholder="Select childcare need"
-            disabled={isAssessmentDisabled}
+            readOnly={isAssessmentDisabled}
           />
         </FormField>
       </Grid>
@@ -3839,7 +3911,8 @@ const CoordinatorAssessmentWidget = forwardRef(
             <Textarea
               value={assessment.childcareFunding || ''}
               onChange={({ detail }) => handleField('childcareFunding', detail.value)}
-              disabled={isAssessmentDisabled || assessment.childcareNeed !== 'yes'}
+              readOnly={isAssessmentDisabled}
+              disabled={assessment.childcareNeed !== 'yes'}
             />
           </FormField>
         </Grid>
@@ -3875,7 +3948,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             onChange={({ detail }) => handleField('previousISET', detail.selectedOption?.value || '')}
             options={CHILDCARE_OPTIONS}
             placeholder="Select"
-            disabled={isAssessmentDisabled}
+            readOnly={isAssessmentDisabled}
           />
         </FormField>
       </Grid>
@@ -3892,7 +3965,6 @@ const CoordinatorAssessmentWidget = forwardRef(
               data-error-focus={showPreviousIsetErrors && fieldErrors.previousISETDetails ? 'true' : undefined}
               tabIndex={-1}
               readOnly={isAssessmentDisabled}
-              disabled={isAssessmentDisabled}
             />
           </FormField>
         </Grid>
@@ -3917,7 +3989,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 key={barrier}
                 checked={(assessment.barriers || []).includes(barrier)}
                 onChange={({ detail }) => toggleBarrier(barrier, detail.checked)}
-                disabled={isAssessmentDisabled}
+                readOnly={isAssessmentDisabled}
               >
                 {barrier}
               </Checkbox>
@@ -3934,7 +4006,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             value={assessment.barriersOther || ''}
             onChange={({ detail }) => handleField('barriersOther', detail.value)}
             placeholder="Describe the other barrier"
-            disabled={isAssessmentDisabled}
+            readOnly={isAssessmentDisabled}
           />
         </FormField>
       )}
@@ -3950,7 +4022,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               key={priority}
               checked={(assessment.priorities || []).includes(priority)}
               onChange={({ detail }) => togglePriority(priority, detail.checked)}
-              disabled={isAssessmentDisabled}
+              readOnly={isAssessmentDisabled}
             >
               {priority}
             </Checkbox>
@@ -3971,7 +4043,6 @@ const CoordinatorAssessmentWidget = forwardRef(
             value={assessment.otherFunding || ''}
             onChange={({ detail }) => handleField('otherFunding', detail.value)}
             readOnly={isAssessmentDisabled}
-            disabled={isAssessmentDisabled}
           />
         </FormField>
       </Grid>
@@ -4023,7 +4094,6 @@ const CoordinatorAssessmentWidget = forwardRef(
                       }}
                       ariaLabel={item.label}
                       readOnly={isAssessmentDisabled}
-                      disabled={isAssessmentDisabled}
                     />
                   );
                   if (!item.labelKey) return amountInput;
@@ -4035,7 +4105,6 @@ const CoordinatorAssessmentWidget = forwardRef(
                         placeholder="Describe..."
                         ariaLabel={`${item.label} description`}
                         readOnly={isAssessmentDisabled}
-                        disabled={isAssessmentDisabled}
                       />
                       {amountInput}
                     </SpaceBetween>
@@ -4115,7 +4184,6 @@ const CoordinatorAssessmentWidget = forwardRef(
                       }}
                       ariaLabel={item.label}
                       readOnly={isAssessmentDisabled}
-                      disabled={isAssessmentDisabled}
                     />
                   );
                   if (!item.labelKey) return amountInput;
@@ -4127,7 +4195,6 @@ const CoordinatorAssessmentWidget = forwardRef(
                         placeholder="Describe..."
                         ariaLabel={`${item.label} description`}
                         readOnly={isAssessmentDisabled}
-                        disabled={isAssessmentDisabled}
                       />
                       {amountInput}
                     </SpaceBetween>
@@ -4203,7 +4270,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 }}
                 placeholder={interventionCostPlaceholder}
                 data-error-focus={showCostErrors && fieldErrors.interventionCost ? 'true' : undefined}
-                disabled={isAssessmentDisabled}
+                readOnly={isAssessmentDisabled}
               />
             </FormField>
           </Grid>
@@ -4219,7 +4286,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 { value: 'one_time', label: 'One-time total' },
                 { value: 'recurring', label: 'Recurring schedule' }
               ]}
-              disabled={isAssessmentDisabled}
+              readOnly={isAssessmentDisabled}
             />
           </FormField>
           {isRecurringSchedule && (
@@ -4231,7 +4298,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                     onChange={({ detail }) => handleField('recurringPeriod', detail.selectedOption?.value || '')}
                     options={RECURRING_PERIOD_OPTIONS}
                     placeholder="Select recurrence period"
-                    disabled={isAssessmentDisabled}
+                    readOnly={isAssessmentDisabled}
                   />
                 </FormField>
                 <FormField label="Amount per period">
@@ -4247,7 +4314,6 @@ const CoordinatorAssessmentWidget = forwardRef(
                     inputMode="decimal"
                     placeholder="e.g. 150.00"
                     readOnly={isAssessmentDisabled}
-                    disabled={isAssessmentDisabled}
                   />
                 </FormField>
               </Grid>
@@ -4259,7 +4325,6 @@ const CoordinatorAssessmentWidget = forwardRef(
                   <Input
                     value={assessment.recurringOccurrences || ''}
                     readOnly
-                    disabled
                   />
                 </FormField>
                 <FormField
@@ -4271,7 +4336,6 @@ const CoordinatorAssessmentWidget = forwardRef(
                     value={displayInterventionCost || ''}
                     data-error-focus={showCostErrors && fieldErrors.interventionCost ? 'true' : undefined}
                     readOnly
-                    disabled
                   />
                 </FormField>
               </Grid>
@@ -4330,139 +4394,6 @@ const CoordinatorAssessmentWidget = forwardRef(
           {checklistUploadSuccess}
         </Alert>
       )}
-      <Box>
-        <Header
-          variant="h3"
-          description={
-            activeLetterKey
-              ? `Draft and send the ${activeLetterKey === 'approval' ? 'approval' : 'denial'} letter.`
-              : 'Record an approval or denial before drafting the letter.'
-          }
-          actions={
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button
-                onClick={handleGenerateLetterDraft}
-                disabled={!canGenerateLetterDraft || letterWorkflowsLoading}
-                loading={draftingLetter}
-              >
-                Generate draft
-              </Button>
-              <Button
-                onClick={() => persistLetterDraft({ silent: false })}
-                disabled={!canSaveLetterDraft}
-              >
-                Save draft
-              </Button>
-              <Button
-                variant="primary"
-                onClick={handleSendDecisionLetter}
-                disabled={!canSendLetter}
-                loading={sendingLetter}
-              >
-                Send letter
-              </Button>
-            </SpaceBetween>
-          }
-        >
-          Decision letter
-        </Header>
-        {letterWorkflowsError && (
-          <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setLetterWorkflowsError(null)}>
-            {letterWorkflowsError}
-          </Alert>
-        )}
-        {draftingLetterError && (
-          <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setDraftingLetterError(null)}>
-            {draftingLetterError}
-          </Alert>
-        )}
-        {sendingLetterError && (
-          <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setSendingLetterError(null)}>
-            {sendingLetterError}
-          </Alert>
-        )}
-        {!activeLetterKey && (
-          <Alert type="info" statusIconAriaLabel="Info">
-            Decision letters are available once an approval or denial has been recorded.
-          </Alert>
-        )}
-        {activeLetterKey && (
-          <SpaceBetween size="m">
-            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-              <FormField label="Decision date">
-                <DatePicker
-                  value={activeLetterDraft.decision_date || ''}
-                  onChange={({ detail }) => updateLetterDraftField('decision_date', detail.value)}
-                  placeholder="YYYY-MM-DD"
-                  disabled={isLetterEditingDisabled}
-                />
-              </FormField>
-              <FormField label="Letter title">
-                <Input
-                  value={activeLetterDraft.letter_title || ''}
-                  onChange={({ detail }) => updateLetterDraftField('letter_title', detail.value)}
-                  disabled={isLetterEditingDisabled}
-                />
-              </FormField>
-            </Grid>
-            <FormField label="Intro paragraph">
-              <Textarea
-                value={activeLetterDraft.decision_intro || ''}
-                onChange={({ detail }) => updateLetterDraftField('decision_intro', detail.value)}
-                rows={3}
-                disabled={isLetterEditingDisabled}
-              />
-            </FormField>
-            <FormField label="Decision label">
-              <Input
-                value={activeLetterDraft.decision_label || ''}
-                onChange={({ detail }) => updateLetterDraftField('decision_label', detail.value)}
-                disabled={isLetterEditingDisabled}
-              />
-            </FormField>
-            <FormField label="Decision reason">
-              <Textarea
-                value={activeLetterDraft.decision_reason || ''}
-                onChange={({ detail }) => updateLetterDraftField('decision_reason', detail.value)}
-                rows={3}
-                disabled={isLetterEditingDisabled}
-              />
-            </FormField>
-            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-              <FormField label="Next step 1">
-                <Input
-                  value={activeLetterDraft.next_step_1 || ''}
-                  onChange={({ detail }) => updateLetterDraftField('next_step_1', detail.value)}
-                  disabled={isLetterEditingDisabled}
-                />
-              </FormField>
-              <FormField label="Next step 2">
-                <Input
-                  value={activeLetterDraft.next_step_2 || ''}
-                  onChange={({ detail }) => updateLetterDraftField('next_step_2', detail.value)}
-                  disabled={isLetterEditingDisabled}
-                />
-              </FormField>
-            </Grid>
-            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-              <FormField label="Coordinator name">
-                <Input
-                  value={activeLetterDraft.coordinator_name || ''}
-                  onChange={({ detail }) => updateLetterDraftField('coordinator_name', detail.value)}
-                  disabled={isLetterEditingDisabled}
-                />
-              </FormField>
-              <FormField label="Organization name">
-                <Input
-                  value={activeLetterDraft.organization_name || ''}
-                  onChange={({ detail }) => updateLetterDraftField('organization_name', detail.value)}
-                  disabled={isLetterEditingDisabled}
-                />
-              </FormField>
-            </Grid>
-          </SpaceBetween>
-        )}
-      </Box>
       <SpaceBetween size="s">
         {documentChecklistError && (
           <Alert type="error" dismissible onDismiss={() => setDocumentChecklistError(null)}>
@@ -4603,6 +4534,141 @@ const CoordinatorAssessmentWidget = forwardRef(
           {checklistUploadSuccess}
         </Alert>
       )}
+      <Box>
+        <Header
+          variant="h3"
+          description={
+            activeLetterKey
+              ? `Draft and send the ${activeLetterKey === 'approval' ? 'approval' : 'denial'} letter.`
+              : 'Record an approval or denial before drafting the letter.'
+          }
+          actions={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                onClick={handleGenerateLetterDraft}
+                disabled={!canGenerateLetterDraft || letterWorkflowsLoading}
+                loading={draftingLetter}
+              >
+                Generate draft
+              </Button>
+              <Button
+                onClick={() => persistLetterDraft({ silent: false })}
+                disabled={!canSaveLetterDraft}
+              >
+                Save draft
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleSendDecisionLetter}
+                disabled={!canSendLetter}
+                loading={sendingLetter}
+              >
+                Send letter
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          Decision letter
+        </Header>
+        {letterWorkflowsError && (
+          <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setLetterWorkflowsError(null)}>
+            {letterWorkflowsError}
+          </Alert>
+        )}
+        {draftingLetterError && (
+          <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setDraftingLetterError(null)}>
+            {draftingLetterError}
+          </Alert>
+        )}
+        {sendingLetterError && (
+          <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setSendingLetterError(null)}>
+            {sendingLetterError}
+          </Alert>
+        )}
+        {!activeLetterKey && (
+          <Alert type="info" statusIconAriaLabel="Info">
+            Decision letters are available once an approval or denial has been recorded.
+          </Alert>
+        )}
+        {activeLetterKey && (
+          <SpaceBetween size="m">
+            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+              <FormField label="Decision date">
+                <DatePicker
+                  value={activeLetterDraft.decision_date || ''}
+                  onChange={({ detail }) => updateLetterDraftField('decision_date', detail.value)}
+                  placeholder="YYYY-MM-DD"
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+              <FormField label="Letter title">
+                <Input
+                  value={activeLetterDraft.letter_title || ''}
+                  onChange={({ detail }) => updateLetterDraftField('letter_title', detail.value)}
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+            </Grid>
+            <FormField label="Intro paragraph">
+              <Textarea
+                value={activeLetterDraft.decision_intro || ''}
+                onChange={({ detail }) => updateLetterDraftField('decision_intro', detail.value)}
+                rows={3}
+                disabled={isLetterEditingDisabled}
+              />
+            </FormField>
+            <FormField label="Decision label">
+              <Input
+                value={activeLetterDraft.decision_label || ''}
+                onChange={({ detail }) => updateLetterDraftField('decision_label', detail.value)}
+                disabled={isLetterEditingDisabled}
+              />
+            </FormField>
+            <FormField label="Decision reason">
+              <Textarea
+                value={activeLetterDraft.decision_reason || ''}
+                onChange={({ detail }) => updateLetterDraftField('decision_reason', detail.value)}
+                rows={3}
+                disabled={isLetterEditingDisabled}
+              />
+            </FormField>
+            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+              <FormField label="Next step 1">
+                <Textarea
+                  value={activeLetterDraft.next_step_1 || ''}
+                  onChange={({ detail }) => updateLetterDraftField('next_step_1', detail.value)}
+                  rows={2}
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+              <FormField label="Next step 2">
+                <Textarea
+                  value={activeLetterDraft.next_step_2 || ''}
+                  onChange={({ detail }) => updateLetterDraftField('next_step_2', detail.value)}
+                  rows={2}
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+            </Grid>
+            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+              <FormField label="Coordinator name">
+                <Input
+                  value={activeLetterDraft.coordinator_name || ''}
+                  onChange={({ detail }) => updateLetterDraftField('coordinator_name', detail.value)}
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+              <FormField label="Organization name">
+                <Input
+                  value={activeLetterDraft.organization_name || ''}
+                  onChange={({ detail }) => updateLetterDraftField('organization_name', detail.value)}
+                  disabled={isLetterEditingDisabled}
+                />
+              </FormField>
+            </Grid>
+          </SpaceBetween>
+        )}
+      </Box>
       <SpaceBetween size="s">
         {documentChecklistError && (
           <Alert type="error" dismissible onDismiss={() => setDocumentChecklistError(null)}>
@@ -4833,7 +4899,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 value={assessment.nwacReviewStatus || ''}
                 onChange={({ detail }) => {
                   if (detail.value === 'approve' && isHighCostApprovalBlocked) {
-                    setValidationAlert([`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`]);
+                    setValidationAlert([`Regional Managers cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to Program Administrators.`]);
                     return;
                   }
                   if (isNWACFieldsDisabled) return;
@@ -4852,9 +4918,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 ]}
                 ariaLabel="NWAC Review Status"
                 data-error-focus={showDecisionErrors && fieldErrors.nwacReviewStatus ? 'true' : undefined}
-                disabled={isNWACFieldsDisabled}
                 readOnly={isNWACFieldsDisabled}
-                style={isNWACFieldsDisabled ? { opacity: 0.4 } : undefined}
               />
             </SpaceBetween>
           </FormField>
@@ -4871,7 +4935,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               ]}
               placeholder="Select review outcome"
               data-error-focus={showDecisionErrors && fieldErrors.nwacReview ? 'true' : undefined}
-              disabled={isNWACFieldsDisabled || assessment.nwacReviewStatus === 'push_back'}
+              readOnly={isNWACFieldsDisabled || assessment.nwacReviewStatus === 'push_back'}
             />
           </FormField>
         </Grid>
@@ -4885,7 +4949,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
                   if (isNWACFieldsDisabled) return;
                   handleField('nwacReason', detail.value);
-                }} data-error-focus={showDecisionErrors && fieldErrors.nwacReason ? 'true' : undefined} disabled={isNWACFieldsDisabled} />
+                }} data-error-focus={showDecisionErrors && fieldErrors.nwacReason ? 'true' : undefined} readOnly={isNWACFieldsDisabled} />
               </Box>
             </FormField>
           </Grid>
@@ -4911,12 +4975,12 @@ const CoordinatorAssessmentWidget = forwardRef(
                 loadingText="Loading budget pots"
                 onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
                 data-error-focus={showDecisionErrors && fieldErrors.interventionPotId ? 'true' : undefined}
-                disabled={
+                readOnly={
                   baseAssessmentLocked ||
                   isEligibilityGateActive ||
-                  (!canManageBudgetPotPending && isAssessmentDisabled) ||
-                  !decisionHasCost
+                  (!canManageBudgetPotPending && isAssessmentDisabled)
                 }
+                disabled={!decisionHasCost}
               />
             </FormField>
             <FormField
@@ -4925,7 +4989,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               errorText={showDecisionErrors && fieldErrors.postingContext ? fieldErrors.postingContext : undefined}
             >
               {isAssessor ? (
-                <Input value="External (region/PTMA)" readOnly disabled={!assessment.interventionPotId || !decisionHasCost || isAssessmentDisabled} />
+                <Input value="External (region/PTMA)" readOnly />
               ) : (
                 <Select
                   selectedOption={selectedPostingContext}
@@ -4933,13 +4997,15 @@ const CoordinatorAssessmentWidget = forwardRef(
                   onChange={({ detail }) => handleField('postingContext', detail.selectedOption?.value || '')}
                   placeholder="Select"
                   data-error-focus={showDecisionErrors && fieldErrors.postingContext ? 'true' : undefined}
-                  disabled={
-                    !assessment.interventionPotId ||
-                    !decisionHasCost ||
+                  readOnly={
                     lockedByAnotherUser ||
                     isLockedStatus ||
                     isDecisionFinal ||
                     (isAssessmentDisabled && !canManageBudgetPotPending)
+                  }
+                  disabled={
+                    !assessment.interventionPotId ||
+                    !decisionHasCost
                   }
                 />
               )}
@@ -5005,7 +5071,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     : (showNWACSection ? (canSubmitOutcome ? handleApproveClick : undefined) : (canSubmitAssessment ? handleSubmit : undefined));
   const wizardSubmitLabel = isCommunicationStep
     ? 'Mark communication complete'
-    : (showNWACSection ? 'Approve / Mark Not Approved' : 'Submit assessment');
+    : (showNWACSection ? 'Commit' : 'Submit assessment');
 
   if (isDeclarationGateActive) {
     return (
@@ -5157,11 +5223,11 @@ const CoordinatorAssessmentWidget = forwardRef(
         {isEligibilityGateActive && (
           <>
             <Alert
-              type="info"
+              type="error"
               header="Employment insurance eligibility not checked"
-              statusIconAriaLabel="Info"
+              statusIconAriaLabel="Error"
             >
-              Assessment sections are locked until a System Admin or Program Admin sets ESDC eligibility.
+              Assessment sections are locked until a Program Administrator, Regional Manager, or ISET Coordinator/Case Manager sets ESDC eligibility.
             </Alert>
             <Box margin={{ bottom: 's' }} />
           </>
@@ -5173,29 +5239,31 @@ const CoordinatorAssessmentWidget = forwardRef(
           accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
           onChange={handleChecklistFileSelected}
         />
-        <Wizard
-          activeStepIndex={activeStepIndex}
-          isLoadingNextStep={lockingAssessment || checkingChecklist || eiVerificationUploading}
-          onNavigate={handleWizardNavigate}
-          onSubmit={wizardSubmitHandler}
-          onCancel={canSubmitAssessment ? handleCancel : undefined}
-          steps={steps.map(step => ({
-            title: step.title,
-            content: step.content,
-            isOptional: step.isOptional,
-            errorText:
-              attemptedSteps[step.id] && !isWizardStepValid(step.id)
-                ? step.id === 'review'
-                  ? 'Complete required fields before submitting.'
-                  : 'Complete required fields before continuing.'
-                : undefined,
-          }))}
-          submitButtonText={wizardSubmitHandler ? wizardSubmitLabel : 'Read only'}
-          cancelButtonText={canSubmitAssessment ? 'Cancel' : undefined}
-          nextButtonText="Next"
-          previousButtonText="Previous"
-          secondaryActions={null}
-        />
+        <div style={{ visibility: wizardNavPriming ? 'hidden' : 'visible' }} aria-hidden={wizardNavPriming ? 'true' : undefined}>
+          <Wizard
+            activeStepIndex={activeStepIndex}
+            isLoadingNextStep={lockingAssessment || checkingChecklist || eiVerificationUploading || isSubmittingAssessment}
+            onNavigate={handleWizardNavigate}
+            onSubmit={wizardSubmitHandler}
+            onCancel={canSubmitAssessment ? handleCancel : undefined}
+            steps={steps.map(step => ({
+              title: step.title,
+              content: step.content,
+              isOptional: step.isOptional,
+              errorText:
+                attemptedSteps[step.id] && !isWizardStepValid(step.id)
+                  ? step.id === 'review'
+                    ? 'Complete required fields before submitting.'
+                    : 'Complete required fields before continuing.'
+                  : undefined,
+            }))}
+            submitButtonText={wizardSubmitHandler ? wizardSubmitLabel : 'Read only'}
+            cancelButtonText={canSubmitAssessment ? 'Cancel' : undefined}
+            nextButtonText="Next"
+            previousButtonText="Previous"
+            secondaryActions={null}
+          />
+        </div>
         {checklistUploadModal}
         <Modal
           visible={showCancelModal}
@@ -5311,7 +5379,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               Thank you for declaring a potential conflict of interest. You won’t be able to assess this case while the conflict is reviewed.
             </Box>
             <Box>
-              A program admin or regional manager will review and reassign the case as needed. You’ll be redirected to your homepage now.
+              A Program Administrator or Regional Manager will review and reassign the case as needed. You’ll be redirected to your homepage now.
             </Box>
           </SpaceBetween>
         </Modal>

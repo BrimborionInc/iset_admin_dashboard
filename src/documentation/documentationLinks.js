@@ -1,15 +1,15 @@
 export const documentationCategories = [
   {
     id: 'training-compliance',
-    title: 'Training & Compliance',
-    description: 'Orientation modules and audit-ready checklists for ISET case managers and PTMA staff.',
+    title: 'Guidance & Compliance',
+    description: 'Orientation guidance and audit-ready checklists for ISET case managers and PTMA staff.',
     items: [
       {
         id: 'iset-orientation-2025',
-        title: 'ISET Orientation Training Modules (2025-2026)',
+        title: 'ISET Orientation Guidance Modules (2025-2026)',
         runtimeId: 'training-modules-2025',
         sourcePath: 'docs/training/TRAINING_MODULES_September_2025_extracted.md',
-        sourceNote: 'Source lives in the repo docs folder; not bundled into the runtime build.',
+        sourceNote: 'Reference guidance compiled from internal program materials; not a replacement for formal training.',
         summary: [
           'Orientation to the NWAC ↔ ESDC contribution agreement, funding streams (EI/CRF), and program mandate.',
           'Eligibility and documentation expectations for case managers, including ARMS usage and audit readiness.',

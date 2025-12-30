@@ -1,0 +1,97 @@
+{
+  "id": "iset-intervention-v1",
+  "label": "ISET Intervention Checklist",
+  "version": "2026-01-20",
+  "gates": [
+    {
+      "id": "submit_proposal",
+      "label": "Needed to Submit Proposal",
+      "statusScope": "intervention",
+      "statuses": ["draft", "changes_requested"],
+      "items": [
+        {
+          "id": "band-funding-letter",
+          "label": "Band funding confirmation or denial letter",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "minCount": 1,
+          "documentTypes": ["band_funding_confirmation", "band_funding_denial"]
+        },
+        {
+          "id": "intervention-acceptance-letter",
+          "label": "Letter of Acceptance (current year/term)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["acceptance_letter"]
+        },
+        {
+          "id": "intervention-financial-overview",
+          "label": "ISET Financial Overview (monthly budget)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["financial_overview"]
+        },
+        {
+          "id": "intervention-financial-evidence",
+          "label": "Financial Evidence (expenses / supporting)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "minCount": 1,
+          "documentTypes": ["financial_evidence"]
+        }
+      ]
+    },
+    {
+      "id": "enable_funding",
+      "label": "Needed to Enable Funding",
+      "statusScope": "intervention",
+      "statuses": ["submitted", "in_review"],
+      "items": [
+        {
+          "id": "band-funding-letter",
+          "label": "Band funding confirmation or denial letter",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "minCount": 1,
+          "documentTypes": ["band_funding_confirmation", "band_funding_denial"]
+        },
+        {
+          "id": "intervention-acceptance-letter",
+          "label": "Letter of Acceptance (current year/term)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["acceptance_letter"]
+        },
+        {
+          "id": "intervention-financial-overview",
+          "label": "ISET Financial Overview (monthly budget)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["financial_overview"]
+        },
+        {
+          "id": "intervention-financial-evidence",
+          "label": "Financial Evidence (expenses / supporting)",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "minCount": 1,
+          "documentTypes": ["financial_evidence"]
+        },
+        {
+          "id": "intervention-ei-verification",
+          "label": "EI Eligibility Verification",
+          "sources": ["application_submission", "manual_upload", "secure_message_attachment"],
+          "required": true,
+          "documentTypes": ["ei_verification"]
+        }
+      ]
+    },
+    {
+      "id": "release_payments",
+      "label": "Needed to Release Payments",
+      "statusScope": "intervention",
+      "statuses": ["approved", "in_progress", "suspended", "ready_to_close"],
+      "items": []
+    }
+  ]
+}

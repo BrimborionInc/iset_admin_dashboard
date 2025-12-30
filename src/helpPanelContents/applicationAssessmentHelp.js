@@ -2,94 +2,83 @@ import React from 'react';
 
 const ApplicationAssessmentHelp = () => (
   <div>
-    <h2>Coordinator assessment workflow</h2>
+    <h2>Application assessment workflow</h2>
     <p>
-      Use this form to document the coordinator&apos;s review, confirm eligibility, and capture the funding recommendation.
-      Required fields must be completed before you can submit for NWAC review. Editing requires an assessment lock; if
-      the case is approved/rejected or locked by another user, editing is blocked.
+      Use this form to document the assessment, confirm eligibility, and capture the funding recommendation. Required
+      fields must be completed before you can submit for NWAC review. Editing requires an assessment lock and becomes
+      read-only once a final decision is recorded.
     </p>
 
     <h3>Before you start</h3>
     <ul>
-      <li>Review the <strong>ISET Application Form</strong> widget to gather the applicant&apos;s background, requested
-        supports, and prior funding history.</li>
-      <li>Check <strong>Supporting Documents</strong> for mandatory evidence from the training module: Status/Treaty card or two Nation letters plus self-declaration, two IDs, acceptance letter, fee statement, band denial (if applicable), and income/expense proofs for living allowance.</li>
-      <li>Confirm the case status in <strong>Application Overview</strong>; if it is pending approval, approved, rejected, or locked by another user you may have limited edit access.</li>
+      <li>Review the <strong>ISET Application Form</strong> for intake answers, signatures, and background details.</li>
+      <li>Check <strong>Supporting Documents</strong> and confirm the checklist reflects the required evidence.</li>
+      <li>Complete the conflict of interest declaration if it is still required; the assessment stays locked until it is signed.</li>
+      <li>Set EI eligibility if your role permits it; sections remain locked until eligibility is recorded.</li>
     </ul>
 
     <h3>Completing the form</h3>
     <ol>
-      <li>Open <em>Edit</em>, confirm to acquire the lock, then populate the <strong>assessment overview</strong> and <strong>employment goals</strong> with a concise summary of the client situation.</li>
-      <li>Record <strong>barriers</strong>, <strong>local priorities</strong>, and <strong>other funding</strong> (band try-first rule, EI/CRF stream, other sponsors) to justify need.</li>
-      <li>Use <strong>Intervention Details</strong> to capture timelines, provider, program name, NOC code/version (if required), childcare needs, and cost breakdowns (ITP and/or Targeted Wage Subsidy fields).</li>
-      <li>Select a <strong>recommendation</strong> (fund / do not fund / alternative) and provide a detailed justification; this text is carried to the case record and outcome review.</li>
-      <li>Click <em>Save</em> to keep a draft without status change, or <em>Submit</em> to move the case to <strong>pending approval</strong> for NWAC review. Save/Submit will release your lock.</li>
+      <li>Select <em>Edit</em> and confirm to acquire the lock.</li>
+      <li>Record EI eligibility and upload verification if required.</li>
+      <li>Complete the assessment overview, employment goals, barriers, priorities, other funding, and previous ISET details.</li>
+      <li>Capture intervention details (dates, provider, delivery mode, NOC code/version when required, childcare needs).</li>
+      <li>Enter costs using the ITP and/or wage subsidy breakdowns and confirm totals.</li>
+      <li>Review the checklist step and upload missing documents as needed.</li>
+      <li>Set the recommendation and justification on the Review step.</li>
+      <li>Click <em>Save</em> to keep a draft, or <em>Submit assessment</em> to move the application to <strong>pending approval</strong>.</li>
     </ol>
 
     <h3>Outcome notice</h3>
     <p>
-      Once the assessment is submitted, the NWAC section unlocks so reviewers can record the funding decision and
-      assurance outcome. Approved outcomes set application status to Approved/Initiated; rejected outcomes set it to
-      Rejected/Archived and require a denial reason. Audit events and status updates fire automatically.
+      After submission, the NWAC section unlocks for reviewers to record the decision and assurance outcome. Approved
+      or Not Approved moves the application to decision ready; Push back returns it to in review. The Communication step
+      then appears to draft and send the approval or denial letter and mark communication complete.
     </p>
 
     <h3>Need to revise?</h3>
     <p>
       If adjustments are required after submission and policy allows, choose <em>Edit</em> to re-open the form (lock
-      required). Save or re-submit to persist changes; edits are blocked once a final decision exists unless privileges
-      permit reopening.
+      required). Save or re-submit to persist changes; edits are blocked once a final decision exists unless reopening
+      is permitted.
     </p>
-
-    <h3>Compliance reminders (from training)</h3>
-    <ul>
-      <li>Contact new applicants within five days and make up to three attempts for missing information before closing for non-response; log outreach in Case Notes.</li>
-      <li>Pending means: documents complete, case manager recommendation captured, NWAC decision pending, Funding Agreement not yet signed—use status and notes to explain why a case remains pending.</li>
-      <li>Band/First Nation funding letters must be requested first; denials must be on letterhead and match the ask.</li>
-      <li>All applications (funded or not) must remain recorded for ARMS/audit; avoid untracked closures.</li>
-    </ul>
   </div>
 );
 
 ApplicationAssessmentHelp.aiContext = `
 You are assisting a coordinator filling out the Application Assessment widget. Key behaviors and constraints:
-- Edit requires acquiring an assessment lock; editing is blocked if the case is approved/rejected or held by another user.
-- Sections: overview/employment goals, barriers and local priorities, previous ISET, other funding (band try-first, EI/CRF stream, other sponsors), ESDC eligibility, intervention details (provider, dates, program name, NOC + version as needed, childcare need/funding), costs (ITP and/or wage breakdowns), recommendation and justification.
-- Save keeps a draft without changing status; Submit moves the case to pending approval for NWAC review. Both persist to the case record and may release the lock.
-- Evidence expectations from the training module: Status/Treaty card or two Nation letters plus self-declaration; two IDs; acceptance letter; statement of fees; band denial (if applicable); income/expense proofs for living allowance; attendance reports monthly during training.
-- Timelines and pending definition from training: contact applicants within five days and make up to three attempts for missing info; “pending” covers cases waiting on docs, case manager recommendation, NWAC decision, or Funding Agreement. Note this in status explanations and Case Notes.
-- All applications (funded or not) must stay recorded for audit/ARMS; avoid untracked closures. Reference related widgets for context: Application Overview (status/owner), ISET Application Form (applicant data/version history), Supporting Documents (evidence), Notes and Tasks (audit trail), Secure Messaging (doc requests).
+- Edit requires acquiring an assessment lock; editing is blocked after a final decision or when another user holds the lock.
+- Sections include EI eligibility, overview/employment goals, barriers and local priorities, previous ISET, other funding, intervention details (provider, dates, program name, NOC + version as needed, childcare need), costs (ITP and/or wage breakdowns), recommendation, justification, and the document checklist.
+- Save keeps a draft without changing status; Submit assessment moves the application to pending approval and unlocks NWAC review.
+- Use related widgets for context: Application Overview (status/owner), ISET Application Form (applicant data/version history), Supporting Documents (evidence/checklist), Notes and Tasks (audit trail), Secure Messaging (doc requests).
 `;
 
 export const NwacAssessmentHelp = () => (
   <div>
     <h2>NWAC outcome notice</h2>
     <p>
-      This panel appears once the coordinator submits the assessment. Use it to record the NWAC funding decision and the
-      assurance outcome before finalising the case.
+      This panel appears once the assessment is submitted. Use it to record the NWAC decision and assurance outcome
+      before moving to communication.
     </p>
     <ol>
-      <li>Select <strong>Approve</strong> or <strong>Reject</strong> under Funding Decision. Approval clears any existing
-        denial reason.</li>
-      <li>Choose the <strong>Assessment Assurance</strong> response that best reflects your review of the coordinator&apos;s
-        recommendation.</li>
-      <li>If rejecting, provide a detailed <strong>Reason for Denial</strong> to surface the rationale in downstream
-        communications and logs.</li>
-      <li>Click <em>Approve/Reject</em> to save the outcome, mark the case status, emit audit events, and unlock next
-        steps for notifications.</li>
+      <li>Select <strong>Approved</strong>, <strong>Not Approved</strong>, or <strong>Push back to coordinator</strong>.</li>
+      <li>Choose the <strong>Assessment Assurance</strong> outcome when approving or not approving.</li>
+      <li>Provide the <strong>Reason for Not Approving</strong> or <strong>Reason for Push Back</strong> when required.</li>
+      <li>Click <em>Commit</em> to save the outcome, update status, and unlock the Communication step.</li>
     </ol>
     <p>
-      Edits are locked once a final decision exists. Reopen the assessment only when policy permits and be sure to
-      capture a new case note documenting any change.
+      Edits are locked once a final decision exists. Reopen the assessment only when policy permits and capture a
+      case note documenting any change.
     </p>
   </div>
 );
 
 NwacAssessmentHelp.aiContext = `
 You are assisting an NWAC reviewer who is completing the outcome notice at the end of the Application Assessment widget.
-Explain how to record the funding decision, assurance outcome, and rejection reasons, and what happens when the
-Approve/Reject action is taken. Approved sets application status to Approved/Initiated; rejected sets it to Rejected/Archived
-and requires a denial reason. Editing is disabled after final decision unless policy allows reopening. Status and audit log
-update automatically.
+Explain how to record the funding decision, assurance outcome, and required reasons, and what happens when Commit is
+selected. Approved or Not Approved moves the application to decision ready and unlocks the Communication step; Push back
+returns the assessment to the coordinator for updates. Editing is disabled after a final decision unless reopening is
+permitted. Status and audit logs update automatically.
 `;
 
 export default ApplicationAssessmentHelp;

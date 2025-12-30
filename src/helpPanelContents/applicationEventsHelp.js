@@ -4,7 +4,7 @@ const ApplicationEventsHelp = () => (
   <div>
     <h2>Case activity timeline</h2>
     <p>
-      The events feed records every key action on the application—from submissions and status changes to review
+      The events feed records every key action on the application - from submissions and status changes to review
       outcomes. Use it to retrace who did what and when.
     </p>
 
@@ -26,15 +26,16 @@ const ApplicationEventsHelp = () => (
 
     <h3>Working with the table</h3>
     <ul>
-      <li>Use the search box to filter for keywords such as “approved” or a specific team member.</li>
+      <li>Use the search box to filter for keywords such as "approved" or a specific team member.</li>
       <li>Sort the Date/Time column to review the most recent activity or replay events in order.</li>
-      <li>Pinned alerts from other widgets (like assessments) also appear here so you do not miss follow-up items.</li>
+      <li>Reminder events include an action to acknowledge and clear the reminder.</li>
+      <li>Use the download action to export the timeline as CSV when needed.</li>
     </ul>
 
     <h3>Operational tips</h3>
     <ul>
       <li>Review events before contacting an applicant to ensure you understand the latest communication.</li>
-      <li>When notes reference a change, confirm it appears here—if not, refresh to pull the latest log.</li>
+      <li>When notes reference a change, confirm it appears here - if not, refresh to pull the latest log.</li>
       <li>Use the timeline during audits to demonstrate when decisions were recorded and by whom.</li>
     </ul>
   </div>
@@ -42,7 +43,7 @@ const ApplicationEventsHelp = () => (
 
 ApplicationEventsHelp.aiContext = `
 You are assisting an ISET program user reviewing the Events widget. Explain how to interpret event messages, filter the
-list, and confirm who performed each action. Focus on operational awareness and audit readiness.
+list, sort by date, acknowledge reminders, and export CSV when needed. Focus on operational awareness and audit readiness.
 `;
 
 export default ApplicationEventsHelp;
