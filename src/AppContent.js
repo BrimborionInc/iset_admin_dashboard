@@ -7,7 +7,8 @@ import {
   Button,
   Header,
   SpaceBetween,
-  Container
+  Container,
+  AnnotationContext
 } from '@cloudscape-design/components';
 import Link from '@cloudscape-design/components/link';
 import Avatar from "@cloudscape-design/chat-components/avatar";
@@ -20,15 +21,20 @@ import AppRoutes from './routes/AppRoutes.js'; // Ensure this matches the export
 import { helpMessages } from './utils/helpMessages.js';
 import CustomSplitPanel from './layouts/CustomSplitPanel.js';
 import { LocationProvider } from './context/LocationContext';
+import { TutorialsContext } from './context/TutorialsContext';
 import AdminDashboardHelp from './helpPanelContents/adminDashboardHelp.js';
 import AdminConsoleIntroHelp from './helpPanelContents/adminConsoleIntroHelp.js';
 import { MessagingProvider } from './pages/messages/MessagingContext.js';
 import FloatingMessageWindow from './pages/messages/FloatingMessageWindow.jsx';
+import { buildApplicationWorkspaceTutorials } from './tutorials/applicationWorkspaceTutorials';
+import { buildNwacAssessmentTutorials } from './tutorials/nwacAssessmentTutorials';
+import { annotationContextI18nStrings } from './tutorials/tutorialI18n';
 
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_STORED_MESSAGES = 24;
 const MAX_PROMPT_CHARS = 1000;
 const CONTENT_DENSITY_STORAGE_KEY = "iset-demo-content-density";
+const TUTORIAL_COMPLETION_STORAGE_KEY = 'iset-tutorials.completed.v1';
 
 const CONTEXT_FACTS = {
   'iset-application-assessment': `
@@ -82,6 +88,56 @@ const buildSystemPrompt = ({ focusTitle, aiContext }) => {
   );
 
   return sections.join('\n');
+};
+
+const loadTutorialCompletionMap = () => {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+  try {
+    const raw = window.localStorage?.getItem(TUTORIAL_COMPLETION_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.reduce((acc, entry) => {
+        if (typeof entry === 'string' && entry.trim()) {
+          acc[entry] = true;
+        }
+        return acc;
+      }, {});
+    }
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
+  } catch (_) {
+    return {};
+  }
+  return {};
+};
+
+const persistTutorialCompletionMap = (nextValue) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage?.setItem(
+      TUTORIAL_COMPLETION_STORAGE_KEY,
+      JSON.stringify(nextValue || {})
+    );
+  } catch (_) {
+    // Ignore persistence failures (private mode, quota, etc.)
+  }
+};
+
+const getTutorialId = (tutorial) => {
+  if (!tutorial) return '';
+  if (typeof tutorial.tutorialId === 'string' && tutorial.tutorialId.trim()) {
+    return tutorial.tutorialId.trim();
+  }
+  if (typeof tutorial.title === 'string' && tutorial.title.trim()) {
+    return tutorial.title.trim();
+  }
+  return '';
 };
 
 const createChatMessage = (type, content) => {
@@ -479,6 +535,16 @@ const AppContent = ({ currentRole }) => {
     const stored = window.localStorage?.getItem(CONTENT_DENSITY_STORAGE_KEY);
     return stored === "compact" ? "compact" : "comfortable";
   });
+  const [completedTutorials, setCompletedTutorials] = useState(() => loadTutorialCompletionMap());
+  const [currentTutorial, setCurrentTutorial] = useState(null);
+
+  const tutorials = useMemo(
+    () => [
+      ...buildApplicationWorkspaceTutorials({ completedMap: completedTutorials }),
+      ...buildNwacAssessmentTutorials({ completedMap: completedTutorials })
+    ],
+    [completedTutorials]
+  );
 
   // Notifications state (moved inside component)
   const [notifications, setNotifications] = useState([]);
@@ -552,6 +618,10 @@ const AppContent = ({ currentRole }) => {
     }
     return undefined;
   }, [contentDensity]);
+
+  useEffect(() => {
+    persistTutorialCompletionMap(completedTutorials);
+  }, [completedTutorials]);
 
   const handleDismissNotification = useCallback(async (notificationId) => {
     try {
@@ -658,6 +728,30 @@ const AppContent = ({ currentRole }) => {
     setIsHelpPanelOpen(true);
   };
 
+  const markTutorialCompleted = useCallback((tutorial) => {
+    const tutorialId = getTutorialId(tutorial);
+    if (!tutorialId) return;
+    setCompletedTutorials(prev => {
+      if (prev[tutorialId]) return prev;
+      return { ...prev, [tutorialId]: true };
+    });
+  }, []);
+
+  const handleStartTutorial = useCallback(({ detail }) => {
+    setCurrentTutorial(detail?.tutorial || null);
+  }, []);
+
+  const handleExitTutorial = useCallback(() => {
+    setCurrentTutorial(null);
+  }, []);
+
+  const handleFinishTutorial = useCallback(() => {
+    if (currentTutorial) {
+      markTutorialCompleted(currentTutorial);
+    }
+    setCurrentTutorial(null);
+  }, [currentTutorial, markTutorialCompleted]);
+
   const updateBreadcrumbs = useCallback((newBreadcrumbs) => {
     const breadcrumbsChanged = JSON.stringify(newBreadcrumbs) !== JSON.stringify(breadcrumbs);
     if (breadcrumbsChanged) {
@@ -716,79 +810,89 @@ const AppContent = ({ currentRole }) => {
           onClose={() => setChatVisible(false)}
           title={helpPanelTitle}
         />
-        <AppLayout
-          navigationOpen={isNavigationOpen}
-          onNavigationChange={({ detail }) => setIsNavigationOpen(detail.open)}
-          navigation={
-            <SideNavigation
-              currentRole={currentRole}
-              notificationCount={notifications.length}
-              refreshNotifications={refreshNotifications}
-              notificationsLoading={notificationsLoading}
-            />
-          }
-          notifications={
-            <div ref={flashbarRef}>
-              <Flashbar stackItems items={notificationFlashbarItems} />
-            </div>
-          }
-          toolsOpen={isHelpPanelOpen}
-          onToolsChange={({ detail }) => setIsHelpPanelOpen(detail.open)}
-          tools={
-            <HelpPanel
-              header={
-                <Header
-                  variant="h2"
-                  actions={
-                    <Button
-                      onClick={() => setChatVisible(!chatVisible)}
-                      variant="primary"
+        <TutorialsContext.Provider value={{ tutorials }}>
+          <AnnotationContext
+            currentTutorial={currentTutorial}
+            onStartTutorial={handleStartTutorial}
+            onExitTutorial={handleExitTutorial}
+            onFinish={handleFinishTutorial}
+            i18nStrings={annotationContextI18nStrings}
+          >
+            <AppLayout
+              navigationOpen={isNavigationOpen}
+              onNavigationChange={({ detail }) => setIsNavigationOpen(detail.open)}
+              navigation={
+                <SideNavigation
+                  currentRole={currentRole}
+                  notificationCount={notifications.length}
+                  refreshNotifications={refreshNotifications}
+                  notificationsLoading={notificationsLoading}
+                />
+              }
+              notifications={
+                <div ref={flashbarRef}>
+                  <Flashbar stackItems items={notificationFlashbarItems} />
+                </div>
+              }
+              toolsOpen={isHelpPanelOpen}
+              onToolsChange={({ detail }) => setIsHelpPanelOpen(detail.open)}
+              tools={
+                <HelpPanel
+                  header={
+                    <Header
+                      variant="h2"
+                      actions={
+                        <Button
+                          onClick={() => setChatVisible(!chatVisible)}
+                          variant="primary"
+                        >
+                          {chatVisible ? "Close AI" : "Ask the AI"}
+                        </Button>
+                      }
                     >
-                      {chatVisible ? "Close AI" : "Ask the AI"}
-                    </Button>
+                      {helpPanelTitle}
+                    </Header>
                   }
                 >
-                  {helpPanelTitle}
-                </Header>
+                  {currentHelpContent}
+                </HelpPanel>
               }
-            >
-              {currentHelpContent}
-            </HelpPanel>
-          }
-          splitPanelOpen={splitPanelOpen}
-          onSplitPanelToggle={({ detail }) => setSplitPanelOpen(detail.open)}
-          splitPanel={
-            <CustomSplitPanel
-              availableItems={availableItems}
-              handleItemSelect={handleItemSelect}
-              splitPanelSize={splitPanelSize}
-              setSplitPanelSize={setSplitPanelSize}
               splitPanelOpen={splitPanelOpen}
-              setSplitPanelOpen={setSplitPanelOpen}
-            />
-          }
-          splitPanelPreferences={splitPanelPreferences}
-          onSplitPanelPreferencesChange={handleSplitPanelPreferencesChange}
-          content={
-            <SpaceBetween size="l">
-              <AppRoutes
-                toggleHelpPanel={toggleHelpPanel}
-                updateBreadcrumbs={updateBreadcrumbs}
-                setSplitPanelOpen={setSplitPanelOpen}
-                splitPanelOpen={splitPanelOpen}
-                setSplitPanelSize={setSplitPanelSize}
-                splitPanelSize={splitPanelSize}
-                setAvailableItems={setAvailableItems}
-                openPaletteInTools={openPaletteInTools}
-                breadcrumbs={breadcrumbs}
-                helpMessages={helpMessages}
-                aiContext={AdminDashboardHelp.aiContext} // Use the static aiContext property
-              />
+              onSplitPanelToggle={({ detail }) => setSplitPanelOpen(detail.open)}
+              splitPanel={
+                <CustomSplitPanel
+                  availableItems={availableItems}
+                  handleItemSelect={handleItemSelect}
+                  splitPanelSize={splitPanelSize}
+                  setSplitPanelSize={setSplitPanelSize}
+                  splitPanelOpen={splitPanelOpen}
+                  setSplitPanelOpen={setSplitPanelOpen}
+                />
+              }
+              splitPanelPreferences={splitPanelPreferences}
+              onSplitPanelPreferencesChange={handleSplitPanelPreferencesChange}
+              content={
+                <SpaceBetween size="l">
+                  <AppRoutes
+                    toggleHelpPanel={toggleHelpPanel}
+                    updateBreadcrumbs={updateBreadcrumbs}
+                    setSplitPanelOpen={setSplitPanelOpen}
+                    splitPanelOpen={splitPanelOpen}
+                    setSplitPanelSize={setSplitPanelSize}
+                    splitPanelSize={splitPanelSize}
+                    setAvailableItems={setAvailableItems}
+                    openPaletteInTools={openPaletteInTools}
+                    breadcrumbs={breadcrumbs}
+                    helpMessages={helpMessages}
+                    aiContext={AdminDashboardHelp.aiContext} // Use the static aiContext property
+                  />
 
-            </SpaceBetween>
-          }
-          contentDensity={contentDensity}
-        />
+                </SpaceBetween>
+              }
+              contentDensity={contentDensity}
+            />
+          </AnnotationContext>
+        </TutorialsContext.Provider>
       </MessagingProvider>
     </LocationProvider>
   );

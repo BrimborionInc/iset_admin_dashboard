@@ -15,7 +15,8 @@ import {
   Input,
   Textarea,
   Checkbox,
-  Multiselect
+  Multiselect,
+  Hotspot
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
 import SecureMessagesHelpPanelContent from '../helpPanelContents/secureMessagesHelpPanelContent';
@@ -1094,6 +1095,7 @@ const SecureMessagingWidget = ({
             ) : undefined
           }
         >
+          <Hotspot hotspotId="app-workspace-secure-messaging" direction="right" />
           Secure Messaging
         </Header>
       }

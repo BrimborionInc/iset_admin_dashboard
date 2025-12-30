@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { apiFetch } from '../auth/apiClient';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Header, ButtonDropdown, Table, StatusIndicator, Box, Spinner, TextFilter, SpaceBetween, Link, Button, Badge } from '@cloudscape-design/components';
+import { Header, ButtonDropdown, Table, StatusIndicator, Box, Spinner, TextFilter, SpaceBetween, Link, Button, Badge, Hotspot } from '@cloudscape-design/components';
 import ApplicationEventsHelp from '../helpPanelContents/applicationEventsHelp';
 
 const STATUS_LABELS = {
@@ -518,6 +518,7 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
             </SpaceBetween>
           }
         >
+          <Hotspot hotspotId="app-workspace-events-timeline" direction="right" />
           Events Timeline
         </Header>
       }

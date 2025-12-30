@@ -3,7 +3,7 @@ import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
 import { canCompleteOutcomeReview, getCaseStatusContext, getApplicationStatusContext } from '../utils/rbac';
-import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup, Autosuggest, StatusIndicator, Wizard } from '@cloudscape-design/components';
+import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup, Autosuggest, StatusIndicator, Wizard, Hotspot } from '@cloudscape-design/components';
 import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
 
@@ -3435,6 +3435,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         </Link>
       }
     >
+      <Hotspot hotspotId="app-workspace-assessment" direction="right" />
       {showNWACSection ? 'NWAC Assessment' : 'Application Assessment'}
     </Header>
   );
@@ -4568,6 +4569,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             </SpaceBetween>
           }
         >
+          <Hotspot hotspotId="nwac-decision-letter" direction="right" />
           Decision letter
         </Header>
         {letterWorkflowsError && (
@@ -4895,48 +4897,52 @@ const CoordinatorAssessmentWidget = forwardRef(
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
           <FormField label="Funding Decision" errorText={showDecisionErrors && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}>
             <SpaceBetween direction="horizontal" size="xs">
-              <RadioGroup
-                value={assessment.nwacReviewStatus || ''}
-                onChange={({ detail }) => {
-                  if (detail.value === 'approve' && isHighCostApprovalBlocked) {
-                    setValidationAlert([`Regional Managers cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to Program Administrators.`]);
-                    return;
-                  }
-                  if (isNWACFieldsDisabled) return;
-                  if (detail.value === 'approve' && assessment.nwacReason) {
-                    setShowApproveConfirmModal(true);
-                  } else {
-                    handleField('nwacReviewStatus', detail.value);
-                    if (detail.value === 'approve') handleField('nwacReason', '');
-                    if (detail.value === 'push_back') handleField('nwacReview', '');
-                  }
-                }}
-                items={[
-                  { value: 'approve', label: 'Approved' },
-                  { value: 'reject', label: 'Not Approved' },
-                  { value: 'push_back', label: 'Push back to coordinator' }
-                ]}
-                ariaLabel="NWAC Review Status"
-                data-error-focus={showDecisionErrors && fieldErrors.nwacReviewStatus ? 'true' : undefined}
-                readOnly={isNWACFieldsDisabled}
-              />
+              <Hotspot hotspotId="nwac-decision-status" direction="right">
+                <RadioGroup
+                  value={assessment.nwacReviewStatus || ''}
+                  onChange={({ detail }) => {
+                    if (detail.value === 'approve' && isHighCostApprovalBlocked) {
+                      setValidationAlert([`Regional Managers cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to Program Administrators.`]);
+                      return;
+                    }
+                    if (isNWACFieldsDisabled) return;
+                    if (detail.value === 'approve' && assessment.nwacReason) {
+                      setShowApproveConfirmModal(true);
+                    } else {
+                      handleField('nwacReviewStatus', detail.value);
+                      if (detail.value === 'approve') handleField('nwacReason', '');
+                      if (detail.value === 'push_back') handleField('nwacReview', '');
+                    }
+                  }}
+                  items={[
+                    { value: 'approve', label: 'Approved' },
+                    { value: 'reject', label: 'Not Approved' },
+                    { value: 'push_back', label: 'Push back to coordinator' }
+                  ]}
+                  ariaLabel="NWAC Review Status"
+                  data-error-focus={showDecisionErrors && fieldErrors.nwacReviewStatus ? 'true' : undefined}
+                  readOnly={isNWACFieldsDisabled}
+                />
+              </Hotspot>
             </SpaceBetween>
           </FormField>
           <FormField label="Assessment Assurance" errorText={showDecisionErrors && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}>
-            <Select
-              selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
-              onChange={({ detail }) => {
-                if (isNWACFieldsDisabled) return;
-                handleField('nwacReview', detail.selectedOption.value);
-              }}
-              options={[
-                { label: 'Agree with Coordinator Recommendation', value: 'agree' },
-                { label: 'Disagree with Coordinator Recommendation', value: 'disagree' }
-              ]}
-              placeholder="Select review outcome"
-              data-error-focus={showDecisionErrors && fieldErrors.nwacReview ? 'true' : undefined}
-              readOnly={isNWACFieldsDisabled || assessment.nwacReviewStatus === 'push_back'}
-            />
+            <Hotspot hotspotId="nwac-assessment-assurance" direction="right">
+              <Select
+                selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
+                onChange={({ detail }) => {
+                  if (isNWACFieldsDisabled) return;
+                  handleField('nwacReview', detail.selectedOption.value);
+                }}
+                options={[
+                  { label: 'Agree with Coordinator Recommendation', value: 'agree' },
+                  { label: 'Disagree with Coordinator Recommendation', value: 'disagree' }
+                ]}
+                placeholder="Select review outcome"
+                data-error-focus={showDecisionErrors && fieldErrors.nwacReview ? 'true' : undefined}
+                readOnly={isNWACFieldsDisabled || assessment.nwacReviewStatus === 'push_back'}
+              />
+            </Hotspot>
           </FormField>
         </Grid>
         {['reject', 'push_back'].includes(assessment.nwacReviewStatus) && (
@@ -4946,10 +4952,12 @@ const CoordinatorAssessmentWidget = forwardRef(
               stretch={true}
             >
               <Box width="100%">
-                <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
-                  if (isNWACFieldsDisabled) return;
-                  handleField('nwacReason', detail.value);
-                }} data-error-focus={showDecisionErrors && fieldErrors.nwacReason ? 'true' : undefined} readOnly={isNWACFieldsDisabled} />
+                <Hotspot hotspotId="nwac-decision-reason" direction="right">
+                  <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
+                    if (isNWACFieldsDisabled) return;
+                    handleField('nwacReason', detail.value);
+                  }} data-error-focus={showDecisionErrors && fieldErrors.nwacReason ? 'true' : undefined} readOnly={isNWACFieldsDisabled} />
+                </Hotspot>
               </Box>
             </FormField>
           </Grid>
@@ -4961,27 +4969,29 @@ const CoordinatorAssessmentWidget = forwardRef(
               description="Assign the pot that will fund this intervention."
               errorText={showDecisionErrors && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
             >
-              <Select
-                placeholder={
-                  !decisionHasCost
-                    ? 'Not assigned for zero-cost interventions'
-                    : budgetPotLoading
-                      ? 'Loading budget pots'
-                      : 'Select budget pot'
-                }
-                selectedOption={selectedBudgetPotOption}
-                options={budgetPotOptions}
-                statusType={budgetPotLoading ? 'loading' : 'finished'}
-                loadingText="Loading budget pots"
-                onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
-                data-error-focus={showDecisionErrors && fieldErrors.interventionPotId ? 'true' : undefined}
-                readOnly={
-                  baseAssessmentLocked ||
-                  isEligibilityGateActive ||
-                  (!canManageBudgetPotPending && isAssessmentDisabled)
-                }
-                disabled={!decisionHasCost}
-              />
+              <Hotspot hotspotId="nwac-budget-pot" direction="right">
+                <Select
+                  placeholder={
+                    !decisionHasCost
+                      ? 'Not assigned for zero-cost interventions'
+                      : budgetPotLoading
+                        ? 'Loading budget pots'
+                        : 'Select budget pot'
+                  }
+                  selectedOption={selectedBudgetPotOption}
+                  options={budgetPotOptions}
+                  statusType={budgetPotLoading ? 'loading' : 'finished'}
+                  loadingText="Loading budget pots"
+                  onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
+                  data-error-focus={showDecisionErrors && fieldErrors.interventionPotId ? 'true' : undefined}
+                  readOnly={
+                    baseAssessmentLocked ||
+                    isEligibilityGateActive ||
+                    (!canManageBudgetPotPending && isAssessmentDisabled)
+                  }
+                  disabled={!decisionHasCost}
+                />
+              </Hotspot>
             </FormField>
             <FormField
               label="Paid from"

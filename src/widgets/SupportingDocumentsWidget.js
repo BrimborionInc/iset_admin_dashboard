@@ -16,7 +16,8 @@ import {
   CollectionPreferences,
   Tabs,
   StatusIndicator,
-  Select
+  Select,
+  Hotspot
 } from '@cloudscape-design/components';
 import SupportingDocumentsHelp from '../helpPanelContents/supportingDocumentsHelp';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
@@ -1838,6 +1839,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             ) : undefined
           }
         >
+          <Hotspot hotspotId="app-workspace-supporting-documents" direction="right" />
           Supporting Documents
         </Header>
       }

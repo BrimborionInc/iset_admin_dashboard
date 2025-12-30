@@ -11,7 +11,8 @@ import {
   Badge,
   Tabs,
   Table,
-  TextFilter
+  TextFilter,
+  Hotspot
 } from '@cloudscape-design/components';
 import CaseCalendarHelp from '../helpPanelContents/caseCalendarHelp';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
@@ -877,6 +878,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
             ) : undefined
           }
         >
+          <Hotspot hotspotId="app-workspace-case-calendar" direction="right" />
           Case calendar
         </Header>
       }

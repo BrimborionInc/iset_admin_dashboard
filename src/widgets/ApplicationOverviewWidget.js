@@ -18,7 +18,8 @@ import {
   Link,
   Input,
   Textarea,
-  StatusIndicator
+  StatusIndicator,
+  Hotspot
 } from '@cloudscape-design/components';
 import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
 import { apiFetch } from '../auth/apiClient';
@@ -1588,15 +1589,17 @@ const ApplicationOverviewWidget = ({
             (
               <SpaceBetween direction="horizontal" size="xs">
                 {quickActionItems.length ? (
-                  <ButtonDropdown
-                    items={quickActionItems}
-                    onItemClick={handleQuickActionSelect}
-                    ariaLabel="Quick actions"
-                    expandToViewport
-                    disabled={savingStatus || quickActionItems.length === 0}
-                  >
-                    Quick actions
-                  </ButtonDropdown>
+                  <Hotspot hotspotId="app-workspace-quick-actions" direction="left">
+                    <ButtonDropdown
+                      items={quickActionItems}
+                      onItemClick={handleQuickActionSelect}
+                      ariaLabel="Quick actions"
+                      expandToViewport
+                      disabled={savingStatus || quickActionItems.length === 0}
+                    >
+                      Quick actions
+                    </ButtonDropdown>
+                  </Hotspot>
                 ) : null}
               </SpaceBetween>
             )
@@ -1618,6 +1621,7 @@ const ApplicationOverviewWidget = ({
             ) : undefined
           }
         >
+          <Hotspot hotspotId="app-workspace-application-overview" direction="right" />
           {headerTitle}
         </Header>
       }

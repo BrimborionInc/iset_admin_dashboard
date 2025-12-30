@@ -23,7 +23,8 @@ import {
   Select,
   Multiselect,
   Spinner,
-  Autosuggest
+  Autosuggest,
+  Hotspot
 } from '@cloudscape-design/components';
 import IsetApplicationFormHelpPanelContent from '../helpPanelContents/isetApplicationFormHelpPanelContent';
 import { apiFetch } from '../auth/apiClient';
@@ -2123,6 +2124,7 @@ const IsetApplicationFormWidget = ({
           }
           actions={headerActions}
         >
+          <Hotspot hotspotId="app-workspace-application-form" direction="right" />
           ISET Application Form
         </Header>
       }

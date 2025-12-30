@@ -34,7 +34,7 @@ const SupportingDocumentsHelp = () => (
       </li>
       <li>
         <strong>Application / Case:</strong> Shows the application reference or case number. Intervention documents
-        appear as "Intervention: {name}" in the case workspace.
+        appear as "Intervention: (name)" in the case workspace.
       </li>
       <li>
         <strong>Source:</strong> Where the file came from. Common values are Application submission, Message attachment,

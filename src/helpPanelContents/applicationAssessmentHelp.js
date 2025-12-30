@@ -1,4 +1,7 @@
 import React from 'react';
+import TutorialPanel from '@cloudscape-design/components/tutorial-panel';
+import { useTutorials } from '../context/TutorialsContext';
+import { tutorialPanelI18nStrings } from '../tutorials/tutorialI18n';
 
 const ApplicationAssessmentHelp = () => (
   <div>
@@ -53,25 +56,44 @@ You are assisting a coordinator filling out the Application Assessment widget. K
 - Use related widgets for context: Application Overview (status/owner), ISET Application Form (applicant data/version history), Supporting Documents (evidence/checklist), Notes and Tasks (audit trail), Secure Messaging (doc requests).
 `;
 
-export const NwacAssessmentHelp = () => (
-  <div>
-    <h2>NWAC outcome notice</h2>
-    <p>
-      This panel appears once the assessment is submitted. Use it to record the NWAC decision and assurance outcome
-      before moving to communication.
-    </p>
-    <ol>
-      <li>Select <strong>Approved</strong>, <strong>Not Approved</strong>, or <strong>Push back to coordinator</strong>.</li>
-      <li>Choose the <strong>Assessment Assurance</strong> outcome when approving or not approving.</li>
-      <li>Provide the <strong>Reason for Not Approving</strong> or <strong>Reason for Push Back</strong> when required.</li>
-      <li>Click <em>Commit</em> to save the outcome, update status, and unlock the Communication step.</li>
-    </ol>
-    <p>
-      Edits are locked once a final decision exists. Reopen the assessment only when policy permits and capture a
-      case note documenting any change.
-    </p>
-  </div>
-);
+export const NwacAssessmentHelp = () => {
+  const { tutorials } = useTutorials();
+  const nwacTutorials = (tutorials || []).filter(
+    tutorial => tutorial.category === 'nwac-assessment'
+  );
+
+  return (
+    <div>
+      <h2>NWAC outcome notice</h2>
+      <p>
+        This panel appears once the assessment is submitted. Use it to record the NWAC decision and assurance outcome
+        before moving to communication.
+      </p>
+      <ol>
+        <li>Select <strong>Approved</strong>, <strong>Not Approved</strong>, or <strong>Push back to coordinator</strong>.</li>
+        <li>Choose the <strong>Assessment Assurance</strong> outcome when approving or not approving.</li>
+        <li>Provide the <strong>Reason for Not Approving</strong> or <strong>Reason for Push Back</strong> when required.</li>
+        <li>Click <em>Commit</em> to save the outcome, update status, and unlock the Communication step.</li>
+      </ol>
+
+      <h3>Hands-on tutorial</h3>
+      <p>Follow the guided walkthrough to record the NWAC decision and communicate the outcome.</p>
+      {nwacTutorials.length ? (
+        <TutorialPanel
+          tutorials={nwacTutorials}
+          i18nStrings={tutorialPanelI18nStrings}
+        />
+      ) : (
+        <p>No hands-on tutorials are available for NWAC yet.</p>
+      )}
+
+      <p>
+        Edits are locked once a final decision exists. Reopen the assessment only when policy permits and capture a
+        case note documenting any change.
+      </p>
+    </div>
+  );
+};
 
 NwacAssessmentHelp.aiContext = `
 You are assisting an NWAC reviewer who is completing the outcome notice at the end of the Application Assessment widget.

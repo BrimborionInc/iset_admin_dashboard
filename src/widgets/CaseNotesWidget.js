@@ -14,7 +14,8 @@ import {
   Textarea,
   Badge,
   Link,
-  DatePicker
+  DatePicker,
+  Hotspot
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
 import CaseNotesHelp from '../helpPanelContents/caseNotesHelp';
@@ -525,6 +526,7 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
             ) : undefined
           }
         >
+          <Hotspot hotspotId="app-workspace-notes-tasks" direction="right" />
           Notes and Reminders
         </Header>
       }
