@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
   Box,
@@ -8,6 +8,7 @@ import {
   CopyToClipboard,
   FormField,
   Header,
+  Icon,
   Input,
   Link,
   Modal,
@@ -21,8 +22,10 @@ import {
 } from '@cloudscape-design/components';
 import { PROGRAM_ADMIN_BUCKETS } from './ProgramAdminWorkQueueWidget';
 import { apiFetch } from '../../../auth/apiClient';
+import HomeWorkQueueItemsHelp from '../../../helpPanelContents/homeWorkQueueItemsHelp';
 
 const COLUMN_WIDTHS_STORAGE_KEY = 'work-queue-items-column-widths-v1';
+const WATCHLIST_REFRESH_EVENT = 'watchlist:refresh';
 const APPROVAL_COST_THRESHOLD = 25000;
 const ESDC_OPTIONS = [
   { label: 'CRF', value: 'CRF' },
@@ -53,6 +56,12 @@ const getWorkspacePath = item => {
   return `/application-case/${caseId}`;
 };
 
+const resolveCaseId = item => {
+  const raw = item?.case_id ?? item?.caseId ?? item?.caseID ?? null;
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+};
+
 const PROVINCE_LABELS = {
   ab: 'Alberta',
   bc: 'British Columbia',
@@ -66,7 +75,8 @@ const PROVINCE_LABELS = {
   pe: 'Prince Edward Island',
   qc: 'Quebec',
   sk: 'Saskatchewan',
-  yt: 'Yukon Territory'
+  yt: 'Yukon Territory',
+  xx: 'Test Region'
 };
 
 const normalizeProvinceCode = value => {
@@ -74,6 +84,32 @@ const normalizeProvinceCode = value => {
   const trimmed = String(value).trim();
   if (!trimmed) return null;
   return trimmed.slice(0, 2).toUpperCase();
+};
+
+const normalizeProvinceKey = value => (value || '').toString().trim().toLowerCase();
+
+const normalizeProvinceLabelKey = value =>
+  normalizeProvinceKey(value)
+    .replace(/&/g, 'and')
+    .replace(/[^a-z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const PROVINCE_NAME_TO_CODE = Object.entries(PROVINCE_LABELS).reduce((acc, [code, name]) => {
+  const normalized = normalizeProvinceLabelKey(name);
+  if (normalized) {
+    acc[normalized] = code.toUpperCase();
+  }
+  return acc;
+}, {});
+
+const resolveProvinceCode = value => {
+  const raw = normalizeProvinceKey(value);
+  if (!raw) return null;
+  if (PROVINCE_LABELS[raw]) return raw.toUpperCase();
+  if (raw.length === 2) return raw.toUpperCase();
+  const normalizedLabel = normalizeProvinceLabelKey(raw);
+  return PROVINCE_NAME_TO_CODE[normalizedLabel] || null;
 };
 
 const mapEligibilityToFundingSource = value => {
@@ -438,8 +474,8 @@ const columnDefinitionsByKey = {
     id: 'region',
     header: 'Province',
     cell: item => {
-      const code = (item.address_province || item.region || '').toLowerCase();
-      return PROVINCE_LABELS[code] || code.toUpperCase() || '—';
+      const code = resolveProvinceCode(item.address_province || item.region || '');
+      return code || '—';
     },
     sortingField: 'region'
   },
@@ -590,11 +626,10 @@ const WorkQueueItemsTableWidget = ({
   selectedBucketId,
   bucketDefinitions = PROGRAM_ADMIN_BUCKETS,
   items = [],
-  selectedItemId,
-  onSelectItem,
   role,
   actions,
-  onRefresh
+  onRefresh,
+  toggleHelpPanel
 }) => {
   const canonicalRole = role === 'Regional Manager' ? 'Regional Coordinator' : role;
   const isAssessor = canonicalRole === 'Application Assessor';
@@ -628,6 +663,8 @@ const WorkQueueItemsTableWidget = ({
   const [eligibilityFileError, setEligibilityFileError] = useState(null);
   const [eligibilityApplicantId, setEligibilityApplicantId] = useState(null);
   const eligibilityFileInputRef = useRef(null);
+  const [watchMap, setWatchMap] = useState(() => new Map());
+  const [watchPending, setWatchPending] = useState(new Set());
   const [resolveTarget, setResolveTarget] = useState(null);
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
   const applicantProvinceCode = normalizeProvinceCode(decisionTarget?.address_province || decisionTarget?.region);
@@ -650,6 +687,17 @@ const WorkQueueItemsTableWidget = ({
     () => interventionCostValue !== null && interventionCostValue > 0,
     [interventionCostValue]
   );
+  const infoLink = toggleHelpPanel ? (
+    <Link
+      variant="info"
+      onFollow={event => {
+        event.preventDefault();
+        toggleHelpPanel(<HomeWorkQueueItemsHelp />, 'Work Queue Items', HomeWorkQueueItemsHelp.aiContext || '');
+      }}
+    >
+      Info
+    </Link>
+  ) : undefined;
   const approvalThresholdBlocked = useMemo(
     () => canonicalRole === 'Regional Coordinator' && interventionCostValue !== null && interventionCostValue >= APPROVAL_COST_THRESHOLD,
     [canonicalRole, interventionCostValue]
@@ -661,11 +709,22 @@ const WorkQueueItemsTableWidget = ({
     ]);
   const shouldWrapLines = selectedBucket && ['exceptions-escalations', 'unresolved-conflicts'].includes(selectedBucket.id);
 
+  const decoratedItems = useMemo(() => {
+    return items.map(item => {
+      const caseId = resolveCaseId(item);
+      return {
+        ...item,
+        __caseIdNumeric: caseId,
+        __isWatched: caseId ? watchMap.has(caseId) : false
+      };
+    });
+  }, [items, watchMap]);
+
   const queueItems = useMemo(() => {
     if (!selectedBucket) {
       return [];
     }
-    const scoped = items.filter(item => item.bucketId === selectedBucket.id);
+    const scoped = decoratedItems.filter(item => item.bucketId === selectedBucket.id);
     if (!filteringText) return scoped;
     const needle = filteringText.toLowerCase();
     return scoped.filter(item => {
@@ -680,7 +739,7 @@ const WorkQueueItemsTableWidget = ({
       ];
       return fields.some(v => v && String(v).toLowerCase().includes(needle));
     });
-  }, [items, selectedBucket, filteringText]);
+  }, [decoratedItems, selectedBucket, filteringText]);
 
   const [columnWidths, setColumnWidths] = useState(() => loadStoredColumnWidths());
 
@@ -708,6 +767,102 @@ const WorkQueueItemsTableWidget = ({
       // no-op if window unavailable
     }
   };
+
+  const notifyWatchlistRefresh = useCallback((detail = {}) => {
+    try {
+      window.dispatchEvent(new CustomEvent(WATCHLIST_REFRESH_EVENT, { detail }));
+    } catch (_) {
+      // no-op if window unavailable
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/me/case-watches')
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('fetch_failed');
+        }
+        return response.json();
+      })
+      .then(data => {
+        if (cancelled) return;
+        const map = new Map();
+        (Array.isArray(data) ? data : []).forEach(entry => {
+          const caseId = resolveCaseId(entry);
+          if (caseId) {
+            map.set(caseId, entry);
+          }
+        });
+        setWatchMap(map);
+      })
+      .catch(error => {
+        if (cancelled) return;
+        console.error('[work-queue-items] failed to load watchlist', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [role]);
+
+  const handleToggleWatch = useCallback(async (item) => {
+    const caseId = resolveCaseId(item);
+    if (!caseId) {
+      return;
+    }
+    const isCurrentlyWatched = watchMap.has(caseId);
+    setWatchPending(prev => {
+      const next = new Set(prev);
+      next.add(caseId);
+      return next;
+    });
+
+    try {
+      const response = await apiFetch(`/api/cases/${caseId}/watch`, {
+        method: isCurrentlyWatched ? 'DELETE' : 'POST',
+        headers: isCurrentlyWatched ? undefined : { 'Content-Type': 'application/json' },
+        body: isCurrentlyWatched ? undefined : JSON.stringify({})
+      });
+
+      let body = null;
+      try {
+        body = await response.json();
+      } catch {
+        body = null;
+      }
+
+      if (!response.ok || (body && body.error)) {
+        const err = new Error(body?.error || 'watch_failed');
+        err.status = response.status;
+        throw err;
+      }
+
+      if (isCurrentlyWatched) {
+        setWatchMap(prev => {
+          const next = new Map(prev);
+          next.delete(caseId);
+          return next;
+        });
+        notifyWatchlistRefresh({ caseId, watched: false });
+      } else {
+        const watchEntry = body?.watch || { caseId };
+        setWatchMap(prev => {
+          const next = new Map(prev);
+          next.set(caseId, watchEntry);
+          return next;
+        });
+        notifyWatchlistRefresh({ caseId, watched: true });
+      }
+    } catch (error) {
+      console.error('[work-queue-items] watch toggle failed', error);
+    } finally {
+      setWatchPending(prev => {
+        const next = new Set(prev);
+        next.delete(caseId);
+        return next;
+      });
+    }
+  }, [notifyWatchlistRefresh, watchMap]);
 
   useEffect(() => {
     let cancelled = false;
@@ -778,15 +933,58 @@ const WorkQueueItemsTableWidget = ({
 
   const columnDefinitions = useMemo(() => {
     let keys = buildColumns(itemTypes);
+    keys = ['watch', ...keys];
+    const dedupedKeys = [];
+    const seen = new Set();
+    keys.forEach(key => {
+      if (!seen.has(key)) {
+        seen.add(key);
+        dedupedKeys.push(key);
+      }
+    });
     const isMilestoneQueue =
       selectedBucketId === 'active-clients-checkins' ||
       (itemTypes.length === 1 && itemTypes[0] === 'InterventionMilestone');
     if (isAssessor) {
-      keys = keys.filter(key => key !== 'owner');
+      keys = dedupedKeys.filter(key => key !== 'owner');
+    } else {
+      keys = dedupedKeys;
     }
     const widthsMap = new Map(columnWidths.map(entry => [entry.id, entry.width]));
+    const watchColumn = {
+      id: 'watch',
+      header: 'Flag',
+      minWidth: 45,
+      width: widthsMap.get('watch'),
+      cell: item => {
+        const caseId = item.__caseIdNumeric ?? resolveCaseId(item);
+        const isWatchable = Number.isFinite(caseId) && caseId > 0;
+        const isWatched = Boolean(item.__isWatched);
+        const pending = isWatchable && watchPending.has(caseId);
+        const icon = (
+          <Icon
+            name="flag"
+            size="small"
+            variant={isWatched ? 'error' : 'normal'}
+          />
+        );
+        return (
+          <Button
+            variant="icon"
+            iconSvg={icon}
+            disabled={!isWatchable || pending}
+            ariaLabel={isWatched ? 'Unflag case' : 'Flag case'}
+            onClick={() => handleToggleWatch(item)}
+            title={!isWatchable ? 'Case record not yet created' : (isWatched ? 'Remove flag' : 'Flag this case')}
+          />
+        );
+      }
+    };
     return keys
       .map(key => {
+        if (key === 'watch') {
+          return watchColumn;
+        }
         const base = columnDefinitionsByKey[key];
         if (!base) return null;
         const widthOverride = widthsMap.get(base.id);
@@ -1067,12 +1265,17 @@ const WorkQueueItemsTableWidget = ({
         return widthOverride ? { ...base, width: widthOverride } : base;
       })
       .filter(Boolean);
-  }, [itemTypes, selectedBucketId, slaTargets, columnWidths, budgetPotOptions.length, role, isAssessor]);
-
-  const selectedItems = useMemo(() => {
-    if (!selectedItemId) return [];
-    return queueItems.filter(item => item.id === selectedItemId);
-  }, [queueItems, selectedItemId]);
+  }, [
+    itemTypes,
+    selectedBucketId,
+    slaTargets,
+    columnWidths,
+    budgetPotOptions.length,
+    role,
+    isAssessor,
+    watchPending,
+    handleToggleWatch
+  ]);
 
   const emptyState = selectedBucket
     ? 'No items are available for this queue yet.'
@@ -1397,6 +1600,7 @@ const WorkQueueItemsTableWidget = ({
       header={
         <Header
           variant="h2"
+          info={infoLink}
           description={
             selectedBucket
               ? `${selectedBucket.label} — ${queueItems.length} item(s)`
@@ -1414,8 +1618,6 @@ const WorkQueueItemsTableWidget = ({
         trackBy="id"
         items={queueItems}
         columnDefinitions={columnDefinitions}
-        selectionType="single"
-        selectedItems={selectedItems}
         resizableColumns
         stickyHeader
         enableKeyboardNavigation
@@ -1444,12 +1646,6 @@ const WorkQueueItemsTableWidget = ({
             .filter(Boolean);
           setColumnWidths(parsed);
           persistColumnWidths(parsed);
-        }}
-        onSelectionChange={({ detail }) => {
-          const next = detail.selectedItems?.[0];
-          if (typeof onSelectItem === 'function') {
-            onSelectItem(next?.id || null);
-          }
         }}
         empty={<Box variant="p">{emptyState}</Box>}
       />

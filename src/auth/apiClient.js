@@ -30,7 +30,7 @@ function getBypassHeaders(iamMode, requestPath) {
     }
     const roleRaw = sessionStorage.getItem('currentRole');
     const roleObj = roleRaw ? JSON.parse(roleRaw) : null;
-    const role = roleObj?.value || roleObj?.label || roleObj || 'SysAdmin';
+    const role = roleObj?.value || roleObj?.label || roleObj || 'System_Administrator';
     const userId = sessionStorage.getItem('devUserId') || 'dev-user-1';
     const regionId = sessionStorage.getItem('devRegionId') || '';
     // Allow env override to ensure server and client share the key

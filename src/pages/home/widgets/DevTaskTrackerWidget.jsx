@@ -14,6 +14,7 @@ import {
 } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { devTasks as devTasksData } from '../../../devTasksData';
+import HomeDevTaskTrackerHelp from '../../../helpPanelContents/homeDevTaskTrackerHelp';
 
 const STATUS_OPTIONS = [
     { id: 'planned', text: 'Planned' },
@@ -24,7 +25,7 @@ const STATUS_OPTIONS = [
 
 const initialDevTasks = devTasksData;
 
-const DevTaskTrackerWidget = ({ actions }) => {
+const DevTaskTrackerWidget = ({ actions, toggleHelpPanel }) => {
     const [tasks, setTasks] = useState(() => {
         try {
             const stored = sessionStorage.getItem('devTasks');
@@ -80,9 +81,21 @@ const DevTaskTrackerWidget = ({ actions }) => {
         [tasks]
     );
 
+    const infoLink = toggleHelpPanel ? (
+        <Link
+            variant="info"
+            onFollow={event => {
+                event.preventDefault();
+                toggleHelpPanel(<HomeDevTaskTrackerHelp />, 'Development Tracker', HomeDevTaskTrackerHelp.aiContext || '');
+            }}
+        >
+            Info
+        </Link>
+    ) : undefined;
+
     return (
         <BoardItem
-            header={<Header variant="h2">Development Tracker</Header>}
+            header={<Header variant="h2" info={infoLink}>Development Tracker</Header>}
             settings={
                 actions?.removeItem ? (
                     <ButtonDropdown

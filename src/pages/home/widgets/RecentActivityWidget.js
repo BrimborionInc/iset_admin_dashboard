@@ -9,6 +9,7 @@ import {
   StatusIndicator
 } from '@cloudscape-design/components';
 import { apiFetch } from '../../../auth/apiClient';
+import HomeRecentActivityHelp from '../../../helpPanelContents/homeRecentActivityHelp';
 
 const getMockRecentActivity = role => {
   const now = Date.now();
@@ -111,7 +112,7 @@ const buildRequestHeaders = role => {
   return headers;
 };
 
-const RecentActivityWidget = ({ role, refreshKey = 0, actions }) => {
+const RecentActivityWidget = ({ role, refreshKey = 0, actions, toggleHelpPanel }) => {
   const [activityItems, setActivityItems] = useState(() => getMockRecentActivity(role));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -271,9 +272,21 @@ const RecentActivityWidget = ({ role, refreshKey = 0, actions }) => {
     });
   }, [activityItems]);
 
+  const infoLink = toggleHelpPanel ? (
+    <Link
+      variant="info"
+      onFollow={event => {
+        event.preventDefault();
+        toggleHelpPanel(<HomeRecentActivityHelp />, 'Recent Activity', HomeRecentActivityHelp.aiContext || '');
+      }}
+    >
+      Info
+    </Link>
+  ) : undefined;
+
   return (
     <BoardItem
-      header={<Header variant="h2">Recent Activity</Header>}
+      header={<Header variant="h2" info={infoLink}>Recent Activity</Header>}
       settings={actions?.removeItem ? (
         <ButtonDropdown
           ariaLabel="Board item settings"

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Box, Button, ButtonDropdown, Cards, Header, SpaceBetween } from '@cloudscape-design/components';
+import { Box, Button, ButtonDropdown, Cards, Header, Link, SpaceBetween } from '@cloudscape-design/components';
+import HomeCoordinatorWorkQueueHelp from '../../../helpPanelContents/homeCoordinatorWorkQueueHelp';
 
 export const ISET_COORDINATOR_BUCKETS = [
   {
@@ -241,7 +242,8 @@ const IsetCoordinatorWorkQueueWidget = ({
   countsByBucket = {},
   items = [],
   actions,
-  onRefresh
+  onRefresh,
+  toggleHelpPanel
 }) => {
   const bucketCounts = useMemo(() => {
     return ISET_COORDINATOR_BUCKETS.map(bucket => {
@@ -258,12 +260,28 @@ const IsetCoordinatorWorkQueueWidget = ({
 
   const selectedBucket =
     bucketCounts.find(bucket => bucket.id === selectedBucketId) || bucketCounts[0] || null;
+  const infoLink = toggleHelpPanel ? (
+    <Link
+      variant="info"
+      onFollow={event => {
+        event.preventDefault();
+        toggleHelpPanel(
+          <HomeCoordinatorWorkQueueHelp />,
+          'Work Queue (ISET Coordinator)',
+          HomeCoordinatorWorkQueueHelp.aiContext || ''
+        );
+      }}
+    >
+      Info
+    </Link>
+  ) : undefined;
 
   return (
     <BoardItem
       header={
         <Header
           variant="h2"
+          info={infoLink}
           description="Select a work queue to view the assigned items."
           actions={
             typeof onRefresh === 'function'

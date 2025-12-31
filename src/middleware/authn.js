@@ -56,10 +56,14 @@ function getJWKSForPool(pool) {
 
 const groupRoleMap = {
   SysAdmin: 'System Administrator',
+  System_Administrator: 'System Administrator',
   ProgramAdmin: 'Program Administrator',
+  NWAC_Administrator: 'Program Administrator',
   RegionalCoordinator: 'Regional Coordinator',
+  Regional_Manager: 'Regional Coordinator',
   Assessor: 'Application Assessor',
   Adjudicator: 'Application Assessor',
+  ISET_Coordinator: 'Application Assessor',
   ApplicationAssessor: 'Application Assessor'
 };
 

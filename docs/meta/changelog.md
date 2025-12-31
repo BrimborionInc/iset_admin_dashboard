@@ -2,6 +2,18 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2025-12-31
+- UX: Homepage work queue items table now supports flagging/unflagging and no longer shows the row-selection radio.
+- UX: Homepage work queue items table now shows province codes instead of full names.
+- UX: Homepage removed the legacy Application Work Queue, Case Work Queue, Conflict Declarations, and Program Admin Work Queue Items widgets.
+- Fix: Watchlist applicant names now pull from intake payload fields so names render consistently.
+- UX: Homepage now includes a Metrics widget with period-based totals for applications, decisions, active cases, and funding.
+- API: Added `/api/dashboard/metrics` to serve periodized homepage metrics.
+- UX: Updated Program Admin work queue bucket descriptions for conflicts, eligibility, escalations, and approvals.
+- UX: Homepage watchlist now refreshes automatically when queue items are flagged or unflagged.
+- Docs: Updated NWAC ISET homepage help panel copy to reflect the current widget set.
+- UX: Added info links and placeholder help panels for NWAC ISET homepage widgets.
+
 ## 2025-12-26
 - UX: Application assessment cost step now supports recurring cost scheduling (period, amount, occurrences) tied to the total cost input.
 - Fix: Case detail payload now includes case context so assessment delivery mode persists after save/refresh.
@@ -55,6 +67,13 @@ Format: YYYY-MM-DD - Category: Short description
 
 ## 2025-12-04
 - Docs: Added auto-assignment notes (config in admin, execution in portal ingest) and clarified province sourcing from submission payload.
+
+## 2025-12-31
+- UX: User Management dashboard now shows region codes (not numeric IDs) and uses a region code selector when inviting admin users.
+- UX: Administrative Users table renders as embedded content within its tab panel.
+- API: `/api/regions/canada` now includes `regionId` alongside code/name for region lookups.
+- Auth: Mapped new Cognito group names (System_Administrator, NWAC_Administrator, Regional_Manager, ISET_Coordinator) to canonical admin roles.
+- Ops: Updated local admin `.env` to the new Cognito user pool, client, and Hosted UI domain.
 
 ## 2025-12-23
 - Feature: Case workspace intervention assessment now supports submit-for-approval from the proposal wizard, and the interventions table surfaces submitted status with a status filter.

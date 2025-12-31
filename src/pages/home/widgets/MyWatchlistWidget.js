@@ -15,6 +15,17 @@ import {
 } from '@cloudscape-design/components';
 import { useHistory } from 'react-router-dom';
 import { apiFetch } from '../../../auth/apiClient';
+import { getCaseStatusContext } from '../../../utils/rbac';
+import HomeWatchlistHelp from '../../../helpPanelContents/homeWatchlistHelp';
+
+const CASE_MANAGED_STATUSES = new Set([
+  'initiated',
+  'active',
+  'dormant',
+  'ready_to_close',
+  'closed',
+  'archived',
+]);
 
 const BASE_COLUMN_DEFINITIONS = [
   {
@@ -57,8 +68,9 @@ const BASE_COLUMN_DEFINITIONS = [
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_VISIBLE_COLUMNS = BASE_COLUMN_DEFINITIONS.map(col => col.id);
+const WATCHLIST_REFRESH_EVENT = 'watchlist:refresh';
 
-const MyWatchlistWidget = ({ actions }) => {
+const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
   const history = useHistory();
   const [rawItems, setRawItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -111,6 +123,15 @@ const MyWatchlistWidget = ({ actions }) => {
     setCurrentPageIndex(1);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.addEventListener) {
+      return () => {};
+    }
+    const handler = () => handleRefresh();
+    window.addEventListener(WATCHLIST_REFRESH_EVENT, handler);
+    return () => window.removeEventListener(WATCHLIST_REFRESH_EVENT, handler);
+  }, [handleRefresh]);
+
   const handleClearSelected = useCallback(async () => {
     const [selected] = selectedItems;
     const caseId = selected?.caseId;
@@ -142,16 +163,42 @@ const MyWatchlistWidget = ({ actions }) => {
     }
   }, [selectedItems]);
 
+  const resolveWorkspacePath = useCallback((watch) => {
+    const numeric = Number(watch?.caseId ?? watch?.case_id);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return null;
+    }
+    const metadata = watch?.metadata || {};
+    const metadataCaseManaged =
+      metadata?.isCaseManaged === true ||
+      metadata?.caseManaged === true ||
+      metadata?.case_managed === true;
+    if (metadataCaseManaged) {
+      return `/cases/${numeric}`;
+    }
+    const statusCandidate =
+      watch?.status ??
+      watch?.statusRaw ??
+      watch?.caseStatus ??
+      watch?.case_status ??
+      null;
+    const { canonicalStatus } = getCaseStatusContext(statusCandidate);
+    if (CASE_MANAGED_STATUSES.has(canonicalStatus)) {
+      return `/cases/${numeric}`;
+    }
+    return `/application-case/${numeric}`;
+  }, []);
+
   const handleCaseFollow = useCallback(
-    (event, caseId) => {
-      const numeric = Number(caseId);
-      if (!Number.isFinite(numeric) || numeric <= 0) {
+    (event, watch) => {
+      const href = resolveWorkspacePath(watch);
+      if (!href) {
         return;
       }
       event.preventDefault();
-      history.push({ pathname: `/application-case/${numeric}` });
+      history.push({ pathname: href });
     },
-    [history]
+    [history, resolveWorkspacePath]
   );
 
   const columnDefinitions = useMemo(
@@ -165,7 +212,7 @@ const MyWatchlistWidget = ({ actions }) => {
           cell: item => (
             <Link
               href={item.caseLink}
-              onFollow={event => handleCaseFollow(event, item.caseId)}
+              onFollow={event => handleCaseFollow(event, item)}
               ariaLabel={`Open case ${item.trackingId}`}
             >
               {item.trackingId}
@@ -188,6 +235,7 @@ const MyWatchlistWidget = ({ actions }) => {
         const lastActivity = watch?.lastActivityAt
           ? new Date(watch.lastActivityAt).toLocaleString()
           : 'Not available';
+        const caseLink = caseId ? resolveWorkspacePath(watch) : null;
         return {
           ...watch,
           caseId,
@@ -196,12 +244,12 @@ const MyWatchlistWidget = ({ actions }) => {
           status,
           assignedEmail,
           lastActivity,
-          caseLink: caseId ? `/application-case/${caseId}` : '#',
+          caseLink: caseLink || '#',
           __recordId:
             caseId !== null ? `case-${caseId}` : `watch-${index}-${watch?.createdAt || 'unknown'}`,
         };
       }),
-    [rawItems]
+    [rawItems, resolveWorkspacePath]
   );
 
   const filteredItems = useMemo(() => {
@@ -250,10 +298,23 @@ const MyWatchlistWidget = ({ actions }) => {
     setCurrentPageIndex(prev => Math.min(prev, pagesCount));
   }, [pagesCount]);
 
+  const infoLink = toggleHelpPanel ? (
+    <Link
+      variant="info"
+      onFollow={event => {
+        event.preventDefault();
+        toggleHelpPanel(<HomeWatchlistHelp />, 'My Watchlist', HomeWatchlistHelp.aiContext || '');
+      }}
+    >
+      Info
+    </Link>
+  ) : undefined;
+
   const headerContent = (
     <Header
       variant="h2"
       counter={`(${filteredItems.length})`}
+      info={infoLink}
       actions={
         <SpaceBetween direction="horizontal" size="xs">
           <Button

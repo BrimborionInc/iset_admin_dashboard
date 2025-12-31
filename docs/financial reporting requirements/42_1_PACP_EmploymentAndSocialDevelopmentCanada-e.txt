@@ -1,0 +1,3004 @@
+Report on Recommendations 6 and 8 of the
+House of Commons Standing Committee on Public Accounts’
+Report 6, Employment Training for Indigenous People
+Following the 2018 Office of the Auditor General of Canada report on Indigenous Labour Market
+Programs, ESDC has committed to provide the House of Commons Standing Committee on Public
+Accounts reports on concrete measures taken to reduce the administrative burden in the new
+Indigenous Skills and Employment Training (ISET) agreements (Recommendation 6) and on the elements
+of risk and mitigation strategies associated with the management of sub-agreements (Recommendation
+8).
+The Department has made continuous efforts through the Program Delivery Improvement Working
+Group, composed of Departmental staff and Agreement Holders, to streamline its administrative
+requirements and ensure that changes are reflected in the new program. This will support Indigenous
+partners in their efforts to improve the delivery of services and shift the emphasis of administrative
+reporting towards monitoring outcomes. For example, the mid-year dialogue process is now focused on
+working together for the achievement of concrete outcomes, as opposed to the fulfillment of reporting
+requirements. Further changes include a simplified contracting clause, a flat rate for administrative
+costs, simplified requirements for the Annual Operating Plan, and the introduction of the Capacity
+Assessment model. Combined, these measures will decrease the time and resources required for
+Agreement Holders to meet their obligations to ESDC, allowing them to focus on the work of providing
+skills and employment training to their beneficiaries. A comprehensive description of administrative
+changes can be found in Annex A: Administrative Burden – Impact Assessment.
+In response to Recommendation 8, ISET’s program contribution agreement clearly outlines the primary
+responsibility of recipients to manage and provide oversight on sub-agreements, however the new
+Capacity Assessment Process takes into consideration a number of factors which are used to
+collaboratively assess the capacity of Indigenous organizations to manage and monitor their subagreements. The management and monitoring of sub-agreements is explicitly assessed within the
+Planning, Financial Management, and Delivering Results sections of the Joint Capacity Assessment Tool,
+and all ISET Agreement Holders’ reporting and payment schedules are determined by their Capacity
+Assessment outcomes (Annex B: Joint Capacity Assessment Guide). By integrating the management of
+sub-agreement holders into the Capacity Assessments of ISET Agreement Holders, ESDC ensures that
+monitoring, mitigation, and capacity development activities are better targeted towards organizations
+that would most benefit. This approach further allows for the development of mitigation strategies that
+are tailored to the contexts of each Agreement Holder and the unique relationships with their subagreement holders through the implementation of Capacity Building Plans.
+For further information, see clauses 17.0, 20.0, and sub-clauses 25.2, 25.3, 25.4, and 25.5 of the ISET
+program template agreement (Annex C: First Nations Distinction Funding Agreement) as well the
+Capacity Assessment Tool (Annex D: Joint Capacity Assessment Tool) utilized by Service Canada and
+Indigenous Organizations to conduct Capacity Assessments.
+
+Annex A
+
+OAG Audit -- Employment Training for Indigenous People
+Administrative Burden – Impact Assessment
+1. Background
+The OAG published an audit in May 2018 on ESDC’s Indigenous Labour Market Programs. As a
+result of the audit, the OAG recognized that changes had been made to reduce administrative
+burden for agreement holders (AHs). Specifically, recommendation 6 states: “Employment and
+Social Development Canada, in collaboration with Indigenous organizations, should assess how
+the changes it has made to reporting requirements have affected the agreement holders’
+administrative burden and the Department’s ability to manage the programs. It should also
+make any required adjustments.”
+Departmental Response to this element of the Audit:
+ESDC has taken concrete steps in consultation with Indigenous organizations to reduce
+administrative burden. The Department will continue this collaborative effort and will assess the
+impact of previous changes in order to further improve the delivery of the programs.
+As part of the co-development of the new Indigenous Skills, Employment and Training Program
+(ISETP), ESDC consulted with Indigenous partners during the development of program processes
+and tools with a focus on further changes to reporting requirements streamlining activity and
+financial reporting.
+2. Changes to the Aboriginal Skills and Employment Training Strategy (ASETS) made prior
+to fiscal year 2018/2019
+In June 2016, the Department established the Program Delivery Improvement Working Group
+(comprised of ASETS organizations’ representatives, regional Service Canada representatives,
+and NHQ representatives) to develop an action plan with the goal of simplifying administrative
+processes for Agreement Holders. The working group developed the following
+recommendations, which were implemented for amended agreements in 2017-18:
+ the requirement to obtain three bids for a contract was removed from the contribution
+agreement;
+ the Annual Operating Plan (AOP), which outlines planned project activities and forms
+part of the contribution agreement, was simplified by requesting only an overview of
+the planned activities and expenditures;
+ the Department no longer approved changes made to the AOP. Instead, agreement
+holders were free to make changes to the AOP, and would then share these revisions
+with the Department. The Department would simply confirm that the changes were
+eligible;
+
+…/2
+
+-2-
+
+UNCLASSIFIED
+
+ the AOP no longer required approval from Canada. A collaborative review process was
+undertaken between the agreement holder and Canada;
+ the Mid-Year Dialogue and the Annual Report were eliminated and replaced by a
+simplified quarterly Activity Report; and,
+ board decisions and minutes were no longer required by the Department.
+3. Changes made for fiscal year 2018/2019
+Additionally, further changes were made in 2018/19 based on further feedback received from
+agreement holders:
+ travel rates allowed for more flexibility to reimbursed on a per diem basis; and,
+ a pilot initiative was implemented with the participation of 24 ASETS agreement holders
+to test the effectiveness of a flat rate to cover administration costs.
+4. Process to Seek Feedback from Agreement Holders and Program Delivery Staff on
+Administrative Process Changes
+A questionnaire was sent to ASETS agreement holders and to regional service delivery staff to
+seek feedback on impacts the changes had. The questionnaire included five questions on
+changes made, and a sixth question for any further suggestions. 36 agreement holders (out of a
+total of 82 agreement holders) and 14 staff responded to the questionnaire.
+5. Summary of Feedback Received and Recommendations for Future Implementation
+Overall, the changes introduced received a majority of positive responses, though a sizeable
+minority of neutral and negative responses was also included. Based on the feedback, some
+respondents indicated some dissatisfaction with the loss of the mid-year dialogue. A number of
+the neutral or negative responses were related to new processes (e.g. problems using the new
+template, still wanting to report on changes to the Annual Operating Plan).
+The feedback received has informed the design and application of new tools and processes for
+the implementation of ISETP.
+Tally of Responses for each Administrative Change
+a) The simplification of the AOP template: Positive – 27; Neutral – 13; Negative – 9
+The Department received 27 positive responses when questioned on the impacts of the
+simplified AOP template. The responses were measured, though, as organizations
+indicated that while the template was more streamlined and ease-of-use was improved,
+it did not result in significant savings of time or in reduced administrative burden.
+Negative responses received mostly centred on the ease-of-use of the template as well.
+The following quotes illustrate this:
+“Loves the simplified AOP. The style and ease of it. Still doing all the detail for
+administration.” “The Agreement Holder appreciated the streamlining in the fact the
+
+…/3
+
+-3-
+
+UNCLASSIFIED
+
+financial information was incorporated into the AOP instead of two separate documents
+as in the past with the AOP and the AEP. However, the internal work still has to be done
+in order to populate the AOP and actual time saving was determined to be minimal.” The
+majority of negative responses were from staff and often had to do with technical
+difficulties in using the new form: “AH has had difficulty using the Excel format so
+additional assistance is required by SC to input information.”
+Recommendation: It was recommended that this change be kept for ISETP. Regarding
+the technical concerns expressed, the AOP template will be further revised in order to
+make it easier to use.
+Current status update (since the negotiations for ISETP agreements have commenced):
+ISETP agreement holders may also use their own template in place of the Department’s
+AOP template. This will reduce burden for organizations that already have planning
+documents that include all of the information required by the department.
+b) The Department no longer approves the AOP : Positive – 31; Neutral – 16; Negative – 1
+Positive responses were generally not very detailed and simply mentioned that there
+were savings in time. With regards to neutral responses, there was often either an
+impression that approval was still required (‘While the Department is no longer
+“required” to approve the AOP, the fact that there is a signature line for the Department
+implies that it is still “approved”.’) or the AH continues to verify with the Department
+(“This has not changed…as she will continue to submit her AOP to the SDO to review
+before she submits a final version. This is to ensure that she has completed it
+correctly.”).
+Recommendation: It was recommended that this change be kept for ISETP as it
+increases the flexibility of organizations to manage their contribution agreements.
+Current status update: The annual planning process under the new ISET program, has
+moved away from the administrative burdensome submission and review of
+expenditures and supporting invoices, to placing the focus on setting out the key
+activities and programs that will achieve anticipated milestones and longer-term
+results. It is upon this basis that approval will be sought so that advance payments are
+provided based on the overall capacity of the organization.
+c) Departmental approval no longer required for changes to the AOP: Positive – 29;
+Neutral – 17; Negative – 1
+In addition to savings in time, positive responses also focussed on increased flexibility to
+react to the labour market and overall more efficient management: “…allowed more
+flexibility to the Agreement Holder to update activities in a timely manner, resulting in a
+more efficient management of the project.” “This improvement has provided added
+flexibility for the agreement holder to respond quickly to partnership opportunities and
+changes in the local labour market as they arise…” Although responding neutral to the
+question, one response was positive in a way that demonstrates the importance of a
+good, collaborative working relationship between the AH and the departmental
+
+…/4
+
+-4-
+
+UNCLASSIFIED
+
+representative: “No big impact for <organization> - whenever changes happen to the
+AOP, we contact our Senior Development Officer to let her know, even if it is not required
+to do so; the relationship between <organization> and Service Canada is a very good one
+so there is communication that exists on a regular basis.”
+Recommendation: It was recommended that this change be kept for ISETP.
+Current status update: Agreement holders are free to make any revisions to the AOP
+without the formal approval of Service Canada. Agreement holders would generally
+share revisions with Service Canada for information purposes.
+d) A simplified quarterly Activity Report has replaced Mid-Year Dialogue and Annual
+Report: Positive – 34; Neutral – 6; Negative – 18
+This change elicited the greatest number of negative responses. Although a majority of
+respondents felt that the new process saved time and was less burdensome, many
+(including some of those who responded overall in favour of the change) regret the loss
+of the mid-year dialogue. The following is typical of the negative feedback: “We miss
+having the Mid-Year Dialogue. It was an excellent touchpoint and opportunity to meet
+with our SDO and have the whole staff speak to their experience and ideas for the new
+year.” This is the one change that the Department may want to reconsider.
+Recommendation: Although it was recommended that the simplified quarterly activity
+report be retained for ISETP, it was also recommended to either reinstate the mid-year
+dialogue or provide a similar alternative.
+Current status update: The mid-year dialogue has been reinstated for ISETP in order to
+promote on-going communication and collaboration between the agreement holder and
+Service Canada. Overall, as a result of a new joint capacity assessment process
+implemented for ISETS, which establishes reporting and monitoring schedules, the
+frequency of monitoring has been reduced in that semi-annual and annual reporting are
+options.
+e) Board decisions and minutes no longer required by Department: Positive – 31; Neutral
+– 16; Negative – 1
+Positive responses generally centred on timesaving with regard to not having to redact
+minutes (AH) or having to wait for the submission of minutes before processing a claim
+(staff), with a number of staff responses even questioning why minutes were required in
+the first place. Neutral responses indicated that minutes are produced and available
+regardless.
+Recommendation: It is recommended that this change be kept for ISETP.
+Current status update: This change has been retained for ISETP.
+
+…/5
+
+-5-
+
+UNCLASSIFIED
+
+6. Flat Rate Pilot
+The goal of this initiative was to evaluate the effectiveness of using a flat rate for administration
+costs in reducing the reporting requirements for ASETS agreement holders (AAHs). After
+reviewing flat rate models used by other programs and other departments, it was decided to
+implement a model which required as little change as possible on the part of the AH. Ultimately,
+the flat rate was a funding ‘cap’ dictated by the amount for administration costs identified in the
+AH’s Annual Operational Plan (AOP). Hence, there was no change in funding amount, eligibility
+criteria, or claiming an amount for administration; the only change was that no supporting
+documentation was required for administration costs, and Service Canada (SC) staff would not
+be monitoring administration costs.
+Twenty-four AAHs volunteered to participate, and were requested to complete (for the first or
+second quarter and for the third quarter) a questionnaire twice during the 2018/2019 extension
+year. Service Canada staff responsible for the management of these agreements were also
+requested to complete the questionnaire.
+Number of agreement holders who have responded (out of 24): 18 in total with six having
+completed the questionnaire twice as requested.
+Observations: Although the questionnaire consisted of 15 questions (including questions
+regarding changes in amount of contact with the Department, level of effort for reporting,
+changes in financial processes, and management of sub-agreements), below are the tallies for
+the responses to the first and second questions, which essentially represent the main reasons
+(ease of process and savings in time) for the flat rate.
+The reception for the initiative ranged from neutral to positive with the majority of respondents
+indicating little or no impact on lessening the time required to prepare financial claims. Many of
+these responses were due to the organization already having an efficient reporting system in
+place and the change only had a minor impact on time. Although the majority of respondents
+have indicated little to no impact, a sizeable minority have claimed a positive impact.
+1. Did the use of a flat rate noticeably simplify financial administration (for AH)? Did it
+require less time to process financial claims (for staff): Positive – 15; Neutral – 18;
+Negative – 1
+2. Does it require less time now to prepare financial claims (for AH)? Has your financial
+claim review process changed at all (for staff): Positive – 14; Neutral – 19; Negative – 0
+Recommendation: Overall, based on these results and on the feedback received, it has been
+demonstrated that the flat rate had a positive impact with regards to the reduction of
+administrative burden and should be considered in the new ISET Program.
+
+…/6
+
+-6-
+
+UNCLASSIFIED
+
+Current status update: The use of the flat rate for administration costs is being introduced for
+the new ISET agreements as it supports streamlined reporting on financial expenditures, and
+reduces the amount of repetitive reporting for reoccurring and fixed administrative costs.
+7. Ongoing Efforts for the Indigenous Skills, Employment and Training Program
+Due to the feedback received on the administrative changes made for ASETS, the mid-year
+dialogue is being reinstated for ISET. A flat rate for administration costs is now to be used for all
+ISET agreements. Unless otherwise negotiated, the maximum amount is 15%. In order to
+provide spending flexibility, this percentage applies to the entire project budget and not to the
+annual allocation.
+Agreement holders continue to be engaged through the co-development and implementation of
+the new ISET program and opportunities will be explored to continuously seek areas for
+improvement.
+
+Annex B
+
+Indigenous Skills and Employment
+Training Program (ISETP)
+Joint Capacity Assessment Guide
+
+January 2019
+
+Table of Contents
+1.0 Background .............................................................................................................................................................................................................. 3
+2.0 Introduction ............................................................................................................................................................................................................. 3
+2.1 What is the purpose of the Capacity Assessment Guide? ................................................................................................................................... 3
+3.0 Roles and Responsibilities - Capacity Assessment ................................................................................................................................................... 4
+3.1 Preparation and Scheduling a Meeting with the Organization ........................................................................................................................... 4
+3.2 Discussion and Documentation ........................................................................................................................................................................... 5
+3.3 Review of Initial Assessment/Capacity Development Plan (CDP) ....................................................................................................................... 6
+3.4 Results of Review ................................................................................................................................................................................................. 7
+3.5 Capacity Reassessment ........................................................................................................................................................................................ 8
+3.6 Capacity Development Plan (CDP) ....................................................................................................................................................................... 8
+4.0 Capacity Assessment Tool ........................................................................................................................................................................................ 9
+4.1 Purpose ................................................................................................................................................................................................................ 9
+4.2 Description of the Tool ........................................................................................................................................................................................ 9
+4.2.1 Factors and Considerations........................................................................................................................................................................... 9
+4.2.1.1 Governance .......................................................................................................................................................................................... 10
+4.2.1.2 Planning................................................................................................................................................................................................ 11
+4.2.1.3 Financial Management......................................................................................................................................................................... 12
+4.2.1.4 Delivering Results................................................................................................................................................................................. 14
+4.3 Assessment Rationale ........................................................................................................................................................................................ 15
+4.4 Capacity Development Plan / Activities ............................................................................................................................................................. 15
+4.5 Capacity Assessment Category and Descriptor ................................................................................................................................................. 16
+4.6 Overall Assessment Rationale ............................................................................................................................................................................ 17
+1
+
+Annex A: Example Capacity Development Plan .......................................................................................................................................................... 18
+Annex B: References .................................................................................................................................................................................................... 19
+Annex C: Definitions..................................................................................................................................................................................................... 20
+Annex D: ISET Organizational Capacity Continuum ..................................................................................................................................................... 21
+Annex E: Contact .......................................................................................................................................................................................................... 24
+
+2
+
+1.0 Background
+The Treasury Board Secretariat Policy and Directive on Transfer Payments (2008) requires that all federal departments apply a more recipientspecific, risk-based approach to managing transfer payments.
+As a result of this requirement, Service Canada (SC) developed the Risk Assessment, Management and Mitigation (RAMM) in 2009.
+With the creation of the Indigenous Skills and Employment Training program (ISETP), SC is taking a different approach on how risks will be
+managed. SC is shifting from only considering potential risks, to supporting organizations through a collaborative capacity assessment process.
+This process has been developed in collaboration with Indigenous organizations, as well as internally with SC delivery staff.
+
+2.0 Introduction
+2.1 What is the purpose of the Capacity Assessment Guide?
+This guide is an accompaniment to the Capacity Assessment Tool and provides an overview of the capacity assessment process and guidance on
+the completion of each section of the tool. In addition, more generally, the goal of this guide is to assist the Department and Indigenous
+organizations in assessing organizational capacity elements, and identifying those areas that could be strengthened in order to support the
+management of the funding agreement.
+
+3
+
+3.0 Roles and Responsibilities - Capacity Assessment
+3.1 Preparation and Scheduling a Meeting with the Organization
+
+WHAT
+
+WHO
+SC
+
+1
+
+2
+
+3
+4
+
+4
+
+Review observations and comments in the agreement file and
+the CSGC from previous year(s) that could help with the
+assessment.
+Review current information provided and sources of
+information: all notes to file, e-mails exchanged between SC
+and the indigenous organization, and supporting documents in
+CSGC to prepare for the discussion.. This will avoid
+unnecessary requests for information that may already be on
+file.
+SC organizes and prepares information before the meeting
+with the Indigenous organization.
+SC schedules a meeting with the Indigenous organization.
+
+3.2 Discussion and Documentation
+An initial assessment is undertaken to support elements of the funding agreement between the organization and SC. They will work in
+collaboration to facilitate a transparent, consistent, and equitable assessment process.
+
+WHO
+WHAT
+1. The assessment process is collaborative and decisions are
+taken by consensus using the Capacity Assessment Tool.
+
+SC together with representative(s) from the Indigenous
+organization
+
+2. This step involves the complete documentation and/or
+confirmation of information to the considerations on the
+Capacity Assessment Tool. This will ensure that all
+parties are aware of the information captured and, it can
+be referred to when updating future templates, along with
+the identification, if any, of areas which could benefit from
+capacity development or capacity building. The resulting
+draft summary of the preparatory Capacity Assessment
+discussion should contain observations and the reasons
+for supporting the assessment decision.
+
+SC
+
+3. SC uploads a PDF and an electronic (Word) copy of the
+Capacity Assessment Tool in Supporting Documents in the
+CSGC.
+
+SC
+
+4. The PDF copy of the Capacity Assessment Tool is shared with
+the Indigenous organization to validate the observations and
+justifications rationale and the information captured during
+the discussion
+
+5
+
+3.3 Review of Initial Assessment/Capacity Development Plan (CDP)
+The review process is an opportunity to encourage and apply consistency, and if necessary, seek additional information to support the
+assessment.
+
+WHO
+WHAT
+SC and SC Regional Director together with representative(s) from
+the Indigenous organization
+
+1
+
+2
+
+SC and SC Regional Director
+
+3
+
+SC
+
+4
+
+6
+
+A meeting is arranged by SC to be held together with the
+Indigenous organization, and the SC Regional Director(s) to
+discuss the assessment/CDP.
+The summary of the preparatory capacity discussion reflective
+of the views of both parties is reviewed. A consensus
+approach amongst all parties will be used to finalize all
+capacity reviews. All parties can reconvene to further discuss
+the assessment and agree to a reassessment within a defined
+period (for example 6 months or a year).
+During the meeting, SC documents the date of the meeting,
+attendees and takes notes of the conversation. These are to
+be uploaded in Notes to file in the CSGC.
+SC records the date of the decision and name of the Regional
+Director(s) on the reviewed Capacity Assessment.
+SC uploads the PDF and a Word copy of the (potentially
+revised or updated) Capacity Assessment Tool in Supporting
+Documents in the CSGC.
+
+3.4 Results of Review
+
+WHO
+
+WHAT
+
+SC and Indigenous Organization representatives
+
+1. The results of the Capacity Assessment are shared by SC
+with the Indigenous organization’s representatives that were
+part of the assessment and the review of the assessment.
+2 The subsequent placement of the organization on the ISET
+program Organizational Capacity Continuum (Annex D) is
+used to determine the payment frequency and reporting
+requirements within the funding agreement. Details on the
+categories of the Continuum and the corresponding payments,
+monitoring, and reporting are outlined further in the
+Organizational Capacity Continuum. As described in the
+funding agreement; should the Indigenous organization’s
+capacity change significantly, the corresponding payment
+frequency and reporting requirements aligns with
+Organizational Capacity Continuum following the result of the
+re-assessment process. No amendment to the Annual
+Operating Plan (AOP) or funding agreement is required to be
+made as a result of a reassessment, unless there are
+changes to the activities and/or to the level of funding
+(e.g. addition of Capital Assets), in which case, a revision to
+the AOP and a minor or major amendment may be required.
+
+Note: Refer to Annex D: ISET Organizational Capacity Continuum for more details on payment frequency and reporting requirements.
+
+7
+
+3.5 Capacity Reassessment
+The purpose of any reassessment or update to the Capacity Assessment Tool is to ensure that information is up to date and that changes in
+capacity are accurate, and appropriately reflected and addressed if necessary.
+As per the agreement, an Indigenous organization’s capacity is, at a minimum, to be reassessed in the 4th and 8th years to capture any changes
+(positive or negative).
+The request to reassess can be made by the Indigenous organization, or at the initiative of SC when there are factual and objective reasons to
+believe significant changes may have happened with respect to the four capacity factors. E.g., leadership changes, staff changes, new economic
+opportunities, etc.
+The reassessment could result in the organization moving up or down in the Capacity Continuum, thus changing the requirements of the funding
+agreement. SC commits to providing appropriate support when and as needed by the Indigenous organization.
+Reassessments will be reviewed through the same process as described in processes1 - 4 to ensure that Indigenous organizations are
+continuously engaged as part of the assessment process
+Once initiated, reassessments should be concluded within a two-week timeframe.
+
+3.6 Capacity Development Plan (CDP)
+If the assessment of an Indigenous organization has identified opportunities to enhance or build its capacity, the Indigenous organization may
+establish a CDP outlining activities (and/or funding) designed to strengthen capacity. Expenses to implement this plan are eligible under ISET
+program funding agreement so long as they relate to the delivery of the program.
+Indigenous Organizations are not required to develop a CDP. However, over time, discussions may result in either the desire to create a plan or
+the need to re-assess capacity of the organization (e.g., a major change has taken place within the organization causing the need for
+enhancements).
+The CDP can be reviewed by the Indigenous organizations and SC as part of the year-end discussions, and when needed.
+
+8
+
+4.0 Capacity Assessment Tool
+The Capacity Assessment Tool is the template which guides the assessment discussion, and in which the detailed information/responses and
+results are recorded. It consists of the organization information and assessment questions.
+
+4.1 Purpose
+The Capacity Assessment Tool provides organizations with a set of criteria to assess their capacity, and to identify key areas that may need
+strengthening. The tool is divided into six sections:
+•
+•
+•
+•
+•
+•
+
+Factors
+Assessment Rationale
+Considerations
+Capacity Assessment Category
+Overall Assessment Rationale
+Capacity Development Plan (optional)
+
+4.2 Description of the Tool
+4.2.1 Factors and Considerations
+The factors are the four elements to be considered for the capacity assessment:
+•
+•
+•
+•
+
+Governance/Leadership
+Planning/Management
+Financial Management
+Delivering Results
+
+Considerations in the tool are expressed as questions and provide suggestions on elements to take into account when assessing each factor.
+Answers are to be documented so that all parties are aware of the information captured and it can be referred to when updating future templates.
+
+9
+
+4.2.1.1 Governance
+Governance is the ability to demonstrate leadership in the management of the organization.
+The objective of this section is to assess the clarity of the organization’s purpose and stability by reviewing its guiding principles, structure, and
+oversight mechanisms.
+
+Considerations:
+1. Organizational Structure
+• How long has the organization been in operation (for example, 1 to 5, 6 to 10 years)?
+• How is the organization managed (for example, council, board of directors, other governance structure)?
+• Is the organization associated with another government (for example, municipality or Indigenous)?
+2. Partnerships and accountability
+• Does the organization publish an annual report, including service and program outcomes, financial statements, etc.?
+• Does the organization have established partnerships to support their service delivery?
+3. Policies and Procedures
+• Are there established policies and procedures that are used to support service delivery (e.g. HR policies, service standards)?
+• Are there established planning cycles supported by operational and budget plans?
+
+Examples of Sources of Information / Evidence:
+•
+•
+•
+•
+•
+•
+•
+•
+
+Corporations Canada data base or provincial/territorial equivalent
+Observations during field visits
+Overall fulfillment of existing agreements
+Copies of annual reports or other accountability documents
+Public information;
+Organization websites (e.g. posting of accountability documents)
+Organization has not filed an annual return or other filing as required by applicable legislation or regulation.
+Vision, mission, and/or values statements.
+
+Examples of Best Practices
+•
+•
+
+Level of services available through the agreement, within available funds, and the policies which govern their delivery
+Administrative policies to guide sensitive matters (staffing, contracting, travel expenditures)
+
+10
+
+•
+•
+•
+
+Formal process for the change of any policy within the organization (i.e. governing authority)'s authority
+Experienced and knowledgeable staff supporting program and administrative functions
+Conflict of interest guidelines applicable to those in governance and administrative functions
+
+4.2.1.2 Planning
+
+Planning is the ability of an organization to demonstrate long-term sustainability through careful planning of its operations, administration, and
+management.
+
+Considerations:
+1. Strategic, Operational and Budget Plans
+• Are there plans and strategies in place, such as strategic, operational and budget plans to manage potential impacts on funded programs?
+• How will these plans guide the long-term skills development and employment training services provided?
+• What are the expected outcomes and targeted results of the planned activities?
+•
+What is the organization’s vision and long term plans?
+• Are foreseeable emergencies and service disruptions considered in these plans?
+2. Human Resource Planning
+• Does the organization have procedures in place for the recruitment, staffing, and retention of employees?
+• Are structures in place to train and support staff?
+3. Community Involvement
+• Has the organization engaged people in the community or service area in the planning and design of services? If applicable, have
+partners (such as sub-agreement holders or other entities) been informed and involved during the planning process to ensure program
+delivery coverage, quality services, and that results are communicated to the community?
+Examples of Sources of Evidence:
+•
+•
+•
+•
+
+Copy of plan shared with the ESDC.
+Reference made to plan during field trips / site visits or by the funded organization during presentations to the department.
+Plans posted on organization website.
+The organization should reference its operational plan and budget for purposes such as setting agreement cash flow.
+
+11
+
+Examples of Best Practices:
+•
+•
+•
+•
+
+Established multi-year direction based upon the mission / mandate, vision and values of the organization.
+A business plan that expresses outcomes to be achieved, performance measurement and accountability.
+An operational plan that sets context and priorities for shorter term plans throughout the organization.
+Operational Plan and Budget sets out the services to be delivered by each organizational unit
+
+4.2.1.3 Financial Management
+
+Financial Management is the ability to demonstrate accountability, effective use of resources and adapt to new opportunities or changes.
+
+Considerations:
+
+1. Financial Certification
+• Has the organization obtained financial certification by First Nations Financial Management Board (FNFMB), International Standards
+Organization (ISO) or another entity? (As applicable to Indigenous organizations that have already received a certification. This is not a
+requirement of Service Canada but may be for other funding partners).
+
+2. Financial Controls, Records, and Reporting
+•
+•
+•
+•
+•
+•
+•
+
+Has the organization implemented financial operations policies and procedures?
+Is there a separate project structure for the ISET program within (the Chart of Accounts) in the accounting system?
+How often does the organization reconcile its bank statements and has it implemented separate tracking of program funding (Income
+and Expenditures)?
+Who is responsible for preparing the bank reconciliation? Does this individual have access to the cash account (e.g. can they affect the
+cash account in the accounting system)?
+Does the AH use a separate ledger to track program costs?
+a. What system/tools are used for this purpose?
+Based on the organization’s policies and delegation of authority, how are financial transactions managed (for example, requisition of
+cheques, direct deposit, etc.)?
+Do the procurement or purchasing policies in place apply to funding received through the contribution agreement, including a
+competitive/tendering process for the purchase of a good or service and a threshold for going to tender to purchase a good or a service?
+
+12
+
+•
+•
+
+As part of its internal control framework, is the organization able to extract a general ledger at the transaction level and reconcile with
+financial accounts? (for example, being able to provide transaction level information related specifically to project expenditures).
+Does the organization engage a Certified Professional Accountant (CPA) to prepare its annual financial audit?
+
+3. Finance Functions
+•
+•
+•
+•
+
+Has the organization recruited staff with professional designations, e.g., a CFO, an accountant, bookkeeper, a certification from the
+Aboriginal Financial Officers Association, etc.?
+Does the organization conduct monitoring, review, and reconcile sub-agreement holders’ claims/expenditures to determine the eligibility of
+expenditures?
+Are sub-agreements (if applicable) monitored by the organization for compliance consistent with the terms of the contribution agreement?
+Are structures in place to ensure that the expenditure of funds redistributed to sub-agreement holders or services providers meet the
+terms and conditions of the program?
+Have there been any issues found (and addressed) based on financial monitors in the last 2 years that may have an impact on service
+delivery or financial management?
+
+4. Segregation of Duties
+•
+
+How does the organization determine and address segregation of duties, i.e., financial system requirements and policies at staff level? Have
+there been any issues with following this approach?
+
+Examples of Sources of Evidence:
+•
+•
+•
+•
+•
+
+Observations during field visits.
+Financial staff titles, certifications and descriptions (e.g. CPA, CGA, and CAFM) included in organization’s work plans, cash flows, and
+budget notes.
+Financial certification (FNFMB, ISO, AFOA Canada etc.).
+Annual audited financial statement or annual return (e.g. Interim and Final financial reports).
+Annual Audit Review process.
+
+Examples of Best Practice:
+•
+•
+
+The organization maintains a balance between revenues and expenditures such that it is well positioned to meet its financial obligations in
+the short and long-term for purposes of delivering public services.
+The organization has the capacity to recruit, train and retain appropriate personnel to support the finance function.
+
+13
+
+4.2.1.4 Delivering Results
+
+Delivering Results is the ability to provide quality services that meet the needs of clients and the community on a sustained basis.
+
+Considerations:
+1. Service / Program Delivery
+• How much experience does the organization have in delivering skills training and /or employment programs (e.g. 10 years +)?
+• Have past agreements consistently demonstrated good results?
+• How much experience does the organization have in delivering other federal programs or services? (e.g. 10 years +)
+• Does the organization have indicators to monitor and evaluate the effectiveness of services and programs delivered? Are the results
+published or shared?
+• Are service evaluations, client feedback, and data collected used to inform decisions on revisions to programs and services?
+• Are interviews performed with program participants or with employers to determine if programs or services are easy to access and effective?
+2. Staff Capacity
+• Does the organization have the capacity and flexibility to meet the needs of clients if there are changes, such as increase service volumes if
+demand grows?
+3. Management of Sub-Agreements
+•
+•
+
+Does the organization have experience in managing sub-agreement holders?
+How does the organization intend to monitor and manage these sub-agreements to effectively increase or improve their capacity to deliver?
+
+Examples of Sources of Evidence
+•
+•
+•
+•
+
+Observations during field visits
+Program Compliance / Performance Reviews
+Program /Activity reporting
+Other analysis as required by program.
+
+14
+
+Examples of Best Practices
+•
+•
+•
+•
+
+Organizations use flexibility as available under their funding agreement to tailor policies and plans to the specific needs of their client
+population.
+Human resource strategies are in place to hire, train and retain the staff required to maintain services and their continuous improvement.
+The organization and the department receive periodic program reports that allow it to monitor progress in comparison to the operational
+plan and budget.
+Systems are in place to share such information with the client population in a way that is meaningful to them (e.g. through annual reports).
+
+4.3 Assessment Rationale
+Based on the information and answers documented in the Considerations section, the Assessment Rationale identifies and justifies the capacity
+level (i.e. Optimal and Enhancement Capacity, and Capacity Building).
+
+4.4 Capacity Development Plan / Activities
+If the assessment has identified opportunities to enhance or build its capacity, the Indigenous organization supported by SC may decide to
+establish a Capacity Development Plan (CDP) to outline initiatives and activities to strengthen its capacity. These activities are outlined by the
+organization and can include training, mentoring, and hiring of expertise. Indigenous organizations are not required to develop a CDP, though they
+may choose to.. Expenses to implement this plan may be eligible under the ISET program funding agreement so long as they are related to the
+management and delivery of the program.
+The CDP tool offers a non-exhaustive list of activity options from which to choose, delete or add to, based on the specific needs. The activities
+become the basis for the CDP. Once an activity is identified, the detail on how the activity will be implemented and carried out is then added to the
+tool. This, then, becomes the CDP.
+
+15
+
+4.5 Capacity Assessment Category and Descriptor
+The capacity assessment category identifies the overall capacity level of the organization. The capacity levels are as follows:
+
+•
+
+•
+
+Optimal Capacity:
+o
+
+The organization demonstrates an effective organization of its operations and sound practices on the majority of the
+aspects of its capacity relating to the management of or delivery of the program;
+
+o
+
+Overall, the organization has the following:
+
+ governance (considering variances in the size and range of services provided);
+ planning in place to manage potential impacts on services from foreseeable emergencies/service disruptions.
+ financial controls; and
+ Services are being delivered and results achieved.
+Capacity Enhancements:
+o
+o
+
+•
+
+The organization is pursuing certain improvements to aspects of its management of or delivery of program and services
+capacity
+Overall, the organization demonstrates the capacity in each of the four elements assessed, similar to optimal capacity.
+Where additional needs or gaps have been identified, there may be opportunities for further enhancement which would
+result in the ability to provide increased/improved services, additional staff capacity, increased reporting of accurate
+results and improvements in service delivery to the service population.
+
+Capacity Building
+o
+o
+
+The organization is pursuing significant improvements to different aspects of its management of or delivery of programs
+and services capacity, or there is an identified need to build capacity to deliver the project successfully
+Capacity building would address gaps identified that have a direct impact on the ability of the services to be provided and
+for results to be achieved. Capacity building activities may be identified in order to increase operational, financial,
+reporting and delivery functions.
+
+16
+
+4.6 Overall Assessment Rationale
+The Overall Assessment Rationale is based on the assessment of all four factors. There is no set standard to weigh the different considerations of
+each organization, as the circumstances of each service delivery structure is unique.
+When determining an organization’s Overall capacity assessment category. It is important to note if areas of improvement were identified. Are
+these improvements essential to service delivery requirements, or are they areas that could simply be enhanced and would not impact on
+achieving the objectives of the program.
+
+17
+
+Annex A: Example Capacity Development Plan
+CAPACITY DEVELOPMENT PLAN/ ACTIVITIES
+
+18
+
+Annex B: References
+1. First Nation Financial Management Board (FNFMB): The First Nations Financial Management Board (FMB) supports First Nations across
+Canada to build good governance and finance practices.
+Link: https://fnfmb.com/en
+
+2. Aboriginal Financial Officers Association Canada (AFOA)
+AFOA Canada (formerly Aboriginal Financial Officers Association of Canada) was founded as a not-for-profit association in 1999 to help
+Indigenous people better manage and govern their communities and organizations through a focus on enhancing finance and management
+practices and skills.
+Link: http://www.afoa.ca/
+3. Policy Transfer Payment
+Link: https://www.tbs-sct.gc.ca/pol/doc-eng.aspx?id=13525
+4. Directive on Transfer Payment
+Link: https://www.tbs-sct.gc.ca/pol/doc-eng.aspx?id=14208
+
+5.
+
+Verify organization corporate status for:
+Federal:
+Link: https://www.ic.gc.ca/app/scr/cc/CorporationsCanada/fdrlCrpSrch.html?locale=en_CA
+Provincial and territorial registrar websites:
+Link: https://www.ic.gc.ca/eic/site/cd-dgc.nsf/eng/cs04578.html
+
+19
+
+Annex C: Definitions
+Capacity:
+Capacity is defined as the ability of an organization to fulfill its mission through effective leadership and governance, sound management, and the
+alignment of measurable outcomes with strategies, services, resources, and partners.
+Capacity Development:
+Capacity development is about developing the skills, knowledge, and the capacity of an organization to respond to challenges and provide
+effective and efficient services. During capacity development, Service Canada plays a a supporting role bringing together its commitments and
+strengths.
+Capacity Assessment Process:
+Capacity Assessment is a joint process to understand an Indigenous organization’s ability to deliver services through sound management, strong
+governance, and a focus on client service needs and results. It is a process that aims to guide and support an organization’s efforts to increase its
+effectiveness (skills, resources, knowledge etc.) to achieve its objectives over the long term. It encourages continuous dialogue and a shared
+understanding between the Indigenous organization and SC.
+
+20
+
+Annex D: ISET Organizational Capacity Continuum
+
+21
+
+22
+
+23
+
+Annex E: Contact
+
+Please address all questions to:
+NC-ABORIGINAL_PROG-PROG_AUTOCHTONE-GD@hrdc-drhc.net
+
+24
+
+Annex C
+AGREEMENT #:
+AMENDMENT #:
+
+INDIGENOUS SKILLS AND EMPLOYMENT TRAINING PROGRAM
+FIRST NATIONS DISTINCTION FUNDING AGREEMENT
+BETWEEN
+
+Her Majesty the Queen in Right of Canada
+(hereinafter referred to as “Canada”),
+as represented by the Minister of Employment and Social Development Canada
+and the Canada Employment Insurance Commission
+
+AND
+
+[legal name of recipient organization]
+(hereinafter referred to as the “Recipient”)
+
+Hereinafter collectively referred to as the “Parties”
+
+ARTICLES OF AGREEMENT
+WHEREAS the Parties share the vision that this Agreement will:
+•
+Support capacity-building by the Recipient to empower the Recipient to plan and invest in
+activities covered under this Agreement based on the Recipient’s priorities;
+•
+Be founded on a mutual accountability relationship whereby the Recipient is primarily
+accountable to its community while the Government of Canada and Recipients are mutually
+accountable for the commitments they make to one another in pursuit of achieving the goals of
+this Agreement; and,
+•
+Work toward reducing the employment, skills and earning gaps between the Recipient’s
+Indigenous eligible clientele and non-Indigenous Canadians.
+WHEREAS pursuant to the above, the Recipient will provide the activities of this Agreement for the
+benefit of its eligible clientele;
+WHEREAS pursuant to the above, Canada wishes to provide funding to the Recipient in accordance with
+the Terms and Conditions of this Agreement to support the provision of eligible activities; and,
+WHEREAS the Recipient and Canada intend that nothing in this Agreement will have the effect of, or be
+interpreted as, limiting or expanding any fiduciary relationship between Canada and First Nation people.
+NOW THEREFORE the Parties agree as follows:
+PART 1 – FOUNDING COMPONENTS OF AGREEMENT
+1.0
+
+Purpose of this Agreement
+The purpose of this Agreement is to outline the terms under which Canada will provide funding to
+the Recipient to carry out the programs, services and activities to its eligible clientele described in
+the specific program Schedules that form part of this Agreement.
+
+2.0
+
+Definitions
+
+2.1
+
+For the purpose of this Agreement and in addition to other definitions included elsewhere in this
+Agreement:
+“Administrative Costs” means the expenditures incurred by the Recipient in the course of its
+regular operations that, though indirectly related to the delivery of programs, enable the Recipient
+to manage the delivery of programs successfully.
+“Advance Period” means the intervals upon which Canada’s contribution is made, in
+accordance with Section 11 of this Agreement.
+“Agreement” means these Articles of Agreement, the specific program Schedules, and any
+amendments that may be made by the Parties thereto.
+“Agreement Period” means the period as listed in the “Effective Date and Duration” in Section
+3.0 of this Agreement.
+“Canada’s Access Coordinator” means Service Canada’s Regional coordinator(s) authorized
+to submit and manage access requests for Systems and Services Administered by Canada.
+“Capital Asset” means any single item, or a collection of items which form one identifiable
+functional unit, that has a purchase or lease value more than $5,000.00 (excluding GST/HST), but
+does not include land or buildings purchased or leased by the Recipient in connection with the
+implementation of this Agreement.
+“Data Gateway” means the secure systems link maintained by Canada through which the
+Recipient will upload client data files and information.
+“Eligible Expenditures” means the expenditures comply with the corresponding Terms and
+Conditions as set out in the specific program Schedules that form part of this Agreement.
+“Fiscal Year” means the period commencing on April 1 in one calendar year and ending on
+March 31 in the next calendar year.
+“Minister” means the Minister of Employment and Social Development Canada.
+“Sub-Agreement” means an agreement between the Recipient and an organization other than
+the Recipient, under which the Recipient further distributes the funds received under this
+Agreement, and delegates all or part of their responsibilities relating to the delivery of the eligible
+activities under this Agreement.
+
+1
+
+“Sub-Agreement Holder” means an organization other than the Recipient, pursuant to a SubAgreement, to whom funding provided to the Recipient under this Agreement is further
+distributed, and to whom all or part of the Recipients responsibilities to deliver the eligibile
+activities under this Agreement are delegated, to enable the organization to carry out a SubAgreement.
+“Vendor” means any legal entity, other than Canada, the Recipient or a Sub-Agreement Holder,
+who supplies a product or a service under this Agreement.
+2.2
+
+Unless otherwise specified in this Agreement, words importing the singular include the plural and
+vice-versa and words importing gender include all genders.
+
+2.3
+
+The title of clauses and headings in this Agreement are for ease of reference only, do not form
+part of this Agreement and are not to be taken into account in the construction or interpretation of
+any provision.
+
+3.0
+
+Effective Date and Duration
+This Agreement will come into effect on April 1, 2019 and will expire on March 31, 2029 unless
+this Agreement is terminated on a prior date in accordance with the terms of this Agreement, or
+extended by an Amendment. All Schedules of this Agreement correspond to the same effective
+start date and end date of this Agreement, unless otherwise stated in the specific Schedule.
+
+4.0
+
+Mutual Accountability and Relationship
+
+4.1
+
+The Recipient and Canada will maintain a system of mutual accountability and transparency that
+is based on recognition of Indigenous rights, respect, co-operation, and partnership.
+
+4.2
+
+The Recipient and Canada will work in a spirit of partnership to pursue the goals of this
+Agreement, but they are not an agent, delegate or contractor of the other, and do not act on
+behalf of the other. The Recipient will act for and on behalf of its eligible clientele and will be
+primarily accountable to them in delivering the activities in accordance with this Agreement.
+Canada will provide funding to the Recipient and undertake the other responsibilities set out for it
+herein. Both Canada and the Recipient will be accountable to each other for their respective
+obligations set out in this Agreement.
+
+5.0
+
+Non-Derogation
+
+5.1
+
+Nothing in this Agreement shall be construed to diminish, abrogate, derogate from, or prejudice
+any treaty or Indigenous rights of the Recipient and nothing in this Agreement will:
+(a) Prejudice whatsoever any application, negotiation or settlement with respect to land
+claim or land entitlement between Canada and the Recipient;
+(b) Prejudice whatsoever the implementation of any inherent right to self-government or
+prejudice in any way negotiations with respect to self-government involving the
+Recipient; and,
+(c) Be construed as modifying any existing treaty.
+
+5.2
+
+Nothing in this Agreement shall be construed to create a treaty within the meaning of the
+Constitution Act, 1982.
+
+6.0
+
+Annual Operational Plan
+
+6.1
+
+No later then 30 days before the beginning of each Fiscal Year during the Agreement Period, the
+Recipient will prepare and provide Canada with an Annual Operational Plan for the forthcoming
+year in question, which will set out:
+(a) The Recipient’s priorities and objectives, and how they will contribute to achieving the
+objectives of the programs described in the Schedules of this Agreement;
+(b) The planned activities;
+(c) The planned budget and expenditures;
+(d) The cash flow forecast;
+(e) The performance measurement activities planned; and,
+(f) Any other information relevant to meeting the objectives of the programs described in
+the Schedules of this Agreement.
+
+6.2
+
+The Annual Operational Plan is communicated to Canada, which may request clarifications and
+additional information on the plan within 30 days of receipt, to ensure the eligibility of planned
+activities in accordance with this Agreement.
+
+2
+
+6.3
+
+Canada will have 30 days from receipt of the Annual Operational Plan to determine if the plan
+complies with Section 6.1. During this 30 day period, Canada can request additional information
+from the Recipient about the plan. Upon receipt of this information from the Recipient, the 30 day
+period restarts. In the absence of any requests by Canada within the 30 day period, either after
+receipt of the Annual Operational Plan or after the receipt of information from the Recipient,
+whichever is applicable, Canada is deemed to have declared itself satisfied that the Recipient
+complies with provision 6.1.
+
+7.0
+
+Activity and Cash Flow Reporting
+
+7.1
+
+Within 60 days following each Advance Period in which the Recipient received an advance, the
+Recipient will submit to Canada an Activity Report that includes:
+(a) For Recipients assessed as Capacity Building: A summary of completed activities for
+the Advance Period aligned with the milestones set out in the Annual Operational Plan;
+or for Recipients assessed as Capacity Enhancement or Optimal Capacity: A summary
+of achievements during the Advance Period;
+(b) A statement signed by the designated official certifying that all information contained in
+the Activity Report is accurate and that all expenditures claimed are in accordance with
+this Agreement; and,
+(c) No in-year activity and cash flow reporting is required of Optimal Capacity
+organizations.
+
+7.2
+
+The Recipient will include with each Activity Report a revised, updated forecast of its monthly
+cash flow requirements that takes into account actual expenditures to date and revised estimated
+monthly eligible expenditures for the balance of the Fiscal Year.
+
+7.3
+
+Canada will advise the Recipient if clarification and additional information is needed.
+
+7.4
+
+Canada will process the next advance payment following the receipt of the Activity Report or
+receipt of the clarification and additional information requested under Section 7.3, whichever is
+later. This does not apply to Recipients that have demonstrated Optimal Capacity, pursuant to
+Section 10.0.
+
+PART 2 – FUNDING AND FINANCIAL CONDITIONS
+8.0
+
+Canada’s Funding
+Subject to the Terms and Conditions of this Agreement and its Schedules, in each Fiscal Year of
+the Agreement Period, Canada agrees to contribute to the Recipient’s eligible expenditures
+incurred in the Fiscal Year up to the amount set out in the respective Schedule.
+
+9.0
+
+Eligible Expenditures
+
+9.1
+
+In accordance with the Terms and Conditions of the Programs provided in the Schedules of this
+Agreement, the Recipient may only be reimbursed for expended funding where:
+(a) The expenditure is directly related to the carrying out of the Recipient’s responsibilities
+under this Agreement;
+(b) The Recipient ensures value for money by negotiating the price and other Terms and
+Conditions for the expenditure; and,
+(c) The expenditure is incurred during the Agreement Period.
+
+9.2
+
+Additional details regarding Eligible Expenditures may be found within the specific Schedules that
+form part of this Agreement.
+
+10.0
+
+Management Capacity Assessment of the Recipient
+
+10.1
+
+In collaboration with the Recipient, Canada will perform prior to, or at the start of this Agreement
+and periodically thereafter, an assessment of the Recipient’s capacity to manage this Agreement
+and achieve results.
+
+10.2
+
+Periodical reassessments of the Recipient capacity shall be conducted:
+(a) As may be provided in the Schedules to this Agreement;
+(b) At the request of the Recipient; and,
+(c) At the initiative of Canada where Canada is of the opinion that changes have taken place
+that may have affected the management capacity of the Recipient. These reasons must
+be fact based and objective.
+
+10.3
+
+The capacity of the Recipient is assessed on:
+
+3
+
+(a) The procedures and practices put in place by the Recipient with respect to its
+governance;
+(b) Its planning activities and practices;
+(c) Its financial management systems and practices; and,
+(d) Its ability to achieve results.
+10.4
+
+Pursuant to 10.3, the Capacity Assessment of the Recipient can lead to one of three findings:
+(a) Capacity Building where the Recipient is pursuing significant improvements to different
+aspects of its management capacity;
+(b) Capacity Enhancements where the Recipient is pursuing certain improvements to
+aspects of its management capacity; or,
+(c) Optimal Capacity where the Recipient demonstrates an effective organization of its
+operations and sound practices on the majority of the aspects of its capacity.
+
+11.0
+
+Advances
+
+11.1
+
+Pursuant to Section 6.0, Canada will provide advances of its contribution based upon planned
+expenditures, as periodically updated by the Recipient, and accepted by Canada pursuant to
+Section 6.3 and based upon the management Capacity Assessment of the Recipient as
+described in Section 10.4.
+
+11.2
+
+Canada may withhold payment, or portion of, any advance pending the completion of its financial
+and activity monitoring of the Recipient’s books and records conducted by Canada under Section
+17.0. Canada may also withhold an advance, in whole or in part, when the reporting requirements
+in Section 7.0 are not adhered to.
+
+11.3
+
+Where the management capacity of the Recipient is assessed as Capacity Building, advances by
+Canada of the contribution provided in the appropriate Schedule to this Agreement are made at
+quarterly intervals:
+(a) For the first and second quarter of each Fiscal Year, on the submission of the Annual
+Operational Plan provided for in Section 6.0 by the Recipient pursuant to Section 6.3
+and its acceptance by Canada;
+(b) For the third quarter of each Fiscal Year, upon acceptance by Canada, on the
+submission of the reporting required under Section 7.0 for the first quarter outlining the
+milestones achieved by the Recipient;
+(c) For the fourth quarter of each Fiscal Year, upon the acceptance by Canada, on the
+submission of the reporting required under Section 7.0 for the second quarter outlining
+the milestones achieved by the Recipient; and
+(d) For each Fiscal Year, 10% of the annual contribution by Canada is withheld from each
+fourth quarter advance pending the submission by the Recipient of an Annual Report
+outlining milestones achieved for that year and its acceptance by Canada.
+
+11.4
+
+Where the management capacity of the Recipient is assessed as Capacity Enhancements, an
+advance by Canada of the contribution provided in the appropriate Schedule to this Agreement is
+made at semi-annual intervals:
+(a) For the first half of each Fiscal Year, on the submission of the Annual Operational Plan
+provided under Section 6.0 by the Recipient pursuant to Section 6.3 and its acceptance
+by Canada;
+(b) For the second half of each Fiscal Year, on the submission of the reporting required
+under Section 7.0 outlining progress achieved by the Recipient for the first period of the
+Fiscal Year; and,
+(c) For each Fiscal Year, 7.5% of the annual contribution by Canada is withheld from each
+second advance pending the submission by the Recipient of an Annual Report outlining
+the progress achieved for that year and its acceptance by Canada.
+
+11.5
+
+Where the management capacity of the Recipient is assessed as Optimal Capacity, an advance
+by Canada of the contribution provided in the appropriate Schedule to this Agreement is made at
+an annual interval on the submission of the Annual Operational Plan provided under Section 6.0
+by the Recipient and its acceptance by Canada pursuant to Section 6.3:
+(a) For each Fiscal Year, 5% of the annual contribution by Canada is withheld from the
+annual advance pending the submission by the Recipient of an Annual Report outlining
+the progress achieved for that year and its acceptance by Canada.
+
+4
+
+12.0
+
+Basis of Payment
+
+12.1
+
+Where the management capacity of the Recipient is assessed as Capacity Building, the basis of
+payment is the Recipient’s achievement of pre-determined milestones as outlined in the Annual
+Operational Plan.
+
+12.2
+
+Where the management capacity of the Recipient is assessed as Capacity Enhancements or as
+Optimal Capacity, the basis of payment is a pre-determined annual amount based on the
+Recipients Annual Operational Plan.
+
+12.3
+
+Advances provided during a Fiscal Year are reconciled with the Annual Operational Plan provided
+for in Section 6.0 and the milestones and progress achieved outlined in the Annual Report
+provided under applicable Schedule to this Agreement.
+
+13.0
+
+Unexpended Funds
+
+13.1
+
+If at the end of a Fiscal Year, other than the final Fiscal Year of this Agreement, the Recipient has
+not expended all funding advanced for that Fiscal Year, the Recipient may retain the unspent
+amount for expenditures in a subsequent Fiscal Year subject to the terms of this Agreement.
+
+13.2
+
+If more than 20% of the annual funding allocation has not been expended by the Recipient over
+two (2) Fiscal Years, then such excess funding may be redirected to another Recipient within the
+same First Nation network as the Recipient in consultation with the First Nation network
+coordinating mechanism. If this occurs, this Agreement will be amended to reflect the change
+and agreed to, in writing, by both Parties.
+
+13.3
+
+If upon expiry, termination or cancellation of this Agreement, the Recipient has not expended all
+allocated funding, the Recipient must repay the unspent amount to Canada within one hundred
+and twenty (120) days of the expiry of this Agreement.
+
+14.0
+
+Funding Repayment
+
+14.1
+
+In the event payments made to the Recipient exceed the amount to which the Recipient is entitled
+under this Agreement, the amount of the excess is a debt owing to Canada and shall be repaid to
+Canada upon receipt of notice to do so and within the period specified in the notice. Without
+limiting the generality of the foregoing, amounts to which the Recipient is not entitled include:
+(a) The amount of any expenditures paid for with the contribution which are disallowed or
+determined to be ineligible; and,
+(b) Any amount paid in error or any amount paid in excess of the amount of the expenditure
+actually incurred.
+
+14.2
+
+Interest shall be charged on any debts in accordance with the Interest and Administrative
+Charges Regulations and shall constitute a debt due to the Crown.
+
+15.0
+
+Preservation and Disposition of Capital Assets
+
+15.1
+
+During the Agreement Period, the Recipient agrees not to dispose of any Capital Assets
+purchased by the Recipient with the funding provided by Canada under this Agreement without
+the prior written authorization of Canada.
+
+15.2
+
+At the end of the Agreement Period, or upon termination of this Agreement, if earlier, Canada will
+provide direction to the Recipient with regards to the preservation or disposition of any Capital
+Asset purchased by the Recipient with funding provided under this Agreement.
+
+16.0
+
+Agreement Records
+
+16.1
+
+The Recipient shall keep proper books and records, in accordance with generally accepted
+accounting principles, of all expenditures and revenues relating to the activities of this Agreement,
+including:
+(a) Agreement-related contracts and agreements:
+(b) All invoices, receipts, vouchers, electronic payment requisitions and records relating to
+Eligible Expenditures;
+(c) Bank records including bank statements and cancelled cheques; and,
+(d) Agreement-related activity, progress and evaluation reports and reports of Agreement
+reviews or audits carried out for, by, or on behalf of the Recipient.
+
+16.2
+
+The Recipient shall retain the books and records referred to in Section 16.1 for a period of six (6)
+years following the Agreement Period.
+
+5
+
+16.3
+
+Where the Recipient enters into a Sub-Agreement with respect to any of its obligations under this
+Agreement, it shall maintain financial and non-financial records for each program, service or
+activity for the fulfillment of all of its obligations under Sections 16.1 and 16.2 of this Agreement.
+
+17.0
+
+Financial and Activity Monitoring
+The Recipient shall grant representatives of Canada access to all information related to the
+activities performed, and expenditures incurred, either directly by the Recipient or indirectly
+through a Sub-Agreement Holder, for the entire funding allocated to the Recipient under this
+Agreement. This access shall be exercised periodically, with prior notice from Canada to the
+Recipient, throughout the Agreement Period, and for a period of six (6) year thereafter, for the
+purpose of conducting monitoring reviews of this Agreement.
+
+18.0
+
+Interest Earned on Advances
+The amount of interest earned on any advances may be retained by the Recipient provided it is
+used by the Recipient during the Agreement Period to pursue activities consistent with the
+objectives of this Agreement. If there is any unspent interest at the end of the Agreement Period,
+the amount of such interest shall be deemed part of Canada’s contribution to which the Recipient
+is not entitled for the purpose of Section 14.0 of this Agreement.
+
+19.0
+
+Other Sources of Funding
+The Recipient shall identify additional sources of funding received and used towards the costs of
+the activities that support the programs described in the Schedules of this Agreement. This
+information shall be provided to Canada in accordance with the Recipient’s Capacity Assessment
+and corresponding reporting regime.
+
+20.0
+
+Canada’s Right to Audit and Access to Records
+During the Agreement Period, and for a period of six (6) years thereafter, the Recipient shall,
+upon request, grant representatives of Canada access to the books and records referred to in this
+Agreement for audit purposes. Audits may be made to verify compliance with the Terms and
+Conditions of this Agreement and to verify expenses claimed by the Recipient as Eligible
+Expenditures, including all financial and non-financial records from Sub-Agreement Holders or
+other delegated responsibilities holders.
+
+21.0
+
+Inquiry by the Auditor General of Canada
+If, during the Agreement Period or within a period of six(6) years thereafter, the Auditor General
+of Canada requests, in relation to an inquiry conducted under subsection 7.1(1) of the Auditor
+General Act (R.S.C., 1985, c. A-17), the Recipient to produce records, documents or other
+information pertaining to the use of the funding provided under this Agreement, the Recipient
+shall provide those records, documents or other information within such period of time as may be
+reasonably requested in writing by the Auditor General of Canada.
+
+22.0
+
+Disclosure of Information by the Government of Canada
+
+22.1
+
+The Government of Canada may make public, after informing the Recipient:
+(a) The name of the Recipient;
+(b) The amount of funding provided under this Agreement; and,
+(c) The general nature of each initiative described in this Agreement or appropriate
+Schedule.
+
+22.2
+
+Section 22.1 does not limit the rights or obligations that the Government of Canada has to
+disclose information.
+
+23.0
+
+Publicity about Funding
+
+23.1
+
+Either the Government of Canada or the Recipient may propose to the other Party a joint public
+announcement or the development of joint communication materials that recognize the
+Government of Canada’s funding for an initiative under this Agreement. Communication materials
+may include public events, media releases, interviews, speeches, publications, signage,
+websites, advertising and promotional materials.
+
+23.2
+
+The Party making the proposal will provide time for the other Party to respond in writing before
+the communications release or event. The Party receiving the proposal will respond as soon as
+reasonably possible to facilitate attendance and to allow for the timely production and distribution
+of the communication material.
+
+6
+
+PART 3 – CONTRACTING
+24.0
+
+Contracting for Goods and Services
+
+24.1
+
+The Recipient shall use a competitive process when contracting for goods and services valued at
+$25,000 or more (excluding GST/HST) in relation to the administration of activities funded under
+this Agreement. The Recipient shall select the bid or proposal from the Vendor offering the best
+value for money, and the Recipient must not divide a requirement for goods and services into a
+number of smaller contracts.
+
+24.2
+
+The Recipient must inform Canada of any exception to the requirement to use a competitive
+process under Section 24.1 by including this information in their Annual Report. A rationale needs
+to be provided by the Recipient to Canada as to why a competitive process could not be used.
+
+25.0
+
+Sub-Agreements and Delegating
+
+25.1
+
+The Recipient may establish their own service delivery structure to accomplish the objectives of
+this Agreement by sub-contracting their responsibilities for the delivery of some of its activities
+under this Agreement to Sub-Agreement Holders.
+
+25.2
+
+The Recipient is fully accountable to Canada for the effective management and monitoring of all
+Sub-Agreement activities, results and information collection requirements relating to this
+Agreement.
+
+25.3
+
+The Recipient shall put into place a process for ensuring that proposals for Sub-Agreements to be
+funded by the Recipient with Canada’s contribution are assessed and selected in an open,
+impartial and fair manner.
+
+25.4
+
+The Recipient shall put into place written operational policies and procedures relating to its
+monitoring of the Sub-Agreements, and will provide a copy of those policies and procedures to
+Canada upon request.
+
+25.5
+
+The Recipient shall ensure that there is a written agreement between it and the Sub-Agreement
+Holder that sets out the Terms and Conditions under which the Recipient is providing funding to
+the Sub-Agreement Holder. The Agreement with the Sub-Agreement Holder will include the
+necessary obligations to allow the Recipient to fully report and to provide Canada with information
+Canada may request under the terms of this Agreement.
+
+PART 4 – SERVICE STANDARDS AND COLLECTION OF INFORMATION
+26.0
+
+Transparency and Fairness
+
+26.1
+
+Where this Agreement involves the provision of assistance to the individuals selected to
+participate in the activities of this Agreement (hereinafter "Participants"), the Recipient shall:
+(a) Implement measures to ensure that individuals are selected in a fair and equitable
+manner;
+(b) Make readily available to the public information about this Agreement and the
+Recipient’s policies and procedures relating to the selection of Participants;
+(c) Establish and maintain an impartial dispute resolution mechanism whereby individuals
+whose applications for participation are refused by the Recipient and who are
+dissatisfied with the decision, may have the decision reviewed; and,
+(d) Provide for appropriate redress for the individuals referred to in Section 26.1(c) based
+upon the outcome of the dispute resolution process.
+
+26.2
+
+The Recipient will keep and maintain records of disputes referred to in Section 26.1 and will
+share them with Canada for review upon request.
+
+27.0
+
+Collection and Protection of Information
+
+27.1
+
+The Recipient shall obtain the written consent of the Participant to collect, use and disclose the
+information outlined in the Schedules of this Agreement; and inform the Participant that the
+information, when provided to Canada, is administered in accordance with the Privacy Act (R.
+S.C., 1985, c. P-21), the Department of Employment and Social Development Canada Act
+(S.C. 2005, c. 34) and Access to Information Act (R.S.C., 1985, c. A-1).
+
+27.2
+
+Prior to collecting the information stipulated in Section 27.1 from the Participant, the Recipient will
+inform the Participant that Canada needs the information to;
+(a) Measure the results of this Agreement and evaluate this Agreement’s success;
+(b) Evaluate the success of the Program in achieving its objectives; and,
+(c) Meet its obligation of accountability by reporting on the results of the Program and its
+
+7
+
+success in achieving its objectives.
+27.3
+
+If any of the information referred to in Section 27.1 is required by the Recipient for the purpose
+of providing assistance to the Participant in carrying out this Agreement, the purposes for which
+the Recipient intends to use the information shall be shared with the Participant.
+
+27.4
+
+All Participant information referred to in Section 27.1 shall be treated as confidential, and the
+Recipient will take all security measures reasonably necessary for the protection of such
+information against unauthorized release or disclosure, including those set out in any
+instructions issued by Canada.
+
+27.5
+
+The Recipient shall immediately and independently inform and furnish Canada’s Access
+Coordinator with the full details of any known or possible breach of the safeguard requirements in
+this Agreement, or of any incident that may have resulted in misuse and unauthorized access,
+disclosure, modification, disposal or destruction of Personal Information.
+
+27.6
+
+The Recipient shall not release or disclose Participant information referred to in Section 27.1 to
+any other person or body for any purpose without the consent of the Participant, unless that
+person or body is authorized by law to require the Recipient to release or disclose such
+information.
+
+27.7
+
+Representatives of Canada may monitor compliance with the information security requirements
+of Section 27.6 during on-site visits and monitoring.
+
+27.8
+
+Upon expiry of the Agreement Period or upon termination of this Agreement, if earlier, the
+Recipient shall destroy the information referred to in Section 27.1 in accordance with instructions
+issued by Canada, unless the Recipient satisfies Canada that the retention of the information
+beyond the Agreement Period or termination of this Agreement, if earlier, is required in order to
+provide on-going or future employment assistance to the Participants.
+
+28.0
+
+Agreements between the Recipient and Participants
+When the Recipient, in carrying out this Agreement, provides financial assistance to a Participant
+with funds provided under this Agreement, the Recipient shall ensure that there is a written
+agreement between it and the Participant that sets out the Terms and Conditions under which the
+Recipient is providing the financial assistance to the Participant.
+
+29.0
+
+Data Collection System
+
+29.1
+
+Canada is responsible for establishing a secure and encrypted network connectivity that allows
+Recipients to access the systems and services administered by Canada.
+
+29.2
+
+As of the date of this Agreement comes into effect, the Recipient will:
+(a) Collect or compile, and keep regularly updated, the Personal Information, as set out in
+the appropriate Schedule, about each member of its eligible clientele to whom the
+Recipient or a Sub-Agreement Holder, as the case may be, has provided assistance
+under this Agreement; and,
+(b) Provide that information to Canada in accordance with Section 27.2 of this Agreement
+for use by Canada in assessing and evaluating both the Program and the Recipient’s
+activities.
+
+29.3
+
+The Personal Information referred to in the appropriate Schedules of this Agreement will be
+provided to Canada through quarterly uploads of data files, in a format specified by Canada, to
+Canada’s data system using a secure systems link maintained by Canada known as the “Data
+Gateway”.
+
+29.4
+
+The Recipient is responsible for:
+(a) Managing, supporting and maintaining its own technological environment including its
+network, routers, and workstations;
+(b) Appointing a System Access Coordinator who will liaise with authorized users ,
+employees, agents and contractors of the Recipient and communicating with Canada’s
+Access Coordinator on all matters involving access to systems and services administered
+by Canada; and,
+(c) Ensuring that authorized users are advised of, and abide by, their obligations, roles and
+responsibilities and use Personal Information only for the purposes of sharing under this
+Agreement.
+
+8
+
+30.0
+
+Security Requirements for Accessing Systems and Services Administered by Canada
+
+30.1
+
+The Recipient acknowledges and agrees that access to systems and services administered by
+Canada is governed by Canada’s Treasury Board Secretariat’s Policy on Government Security
+and its Policy on Departmental Information Technology Security Management, as amended from
+time to time.
+
+30.2
+
+To be granted access to the systems and services administered by Canada all subscribers must
+undergo a personnel security screening process and obtain a valid Reliability Status as per the
+Systems Support Operational Guide, as amended. Canada will perform the required security
+screening process for subscribers and has the discretion to refuse a personnel security screening
+of any subscriber provided by the Recipient.
+
+30.3
+
+All requests for the issuance, modification, suspension, or cancellation will be submitted,
+processed and managed in accordance with this Agreement and the security policies applicable
+to this Agreement.
+
+PART 5 – GENERAL
+31.0
+
+Funding Subject to Appropriations and Departmental Funding Authorities
+
+31.1
+
+Canada’s contribution for each Fiscal Year of the Agreement Period is subject to:
+(a) The appropriation of funds by Parliament for the Fiscal Year in which the contribution is
+to be paid; and,
+(b) The amount of funding available to the Program in each or any given Fiscal Year.
+
+31.2
+
+Canada may, upon not less than ninety (90) days notice, reduce its funding under this Agreement
+or terminate this Agreement, if:
+(a) The Program named in a Schedule of this Agreement is cancelled;
+(b) The level of funding for a Schedule of this Agreement, for any Fiscal Year in which
+payment is to be made under this Agreement, is reduced as a result of a governmental
+or departmental spending decision; or,
+(c) Parliament reduces the overall level of funding for the programs of Employment and
+Social Development Canada for any Fiscal Year in which payment is to be made under
+this Agreement.
+
+31.3
+
+If Canada gives notice of its intention to reduce the funding provided to the Recipient, and where,
+as a result of the reduction in funding, the Recipient is of the opinion that it will be unable to
+complete the activities of this Agreement or will be unable to complete the activities of this
+Agreement in the manner desired by the Recipient, the Recipient will notify Canada as soon as
+possible after receiving notice of the funding reduction and may, upon not less than thirty (30)
+days written notice to Canada, terminate this Agreement.
+
+32.0
+
+Exceptional Circumstances
+If exceptional circumstances occur during the Agreement Period that were not reasonably
+foreseeable at the date this Agreement came into effect and which have a significant impact on
+Recipient's ability to carry out this Agreement, the Recipient may request changes to the affected
+activities. If Canada agrees to change, including the level of funding provided in a Schedule to
+this Agreement, that change will be made by way of an Amendment to this Agreement and its
+Schedule as required.
+
+33.0
+
+Relationship Between the Parties and Non-Liability of Canada
+The management and supervision of this Agreement are the sole and absolute responsibility of
+the Recipient. The Recipient is not in any way authorized to make a promise, agreement or
+contract on behalf of Canada and Canada will not be liable for any loan, capital lease or other
+long-term obligation that the Recipient enters into in relation to carrying out its responsibilities
+under this Agreement. The Parties hereto declare that nothing in this Agreement shall be
+construed as creating an employer-employee, or agency relationship between them and the
+Recipient will not represent itself as an agent or employee of Canada.
+
+34.0
+
+Indemnification
+The Recipient shall, both during and following the Agreement Period, indemnify and save Canada
+from and against all claims, losses, damages, costs, expenses and other actions made,
+sustained, brought, threatened to be brought or prosecuted, in any manner based upon,
+occasioned by or attributable to any injury or death of a person, or loss or damage to property
+caused or alleged to be caused by any wilful or negligent act, omission or delay on the part of the
+Recipient or its employees or agents, and participating employers or Participants, if any, in
+
+9
+
+connection with anything purported to be or required to be provided by or done by the Recipient
+pursuant to this Agreement or done otherwise in connection with the implementation of this
+Agreement.
+35.0
+
+Insurance
+The Recipient will arrange and maintain, during the Agreement Period, appropriate
+comprehensive general liability insurance coverage to cover claims for bodily injury or property
+damage resulting from anything done or omitted by the Recipient or its employees, agents or
+Participants, if any, in carrying out the activities of this Agreement.
+
+36.0
+
+Amendment
+
+36.1
+
+This Agreement may be amended by mutual agreement of the Parties. Any amendment to this
+Agreement shall be in writing and signed by the Parties.
+
+36.2
+
+Canada may amend this Agreement, including the level of funding, to reflect the establishment of
+a new service delivery arrangement for eligible clientele previously served by the Recipient.
+
+37.0
+
+Termination
+
+37.1
+
+Termination for Default
+(1) The following constitute Events of Default:
+(a) The Recipient becomes bankrupt, has a receiving order made against it, makes an
+assignment for the benefit of creditors, takes the benefit of a statute relating to bankrupt
+or insolvent debtors or an order is made or resolution passed for the winding up of the
+Recipient;
+(b) The Recipient ceases to operate;
+(c) Any Party to this Agreement is in breach of the performance of, or compliance with, any
+provision of this Agreement;
+(d) The Recipient, in support of its application for Canada’s contribution or in connection
+with this Agreement, has made materially false or misleading representations,
+statements or declarations, or provided materially false or misleading information to
+Canada; or,
+(2) Any Party may, in addition to any remedies otherwise available, immediately terminate this
+Agreement by written notice, if:
+(a) An Event of Default specified in Sections (37.1)(1)(a), (b), or (d) occurs, or,
+(b) An Event of Default specified in Sections (37.1)(1)(c) occurs and has not been remedied
+within thirty (30) days of receipt of written notice of default, or a plan satisfactory to
+remedy such Event of Default has not been put into place within such time period.
+Upon providing such notice of termination, Canada shall have no obligation to make any further
+contribution to the Recipient.
+
+37.2
+
+Obligations Relating to Termination
+(1) In the event of a termination notice under Section 37.0,
+(a) The Recipient will make no further commitments in relation to this Agreement and will
+cancel or otherwise reduce, to the extent possible, the amount of any outstanding
+commitments in relation thereto; and,
+(b) All Eligible Expenditures incurred by the Recipient up to the date of termination will be
+paid by Canada, including the Recipient’s costs of, and incidental to, the cancellation of
+obligations incurred by it as a consequence of the termination of this Agreement, saving
+and excepting costs of, and incidental to, cancellation or termination for cause under
+Section 37.1(1)(d); provided always that payment and reimbursement under this Section
+will only be made to the extent that it is established to the satisfaction of Canada that the
+costs mentioned herein were actually incurred by the Recipient and the same are
+reasonable and properly attributable to the termination of this Agreement.
+(2) The Recipient shall negotiate all contracts related to this Agreement, including employment
+contracts with staff, on terms that will enable the Recipient to cancel the contracts upon
+conditions and terms that will minimize to the extent possible their cancellation costs in the
+event of a termination of this Agreement. The Recipient shall cooperate with Canada and do
+everything reasonably within its power to minimize and reduce the amount of Canada’s
+obligations under Section 37.1(1)(b) in the event of a termination of this Agreement.
+
+10
+
+38.0
+
+Dispute Resolution
+In the event of a dispute arising under the terms of this Agreement, the Parties agree to make a
+good faith attempt to settle the dispute. In the event that the Parties are unable to resolve the
+dispute through negotiation, they agree to give good faith consideration to resorting to other
+alternate dispute resolution processes to resolve the dispute. However, the Parties agree that
+nothing contained in this Section will affect, alter or modify the rights of either Party to terminate
+this Agreement.
+
+39.0
+
+Assignment
+
+39.1
+
+The Parties may sub-contract or delegate any functions or activities under this Agreement but will
+not assign any of their responsibilities under this Agreement.
+
+39.2
+
+This Agreement is binding upon the Parties and their respective administrators, successors and
+assignees.
+
+40.0
+
+Applicable Law
+
+40.1
+
+This Agreement shall be governed by and construed in accordance with the applicable laws of
+the province or territory where the activities of this Agreement will be performed or, if this
+Agreement is to be carried out in more than one province or territory, of the province or territory
+where the Recipient has its main place of business.
+
+40.2
+
+The Recipient shall carry out this Agreement in compliance with all applicable federal, provincial
+and municipal laws, by-laws and regulations, including any environmental legislation and
+legislation related to protection of information and privacy. The Recipient will obtain, prior to the
+commencement of this Agreement, all permits, licenses, consents and other authorizations that
+are necessary to the carrying out of the activities of this Agreement.
+
+41.0
+
+Conflict of Interest Provisions Regarding Federal Officials
+
+41.1
+
+No current or former public servant or public office holder to whom the Conflict of Interest Act
+(S.C. 2006, c. 9, s. 2), the Policy on Conflict of Interest and Post-Employment or the Values and
+Ethics Code for the Public Sector applies shall derive a direct benefit from this Agreement unless
+the provision or receipt of such benefit is in compliance with the said legislation or codes.
+
+41.2
+
+No member of the Senate or the House of Commons shall be a party to this Agreement or to any
+benefit from it that is not otherwise available to the general public.
+
+42.0
+
+Proactive Disclosure
+The Recipient acknowledges that the name of the Recipient, the amount of the contribution and
+the general nature of this Agreement may be made publically available by Canada in accordance
+with the Government of Canada’s commitment to proactively disclose the awarding of grants and
+contributions.
+
+43.0
+
+Access to Information
+The Recipient acknowledges that Canada is subject to the Access to Information Act (R.S.C.
+1985, Chapter A-1), and information obtained by Canada pertaining to this Agreement may be
+disclosed by Canada to the public upon request under the aforementioned Act.
+
+44.0
+
+Intellectual Property
+
+44.1
+
+The Recipient owns any intellectual property resulting from the activities undertaken with
+Canada’s funding.
+
+44.2
+
+Canada may request a licence to make its own use of such intellectual property, including the
+right to translate and transform it into alternate formats. The Recipient will not unreasonably
+withhold such licence.
+
+45.0
+
+Environmental Protection:
+The Recipient will:
+(a) Maintain and implement any and all environmental protection measures
+prescribed by Canada for ensuring that the harm to the environment resulting
+directly from implementing this Agreement, if any, will remain minimal; and
+(b) Ensure that all environmental protection measures, standards, and rules
+relating directly to implementing this Agreement, and established by competent
+authorities are respected.
+
+11
+
+46.0
+
+Notices
+Any notices to be given and all reports, information, correspondence and other documents to be
+provided by either Party under this Agreement will be given or provided by personal delivery, mail,
+courier service, fax or email at the postal address, fax number or email address, as the case may
+be, of the receiving Party as shown in the appropriate Schedule. If there is any change to the
+postal address, fax number or email address or contact person of a Party, the Party concerned
+will notify the other in writing of the change as soon as possible.
+
+47.0
+
+Lobbyists
+The Recipient declares that any person who has been lobbying on its behalf to obtain the
+contribution that is the subject of this Agreement was in compliance with the provisions of the
+Lobbying Act [R.S.C.1985 c. 44 (4th Supp.)], as amended from time to time, at the time the
+lobbying occurred and that any such person to whom the aforementioned Act applies has
+received, or will receive, no payment, directly or indirectly, from the Recipient that is in whole or in
+part contingent on obtaining this Agreement.
+
+48.0
+
+Official Languages Act
+Where this Agreement may be delivered to members of both official language communities, the
+Recipient will:
+(a) Make Agreement-related documentation and announcements (for the public and
+prospective Participants, if any) in both official languages;
+(b) Actively offer and provide in both official languages any Agreement-related services to
+members of the public eligible for the Recipient’s services;
+(c) Encourage members of both official language communities to participate in this
+Agreement and its activities; and,
+(d) Organize activities and provide its services, where appropriate, in such a manner as to
+address the needs of both official language communities.
+
+49.0
+
+Unincorporated Association
+If the Recipient is in an unincorporated association, it is understood and agreed by the persons
+signing this Agreement on behalf of the Recipient that, in addition to signing this Agreement in
+their representative capacities on behalf of the members of the Recipient, they are personally,
+jointly and severally liable for the obligation of the Recipient under the Agreement, as well as to
+pay any debt that may become owing to Canada by the Recipient under this Agreement.
+
+50.0
+
+Severability
+If any provision of this Agreement is held void or unenforceable by a court or tribunal of
+competent jurisdiction or pursuant to the dispute resolution process specified in this Agreement,
+the remainder of this Agreement shall be unaffected and each remaining provision of this
+Agreement shall be valid and be enforceable to the fullest extent permissible by law.
+
+51.0
+
+Warranty of Authority
+The Recipient warrants that any representative who signs this Agreement on behalf of the
+Recipient has the authority to sign the Agreement and agrees to provide Canada with such
+evidence of that authorisation as Canada may reasonably require.
+
+52.0
+
+Counterparts
+This Agreement may be executed in counterparts, each of which shall be deemed an original but
+both of which taken together shall constitute one and the same Agreement. The exchange of
+copies of this Agreement and of signature pages by facsimile or electronic transmission shall
+constitute effective execution and delivery of this Agreement as to the Parties and may be used in
+lieu of the original Agreement for all purposes. Signatures of the Parties transmitted by facsimile
+or electronic transmission shall be deemed to be their original signatures for all purposes.
+
+12
+
+AND SIGNED ON BEHALF OF THE RECIPIENT THIS __ DAY OF _________, 2019 BY ITS DULY
+AUTHORIZED OFFICERS
+
+per: ____________________________
+(signature)
+
+_______________________________
+(name and title of authorized signatory)
+
+per: ____________________________
+(signature)
+
+_______________________________
+(name and title of authorized signatory)
+
+SIGNED ON BEHALF OF CANADA THIS __ DAY OF _________, 2019 BY THE MINISTER OF
+EMPLOYMENT AND SOCIAL DEVELOPMENT CANADA AND THE CANADA EMPLOYMENT
+INSURANCE COMMISSION
+
+per: ____________________________
+(signature)
+
+_________________________________
+(name and title of signatory on behalf of Minister and the Commission)
+
+13
+
+Agreement # 000000000
+Amendment# 0
+
+SCHEDULE A – CONSOLIDATED REVENUE FUNDING FOR THE INDIGENOUS SKILLS AND
+EMPLOYMENT TRAINING PROGRAM
+1.0
+
+Authority
+Funding is provided under the Indigenous Skills and Employment Training (ISET) Program, which
+is established by the Minister of Employment and Social Development Canada pursuant to
+Section 7 of the Department of Employment and Social Development Act (S.C. 2005, Chapter
+34).
+
+2.0
+
+Purpose and Objective
+
+2.1
+
+The First Nation Labour Market Strategy, under the ISET Program, will “help close the
+employment and earning gaps between Indigenous and non-Indigenous people,” with “a stronger
+focus on training for higher quality, better paying jobs rather than rapid re-employment,’ as well as
+assisting “clients to gain greater skills and find jobs that will support their long-term career
+success,” as stated in Budget 2018.
+
+2.2
+
+The objectives of the First Nation Labour Market Strategy are:
+(a) to support First Nations in developing employment skills by pursuing training for
+employment and long-term careers, and by recognizing their unique needs, with the
+ultimate objective of closing the employment, earning, and skills gaps between First
+Nations and non-Indigenous people; and,
+(b) to support and enhance capacity of First Nations service delivery organizations and
+structures to customize culturally-appropriate services to support their clients throughout
+the employment continuum by developing and improving skills and employment training.
+
+3.0
+
+Effective Date and Duration
+This Schedule will come into effect on April 1, 2019 and will expire on March 31, 2029 unless this
+Agreement is terminated on a prior date in accordance with the terms of this Agreement, or
+extended by Amendment.
+
+4.0
+
+Funding Amounts
+
+4.1
+
+The total amount of Canada’s contribution towards the Eligible Expenditures of this Agreement is
+$ __________.
+
+4.2
+
+The maximum amount payable by Canada in each Fiscal Year of the Agreement Period on
+account of the contribution is as follows, unless otherwise authorized in writing by Canada:
+Fiscal Year
+2019-2020
+2020-2021
+2021-2022
+2022-2023
+2023-2024
+2024-2025
+2025-2026
+2026-2027
+2027-2028
+2028-2029
+
+Consolidated Revenue Fund
+
+5.0
+
+Program Budget
+
+5.1
+
+The Recipient’s Capacity Assessment results form part of this Schedule, as well as the
+Recipient’s corresponding Annual Operational Plan, activity and cash flow reports, and Annual
+Report for each Fiscal Year for which funding is received under this Agreement.
+
+5.2
+
+Pursuant to Section 10.2 of this Agreement, periodical reassessments of the Recipient’s
+management capacity will be conducted, at a minimum, during the fourth and the eighth year of
+this Schedule.
+
+1
+
+Agreement # 000000000
+Amendment# 0
+
+Flat Rate for Administrative Costs
+5.3
+
+Canada will provide payment to the Recipient for “Administrative Costs” up to 15% as set out in
+the Program Budget. The usage of this payment is exempt from the reporting requirements
+stipulated in this Agreement.
+
+6.0
+
+Basic Services for all Indigenous Clientele
+In addition to delivering the activities described in each specific program plan to its eligible
+clientele, the Recipient agrees to provide, where practicable and upon request, the following
+services free of charge to all Indigenous clientele who come to their service centres seeking
+assistance:
+(a) A preliminary interview to discuss the needs of clients;
+(b) If the needs of clients surpass the services offered by the point of service, the
+clients, as appropriate, are to be referred to another community agency,
+Service Canada, or other Indigenous service provider to obtain the service or
+services needed by the clients that have been identified through their
+preliminary interview;
+(c) As appropriate, the sharing of relevant information and materials related to the
+programs included in this Agreement; and,
+(d) If, at the point of service, there are computers with internet connection for use
+by the clients, the Recipient will permit the clients seeking assistance to use the
+computers to research additional materials to those referred to in (c) if
+requested.
+
+7.0
+
+Reporting on Results
+Annual Reports
+
+7.1
+
+No later than 120 days following the end of each Fiscal Year during the Agreement Period, the
+Recipient will prepare and provide for acceptance by Canada, an Annual Report on:
+(a) The overall success achieved in implementing its Annual Operational Plan, including the
+activities and expenditures for the Fiscal Year;
+(b) Audited financial statements;
+(c) The overall success achieved in meeting its milestones;
+(d) The challenges, and lessons learned during the year in implementing its activities; and,
+(e) Its partnering activities.
+
+7.2
+
+The Annual Report submitted pursuant to Section 7.1 of this Schedule, could consist of the
+Recipient’s overall governance and organizational reporting, if appropriate.
+
+7.3
+
+The Recipient shall make copies of its Annual Report available to the public electronically and at
+its offices and at such other locations as will provide convenient access to the Annual Report by
+the communities served by the Recipient and to whom the Recipient is accountable.
+
+7.4
+
+The audited financial statement will be signed by the designated official certifying that all
+information contained in the Annual Report is accurate and are in accordance with this
+Agreement.
+Data Gateway Reporting
+
+7.5
+
+Pursuant to Section 29.2 of this Agreement, the Recipient will provide to Canada, about each
+client who is participating in ISET Program, the data elements described in Annex A, as amended
+by mutual consent of the signatories from time to time.
+
+2
+
+Agreement # 000000000
+Amendment# 0
+
+SCHEDULE B – EMPLOYMENT INSURANCE PART II FUNDING FOR THE INDIGENOUS
+SKILLS AND EMPLOYMENT TRAINING PROGRAM
+1.0
+
+Authority
+Funding is provided under the authority of Section 63 of the Employment Insurance Act (S.C.
+1996, Chapter 23) (EI Act). Section 63 authorizes the Canada Employment Insurance
+Commission to enter into agreements with any government in Canada or any other public or
+private organization to provide for the payment of contributions for all or a portion of:
+(a) Any costs of benefits or measures that are similar to the employment benefit and
+support measures established by the Commission and that are consistent with the
+purpose and guidelines of Part II of the EI Act that are provided by the government,
+government agency or organization; and,
+(b) Any administration costs that the government, government agency or organization
+incurs in providing the benefits and measures.
+
+2.0
+
+Purpose/Objective
+Contributions under Section 63 of the EI Act support the purpose of Part II of the EI Act, which is
+to help maintain a sustainable Employment Insurance system through the establishment of
+employment benefit and support measures. Benefits and measures established by provinces,
+territories and by Indigenous organizations must be similar to the employment benefit and support
+measures to be eligible for funding. The similar benefits and measures are designed to:
+(a) Better coordinate federal, provincial/territorial and Indigenous labour market programs
+and reducing overlap and duplication;
+(b) Improve service to clients; and,
+(c) Better meet the needs of regional and local labour markets.
+
+3.0
+
+Effective Date and Duration
+This Schedule will come into effect on April 1, 2019 and will expire on March 31, 2029 unless this
+Agreement is terminated on a prior date in accordance with the terms of this Agreement, or
+extended by Amendment.
+
+4.0
+
+Funding Amounts
+
+4.1
+
+The total amount of Canada’s contribution towards the Eligible Expenditures of this Agreement is
+$ _________.
+
+4.2
+
+The maximum amount payable by Canada in each Fiscal Year of the Agreement Period on
+account of the contribution is as follows, unless otherwise authorized in writing by Canada:
+Fiscal Year
+2019-2020
+2020-2021
+2021-2022
+2022-2023
+2023-2024
+2024-2025
+2025-2026
+2026-2027
+2027-2028
+2028-2029
+
+Employment Insurance Part II
+
+4.3
+
+The Recipient acknowledges the limitations imposed by Section 63 of the EI Act on the purposes
+and types of programs for which contributions under Section 63 may be made and agrees that the
+contribution by Canada may only be used to defray the Recipient’s EI-related Eligible
+Expenditures.
+
+4.4
+
+The balance of any unexpended contribution under Section 63 of the EI Act that is retained and
+carried forward under this Section may only be used by the Recipient for EI-related Eligible
+Expenditures.
+
+3
+
+Agreement # 000000000
+Amendment# 0
+
+5.0
+
+Program Budget
+
+5.1
+
+The Recipient’s Capacity Assessment results form part of this Schedule, as well as the
+Recipient’s corresponding Annual Operational Plan, activity and cash flow reports, and Annual
+Report for each Fiscal Year for which funding is received under this Agreement.
+
+5.2
+
+Pursuant to Section 10.2 of this Agreement, periodical reassessments of the Recipient’s
+management capacity will be conducted, at a minimum, during the fourth and the eighth year of
+this Schedule.
+Flat Rate for Administrative Costs
+
+5.3
+
+Canada will provide payment to the Recipient for “Administrative Costs” up to 15% as set out in
+the Program Budget. The usage of this payment is exempt from the reporting requirements
+stipulated in this Agreement.
+
+6.0
+
+Basic Services for all Indigenous Clientele
+In addition to delivering the activities described in each specific program plan to its Eligible
+clientele, the Recipient agrees to provide, where practicable and upon request, the following
+services free of charge to all Indigenous clientele who come to their service centres seeking
+assistance:
+(a) A preliminary interview to discuss the needs of the client;
+(b) If the needs of the clients surpass the services offered by the point of service,
+the client , as appropriate, are to be referred to another community agency,
+Service Canada, or other Indigenous service provider to obtain the service or
+services needed by the clients that have been identified through their
+preliminary interview;
+(c) As appropriate, the sharing of relevant information and materials related to the
+programs included in this Agreement; and,
+(d) If, at the point of service, there are computers with internet connection for use
+by the clients, the Recipient will permit the clients seeking assistance to use the
+computers to research additional materials to those referred to in (c) if
+requested.
+
+7.0
+
+Reporting on Results
+Annual Reports
+
+7.1
+
+No later than 120 days following the end of each Fiscal Year during the Agreement Period, the
+Recipient will prepare and provide for acceptance by Canada, an Annual Report on:
+(a) The overall progress achieved in implementing its Annual Operational Plan, including the
+activities and expenditures for the Fiscal Year;
+(b) Audited financial statements;
+(c) The overall progress achieved in meeting its milestones;
+(d) The successes, challenges, and lessons learned during the year in implementing its
+activities; and,
+(e) Its partnering activities.
+
+7.2
+
+The Annual Report submitted pursuant to Section 7.1 of this Schedule, could consist of the
+Recipient’s overall governance and organizational reporting, if appropriate.
+
+7.3
+
+The Recipient will make copies of its Annual Report available to the public electronically and at its
+offices and at such other locations as will provide convenient access to the Annual Report by the
+communities served by the Recipient and to whom the Recipient is accountable
+
+7.4
+
+The audited financial statement will be signed by the designated official certifying that all
+information contained in the Annual Report is accurate and are in accordance with this
+Agreement.
+
+4
+
+Agreement # 000000000
+Amendment# 0
+
+Data Gateway Reporting
+7.5
+
+The Recipient pursuant to Section 29.2 of this Agreement will provide to Canada, about each
+client who is participating in the ISET Program, the data elements described in Annex A, as
+amended by mutual consent of the signatories from time to time.
+
+7.6
+
+The Recipient will also provide to Canada the following Personal Information under its control
+about each EI client receiving assistance from the Recipient, as the case may be, under a
+program of the Recipient that is similar to Canada’s Skills Development Benefit , Self-employment
+Benefit or Job Creation Partnerships Benefit for the purposes of assisting Canada in verifying
+client eligibility for, or entitlement to, insurance benefits under Part I of the EI Act, and ensuring for
+purposes of Section 25 of the EI Act that EI clients who are active EI claimants continue to
+receive the insurance benefits to which they are entitled while participating in the program: name,
+social insurance number, project type, training ID, start week(s)/date(s) of intervention, end
+week(s)/date(s) of intervention, project responsibility centre code, project number, apprentice
+indicator, intervention break start week/date, agreement number, institution code (if available), no
+claim report code, rate (EI Act Part II), date of birth, name of intervention in which individual is
+involved, date of withdrawal from intervention, date terminated from intervention, reason for
+withdrawal from intervention, and reason for termination from employment/intervention.
+
+7.7
+
+Canada will provide to the Recipient the following Personal Information under its control
+for the purpose of assisting the Recipient in determining if the individual qualifies as an
+EI client who is eligible for assistance under the Recipient’s programs that are similar to
+Canada’s Employment Benefits and Support Measures with EI funds provided to the
+Recipient: name, social insurance number, address, postal code, telephone number,
+date of birth, responsible Service Canada Centres – if available, gender, language
+(French or English), and EI client status.
+
+7.8
+
+Canada will also provide the Recipient with the following information in respect of an individual
+who has been determined to be an EI client for the purpose of assisting the Recipient in
+determining the nature and level of financial assistance to be provided to the EI client under the
+Recipient’s programs: name, social insurance number, address, postal code, telephone number,
+date of birth, responsible Service Canada Centres – if available, gender, language (French or
+English), EI client status, number of previous claims in the last five years (60 months),
+disqualified, disentitlement, type of EI benefit (claim type, e.g. regular, etc.), benefit period
+commencement, last week processed, week of renewal, EI Act Part I expected end date and
+benefit rate, federal tax and provincial/territorial tax deducted, number of eligible weeks, number
+of weeks paid, apprenticeship status, details on allocation (start / end / weekly earnings / total
+earnings) and intervention measures status.
+Information Exchange
+
+7.9
+
+Personal Information referred to in this Schedule may be provided by Canada to the Recipient by
+giving the Recipient access to data systems administered by Canada through a web-based
+application known as “EIBIS/LMDA Access”.
+
+7.10
+
+Similarly, Personal Information referred to in this Schedule may be provided by the Recipient to
+Canada by giving the Recipient access to data systems administered by Canada through a webbased application known as “EIBIS/LMDA Access”.
+Designation of Recipient as Referral Authority
+
+7.11
+
+To better coordinate the provision of assistance by the Recipient to participants in its programs
+who are active EI claimants with the payment of insurance benefits to those claimants by virtue of
+Section 25 of the EI Act, Canada, as represented by the Canada Employment Insurance
+Commission, hereby designates the Recipient as an authority for the purposes of Section 25 of
+the EI Act to refer participants in the Recipient’s activities who are active EI claimants to:
+(a) Courses or programs of instruction or training which the claimant is attending at his or
+her own expense or under ISET Program benefits; or,
+(b) Any other employment activity for which assistance has been provided for the claimant
+under labour market programs described in the Annual Operational Plan which are
+similar to the Employment Benefit established by the Commission under the Act.
+
+5
+
+Agreement # 000000000
+Amendment# 0
+
+7.12
+
+The Recipient will give notice to Canada of its intention to designate a referral authority for the
+purposes of Section 25 of Canada’s EI Act in order that Canada may make the necessary
+administrative arrangements with the referral authority to ensure timely and proper payment of
+insurance benefits to the referred active EI claimants under Section 25 of the Act.
+
+7.13
+
+Pursuant to Section 7.11 of this Schedule, when making referrals, the Recipient will comply with
+such policies regarding the referral of claimants for the purposes of Section 25 of the EI Act that
+Canada, as represented by the Canada Employment Insurance Commission, may issue from
+time to time.
+
+7.14
+
+The designation of the Recipient under this Section will terminate automatically on expiry of the
+Agreement Period. The Commission may also revoke the designation at any time for cause.
+
+8.0
+
+Definitions
+“Active EI Claimant” means an individual for whom an employment insurance benefit period is
+established under the Employment Insurance Act.
+“EI Client” means an unemployed person who, when requesting assistance under a program
+described in the Recipient’s annual operational plans that is similar to Canada’s Targeted Wage
+Subsidies Benefit, Job Creation Partnerships Benefit, Skills Development Benefit or Selfemployment Benefit established by Canada under Part II of the EI Act, is:
+(a) An active EI claimant;
+(b) A former EI claimant whose benefit period under the Employment Insurance Act has
+ended within the previous 36 months; or,
+(c) A former EI claimant for whom a benefit period has been established in the previous 60
+months and who:
+(i) Was paid special benefits under the Employment Insurance Act during the
+benefit period;
+(ii) Subsequently withdrew from active participation in the labour force to care for
+one or more of their new-born children or one or more children placed with them
+for the purpose of adoption; and,
+(iii) Is seeking to re-enter the labour force.
+“EI-Related Eligible Expenditures” means:
+(a) The portion of the Recipient’s eligible expenditures related to administering the programs
+described in its annual operational plans that are similar to Canada’s Targeted Wage
+Subsidies Benefit, Job Creation Partnerships Benefit, Skills Development Benefit, Selfemployment Benefit or Employment Assistance Services Support Measure established
+by Canada under Part II of the Employment Insurance Act, that is reasonably attributable
+to providing services to EI clients, and
+(b) The Recipient’s eligible expenditures related to providing financial assistance in support
+of EI clients under the programs described in its annual operational plans that are similar
+to Canada’s Targeted Wage Subsidies Benefit, Job Creation Partnerships Benefit, Skills
+Development Benefit and Self-employment Benefit established by Canada under Part II
+of the Employment Insurance Act.
+“Employment Insurance Act” means the Employment Insurance Act, Statutes of Canada 1996,
+chapter 23.
+
+6
+
+Agreement # 000000000
+Amendment# 0
+
+SCHEDULE C – CONSOLIDATED REVENUE FUNDING FOR FIRST NATION AND INUIT CHILD
+CARE INITIATIVE
+1.0
+
+Authority
+Funding is provided under the First Nation and Inuit Child Care Initiative, which is established by
+the Minister of Employment and Social Development Canada (“the Minister”) pursuant to Section
+7 of the Department of Employment and Social Development Act (S.C. 2005, Chapter 34).
+
+2.0
+
+Objective
+The objective of this Initiative is to increase access and quality of Early Learning and Child Care
+services and supports for Indigenous children and families.
+
+3.0
+
+Effective Date and Duration
+This Schedule will come into effect on April 1, 2019 and will expire on March 31, 2021 unless this
+Agreement is terminated on a prior date in accordance with the terms of this Agreement, or
+extended by Amendment.
+
+4.0
+
+Funding Amounts
+
+4.1
+
+The total amount of Canada’s contribution towards the Eligible Expenditures of this Agreement is
+$ ________.
+
+4.2
+
+The maximum amount payable by Canada in each Fiscal Year of the Agreement Period on
+account of the contribution is as follows, unless otherwise authorized in writing by Canada:
+Fiscal Year
+2019-2020
+2020-2021
+Future Years
+
+Consolidated Revenue Fund
+
+To Be Determined
+
+5.0
+
+Program Budget
+
+5.1
+
+The Recipient’s Capacity Assessment results form part of this Schedule, as well as the
+Recipient’s corresponding Annual Operational Plan, activity and cash flow reports, and Annual
+Report for each Fiscal Year for which funding is received under this Agreement.
+
+5.2
+
+Pursuant to Section 10.2 of this Agreement, periodical reassessments of the Recipient’s capacity
+will be conducted, at a minimum, during the fourth and the eighth year of this Schedule.
+Flat Rate for Administrative Costs
+
+5.3
+
+Canada will provide payment to the Recipient for “Administrative Costs” up to 15% as set out in
+the Program Budget. The usage of this payment is exempt from the reporting requirements
+stipulated in this Agreement.
+
+6.0
+
+Reporting on Results
+Annual Reports
+
+6.1
+
+No later than 120 days following the end of each Fiscal Year during the Agreement Period, the
+Recipient will prepare and provide for acceptance by Canada, an Annual Report on:
+(a) The overall progress achieved in implementing its Annual Operational Plan, including the
+activities and expenditures for the Fiscal Year;
+(b) Audited financial statements;
+(c) The overall progress achieved in meeting its milestones;
+(d) The successes, challenges, and lessons learned during the year in implementing its
+activities; and,
+(e) Its partnering activities.
+
+6.2
+
+The Annual Report submitted pursuant to Section 7.1 of this Schedule, could consist of the
+Recipient’s overall governance and organizational reporting, if appropriate.
+7
+
+Agreement # 000000000
+Amendment# 0
+
+6.3
+
+The Recipient will make copies of its Annual Report available to the public electronically and at its
+offices and at such other locations as will provide convenient access to the Annual Report by the
+communities served by the Recipient’s activities and to whom the Recipient is accountable.
+
+6.4
+
+The statement will be signed by the designated official certifying that all information contained in
+the Annual Report is accurate and are in accordance with this Agreement.
+Results Reporting
+
+6.5
+
+Reporting provided by Recipient to Canada – to be determined
+
+8
+
+Agreement # 000000000
+Amendment# 0
+
+ANNEX A – Personal Information to be Provided by the Recipient to Canada
+The Recipient pursuant to Section 23 of this Agreement will provide to Canada the following Personal
+Information under its control about each client who is participating in ISET program for the purpose of
+assisting Canada in monitoring, assessing and evaluating the effectiveness of the assistance provided by
+Canada under ISET program:
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+•
+
+Social insurance number
+Last Name
+Initial
+First name
+Date of birth
+Gender
+Indigenous group
+Marital status
+Number of dependents of the client
+Language(s) spoken
+Disability
+Street address
+City
+Province
+Postal code
+Agreement number
+Highest level of education at intake
+Barriers to employment
+Social assistance recipient
+Employment Insurance claimant
+Client status at intake
+Employed client details at intake
+Action plan start date
+Intervention start date
+Intervention code
+Intervention related National Occupational Classification
+Intervention outcome
+Intervention end date
+Action plan result date
+Action plan result
+Details on employed Result
+Details on return to school result
+Highest level of education on exit
+
+9
+
+Agreement # 000000000
+Amendment# 0
+
+ANNEX B – Description of Eligible Clientele
+
+10
+
+JOINT CAPACITY ASSESSMENT TOOL
+INDIGENOUS SKILLS AND EMPLOYMENT TRAINING PROGRAM
+
+Annex D
+
+Organization and Program Information
+Organization Name:
+Program (s):
+Project Number (s):
+
+Capacity Assessment
+Status
+
+Date
+
+Initial Discussion
+
+Click cell for date
+
+Review
+
+Click cell for date
+
+Assessment Result
+
+Click cell for date
+
+Service Canada Staff
+
+Organization representative (s)
+
+1
+
+JOINT CAPACITY ASSESSMENT TOOL
+INDIGENOUS SKILLS AND EMPLOYMENT TRAINING PROGRAM
+
+Annex D
+
+The questions below serve as a guide to assess and determine the management capacity of an organization. Recognizing that organizations range in size and structure and serve
+different communities, certain questions may not apply in all cases, and other elements may be considered to determine capacity.
+FACTORS
+
+ASSESSMENT RATIONALE
+
+GOVERNANCE/LEADERSHIP
+
+Supporting Information
+
+Ability to demonstrate
+leadership in the
+management of the
+organization and support in
+developing its capacity.
+
+Click here to enter text.
+
+CONSIDERATIONS
+1. Organizational Structure
+• How long has the organization been in operation?
+• How is the organization managed (for example, council, board of directors, other governance
+structure)?
+• Is the organization associated with another government (for example, municipality or Indigenous)?
+
+2. Partnerships and accountability
+• Does the organization publish an annual report, including service and program outcomes, financial
+statements, etc.?
+• Does the organization have established partnerships to support their service delivery?
+3. Policies and Procedures
+• Are there established policies and procedures that are used to support service delivery (e.g. HR
+policies, service standards)?
+• Are there established planning cycles supported by operational and budget plans?
+
+Governance/Leadership Assessment
+Click here to enter observations and rationale
+
+2
+
+JOINT CAPACITY ASSESSMENT TOOL
+INDIGENOUS SKILLS AND EMPLOYMENT TRAINING PROGRAM
+FACTORS
+
+ASSESSMENT RATIONALE
+
+PLANNING/MANAGEMENT
+
+Supporting Information
+
+Ability to demonstrate longterm sustainability through
+careful planning of its
+operations, administration,
+and management.
+
+Click here to enter text.
+
+Annex D
+
+CONSIDERATIONS
+1. Strategic, Operational and Budget Plans
+• Are there plans and strategies in place, such as strategic, operational and budget plans to manage
+potential impacts on funded programs?
+• Will these plans guide the long-term skills development and employment training services provided?
+• What are the expected outcomes and targeted results of the planned activities?
+• What is the organization’s vision and long term plans?
+• Are foreseeable emergencies and service disruptions considered in these plans?
+
+2. Human Resources Planning
+• Does the organization have procedures in place for the recruitment, staffing, and retention of
+employees?
+• Are structures in place to train and support staff?
+3. Community Involvement
+• Have you engaged people in the community or service area in the planning and design of your service?
+If applicable, have stakeholders such as sub-agreement holders or other entities) been consulted
+during the planning process to ensure program delivery coverage, quality services, and that results are
+communicated to the community?
+Planning/Management Assessment
+FINANCIAL MANAGEMENT
+Ability to demonstrate
+accountability, effective use
+of resources and adapt to
+
+Click here to enter observations and rationale
+Supporting Information
+Click here to enter text.
+
+1.Financial Certification
+• Has the organization obtained financial certification by First Nations Financial Management Board
+(FNFMB), International Standards Organization (ISO) or another entity?
+
+3
+
+JOINT CAPACITY ASSESSMENT TOOL
+INDIGENOUS SKILLS AND EMPLOYMENT TRAINING PROGRAM
+FACTORS
+new opportunities or
+changes.
+
+ASSESSMENT RATIONALE
+
+Annex D
+
+CONSIDERATIONS
+2.Financial controls, records, and reporting
+
+•
+•
+•
+•
+•
+•
+•
+
+Has the organization implemented financial operations policies and procedures?
+Is there a separate project structure, and ledger to track program costs within the accounting system
+for the ISET program?
+How often does the organization reconcile its banking statements and has it implemented separate
+tracking of program funding?
+Does the individual responsible for preparing the bank reconciliation have access to the cash account?
+Do the procurement or purchasing policies in place apply to funding received through the contribution
+agreement, including a competitive/tendering process for the purchase of a good or service and a
+threshold for going to tender to purchase a good or a service?
+As part of its internal control framework, is the organization able to extract a general ledger at the
+transaction level and reconciliation with financial accounts? (for example, being able to provide
+transaction level information related specifically to project expenditures).
+
+Does the organization engage a Certified Professional Account (CPA) to prepare its annual financial
+audit?
+
+4
+
+JOINT CAPACITY ASSESSMENT TOOL
+INDIGENOUS SKILLS AND EMPLOYMENT TRAINING PROGRAM
+FACTORS
+
+ASSESSMENT RATIONALE
+
+Annex D
+
+CONSIDERATIONS
+3.Finance functions
+•
+•
+•
+
+•
+
+Has the organization recruited staff with professional designations, e.g., a CFO, an accountant,
+bookkeeper, a certification from the Aboriginal Financial Officers Association, etc.?
+Does the organization conduct monitoring, review and reconcile sub-agreement holders’
+claims/expenditures to determine that the expenditures are eligible?
+Are sub-agreements (if applicable), monitored for compliance with all stated conditions in the
+agreement? Are structures in place to ensure that the expenditure of funds redistributed to subagreement holders or services providers meet the terms and conditions of the program?
+Have there been any issues found (and addressed) based on financial monitors in the last 2 years that
+may have an impact on service delivery or financial management?
+
+4. Segregation of Duties
+• How does the organization determine and address segregation of duties, i.e., financial system
+requirements and policies at staff level?
+• Have there been any issues with following this approach?
+
+Financial Management Assessment
+Click here to enter observations and rationale
+
+5
+
+JOINT CAPACITY ASSESSMENT TOOL
+INDIGENOUS SKILLS AND EMPLOYMENT TRAINING PROGRAM
+FACTORS
+
+ASSESSMENT RATIONALE
+
+DELIVERING RESULTS
+
+Supporting Information
+
+Ability to provide quality
+services that meet the needs
+of clients and the community
+on a sustained basis.
+
+Click here to enter text.
+
+Annex D
+
+CONSIDERATIONS
+1.Service / Program Delivery
+• How many years of experience does the organization have in delivering skills and employment programs
+(e.g. 10 years +)?
+• Have past agreements consistently demonstrated results?
+• How many years of experience does the organization have in delivering other federal programs or
+services? (E.g. 10 years +)?
+• Does the organization have indicators to monitor and evaluate the effectiveness of services and
+programs delivered? Are the results published or shared?
+• Are service evaluations, client feedback, and data collected used to inform decisions on revisions to
+programs and services?
+• Are interviews performed with program participants or with employers to determine if programs or
+services are easy to access and effective?
+2. Staff Capacity
+• Does the organization have the capacity and flexibility to meet the needs of clients if they change, such
+as increase service volumes if demand grows?
+3. Management of Sub-Agreements
+• Does the organization have experience in managing sub- agreement holders?
+• Does the organization intend to monitor and manage these sub-agreements to effectively increase or
+improve their capacity to deliver?
+
+Delivering Results Assessment
+Click here to enter observations and rationale
+
+6
+
+JOINT CAPACITY ASSESSMENT TOOL
+INDIGENOUS SKILLS AND EMPLOYMENT TRAINING PROGRAM
+
+Annex D
+
+Global Assessment Rationale:
+• Based on the assessment, please describe the overall assessment rationale.
+• There is no set standard to weigh the different considerations of each organization, as the circumstances of each service delivery structure is unique.
+• When determining an organization’s overall capacity assessment category, it is important to note if areas of improvement were identified. Are these improvements essential to service delivery
+requirements, or are they areas that could simply be enhanced and would not impact on achieving the objectives of the program?
+
+Capacity Assessment Category
+
+Overall Assessment Rationale
+
+7
+
+JOINT CAPACITY ASSESSMENT TOOL
+INDIGENOUS SKILLS AND EMPLOYMENT TRAINING PROGRAM
+
+Annex D
+
+Capacity Development Plan/Activities (optional)
+FACTORS
+
+ACTIVITIES
+
+GOVERNANCE/LEADERSHIP
+
+The following are examples only. Please choose, remove, or add activities.
+Optimal Capacity
+• Maintain dialogue and support as required, initiated by the organization.
+Capacity Enhancement or Capacity Building:
+• Support the development of approaches that demonstrate accountability of program funding and delivery to the public.
+• Support capacity building for business continuity (no service disruption) by promoting relationships and partnerships with other organizations (i.e. more experienced AH,
+other service delivery organizations).
+• Encourage membership in organizations such as the Aboriginal Financial Officer Association (AFOA) Canada that would provide guidance to AH in areas such as:
+o Certified Indigenous Leadership (CIL)
+o Certified Aboriginal Professional Administrator (CAPA).
+
+PLANNING/MANAGEMENT
+
+The following are examples only. Please choose, remove, or add activities.
+Optimal Capacity:
+• Maintain dialogue and support as required, initiated by the organization.
+• Work in collaboration with Indigenous organizations, if required, to discuss or review their Strategic, Operational and Budget Plans.
+Capacity Enhancement or Capacity building:
+• Promote relationships with other Indigenous communities to ensure that Indigenous organizations benefits from best practices
+• Work in collaboration with Indigenous organizations to provide guidance on Strategic, Operational and Budget Plans, and practices to increase transparency with
+community.
+• Implement a staffing/HR plan to meet program delivery objectives.
+• Develop an engagement plan to ensure stakeholders are involved in program development and delivery.
+
+8
+
+JOINT CAPACITY ASSESSMENT TOOL
+INDIGENOUS SKILLS AND EMPLOYMENT TRAINING PROGRAM
+
+Annex D
+
+Capacity Development Plan/Activities (optional)
+FACTORS
+
+ACTIVITIES
+
+FINANCIAL MANAGEMENT
+
+The following are examples only. Please choose, remove, or add activities.
+Optimal Capacity:
+• Maintain dialogue and support as required, initiated by the organization.
+Capacity Enhancement or Capacity Building:
+• Encourage membership with organizations such as FNFMP, AFOA or ISO to:
+- provide guidance to Indigenous organizations on how to obtain an organizational financial certification and/or obtain a Certified Aboriginal Financial Manager
+(CAFM) designation
+- provide professional development training to staff to enhance their financial management abilities
+•
+•
+•
+
+DELIVERING RESULTS
+
+Support Indigenous organizations in establishing relationships with other Indigenous organizations to promote financial management, accounting, reporting best
+practices and monitoring challenges in their fiscal relations and accountability requirements.
+Use of professional financial services, as required, through an advisory organization or contractual arrangement.
+If requested, departmental staff may provide support/information to Indigenous organizations.
+
+The following are examples only. Please choose, remove, or add activities.
+
+Optimal Capacity:
+• Maintain dialogue and support as required, initiated by the organization.
+• Assist Indigenous organizations in maintaining capacity and support them to enhance their competency and skills in project management and delivery.
+Capacity Enhancement or Capacity Building :
+• Establish shorter-term targets to improve results
+• Assess if other supports or infrastructure are required to increase the capacity to deliver results.
+• Partner with other service delivery organizations to enhance delivery expertise.
+• Provide support in the analysis of data to identify issues and opportunities for improvement.
+• Share best practices and tools to enhance ability to measure results.
+
+9
+
+

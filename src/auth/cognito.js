@@ -65,14 +65,36 @@ export async function exchangeCodeForTokens(code) {
   body.set('code', code);
   let usedRedirect = null;
   try { usedRedirect = sessionStorage.getItem('authLastRedirectUri'); } catch {}
-  if (!usedRedirect) usedRedirect = getRedirectUri();
+  const fallbackRedirect = getRedirectUri();
+  if (!usedRedirect) {
+    usedRedirect = fallbackRedirect;
+  } else if (typeof window !== 'undefined') {
+    try {
+      const used = new URL(usedRedirect, window.location.origin);
+      const fallback = new URL(fallbackRedirect, window.location.origin);
+      if (used.origin !== fallback.origin) {
+        usedRedirect = fallbackRedirect;
+      }
+    } catch {
+      usedRedirect = fallbackRedirect;
+    }
+  }
   body.set('redirect_uri', usedRedirect);
   const resp = await fetch(tokenUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
   });
-  if (!resp.ok) throw new Error(`Token exchange failed ${resp.status}`);
+  if (!resp.ok) {
+    const text = await resp.text();
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text);
+      detail = parsed.error_description || parsed.error || text;
+    } catch {}
+    const suffix = detail ? `: ${detail}` : '';
+    throw new Error(`Token exchange failed ${resp.status}${suffix}`);
+  }
   return resp.json();
 }
 
@@ -171,15 +193,19 @@ function normalizeRole(r) {
   const map = {
     SysAdmin: 'System Administrator',
     'System Administrator': 'System Administrator',
+    System_Administrator: 'System Administrator',
     ProgramAdmin: 'Program Administrator',
     'Program Administrator': 'Program Administrator',
+    NWAC_Administrator: 'Program Administrator',
     RegionalCoordinator: 'Regional Coordinator',
     'Regional Coordinator': 'Regional Coordinator',
-  Adjudicator: 'Application Assessor',
-  Assessor: 'Application Assessor',
-  'ApplicationAssessor': 'Application Assessor',
-  'Application Assessor': 'Application Assessor',
-  PTMA: 'Application Assessor'
+    Regional_Manager: 'Regional Coordinator',
+    Adjudicator: 'Application Assessor',
+    Assessor: 'Application Assessor',
+    ISET_Coordinator: 'Application Assessor',
+    'ApplicationAssessor': 'Application Assessor',
+    'Application Assessor': 'Application Assessor',
+    PTMA: 'Application Assessor'
   };
   return map[r] || r; // fall back to raw if unknown
 }

@@ -84,6 +84,7 @@ import EsdcParticipantsHelp from '../helpPanelContents/esdcParticipantsHelp.js';
 import EsdcReportingHelp from '../helpPanelContents/esdcReportingHelp.js';
 import EsdcSubmissionDashboardHelp from '../helpPanelContents/esdcSubmissionDashboardHelp.js';
 import DocumentationLibrary from '../pages/documentation/DocumentationLibrary.jsx';
+import HomeDashboardHelp from '../helpPanelContents/homeDashboardHelp.js';
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -177,7 +178,7 @@ const AppRoutes = ({
       </Route>
 
       <Route path="/manage-workflows">
-        <Guard roles={['System Administrator']} path="/manage-workflows">
+        <Guard path="/manage-workflows">
           {renderContent(
             ManageWorkflows,
             [
@@ -192,7 +193,7 @@ const AppRoutes = ({
       </Route>
 
       <Route path="/modify-workflow">
-        <Guard roles={['System Administrator']} path="/modify-workflow">
+        <Guard path="/modify-workflow">
           {renderContent(
             ModifyWorkflow,
             [
@@ -1142,7 +1143,7 @@ const AppRoutes = ({
           AdminDashboard,
           [{ text: 'Home', href: '/' }],
           'NWAC ISET Homepage',
-          'adminDashboardHome',
+          <HomeDashboardHelp />,
           (
             <SpaceBetween size="xs" direction="horizontal">
               <Button iconName="add-plus" onClick={() => window.dispatchEvent(new CustomEvent('home:openPalette'))}>
@@ -1153,7 +1154,7 @@ const AppRoutes = ({
               </Button>
             </SpaceBetween>
           ),
-          AdminDashboardHelp.aiContext
+          HomeDashboardHelp.aiContext
         )}
       </Route>
     </Switch>

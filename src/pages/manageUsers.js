@@ -1,5 +1,5 @@
 // New Admin User Management Dashboard (mocked Cognito-based admin roles)
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Box,
   Button,
@@ -25,10 +25,10 @@ import { getRoleDisplayName } from '../utils/roleDisplay';
 
 // Canonical (flexible) role keys – UI should adapt if list changes later
 const ROLE_OPTIONS = [
-  { value: 'SysAdmin', label: getRoleDisplayName('SysAdmin') },
-  { value: 'ProgramAdmin', label: getRoleDisplayName('ProgramAdmin') },
-  { value: 'RegionalCoordinator', label: getRoleDisplayName('RegionalCoordinator') },
-  { value: 'Adjudicator', label: getRoleDisplayName('Adjudicator') }
+  { value: 'System_Administrator', label: getRoleDisplayName('System_Administrator') },
+  { value: 'NWAC_Administrator', label: getRoleDisplayName('NWAC_Administrator') },
+  { value: 'Regional_Manager', label: getRoleDisplayName('Regional_Manager') },
+  { value: 'ISET_Coordinator', label: getRoleDisplayName('ISET_Coordinator') }
 ];
 
 // Users loaded from backend (mock fallback server-side if provider disabled)
@@ -43,6 +43,7 @@ export default function UserManagementDashboard() {
   ]);
   const [users, setUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
+  const [regionOptions, setRegionOptions] = useState([]);
   // Load users once
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +66,31 @@ export default function UserManagementDashboard() {
     load();
     return () => { cancelled = true; };
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadRegions() {
+      try {
+        const resp = await apiFetch('/api/regions/canada');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json().catch(() => []);
+        if (cancelled) return;
+        const options = (Array.isArray(data) ? data : [])
+          .map((row) => ({
+            regionId: Number(row.regionId),
+            code: String(row.code || '').trim().toUpperCase(),
+            name: row.name || row.code || ''
+          }))
+          .filter((row) => Number.isFinite(row.regionId) && row.code);
+        setRegionOptions(options);
+      } catch (e) {
+        if (!cancelled) {
+          setRegionOptions([]);
+        }
+      }
+    }
+    loadRegions();
+    return () => { cancelled = true; };
+  }, []);
   const [filteringText, setFilteringText] = useState('');
   const [selected, setSelected] = useState([]); // can be multi
   const [showCreate, setShowCreate] = useState(false);
@@ -84,7 +110,7 @@ export default function UserManagementDashboard() {
     { id: 'disabled', label: 'Disabled', predicate: u => u.status === 'DISABLED' },
     { id: 'pending', label: 'Pending', predicate: u => u.status === 'FORCE_CHANGE_PASSWORD' },
     { id: 'noMfa', label: 'No MFA', predicate: u => !u.mfa },
-    { id: 'admins', label: 'Admins', predicate: u => ['SysAdmin','ProgramAdmin'].includes(u.role) },
+    { id: 'admins', label: 'Admins', predicate: u => ['System_Administrator','NWAC_Administrator'].includes(u.role) },
     { id: 'recent', label: 'Recently Active', predicate: u => u.lastSignIn && (Date.now() - Date.parse(u.lastSignIn)) < 7*24*3600*1000 },
     { id: 'never', label: 'Never Logged In', predicate: u => !u.lastSignIn }
   ], []);
@@ -118,15 +144,37 @@ export default function UserManagementDashboard() {
     return () => clearTimeout(handle);
   }, [filteringText]);
 
-  const columns = [
+  const regionCodeById = useMemo(() => {
+    const map = new Map();
+    regionOptions.forEach((row) => {
+      map.set(Number(row.regionId), row.code);
+    });
+    return map;
+  }, [regionOptions]);
+
+  const resolveRegionCode = useCallback((regionId) => {
+    const numeric = Number(regionId);
+    if (!Number.isFinite(numeric)) return '—';
+    return regionCodeById.get(numeric) || '—';
+  }, [regionCodeById]);
+
+  const regionSelectOptions = useMemo(() => (
+    regionOptions.map((row) => ({
+      label: row.code,
+      description: row.name,
+      value: String(row.regionId),
+    }))
+  ), [regionOptions]);
+
+  const columns = useMemo(() => ([
     { id: 'username', header: 'Username', cell: i => i.username },
     { id: 'email', header: 'Email', cell: i => i.email },
     { id: 'role', header: 'Role', cell: i => ROLE_OPTIONS.find(r => r.value === i.role)?.label || i.role },
-    { id: 'region', header: 'Region', cell: i => i.regionId ?? '—' },
+    { id: 'region', header: 'Region', cell: i => resolveRegionCode(i.regionId) },
     { id: 'status', header: 'Status', cell: i => <StatusPill status={i.status} /> },
     { id: 'mfa', header: 'MFA', cell: i => i.mfa ? <Badge color="green">Enabled</Badge> : <Badge>MISSING</Badge> },
     { id: 'last', header: 'Last Sign-In', cell: i => i.lastSignIn ? new Date(i.lastSignIn).toLocaleString() : '—' }
-  ];
+  ]), [resolveRegionCode]);
 
   function pushFlash(type, content) {
     setFlashItems(cur => {
@@ -382,6 +430,7 @@ export default function UserManagementDashboard() {
                         items={filtered}
                         loading={loadingUsers}
                         loadingText="Loading administrative users"
+                        variant="embedded"
                         filter={<TextFilter filteringText={filteringText} onChange={e => setFilteringText(e.detail.filteringText)} filteringPlaceholder="Search users" />}
                         header={<Header
                           actions={
@@ -403,6 +452,7 @@ export default function UserManagementDashboard() {
                           user={selected[0]}
                           onClose={() => { setInspectorOpen(false); setSelected([]); }}
                           onChangeRole={(username, currentRole) => { setShowRoleChange(true); setRoleChangeTarget({ username, newRole: currentRole }); }}
+                          resolveRegionCode={resolveRegionCode}
                         />
                       )}
                     </SpaceBetween>
@@ -440,8 +490,15 @@ export default function UserManagementDashboard() {
             <FormField label="Name" stretch><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.detail.value }))} placeholder="e.g. Jane Doe" /></FormField>
             <FormField label="Display name" stretch description="Shown in assignments and audit trails. Defaults to Name."><Input value={form.displayName} onChange={e => setForm(f => ({ ...f, displayName: e.detail.value }))} placeholder="e.g. Jane D." /></FormField>
             <FormField label="Role"><Select selectedOption={form.role ? ROLE_OPTIONS.find(r => r.value === form.role) : null} onChange={e => setForm(f => ({ ...f, role: e.detail.selectedOption.value }))} options={ROLE_OPTIONS} placeholder="Select role" /></FormField>
-            {form.role && ['RegionalCoordinator','Adjudicator'].includes(form.role) && (
-              <FormField label="Region ID (numeric)"><Input value={form.regionId} onChange={e => setForm(f => ({ ...f, regionId: e.detail.value }))} inputMode="numeric" placeholder="e.g. 1" /></FormField>
+            {form.role && ['Regional_Manager','ISET_Coordinator'].includes(form.role) && (
+              <FormField label="Region">
+                <Select
+                  selectedOption={form.regionId ? regionSelectOptions.find(opt => opt.value === String(form.regionId)) : null}
+                  onChange={e => setForm(f => ({ ...f, regionId: e.detail.selectedOption.value }))}
+                  options={regionSelectOptions}
+                  placeholder="Select region"
+                />
+              </FormField>
             )}
             {/* Invitation help text: show mock notice only when Cognito not configured */}
             {((process.env.REACT_APP_COGNITO_CLIENT_ID || '').startsWith('REPLACE_') || (process.env.REACT_APP_AWS_REGION ? false : true)) ? (
@@ -520,19 +577,19 @@ function SecurityComplianceWidget({ metrics }) {
 
 function mapRoleToPermissions(role) {
   switch (role) {
-    case 'SysAdmin': return 'All administrative actions';
-    case 'ProgramAdmin': return 'Manage regional managers & ISET coordinators';
-    case 'RegionalCoordinator': return 'Manage ISET coordinators within region';
-    case 'Adjudicator': return 'Coordinate ISET cases assigned to you';
+    case 'System_Administrator': return 'All administrative actions';
+    case 'NWAC_Administrator': return 'Manage regional managers & ISET coordinators';
+    case 'Regional_Manager': return 'Manage ISET coordinators within region';
+    case 'ISET_Coordinator': return 'Coordinate ISET cases assigned to you';
     default: return '—';
   }
 }
 
-function UserInspector({ user, onClose, onChangeRole }) {
+function UserInspector({ user, onClose, onChangeRole, resolveRegionCode }) {
   const profileRows = [
     { label: 'Username', value: user.username },
     { label: 'Email', value: user.email },
-    { label: 'Region', value: user.regionId ?? '—' }
+    { label: 'Region', value: resolveRegionCode ? resolveRegionCode(user.regionId) : (user.regionId ?? '—') }
   ];
   const roleRows = [
     { label: 'Role', value: ROLE_OPTIONS.find(r => r.value === user.role)?.label || user.role },

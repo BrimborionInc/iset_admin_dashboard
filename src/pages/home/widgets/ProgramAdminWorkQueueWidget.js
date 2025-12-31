@@ -13,6 +13,7 @@ import {
   SpaceBetween,
   Table
 } from '@cloudscape-design/components';
+import HomeWorkQueueHelp from '../../../helpPanelContents/homeWorkQueueHelp';
 
 export const PROGRAM_ADMIN_BUCKETS = [
   {
@@ -23,27 +24,27 @@ export const PROGRAM_ADMIN_BUCKETS = [
   {
     id: 'unresolved-conflicts',
     label: 'Unresolved Conflicts',
-    description: 'Conflicts of interest that need a decision or reassignment.'
+    description: 'Conflicts of interest declarations that need resolution or reassignment.'
   },
   {
     id: 'ei-eligibility-checks',
     label: 'EI Eligibility Checks',
-    description: 'Applications waiting for EI status validation by an Admin.'
+    description: 'Applications waiting for EI status validation by an Admin or Manager.'
   },
   {
     id: 'exceptions-escalations',
     label: 'Exceptions & Escalations',
-    description: 'Files escalated for policy exceptions or governance review.'
+    description: 'Applications escalated for your attention.'
   },
   {
     id: 'applications-awaiting-approval',
     label: 'Application Approvals',
-    description: 'Assessments completed and awaiting program approval.'
+    description: 'New application assessments needing a decision.'
   },
   {
     id: 'interventions-awaiting-approval',
     label: 'Intervention Approvals',
-    description: 'Proposed interventions that need approval before issuing agreements.'
+    description: 'New interventions proposed for existing clients needing a decision.'
   },
   {
     id: 'agreement-package-issues',
@@ -247,7 +248,8 @@ const ProgramAdminWorkQueueWidget = ({
   items = PROGRAM_ADMIN_SAMPLE_ITEMS,
   countsByBucket = {},
   actions,
-  onRefresh
+  onRefresh,
+  toggleHelpPanel
 }) => {
   const bucketCounts = useMemo(() => {
     return PROGRAM_ADMIN_BUCKETS.map(bucket => {
@@ -263,12 +265,24 @@ const ProgramAdminWorkQueueWidget = ({
 
   const selectedBucket =
     bucketCounts.find(bucket => bucket.id === selectedBucketId) || bucketCounts[0] || null;
+  const infoLink = toggleHelpPanel ? (
+    <Link
+      variant="info"
+      onFollow={event => {
+        event.preventDefault();
+        toggleHelpPanel(<HomeWorkQueueHelp />, 'Work Queue', HomeWorkQueueHelp.aiContext || '');
+      }}
+    >
+      Info
+    </Link>
+  ) : undefined;
 
   return (
     <BoardItem
       header={
         <Header
           variant="h2"
+          info={infoLink}
           description="Select a work queue to show items in that queue."
           actions={
             typeof onRefresh === 'function'

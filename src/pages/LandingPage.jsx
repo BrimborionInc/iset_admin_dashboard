@@ -43,64 +43,42 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.4.0 (18 Dec 2025)',
-      description: 'Release 0.4.1 covers a range of changes including staff-to-staff secure messaging. See the updates.',
+      sectionTitle: 'Release Notes - v0.5.0 (31 Dec 2025)',
+      description: 'Release 0.5.0 focuses on homepage monitoring, queue workflows, and admin tooling improvements.',
       features: {
         heading: 'What’s New',
         sections: [
           {
-            title: 'Secure internal messaging',
+            title: 'Homepage monitoring refresh',
             paragraphs: [
-              'A new secure messaging feature is now available.',
-              'Selecting Messages from the side navigation opens an email-style dashboard where you can view, send, and receive messages.',
-              'Opening a message displays it in a small, pinned window in the bottom-right corner of the screen.',
-              'The message stays open while you move around the system, so you can continue reading or responding while working elsewhere.',
-              'Messages can be sent to multiple staff members.'
+              'The homepage now centers on role-based work queues, a queue items list, a watchlist, and recent activity.',
+              'Legacy queue widgets have been removed to reduce clutter and focus on current workflows.',
+              'Queue items now show province codes and support quick flagging.',
+              'Flagging or unflagging an item refreshes the watchlist automatically.'
             ]
           },
           {
-            title: 'Improved handling of repeat applications',
+            title: 'New Metrics widget',
             paragraphs: [
-              'The system now better supports clients who apply more than once.',
-              'When a client submits a subsequent application (for example, a second year of funding), it is treated as a new application.',
-              'Once approved, the Case Management view will show multiple cases under the same client profile.',
-              'This makes it easy to see a client’s full application and funding history in one place.'
+              'Added a Metrics widget with week, month, quarter, and year views.',
+              'Metrics include new applications, decisions made, active cases, funds committed, and funds spent.',
+              'Totals are scoped to the signed-in role and region, formatted consistently in CAD.'
             ]
           },
           {
-            title: 'Document checklist now reflects how applications actually work',
+            title: 'Administrative user management updates',
             paragraphs: [
-              'The document checklist has been redesigned to distinguish between different kinds of documents.',
-              'Client-level documents are only checked once and follow the client.',
-              'Application-level documents are required for each new application.',
-              'For example, EI verification and consent forms are now correctly tied to the application, not reused from earlier submissions.',
-              'When a new application is started, the checklist resets appropriately for that application.'
+              'Administrative Users now display region codes instead of numeric IDs.',
+              'The region selector uses two-letter codes when inviting staff.',
+              'The user table is embedded directly inside the tab panels for faster scanning.'
             ]
           },
           {
-            title: 'Mandatory document completion before assessment submission',
+            title: 'Assessment workflow refinements',
             paragraphs: [
-              'The document checklist now actively enforces completeness.',
-              'Assessors cannot submit an assessment to managers or program administrators unless all required documents are present.',
-              'This ensures applications are complete before they move forward in the workflow.'
-            ]
-          },
-          {
-            title: 'EI verification now requires supporting documents',
-            paragraphs: [
-              'When performing an EI verification check:',
-              'Managers and administrators must now upload the supporting EI status document at the same time as setting eligibility.',
-              'This ensures the decision is always backed by documentation.'
-            ]
-          },
-          {
-            title: 'Updates to accepted document types',
-            paragraphs: [
-              'Several improvements have been made to document recognition:',
-              'Status Card has been reintroduced as a document type.',
-              'Letters of Reference have been added as an alternative.',
-              'If a Status Card is not provided, the checklist will now require two Letters of Reference instead.',
-              'This supports participants who do not have a Status Card but can confirm Indigenous status through references.'
+              'Assessment cost scheduling now supports recurring periods with automatic total calculations.',
+              'Checklist-driven uploads are enforced before submission so required items are complete.',
+              'Approval fields reveal budget pots only when an approval and non-zero cost are set.'
             ]
           },
         ]
@@ -186,64 +164,42 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.4.0 (18 décembre 2025)',
-      description: 'La version 0.4.1 présente la messagerie sécurisée entre membres du personnel et d’autres améliorations. Consultez les mises à jour.',
+      sectionTitle: 'Notes de version - v0.5.0 (31 décembre 2025)',
+      description: 'La version 0.5.0 met l’accent sur la surveillance de l’accueil, les files de travail et les outils d’administration.',
       features: {
         heading: 'Quoi de neuf',
         sections: [
           {
-            title: 'Messagerie interne sécurisée',
+            title: 'Actualisation de l’accueil et des files de travail',
             paragraphs: [
-              'Une nouvelle messagerie sécurisée entre membres du personnel est disponible.',
-              'Choisir Messages dans la navigation latérale ouvre un tableau de bord type courriel pour voir, envoyer et recevoir des messages.',
-              'L’ouverture d’un message l’affiche dans une petite fenêtre épinglée en bas à droite de l’écran.',
-              'Le message reste ouvert pendant que vous vous déplacez dans le système, ce qui permet de lire ou de répondre en travaillant ailleurs.',
-              'Les messages peuvent être envoyés à plusieurs membres du personnel.'
+              'La page d’accueil met maintenant l’accent sur les files de travail par rôle, la liste des éléments, la liste de suivi et l’activité récente.',
+              'Les anciens widgets de file ont été retirés pour alléger l’interface.',
+              'Les éléments de file affichent les codes de province et permettent le marquage rapide.',
+              'Le marquage ou le dé-marquage actualise automatiquement la liste de suivi.'
             ]
           },
           {
-            title: 'Meilleure gestion des demandes répétées',
+            title: 'Nouveau widget Indicateurs',
             paragraphs: [
-              'Le système gère mieux les clients qui déposent plus d’une demande.',
-              'Lorsqu’un client soumet une demande subséquente (p. ex. une deuxième année de financement), elle est traitée comme une nouvelle demande.',
-              'Une fois approuvées, la vue Gestion des dossiers affiche plusieurs dossiers sous le même profil client.',
-              'Cela permet de voir l’historique complet des demandes et du financement d’un client au même endroit.'
+              'Ajout d’un widget Indicateurs avec vues semaine, mois, trimestre et année.',
+              'Les indicateurs couvrent les nouvelles demandes, les décisions, les dossiers actifs, les fonds engagés et les fonds dépensés.',
+              'Les totaux sont limités au rôle et à la région de l’utilisateur, avec format CAD cohérent.'
             ]
           },
           {
-            title: 'La liste de contrôle reflète la réalité des demandes',
+            title: 'Mises à jour de la gestion des utilisateurs administratifs',
             paragraphs: [
-              'La liste de contrôle des documents distingue désormais clairement les types de documents.',
-              'Les documents au niveau du client sont vérifiés une seule fois et suivent le client.',
-              'Les documents au niveau de la demande sont requis pour chaque nouvelle demande.',
-              'Par exemple, la vérification AE et les formulaires de consentement sont correctement liés à la demande, et non réutilisés de soumissions antérieures.',
-              'Lorsqu’une nouvelle demande est amorcée, la liste de contrôle se réinitialise pour cette demande.'
+              'Les utilisateurs administratifs affichent maintenant les codes de région au lieu des identifiants numériques.',
+              'Le sélecteur de région utilise les codes à deux lettres lors des invitations.',
+              'La table est intégrée directement dans les onglets pour une lecture plus rapide.'
             ]
           },
           {
-            title: 'Documents obligatoires avant la soumission de l’évaluation',
+            title: 'Ajustements du flux d’évaluation',
             paragraphs: [
-              'La liste de contrôle des documents applique maintenant la complétude.',
-              'Les évaluateurs ne peuvent pas soumettre une évaluation aux gestionnaires ou aux administrateurs de programme tant que tous les documents requis ne sont pas présents.',
-              'Cela garantit que les demandes sont complètes avant d’avancer dans le flux de travail.'
-            ]
-          },
-          {
-            title: 'La vérification AE exige une pièce justificative',
-            paragraphs: [
-              'Lors d’une vérification d’assurance-emploi :',
-              'Les gestionnaires et administrateurs doivent téléverser le document attestant le statut AE en même temps que la décision d’admissibilité.',
-              'Cela garantit que chaque décision est appuyée par une preuve.'
-            ]
-          },
-          {
-            title: 'Mise à jour des types de documents acceptés',
-            paragraphs: [
-              'Plusieurs améliorations ont été apportées à la reconnaissance des documents :',
-              'La carte de statut est réintroduite comme type de document.',
-              'Les lettres de référence sont ajoutées comme alternative.',
-              'Si aucune carte de statut n’est fournie, la liste de contrôle exigera désormais deux lettres de référence.',
-              'Cela soutient les participants qui n’ont pas de carte de statut mais peuvent confirmer leur statut autochtone au moyen de références.'
+              'L’étape des coûts prend en charge les récurrences avec calcul automatique des totaux.',
+              'Les téléversements requis sont bloqués tant que la liste de contrôle n’est pas complète.',
+              'Les champs d’approbation affichent les budgets uniquement quand l’approbation et un coût non nul sont sélectionnés.'
             ]
           }
         ]

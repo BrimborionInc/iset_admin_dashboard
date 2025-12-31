@@ -11,12 +11,16 @@ const ROLE_ALIASES = {
   'PTMA Staff': 'Application Assessor',
   PTMAStaff: 'Application Assessor',
   Adjudicator: 'Application Assessor',
+  ISET_Coordinator: 'Application Assessor',
   SysAdmin: 'System Administrator',
   'System Admin': 'System Administrator',
+  System_Administrator: 'System Administrator',
   'Program Admin': 'Program Administrator',
   'Regional Manager': 'Regional Coordinator',
   'ISET Coordinator': 'Application Assessor',
   ISETCoordinator: 'Application Assessor',
+  Regional_Manager: 'Regional Coordinator',
+  NWAC_Administrator: 'Program Administrator',
   ProgramAdministrator: 'Program Administrator',
 };
 

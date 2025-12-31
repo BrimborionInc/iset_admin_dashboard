@@ -17,10 +17,10 @@ function getClient() {
 
 // Guard matrix
 const CAN_CREATE = {
-  SysAdmin: new Set(['SysAdmin', 'ProgramAdmin', 'RegionalCoordinator', 'Adjudicator']),
-  ProgramAdmin: new Set(['ProgramAdmin', 'RegionalCoordinator', 'Adjudicator']),
-  RegionalCoordinator: new Set(['Adjudicator']),
-  Adjudicator: new Set(),
+  System_Administrator: new Set(['System_Administrator', 'NWAC_Administrator', 'Regional_Manager', 'ISET_Coordinator']),
+  NWAC_Administrator: new Set(['NWAC_Administrator', 'Regional_Manager', 'ISET_Coordinator']),
+  Regional_Manager: new Set(['ISET_Coordinator']),
+  ISET_Coordinator: new Set(),
 };
 
 function normalizeRoleKey(role) {
@@ -31,14 +31,18 @@ function normalizeRoleKey(role) {
     case 'sysadmin':
     case 'systemadministrator':
     case 'systemadmin':
-      return 'SysAdmin';
+      return 'System_Administrator';
     case 'programadmin':
     case 'programadministrator':
-      return 'ProgramAdmin';
+    case 'nwacadministrator':
+      return 'NWAC_Administrator';
     case 'regionalcoordinator':
-      return 'RegionalCoordinator';
+    case 'regionalmanager':
+      return 'Regional_Manager';
     case 'adjudicator':
-      return 'Adjudicator';
+    case 'applicationassessor':
+    case 'isetcoordinator':
+      return 'ISET_Coordinator';
     default:
       return cleaned;
   }
@@ -51,13 +55,13 @@ function canCreateRole(actorKey, targetKey) {
 
 function mapAdminRoleKeyToStaffPrimaryRole(roleKey) {
   switch (roleKey) {
-    case 'SysAdmin':
+    case 'System_Administrator':
       return 'System Administrator';
-    case 'ProgramAdmin':
+    case 'NWAC_Administrator':
       return 'Program Administrator';
-    case 'RegionalCoordinator':
+    case 'Regional_Manager':
       return 'Regional Coordinator';
-    case 'Adjudicator':
+    case 'ISET_Coordinator':
       return 'Application Assessor';
     default:
       return null;
@@ -102,10 +106,10 @@ router.get('/users', async (req, res) => {
     // If no Cognito configured, return a static mock so UI can integrate early
     if (!POOL_ID || !REGION || process.env.AUTH_PROVIDER !== 'cognito') {
       let users = [
-        { username: 'alice@example.org', email: 'alice@example.org', role: 'SysAdmin', status: 'CONFIRMED', regionId: null, mfa: true, lastSignIn: '2025-08-20T14:10:00Z', createdAt: '2025-05-01T10:00:00Z' },
-        { username: 'bob@example.org', email: 'bob@example.org', role: 'ProgramAdmin', status: 'FORCE_CHANGE_PASSWORD', regionId: null, mfa: false, lastSignIn: null, createdAt: '2025-08-15T12:00:00Z' },
-        { username: 'carol.rc.1@example.org', email: 'carol.rc.1@example.org', role: 'RegionalCoordinator', status: 'CONFIRMED', regionId: 1, mfa: true, lastSignIn: '2025-08-23T09:01:00Z', createdAt: '2025-07-20T09:30:00Z' },
-        { username: 'dave.adj.1@example.org', email: 'dave.adj.1@example.org', role: 'Adjudicator', status: 'DISABLED', regionId: 1, mfa: false, lastSignIn: '2025-07-29T11:30:00Z', createdAt: '2025-06-18T11:30:00Z' }
+        { username: 'alice@example.org', email: 'alice@example.org', role: 'System_Administrator', status: 'CONFIRMED', regionId: null, mfa: true, lastSignIn: '2025-08-20T14:10:00Z', createdAt: '2025-05-01T10:00:00Z' },
+        { username: 'bob@example.org', email: 'bob@example.org', role: 'NWAC_Administrator', status: 'FORCE_CHANGE_PASSWORD', regionId: null, mfa: false, lastSignIn: null, createdAt: '2025-08-15T12:00:00Z' },
+        { username: 'carol.rc.1@example.org', email: 'carol.rc.1@example.org', role: 'Regional_Manager', status: 'CONFIRMED', regionId: 1, mfa: true, lastSignIn: '2025-08-23T09:01:00Z', createdAt: '2025-07-20T09:30:00Z' },
+        { username: 'dave.adj.1@example.org', email: 'dave.adj.1@example.org', role: 'ISET_Coordinator', status: 'DISABLED', regionId: 1, mfa: false, lastSignIn: '2025-07-29T11:30:00Z', createdAt: '2025-06-18T11:30:00Z' }
       ];
       if (q) users = users.filter(u => [u.username, u.email, u.role].some(v => v.toLowerCase().includes(q)));
       return res.json({ source: 'mock', users });
@@ -114,8 +118,8 @@ router.get('/users', async (req, res) => {
     const client = getClient();
     // New approach: build user list ONLY from ListUsersInGroup (avoids needing cognito-idp:ListUsers permission).
     // If ListUsers is permitted we can optionally enrich, but it's no longer required.
-    const groups = ['SysAdmin','ProgramAdmin','RegionalCoordinator','Adjudicator'];
-    const ROLE_RANK = { SysAdmin: 4, ProgramAdmin: 3, RegionalCoordinator: 2, Adjudicator: 1 };
+    const groups = ['System_Administrator','NWAC_Administrator','Regional_Manager','ISET_Coordinator'];
+    const ROLE_RANK = { System_Administrator: 4, NWAC_Administrator: 3, Regional_Manager: 2, ISET_Coordinator: 1 };
     const userMap = new Map(); // username -> user object
     for (const g of groups) {
       try {
@@ -226,7 +230,7 @@ if (!AUTH_ENABLED) {
   });
 } else {
   // Real (Cognito) endpoints only when auth enabled
-  router.post('/users', requireRole('SysAdmin', 'ProgramAdmin', 'RegionalCoordinator'), async (req, res) => {
+  router.post('/users', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
     try {
       const actor = req.auth;
       const { email, role, region_id, user_id, suppressInvite, name, display_name } = req.body || {};
@@ -235,7 +239,7 @@ if (!AUTH_ENABLED) {
       if (!email || !targetKey) return res.status(400).json({ error: 'email and role are required' });
       if (!actorKey) return res.status(403).json({ error: 'Forbidden' });
       if (!canCreateRole(actorKey, targetKey)) return res.status(403).json({ error: 'Not allowed to create this role' });
-      if (targetKey !== 'SysAdmin' && targetKey !== 'ProgramAdmin' && !Number.isFinite(region_id)) return res.status(400).json({ error: 'region_id required for regional roles' });
+      if (targetKey !== 'System_Administrator' && targetKey !== 'NWAC_Administrator' && !Number.isFinite(region_id)) return res.status(400).json({ error: 'region_id required for regional roles' });
 
       const client = getClient();
       const createCmd = new AdminCreateUserCommand({
@@ -302,7 +306,7 @@ if (!AUTH_ENABLED) {
     }
   });
 
-  router.patch('/users/:username/disable', requireRole('SysAdmin', 'ProgramAdmin', 'RegionalCoordinator'), async (req, res) => {
+  router.patch('/users/:username/disable', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
     try {
       const actor = req.auth;
       const { role } = req.body || {};
@@ -316,7 +320,7 @@ if (!AUTH_ENABLED) {
       }
       if (!targetKey) return res.status(400).json({ error: 'role required' });
       if (!actorKey) return res.status(403).json({ error: 'Forbidden' });
-      if (!canCreateRole(actorKey, targetKey) && actorKey !== 'SysAdmin') return res.status(403).json({ error: 'Forbidden' });
+      if (!canCreateRole(actorKey, targetKey) && actorKey !== 'System_Administrator') return res.status(403).json({ error: 'Forbidden' });
       const client = getClient();
       await client.send(new AdminDisableUserCommand({ UserPoolId: POOL_ID, Username: username }));
       res.json({ message: 'User disabled' });
@@ -325,7 +329,7 @@ if (!AUTH_ENABLED) {
     }
   });
 
-  router.patch('/users/:username/enable', requireRole('SysAdmin', 'ProgramAdmin'), async (req, res) => {
+  router.patch('/users/:username/enable', requireRole('System Administrator', 'Program Administrator'), async (req, res) => {
     try {
       const username = req.params.username;
       console.log('[admin-users][enable] actor=', req.auth?.role, 'headers.x-dev-bypass=', req.get('x-dev-bypass'));
@@ -340,7 +344,7 @@ if (!AUTH_ENABLED) {
     }
   });
 
-  router.patch('/users/:username/attributes', requireRole('SysAdmin', 'ProgramAdmin', 'RegionalCoordinator'), async (req, res) => {
+  router.patch('/users/:username/attributes', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
     try {
       const { region_id, user_id } = req.body || {};
       const username = req.params.username;
@@ -357,7 +361,7 @@ if (!AUTH_ENABLED) {
   });
 
   // Change role (remove from current group, add to target)
-  router.patch('/users/:username/role', requireRole('SysAdmin', 'ProgramAdmin', 'RegionalCoordinator'), async (req, res) => {
+  router.patch('/users/:username/role', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
     try {
       const actor = req.auth;
       const username = req.params.username;
@@ -367,7 +371,7 @@ if (!AUTH_ENABLED) {
       const currentRoleKey = normalizeRoleKey(currentRole);
       if (!newRoleKey || !currentRoleKey) return res.status(400).json({ error: 'newRole and currentRole required' });
       if (!actorKey) return res.status(403).json({ error: 'Forbidden' });
-      if (!canCreateRole(actorKey, newRoleKey) && actorKey !== 'SysAdmin') return res.status(403).json({ error: 'Forbidden' });
+      if (!canCreateRole(actorKey, newRoleKey) && actorKey !== 'System_Administrator') return res.status(403).json({ error: 'Forbidden' });
       // NOTE: For full correctness we would call AdminRemoveUserFromGroup for current role and AdminAddUserToGroup for new role.
       const { AdminRemoveUserFromGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
       const client = getClient();
@@ -381,14 +385,14 @@ if (!AUTH_ENABLED) {
     }
   });
 
-  router.delete('/users/:username/role', requireRole('SysAdmin', 'ProgramAdmin', 'RegionalCoordinator'), async (req, res) => {
+  router.delete('/users/:username/role', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
     try {
       const username = req.params.username;
       if (req.get('x-dev-bypass')) return res.json({ message: 'Dev bypass: role removed (mock)' });
       const { ListGroupsForUserCommand, AdminRemoveUserFromGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
       const client = getClient();
       const groupsResp = await client.send(new ListGroupsForUserCommand({ Username: username, UserPoolId: POOL_ID }));
-      const targetGroup = (groupsResp.Groups||[]).find(g => ['SysAdmin','ProgramAdmin','RegionalCoordinator','Adjudicator'].includes(g.GroupName));
+      const targetGroup = (groupsResp.Groups||[]).find(g => ['System_Administrator','NWAC_Administrator','Regional_Manager','ISET_Coordinator'].includes(g.GroupName));
       if (!targetGroup) return res.status(404).json({ error: 'No admin role group to remove' });
       await client.send(new AdminRemoveUserFromGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: targetGroup.GroupName }));
       res.json({ message: 'Role removed' });
@@ -397,7 +401,7 @@ if (!AUTH_ENABLED) {
     }
   });
 
-  router.post('/users/:username/resend-invite', requireRole('SysAdmin', 'ProgramAdmin', 'RegionalCoordinator'), async (req, res) => {
+  router.post('/users/:username/resend-invite', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
     try {
       // There is no direct "resend invite" if MessageAction SUPPRESS was used; placeholder for integration with custom email flow.
       if (req.get('x-dev-bypass')) return res.json({ message: 'Dev bypass: invite resent (mock)' });
@@ -408,7 +412,7 @@ if (!AUTH_ENABLED) {
   });
 
   // Force password reset (sets status to FORCE_CHANGE_PASSWORD)
-  router.patch('/users/:username/force-reset', requireRole('SysAdmin', 'ProgramAdmin', 'RegionalCoordinator'), async (req, res) => {
+  router.patch('/users/:username/force-reset', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
     try {
       if (req.get('x-dev-bypass')) return res.json({ message: 'Dev bypass: password reset forced (mock)' });
       const { AdminResetUserPasswordCommand } = require('@aws-sdk/client-cognito-identity-provider');

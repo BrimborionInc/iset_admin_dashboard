@@ -3,71 +3,45 @@ import { Box, Button, SpaceBetween } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../../auth/cognito';
 import { apiFetch } from '../../auth/apiClient';
-import ApplicationWorkQueueWidget from './widgets/ApplicationWorkQueueWidget';
-import CaseWorkQueueWidget from './widgets/CaseWorkQueueWidget';
-import ProgramAdminWorkQueueWidget, { ProgramAdminWorkItemsWidget, PROGRAM_ADMIN_BUCKETS, PROGRAM_ADMIN_SAMPLE_ITEMS } from './widgets/ProgramAdminWorkQueueWidget';
+import ProgramAdminWorkQueueWidget, { PROGRAM_ADMIN_BUCKETS, PROGRAM_ADMIN_SAMPLE_ITEMS } from './widgets/ProgramAdminWorkQueueWidget';
 import IsetCoordinatorWorkQueueWidget, { ISET_COORDINATOR_BUCKETS, ISET_COORDINATOR_SAMPLE_ITEMS } from './widgets/IsetCoordinatorWorkQueueWidget';
 import WorkQueueItemsTableWidget from './widgets/WorkQueueItemsTableWidget';
 import RecentActivityWidget from './widgets/RecentActivityWidget';
 import MyWatchlistWidget from './widgets/MyWatchlistWidget';
-import ConflictDeclarationsWidget from './widgets/ConflictDeclarationsWidget';
 import DevTaskTrackerWidget from './widgets/DevTaskTrackerWidget';
+import MetricsWidget from './widgets/MetricsWidget';
 
 const WIDGET_REGISTRY = {
-    'application-work-queue': {
-        id: 'application-work-queue',
-        component: ApplicationWorkQueueWidget,
-        title: 'Application Work Queue',
-        description: 'Applications currently in your remit by status.',
-        defaultRowSpan: 2,
-        defaultColumnSpan: 4
-    },
-    'case-work-queue': {
-        id: 'case-work-queue',
-        component: CaseWorkQueueWidget,
-        title: 'Case Work Queue',
-        description: 'Case management workload by status.',
-        defaultRowSpan: 2,
-        defaultColumnSpan: 4
-    },
     'program-admin-work-queue': {
         id: 'program-admin-work-queue',
         component: ProgramAdminWorkQueueWidget,
         title: 'Work Queue',
         description: 'Combined application and case queues (role-scoped).',
-        defaultRowSpan: 3,
-        defaultColumnSpan: 4
+        defaultRowSpan: 16,
+        defaultColumnSpan: 1
     },
     'iset-coordinator-work-queue': {
         id: 'iset-coordinator-work-queue',
         component: IsetCoordinatorWorkQueueWidget,
         title: 'Work Queue (ISET Coordinator)',
         description: 'Scaffolded queue buckets for ISET Coordinators (Application Assessors).',
-        defaultRowSpan: 3,
-        defaultColumnSpan: 4
-    },
-    'program-admin-work-items': {
-        id: 'program-admin-work-items',
-        component: ProgramAdminWorkItemsWidget,
-        title: 'Work Queue Items',
-        description: 'Items for the selected queue bucket.',
-        defaultRowSpan: 6,
-        defaultColumnSpan: 4
+        defaultRowSpan: 16,
+        defaultColumnSpan: 1
     },
     'work-queue-items-table': {
         id: 'work-queue-items-table',
         component: WorkQueueItemsTableWidget,
         title: 'Queue Items',
         description: 'Lists items for the selected work queue with adaptive columns.',
-        defaultRowSpan: 6,
-        defaultColumnSpan: 4
+        defaultRowSpan: 5,
+        defaultColumnSpan: 3
     },
     'recent-activity': {
         id: 'recent-activity',
         component: RecentActivityWidget,
         title: 'Recent Activity',
         description: 'Most recent submissions, assignments, and status changes.',
-        defaultRowSpan: 4,
+        defaultRowSpan: 6,
         defaultColumnSpan: 2
     },
     'my-watchlist': {
@@ -75,8 +49,16 @@ const WIDGET_REGISTRY = {
         component: MyWatchlistWidget,
         title: 'My Watchlist',
         description: 'Cases and applications you have flagged for follow-up.',
-        defaultRowSpan: 4,
-        defaultColumnSpan: 2
+        defaultRowSpan: 5,
+        defaultColumnSpan: 3
+    },
+    'metrics': {
+        id: 'metrics',
+        component: MetricsWidget,
+        title: 'Metrics',
+        description: 'Weekly, monthly, quarterly, and yearly activity snapshot.',
+        defaultRowSpan: 6,
+        defaultColumnSpan: 1
     },
     'dev-task-tracker': {
         id: 'dev-task-tracker',
@@ -86,17 +68,9 @@ const WIDGET_REGISTRY = {
         defaultRowSpan: 6,
         defaultColumnSpan: 4
     },
-    'conflict-declarations': {
-        id: 'conflict-declarations',
-        component: ConflictDeclarationsWidget,
-        title: 'Conflict Declarations',
-        description: 'Conflicts of interest declared by staff in your remit.',
-        defaultRowSpan: 4,
-        defaultColumnSpan: 4
-    }
 };
 
-const STORAGE_PREFIX = 'admin-home-layout-v5';
+const STORAGE_PREFIX = 'admin-home-layout-v6';
 const ISET_COORDINATOR_STATUS_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice', 'pending_approval', 'decision_ready'].join(',');
 const ISET_COORDINATOR_EI_ELIGIBILITY_FILTER = ISET_COORDINATOR_STATUS_FILTER;
 const ISET_COORDINATOR_READY_TO_ASSESS_FILTER = ['submitted', 'in_review'].join(',');
@@ -212,16 +186,12 @@ const filterWidgetsForRole = (role) => {
     if (role !== 'System Administrator') {
         delete allowed['dev-task-tracker'];
     }
-    if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
-        delete allowed['conflict-declarations'];
+    if (role === 'System Administrator') {
+        delete allowed['metrics'];
     }
     const isWorkQueueRole = role === 'Program Administrator' || role === 'Regional Coordinator';
-    if (isWorkQueueRole) {
-        delete allowed['application-work-queue'];
-        delete allowed['case-work-queue'];
-    } else {
+    if (!isWorkQueueRole) {
         delete allowed['program-admin-work-queue'];
-        delete allowed['program-admin-work-items'];
         if (!isIsetCoordinator) {
             delete allowed['work-queue-items-table'];
         }
@@ -233,38 +203,29 @@ const filterWidgetsForRole = (role) => {
 };
 
 const buildDefaultLayout = (role) => {
-    if (role === 'Program Administrator' || role === 'Regional Coordinator') {
+    if (role === 'System Administrator') {
         return [
-            { id: 'program-admin-work-queue', rowSpan: 3, columnSpan: 4 },
-            { id: 'work-queue-items-table', rowSpan: 6, columnSpan: 4 },
             { id: 'recent-activity', rowSpan: 4, columnSpan: 2 },
             { id: 'my-watchlist', rowSpan: 4, columnSpan: 2 },
-            { id: 'conflict-declarations', rowSpan: 4, columnSpan: 4 }
+            { id: 'dev-task-tracker', rowSpan: 6, columnSpan: 4 }
         ];
     }
-    if (role === 'Application Assessor') {
-        return [
-            { id: 'iset-coordinator-work-queue', rowSpan: 3, columnSpan: 4 },
-            { id: 'work-queue-items-table', rowSpan: 6, columnSpan: 4 },
-            { id: 'application-work-queue', rowSpan: 2, columnSpan: 4 },
-            { id: 'case-work-queue', rowSpan: 2, columnSpan: 4 },
-            { id: 'recent-activity', rowSpan: 4, columnSpan: 2 },
-            { id: 'my-watchlist', rowSpan: 4, columnSpan: 2 }
-        ];
+
+    const layout = [];
+    if (role === 'Program Administrator' || role === 'Regional Coordinator') {
+        layout.push({ id: 'program-admin-work-queue', rowSpan: 16, columnSpan: 1 });
+    } else if (role === 'Application Assessor') {
+        layout.push({ id: 'iset-coordinator-work-queue', rowSpan: 16, columnSpan: 1 });
     }
-    const base = [
-        { id: 'application-work-queue', rowSpan: 2, columnSpan: 4 },
-        { id: 'case-work-queue', rowSpan: 2, columnSpan: 4 },
-        { id: 'recent-activity', rowSpan: 4, columnSpan: 2 },
-        { id: 'my-watchlist', rowSpan: 4, columnSpan: 2 }
-    ];
-    if (role === 'Regional Coordinator') {
-        base.push({ id: 'conflict-declarations', rowSpan: 4, columnSpan: 4 });
-    }
-    if (role === 'System Administrator') {
-        base.push({ id: 'dev-task-tracker', rowSpan: 6, columnSpan: 4 });
-    }
-    return base;
+
+    layout.push(
+        { id: 'work-queue-items-table', rowSpan: 5, columnSpan: 3 },
+        { id: 'my-watchlist', rowSpan: 5, columnSpan: 3 },
+        { id: 'recent-activity', rowSpan: 6, columnSpan: 2 },
+        { id: 'metrics', rowSpan: 6, columnSpan: 1 }
+    );
+
+    return layout;
 };
 
 const exportLayout = (items = [], allowed = {}) =>
@@ -356,7 +317,7 @@ const boardI18nStrings = {
     navigationItemAriaLabel: item => (item ? item.data?.title || 'Board item' : 'Empty slot')
 };
 
-const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
+const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel }) => {
     const iamOn = isIamOn();
     const signedIn = hasValidSession();
     const claims = signedIn ? getIdTokenClaims() : null;
@@ -1789,20 +1750,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
                     items={programAdminItems}
                     countsByBucket={programAdminCounts}
                     onRefresh={handleProgramAdminRefresh}
-                />
-            );
-        }
-        if (item.id === 'program-admin-work-items') {
-            return (
-                <WidgetComponent
-                    actions={actions}
-                    role={role}
-                    refreshKey={authVersion}
-                    selectedBucketId={programAdminBucketId}
-                    selectedItemId={programAdminSelectedItemId}
-                    onSelectItem={handleProgramAdminItemSelect}
-                    items={programAdminItems}
-                    countsByBucket={programAdminCounts}
+                    toggleHelpPanel={toggleHelpPanel}
                 />
             );
         }
@@ -1817,6 +1765,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
                     items={programAdminItems}
                     countsByBucket={programAdminCounts}
                     onRefresh={handleProgramAdminRefresh}
+                    toggleHelpPanel={toggleHelpPanel}
                 />
             );
         }
@@ -1832,6 +1781,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
                     bucketDefinitions={bucketDefinitions}
                     items={programAdminItems}
                     onRefresh={handleProgramAdminRefresh}
+                    toggleHelpPanel={toggleHelpPanel}
                 />
             );
         }
@@ -1840,6 +1790,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems }) => {
                 actions={actions}
                 role={role}
                 refreshKey={authVersion}
+                toggleHelpPanel={toggleHelpPanel}
             />
         );
     };

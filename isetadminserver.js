@@ -1270,10 +1270,14 @@ const ACCESS_MATRIX_ROLE_ALIASES = {
   'PTMA Staff': 'Application Assessor',
   PTMAStaff: 'Application Assessor',
   Adjudicator: 'Application Assessor',
+  ISET_Coordinator: 'Application Assessor',
   SysAdmin: 'System Administrator',
   'System Admin': 'System Administrator',
+  System_Administrator: 'System Administrator',
   'Program Admin': 'Program Administrator',
+  NWAC_Administrator: 'Program Administrator',
   ProgramAdministrator: 'Program Administrator',
+  Regional_Manager: 'Regional Coordinator',
 };
 
 function canonicaliseAccessRole(role) {
@@ -7040,12 +7044,16 @@ const ASSIGN_ROLE_ALLOWLIST = new Set([
   'SysAdmin',
   'ProgramAdmin',
   'RegionalCoordinator',
+  'System_Administrator',
+  'NWAC_Administrator',
+  'Regional_Manager',
 ]);
 
 const ASSIGN_FORBIDDEN_ROLES = new Set([
   'Application Assessor',
   'Adjudicator',
   'ApplicationAssessor',
+  'ISET_Coordinator',
 ]);
 
 function getRequesterIdentity(req) {
@@ -7343,7 +7351,7 @@ function ensureCanAssignCase(identity, targetStaff) {
     return false;
   }
   if (ASSIGN_ROLE_ALLOWLIST.has(role || '')) {
-    if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+    if (role === 'Regional Coordinator' || role === 'RegionalCoordinator' || role === 'Regional_Manager') {
       if (!Number.isFinite(regionId)) return false;
       if (targetStaff && targetStaff.regionId && Number(targetStaff.regionId) !== Number(regionId)) {
         return false;
@@ -9506,10 +9514,10 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 const ASSIGNABLE_COGNITO_GROUPS = [
-  { group: 'ProgramAdmin', label: 'Program Administrator' },
-  { group: 'RegionalCoordinator', label: 'Regional Coordinator' },
-  { group: 'Adjudicator', label: 'Application Assessor' },
-  { group: 'SysAdmin', label: 'System Administrator' }
+  { group: 'NWAC_Administrator', label: 'Program Administrator' },
+  { group: 'Regional_Manager', label: 'Regional Coordinator' },
+  { group: 'ISET_Coordinator', label: 'Application Assessor' },
+  { group: 'System_Administrator', label: 'System Administrator' }
 ];
 const ASSIGNABLE_GROUP_LABEL = new Map(ASSIGNABLE_COGNITO_GROUPS.map(entry => [entry.group, entry.label]));
 const ASSIGNABLE_GROUP_NAMES = ASSIGNABLE_COGNITO_GROUPS.map(entry => entry.group);
@@ -10532,6 +10540,416 @@ async function countIlmpIssuesByOwner(pool, ownerId) {
   const numeric = Number(ownerId);
   if (!Number.isInteger(numeric) || numeric <= 0) return 0;
   return countIlmpIssuesWithScope(pool, { ownerId: numeric });
+}
+
+const METRICS_PERIOD_LABELS = {
+  week: 'This week',
+  month: 'This month',
+  quarter: 'This quarter',
+  year: 'This year'
+};
+const METRICS_NON_LEGACY_APPLICATION_STATUSES = [
+  'submitted',
+  'in_review',
+  'docs_requested',
+  'closure_notice',
+  'pending_approval',
+  'decision_ready',
+  'completed',
+  'closed',
+  'archived'
+];
+const METRICS_APPLICATION_DECISION_STATUSES = ['decision_ready', 'completed'];
+const METRICS_INTERVENTION_DECISION_STATUSES = ['approved', 'changes_requested', 'rejected'];
+const METRICS_ACTIVE_CASE_STATUSES = ['initiated', 'active', 'dormant', 'ready_to_close'];
+const METRICS_COMMITTED_TRANSACTION_STATUSES = ['submitted', 'approved'];
+const METRICS_SPENT_TRANSACTION_STATUSES = ['posted'];
+const METRICS_DEFAULT_TIMEZONE = 'America/Toronto';
+const METRICS_TIMEZONE_BY_REGION_CODE = {
+  AB: 'America/Edmonton',
+  BC: 'America/Vancouver',
+  MB: 'America/Winnipeg',
+  NB: 'America/Halifax',
+  NL: 'America/St_Johns',
+  NT: 'America/Yellowknife',
+  NS: 'America/Halifax',
+  NU: 'America/Iqaluit',
+  ON: 'America/Toronto',
+  PE: 'America/Halifax',
+  QC: 'America/Toronto',
+  SK: 'America/Regina',
+  YT: 'America/Whitehorse',
+  XX: 'America/Toronto'
+};
+const metricsRegionTimezoneCache = new Map();
+
+const padTwo = value => String(value).padStart(2, '0');
+
+const formatLocalDate = parts =>
+  `${parts.year}-${padTwo(parts.month)}-${padTwo(parts.day)}`;
+
+const getLocalDateParts = (date, timeZone) => {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  const parts = formatter.formatToParts(date);
+  const lookup = {};
+  for (const part of parts) {
+    if (part.type !== 'literal') {
+      lookup[part.type] = part.value;
+    }
+  }
+  return {
+    year: Number(lookup.year),
+    month: Number(lookup.month),
+    day: Number(lookup.day)
+  };
+};
+
+const getLocalWeekdayIndex = (date, timeZone) => {
+  const formatter = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' });
+  const label = formatter.format(date);
+  const map = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6
+  };
+  return map[label] ?? 0;
+};
+
+const getTimeZoneOffsetMinutes = (date, timeZone) => {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+  const parts = formatter.formatToParts(date);
+  const lookup = {};
+  for (const part of parts) {
+    if (part.type !== 'literal') {
+      lookup[part.type] = part.value;
+    }
+  }
+  const year = Number(lookup.year);
+  const month = Number(lookup.month);
+  const day = Number(lookup.day);
+  const hour = Number(lookup.hour);
+  const minute = Number(lookup.minute);
+  const second = Number(lookup.second);
+  const asUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  return (asUtc - date.getTime()) / 60000;
+};
+
+const zonedTimeToUtc = (parts, timeZone) => {
+  const utcDate = new Date(Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour ?? 0,
+    parts.minute ?? 0,
+    parts.second ?? 0
+  ));
+  const offset = getTimeZoneOffsetMinutes(utcDate, timeZone);
+  return new Date(utcDate.getTime() - offset * 60000);
+};
+
+const shiftDateByDays = (parts, days) => {
+  const temp = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  temp.setUTCDate(temp.getUTCDate() + days);
+  return {
+    year: temp.getUTCFullYear(),
+    month: temp.getUTCMonth() + 1,
+    day: temp.getUTCDate()
+  };
+};
+
+const shiftDateByMonths = (parts, months) => {
+  const temp = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  temp.setUTCMonth(temp.getUTCMonth() + months);
+  return {
+    year: temp.getUTCFullYear(),
+    month: temp.getUTCMonth() + 1,
+    day: temp.getUTCDate()
+  };
+};
+
+const formatDateTimeForSql = value =>
+  value instanceof Date ? value.toISOString().slice(0, 19).replace('T', ' ') : null;
+
+const buildMetricsPeriods = timeZone => {
+  const now = new Date();
+  const today = getLocalDateParts(now, timeZone);
+  const weekdayIndex = getLocalWeekdayIndex(now, timeZone);
+  const diffToMonday = (weekdayIndex + 6) % 7;
+  const weekStart = shiftDateByDays(today, -diffToMonday);
+  const weekEnd = shiftDateByDays(weekStart, 7);
+  const monthStart = { year: today.year, month: today.month, day: 1 };
+  const monthEnd = shiftDateByMonths(monthStart, 1);
+  const quarterStartMonth = Math.floor((today.month - 1) / 3) * 3 + 1;
+  const quarterStart = { year: today.year, month: quarterStartMonth, day: 1 };
+  const quarterEnd = shiftDateByMonths(quarterStart, 3);
+  const yearStart = { year: today.year, month: 1, day: 1 };
+  const yearEnd = { year: today.year + 1, month: 1, day: 1 };
+
+  const buildPeriod = (label, startLocal, endLocal) => {
+    const startUtc = zonedTimeToUtc({ ...startLocal, hour: 0, minute: 0, second: 0 }, timeZone);
+    const endUtc = zonedTimeToUtc({ ...endLocal, hour: 0, minute: 0, second: 0 }, timeZone);
+    const rangeEnd = shiftDateByDays(endLocal, -1);
+    return {
+      label,
+      startLocal: formatLocalDate(startLocal),
+      endLocal: formatLocalDate(endLocal),
+      rangeLabel: `${formatLocalDate(startLocal)} - ${formatLocalDate(rangeEnd)}`,
+      startUtc,
+      endUtc
+    };
+  };
+
+  return {
+    week: buildPeriod(METRICS_PERIOD_LABELS.week, weekStart, weekEnd),
+    month: buildPeriod(METRICS_PERIOD_LABELS.month, monthStart, monthEnd),
+    quarter: buildPeriod(METRICS_PERIOD_LABELS.quarter, quarterStart, quarterEnd),
+    year: buildPeriod(METRICS_PERIOD_LABELS.year, yearStart, yearEnd)
+  };
+};
+
+async function resolveMetricsTimezone(regionId) {
+  if (!regionId) return METRICS_DEFAULT_TIMEZONE;
+  const cached = metricsRegionTimezoneCache.get(regionId);
+  if (cached) return cached;
+  try {
+    const [[row]] = await pool.query('SELECT code FROM canada_region WHERE region_id = ? LIMIT 1', [regionId]);
+    const code = typeof row?.code === 'string' ? row.code.trim().toUpperCase() : null;
+    const tz = (code && METRICS_TIMEZONE_BY_REGION_CODE[code]) || METRICS_DEFAULT_TIMEZONE;
+    metricsRegionTimezoneCache.set(regionId, tz);
+    return tz;
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return METRICS_DEFAULT_TIMEZONE;
+    }
+    throw err;
+  }
+}
+
+const applyMetricsScopeFilters = (filters, params, scope, options = {}) => {
+  const caseAlias = options.caseAlias || 'c';
+  const staffAlias = options.staffAlias || 'sp';
+  const ownerId = scope?.ownerId;
+  const regionId = scope?.regionId;
+  if (Number.isInteger(ownerId) && ownerId > 0) {
+    filters.push(`${caseAlias}.assigned_to_user_id = ?`);
+    params.push(ownerId);
+  }
+  if (Number.isInteger(regionId) && regionId > 0) {
+    filters.push(`${caseAlias}.assigned_to_user_id IS NOT NULL`);
+    filters.push(`${staffAlias}.region_id = ?`);
+    params.push(regionId);
+  }
+};
+
+const normalizeStatusList = values => values.map(value => String(value).trim().toLowerCase());
+
+async function countMetricsNewApplications(pool, { start, end, scope }) {
+  try {
+    const statuses = normalizeStatusList(METRICS_NON_LEGACY_APPLICATION_STATUSES);
+    const placeholders = statuses.map(() => '?').join(',');
+    const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
+    const filters = [
+      's.submitted_at >= ?',
+      's.submitted_at < ?',
+      `${statusExpr} IN (${placeholders})`
+    ];
+    const params = [start, end, ...statuses];
+    applyMetricsScopeFilters(filters, params, scope);
+    const sql = `
+      SELECT COUNT(DISTINCT s.id) AS total
+        FROM iset_application_submission s
+        JOIN iset_application a ON a.submission_id = s.id
+        LEFT JOIN iset_case c ON c.application_id = a.id
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+    `;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function countMetricsApplicationDecisions(pool, { start, end, scope }) {
+  try {
+    const statuses = normalizeStatusList(METRICS_APPLICATION_DECISION_STATUSES);
+    const placeholders = statuses.map(() => '?').join(',');
+    const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
+    const filters = [
+      'COALESCE(a.updated_at, a.created_at) >= ?',
+      'COALESCE(a.updated_at, a.created_at) < ?',
+      `${statusExpr} IN (${placeholders})`
+    ];
+    const params = [start, end, ...statuses];
+    applyMetricsScopeFilters(filters, params, scope);
+    const sql = `
+      SELECT COUNT(*) AS total
+        FROM iset_application a
+        LEFT JOIN iset_case c ON c.application_id = a.id
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+    `;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function countMetricsInterventionDecisions(pool, { start, end, scope }) {
+  try {
+    const statuses = normalizeStatusList(METRICS_INTERVENTION_DECISION_STATUSES);
+    const placeholders = statuses.map(() => '?').join(',');
+    const statusExpr = `REPLACE(LOWER(TRIM(ci.status)), ' ', '_')`;
+    const filters = [
+      'COALESCE(ci.updated_at, ci.created_at) >= ?',
+      'COALESCE(ci.updated_at, ci.created_at) < ?',
+      `${statusExpr} IN (${placeholders})`
+    ];
+    const params = [start, end, ...statuses];
+    applyMetricsScopeFilters(filters, params, scope, { caseAlias: 'c', staffAlias: 'sp' });
+    const sql = `
+      SELECT COUNT(*) AS total
+        FROM iset_case_intervention ci
+        JOIN iset_case c ON c.id = ci.case_id
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+    `;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function countMetricsActiveCases(pool, scope) {
+  try {
+    const statuses = normalizeStatusList(METRICS_ACTIVE_CASE_STATUSES);
+    const placeholders = statuses.map(() => '?').join(',');
+    const statusExpr = `REPLACE(LOWER(TRIM(c.status)), ' ', '_')`;
+    const filters = [`${statusExpr} IN (${placeholders})`];
+    const params = [...statuses];
+    applyMetricsScopeFilters(filters, params, scope);
+    const sql = `
+      SELECT COUNT(*) AS total
+        FROM iset_case c
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+    `;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function sumMetricsTransactions(pool, { start, end, scope, statuses }) {
+  try {
+    const statusValues = normalizeStatusList(statuses);
+    const placeholders = statusValues.map(() => '?').join(',');
+    const filters = [
+      'COALESCE(ft.transaction_date, ft.created_at) >= ?',
+      'COALESCE(ft.transaction_date, ft.created_at) < ?',
+      `LOWER(TRIM(ft.status)) IN (${placeholders})`
+    ];
+    const params = [start, end, ...statusValues];
+    applyMetricsScopeFilters(filters, params, scope);
+    const sql = `
+      SELECT COALESCE(SUM(ft.amount), 0) AS total
+        FROM finance_transaction ft
+        JOIN iset_case c ON c.id = ft.case_id
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+    `;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+const buildEmptyMetricsPeriods = periods => {
+  const entries = {};
+  Object.entries(periods || {}).forEach(([key, period]) => {
+    entries[key] = {
+      label: period?.label || METRICS_PERIOD_LABELS[key] || key,
+      startLocal: period?.startLocal || null,
+      endLocal: period?.endLocal || null,
+      rangeLabel: period?.rangeLabel || null,
+      metrics: {
+        newApplications: 0,
+        decisionsMade: 0,
+        activeCases: 0,
+        fundsCommitted: 0,
+        fundsSpent: 0
+      }
+    };
+  });
+  return entries;
+};
+
+async function resolveMetricsScope(req, role) {
+  const fallbackRegionId =
+    Number.isInteger(Number(req?.auth?.regionId)) ? Number(req.auth.regionId) :
+    Number.isInteger(Number(req?.staffProfile?.region_id)) ? Number(req.staffProfile.region_id) :
+    null;
+
+  if (role === 'Regional Coordinator') {
+    const context = await resolveRegionalCoordinatorContext(req);
+    return {
+      valid: Boolean(context?.valid && context?.regionId),
+      scope: { regionId: context?.regionId || null, ownerId: null },
+      timeZoneRegionId: context?.regionId || fallbackRegionId
+    };
+  }
+
+  if (role === 'Application Assessor') {
+    const context = await resolveApplicationAssessorContext(req);
+    return {
+      valid: Boolean(context?.valid && context?.staffProfileId),
+      scope: { regionId: null, ownerId: context?.staffProfileId || null },
+      timeZoneRegionId: context?.regionId || fallbackRegionId
+    };
+  }
+
+  return {
+    valid: true,
+    scope: { regionId: null, ownerId: null },
+    timeZoneRegionId: fallbackRegionId
+  };
 }
 
 async function markCaseReadyToClose({ caseId, connection = null }) {
@@ -13909,6 +14327,7 @@ function sysAdminOnly(req) {
     if (!r) return r;
     const map = {
       SysAdmin: 'System Administrator',
+      System_Administrator: 'System Administrator',
       'System Administrator': 'System Administrator'
     };
     return map[r] || r;
@@ -15094,8 +15513,9 @@ function buildDummyDraft(stepCursor = 'summary-page') {
 // GET /api/regions/canada -> province/territory list for dummy generation UI
 app.get('/api/regions/canada', async (_req, res) => {
   try {
-    const [rows] = await pool.query('SELECT code, name_en FROM canada_region ORDER BY name_en');
+    const [rows] = await pool.query('SELECT region_id, code, name_en FROM canada_region ORDER BY name_en');
     const options = (rows || []).map(row => ({
+      regionId: row.region_id,
       code: String(row.code || '').trim().toUpperCase(),
       name: row.name_en || row.code
     })).filter(opt => opt.code);
@@ -16670,6 +17090,81 @@ app.get('/api/dashboard/intervention-milestone-items', async (req, res) => {
     }
     console.error('[intervention-milestone-items] fetch failed:', err.message);
     return res.status(500).json({ error: 'intervention_milestone_items_fetch_failed', message: err.message });
+  }
+});
+
+// Homepage metrics (activity snapshot)
+app.get('/api/dashboard/metrics', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role === 'System Administrator') {
+    return res.json({ role, periods: {} });
+  }
+  try {
+    const context = await resolveMetricsScope(req, role);
+    const timeZone = await resolveMetricsTimezone(context.timeZoneRegionId);
+    const periods = buildMetricsPeriods(timeZone);
+    if (!context.valid) {
+      return res.json({
+        role,
+        timeZone,
+        scope: context.scope,
+        generatedAt: new Date().toISOString(),
+        periods: buildEmptyMetricsPeriods(periods)
+      });
+    }
+
+    const activeCases = await countMetricsActiveCases(pool, context.scope);
+    const periodKeys = Object.keys(periods);
+    const results = await Promise.all(periodKeys.map(async key => {
+      const period = periods[key];
+      const start = formatDateTimeForSql(period.startUtc);
+      const end = formatDateTimeForSql(period.endUtc);
+      const [
+        newApplications,
+        applicationDecisions,
+        interventionDecisions,
+        fundsCommitted,
+        fundsSpent
+      ] = await Promise.all([
+        countMetricsNewApplications(pool, { start, end, scope: context.scope }),
+        countMetricsApplicationDecisions(pool, { start, end, scope: context.scope }),
+        countMetricsInterventionDecisions(pool, { start, end, scope: context.scope }),
+        sumMetricsTransactions(pool, { start, end, scope: context.scope, statuses: METRICS_COMMITTED_TRANSACTION_STATUSES }),
+        sumMetricsTransactions(pool, { start, end, scope: context.scope, statuses: METRICS_SPENT_TRANSACTION_STATUSES })
+      ]);
+      return {
+        key,
+        value: {
+          label: period.label,
+          startLocal: period.startLocal,
+          endLocal: period.endLocal,
+          rangeLabel: period.rangeLabel,
+          metrics: {
+            newApplications,
+            decisionsMade: applicationDecisions + interventionDecisions,
+            activeCases,
+            fundsCommitted,
+            fundsSpent
+          }
+        }
+      };
+    }));
+
+    const periodPayload = {};
+    results.forEach(entry => {
+      periodPayload[entry.key] = entry.value;
+    });
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json({
+      role,
+      timeZone,
+      scope: context.scope,
+      generatedAt: new Date().toISOString(),
+      periods: periodPayload
+    });
+  } catch (err) {
+    console.error('[dashboard-metrics] fetch failed:', err.message);
+    return res.status(500).json({ error: 'dashboard_metrics_fetch_failed', message: err.message });
   }
 });
 
@@ -20350,7 +20845,7 @@ function normaliseJson(v) {
   return v;
 }
 
-const STEP_EDITOR_GROUPS = new Set(['SysAdmin', 'ProgramAdmin', 'RegionalCoordinator']);
+const STEP_EDITOR_GROUPS = new Set(['System_Administrator', 'NWAC_Administrator', 'Regional_Manager']);
 const STEP_EDITOR_ROLES = new Set(['System Administrator', 'Program Administrator', 'Regional Coordinator']);
 
 function isAuthEnabled() {
@@ -30528,8 +31023,10 @@ app.get('/api/me/case-watches', async (req, res) => {
             c.assigned_to_user_id,
             c.updated_at,
             c.case_number,
-            c.case_context_json,
             sub.reference_number AS submission_reference,
+            JSON_UNQUOTE(JSON_EXTRACT(sub.intake_payload, '$.\"first-name\"')) AS submission_first_name,
+            JSON_UNQUOTE(JSON_EXTRACT(sub.intake_payload, '$.\"last-name\"')) AS submission_last_name,
+            JSON_UNQUOTE(JSON_EXTRACT(sub.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
             staff.email AS assigned_staff_email
          FROM iset_case c
          LEFT JOIN iset_application a ON a.id = c.application_id
@@ -30551,24 +31048,11 @@ app.get('/api/me/case-watches', async (req, res) => {
           : Number(assignedRaw);
 
       const statusNormalised = normaliseCaseStatusValue(match.status);
-      const caseContext = safeJsonParse(match.case_context_json, null) || {};
-      const ctxPersonal = caseContext.applicationPersonal || {};
-      const ctxAnswers = caseContext.applicationAnswers || {};
-      const nameCandidates = [
-        ctxPersonal.preferred_name,
-        ctxPersonal.preferredName,
-        caseContext.preferredName,
-        ctxAnswers['preferred-name'],
-        ctxAnswers['preferred_name'],
-        ctxPersonal.first_name && ctxPersonal.last_name
-          ? `${ctxPersonal.first_name} ${ctxPersonal.last_name}`
-          : null,
-        ctxPersonal.firstName && ctxPersonal.lastName
-          ? `${ctxPersonal.firstName} ${ctxPersonal.lastName}`
-          : null,
-      ];
-      const applicantName =
-        nameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
+      const preferred = normaliseString(match.submission_preferred_name);
+      const first = normaliseString(match.submission_first_name);
+      const last = normaliseString(match.submission_last_name);
+      const full = [first, last].filter(Boolean).join(' ').trim();
+      const applicantName = full || preferred || null;
 
       const trackingId =
         normaliseString(match.submission_reference) ||
