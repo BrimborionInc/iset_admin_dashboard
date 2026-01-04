@@ -16,8 +16,8 @@ import {
 import { boardItemI18nStrings } from "./common";
 import { usePaymentsData } from "./PaymentsDataContext.jsx";
 
-const COLUMN_WIDTHS_STORAGE_KEY = "finance-payments-communications-widths-v1";
-const PREFERENCES_STORAGE_KEY = "finance-payments-communications-preferences-v1";
+const COLUMN_WIDTHS_STORAGE_KEY = "finance-payments-communications-widths-v2";
+const PREFERENCES_STORAGE_KEY = "finance-payments-communications-preferences-v2";
 const DEFAULT_PAGE_SIZE = 10;
 
 const directionBadge = {
@@ -32,9 +32,9 @@ const baseColumns = [
     cell: item => new Date(item.sentOn).toLocaleString(),
   },
   {
-    id: "paymentId",
-    header: "Payment ID",
-    cell: item => item.paymentId,
+    id: "packetId",
+    header: "Packet",
+    cell: item => item.packetId,
   },
   {
     id: "direction",
@@ -52,7 +52,7 @@ const baseColumns = [
   {
     id: "recipients",
     header: "Recipients",
-    cell: item => item.recipients?.join(", ") ?? "—",
+    cell: item => item.recipients?.join(", ") ?? "-",
   },
   {
     id: "subject",
@@ -63,6 +63,11 @@ const baseColumns = [
     id: "template",
     header: "Template",
     cell: item => item.template,
+  },
+  {
+    id: "attachments",
+    header: "Attachments",
+    cell: item => (item.attachments?.length ? item.attachments.length : "-"),
   },
 ];
 
@@ -127,15 +132,19 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
 
   const filteredItems = useMemo(() => {
     return communications.filter(item => {
-      if (selectedRequestId && item.paymentId !== selectedRequestId) {
+      if (item.channel && item.channel !== "email") {
+        return false;
+      }
+      if (selectedRequestId && item.packetId !== selectedRequestId) {
         return false;
       }
       if (!filteringText) {
         return true;
       }
       const lower = filteringText.toLowerCase();
+      const packetValue = item.packetId ? String(item.packetId) : "";
       return (
-        item.paymentId.toLowerCase().includes(lower) ||
+        packetValue.toLowerCase().includes(lower) ||
         (item.subject ?? "").toLowerCase().includes(lower) ||
         (item.recipients ?? []).some(recipient => recipient.toLowerCase().includes(lower))
       );
@@ -273,6 +282,8 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
     />
   );
 
+  const logTargetId = selectedRequestId ?? communications[0]?.packetId ?? null;
+
   return (
     <BoardItem
       header={
@@ -300,7 +311,7 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
         <SpaceBetween direction="horizontal" size="xs">
           <TextFilter
             filteringText={filteringText}
-            filteringPlaceholder="Search by payment ID, subject, or recipient"
+            filteringPlaceholder="Search by packet ID, subject, or recipient"
             onChange={({ detail }) => {
               setFilteringText(detail.filteringText);
               setCurrentPageIndex(1);
@@ -309,9 +320,10 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
           />
           <Button
             iconName="add-plus"
+            disabled={!logTargetId}
             onClick={() =>
               addCommunication({
-                paymentId: selectedRequestId ?? communications[0]?.paymentId,
+                packetId: logTargetId,
                 subject: "Follow-up note",
                 recipients: ["finance@nwac.org"],
                 direction: "outbound",

@@ -6,31 +6,47 @@ const FinancePaymentsHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Coordinate payment packets between program teams and Finance. Each packet carries the EFT form, invoice,
-        supporting documents, and confirmation trail so NWAC/PTMA finance can process disbursements with full audit
-        visibility.
+        Coordinate evidence-gated payment packets between program teams and Finance. Each packet groups payment lines,
+        evidence, approvals, and confirmations so disbursements stay audit-ready and align with Annual Reporting.
       </p>
     </Box>
     <Box>
-      <strong>Workflow</strong>
+      <strong>What this dashboard covers</strong>
+      <ul>
+        <li>Queue: prioritise packets by status, evidence completeness, and ageing.</li>
+        <li>Detail: view line items, evidence checklist, approvals, and audit timeline.</li>
+        <li>Communications: track outbound email sends and manual follow-ups.</li>
+        <li>SLA snapshot: spot bottlenecks across review, batching, and confirmation.</li>
+      </ul>
+    </Box>
+    <Box>
+      <strong>Key rules</strong>
+      <ul>
+        <li>Required evidence must be received before advancing to finance review, batching, sent, or confirmed.</li>
+        <li>Confirmed packets create posted finance transactions for reporting rollups.</li>
+        <li>Reporting unit and region metadata drive finance routing and audit context.</li>
+      </ul>
+    </Box>
+    <Box>
+      <strong>Quick start</strong>
       <ol>
-        <li>Program staff submit a payment packet (EFT form, invoice, justification).</li>
-        <li>Finance reviews, attaches proof of payment, and updates the packet status.</li>
-        <li>Communications log captures request and confirmation emails for audit purposes.</li>
-        <li>SLA metrics highlight packets nearing their due date or awaiting confirmation.</li>
+        <li>Select a packet in the queue to load detail.</li>
+        <li>Check evidence completeness and resolve missing items.</li>
+        <li>Send the packet to Finance and update status as it moves.</li>
+        <li>Mark confirmed when proof of payment is on file.</li>
       </ol>
     </Box>
     <Box>
       <strong>Next steps</strong>
       <p>
-        Use the queue filters to prioritise reviews, update packet status as confirmations arrive, and ensure supporting
-        documents remain attached so audit queries can be resolved quickly.
+        Use queue filters to prioritise reviews, keep the communications log complete, and monitor SLA buckets to keep
+        packets flowing toward confirmation.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinancePaymentsHelp.aiContext =
-  "Describe the Finance Payments dashboard: how the Payment Requests queue triages packets, the Payment Packet Detail widget manages documents and status updates, the communications log records request/confirmation emails, and the SLA snapshot highlights ageing or overdue packets.";
+  "Explain the Finance Payments dashboard: packet queue, detail view, communications log, and SLA snapshot. Include evidence gates, key statuses, and the fact that confirmed packets post finance transactions for reporting.";
 
 export default FinancePaymentsHelp;

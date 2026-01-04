@@ -6,14 +6,22 @@ const FinancePaymentCommsHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Capture the audit trail of payment-related emails, templates, and attachments so Finance can prove when requests
+        Capture the audit trail of packet-related emails, templates, and attachments so Finance can prove when requests
         and confirmations were exchanged.
       </p>
     </Box>
     <Box>
+      <strong>What shows up here</strong>
+      <ul>
+        <li>Emails sent from the packet detail view (Send to finance).</li>
+        <li>Manually logged outbound or inbound communications.</li>
+        <li>Attachment counts for evidence bundles and confirmations.</li>
+      </ul>
+    </Box>
+    <Box>
       <strong>How to use</strong>
       <ul>
-        <li>Filter or search the table by payment ID, subject, or recipient to locate past messages.</li>
+        <li>Filter or search the table by packet ID, subject, or recipient to locate past messages.</li>
         <li>Log manual communications when offline channels (phone, Teams) generate follow-up actions.</li>
         <li>Review template usage to ensure standard request/confirmation wording is applied consistently.</li>
       </ul>
@@ -21,14 +29,13 @@ const FinancePaymentCommsHelp = () => (
     <Box>
       <strong>Next steps</strong>
       <p>
-        Ensure the email service records message metadata and attachments automatically; use manual entries only when
-        capturing offline conversations so the audit trail remains complete.
+        Use manual entries only for offline conversations so the audit trail stays complete and consistent.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinancePaymentCommsHelp.aiContext =
-  "Describe the payment communications log: filtering, logging manual notes, and understanding template usage.";
+  "Explain the payment communications log: automatic email entries from Send to finance, manual log entries, filtering by packet/subject/recipient, and how templates/attachments support audit trails.";
 
 export default FinancePaymentCommsHelp;

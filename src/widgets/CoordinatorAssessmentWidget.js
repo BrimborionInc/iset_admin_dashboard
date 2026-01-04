@@ -553,17 +553,19 @@ const CoordinatorAssessmentWidget = forwardRef(
   const normalizedRole = (userRole || '').toString().trim().toLowerCase();
   const canonicalRole = normalizedRole === 'regional manager' ? 'regional coordinator' : normalizedRole;
   const isAssessor = canonicalRole === 'application assessor';
+  const roleKey = normalizedRole.replace(/[\s_-]+/g, '');
   const eligibilityRoleAllowlist = new Set([
-    'system administrator',
-    'program administrator',
-    'regional manager',
-    'regional coordinator',
-    'application assessor',
-    'iset coordinator',
-    'case manager'
+    'systemadministrator',
+    'sysadmin',
+    'programadministrator',
+    'programadmin',
+    'nwacadministrator',
+    'regionalcoordinator',
+    'regionalmanager'
   ]);
-  const isEligibilityAdmin = eligibilityRoleAllowlist.has(normalizedRole);
-  const canUploadEiVerification = eligibilityRoleAllowlist.has(normalizedRole);
+  const canManageEiEligibility = eligibilityRoleAllowlist.has(roleKey);
+  const isEligibilityAdmin = canManageEiEligibility;
+  const canUploadEiVerification = canManageEiEligibility;
   const numericInterventionCost = useMemo(() => parseCurrencyToNumber(assessment.interventionCost), [assessment.interventionCost]);
   const isHighCostApprovalBlocked = canonicalRole === 'regional coordinator' && Number.isFinite(numericInterventionCost) && numericInterventionCost >= APPROVAL_COST_THRESHOLD;
 
@@ -910,7 +912,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       assessment_employment_barriers_other_details: assessment.barriersOther || null,
       assessment_local_area_priorities: assessment.priorities || null,
       assessment_other_funding_details: assessment.otherFunding || null,
-      assessment_esdc_eligibility: assessment.esdcEligibility || null,
+      assessment_esdc_eligibility: isEligibilityAdmin ? (assessment.esdcEligibility || null) : undefined,
       assessment_intervention_start_date: formatDate(assessment.startDate) || null,
       assessment_intervention_end_date: formatDate(assessment.endDate) || null,
       assessment_institution: assessment.institution || null,
@@ -947,7 +949,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       };
     }
     return payload;
-  }, [assessment, buildCostSettingsPayload, caseData?.caseContext, letterDrafts]);
+  }, [assessment, buildCostSettingsPayload, caseData?.caseContext, isEligibilityAdmin, letterDrafts]);
   const handlePostingContextErrors = useCallback((result) => {
     const code = result?.error || result?.code;
     if (['missing_internal_gl_code', 'missing_external_gl_code', 'posting_context_not_permitted'].includes(code)) {
@@ -1618,7 +1620,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         : rawDocTypes.filter(type => type !== 'ei_verification');
       if (!docTypes.length) {
         if (!canUploadEiVerification && rawDocTypes.includes('ei_verification')) {
-          setChecklistUploadError('EI verification uploads are restricted to Program Administrators, Regional Managers, and ISET Coordinators/Case Managers.');
+          setChecklistUploadError('EI verification uploads are restricted to Program Administrators, Regional Coordinators/Managers, and System Administrators.');
           return;
         }
         setChecklistUploadError('No document type is configured for this checklist item.');
@@ -5237,7 +5239,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               header="Employment insurance eligibility not checked"
               statusIconAriaLabel="Error"
             >
-              Assessment sections are locked until a Program Administrator, Regional Manager, or ISET Coordinator/Case Manager sets ESDC eligibility.
+              Assessment sections are locked until a Program Administrator, Regional Coordinator/Manager, or System Administrator sets ESDC eligibility.
             </Alert>
             <Box margin={{ bottom: 's' }} />
           </>

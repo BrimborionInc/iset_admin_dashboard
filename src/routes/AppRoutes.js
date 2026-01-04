@@ -75,6 +75,7 @@ import PortfolioDashboardPage from '../pages/Caseworking/PortfolioDashboardPage.
 import PortfolioDashboardHelp from '../helpPanelContents/portfolioDashboardHelp.js';
 import CaseWorkspacePage from '../pages/Caseworking/CaseWorkspacePage.jsx';
 import CaseWorkspaceHelp from '../helpPanelContents/caseWorkspaceHelp.js';
+import ProgramPaymentsPage from '../pages/Caseworking/ProgramPaymentsPage.jsx';
 import EsdcSubmissionsOverviewPage from '../pages/esdc/EsdcSubmissionsOverviewPage.jsx';
 import EsdcParticipantSubmissionsPage from '../pages/esdc/EsdcParticipantSubmissionsPage.jsx';
 import EsdcReportingPackagesPage from '../pages/esdc/EsdcReportingPackagesPage.jsx';
@@ -693,6 +694,37 @@ const AppRoutes = ({
               </SpaceBetween>
             ),
             PortfolioDashboardHelp.aiContext
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/iset/payments">
+        <Guard path="/iset/payments">
+          {renderContent(
+            ProgramPaymentsPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'ISET Case Portfolio', href: '/iset/cases' },
+              { text: 'Program Payments', href: '/iset/payments' }
+            ],
+            'Program Payments',
+            <Box variant="p">Manage payment packets, upload evidence, and submit requests to finance.</Box>,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() => window.dispatchEvent(new CustomEvent("programPayments:openPalette"))}
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() => window.dispatchEvent(new CustomEvent("programPayments:resetLayout"))}
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            )
           )}
         </Guard>
       </Route>

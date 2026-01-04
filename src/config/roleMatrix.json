@@ -28,6 +28,12 @@
       "System Administrator",
       "Program Administrator"
     ],
+    "/iset/payments": [
+      "System Administrator",
+      "Program Administrator",
+      "Regional Coordinator",
+      "Application Assessor"
+    ],
     "/cases/:caseId": [
       "System Administrator",
       "Program Administrator",

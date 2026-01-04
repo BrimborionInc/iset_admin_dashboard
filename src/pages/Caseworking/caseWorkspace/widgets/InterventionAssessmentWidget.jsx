@@ -161,6 +161,17 @@ const ESDC_OPTIONS = [
   { label: "EI Active Claim", value: "EI Active Claim" },
   { label: "EI Reach Back", value: "EI Reach Back" },
 ];
+const EI_ELIGIBILITY_ROLE_KEYS = new Set([
+  "systemadministrator",
+  "sysadmin",
+  "programadministrator",
+  "programadmin",
+  "nwacadministrator",
+  "regionalcoordinator",
+  "regionalmanager",
+]);
+const normalizeRoleKey = value =>
+  String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
 const normalizeFundingStream = value => {
   if (!value) return "";
   const normalized = String(value).trim().toUpperCase();
@@ -431,6 +442,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
   const isSubmittedStatus = statusValue === "submitted";
   const role = currentUser?.role || null;
   const canonicalRole = role === "Regional Manager" ? "Regional Coordinator" : role;
+  const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(normalizeRoleKey(role));
   const canEditSubmitted =
     canonicalRole === "Regional Coordinator" ||
     canonicalRole === "Program Administrator" ||
@@ -2762,7 +2774,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
 
   const eiVerificationStepContent = (
     <SpaceBetween size="m">
-      {!activeInterventionIdValue && !dismissedAlerts.eiUploadLocked && (
+      {canManageEiEligibility && !activeInterventionIdValue && !dismissedAlerts.eiUploadLocked && (
         <Alert
           type="error"
           header="Save progress to enable EI verification"
@@ -2793,7 +2805,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
           </SpaceBetween>
         </Alert>
       )}
-      {eiVerificationUploadError && (
+      {canManageEiEligibility && eiVerificationUploadError && (
         <Alert
           type="error"
           statusIconAriaLabel="Error"
@@ -2803,7 +2815,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
           {eiVerificationUploadError}
         </Alert>
       )}
-      {eiVerificationUploadSuccess && (
+      {canManageEiEligibility && eiVerificationUploadSuccess && (
         <Alert
           type="success"
           statusIconAriaLabel="Success"
@@ -2832,7 +2844,7 @@ const InterventionAssessmentWidget = ({ actions }) => {
           options={ESDC_OPTIONS}
           placeholder="Select eligibility"
           filteringType="auto"
-          disabled={isFormLocked}
+          disabled={isFormLocked || !canManageEiEligibility}
         />
       </FormField>
       {renderPlanSelector({
@@ -2840,32 +2852,34 @@ const InterventionAssessmentWidget = ({ actions }) => {
           "If EI status requires a different funding stream, create a new Action Plan and select it here.",
         errorText: planSelectorErrorText,
       })}
-      <FormField label="EI Verification document" errorText={eiVerificationFileError} stretch>
-        <input
-          type="file"
-          ref={eiVerificationFileInputRef}
-          style={{ display: "none" }}
-          accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
-          onChange={handleEiVerificationFileChange}
-        />
-        <Box variant="small" color="text-body-secondary">
-          Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
-        </Box>
-        <SpaceBetween size="xs" direction="horizontal">
-          <Button
-            onClick={() =>
-              eiVerificationFileInputRef.current && eiVerificationFileInputRef.current.click()
-            }
-            disabled={isFormLocked || eiVerificationUploading || !activeInterventionIdValue}
-          >
-            Choose file
-          </Button>
-          <Box>{eiVerificationFile ? eiVerificationFile.name : "No file selected"}</Box>
-        </SpaceBetween>
-        <Box variant="small" color="text-body-secondary">
-          Upload happens when you continue or save progress.
-        </Box>
-      </FormField>
+      {canManageEiEligibility && (
+        <FormField label="EI Verification document" errorText={eiVerificationFileError} stretch>
+          <input
+            type="file"
+            ref={eiVerificationFileInputRef}
+            style={{ display: "none" }}
+            accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+            onChange={handleEiVerificationFileChange}
+          />
+          <Box variant="small" color="text-body-secondary">
+            Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
+          </Box>
+          <SpaceBetween size="xs" direction="horizontal">
+            <Button
+              onClick={() =>
+                eiVerificationFileInputRef.current && eiVerificationFileInputRef.current.click()
+              }
+              disabled={isFormLocked || eiVerificationUploading || !activeInterventionIdValue}
+            >
+              Choose file
+            </Button>
+            <Box>{eiVerificationFile ? eiVerificationFile.name : "No file selected"}</Box>
+          </SpaceBetween>
+          <Box variant="small" color="text-body-secondary">
+            Upload happens when you continue or save progress.
+          </Box>
+        </FormField>
+      )}
     </SpaceBetween>
   );
 

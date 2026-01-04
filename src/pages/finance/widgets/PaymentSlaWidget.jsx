@@ -36,40 +36,46 @@ const PaymentSlaWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
 
   const cards = [
     {
-      label: "Awaiting finance review",
-      value: slaSnapshot.awaitingFinance,
-      indicator: slaSnapshot.awaitingFinance > 0 ? "warning" : "success",
-      helper: "Packets sitting in the finance queue.",
+      label: "Ready for finance review",
+      value: slaSnapshot.readyForFinance,
+      indicator: slaSnapshot.readyForFinance > 0 ? "warning" : "success",
+      helper: "Packets waiting for finance review.",
     },
     {
-      label: "Awaiting confirmation",
-      value: slaSnapshot.awaitingConfirmation,
-      indicator: slaSnapshot.awaitingConfirmation > 0 ? "warning" : "success",
-      helper: "Packets waiting for payment proof.",
+      label: "Ready for batching",
+      value: slaSnapshot.readyForBatching,
+      indicator: slaSnapshot.readyForBatching > 0 ? "warning" : "success",
+      helper: "Finance-approved packets ready for batch creation.",
     },
     {
-      label: "Completed this week",
-      value: slaSnapshot.completed,
+      label: "On hold",
+      value: slaSnapshot.onHold,
+      indicator: slaSnapshot.onHold > 0 ? "error" : "success",
+      helper: "Packets paused due to missing evidence or risk flags.",
+    },
+    {
+      label: "Sent awaiting confirmation",
+      value: slaSnapshot.sentAwaitingConfirmation,
+      indicator: slaSnapshot.sentAwaitingConfirmation > 0 ? "warning" : "success",
+      helper: "Packets sent to Finance but not yet confirmed.",
+    },
+    {
+      label: "Confirmed / closed",
+      value: slaSnapshot.confirmed,
       indicator: "success",
-      helper: "Packets completed within SLA window.",
+      helper: "Recently confirmed packets.",
     },
     {
-      label: "Draft packets",
-      value: slaSnapshot.draft,
-      indicator: "info",
-      helper: "Drafts saved by program staff but not submitted.",
-    },
-    {
-      label: "Overdue packets",
-      value: slaSnapshot.overdue,
-      indicator: slaSnapshot.overdue > 0 ? "error" : "success",
-      helper: "Packets past due-by date.",
+      label: "Overdue evidence tasks",
+      value: slaSnapshot.overdueEvidence,
+      indicator: slaSnapshot.overdueEvidence > 0 ? "error" : "success",
+      helper: "Lines past receipt or evidence deadlines.",
     },
     {
       label: "Avg. turnaround (days)",
       value: slaSnapshot.avgTurnaroundDays.toFixed(1),
       indicator: "info",
-      helper: "Rolling 30-day average from submission to completion.",
+      helper: "Average days from submission to confirmation.",
     },
   ];
 
@@ -112,4 +118,3 @@ const PaymentSlaWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
 };
 
 export default PaymentSlaWidget;
-

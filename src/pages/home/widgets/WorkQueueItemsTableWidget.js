@@ -32,6 +32,17 @@ const ESDC_OPTIONS = [
   { label: 'EI Active Claim', value: 'EI Active Claim' },
   { label: 'EI Reach Back', value: 'EI Reach Back' }
 ];
+const EI_ELIGIBILITY_ROLE_KEYS = new Set([
+  'systemadministrator',
+  'sysadmin',
+  'programadministrator',
+  'programadmin',
+  'nwacadministrator',
+  'regionalcoordinator',
+  'regionalmanager'
+]);
+const normalizeRoleKey = value =>
+  String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
 
 const formatDateOnly = value => {
   if (!value) return null;
@@ -634,6 +645,7 @@ const WorkQueueItemsTableWidget = ({
   const canonicalRole = role === 'Regional Manager' ? 'Regional Coordinator' : role;
   const isAssessor = canonicalRole === 'Application Assessor';
   const canSelectPostingContext = canonicalRole === 'Regional Coordinator' || canonicalRole === 'Program Administrator';
+  const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(normalizeRoleKey(role));
   const [filteringText, setFilteringText] = useState('');
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null);
@@ -1162,6 +1174,9 @@ const WorkQueueItemsTableWidget = ({
                       );
                     }
                     if (item.bucketId === 'ei-eligibility-checks') {
+                      if (!canManageEiEligibility) {
+                        return null;
+                      }
                       return (
                         <SpaceBetween size="xxs" direction="horizontal">
                           <Link
@@ -1273,6 +1288,7 @@ const WorkQueueItemsTableWidget = ({
     budgetPotOptions.length,
     role,
     isAssessor,
+    canManageEiEligibility,
     watchPending,
     handleToggleWatch
   ]);
@@ -1383,6 +1399,10 @@ const WorkQueueItemsTableWidget = ({
   };
 
   const handleEligibilitySubmit = async () => {
+    if (!canManageEiEligibility) {
+      setEligibilityError('You do not have permission to set EI eligibility.');
+      return;
+    }
     const caseId = eligibilityTarget?.case_id || eligibilityTarget?.caseId;
     const applicationId = eligibilityTarget?.application_id || eligibilityTarget?.applicationId;
     const applicantUserId =
@@ -1649,95 +1669,97 @@ const WorkQueueItemsTableWidget = ({
         }}
         empty={<Box variant="p">{emptyState}</Box>}
       />
-      <Modal
-        visible={eligibilityModalVisible}
-        onDismiss={() => {
-          setEligibilityModalVisible(false);
-          setEligibilityTarget(null);
-          setSelectedEligibility(null);
-          setEligibilityFile(null);
-          setEligibilityFileError(null);
-          setEligibilityApplicantId(null);
-          setEligibilityError(null);
-        }}
-        header="Set EI Eligibility"
-        closeAriaLabel="Close eligibility modal"
-        footer={
-          <SpaceBetween size="xs" direction="horizontal">
-            <Button
-              onClick={() => {
-                setEligibilityModalVisible(false);
-                setEligibilityTarget(null);
-                setSelectedEligibility(null);
-                setEligibilityFile(null);
-                setEligibilityFileError(null);
-                setEligibilityApplicantId(null);
-                setEligibilityError(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              loading={eligibilitySubmitting}
-              disabled={!selectedEligibility?.value || !eligibilityFile || eligibilitySubmitting}
-              onClick={handleEligibilitySubmit}
-            >
-              Save
-            </Button>
-          </SpaceBetween>
-        }
-      >
-        <SpaceBetween size="s">
-          {eligibilityError && <Box color="text-status-error">{eligibilityError}</Box>}
-          <FormField label="EI Eligibility" stretch>
-            <Select
-              options={ESDC_OPTIONS}
-              selectedOption={selectedEligibility}
-              onChange={({ detail }) => setSelectedEligibility(detail.selectedOption || null)}
-              filteringType="auto"
-              placeholder="Select eligibility"
-            />
-          </FormField>
-          <FormField label="EI Verification document" errorText={eligibilityFileError} stretch>
-            <input
-              type="file"
-              ref={eligibilityFileInputRef}
-              style={{ display: 'none' }}
-              accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
-              onChange={event => {
-                const file = event?.target?.files?.[0] || null;
-                if (event?.target) {
-                  event.target.value = '';
-                }
-                if (file) {
-                  if (!ELIGIBILITY_ALLOWED_MIME_TYPES.includes(file.type)) {
-                    setEligibilityFile(null);
-                    setEligibilityFileError('Only PDF, JPG, PNG, BMP, or TIFF files are allowed.');
-                    return;
-                  }
-                  if (file.size > ELIGIBILITY_MAX_BYTES) {
-                    setEligibilityFile(null);
-                    setEligibilityFileError('File is too large (max 6 MB).');
-                    return;
-                  }
-                }
-                setEligibilityFile(file);
-                setEligibilityFileError(file ? null : eligibilityFileError);
-              }}
-            />
-            <Box variant="small" color="text-body-secondary">
-              Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
-            </Box>
+      {canManageEiEligibility && (
+        <Modal
+          visible={eligibilityModalVisible}
+          onDismiss={() => {
+            setEligibilityModalVisible(false);
+            setEligibilityTarget(null);
+            setSelectedEligibility(null);
+            setEligibilityFile(null);
+            setEligibilityFileError(null);
+            setEligibilityApplicantId(null);
+            setEligibilityError(null);
+          }}
+          header="Set EI Eligibility"
+          closeAriaLabel="Close eligibility modal"
+          footer={
             <SpaceBetween size="xs" direction="horizontal">
-              <Button onClick={() => eligibilityFileInputRef.current && eligibilityFileInputRef.current.click()}>
-                Choose file
+              <Button
+                onClick={() => {
+                  setEligibilityModalVisible(false);
+                  setEligibilityTarget(null);
+                  setSelectedEligibility(null);
+                  setEligibilityFile(null);
+                  setEligibilityFileError(null);
+                  setEligibilityApplicantId(null);
+                  setEligibilityError(null);
+                }}
+              >
+                Cancel
               </Button>
-              <Box>{eligibilityFile ? eligibilityFile.name : 'No file selected'}</Box>
+              <Button
+                variant="primary"
+                loading={eligibilitySubmitting}
+                disabled={!selectedEligibility?.value || !eligibilityFile || eligibilitySubmitting}
+                onClick={handleEligibilitySubmit}
+              >
+                Save
+              </Button>
             </SpaceBetween>
-          </FormField>
-        </SpaceBetween>
-      </Modal>
+          }
+        >
+          <SpaceBetween size="s">
+            {eligibilityError && <Box color="text-status-error">{eligibilityError}</Box>}
+            <FormField label="EI Eligibility" stretch>
+              <Select
+                options={ESDC_OPTIONS}
+                selectedOption={selectedEligibility}
+                onChange={({ detail }) => setSelectedEligibility(detail.selectedOption || null)}
+                filteringType="auto"
+                placeholder="Select eligibility"
+              />
+            </FormField>
+            <FormField label="EI Verification document" errorText={eligibilityFileError} stretch>
+              <input
+                type="file"
+                ref={eligibilityFileInputRef}
+                style={{ display: 'none' }}
+                accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+                onChange={event => {
+                  const file = event?.target?.files?.[0] || null;
+                  if (event?.target) {
+                    event.target.value = '';
+                  }
+                  if (file) {
+                    if (!ELIGIBILITY_ALLOWED_MIME_TYPES.includes(file.type)) {
+                      setEligibilityFile(null);
+                      setEligibilityFileError('Only PDF, JPG, PNG, BMP, or TIFF files are allowed.');
+                      return;
+                    }
+                    if (file.size > ELIGIBILITY_MAX_BYTES) {
+                      setEligibilityFile(null);
+                      setEligibilityFileError('File is too large (max 6 MB).');
+                      return;
+                    }
+                  }
+                  setEligibilityFile(file);
+                  setEligibilityFileError(file ? null : eligibilityFileError);
+                }}
+              />
+              <Box variant="small" color="text-body-secondary">
+                Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
+              </Box>
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button onClick={() => eligibilityFileInputRef.current && eligibilityFileInputRef.current.click()}>
+                  Choose file
+                </Button>
+                <Box>{eligibilityFile ? eligibilityFile.name : 'No file selected'}</Box>
+              </SpaceBetween>
+            </FormField>
+          </SpaceBetween>
+        </Modal>
+      )}
       <Modal
         visible={decisionModalVisible}
         onDismiss={() => {

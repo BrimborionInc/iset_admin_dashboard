@@ -109,7 +109,8 @@ const copy = {
             title: 'Up Next',
             paragraphs: [
               'Expanding the digital forms library beyond the initial three examples.',
-              'Case Manager prefill for forms (e.g., EI Funding Agreement) so some fields arrive pre-populated before applicant signature.'
+              'Case Manager prefill for forms (e.g., EI Funding Agreement) so some fields arrive pre-populated before applicant signature.',
+              'Cover the payments module and financial report generation.'
             ]
           }
         ]
@@ -226,9 +227,9 @@ const copy = {
           {
             title: 'Prochaines étapes',
             paragraphs: [
-              'Intégration de la recherche de communauté d’origine dans le portail public.',
-              'Capacité d’accorder à des utilisateurs spécifiques des droits d’approbation (ex. approuver leurs propres interventions).',
-              'Module Finances (données factices pour le moment).'
+              'Expansion de la bibliothèque de formulaires numériques au-delà des trois exemples initiaux.',
+              'Préremplissage par le gestionnaire de cas des formulaires (p. ex., Entente de financement EI) afin que certains champs soient préremplis avant la signature du demandeur.',
+              'Couverture du module de paiements et de la génération de rapports financiers.'
             ]
           }
         ]

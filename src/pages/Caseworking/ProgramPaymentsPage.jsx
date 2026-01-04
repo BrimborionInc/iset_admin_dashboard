@@ -1,29 +1,31 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Board from "@cloudscape-design/board-components/board";
-import { SpaceBetween, Box, Link } from "@cloudscape-design/components";
+import { SpaceBetween, Box } from "@cloudscape-design/components";
 
-import { PaymentsDataProvider } from "./widgets/PaymentsDataContext.jsx";
-import PaymentRequestsWidget from "./widgets/PaymentRequestsWidget.jsx";
-import PaymentDetailWidget from "./widgets/PaymentDetailWidget.jsx";
-import PaymentCommunicationWidget from "./widgets/PaymentCommunicationWidget.jsx";
-import PaymentSlaWidget from "./widgets/PaymentSlaWidget.jsx";
-import FinancePaymentsHelp from "../../helpPanelContents/financePaymentsHelp.js";
-import FinancePaymentRequestsHelp from "../../helpPanelContents/financePaymentRequestsHelp.js";
-import FinancePaymentDetailHelp from "../../helpPanelContents/financePaymentDetailHelp.js";
-import FinancePaymentCommsHelp from "../../helpPanelContents/financePaymentCommsHelp.js";
-import FinancePaymentSlaHelp from "../../helpPanelContents/financePaymentSlaHelp.js";
+import { PaymentsDataProvider } from "../finance/widgets/PaymentsDataContext.jsx";
+import PaymentRequestsWidget from "../finance/widgets/PaymentRequestsWidget.jsx";
+import PaymentDetailWidget from "../finance/widgets/PaymentDetailWidget.jsx";
 
-const STORAGE_KEY = "finance-payments-layout-v1";
+const STORAGE_KEY = "program-payments-layout-v1";
+
+const PROGRAM_STATUS_OPTIONS = [
+  { value: "all", label: "All packets" },
+  { value: "draft", label: "My drafts / needs evidence", statuses: ["draft"] },
+  {
+    value: "submitted",
+    label: "Submitted / in program review",
+    statuses: ["submitted", "program_review"],
+  },
+  { value: "returned", label: "Returned", statuses: ["returned"] },
+  { value: "program_approved", label: "Program approved", statuses: ["program_approved"] },
+];
 
 const widgetRegistry = {
   requests: {
     id: "requests",
     component: PaymentRequestsWidget,
-    title: "Payment packet queue",
-    description: "Evidence-gated packets across finance review, batching, and confirmation.",
-    helpComponent: FinancePaymentRequestsHelp,
-    helpTitle: "Payment request queue",
-    aiContext: FinancePaymentRequestsHelp.aiContext,
+    title: "Program payment queue",
+    description: "Draft, submitted, returned, and approved packets awaiting finance review.",
     defaultRowSpan: 4,
     defaultColumnSpan: 4,
   },
@@ -31,42 +33,15 @@ const widgetRegistry = {
     id: "detail",
     component: PaymentDetailWidget,
     title: "Payment packet detail",
-    description: "Lines, evidence checklist, approvals, and batch actions for the selected packet.",
-    helpComponent: FinancePaymentDetailHelp,
-    helpTitle: "Payment detail",
-    aiContext: FinancePaymentDetailHelp.aiContext,
-    defaultRowSpan: 3,
-    defaultColumnSpan: 2,
-  },
-  comms: {
-    id: "comms",
-    component: PaymentCommunicationWidget,
-    title: "Payment communications",
-    description: "Email and follow-up log for packets and confirmations.",
-    helpComponent: FinancePaymentCommsHelp,
-    helpTitle: "Payment communications",
-    aiContext: FinancePaymentCommsHelp.aiContext,
-    defaultRowSpan: 3,
-    defaultColumnSpan: 4,
-  },
-  sla: {
-    id: "sla",
-    component: PaymentSlaWidget,
-    title: "SLA snapshot",
-    description: "Queue mix, overdue evidence, and turnaround metrics.",
-    helpComponent: FinancePaymentSlaHelp,
-    helpTitle: "SLA snapshot",
-    aiContext: FinancePaymentSlaHelp.aiContext,
-    defaultRowSpan: 2,
+    description: "Upload evidence, resolve returns, and submit packets for approval.",
+    defaultRowSpan: 4,
     defaultColumnSpan: 2,
   },
 };
 
 const defaultLayout = [
   { id: "requests", rowSpan: 5, columnSpan: 4 },
-  { id: "detail", rowSpan: 4, columnSpan: 2 },
-  { id: "sla", rowSpan: 2, columnSpan: 2 },
-  { id: "comms", rowSpan: 4, columnSpan: 4 },
+  { id: "detail", rowSpan: 5, columnSpan: 2 },
 ];
 
 const exportLayout = items =>
@@ -81,9 +56,7 @@ const toBoardItems = layout =>
   layout
     .map(item => {
       const definition = widgetRegistry[item.id];
-      if (!definition) {
-        return null;
-      }
+      if (!definition) return null;
       return {
         id: definition.id,
         rowSpan: item.rowSpan ?? definition.defaultRowSpan,
@@ -93,9 +66,8 @@ const toBoardItems = layout =>
           title: definition.title,
           description: definition.description,
           component: definition.component,
-          helpComponent: definition.helpComponent,
-          helpTitle: definition.helpTitle,
-          aiContext: definition.aiContext,
+          mode: "program",
+          statusOptions: PROGRAM_STATUS_OPTIONS,
         },
       };
     })
@@ -124,7 +96,7 @@ const loadLayoutFromStorage = () => {
       return filtered.length ? filtered : null;
     }
   } catch (error) {
-    console.error("[FinancePayments] failed to parse stored layout", error);
+    console.error("[ProgramPayments] failed to parse stored layout", error);
   }
   return null;
 };
@@ -170,12 +142,12 @@ const boardI18nStrings = {
   liveAnnouncementDndCommitted: operation => `${operation} committed`,
   liveAnnouncementDndDiscarded: operation => `${operation} discarded`,
   liveAnnouncementItemRemoved: op => `Removed item ${op.item.data.title}.`,
-  navigationAriaLabel: "Payments dashboard navigation",
-  navigationAriaDescription: "Use arrow keys to move between widgets on the Payments dashboard.",
+  navigationAriaLabel: "Program payments dashboard navigation",
+  navigationAriaDescription: "Use arrow keys to move between widgets on the Program Payments dashboard.",
   navigationItemAriaLabel: item => (item ? item.data.title : "Empty"),
 };
 
-const FinancePaymentsPage = ({
+const ProgramPaymentsPage = ({
   updateBreadcrumbs,
   setAvailableItems,
   setSplitPanelOpen,
@@ -192,8 +164,8 @@ const FinancePaymentsPage = ({
     if (typeof updateBreadcrumbs === "function") {
       updateBreadcrumbs([
         { text: "Home", href: "/" },
-        { text: "Financial Management", href: "/finance/overview" },
-        { text: "Payments", href: "/finance/payments" },
+        { text: "ISET Case Portfolio", href: "/iset/cases" },
+        { text: "Program Payments", href: "/iset/payments" },
       ]);
     }
   }, [updateBreadcrumbs]);
@@ -222,28 +194,15 @@ const FinancePaymentsPage = ({
         return [...current, { id }];
       });
     };
+    const handleOpenPalette = () => openPalette();
+    const handleResetLayout = () => resetLayout();
     window.addEventListener("palette:add", handlePaletteAdd);
-    return () => window.removeEventListener("palette:add", handlePaletteAdd);
-  }, []);
-
-  useEffect(() => {
-    const handleOpenPalette = () => {
-      if (typeof setAvailableItems === "function") {
-        setAvailableItems(paletteItems);
-      }
-      if (typeof setSplitPanelOpen === "function") {
-        setSplitPanelOpen(true);
-      }
-    };
-    const handleResetLayout = () => {
-      setLayout(current => (areLayoutsEqual(current, defaultLayout) ? current : defaultLayout));
-      window.localStorage.removeItem(STORAGE_KEY);
-    };
-    window.addEventListener("financePayments:openPalette", handleOpenPalette);
-    window.addEventListener("financePayments:resetLayout", handleResetLayout);
+    window.addEventListener("programPayments:openPalette", handleOpenPalette);
+    window.addEventListener("programPayments:resetLayout", handleResetLayout);
     return () => {
-      window.removeEventListener("financePayments:openPalette", handleOpenPalette);
-      window.removeEventListener("financePayments:resetLayout", handleResetLayout);
+      window.removeEventListener("palette:add", handlePaletteAdd);
+      window.removeEventListener("programPayments:openPalette", handleOpenPalette);
+      window.removeEventListener("programPayments:resetLayout", handleResetLayout);
     };
   }, [paletteItems, setAvailableItems, setSplitPanelOpen]);
 
@@ -277,7 +236,7 @@ const FinancePaymentsPage = ({
     try {
       window.localStorage.removeItem(STORAGE_KEY);
     } catch (error) {
-      console.error("[FinancePayments] failed to clear layout", error);
+      console.error("[ProgramPayments] failed to clear layout", error);
     }
   }, []);
 
@@ -298,26 +257,11 @@ const FinancePaymentsPage = ({
           items={boardItems}
           onItemsChange={handleItemsChange}
           renderItem={renderBoardItem}
-          empty={<Box padding="m">No widgets on the Payments dashboard.</Box>}
+          empty={<Box padding="m">No widgets on the Program Payments dashboard.</Box>}
         />
-        <Box variant="awsui-key-label">
-          Need to revisit the Payments workflow description?{" "}
-          <Link
-            href="#"
-            onFollow={event => {
-              event.preventDefault();
-              if (typeof toggleHelpPanel === "function") {
-                const helpContent = React.createElement(FinancePaymentsHelp);
-                toggleHelpPanel(helpContent, "Payments", FinancePaymentsHelp.aiContext);
-              }
-            }}
-          >
-            Open help
-          </Link>
-        </Box>
       </SpaceBetween>
     </PaymentsDataProvider>
   );
 };
 
-export default FinancePaymentsPage;
+export default ProgramPaymentsPage;

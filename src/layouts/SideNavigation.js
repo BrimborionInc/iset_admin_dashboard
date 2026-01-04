@@ -124,6 +124,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       items: [
         { type: 'link', text: 'Case Management', href: '/iset/cases' },
         { type: 'link', text: 'My Case Queue', href: '/case-management' },
+        { type: 'link', text: 'Program Payments', href: '/iset/payments' },
       ],
     },
     {

@@ -1,6 +1,6 @@
 Purpose: Single source for Finance module enablement decisions, milestones, and next actions.  
 Audience: Finance/Casework engineers, product, ops.  
-Last Updated: 2025-12-07
+Last Updated: 2026-01-03
 
 # Finance Module Enablement Tracker
 
@@ -31,6 +31,34 @@ Last Updated: 2025-12-07
 
 ## Current Focus
 - Budgets dashboard now runs live: pot CRUD, draft/publish, snapshots, pot selection for case interventions. Case-linked finance transactions roll into committed/actual. Draft/snapshot UX refined; saved views and pot detail widgets now backed by API + CSV export; burn-rate widget uses live metrics with risk tagging.
+
+## Payments — Remaining MUSTs
+- None. All current MUST items completed for payments enablement.
+
+## Payments — Completion Plan (proposed order)
+1. Auto-generate packets from approved interventions (define trigger, map approval data to packet/line, default statuses, audit event). ✅
+2. Evidence verification UI + verified gating (verify/unverify controls; approvals require verified evidence). ✅
+3. Proof-of-payment upload in Mark Paid (upload file, link to line, enforce proof document requirement). ✅
+4. Annual Report ledger extract export (API + download from Finance Payments; required fields aligned to reporting spec). ✅
+5. Override UX (modal with reason + type; role gating; surfaced in timeline/history). ✅
+6. Program ↔ Finance notes/requests thread (persistent communication log beyond status timeline). ✅
+
+## Payments — Recently completed
+- Payments board wired to live data with packets, lines, evidence checklists, and status timeline.
+- Evidence rules engine (baseline + payment-type gates) enforced on program/finance approvals.
+- Funding-authorization caps with remaining-authorized tracking per intervention (blocks overages).
+- Batch creation/approval gate + CSV export from the Payments detail view.
+- Mark-paid requires paid date + payment reference; auto-post `finance_transaction` on confirm.
+- Duplicate payment detection with override history logging (client/intervention/type/period/amount/vendor).
+- Recurring payment scheduler for living allowance/childcare (auto “Needs Evidence” lines) + no-backdating and EI-claim eligibility gates.
+- Communications log + “Send to finance” email hook (routing config lives in Finance Settings).
+- Program-side packet/line creation in-app (case/client/intervention selection, payee, amount, pot, service period, draft edits).
+- Auto-generate payment packets from approved interventions (draft packet + line defaults).
+- Evidence verification (verify/unverify) enforced in approval gating.
+- Mark Paid now uploads proof-of-payment and requires proof document before paid/confirmed.
+- Annual Report ledger extract export available from Payments queue.
+- Override modal with reason capture for evidence, duplicate, and approval gates.
+- Program ↔ Finance internal notes thread in packet detail view.
 
 ## Next Actions (short)
 - Add auto-forecasting (system-generated) and clarify variance vs adjusted; remove manual placeholder.

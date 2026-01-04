@@ -2,6 +2,17 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-01-03
+- Docs: Added Payments module user manual (`docs/guides/payments-module-user-manual.md`).
+
+## 2026-01-24
+- Payments: Auto-generate draft payment packets from approved interventions.
+- Payments: Evidence verification required before approvals; verify/unverify controls added.
+- Payments: Mark Paid now uploads proof-of-payment and enforces proof requirement.
+- Payments: Added Annual Report ledger extract export from Payments queue.
+- Payments: Override modal captures reason for evidence/duplicate/threshold gates.
+- Payments: Added internal notes thread for program ↔ finance collaboration.
+
 ## 2025-12-31
 - UX: Homepage work queue items table now supports flagging/unflagging and no longer shows the row-selection radio.
 - UX: Homepage work queue items table now shows province codes instead of full names.
