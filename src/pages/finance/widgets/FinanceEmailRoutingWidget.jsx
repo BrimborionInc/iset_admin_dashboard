@@ -179,6 +179,7 @@ const FinanceEmailRoutingWidget = () => {
                   <Input
                     value={item.email}
                     placeholder="finance@example.org"
+                    autoComplete="off"
                     onChange={({ detail }) => {
                       setDraftRouting(current => ({
                         ...current,

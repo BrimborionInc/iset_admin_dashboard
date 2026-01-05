@@ -200,8 +200,11 @@ try {
     Copy-Item -Path (Join-Path $repoRoot "package.json") -Destination (Join-Path $stagingPath "package.json") -Force
     Copy-Item -Path (Join-Path $repoRoot "package-lock.json") -Destination (Join-Path $stagingPath "package-lock.json") -Force
     Copy-Item -Path (Join-Path $repoRoot ".env.test") -Destination (Join-Path $stagingPath ".env.test") -Force
+    Copy-Item -Path (Join-Path $repoRoot "tmp_assessment_template.html") -Destination (Join-Path $stagingPath "tmp_assessment_template.html") -Force
+    Copy-Item -Path (Join-Path $repoRoot "tmp_application_form_template.html") -Destination (Join-Path $stagingPath "tmp_application_form_template.html") -Force
+    Copy-Item -Path (Join-Path $repoRoot "tmp_financial_overview_template.html") -Destination (Join-Path $stagingPath "tmp_financial_overview_template.html") -Force
 
-    $directoriesToStage = @("src", "shared", "templates", "blocksteps")
+    $directoriesToStage = @("src", "shared", "templates", "blocksteps", "public")
     $stagedDirectories = @()
     foreach ($dir in $directoriesToStage) {
         $sourceDir = Join-Path $repoRoot $dir
@@ -329,6 +332,13 @@ try {
         $commandsList.Add('rm -rf /opt/nwac/admin-dashboard/blocksteps')
         $commandsList.Add('cp -r "$TMPDIR/blocksteps" /opt/nwac/admin-dashboard/')
     }
+    if ($stagedDirectories -contains 'public') {
+        $commandsList.Add('rm -rf /opt/nwac/admin-dashboard/public')
+        $commandsList.Add('cp -r "$TMPDIR/public" /opt/nwac/admin-dashboard/')
+    }
+    $commandsList.Add('if [ -f "$TMPDIR/tmp_assessment_template.html" ]; then cp "$TMPDIR/tmp_assessment_template.html" /opt/nwac/admin-dashboard/tmp_assessment_template.html; else echo "WARNING: tmp_assessment_template.html missing in artifact"; fi')
+    $commandsList.Add('if [ -f "$TMPDIR/tmp_application_form_template.html" ]; then cp "$TMPDIR/tmp_application_form_template.html" /opt/nwac/admin-dashboard/tmp_application_form_template.html; else echo "WARNING: tmp_application_form_template.html missing in artifact"; fi')
+    $commandsList.Add('if [ -f "$TMPDIR/tmp_financial_overview_template.html" ]; then cp "$TMPDIR/tmp_financial_overview_template.html" /opt/nwac/admin-dashboard/tmp_financial_overview_template.html; else echo "WARNING: tmp_financial_overview_template.html missing in artifact"; fi')
 
     $commandsList.Add('NPM_BIN="$(command -v npm 2>/dev/null || command -v /usr/local/bin/npm 2>/dev/null || command -v /usr/bin/npm 2>/dev/null)"')
     $commandsList.Add('if [ -z "$NPM_BIN" ]; then')

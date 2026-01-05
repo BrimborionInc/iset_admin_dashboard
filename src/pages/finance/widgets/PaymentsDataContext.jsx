@@ -49,6 +49,39 @@ const normalizeEvidenceItem = item => {
       note: null,
     };
   }
+  const documentName =
+    item.documentName ||
+    item.document_name ||
+    item.file_name ||
+    item.label ||
+    null;
+  const documentNames = Array.isArray(item.documentNames)
+    ? item.documentNames.map(value => String(value)).filter(Boolean)
+    : documentName
+      ? [String(documentName)]
+      : [];
+  const documentIds = Array.isArray(item.documentIds)
+    ? item.documentIds.map(value => String(value)).filter(Boolean)
+    : item.documentId || item.document_id
+      ? [String(item.documentId || item.document_id)]
+      : [];
+  const documentLinks = Array.isArray(item.documentLinks)
+    ? item.documentLinks
+        .map(entry => {
+          if (!entry || typeof entry !== "object") return null;
+          const linkId =
+            entry.id || entry.linkId || entry.link_id || entry.documentLinkId || null;
+          const documentId = entry.documentId || entry.document_id || null;
+          const name = entry.name || entry.documentName || entry.document_name || entry.file_name || entry.label || null;
+          if (!linkId && !documentId && !name) return null;
+          return {
+            id: linkId ? String(linkId) : null,
+            documentId: documentId ? String(documentId) : null,
+            name: name ? String(name) : null,
+          };
+        })
+        .filter(Boolean)
+    : null;
   return {
     id: item.id ? String(item.id) : item.linkId ? String(item.linkId) : null,
     documentId: item.documentId ? String(item.documentId) : item.document_id ? String(item.document_id) : null,
@@ -66,7 +99,11 @@ const normalizeEvidenceItem = item => {
     receivedAt: item.receivedAt || item.received_at || null,
     verifiedAt: item.verifiedAt || item.verified_at || null,
     verifiedBy: item.verifiedBy || item.verified_by || null,
-    documentName: item.documentName || item.document_name || item.file_name || item.label || null,
+    documentName: documentName || (documentNames.length ? documentNames[0] : null),
+    documentNames: documentNames.length ? documentNames : null,
+    documentIds: documentIds.length ? documentIds : null,
+    documentLinks: documentLinks && documentLinks.length ? documentLinks : null,
+    source: item.source || item.source_type || null,
   };
 };
 
@@ -663,6 +700,41 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
     }
   }, []);
 
+  const deleteLine = useCallback(async lineId => {
+    if (!lineId) return null;
+    try {
+      const resp = await apiFetch(
+        `/api/finance/payment-lines/${encodeURIComponent(lineId)}`,
+        { method: "DELETE" }
+      );
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw buildApiError(resp, data, `Delete failed (${resp.status})`);
+      }
+      if (data?.id) {
+        const updated = normalizePacket(data);
+        setRequests(prev => {
+          const next = Array.isArray(prev) ? prev.slice() : [];
+          const index = next.findIndex(entry => entry.id === updated.id);
+          if (index >= 0) {
+            next[index] = updated;
+            return next;
+          }
+          return [updated, ...next];
+        });
+        setSelectedRequestId(updated.id);
+        return updated;
+      }
+      await loadRequests();
+      return data;
+    } catch (err) {
+      console.error("[Payments] failed to delete payment line", err);
+      const message = err.message || "Failed to delete payment line";
+      setError(message);
+      throw err;
+    }
+  }, [loadRequests]);
+
   const createPacket = useCallback(async payload => {
     try {
       const resp = await apiFetch("/api/finance/payment-packets", {
@@ -949,6 +1021,7 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
       updatePacketStatus,
       updateLineStatus,
       updateLine,
+      deleteLine,
       createPacket,
       deletePacket,
       addPacketLines,
@@ -977,6 +1050,7 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
       updatePacketStatus,
       updateLineStatus,
       updateLine,
+      deleteLine,
       createPacket,
       deletePacket,
       addPacketLines,

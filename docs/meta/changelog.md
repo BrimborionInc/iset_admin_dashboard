@@ -32,6 +32,17 @@ Format: YYYY-MM-DD - Category: Short description
 - Payments: Submission now emails finance from the status update and evidence gates use received evidence instead of verification.
 - Docs: Updated payments requirements, user manual, and help copy to reflect the simplified workflow.
 
+## 2026-01-05
+- UX: Combined the payment packet evidence checklist and documents list into a single table in the detail widget.
+- UX: Evidence table now lists all packet evidence requirements across lines and shows all attached documents per requirement (no separate document rows).
+- UX: Removed the notes section from the payment packet detail widget.
+- UX: Evidence table now uses row-level actions to view, link, upload, replace, or unlink supporting documents.
+- Payments: Finance submission email now lists document names and includes a 7-day packet bundle download link.
+- Payments: Auto-generated draft packets now prefill line items from assessment cost breakdowns, including recurrence and payee inference.
+- Fix: Auto-generated payment packets now resolve requester user IDs to avoid FK insert failures.
+- UX: Submit-to-finance alerts now summarize policy blockers with line ranges.
+- Fix: Payment packet bundle generation now handles typed-array buffers to avoid archiver crashes.
+
 ## 2026-01-24
 - Payments: Auto-generate draft payment packets from approved interventions.
 - Payments: Evidence verification required before approvals; verify/unverify controls added.

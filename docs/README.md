@@ -4,6 +4,14 @@ This library captures the working knowledge for the admin dashboard. The goal is
 
 **Mandatory for assistants and developers:** before changing any dashboard or widget, read and follow `docs/guides/configurable-dashboard-notes.md`. Treat it as a blocker; if you haven’t read it this session, stop and do that first. Summarize how you applied it when you finish a dashboard change.
 
+## Assistant workflow (mandatory, read first)
+
+- For complex tasks, follow Interview → Planning → Implementation.
+- Interview means: ask short, focused questions before making changes; do not guess intent.
+- If anything is unclear (requirements, data, ownership, API payloads), stop and ask before coding.
+- **Interview format (mandatory):** Never interview Bill with lists of questions in a single prompt. This is a linear chat; lists branch the conversation. Ask one question at a time, wait for the response, and keep asking until you have enough to enter Planning.
+- **Ownership:** You own the code and data. Do not ask Bill questions about your approach to coding the functionality; ask only about requirements, behavior, and desired outcomes.
+
 ## Structure
 
 - meta/ — changelog, project map, standing directives, and working notes for the library itself.

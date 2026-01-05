@@ -1,25 +1,23 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
   Header,
   SpaceBetween,
   ButtonDropdown,
   Box,
-  Container,
   ColumnLayout,
   Link,
   StatusIndicator,
   Button,
   Table,
   ExpandableSection,
-  KeyValuePairs,
   Alert,
   Modal,
   FormField,
   Input,
-  Textarea,
   DatePicker,
   FileUpload,
+  RadioGroup,
   Select,
 } from "@cloudscape-design/components";
 import { apiFetch } from "../../../auth/apiClient";
@@ -105,6 +103,70 @@ const formatEvidenceMissingDetails = details => {
   return `Missing evidence: ${unique.join(", ")}`;
 };
 
+const formatLineIdLabel = lineIds => {
+  const raw = Array.isArray(lineIds) ? lineIds : [];
+  const unique = Array.from(new Set(raw.map(value => String(value).trim()).filter(Boolean)));
+  if (!unique.length) return null;
+  const numericIds = unique
+    .map(value => Number.parseInt(value, 10))
+    .filter(value => Number.isFinite(value));
+  const isNumeric = numericIds.length === unique.length;
+  if (isNumeric) {
+    const sorted = Array.from(new Set(numericIds)).sort((a, b) => a - b);
+    const ranges = [];
+    let start = sorted[0];
+    let prev = sorted[0];
+    for (let index = 1; index < sorted.length; index += 1) {
+      const current = sorted[index];
+      if (current === prev + 1) {
+        prev = current;
+        continue;
+      }
+      ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+      start = current;
+      prev = current;
+    }
+    ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
+    const label = ranges.join(", ");
+    return ranges.length === 1 ? `Line ${label}` : `Lines ${label}`;
+  }
+  const label = unique.join(", ");
+  return unique.length === 1 ? `Line ${label}` : `Lines ${label}`;
+};
+
+const formatPolicyViolationDetails = details => {
+  if (!Array.isArray(details) || !details.length) return null;
+  const groups = new Map();
+  details.forEach((detail, index) => {
+    if (!detail || typeof detail !== "object") return;
+    const message = detail.message ? String(detail.message).trim() : "";
+    const field = detail.field ? String(detail.field).trim() : "";
+    const error = detail.error ? String(detail.error).trim() : "";
+    const lineId = detail.lineId || detail.line_id || detail.line || null;
+    const key = message || [field, error].filter(Boolean).join("|") || `unknown-${index}`;
+    const entry = groups.get(key) || {
+      message,
+      field,
+      error,
+      lineIds: [],
+      order: index,
+    };
+    if (lineId) entry.lineIds.push(lineId);
+    groups.set(key, entry);
+  });
+  if (!groups.size) return null;
+  return Array.from(groups.values())
+    .sort((a, b) => a.order - b.order)
+    .map(entry => {
+      const fallbackField = entry.field ? entry.field.replace(/[_-]+/g, " ") : "Line";
+      const fallbackError = entry.error ? entry.error.replace(/[_-]+/g, " ") : "invalid";
+      const summary = entry.message || `${fallbackField}: ${fallbackError}`;
+      const lineLabel = formatLineIdLabel(entry.lineIds);
+      return lineLabel ? `${lineLabel}: ${summary}` : summary;
+    })
+    .filter(Boolean);
+};
+
 const buildEvidenceMeta = item => {
   if (item.required && !item.received) {
     return { indicator: "error", label: "Missing" };
@@ -115,15 +177,56 @@ const buildEvidenceMeta = item => {
   return { indicator: "pending", label: "Optional" };
 };
 
+const EVIDENCE_DOCUMENT_TYPE_MAP = {
+  ClientApplicationSigned: ["application_form"],
+  EIConsent: ["ei_consent"],
+  EIVerification: ["ei_verification"],
+  IndigenousIdentity: ["indigenous_declaration", "status_card", "letter_of_reference"],
+  BandFundingConfirmationOrDenial: ["band_funding_confirmation", "band_funding_denial"],
+  AcceptanceLetter: ["acceptance_letter"],
+  StatementOfAccount: ["statement_of_account"],
+  TuitionStatementOrInvoice: ["statement_of_account"],
+  FundingAgreement: ["funding_agreement"],
+  CaseManagerAssessment: ["case_assessment"],
+  AttendanceReport: ["attendance_form"],
+  FinancialOverview: ["financial_overview"],
+  IncomeVerification: ["financial_records"],
+  ExpenseVerification: ["financial_evidence"],
+  PaidReceipt: ["receipt"],
+  EquipmentReceipt: ["receipt"],
+  AlternatePayeeLetter: ["alternate_payee_letter"],
+  InstitutionLetter: ["institution_letter"],
+  Quote: ["equipment_quote"],
+  EmployerDutiesLetter: ["employer_duties_letter"],
+  EmployerOfferLetterAfterSubsidy: ["employer_offer_letter_after_subsidy"],
+  WagePlan: ["wage_plan"],
+};
+
+const resolveEvidenceDocumentTypes = evidenceType =>
+  evidenceType ? EVIDENCE_DOCUMENT_TYPE_MAP[evidenceType] || [] : [];
+
+const normalizeDocumentCategory = value => {
+  if (!value) return "";
+  return String(value).trim().toLowerCase();
+};
+
+const formatShortDate = value => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString();
+};
+
+const API_BASE_URL = (process.env.REACT_APP_API_BASE_URL || "").replace(/\/$/, "");
+
 const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
     selectedRequest,
     updatePacketStatus,
     updateLine,
+    deleteLine,
     addPacketLines,
     createRecurringLines,
-    communications,
-    addCommunication,
     reloadRequests,
     paymentTypeMappingLookup,
     paymentTypeMappingLoading,
@@ -137,13 +240,30 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [recurringStartDate, setRecurringStartDate] = useState("");
   const [recurringEndDate, setRecurringEndDate] = useState("");
   const [recurringOccurrences, setRecurringOccurrences] = useState("");
+  const [recurringAmountMode, setRecurringAmountMode] = useState("split_total");
   const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
-  const [evidenceTarget, setEvidenceTarget] = useState(null);
-  const [evidenceTypeOption, setEvidenceTypeOption] = useState(null);
-  const [customEvidenceType, setCustomEvidenceType] = useState("");
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [unlinkModalOpen, setUnlinkModalOpen] = useState(false);
+  const [activeEvidenceRow, setActiveEvidenceRow] = useState(null);
+  const [replaceMode, setReplaceMode] = useState(false);
   const [evidenceFiles, setEvidenceFiles] = useState([]);
   const [evidenceUploading, setEvidenceUploading] = useState(false);
   const [evidenceError, setEvidenceError] = useState(null);
+  const [uploadLabel, setUploadLabel] = useState("");
+  const [uploadDocumentType, setUploadDocumentType] = useState(null);
+  const [documentTypeOptions, setDocumentTypeOptions] = useState([]);
+  const [documentTypesLoading, setDocumentTypesLoading] = useState(false);
+  const [supportingDocuments, setSupportingDocuments] = useState([]);
+  const [supportingDocumentsLoading, setSupportingDocumentsLoading] = useState(false);
+  const [supportingDocumentsError, setSupportingDocumentsError] = useState(null);
+  const [selectedDocuments, setSelectedDocuments] = useState([]);
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState(null);
+  const [unlinking, setUnlinking] = useState(false);
+  const [unlinkError, setUnlinkError] = useState(null);
+  const [viewError, setViewError] = useState(null);
+  const [viewingDocumentId, setViewingDocumentId] = useState(null);
   const [lineModalOpen, setLineModalOpen] = useState(false);
   const [lineModalMode, setLineModalMode] = useState("create");
   const [lineForm, setLineForm] = useState({
@@ -160,11 +280,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   });
   const [lineSubmitting, setLineSubmitting] = useState(false);
   const [lineError, setLineError] = useState(null);
+  const [deleteLineModalOpen, setDeleteLineModalOpen] = useState(false);
+  const [deleteLineSubmitting, setDeleteLineSubmitting] = useState(false);
+  const [deleteLineError, setDeleteLineError] = useState(null);
   const [linePotOptions, setLinePotOptions] = useState([]);
   const [linePotLoading, setLinePotLoading] = useState(false);
-  const [noteText, setNoteText] = useState("");
-  const [noteSubmitting, setNoteSubmitting] = useState(false);
-  const [noteError, setNoteError] = useState(null);
   const requiresLinePeriod = requiresServicePeriod(lineForm.paymentType);
   const selectedInterventionCode = useMemo(() => {
     const raw =
@@ -203,6 +323,33 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   }, [allowedPaymentTypes]);
 
   useEffect(() => {
+    let cancelled = false;
+    setDocumentTypesLoading(true);
+    apiFetch("/api/document-types")
+      .then(resp => resp.ok ? resp.json() : Promise.reject(new Error("Failed to load document types")))
+      .then(payload => {
+        if (cancelled) return;
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        const options = items
+          .filter(item => item && item.code)
+          .map(item => ({
+            value: item.code,
+            label: item.label || item.code,
+          }));
+        setDocumentTypeOptions(options);
+      })
+      .catch(() => {
+        if (!cancelled) setDocumentTypeOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setDocumentTypesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (selectedRequest?.lines?.length) {
       const firstId = selectedRequest.lines[0].id;
       setSelectedLineId(firstId);
@@ -217,13 +364,28 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setRecurringStartDate("");
     setRecurringEndDate("");
     setRecurringOccurrences("");
+    setRecurringAmountMode("split_total");
     setEvidenceModalOpen(false);
-    setEvidenceTarget(null);
-    setEvidenceTypeOption(null);
-    setCustomEvidenceType("");
+    setLinkModalOpen(false);
+    setViewModalOpen(false);
+    setUnlinkModalOpen(false);
+    setActiveEvidenceRow(null);
+    setReplaceMode(false);
     setEvidenceFiles([]);
     setEvidenceUploading(false);
     setEvidenceError(null);
+    setUploadLabel("");
+    setUploadDocumentType(null);
+    setSupportingDocuments([]);
+    setSupportingDocumentsLoading(false);
+    setSupportingDocumentsError(null);
+    setSelectedDocuments([]);
+    setLinking(false);
+    setLinkError(null);
+    setUnlinking(false);
+    setUnlinkError(null);
+    setViewError(null);
+    setViewingDocumentId(null);
     setLineModalOpen(false);
     setLineModalMode("create");
     setLineForm({
@@ -240,9 +402,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     });
     setLineSubmitting(false);
     setLineError(null);
-    setNoteText("");
-    setNoteSubmitting(false);
-    setNoteError(null);
   }, [selectedRequest?.id]);
 
   useEffect(() => {
@@ -268,19 +427,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     if (!packetLines.length) return null;
     return packetLines.find(line => line.id === selectedLineId) ?? null;
   }, [packetLines, selectedLineId]);
-  const internalNotes = useMemo(() => {
-    if (!selectedRequest?.id) return [];
-    return (communications || [])
-      .filter(note => note.packetId === selectedRequest.id && note.channel === "internal")
-      .sort((a, b) => {
-        const aTime = a.sentOn ? new Date(a.sentOn).getTime() : 0;
-        const bTime = b.sentOn ? new Date(b.sentOn).getTime() : 0;
-        return bTime - aTime;
-      });
-  }, [communications, selectedRequest?.id]);
-  const showLineServicePeriod = selectedLine
-    ? requiresServicePeriod(selectedLine.paymentType)
-    : false;
   const recurringPeriodOptions = [
     { value: "weekly", label: "Weekly" },
     { value: "bi_weekly", label: "Bi-weekly" },
@@ -298,6 +444,489 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     packetStatusKey === "draft";
   const canEditPacketLines = selectedRequest && packetStatusKey === "draft";
   const canUploadEvidence = packetStatusKey === "draft";
+  const evidenceDocumentRows = useMemo(() => {
+    if (!selectedRequest) return [];
+    const rows = [];
+    const addEvidenceRows = (items, scope, lineId = null, interventionId = null) => {
+      (items || []).forEach((item, index) => {
+        if (item?.source === "extra") return;
+        const rowId = item?.id || item?.documentId || item?.type || `${scope}-${index}`;
+        const documentLinks = Array.isArray(item?.documentLinks)
+          ? item.documentLinks
+              .map(entry => ({
+                id: entry?.id || null,
+                documentId: entry?.documentId || null,
+                name: entry?.name || null,
+              }))
+              .filter(entry => entry.documentId || entry.name || entry.id)
+          : [];
+        const documents =
+          documentLinks.length
+            ? documentLinks.map(entry => entry.name).filter(Boolean)
+            : Array.isArray(item?.documentNames) && item.documentNames.length
+              ? item.documentNames
+              : item?.documentName
+                ? [item.documentName]
+                : [];
+        rows.push({
+          id: `${scope}-${rowId}`,
+          scope,
+          evidence: item?.type || "Evidence",
+          evidenceType: item?.type || "Evidence",
+          status: buildEvidenceMeta(item),
+          documents,
+          notes: item?.note ? String(item.note) : "",
+          lineId,
+          interventionId,
+          required: !!item?.required,
+          documentLinks,
+        });
+      });
+    };
+
+    addEvidenceRows(
+      selectedRequest.baselineEvidence,
+      "Baseline compliance",
+      null,
+      selectedRequest.interventionId || null,
+    );
+    (selectedRequest.lines || []).forEach(line => {
+      const lineLabel = line.paymentType ? `${line.paymentType}` : "Payment line";
+      const scope = line.id
+        ? `Line LINE-${line.id} • ${lineLabel}`
+        : `Line • ${lineLabel}`;
+      addEvidenceRows(
+        line.evidenceChecklist,
+        scope,
+        line.id || null,
+        line.interventionId || selectedRequest.interventionId || null,
+      );
+    });
+    return rows;
+  }, [selectedRequest]);
+
+  const documentTypeOptionMap = useMemo(() => {
+    const map = new Map();
+    (documentTypeOptions || []).forEach(option => {
+      if (option?.value) {
+        map.set(option.value, option);
+      }
+    });
+    return map;
+  }, [documentTypeOptions]);
+
+  const resolveDocumentTypeLabel = useCallback(
+    value => {
+      const normalized = normalizeDocumentCategory(value);
+      if (!normalized) return "-";
+      const match = documentTypeOptionMap.get(normalized);
+      return match?.label || value || normalized;
+    },
+    [documentTypeOptionMap]
+  );
+
+  const resolveDocumentLabel = useCallback(doc => {
+    if (!doc || typeof doc !== "object") return "Document";
+    return (
+      doc.label ||
+      doc.file_name ||
+      doc.fileName ||
+      doc.document_name ||
+      doc.documentName ||
+      doc.name ||
+      doc.originalFileName ||
+      (doc.id || doc.documentId ? `Document ${doc.id || doc.documentId}` : "Document")
+    );
+  }, []);
+
+  const resolveDocumentTypeOptionsForEvidence = useCallback(
+    evidenceType => {
+      const codes = resolveEvidenceDocumentTypes(evidenceType);
+      if (!codes.length) return documentTypeOptions;
+      return codes.map(code => documentTypeOptionMap.get(code) || { value: code, label: code });
+    },
+    [documentTypeOptionMap, documentTypeOptions]
+  );
+
+  const linkableDocuments = useMemo(() => {
+    if (!supportingDocuments.length) return [];
+    const evidenceType = activeEvidenceRow?.evidenceType || null;
+    const allowedTypes = new Set(resolveEvidenceDocumentTypes(evidenceType).map(normalizeDocumentCategory));
+    const linkedDocIds = new Set(
+      (activeEvidenceRow?.documentLinks || [])
+        .map(link => link?.documentId || link?.id)
+        .filter(Boolean)
+        .map(id => String(id))
+    );
+    const normalized = supportingDocuments
+      .filter(doc => {
+        if (replaceMode) return true;
+        const id = doc?.id || doc?.documentId;
+        if (!id) return true;
+        return !linkedDocIds.has(String(id));
+      })
+      .map(doc => ({
+        ...doc,
+        documentCategory: normalizeDocumentCategory(
+          doc.document_category || doc.documentCategory || doc.category || doc.document_type
+        ),
+      }));
+    if (!allowedTypes.size) return normalized;
+    const matches = normalized.filter(doc => allowedTypes.has(doc.documentCategory));
+    return matches.length ? matches : normalized;
+  }, [supportingDocuments, activeEvidenceRow, replaceMode]);
+
+  const uploadDocumentTypeOptions = useMemo(() => {
+    if (!activeEvidenceRow?.evidenceType) return documentTypeOptions;
+    return resolveDocumentTypeOptionsForEvidence(activeEvidenceRow.evidenceType);
+  }, [activeEvidenceRow, documentTypeOptions, resolveDocumentTypeOptionsForEvidence]);
+
+  const evidenceTypeFilters = useMemo(
+    () => resolveEvidenceDocumentTypes(activeEvidenceRow?.evidenceType),
+    [activeEvidenceRow]
+  );
+
+  useEffect(() => {
+    if (!evidenceModalOpen) return;
+    if (!uploadDocumentTypeOptions.length) {
+      if (uploadDocumentType !== null) setUploadDocumentType(null);
+      return;
+    }
+    if (!uploadDocumentType || !uploadDocumentTypeOptions.some(opt => opt.value === uploadDocumentType.value)) {
+      setUploadDocumentType(uploadDocumentTypeOptions[0]);
+    }
+  }, [evidenceModalOpen, uploadDocumentType, uploadDocumentTypeOptions]);
+
+  const loadSupportingDocuments = useCallback(
+    async row => {
+      if (!selectedRequest?.applicantUserId) {
+        setSupportingDocuments([]);
+        return;
+      }
+      setSupportingDocumentsLoading(true);
+      setSupportingDocumentsError(null);
+      try {
+        const params = new URLSearchParams();
+        const interventionId = row?.interventionId;
+        if (interventionId) {
+          params.set("interventionId", String(interventionId));
+        } else if (selectedRequest?.applicationId) {
+          params.set("applicationId", String(selectedRequest.applicationId));
+        }
+        const query = params.toString() ? `?${params.toString()}` : "";
+        const resp = await apiFetch(
+          `/api/applicants/${encodeURIComponent(selectedRequest.applicantUserId)}/documents${query}`
+        );
+        if (!resp.ok) {
+          throw new Error("Failed to load supporting documents.");
+        }
+        const data = await resp.json().catch(() => []);
+        setSupportingDocuments(Array.isArray(data) ? data : []);
+      } catch (err) {
+        setSupportingDocuments([]);
+        setSupportingDocumentsError(err?.message || "Failed to load supporting documents.");
+      } finally {
+        setSupportingDocumentsLoading(false);
+      }
+    },
+    [selectedRequest?.applicantUserId, selectedRequest?.applicationId]
+  );
+
+  const handleOpenDocument = useCallback(async documentId => {
+    if (!documentId) return;
+    setViewError(null);
+    setViewingDocumentId(documentId);
+    try {
+      const res = await apiFetch(`/api/documents/${encodeURIComponent(documentId)}/presign-download`);
+      if (!res || !res.ok) {
+        const message = res && res.status === 404 ? "Document not found" : "Failed to prepare download";
+        throw new Error(message);
+      }
+      const payload = await res.json().catch(() => null);
+      if (!payload) throw new Error("Invalid download response");
+      let targetUrl = "";
+      if (payload.mode === "s3") {
+        targetUrl = payload.presigned?.url || "";
+      } else if (payload.mode === "local-direct") {
+        const path = payload.path || "";
+        if (path) {
+          const normalized = path.startsWith("/") ? path : `/${path}`;
+          targetUrl = API_BASE_URL ? `${API_BASE_URL}${normalized}` : normalized;
+        }
+      }
+      if (!targetUrl) {
+        throw new Error("Document download unavailable");
+      }
+      if (typeof window !== "undefined") {
+        window.open(targetUrl, "_blank", "noopener,noreferrer");
+      }
+    } catch (err) {
+      setViewError(err?.message || "Failed to open document.");
+    } finally {
+      setViewingDocumentId(null);
+    }
+  }, []);
+
+  const openUploadModal = useCallback(
+    row => {
+      if (!row) return;
+      setActiveEvidenceRow(row);
+      setEvidenceFiles([]);
+      setEvidenceError(null);
+      setEvidenceUploading(false);
+      setUploadLabel(row.evidenceType || row.evidence || "");
+      setUploadDocumentType(null);
+      setReplaceMode(false);
+      setEvidenceModalOpen(true);
+    },
+    []
+  );
+
+  const openLinkModal = useCallback(
+    (row, replace = false) => {
+      if (!row) return;
+      setActiveEvidenceRow(row);
+      setReplaceMode(replace);
+      setSelectedDocuments([]);
+      setLinkError(null);
+      setSupportingDocuments([]);
+      loadSupportingDocuments(row);
+      setLinkModalOpen(true);
+    },
+    [loadSupportingDocuments]
+  );
+
+  const openViewModal = useCallback(
+    row => {
+      if (!row) return;
+      if (row.documentLinks?.length === 1 && row.documentLinks[0]?.documentId) {
+        handleOpenDocument(row.documentLinks[0].documentId);
+        return;
+      }
+      setActiveEvidenceRow(row);
+      setViewError(null);
+      setViewModalOpen(true);
+    },
+    [handleOpenDocument]
+  );
+
+  const openUnlinkModal = useCallback(row => {
+    if (!row) return;
+    setActiveEvidenceRow(row);
+    setUnlinkError(null);
+    setUnlinkModalOpen(true);
+  }, []);
+
+  const handleEvidenceAction = useCallback(
+    (actionId, row) => {
+      if (!row) return;
+      switch (actionId) {
+        case "view":
+          openViewModal(row);
+          break;
+        case "link":
+          openLinkModal(row, false);
+          break;
+        case "upload":
+          openUploadModal(row);
+          break;
+        case "replace":
+          openLinkModal(row, true);
+          break;
+        case "unlink":
+          openUnlinkModal(row);
+          break;
+        default:
+          break;
+      }
+    },
+    [openViewModal, openLinkModal, openUploadModal, openUnlinkModal]
+  );
+
+  const deleteDocumentLinks = useCallback(async links => {
+    const linkIds = (links || [])
+      .map(link => link?.id)
+      .filter(Boolean)
+      .map(id => String(id));
+    if (!linkIds.length) return;
+    for (const linkId of linkIds) {
+      const resp = await apiFetch(
+        `/api/finance/payment-documents/${encodeURIComponent(linkId)}`,
+        { method: "DELETE" }
+      );
+      if (!resp.ok) {
+        const payload = await resp.json().catch(() => ({}));
+        throw new Error(payload?.message || payload?.error || "Failed to unlink document.");
+      }
+    }
+  }, []);
+
+  const handleLinkDocuments = useCallback(async () => {
+    if (!activeEvidenceRow || !selectedRequest?.id) return;
+    if (!selectedDocuments.length) {
+      setLinkError("Select at least one document to link.");
+      return;
+    }
+    setLinking(true);
+    setLinkError(null);
+    try {
+      if (replaceMode && activeEvidenceRow.documentLinks?.length) {
+        await deleteDocumentLinks(activeEvidenceRow.documentLinks);
+      }
+      for (const doc of selectedDocuments) {
+        const documentId = doc?.id || doc?.documentId;
+        if (!documentId) continue;
+        const resp = await apiFetch(
+          `/api/finance/payment-packets/${encodeURIComponent(selectedRequest.id)}/documents`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              documentId,
+              evidenceType: activeEvidenceRow.evidenceType,
+              lineId: activeEvidenceRow.lineId || null,
+              required: activeEvidenceRow.required,
+              received: true,
+            }),
+          }
+        );
+        if (!resp.ok) {
+          const payload = await resp.json().catch(() => ({}));
+          throw new Error(payload?.message || payload?.error || "Failed to link document.");
+        }
+      }
+      await reloadRequests();
+      setLinkModalOpen(false);
+    } catch (err) {
+      setLinkError(err?.message || "Failed to link documents.");
+    } finally {
+      setLinking(false);
+    }
+  }, [activeEvidenceRow, deleteDocumentLinks, replaceMode, reloadRequests, selectedDocuments, selectedRequest?.id]);
+
+  const handleUnlinkDocuments = useCallback(async () => {
+    if (!activeEvidenceRow?.documentLinks?.length) {
+      setUnlinkError("No documents are linked to this evidence requirement.");
+      return;
+    }
+    setUnlinking(true);
+    setUnlinkError(null);
+    try {
+      await deleteDocumentLinks(activeEvidenceRow.documentLinks);
+      await reloadRequests();
+      setUnlinkModalOpen(false);
+    } catch (err) {
+      setUnlinkError(err?.message || "Failed to remove documents.");
+    } finally {
+      setUnlinking(false);
+    }
+  }, [activeEvidenceRow, deleteDocumentLinks, reloadRequests]);
+
+  const handleEvidenceUpload = useCallback(async () => {
+    if (!activeEvidenceRow || !selectedRequest?.id) return;
+    const file = evidenceFiles?.[0] || null;
+    if (!file) {
+      setEvidenceError("Select a file to upload.");
+      return;
+    }
+    const applicantUserId = selectedRequest.applicantUserId;
+    if (!applicantUserId) {
+      setEvidenceError("This packet is missing an applicant user ID. Unable to upload evidence.");
+      return;
+    }
+    setEvidenceUploading(true);
+    setEvidenceError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const label = uploadLabel.trim() || activeEvidenceRow.evidenceType || file.name;
+      formData.append("label", label);
+      if (selectedRequest.caseId) {
+        formData.append("caseId", selectedRequest.caseId);
+      }
+      if (activeEvidenceRow.interventionId) {
+        formData.append("interventionId", activeEvidenceRow.interventionId);
+      } else if (selectedRequest.applicationId) {
+        formData.append("applicationId", selectedRequest.applicationId);
+      }
+      if (uploadDocumentType?.value) {
+        formData.append("documentType", uploadDocumentType.value);
+      }
+      const uploadResp = await apiFetch(
+        `/api/applicants/${encodeURIComponent(applicantUserId)}/documents/upload`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+      if (!uploadResp.ok) {
+        const payload = await uploadResp.json().catch(() => ({}));
+        const errorCode = payload?.error || null;
+        if (errorCode === "unsupported_file_type") {
+          throw new Error("That file type is not allowed. Please upload a PDF, JPG, PNG, BMP, or TIFF file.");
+        }
+        if (errorCode === "file_too_large") {
+          const maxBytes = payload?.maxBytes;
+          const maxMb = maxBytes ? Math.ceil(Number(maxBytes) / (1024 * 1024)) : null;
+          throw new Error(
+            maxMb
+              ? `The file is too large. The maximum supported size is ${maxMb} MB.`
+              : "The file is too large to upload."
+          );
+        }
+        if (errorCode === "invalid_applicant_id") {
+          throw new Error("Unable to determine which applicant this upload belongs to.");
+        }
+        if (errorCode === "application_required_for_document") {
+          throw new Error("Select an application or intervention for this document type before uploading.");
+        }
+        if (errorCode === "invalid_document_type") {
+          throw new Error("The selected document type is not valid or inactive.");
+        }
+        if (errorCode === "document_type_lookup_failed") {
+          throw new Error("Unable to validate the document type. Try again.");
+        }
+        throw new Error(payload?.message || "Failed to upload document.");
+      }
+      const uploadPayload = await uploadResp.json().catch(() => ({}));
+      const documentId = uploadPayload?.document?.id;
+      if (!documentId) {
+        throw new Error("Upload completed but document ID was not returned.");
+      }
+      const attachResp = await apiFetch(
+        `/api/finance/payment-packets/${encodeURIComponent(selectedRequest.id)}/documents`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            documentId,
+            evidenceType: activeEvidenceRow.evidenceType,
+            lineId: activeEvidenceRow.lineId || null,
+            required: activeEvidenceRow.required,
+            received: true,
+          }),
+        }
+      );
+      if (!attachResp.ok) {
+        const payload = await attachResp.json().catch(() => ({}));
+        throw new Error(payload?.message || payload?.error || "Failed to attach evidence.");
+      }
+      await reloadRequests();
+      setEvidenceModalOpen(false);
+      setActionStatus({ type: "success", message: "Evidence uploaded and attached." });
+    } catch (err) {
+      setEvidenceError(err?.message || "Failed to upload evidence.");
+    } finally {
+      setEvidenceUploading(false);
+    }
+  }, [
+    activeEvidenceRow,
+    evidenceFiles,
+    reloadRequests,
+    selectedRequest,
+    uploadDocumentType,
+    uploadLabel,
+  ]);
 
   const selectedLinePaymentType = useMemo(() => {
     const found = findOptionByValue(linePaymentTypeOptions, lineForm.paymentType);
@@ -339,81 +968,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const linePotEmptyMessage = lineRegionCode
     ? `No budget pots available for ${lineRegionCode}.`
     : "No budget pots available.";
-
-  const evidenceTargetOptions = useMemo(() => {
-    if (!selectedRequest) return [];
-    const options = [{ value: "baseline", label: "Baseline compliance (packet)" }];
-    (selectedRequest.lines || []).forEach(line => {
-      const lineLabel = line.paymentType ? `${line.paymentType}` : "Payment line";
-      options.push({
-        value: line.id,
-        label: `Line LINE-${line.id} • ${lineLabel}`,
-      });
-    });
-    return options;
-  }, [selectedRequest]);
-
-  useEffect(() => {
-    if (!evidenceTargetOptions.length) {
-      if (evidenceTarget !== null) setEvidenceTarget(null);
-      return;
-    }
-    if (!evidenceTarget || !evidenceTargetOptions.some(option => option.value === evidenceTarget.value)) {
-      setEvidenceTarget(evidenceTargetOptions[0]);
-    }
-  }, [evidenceTargetOptions, evidenceTarget]);
-
-  const activeEvidenceChecklist = useMemo(() => {
-    if (!selectedRequest || !evidenceTarget) return [];
-    if (evidenceTarget.value === "baseline") {
-      return selectedRequest.baselineEvidence || [];
-    }
-    const line = (selectedRequest.lines || []).find(entry => entry.id === evidenceTarget.value);
-    return line?.evidenceChecklist || [];
-  }, [selectedRequest, evidenceTarget]);
-
-  const evidenceTypeOptions = useMemo(() => {
-    const missing = [];
-    const other = [];
-    const seen = new Set();
-    activeEvidenceChecklist.forEach(item => {
-      if (!item?.type) return;
-      if (seen.has(item.type)) return;
-      seen.add(item.type);
-      const labelSuffix = item.required ? " (required)" : " (optional)";
-      const option = {
-        value: item.type,
-        label: `${item.type}${labelSuffix}`,
-        description: item.note || undefined,
-      };
-      if (item.required && !item.received) {
-        missing.push(option);
-      } else {
-        other.push(option);
-      }
-    });
-    const combined = [...missing, ...other];
-    if (!combined.length) {
-      return [{ value: "__custom", label: "Other (manual entry)" }];
-    }
-    return [...combined, { value: "__custom", label: "Other (manual entry)" }];
-  }, [activeEvidenceChecklist]);
-
-  useEffect(() => {
-    if (!evidenceTypeOptions.length) {
-      if (evidenceTypeOption !== null) setEvidenceTypeOption(null);
-      return;
-    }
-    if (!evidenceTypeOption || !evidenceTypeOptions.some(option => option.value === evidenceTypeOption.value)) {
-      setEvidenceTypeOption(evidenceTypeOptions[0]);
-    }
-  }, [evidenceTypeOptions, evidenceTypeOption]);
-
-  useEffect(() => {
-    if (evidenceTypeOption?.value !== "__custom" && customEvidenceType) {
-      setCustomEvidenceType("");
-    }
-  }, [evidenceTypeOption, customEvidenceType]);
 
   useEffect(() => {
     if (!lineModalOpen || linePotOptions.length || linePotLoading) return;
@@ -468,10 +1022,34 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       const label = packetStatusMeta[normalizePacketStatusKey(status)]?.label || status;
       setActionStatus({ type: "success", message: `Packet updated: ${label}.` });
     } catch (err) {
-      const detailMessage = formatEvidenceMissingDetails(err?.details || err?.payload?.details);
+      const details = err?.details || err?.payload?.details;
+      const policySummaries = formatPolicyViolationDetails(details) || [];
+      const evidenceSummary = formatEvidenceMissingDetails(details);
+      const blockerSummaries = [
+        ...policySummaries,
+        ...(evidenceSummary ? [evidenceSummary] : []),
+      ].filter(Boolean);
+      if (blockerSummaries.length) {
+        const statusKey = normalizePacketStatusKey(status);
+        const heading = statusKey === "submitted" ? "Submission blocked" : "Update blocked";
+        setActionStatus({
+          type: "error",
+          message: (
+            <SpaceBetween size="xs">
+              <Box variant="strong">{heading}:</Box>
+              {blockerSummaries.map((summary, index) => (
+                <Box key={`${summary}-${index}`} variant="p">
+                  {summary}
+                </Box>
+              ))}
+            </SpaceBetween>
+          ),
+        });
+        return;
+      }
       setActionStatus({
         type: "error",
-        message: detailMessage || err?.message || "Failed to update packet status.",
+        message: err?.message || "Failed to update packet status.",
       });
     }
   };
@@ -483,6 +1061,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setRecurringEndDate(selectedLine.servicePeriodEnd || "");
     setRecurringPeriod("monthly");
     setRecurringOccurrences("");
+    setRecurringAmountMode("split_total");
     setRecurringError(null);
     setRecurringModalOpen(true);
   };
@@ -513,6 +1092,9 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         startDate: recurringStartDate,
         endDate: recurringEndDate || undefined,
         occurrences: occurrencesValue || undefined,
+        amountMode: recurringAmountMode,
+        totalAmount: recurringAmountMode === "split_total" ? selectedLine.amount : undefined,
+        amount: recurringAmountMode === "repeat_amount" ? selectedLine.amount : undefined,
       });
       setRecurringModalOpen(false);
       setActionStatus({ type: "success", message: "Recurring payment lines generated." });
@@ -520,131 +1102,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setRecurringError(err?.message || "Failed to generate recurring lines.");
     } finally {
       setRecurringSubmitting(false);
-    }
-  };
-
-  const openEvidenceModal = () => {
-    if (!canUploadEvidence) return;
-    setEvidenceError(null);
-    setEvidenceFiles([]);
-    setEvidenceUploading(false);
-    setEvidenceModalOpen(true);
-  };
-
-  const resolveEvidenceTypeValue = () => {
-    if (!evidenceTypeOption) return "";
-    if (evidenceTypeOption.value === "__custom") {
-      return customEvidenceType.trim();
-    }
-    return String(evidenceTypeOption.value).trim();
-  };
-
-  const handleEvidenceUpload = async () => {
-    if (!selectedRequest) return;
-    const file = evidenceFiles?.[0] || null;
-    if (!file) {
-      setEvidenceError("Select a file to upload.");
-      return;
-    }
-    const evidenceType = resolveEvidenceTypeValue();
-    if (!evidenceType) {
-      setEvidenceError("Select an evidence type.");
-      return;
-    }
-    const applicantUserId = selectedRequest.applicantUserId;
-    if (!applicantUserId) {
-      setEvidenceError("This packet is missing an applicant user ID. Unable to upload evidence.");
-      return;
-    }
-    setEvidenceUploading(true);
-    setEvidenceError(null);
-    try {
-      const targetValue = evidenceTarget?.value || "baseline";
-      const targetLine =
-        targetValue !== "baseline"
-          ? (selectedRequest.lines || []).find(entry => entry.id === targetValue)
-          : null;
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("label", evidenceType);
-      if (selectedRequest.caseId) {
-        formData.append("caseId", selectedRequest.caseId);
-      }
-      if (selectedRequest.applicationId) {
-        formData.append("applicationId", selectedRequest.applicationId);
-      }
-      const interventionId = targetLine?.interventionId || selectedRequest.interventionId;
-      if (interventionId) {
-        formData.append("interventionId", interventionId);
-      }
-      const uploadResp = await apiFetch(
-        `/api/applicants/${encodeURIComponent(applicantUserId)}/documents/upload`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
-      if (!uploadResp.ok) {
-        const payload = await uploadResp.json().catch(() => ({}));
-        throw new Error(payload?.message || payload?.error || `Upload failed (${uploadResp.status})`);
-      }
-      const uploadPayload = await uploadResp.json().catch(() => ({}));
-      const documentId = uploadPayload?.document?.id;
-      if (!documentId) {
-        throw new Error("Upload completed but document ID was not returned.");
-      }
-      const matchedEvidence = activeEvidenceChecklist.find(item => item.type === evidenceType);
-      const requiredFlag = matchedEvidence?.required ?? false;
-      const attachResp = await apiFetch(
-        `/api/finance/payment-packets/${encodeURIComponent(selectedRequest.id)}/documents`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            documentId,
-            evidenceType,
-            lineId: targetLine?.id || null,
-            required: requiredFlag,
-            received: true,
-          }),
-        }
-      );
-      if (!attachResp.ok) {
-        const payload = await attachResp.json().catch(() => ({}));
-        throw new Error(payload?.message || payload?.error || `Attach failed (${attachResp.status})`);
-      }
-      await reloadRequests();
-      setEvidenceModalOpen(false);
-      setActionStatus({ type: "success", message: "Evidence uploaded and attached." });
-    } catch (err) {
-      setEvidenceError(err?.message || "Failed to upload evidence.");
-    } finally {
-      setEvidenceUploading(false);
-    }
-  };
-
-  const handleAddNote = async () => {
-    if (!selectedRequest?.id) return;
-    const message = noteText.trim();
-    if (!message) {
-      setNoteError("Enter a note before sending.");
-      return;
-    }
-    setNoteSubmitting(true);
-    setNoteError(null);
-    try {
-      await addCommunication({
-        packetId: selectedRequest.id,
-        channel: "internal",
-        body: message,
-        subject: "Internal note",
-        direction: "outbound",
-      });
-      setNoteText("");
-    } catch (err) {
-      setNoteError(err?.message || "Failed to add note.");
-    } finally {
-      setNoteSubmitting(false);
     }
   };
 
@@ -691,6 +1148,12 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       invoiceReferenceNumber: selectedLine.invoiceReferenceNumber || "",
     });
     setLineModalOpen(true);
+  };
+
+  const openDeleteLineModal = () => {
+    if (!selectedLine || !canEditPacketLines) return;
+    setDeleteLineError(null);
+    setDeleteLineModalOpen(true);
   };
 
   useEffect(() => {
@@ -777,6 +1240,21 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     }
   };
 
+  const handleDeleteLine = async () => {
+    if (!selectedLine || !canEditPacketLines) return;
+    setDeleteLineSubmitting(true);
+    setDeleteLineError(null);
+    try {
+      await deleteLine(selectedLine.id);
+      setDeleteLineModalOpen(false);
+      setActionStatus({ type: "success", message: `Line ${selectedLine.id} deleted.` });
+    } catch (err) {
+      setDeleteLineError(err?.message || "Failed to delete payment line.");
+    } finally {
+      setDeleteLineSubmitting(false);
+    }
+  };
+
   const lineColumns = [
     {
       id: "id",
@@ -846,14 +1324,103 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       cell: item => item.potName,
     },
   ];
+  const buildEvidenceActionItems = item => {
+    const hasDocuments = (item.documentLinks?.length || 0) > 0;
+    const canEdit = canUploadEvidence;
+    return [
+      { id: "view", text: "View documents", disabled: !hasDocuments },
+      { id: "link", text: "Link existing documents", disabled: !canEdit },
+      { id: "upload", text: "Upload new document", disabled: !canEdit },
+      { id: "replace", text: "Replace linked documents", disabled: !canEdit || !hasDocuments },
+      { id: "unlink", text: "Remove linked documents", disabled: !canEdit || !hasDocuments },
+    ];
+  };
+  const evidenceDocumentColumns = [
+    {
+      id: "scope",
+      header: "Scope",
+      cell: item => item.scope,
+    },
+    {
+      id: "evidence",
+      header: "Evidence",
+      cell: item => (
+        <SpaceBetween size="xs">
+          <Box variant="p">{item.evidence}</Box>
+          {item.notes ? (
+            <Box variant="small" color="text-body-secondary">
+              {item.notes}
+            </Box>
+          ) : null}
+        </SpaceBetween>
+      ),
+    },
+    {
+      id: "status",
+      header: "Status",
+      cell: item => (
+        <StatusIndicator type={item.status.indicator}>
+          {item.status.label}
+        </StatusIndicator>
+      ),
+    },
+    {
+      id: "documents",
+      header: "Documents",
+      cell: item => (item.documents?.length ? item.documents.join(", ") : "-"),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      cell: item => {
+        const actionItems = buildEvidenceActionItems(item);
+        const hasEnabled = actionItems.some(action => !action.disabled);
+        if (!hasEnabled) {
+          return (
+            <Box variant="small" color="text-body-secondary">
+              No actions
+            </Box>
+          );
+        }
+        return (
+          <ButtonDropdown
+            ariaLabel={`Actions for ${item.evidence}`}
+            items={actionItems}
+            expandToViewport
+            onItemClick={({ detail }) => handleEvidenceAction(detail.id, item)}
+          >
+            Actions
+          </ButtonDropdown>
+        );
+      },
+    },
+  ];
 
   const canSubmitPacket = packetStatusKey === "draft";
 
-  const formatOptionalText = value => {
-    if (value === null || value === undefined) return "-";
-    const trimmed = String(value).trim();
-    return trimmed ? trimmed : "-";
-  };
+  const activeEvidenceDocuments = activeEvidenceRow?.documentLinks ?? [];
+  const activeEvidenceContext = activeEvidenceRow
+    ? [activeEvidenceRow.evidence, activeEvidenceRow.scope].filter(Boolean).join(" • ")
+    : "";
+  const linkableDocumentsEmptyText = supportingDocuments.length
+    ? "No linkable documents available for this evidence requirement."
+    : "No supporting documents found for this applicant.";
+  const headerActions = selectedRequest ? (
+    <SpaceBetween direction="horizontal" size="xs">
+      <StatusIndicator type={packetStatusMeta[packetStatusKey].indicator}>
+        {packetStatusMeta[packetStatusKey].label}
+      </StatusIndicator>
+      {canSubmitPacket ? (
+        <Button
+          variant="primary"
+          onClick={() => handlePacketStatusChange("submitted")}
+          disabled={!selectedRequest?.id}
+        >
+          Submit to finance
+        </Button>
+      ) : null}
+    </SpaceBetween>
+  ) : undefined;
   const detailDescription =
     "Add payment lines, attach evidence, then submit to finance (submission emails finance and locks edits).";
   return (
@@ -863,6 +1430,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           variant="h2"
           info={infoLink}
           description={detailDescription}
+          actions={headerActions}
         >
           Payment packet detail
         </Header>
@@ -913,6 +1481,12 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                       >
                         Edit selected
                       </Button>
+                      <Button
+                        onClick={openDeleteLineModal}
+                        disabled={!canEditPacketLines || !selectedLine}
+                      >
+                        Delete selected
+                      </Button>
                     </SpaceBetween>
                   ) : undefined
                 }
@@ -925,50 +1499,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
 
           {selectedLine ? (
             <SpaceBetween size="m">
-              <ColumnLayout columns={2}>
-                <Container header={<Header variant="h3">Line</Header>}>
-                  <KeyValuePairs
-                    columns={1}
-                    items={[
-                      { label: "Line ID", value: selectedLine.id || "-" },
-                      { label: "Payment type", value: formatOptionalText(selectedLine.paymentType) },
-                      {
-                        label: "Payee",
-                        value: selectedLine.payeeName
-                          ? `${selectedLine.payeeName} (${selectedLine.payeeType || "-"})`
-                          : "-",
-                      },
-                      { label: "Budget pot", value: formatOptionalText(selectedLine.potName) },
-                    ]}
-                  />
-                </Container>
-                <Container header={<Header variant="h3">Status and amount</Header>}>
-                  <KeyValuePairs
-                    columns={1}
-                    items={[
-                      {
-                        label: "Status",
-                        value: (
-                          <StatusIndicator
-                            type={resolveLineStatusMeta(selectedLine, packetStatusKey).indicator}
-                          >
-                            {resolveLineStatusMeta(selectedLine, packetStatusKey).label}
-                          </StatusIndicator>
-                        ),
-                      },
-                      {
-                        label: "Amount",
-                        value: <Box variant="strong">{formatCurrency(selectedLine.amount)}</Box>,
-                      },
-                      {
-                        label: "Service period",
-                        value: showLineServicePeriod ? selectedLine.servicePeriodLabel : "-",
-                      },
-                      { label: "Stream", value: formatOptionalText(selectedLine.fundingStream) },
-                    ]}
-                  />
-                </Container>
-              </ColumnLayout>
               <SpaceBetween direction="horizontal" size="xs">
                 <Button onClick={openRecurringModal} disabled={!recurringEligible}>
                   Generate recurring lines
@@ -979,81 +1509,15 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             <Box variant="p">Select a payment line to view details.</Box>
           )}
 
-          <ExpandableSection headerText="Evidence checklist">
+          <ExpandableSection headerText="Evidence and documents">
             <SpaceBetween size="m">
-              <SpaceBetween size="xs">
-                <Box variant="awsui-key-label">Baseline compliance</Box>
-                {(selectedRequest.baselineEvidence ?? []).map(item => {
-                  const meta = buildEvidenceMeta(item);
-                  return (
-                    <SpaceBetween key={item.id || item.type} direction="horizontal" size="xs">
-                      <StatusIndicator type={meta.indicator}>{meta.label}</StatusIndicator>
-                      <Box variant="p">{item.type}</Box>
-                      {item.note ? <Box variant="p">{item.note}</Box> : null}
-                      {item.documentName ? <Box variant="p">{item.documentName}</Box> : null}
-                    </SpaceBetween>
-                  );
-                })}
-              </SpaceBetween>
-              <SpaceBetween size="xs">
-                <Box variant="awsui-key-label">Selected line evidence</Box>
-                {selectedLine?.evidenceChecklist?.map(item => {
-                  const meta = buildEvidenceMeta(item);
-                  return (
-                    <SpaceBetween key={item.id || item.type} direction="horizontal" size="xs">
-                      <StatusIndicator type={meta.indicator}>{meta.label}</StatusIndicator>
-                      <Box variant="p">{item.type}</Box>
-                      {item.note ? <Box variant="p">{item.note}</Box> : null}
-                      {item.documentName ? <Box variant="p">{item.documentName}</Box> : null}
-                    </SpaceBetween>
-                  );
-                })}
-              </SpaceBetween>
-              {canUploadEvidence ? (
-                <SpaceBetween size="xs">
-                  <Box variant="awsui-key-label">Upload evidence</Box>
-                  <Box variant="p">Attach required evidence before submitting to finance.</Box>
-                  <Button onClick={openEvidenceModal} disabled={!selectedRequest?.id}>
-                    Upload evidence
-                  </Button>
-                </SpaceBetween>
-              ) : null}
-            </SpaceBetween>
-          </ExpandableSection>
-
-          <ExpandableSection headerText="Notes">
-            <SpaceBetween size="m">
-              {noteError ? <Alert type="error">{noteError}</Alert> : null}
-              {internalNotes.length ? (
-                internalNotes.map(note => (
-                  <SpaceBetween key={note.id} size="xs">
-                    <Box variant="awsui-key-label">
-                      {note.sender || "Staff"} •{" "}
-                      {note.sentOn ? new Date(note.sentOn).toLocaleString() : "Unknown time"}
-                    </Box>
-                    <Box variant="p">{note.body || note.subject || "-"}</Box>
-                  </SpaceBetween>
-                ))
-              ) : (
-                <Box variant="p">No internal notes logged yet.</Box>
-              )}
-              <FormField
-                label="Add note"
-                description="Use this for internal context on the packet."
-              >
-                <Textarea
-                  value={noteText}
-                  onChange={({ detail }) => setNoteText(detail.value)}
-                  placeholder="e.g., Follow up on missing receipt."
-                />
-              </FormField>
-              <Button
-                onClick={handleAddNote}
-                loading={noteSubmitting}
-                disabled={noteSubmitting || !selectedRequest?.id}
-              >
-                Post note
-              </Button>
+              <Table
+                items={evidenceDocumentRows}
+                columnDefinitions={evidenceDocumentColumns}
+                trackBy="id"
+                variant="embedded"
+                empty={<Box padding="m">No evidence or documents attached.</Box>}
+              />
             </SpaceBetween>
           </ExpandableSection>
 
@@ -1068,38 +1532,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             </SpaceBetween>
           ) : null}
 
-          <SpaceBetween size="xs">
-            <Box variant="awsui-key-label">Notes</Box>
-            <Box variant="p">{selectedRequest.notes || "No notes provided."}</Box>
-          </SpaceBetween>
-
-          <SpaceBetween size="xs">
-            <Box variant="awsui-key-label">Documents</Box>
-            {(selectedRequest.documents ?? []).length ? (
-              selectedRequest.documents.map(document => (
-                <Link key={document.id} href="#">
-                  {document.name}
-                </Link>
-              ))
-            ) : (
-              <Box variant="p">No documents attached.</Box>
-            )}
-          </SpaceBetween>
-
-          <SpaceBetween direction="horizontal" size="xs">
-            <StatusIndicator type={packetStatusMeta[packetStatusKey].indicator}>
-              {packetStatusMeta[packetStatusKey].label}
-            </StatusIndicator>
-            {canSubmitPacket ? (
-              <Button
-                variant="primary"
-                onClick={() => handlePacketStatusChange("submitted")}
-                disabled={!selectedRequest?.id}
-              >
-                Submit to finance
-              </Button>
-            ) : null}
-          </SpaceBetween>
         </SpaceBetween>
       ) : (
         <Box variant="p">Select a payment packet from the queue to view its detail.</Box>
@@ -1264,6 +1696,43 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         </SpaceBetween>
       </Modal>
       <Modal
+        visible={deleteLineModalOpen}
+        onDismiss={() => {
+          if (deleteLineSubmitting) return;
+          setDeleteLineModalOpen(false);
+          setDeleteLineError(null);
+        }}
+        header="Delete payment line"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="link"
+              onClick={() => {
+                setDeleteLineModalOpen(false);
+                setDeleteLineError(null);
+              }}
+              disabled={deleteLineSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleDeleteLine}
+              loading={deleteLineSubmitting}
+            >
+              Delete line
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          {deleteLineError ? <Alert type="error">{deleteLineError}</Alert> : null}
+          <Box>
+            This will permanently delete line {selectedLine?.id || "?"} from the packet.
+          </Box>
+        </SpaceBetween>
+      </Modal>
+      <Modal
         visible={recurringModalOpen}
         onDismiss={() => {
           if (recurringSubmitting) return;
@@ -1301,6 +1770,19 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               {selectedLine.payeeName}
             </Box>
           ) : null}
+          <FormField
+            label="Amount strategy"
+            description="Split divides the template total across each occurrence."
+          >
+            <RadioGroup
+              value={recurringAmountMode}
+              onChange={({ detail }) => setRecurringAmountMode(detail.value)}
+              items={[
+                { value: "split_total", label: "Split total across occurrences" },
+                { value: "repeat_amount", label: "Repeat template amount each occurrence" },
+              ]}
+            />
+          </FormField>
           <FormField label="Recurrence period">
             <Select
               selectedOption={
@@ -1344,8 +1826,13 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           if (evidenceUploading) return;
           setEvidenceModalOpen(false);
           setEvidenceError(null);
+          setEvidenceFiles([]);
         }}
-        header="Upload evidence"
+        header={
+          activeEvidenceRow?.evidence
+            ? `Upload evidence for ${activeEvidenceRow.evidence}`
+            : "Upload evidence"
+        }
         footer={
           <SpaceBetween direction="horizontal" size="xs">
             <Button
@@ -1353,6 +1840,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               onClick={() => {
                 setEvidenceModalOpen(false);
                 setEvidenceError(null);
+                setEvidenceFiles([]);
               }}
               disabled={evidenceUploading}
             >
@@ -1370,40 +1858,254 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       >
         <SpaceBetween size="m">
           {evidenceError && <Alert type="error">{evidenceError}</Alert>}
-          <FormField label="Attach evidence to">
-            <Select
-              selectedOption={evidenceTarget}
-              options={evidenceTargetOptions}
-              onChange={({ detail }) => setEvidenceTarget(detail.selectedOption)}
-              placeholder="Select a target"
+          <Box variant="awsui-key-label">Evidence requirement</Box>
+          <Box variant="p">{activeEvidenceContext || "Evidence requirement not selected."}</Box>
+          <Box variant="small" color="text-body-secondary">
+            Uploads are saved to Supporting Documents and linked to this evidence requirement.
+          </Box>
+          <FormField label="Document label">
+            <Input
+              value={uploadLabel}
+              onChange={({ detail }) => setUploadLabel(detail.value)}
+              placeholder="e.g., Invoice or signed form"
             />
           </FormField>
-          <FormField label="Evidence type">
+          <FormField
+            label="Document type"
+            description="Used to categorize the document in the supporting documents library."
+          >
             <Select
-              selectedOption={evidenceTypeOption}
-              options={evidenceTypeOptions}
-              onChange={({ detail }) => setEvidenceTypeOption(detail.selectedOption)}
-              placeholder="Select evidence type"
+              selectedOption={uploadDocumentType}
+              options={uploadDocumentTypeOptions}
+              onChange={({ detail }) => setUploadDocumentType(detail.selectedOption || null)}
+              placeholder={documentTypesLoading ? "Loading types" : "Select document type"}
+              statusType={documentTypesLoading ? "loading" : "finished"}
+              empty="No document types available."
+              disabled={!uploadDocumentTypeOptions.length}
             />
           </FormField>
-          {evidenceTypeOption?.value === "__custom" ? (
-            <FormField label="Custom evidence type">
-              <Input
-                value={customEvidenceType}
-                onChange={({ detail }) => setCustomEvidenceType(detail.value)}
-                placeholder="Describe the evidence"
-              />
-            </FormField>
-          ) : null}
-          <FormField label="File" description="Upload supporting evidence (PDF, Word, image, or text).">
+          <FormField label="File" description="PDF, JPG, PNG, BMP, or TIFF.">
             <FileUpload
               value={evidenceFiles}
               onChange={({ detail }) => setEvidenceFiles(detail.value)}
               multiple={false}
-              constraintText="PDF, Word, Excel, text, PNG, JPG."
+              accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+              constraintText="PDF, JPG, PNG, BMP, or TIFF."
               loading={evidenceUploading}
             />
           </FormField>
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={linkModalOpen}
+        onDismiss={() => {
+          if (linking) return;
+          setLinkModalOpen(false);
+          setLinkError(null);
+          setSelectedDocuments([]);
+        }}
+        header={replaceMode ? "Replace linked documents" : "Link supporting documents"}
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="link"
+              onClick={() => {
+                setLinkModalOpen(false);
+                setLinkError(null);
+                setSelectedDocuments([]);
+              }}
+              disabled={linking}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleLinkDocuments}
+              loading={linking}
+              disabled={!selectedDocuments.length}
+            >
+              {replaceMode ? "Replace documents" : "Link documents"}
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="m">
+          {replaceMode ? (
+            <Alert type="info">
+              This will remove {activeEvidenceDocuments.length} linked document
+              {activeEvidenceDocuments.length === 1 ? "" : "s"} before attaching the selected items.
+            </Alert>
+          ) : null}
+          {supportingDocumentsError && <Alert type="error">{supportingDocumentsError}</Alert>}
+          {linkError && <Alert type="error">{linkError}</Alert>}
+          <Box variant="awsui-key-label">Evidence requirement</Box>
+          <Box variant="p">{activeEvidenceContext || "Evidence requirement not selected."}</Box>
+          {evidenceTypeFilters.length ? (
+            <Box variant="small" color="text-body-secondary">
+              Showing supporting documents that match {activeEvidenceRow?.evidenceType || "this evidence"} when
+              available.
+            </Box>
+          ) : null}
+          <Table
+            items={linkableDocuments}
+            trackBy="id"
+            selectionType="multi"
+            selectedItems={selectedDocuments}
+            onSelectionChange={({ detail }) => setSelectedDocuments(detail.selectedItems || [])}
+            columnDefinitions={[
+              {
+                id: "label",
+                header: "Document",
+                cell: item => resolveDocumentLabel(item),
+              },
+              {
+                id: "type",
+                header: "Type",
+                cell: item =>
+                  resolveDocumentTypeLabel(
+                    item.documentCategory ||
+                      item.document_category ||
+                      item.category ||
+                      item.document_type
+                  ),
+              },
+              {
+                id: "uploaded",
+                header: "Uploaded",
+                cell: item =>
+                  formatShortDate(item.uploaded_at || item.created_at || item.updated_at),
+              },
+              {
+                id: "view",
+                header: "Preview",
+                cell: item => {
+                  const documentId = item?.id || item?.documentId;
+                  const isViewing = documentId && viewingDocumentId === documentId;
+                  return (
+                    <Button
+                      variant="inline-link"
+                      onClick={() => handleOpenDocument(documentId)}
+                      disabled={!documentId}
+                      loading={isViewing}
+                    >
+                      View
+                    </Button>
+                  );
+                },
+              },
+            ]}
+            loading={supportingDocumentsLoading}
+            loadingText="Loading supporting documents"
+            empty={<Box padding="m">{linkableDocumentsEmptyText}</Box>}
+          />
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={viewModalOpen}
+        onDismiss={() => {
+          setViewModalOpen(false);
+          setViewError(null);
+        }}
+        header="Linked documents"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="primary"
+              onClick={() => {
+                setViewModalOpen(false);
+                setViewError(null);
+              }}
+            >
+              Close
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="m">
+          {viewError && <Alert type="error">{viewError}</Alert>}
+          <Box variant="awsui-key-label">Evidence requirement</Box>
+          <Box variant="p">{activeEvidenceContext || "Evidence requirement not selected."}</Box>
+          <Table
+            items={activeEvidenceDocuments}
+            trackBy="id"
+            columnDefinitions={[
+              {
+                id: "name",
+                header: "Document",
+                cell: item => resolveDocumentLabel(item),
+              },
+              {
+                id: "open",
+                header: "Action",
+                cell: item => {
+                  const documentId = item?.documentId || item?.id;
+                  const isViewing = documentId && viewingDocumentId === documentId;
+                  return (
+                    <Button
+                      variant="inline-link"
+                      onClick={() => handleOpenDocument(documentId)}
+                      disabled={!documentId}
+                      loading={isViewing}
+                    >
+                      View
+                    </Button>
+                  );
+                },
+              },
+            ]}
+            empty={<Box padding="m">No documents linked to this evidence requirement.</Box>}
+          />
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={unlinkModalOpen}
+        onDismiss={() => {
+          if (unlinking) return;
+          setUnlinkModalOpen(false);
+          setUnlinkError(null);
+        }}
+        header="Remove linked documents"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="link"
+              onClick={() => {
+                setUnlinkModalOpen(false);
+                setUnlinkError(null);
+              }}
+              disabled={unlinking}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleUnlinkDocuments}
+              loading={unlinking}
+              disabled={!activeEvidenceDocuments.length}
+            >
+              Remove links
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="m">
+          {unlinkError && <Alert type="error">{unlinkError}</Alert>}
+          <Box variant="awsui-key-label">Evidence requirement</Box>
+          <Box variant="p">{activeEvidenceContext || "Evidence requirement not selected."}</Box>
+          <Box variant="small" color="text-body-secondary">
+            Removing links does not delete files from Supporting Documents.
+          </Box>
+          {activeEvidenceDocuments.length ? (
+            <SpaceBetween size="xs">
+              {activeEvidenceDocuments.map(doc => (
+                <Box key={doc?.id || doc?.documentId || resolveDocumentLabel(doc)} variant="p">
+                  {resolveDocumentLabel(doc)}
+                </Box>
+              ))}
+            </SpaceBetween>
+          ) : (
+            <Box variant="p">No documents are currently linked.</Box>
+          )}
         </SpaceBetween>
       </Modal>
     </BoardItem>

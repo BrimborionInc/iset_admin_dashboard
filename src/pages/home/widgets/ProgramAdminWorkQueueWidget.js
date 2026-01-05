@@ -47,19 +47,19 @@ export const PROGRAM_ADMIN_BUCKETS = [
     description: 'New interventions proposed for existing clients needing a decision.'
   },
   {
-    id: 'agreement-package-issues',
-    label: 'Agreement Package Issues',
-    description: 'Agreement packages that failed validation or need corrections.'
+    id: 'payments-issues',
+    label: 'Payments Issues',
+    description: 'Interventions with missing evidence or needing attention.'
   },
   {
-    id: 'reporting-ilmp-issues',
-    label: 'Reporting / ILMP Issues',
-    description: 'Reporting deliverables or ILMP checks that are blocked.'
+    id: 'ilmp-issues',
+    label: 'ILMP Issues',
+    description: 'Client files with issues blocking ESDC submission.'
   },
   {
-    id: 'stuck-files',
-    label: 'Stuck Files',
-    description: 'Uploads or sync jobs that need intervention.'
+    id: 'marked-for-closure',
+    label: 'Marked for Closure',
+    description: 'Where the applicant has not responded to a request for information.'
   },
   {
     id: 'overdue',
@@ -164,50 +164,50 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
     workspacePath: '/iset/cases'
   },
   {
-    id: 'AG-220',
-    title: 'Agreement · Missing signature (APP-1866)',
-    bucketId: 'agreement-package-issues',
-    type: 'Agreement',
+    id: 'PAY-220',
+    title: 'Payment issue · Missing evidence (INT-1866)',
+    bucketId: 'payments-issues',
+    type: 'Payment',
     applicant: 'Summit Project Management',
     region: 'Central',
-    owner: 'Agreements Desk',
-    status: 'Needs correction',
+    owner: 'Payments Desk',
+    status: 'Missing evidence',
     dueDate: '2025-02-23',
     submittedAt: '2025-02-07',
-    summary: 'Agreement package returned by signatory; signature mismatch.'
+    summary: 'Intervention payment on hold pending receipts and attendance confirmation.'
   },
   {
     id: 'ILMP-77',
-    title: 'ILMP · Validation failure',
-    bucketId: 'reporting-ilmp-issues',
+    title: 'ILMP · ESDC submission blocked',
+    bucketId: 'ilmp-issues',
     type: 'Reporting',
     applicant: 'Northland Indigenous Training',
     region: 'North',
     owner: 'Program Ops',
-    status: 'Validation failed',
+    status: 'Blocked',
     dueDate: '2025-02-25',
     submittedAt: '2025-02-05',
-    summary: 'ILMP submission failed required field checks.'
+    summary: 'Client file missing participation update required for ILMP submission.'
   },
   {
-    id: 'FILE-109',
-    title: 'File · Intake upload stalled',
-    bucketId: 'stuck-files',
-    type: 'File',
+    id: 'CLS-109',
+    title: 'Closure · No response after info request (APP-2071)',
+    bucketId: 'marked-for-closure',
+    type: 'Closure',
     applicant: 'Community Training Hub',
     region: 'Fraser',
-    owner: 'Tech Ops',
-    status: 'Stuck in processing',
+    owner: 'Regional Manager',
+    status: 'Awaiting response',
     dueDate: '2025-02-17',
     submittedAt: '2025-02-11',
-    summary: 'Document upload has been processing for more than 2 hours.'
+    summary: 'Applicant unresponsive after multiple requests; flagged for closure review.'
   }
 ];
 
 const DISABLED_BUCKET_IDS = new Set([
-  'agreement-package-issues',
-  'reporting-ilmp-issues',
-  'stuck-files'
+  'payments-issues',
+  'ilmp-issues',
+  'marked-for-closure'
 ]);
 
 const getWorkspacePath = item => {

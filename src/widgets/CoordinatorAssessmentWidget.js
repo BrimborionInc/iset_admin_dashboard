@@ -5388,10 +5388,10 @@ const CoordinatorAssessmentWidget = forwardRef(
         >
           <SpaceBetween size="s">
             <Box>
-              Thank you for declaring a potential conflict of interest. You won’t be able to assess this case while the conflict is reviewed.
+              Thank you for declaring a potential conflict of interest. This conflict has been escalated to your manager for resolution.
             </Box>
             <Box>
-              A Program Administrator or Regional Manager will review and reassign the case as needed. You’ll be redirected to your homepage now.
+              If you are cleared to work on the application you will receive a notification, or the application may be reassigned. You will be redirected to your homepage now.
             </Box>
           </SpaceBetween>
         </Modal>
