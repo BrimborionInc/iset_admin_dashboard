@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ISET Financial Overview</title>
+  <style>
+    :root {
+      --ink: #111111;
+      --muted: #555555;
+      --line: #666666;
+      --sans: Arial, Helvetica, sans-serif;
+      --bg: #f0f4f8;
+    }
+
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: var(--sans);
+      color: var(--ink);
+      background: #ffffff;
+      font-size: 10.5px;
+      line-height: 1.2;
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 8px auto;
+      padding: 0 10px 18px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo {
+      height: 32px;
+      width: auto;
+    }
+
+    .title-block {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+
+    .confidential {
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .meta .field label {
+      display: block;
+      font-size: 9.5px;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+
+    .meta .field input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid var(--line);
+      padding: 2px 4px;
+      font-size: 10px;
+    }
+
+    .section-title {
+      margin-top: 8px;
+      background: var(--bg);
+      font-weight: 700;
+      text-align: center;
+      padding: 4px 6px;
+      border: 1px solid var(--line);
+      border-bottom: none;
+      letter-spacing: 0.3px;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .panel-title {
+      font-weight: 700;
+      font-size: 10px;
+      padding: 3px 4px;
+      border: 1px solid var(--line);
+      border-bottom: none;
+      background: #f7f9fb;
+      text-align: center;
+    }
+
+    table.form-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      border: 1px solid var(--line);
+    }
+
+    table.form-table td {
+      border: 1px solid var(--line);
+      padding: 4px;
+      vertical-align: top;
+    }
+
+    table.form-table.compact td {
+      padding: 3px;
+    }
+
+    .label {
+      font-weight: 700;
+      font-size: 9.5px;
+    }
+
+    input[type="text"],
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #999999;
+      padding: 2px 4px;
+      font-size: 10px;
+      background: #ffffff;
+    }
+
+    textarea {
+      min-height: 28px;
+      resize: none;
+    }
+
+    .check-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 2px 8px;
+    }
+
+    .check-grid.wide {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+    }
+
+    .check input {
+      width: 11px;
+      height: 11px;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="header-left">
+        <img class="logo" data-field="nwac_logo" alt="NWAC logo" />
+        <div class="title-block">
+          <div class="title">ISET Financial Overview</div>
+          <div class="confidential">CONFIDENTIAL</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div class="field">
+        <label>Reference #</label>
+        <input type="text" data-field="reference_number" />
+      </div>
+      <div class="field">
+        <label>Applicant Name</label>
+        <input type="text" data-field="applicant_name" />
+      </div>
+      <div class="field">
+        <label>Received At</label>
+        <input type="text" data-field="received_at" />
+      </div>
+    </div>
+
+    <div class="section-title">HOUSEHOLD FINANCES</div>
+    <div class="two-col">
+      <div>
+        <div class="panel-title">Household income (monthly)</div>
+        <table class="form-table compact">
+          <tr><td class="label">Employment income</td><td><input type="text" data-field="income_employment" /></td></tr>
+          <tr><td class="label">Spousal income</td><td><input type="text" data-field="income_spousal" /></td></tr>
+          <tr><td class="label">Social assistance</td><td><input type="text" data-field="income_social_assist" /></td></tr>
+          <tr><td class="label">Child support</td><td><input type="text" data-field="income_child_support" /></td></tr>
+          <tr><td class="label">Canada Child Benefit</td><td><input type="text" data-field="income_child_benefit" /></td></tr>
+          <tr><td class="label">Jordan's Principle</td><td><input type="text" data-field="income_jordans" /></td></tr>
+          <tr><td class="label">Band funding</td><td><input type="text" data-field="income_band_funding" /></td></tr>
+          <tr><td class="label">Alimony / spousal support</td><td><input type="text" data-field="income_alimony" /></td></tr>
+          <tr><td class="label">Other income (amount)</td><td><input type="text" data-field="income_other_amount" /></td></tr>
+          <tr><td class="label">Total monthly income</td><td><input type="text" data-field="income_total" /></td></tr>
+        </table>
+      </div>
+      <div>
+        <div class="panel-title">Household expenses (monthly)</div>
+        <table class="form-table compact">
+          <tr><td class="label">Rent / Mortgage</td><td><input type="text" data-field="expenses_rent" /></td></tr>
+          <tr><td class="label">Groceries</td><td><input type="text" data-field="expenses_groceries" /></td></tr>
+          <tr><td class="label">Electricity/Hydro</td><td><input type="text" data-field="expenses_electricity" /></td></tr>
+          <tr><td class="label">Home Heating</td><td><input type="text" data-field="expenses_heating" /></td></tr>
+          <tr><td class="label">Water</td><td><input type="text" data-field="expenses_water" /></td></tr>
+          <tr><td class="label">Sewer / Wastewater</td><td><input type="text" data-field="expenses_sewerage" /></td></tr>
+          <tr><td class="label">Waste Management</td><td><input type="text" data-field="expenses_garbage" /></td></tr>
+          <tr><td class="label">Bus pass</td><td><input type="text" data-field="expenses_bus_pass" /></td></tr>
+          <tr><td class="label">Parking charges</td><td><input type="text" data-field="expenses_parking" /></td></tr>
+          <tr><td class="label">Other expenses total</td><td><input type="text" data-field="expenses_other_total" /></td></tr>
+          <tr><td class="label">Total monthly expenses</td><td><input type="text" data-field="expenses_total" /></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="section-title">DETAILS</div>
+    <table class="form-table">
+      <tr>
+        <td class="label">Other income source(s)</td>
+        <td colspan="3"><textarea data-field="income_other_sources"></textarea></td>
+      </tr>
+      <tr>
+        <td class="label">Social Assistance</td>
+        <td>
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" data-field="social_assistance_yes" />Yes</label>
+            <label class="check"><input type="checkbox" data-field="social_assistance_no" />No</label>
+          </div>
+        </td>
+        <td class="label">Top-up amount</td>
+        <td><input type="text" data-field="top_up_amount" /></td>
+      </tr>
+      <tr>
+        <td class="label">Childcare funding status</td>
+        <td colspan="3">
+          <div class="check-grid wide">
+            <label class="check"><input type="checkbox" data-field="childcare_ei_crf" />EI/CRF</label>
+            <label class="check"><input type="checkbox" data-field="childcare_provincial" />Provincial funding/subsidy</label>
+            <label class="check"><input type="checkbox" data-field="childcare_fnicci" />FNICCI</label>
+            <label class="check"><input type="checkbox" data-field="childcare_no_funding" />No funding received</label>
+            <label class="check"><input type="checkbox" data-field="childcare_daycare_unavailable" />Daycare not available</label>
+            <label class="check"><input type="checkbox" data-field="childcare_family" />Assisted by family</label>
+            <label class="check"><input type="checkbox" data-field="childcare_self_funded" />Self-funded</label>
+            <label class="check"><input type="checkbox" data-field="childcare_not_applicable" />Not applicable</label>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Transport expense categories</td>
+        <td colspan="3">
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" data-field="transport_bus_pass" />Bus pass</label>
+            <label class="check"><input type="checkbox" data-field="transport_parking" />Parking (school)</label>
+            <label class="check"><input type="checkbox" data-field="transport_mileage" />Mileage (home to school)</label>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Mileage (km/month)</td>
+        <td><input type="text" data-field="transport_mileage_km" /></td>
+        <td class="label">Student loans or grants?</td>
+        <td>
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" data-field="loan_grant_yes" />Yes</label>
+            <label class="check"><input type="checkbox" data-field="loan_grant_no" />No</label>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Other expenses (list)</td>
+        <td colspan="3"><textarea data-field="expenses_other_list"></textarea></td>
+      </tr>
+      <tr>
+        <td class="label">Student loan/grant details</td>
+        <td colspan="3"><textarea data-field="loan_grant_details"></textarea></td>
+      </tr>
+    </table>
+  </div>
+</body>
+</html>

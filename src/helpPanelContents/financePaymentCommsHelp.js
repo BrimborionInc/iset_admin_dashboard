@@ -7,15 +7,15 @@ const FinancePaymentCommsHelp = () => (
       <strong>Purpose</strong>
       <p>
         Capture the audit trail of packet-related emails, templates, and attachments so Finance can prove when requests
-        and confirmations were exchanged.
+        were sent.
       </p>
     </Box>
     <Box>
       <strong>What shows up here</strong>
       <ul>
-        <li>Emails sent from the packet detail view (Send to finance).</li>
+        <li>Emails sent when packets are submitted to finance.</li>
         <li>Manually logged outbound or inbound communications.</li>
-        <li>Attachment counts for evidence bundles and confirmations.</li>
+        <li>Attachment counts for evidence bundles.</li>
       </ul>
     </Box>
     <Box>
@@ -23,7 +23,7 @@ const FinancePaymentCommsHelp = () => (
       <ul>
         <li>Filter or search the table by packet ID, subject, or recipient to locate past messages.</li>
         <li>Log manual communications when offline channels (phone, Teams) generate follow-up actions.</li>
-        <li>Review template usage to ensure standard request/confirmation wording is applied consistently.</li>
+        <li>Review template usage to ensure standard request wording is applied consistently.</li>
       </ul>
     </Box>
     <Box>
@@ -36,6 +36,6 @@ const FinancePaymentCommsHelp = () => (
 );
 
 FinancePaymentCommsHelp.aiContext =
-  "Explain the payment communications log: automatic email entries from Send to finance, manual log entries, filtering by packet/subject/recipient, and how templates/attachments support audit trails.";
+  "Explain the payment communications log: automatic email entries from packet submission, manual log entries, filtering by packet/subject/recipient, and how attachments support audit trails.";
 
 export default FinancePaymentCommsHelp;

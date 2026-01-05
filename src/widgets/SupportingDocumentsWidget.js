@@ -56,6 +56,12 @@ const DOCUMENT_TYPE_OPTIONS_FALLBACK = [
   { value: 'assessment_denial_letter', label: 'Assessment denial letter', scope: 'application' },
   { value: 'funding_agreement', label: 'Funding agreement', scope: 'application' },
   { value: 'attendance_form', label: 'Attendance form', scope: 'application' },
+  { value: 'alternate_payee_letter', label: 'Alternate payee letter', scope: 'application' },
+  { value: 'institution_letter', label: 'Institution letter', scope: 'application' },
+  { value: 'equipment_quote', label: 'Equipment quote', scope: 'application' },
+  { value: 'employer_duties_letter', label: 'Employer duties letter', scope: 'application' },
+  { value: 'employer_offer_letter_after_subsidy', label: 'Employer offer letter after subsidy', scope: 'application' },
+  { value: 'wage_plan', label: 'Wage plan / MERCs schedule', scope: 'application' },
   { value: 'receipt', label: 'Receipt', scope: 'application' },
   { value: 'voided_cheque', label: 'Voided cheque', scope: 'client' }
 ];

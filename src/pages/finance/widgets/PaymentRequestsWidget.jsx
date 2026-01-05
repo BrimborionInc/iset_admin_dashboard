@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
   Header,
@@ -22,16 +22,40 @@ import {
   DatePicker,
   Autosuggest,
   Alert,
+  Checkbox,
 } from "@cloudscape-design/components";
 import { apiFetch } from "../../../auth/apiClient";
 import { boardItemI18nStrings } from "./common";
 import { usePaymentsData } from "./PaymentsDataContext.jsx";
 import { PAYMENT_TYPE_OPTIONS, PAYEE_TYPE_OPTIONS, findOptionByValue } from "./paymentOptions";
+import useCurrentUser from "../../../hooks/useCurrentUser";
+import { toCanonicalRole } from "../../../context/RoleMatrixContext";
 
-const COLUMN_WIDTHS_STORAGE_KEY = "finance-payments-requests-widths-v2";
-const PREFERENCES_STORAGE_KEY = "finance-payments-requests-preferences-v2";
+const COLUMN_WIDTHS_STORAGE_KEY = "finance-payments-requests-widths-v3";
+const PREFERENCES_STORAGE_KEY = "finance-payments-requests-preferences-v3";
 const DEFAULT_PAGE_SIZE = 10;
 const CASE_SEARCH_MIN_CHARS = 2;
+const BLOCKED_INTERVENTION_STATUSES = new Set([
+  "draft",
+  "planned",
+  "submitted",
+  "in_review",
+  "changes_requested",
+  "cancelled",
+]);
+const AWAITING_SUBMISSION_STATUSES = new Set(["draft", "returned"]);
+
+const normalizeInterventionCodeValue = value => {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return String(Math.trunc(numeric));
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const digits = trimmed.replace(/[^\d]/g, "");
+  if (!digits) return null;
+  const parsed = Number.parseInt(digits, 10);
+  return Number.isFinite(parsed) ? String(parsed) : null;
+};
 
 const EMPTY_CREATE_FORM = {
   caseSearch: "",
@@ -50,43 +74,81 @@ const EMPTY_CREATE_FORM = {
   servicePeriodEnd: "",
   requestedPaymentDate: "",
   invoiceReferenceNumber: "",
+  partialPayment: false,
+};
+
+const normalizeInterventionStatusValue = status => {
+  const value = String(status || "").trim().toLowerCase();
+  const aliases = {
+    planning: "planned",
+    "in-review": "in_review",
+    "in review": "in_review",
+    "changes-requested": "changes_requested",
+    "changes requested": "changes_requested",
+    active: "in_progress",
+    inprogress: "in_progress",
+    "in-progress": "in_progress",
+    progress: "in_progress",
+    "on-hold": "suspended",
+    on_hold: "suspended",
+    "ready-to-close": "ready_to_close",
+    "ready to close": "ready_to_close",
+    readyclose: "ready_to_close",
+    complete: "completed",
+    closed: "completed",
+    done: "completed",
+    finished: "completed",
+    canceled: "cancelled",
+  };
+  return aliases[value] || value;
+};
+
+const isBlockedInterventionStatus = status =>
+  BLOCKED_INTERVENTION_STATUSES.has(normalizeInterventionStatusValue(status));
+
+const requiresServicePeriod = paymentType =>
+  ["LivingAllowance", "WageSubsidyEmployer"].includes(paymentType);
+
+const toNumberOrNull = value => {
+  if (value === null || typeof value === "undefined" || value === "") return null;
+  const numeric = Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const normalizePacketStatusKey = status => {
+  if (!status) return "draft";
+  const normalized = String(status).trim().toLowerCase();
+  if (normalized === "draft" || normalized === "returned") return "draft";
+  if (normalized === "cancelled") return "cancelled";
+  return "submitted";
 };
 
 const statusMeta = {
   draft: { label: "Draft", indicator: "pending" },
-  submitted: { label: "Submitted", indicator: "info" },
-  program_review: { label: "Program review", indicator: "info" },
-  returned: { label: "Returned", indicator: "warning" },
-  program_approved: { label: "Program approved", indicator: "info" },
-  finance_review: { label: "Finance review", indicator: "warning" },
-  finance_approved: { label: "Finance approved", indicator: "info" },
-  batched: { label: "Batched", indicator: "info" },
-  sent: { label: "Sent", indicator: "warning" },
-  confirmed: { label: "Confirmed", indicator: "success" },
-  closed: { label: "Closed", indicator: "success" },
-  on_hold: { label: "On hold", indicator: "error" },
+  submitted: { label: "Submitted to finance", indicator: "info" },
   cancelled: { label: "Cancelled", indicator: "error" },
 };
 
-const financeStatusOptions = [
+const simpleStatusOptions = [
   { value: "all", label: "All packets" },
-  { value: "finance_review", label: "Ready for finance review", statuses: ["finance_review"] },
-  { value: "finance_approved", label: "Ready for batching", statuses: ["finance_approved"] },
-  { value: "on_hold", label: "On hold", statuses: ["on_hold"] },
-  { value: "sent", label: "Sent awaiting confirmation", statuses: ["sent"] },
-  { value: "confirmed", label: "Confirmed / closed", statuses: ["confirmed", "closed"] },
-];
-
-const programStatusOptions = [
-  { value: "all", label: "All packets" },
-  { value: "draft", label: "My drafts / needs evidence", statuses: ["draft"] },
+  { value: "draft", label: "Drafts", statuses: ["draft", "returned"] },
   {
     value: "submitted",
-    label: "Submitted / in program review",
-    statuses: ["submitted", "program_review"],
+    label: "Submitted to finance",
+    statuses: [
+      "submitted",
+      "program_review",
+      "program_approved",
+      "finance_review",
+      "finance_approved",
+      "on_hold",
+      "batched",
+      "sent",
+      "confirmed",
+      "closed",
+    ],
   },
-  { value: "returned", label: "Returned", statuses: ["returned"] },
-  { value: "program_approved", label: "Program approved", statuses: ["program_approved"] },
+  { value: "cancelled", label: "Cancelled", statuses: ["cancelled"] },
 ];
 
 const formatCurrency = value =>
@@ -94,10 +156,13 @@ const formatCurrency = value =>
 
 const formatEvidenceSummary = summary => {
   if (!summary) return { label: "-", indicator: "info" };
-  if (summary.missing === 0) {
-    return { label: `${summary.verified}/${summary.required} verified`, indicator: "success" };
+  if (!summary.required) {
+    return { label: "No evidence required", indicator: "info" };
   }
-  return { label: `${summary.verified}/${summary.required} missing`, indicator: "warning" };
+  if (summary.missing === 0) {
+    return { label: `${summary.received}/${summary.required} received`, indicator: "success" };
+  }
+  return { label: `${summary.received}/${summary.required} missing`, indicator: "warning" };
 };
 
 const formatCaseClientName = row => {
@@ -142,7 +207,26 @@ const mapPotOption = pot => {
     value: String(pot?.id || pot?.value || ""),
     label,
     description: pot?.fundingSource || pot?.funding_source || undefined,
+    regions: Array.isArray(pot?.regions) ? pot.regions.filter(Boolean) : [],
   };
+};
+
+const resolveInterventionAmount = intervention => {
+  if (!intervention) return null;
+  const candidates = [
+    intervention.approvedAmount,
+    intervention.budgetAmount,
+    intervention.cost,
+    intervention.plannedCost,
+    intervention.amount,
+  ];
+  for (const candidate of candidates) {
+    const numeric = toNumberOrNull(candidate);
+    if (numeric !== null && numeric > 0) {
+      return Math.round(numeric * 100) / 100;
+    }
+  }
+  return null;
 };
 
 const columnDefinitions = [
@@ -166,14 +250,17 @@ const columnDefinitions = [
     cell: item => item.interventionName ?? "-",
   },
   {
-    id: "paymentTypes",
-    header: "Payment type",
-    cell: item => (item.paymentTypes?.length ? item.paymentTypes.join(", ") : "-"),
-  },
-  {
     id: "amount",
     header: "Amount",
-    cell: item => formatCurrency(item.totalAmount ?? 0),
+    cell: item => {
+      const totals = item.streamTotals || {};
+      return (
+        <SpaceBetween direction="horizontal" size="xs">
+          <Badge color="blue">CRF {formatCurrency(totals.CRF ?? 0)}</Badge>
+          <Badge color="grey">EI {formatCurrency(totals.EI ?? 0)}</Badge>
+        </SpaceBetween>
+      );
+    },
   },
   {
     id: "stream",
@@ -216,7 +303,8 @@ const columnDefinitions = [
     id: "status",
     header: "Status",
     cell: item => {
-      const meta = statusMeta[item.status] ?? { label: item.status, indicator: "info" };
+      const statusKey = normalizePacketStatusKey(item.status);
+      const meta = statusMeta[statusKey] ?? { label: statusKey, indicator: "info" };
       return <StatusIndicator type={meta.indicator}>{meta.label}</StatusIndicator>;
     },
   },
@@ -241,6 +329,11 @@ const columnDefinitions = [
     header: "Submitted",
     cell: item => item.submittedOn,
   },
+  {
+    id: "actions",
+    header: "Actions",
+    cell: item => item.actions ?? "-",
+  },
 ];
 
 const defaultPreferences = {
@@ -248,12 +341,12 @@ const defaultPreferences = {
   visibleColumns: [
     "id",
     "clientName",
-    "paymentTypes",
     "amount",
     "status",
     "reportingUnit",
     "evidence",
     "ageDays",
+    "actions",
   ],
 };
 
@@ -304,29 +397,55 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     selectedRequestId,
     selectRequest,
     createPacket,
+    deletePacket,
+    paymentTypeMappingLookup,
+    paymentTypeMappingLoading,
     loading,
     error,
   } = usePaymentsData();
+  const currentUser = useCurrentUser();
+  const canonicalRole = toCanonicalRole(currentUser?.role || "");
+  const isAdminRole =
+    canonicalRole === "System Administrator" || canonicalRole === "Program Administrator";
+  const lockedCaseId = metadata?.caseId ? String(metadata.caseId) : "";
+  const lockedCaseLabel =
+    metadata?.caseLabel || (lockedCaseId ? `Case ${lockedCaseId}` : "");
+  const isCaseLocked = Boolean(lockedCaseId);
   const isProgramView = metadata?.mode === "program";
+  const caseRegionCode = metadata?.caseRegionCode
+    ? String(metadata.caseRegionCode).trim().toUpperCase()
+    : null;
+  const preselectedInterventionId = metadata?.selectedInterventionId
+    ? String(metadata.selectedInterventionId)
+    : "";
 
   const statusOptions = useMemo(() => {
     if (Array.isArray(metadata?.statusOptions) && metadata.statusOptions.length) {
       return metadata.statusOptions;
     }
-    if (metadata?.mode === "program") {
-      return programStatusOptions;
-    }
-    return financeStatusOptions;
-  }, [metadata?.mode, metadata?.statusOptions]);
+    return simpleStatusOptions;
+  }, [metadata?.statusOptions]);
   const [statusFilter, setStatusFilter] = useState(statusOptions[0]);
   const [filteringText, setFilteringText] = useState("");
   const [columnWidths, setColumnWidths] = useState(() => loadColumnWidths());
   const [preferences, setPreferences] = useState(() => loadPreferences());
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [createForm, setCreateForm] = useState({ ...EMPTY_CREATE_FORM });
+  const defaultCreateForm = useMemo(
+    () => ({
+      ...EMPTY_CREATE_FORM,
+      caseSearch: isCaseLocked ? lockedCaseLabel : "",
+      caseId: isCaseLocked ? lockedCaseId : "",
+    }),
+    [isCaseLocked, lockedCaseId, lockedCaseLabel]
+  );
+  const [createForm, setCreateForm] = useState(() => ({ ...defaultCreateForm }));
   const [createError, setCreateError] = useState(null);
   const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
   const [ledgerExporting, setLedgerExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState(null);
   const [caseOptions, setCaseOptions] = useState([]);
@@ -335,11 +454,30 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   const [caseDetails, setCaseDetails] = useState(null);
   const [interventionOptions, setInterventionOptions] = useState([]);
   const [interventionsLoading, setInterventionsLoading] = useState(false);
+  const [interventionsBlockedCount, setInterventionsBlockedCount] = useState(0);
   const [regionOptions, setRegionOptions] = useState([]);
   const [regionsLoading, setRegionsLoading] = useState(false);
   const [potOptions, setPotOptions] = useState([]);
   const [potsLoading, setPotsLoading] = useState(false);
-
+  const managePaymentsSelectionRef = useRef(false);
+  const lastInterventionIdRef = useRef(null);
+  const resolveReportingUnitForPot = useCallback(
+    potId => {
+      if (!potId) return null;
+      const match = potOptions.find(option => option.value === String(potId)) || null;
+      const regions = Array.isArray(match?.regions)
+        ? match.regions.map(code => String(code).trim().toUpperCase()).filter(Boolean)
+        : [];
+      if (regions.length === 1) {
+        return regions[0];
+      }
+      if (caseRegionCode) {
+        return caseRegionCode;
+      }
+      return null;
+    },
+    [caseRegionCode, potOptions]
+  );
   useEffect(() => {
     if (!statusOptions.length) return;
     if (!statusFilter || !statusOptions.some(option => option.value === statusFilter.value)) {
@@ -382,13 +520,14 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   }, [createModalOpen, isProgramView, regionOptions.length, regionsLoading, potOptions.length, potsLoading]);
 
   const resetCreateForm = () => {
-    setCreateForm({ ...EMPTY_CREATE_FORM });
+    setCreateForm({ ...defaultCreateForm });
     setCreateError(null);
     setCaseOptions([]);
     setCaseDetails(null);
     setCaseDetailsLoading(false);
     setInterventionOptions([]);
     setInterventionsLoading(false);
+    setInterventionsBlockedCount(0);
   };
 
   const updateCreateForm = (key, value) => {
@@ -400,12 +539,170 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     setCreateModalOpen(true);
   };
 
+  const selectedInterventionOption = useMemo(
+    () => interventionOptions.find(option => option.value === createForm.interventionId) || null,
+    [interventionOptions, createForm.interventionId]
+  );
+  const selectedInterventionCode = useMemo(() => {
+    const raw =
+      selectedInterventionOption?.interventionCode ??
+      selectedInterventionOption?.code ??
+      selectedInterventionOption?.intervention_code ??
+      null;
+    return normalizeInterventionCodeValue(raw);
+  }, [selectedInterventionOption]);
+  const allowedPaymentTypes = useMemo(() => {
+    if (!selectedInterventionCode) return null;
+    if (!paymentTypeMappingLookup || typeof paymentTypeMappingLookup.has !== "function") return null;
+    if (!paymentTypeMappingLookup.has(selectedInterventionCode)) return null;
+    return paymentTypeMappingLookup.get(selectedInterventionCode);
+  }, [paymentTypeMappingLookup, selectedInterventionCode]);
+  const paymentTypeOptions = useMemo(() => {
+    if (!allowedPaymentTypes) return PAYMENT_TYPE_OPTIONS;
+    return PAYMENT_TYPE_OPTIONS.filter(option => allowedPaymentTypes.has(option.value));
+  }, [allowedPaymentTypes]);
+  const paymentTypeRestrictionError = useMemo(() => {
+    if (!allowedPaymentTypes) return null;
+    if (!createForm.paymentType) return null;
+    if (allowedPaymentTypes.has(createForm.paymentType)) return null;
+    return selectedInterventionCode
+      ? `Payment type is not allowed for intervention code ${selectedInterventionCode}.`
+      : "Payment type is not allowed for the selected intervention.";
+  }, [allowedPaymentTypes, createForm.paymentType, selectedInterventionCode]);
+  const paymentTypeEmptyMessage = useMemo(() => {
+    if (!allowedPaymentTypes) return "No payment types available.";
+    if (allowedPaymentTypes.size === 0) {
+      return "No payment types are available for this intervention.";
+    }
+    return "No payment types match.";
+  }, [allowedPaymentTypes]);
+  const derivedInterventionAmount = useMemo(
+    () => resolveInterventionAmount(selectedInterventionOption),
+    [selectedInterventionOption]
+  );
+  const amountLocked =
+    isProgramView && derivedInterventionAmount !== null && !createForm.partialPayment;
+  const amountEditable = !amountLocked;
+
+  useEffect(() => {
+    if (!createModalOpen) return;
+    if (!selectedInterventionOption) {
+      lastInterventionIdRef.current = null;
+      setCreateForm(current => {
+        if (
+          !current.potId &&
+          !current.amount &&
+          !current.reportingUnit &&
+          !current.partialPayment
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          potId: "",
+          amount: "",
+          reportingUnit: "",
+          partialPayment: false,
+        };
+      });
+      return;
+    }
+    const nextInterventionId = selectedInterventionOption.value;
+    const interventionChanged = lastInterventionIdRef.current !== nextInterventionId;
+    const derivedPotId =
+      selectedInterventionOption.potId ||
+      selectedInterventionOption.planBudgetPotId ||
+      "";
+    const derivedReportingUnit = resolveReportingUnitForPot(derivedPotId);
+    setCreateForm(current => {
+      const next = { ...current };
+      if (interventionChanged) {
+        next.partialPayment = false;
+      }
+      if (derivedPotId) {
+        if (current.potId !== String(derivedPotId)) {
+          next.potId = String(derivedPotId);
+        }
+      } else if (interventionChanged && current.potId) {
+        next.potId = "";
+      }
+      if (derivedInterventionAmount !== null) {
+        if (!current.partialPayment || interventionChanged) {
+          next.amount = String(derivedInterventionAmount);
+        }
+      } else if (interventionChanged && current.amount) {
+        next.amount = "";
+      }
+      const shouldUpdateReportingUnit =
+        derivedReportingUnit &&
+        (!current.reportingUnit || !isAdminRole || interventionChanged);
+      if (shouldUpdateReportingUnit && current.reportingUnit !== derivedReportingUnit) {
+        next.reportingUnit = derivedReportingUnit;
+      } else if (interventionChanged && !derivedReportingUnit && current.reportingUnit) {
+        next.reportingUnit = "";
+      }
+      return next;
+    });
+    lastInterventionIdRef.current = nextInterventionId;
+  }, [
+    createModalOpen,
+    derivedInterventionAmount,
+    isAdminRole,
+    resolveReportingUnitForPot,
+    selectedInterventionOption,
+  ]);
+
+  useEffect(() => {
+    if (!createModalOpen) return;
+    if (createForm.partialPayment) return;
+    if (derivedInterventionAmount === null) return;
+    const nextAmount = String(derivedInterventionAmount);
+    if (createForm.amount === nextAmount) return;
+    setCreateForm(current => ({ ...current, amount: nextAmount }));
+  }, [createModalOpen, createForm.amount, createForm.partialPayment, derivedInterventionAmount]);
+
+  useEffect(() => {
+    if (!createModalOpen || !isProgramView) return;
+    if (!preselectedInterventionId) return;
+    if (createForm.interventionId) return;
+    const match = interventionOptions.find(option => option.value === preselectedInterventionId);
+    if (!match) return;
+    setCreateForm(current => ({ ...current, interventionId: match.value }));
+  }, [
+    createModalOpen,
+    createForm.interventionId,
+    interventionOptions,
+    isProgramView,
+    preselectedInterventionId,
+  ]);
+
+  useEffect(() => {
+    if (!createModalOpen) return;
+    if (!allowedPaymentTypes) return;
+    if (!createForm.paymentType) return;
+    if (allowedPaymentTypes.has(createForm.paymentType)) return;
+    setCreateForm(current => ({ ...current, paymentType: "" }));
+  }, [allowedPaymentTypes, createForm.paymentType, createModalOpen]);
+
+  const requiresPeriodFields = requiresServicePeriod(createForm.paymentType);
+  useEffect(() => {
+    if (!createModalOpen) return;
+    if (requiresPeriodFields) return;
+    if (!createForm.servicePeriodStart && !createForm.servicePeriodEnd) return;
+    setCreateForm(current => ({
+      ...current,
+      servicePeriodStart: "",
+      servicePeriodEnd: "",
+    }));
+  }, [createModalOpen, createForm.servicePeriodEnd, createForm.servicePeriodStart, requiresPeriodFields]);
+
   const handleCloseCreateModal = () => {
     if (createSubmitting) return;
     setCreateModalOpen(false);
   };
 
   const loadCaseSuggestions = async query => {
+    if (isCaseLocked) return;
     const trimmed = (query || "").trim();
     if (trimmed.length < CASE_SEARCH_MIN_CHARS) {
       setCaseOptions([]);
@@ -451,6 +748,13 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         const options = [];
         plans.forEach(plan => {
           const planLabel = plan?.name || plan?.title || `Plan ${plan?.id || ""}`.trim();
+          const planBudgetPotId =
+            plan?.budgetPotId ||
+            plan?.budget_pot_id ||
+            plan?.budgetPot ||
+            plan?.budget_pot ||
+            null;
+          const planFundingStream = plan?.fundingStream || plan?.funding_stream || null;
           const interventions = Array.isArray(plan?.interventions) ? plan.interventions : [];
           interventions.forEach(item => {
             const id = item?.id || item?.intervention_id;
@@ -466,25 +770,61 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
               value: String(id),
               label: title,
               description: planLabel || undefined,
+              planId: plan?.id || null,
+              status: item?.status || item?.statusRaw || null,
+              interventionCode:
+                item?.interventionCode ||
+                item?.intervention_code ||
+                item?.code ||
+                null,
+              potId:
+                item?.potId ||
+                item?.budgetPotId ||
+                item?.budget_pot_id ||
+                planBudgetPotId ||
+                null,
+              planBudgetPotId,
+              fundingStream: item?.fundingStream || planFundingStream || null,
+              approvedAmount: item?.approvedAmount ?? item?.approved_amount ?? null,
+              budgetAmount: item?.budgetAmount ?? item?.budget_amount ?? null,
+              cost: item?.cost ?? item?.plannedCost ?? item?.intervention_cost ?? null,
+              plannedCost: item?.plannedCost ?? null,
+              startDate: item?.startDate || item?.start_date || null,
+              endDate: item?.endDate || item?.end_date || null,
             });
           });
         });
-        setInterventionOptions(options);
+        const eligible = options.filter(option => !isBlockedInterventionStatus(option.status));
+        setInterventionOptions(eligible);
+        setInterventionsBlockedCount(Math.max(0, options.length - eligible.length));
       }
     } catch (err) {
       setInterventionOptions([]);
+      setInterventionsBlockedCount(0);
     } finally {
       setCaseDetailsLoading(false);
       setInterventionsLoading(false);
     }
   };
 
+  useEffect(() => {
+    if (!createModalOpen || !isCaseLocked || !lockedCaseId) return;
+    setCreateForm(current => ({
+      ...current,
+      caseSearch: lockedCaseLabel,
+      caseId: lockedCaseId,
+    }));
+    loadCaseContext(lockedCaseId);
+  }, [createModalOpen, isCaseLocked, lockedCaseId, lockedCaseLabel]);
+
   const handleCaseChange = ({ detail }) => {
+    if (isCaseLocked) return;
     const value = detail.value || "";
     updateCreateForm("caseSearch", value);
     updateCreateForm("caseId", "");
     setCaseDetails(null);
     setInterventionOptions([]);
+    setInterventionsBlockedCount(0);
     updateCreateForm("interventionId", "");
     if (!value) {
       setCaseOptions([]);
@@ -498,6 +838,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   };
 
   const handleCaseSelect = ({ detail }) => {
+    if (isCaseLocked) return;
     const value = detail.value || "";
     updateCreateForm("caseSearch", value);
     const selected = caseOptions.find(option => option.value === value) || null;
@@ -514,25 +855,60 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     const paymentType = createForm.paymentType;
     const payeeType = createForm.payeeType;
     const payeeName = createForm.payeeName.trim();
-    const amountValue = Number(createForm.amount);
+    const amountInputValue = toNumberOrNull(createForm.amount);
+    const derivedAmount = derivedInterventionAmount;
+    const amountLocked = derivedAmount !== null && !createForm.partialPayment;
+    const amountValue = amountLocked ? derivedAmount : amountInputValue;
     const potId = createForm.potId;
+    if (isProgramView && !createForm.interventionId) {
+      setCreateError("Select an intervention to create a payment packet.");
+      return;
+    }
+    if (isProgramView && selectedInterventionOption && isBlockedInterventionStatus(selectedInterventionOption.status)) {
+      setCreateError("Selected intervention is not eligible for payment initiation.");
+      return;
+    }
+    if (isProgramView && selectedInterventionOption && derivedAmount === null) {
+      setCreateError("Selected intervention is missing an approved amount.");
+      return;
+    }
     if (!createForm.caseId) {
       setCreateError("Select a case to create a payment packet.");
+      return;
+    }
+    if (allowedPaymentTypes && allowedPaymentTypes.size === 0) {
+      setCreateError("No payment types are available for the selected intervention.");
       return;
     }
     if (!paymentType || !payeeType || !payeeName) {
       setCreateError("Payment type, payee type, and payee name are required.");
       return;
     }
+    if (allowedPaymentTypes && !allowedPaymentTypes.has(paymentType)) {
+      setCreateError(
+        selectedInterventionCode
+          ? `Payment type is not allowed for intervention code ${selectedInterventionCode}.`
+          : "Payment type is not allowed for the selected intervention.",
+      );
+      return;
+    }
     if (!Number.isFinite(amountValue) || amountValue <= 0) {
       setCreateError("Amount must be a positive number.");
+      return;
+    }
+    if (createForm.partialPayment && derivedAmount !== null && amountValue > derivedAmount) {
+      setCreateError("Amount cannot exceed the approved intervention total.");
       return;
     }
     if (!potId) {
       setCreateError("Select a budget pot for the payment line.");
       return;
     }
-    const requiresPeriod = ["LivingAllowance", "WageSubsidyEmployer"].includes(paymentType);
+    if (isProgramView && !createForm.reportingUnit) {
+      setCreateError("Reporting unit is required.");
+      return;
+    }
+    const requiresPeriod = requiresServicePeriod(paymentType);
     if (requiresPeriod && (!createForm.servicePeriodStart || !createForm.servicePeriodEnd)) {
       setCreateError("Service period start and end are required for this payment type.");
       return;
@@ -638,24 +1014,14 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     return filteredItems.slice(start, start + pageSize);
   }, [filteredItems, currentPageIndex, pageSize]);
 
-  const selectedItems = useMemo(() => {
-    if (!selectedRequestId) {
-      return [];
-    }
-    return pagedItems.filter(item => item.id === selectedRequestId);
-  }, [selectedRequestId, pagedItems]);
 
   const selectedPaymentType = useMemo(
-    () => findOptionByValue(PAYMENT_TYPE_OPTIONS, createForm.paymentType),
-    [createForm.paymentType]
+    () => findOptionByValue(paymentTypeOptions, createForm.paymentType),
+    [createForm.paymentType, paymentTypeOptions]
   );
   const selectedPayeeType = useMemo(
     () => findOptionByValue(PAYEE_TYPE_OPTIONS, createForm.payeeType),
     [createForm.payeeType]
-  );
-  const selectedIntervention = useMemo(
-    () => interventionOptions.find(option => option.value === createForm.interventionId) || null,
-    [interventionOptions, createForm.interventionId]
   );
   const selectedReportingUnit = useMemo(
     () => regionOptions.find(option => option.value === createForm.reportingUnit) || null,
@@ -721,6 +1087,94 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       selectRequest(id);
     }
   };
+
+  const openDeleteModal = useCallback(item => {
+    if (!item) return;
+    setDeleteTarget({
+      id: item.id,
+      clientName: item.clientName ?? null,
+      interventionName: item.interventionName ?? null,
+    });
+    setDeleteError(null);
+    setDeleteModalOpen(true);
+  }, []);
+
+  const handleDeleteDismiss = useCallback(() => {
+    if (deleteSubmitting) return;
+    setDeleteModalOpen(false);
+    setDeleteTarget(null);
+    setDeleteError(null);
+  }, [deleteSubmitting]);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteTarget?.id || deleteSubmitting) return;
+    setDeleteSubmitting(true);
+    setDeleteError(null);
+    try {
+      await deletePacket(deleteTarget.id);
+      setDeleteModalOpen(false);
+      setDeleteTarget(null);
+    } catch (err) {
+      setDeleteError(err?.message || "Failed to delete draft packet.");
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  }, [deletePacket, deleteSubmitting, deleteTarget]);
+
+  const tableItems = useMemo(() => {
+    return pagedItems.map(item => {
+      const canDelete = item.status === "draft";
+      const actions = canDelete ? (
+        <Link
+          href="#"
+          onFollow={event => {
+            event.preventDefault();
+            openDeleteModal(item);
+          }}
+        >
+          Delete draft
+        </Link>
+      ) : (
+        "-"
+      );
+      return { ...item, actions };
+    });
+  }, [openDeleteModal, pagedItems]);
+
+  const selectedItems = useMemo(() => {
+    if (!selectedRequestId) {
+      return [];
+    }
+    return tableItems.filter(item => item.id === selectedRequestId);
+  }, [selectedRequestId, tableItems]);
+
+  useEffect(() => {
+    if (!isProgramView || typeof window === "undefined") return;
+    const handler = event => {
+      const targetCaseId =
+        event?.detail?.caseId !== undefined && event?.detail?.caseId !== null
+          ? String(event.detail.caseId)
+          : null;
+      if (targetCaseId && lockedCaseId && targetCaseId !== lockedCaseId) {
+        return;
+      }
+      managePaymentsSelectionRef.current = true;
+    };
+    window.addEventListener("iset-case-workspace:manage-payments", handler);
+    return () => {
+      window.removeEventListener("iset-case-workspace:manage-payments", handler);
+    };
+  }, [isProgramView, lockedCaseId]);
+
+  useEffect(() => {
+    if (!managePaymentsSelectionRef.current) return;
+    if (!requests.length) return;
+    const candidate = requests.find(item => AWAITING_SUBMISSION_STATUSES.has(item.status));
+    if (candidate) {
+      selectRequest(candidate.id);
+    }
+    managePaymentsSelectionRef.current = false;
+  }, [requests, selectRequest]);
 
   const preferencesComponent = (
     <CollectionPreferences
@@ -849,7 +1303,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         ) : null}
         <Table
           trackBy="id"
-          items={pagedItems}
+          items={tableItems}
           selectionType="single"
           selectedItems={selectedItems}
           onSelectionChange={handleSelectionChange}
@@ -908,48 +1362,76 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
           <SpaceBetween size="m">
             {createError ? <Alert type="error">{createError}</Alert> : null}
             <ColumnLayout columns={2} variant="text-grid">
-              <FormField label="Case" description="Search by client name, case number, or tracking ID.">
-                <Autosuggest
-                  value={createForm.caseSearch}
-                  onChange={handleCaseChange}
-                  onSelect={handleCaseSelect}
-                  onLoadItems={({ detail }) => loadCaseSuggestions(detail.filteringText)}
-                  options={caseOptions}
-                  statusType={caseOptionsLoading ? "loading" : "finished"}
-                  placeholder="Start typing to search cases"
-                  empty={
-                    createForm.caseSearch.trim().length < CASE_SEARCH_MIN_CHARS
-                      ? "Type at least 2 characters to search."
-                      : "No cases found."
-                  }
-                  enteredTextLabel={value => `Use \"${value}\"`}
-                />
+              <FormField
+                label="Case"
+                description={
+                  isCaseLocked
+                    ? "Locked to the current case workspace."
+                    : "Search by client name, case number, or tracking ID."
+                }
+              >
+                {isCaseLocked ? (
+                  <Input value={lockedCaseLabel} disabled />
+                ) : (
+                  <Autosuggest
+                    value={createForm.caseSearch}
+                    onChange={handleCaseChange}
+                    onSelect={handleCaseSelect}
+                    onLoadItems={({ detail }) => loadCaseSuggestions(detail.filteringText)}
+                    options={caseOptions}
+                    statusType={caseOptionsLoading ? "loading" : "finished"}
+                    placeholder="Start typing to search cases"
+                    empty={
+                      createForm.caseSearch.trim().length < CASE_SEARCH_MIN_CHARS
+                        ? "Type at least 2 characters to search."
+                        : "No cases found."
+                    }
+                    enteredTextLabel={value => `Use \"${value}\"`}
+                  />
+                )}
               </FormField>
-              <FormField label="Intervention (optional)">
+              <FormField label={isProgramView ? "Intervention" : "Intervention (optional)"}>
                 <Select
-                  selectedOption={selectedIntervention}
+                  selectedOption={selectedInterventionOption}
                   options={interventionOptions}
                   onChange={({ detail }) => updateCreateForm("interventionId", detail.selectedOption?.value || "")}
                   statusType={interventionsLoading || caseDetailsLoading ? "loading" : "finished"}
                   placeholder={
                     caseDetailsLoading
                       ? "Loading interventions"
+                      : isProgramView
+                      ? "Select an eligible intervention"
                       : "Select an intervention"
                   }
                   filteringType="auto"
-                  empty="No interventions available for this case."
+                  empty={
+                    interventionsBlockedCount
+                      ? "No interventions eligible for payments."
+                      : "No interventions available for this case."
+                  }
                 />
               </FormField>
-              <FormField label="Reporting unit (optional)">
-                <Select
-                  selectedOption={selectedReportingUnit}
-                  options={regionOptions}
-                  onChange={({ detail }) => updateCreateForm("reportingUnit", detail.selectedOption?.value || "")}
-                  statusType={regionsLoading ? "loading" : "finished"}
-                  placeholder={regionsLoading ? "Loading regions" : "Select reporting unit"}
-                  filteringType="auto"
-                  empty="No regions available."
-                />
+              <FormField
+                label="Reporting unit"
+                description={
+                  isAdminRole
+                    ? "Derived from the budget pot; admins may override."
+                    : "Derived from the budget pot."
+                }
+              >
+                {isAdminRole ? (
+                  <Select
+                    selectedOption={selectedReportingUnit}
+                    options={regionOptions}
+                    onChange={({ detail }) => updateCreateForm("reportingUnit", detail.selectedOption?.value || "")}
+                    statusType={regionsLoading ? "loading" : "finished"}
+                    placeholder={regionsLoading ? "Loading regions" : "Select reporting unit"}
+                    filteringType="auto"
+                    empty="No regions available."
+                  />
+                ) : (
+                  <Input value={selectedReportingUnit?.label || createForm.reportingUnit || ""} disabled readOnly />
+                )}
               </FormField>
               <FormField label="Due by (optional)">
                 <DatePicker
@@ -959,6 +1441,11 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                 />
               </FormField>
             </ColumnLayout>
+            {isProgramView && interventionsBlockedCount > 0 ? (
+              <Box variant="p">
+                {interventionsBlockedCount} interventions are not eligible for payments.
+              </Box>
+            ) : null}
             <FormField label="Notes (optional)">
               <Textarea
                 value={createForm.notes}
@@ -969,13 +1456,18 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
 
             <Header variant="h3">Initial payment line</Header>
             <ColumnLayout columns={2} variant="text-grid">
-              <FormField label="Payment type">
+              <FormField
+                label="Payment type"
+                errorText={paymentTypeRestrictionError || undefined}
+              >
                 <Select
                   selectedOption={selectedPaymentType}
-                  options={PAYMENT_TYPE_OPTIONS}
+                  options={paymentTypeOptions}
                   onChange={({ detail }) => updateCreateForm("paymentType", detail.selectedOption?.value || "")}
                   placeholder="Select payment type"
                   filteringType="auto"
+                  statusType={paymentTypeMappingLoading ? "loading" : "finished"}
+                  empty={paymentTypeEmptyMessage}
                 />
               </FormField>
               <FormField label="Payee type">
@@ -1006,39 +1498,47 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                   onChange={({ detail }) => updateCreateForm("amount", detail.value)}
                   type="number"
                   placeholder="0.00"
+                  disabled={!amountEditable}
                 />
               </FormField>
+              {derivedInterventionAmount !== null ? (
+                <FormField label="Partial payment">
+                  <Checkbox
+                    checked={createForm.partialPayment}
+                    onChange={({ detail }) => updateCreateForm("partialPayment", detail.checked)}
+                    description="Enable to enter a smaller amount than the approved total."
+                  >
+                    Allow partial amount
+                  </Checkbox>
+                </FormField>
+              ) : null}
               <FormField label="Budget pot">
-                <Select
-                  selectedOption={selectedPot}
-                  options={potOptions}
-                  onChange={({ detail }) => updateCreateForm("potId", detail.selectedOption?.value || "")}
-                  statusType={potsLoading ? "loading" : "finished"}
-                  placeholder={potsLoading ? "Loading pots" : "Select budget pot"}
-                  filteringType="auto"
-                  empty="No budget pots available."
-                />
+                <Input value={selectedPot?.label || createForm.potId || ""} disabled readOnly />
               </FormField>
-              <FormField
-                label="Service period start"
-                description="Required for living allowance and wage subsidy."
-              >
-                <DatePicker
-                  value={createForm.servicePeriodStart}
-                  onChange={({ detail }) => updateCreateForm("servicePeriodStart", detail.value)}
-                  placeholder="YYYY-MM-DD"
-                />
-              </FormField>
-              <FormField
-                label="Service period end"
-                description="Required for living allowance and wage subsidy."
-              >
-                <DatePicker
-                  value={createForm.servicePeriodEnd}
-                  onChange={({ detail }) => updateCreateForm("servicePeriodEnd", detail.value)}
-                  placeholder="YYYY-MM-DD"
-                />
-              </FormField>
+              {requiresPeriodFields ? (
+                <>
+                  <FormField
+                    label="Service period start"
+                    description="Required for living allowance and wage subsidy."
+                  >
+                    <DatePicker
+                      value={createForm.servicePeriodStart}
+                      onChange={({ detail }) => updateCreateForm("servicePeriodStart", detail.value)}
+                      placeholder="YYYY-MM-DD"
+                    />
+                  </FormField>
+                  <FormField
+                    label="Service period end"
+                    description="Required for living allowance and wage subsidy."
+                  >
+                    <DatePicker
+                      value={createForm.servicePeriodEnd}
+                      onChange={({ detail }) => updateCreateForm("servicePeriodEnd", detail.value)}
+                      placeholder="YYYY-MM-DD"
+                    />
+                  </FormField>
+                </>
+              ) : null}
               <FormField label="Requested payment date (optional)">
                 <DatePicker
                   value={createForm.requestedPaymentDate}
@@ -1054,6 +1554,35 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                 />
               </FormField>
             </ColumnLayout>
+          </SpaceBetween>
+        </Modal>
+        <Modal
+          visible={deleteModalOpen}
+          onDismiss={handleDeleteDismiss}
+          closeAriaLabel="Close dialog"
+          header="Delete draft packet"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={handleDeleteDismiss} disabled={deleteSubmitting}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleDeleteConfirm}
+                loading={deleteSubmitting}
+                disabled={!deleteTarget?.id || deleteSubmitting}
+              >
+                Delete
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            {deleteError ? <Alert type="error">{deleteError}</Alert> : null}
+            <Box>
+              This will permanently delete the draft packet
+              {deleteTarget?.id ? ` ${deleteTarget.id}` : ""} and any lines attached to it.
+            </Box>
           </SpaceBetween>
         </Modal>
       </SpaceBetween>

@@ -5,13 +5,14 @@ import {
   SpaceBetween,
   ButtonDropdown,
   Box,
+  Container,
   ColumnLayout,
   Link,
   StatusIndicator,
   Button,
   Table,
-  Badge,
   ExpandableSection,
+  KeyValuePairs,
   Alert,
   Modal,
   FormField,
@@ -29,57 +30,87 @@ import { PAYMENT_TYPE_OPTIONS, PAYEE_TYPE_OPTIONS, findOptionByValue } from "./p
 const formatCurrency = value =>
   new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value);
 
+const requiresServicePeriod = paymentType =>
+  ["LivingAllowance", "WageSubsidyEmployer"].includes(paymentType);
+
+const normalizePacketStatusKey = status => {
+  if (!status) return "draft";
+  const normalized = String(status).trim().toLowerCase();
+  if (normalized === "draft" || normalized === "returned") return "draft";
+  if (normalized === "cancelled") return "cancelled";
+  return "submitted";
+};
+
 const packetStatusMeta = {
   draft: { label: "Draft", indicator: "pending" },
-  submitted: { label: "Submitted", indicator: "info" },
-  program_review: { label: "Program review", indicator: "info" },
-  returned: { label: "Returned", indicator: "warning" },
-  program_approved: { label: "Program approved", indicator: "info" },
-  finance_review: { label: "Finance review", indicator: "warning" },
-  finance_approved: { label: "Finance approved", indicator: "info" },
-  batched: { label: "Batched", indicator: "info" },
-  sent: { label: "Sent", indicator: "warning" },
-  confirmed: { label: "Confirmed", indicator: "success" },
-  closed: { label: "Closed", indicator: "success" },
-  on_hold: { label: "On hold", indicator: "error" },
+  submitted: { label: "Submitted to finance", indicator: "info" },
   cancelled: { label: "Cancelled", indicator: "error" },
 };
 
 const lineStatusMeta = {
   needs_evidence: { label: "Needs evidence", indicator: "warning" },
-  ready_for_program: { label: "Ready for program", indicator: "info" },
-  ready_for_finance: { label: "Ready for finance", indicator: "info" },
-  approved: { label: "Approved", indicator: "success" },
-  batched: { label: "Batched", indicator: "info" },
-  paid: { label: "Paid", indicator: "success" },
-  held: { label: "Held", indicator: "error" },
+  ready: { label: "Ready to submit", indicator: "success" },
+  submitted: { label: "Submitted", indicator: "info" },
   cancelled: { label: "Cancelled", indicator: "error" },
 };
 
-const overrideableErrors = {
-  missing_required_evidence: {
-    title: "Missing required evidence",
-    overrideType: "evidence_gate",
-  },
-  duplicate_payment_detected: {
-    title: "Possible duplicate payment detected",
-    overrideType: "duplicate_payment",
-  },
-  approval_threshold_requires_role: {
-    title: "Approval threshold requires a higher role",
-    overrideType: "approval_threshold",
-  },
+const resolveLineStatusMeta = (line, packetStatusKey) => {
+  if (line?.status === "cancelled") return lineStatusMeta.cancelled;
+  if (packetStatusKey === "submitted") return lineStatusMeta.submitted;
+  if ((line?.evidenceSummary?.missing ?? 0) > 0) {
+    return lineStatusMeta.needs_evidence;
+  }
+  return lineStatusMeta.ready;
+};
+
+const normalizeInterventionCodeValue = value => {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return String(Math.trunc(numeric));
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const digits = trimmed.replace(/[^\d]/g, "");
+  if (!digits) return null;
+  const parsed = Number.parseInt(digits, 10);
+  return Number.isFinite(parsed) ? String(parsed) : null;
+};
+
+const normalizeRegionCode = value => {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim().toUpperCase();
+  return trimmed ? trimmed : null;
+};
+
+const formatLineErrorDetails = details => {
+  if (!Array.isArray(details) || !details.length) return null;
+  const messages = details
+    .map(detail => {
+      if (!detail || typeof detail !== "object") return null;
+      if (detail.message) return detail.message;
+      const field = detail.field ? String(detail.field) : "Line";
+      const code = detail.error ? String(detail.error) : "invalid";
+      return `${field}: ${code}`;
+    })
+    .filter(Boolean);
+  return messages.length ? messages : null;
+};
+
+const formatEvidenceMissingDetails = details => {
+  if (!Array.isArray(details) || !details.length) return null;
+  const types = details
+    .map(entry => entry?.evidenceType || entry?.evidence_type || null)
+    .filter(Boolean);
+  if (!types.length) return null;
+  const unique = Array.from(new Set(types));
+  return `Missing evidence: ${unique.join(", ")}`;
 };
 
 const buildEvidenceMeta = item => {
   if (item.required && !item.received) {
     return { indicator: "error", label: "Missing" };
   }
-  if (item.received && item.verified) {
-    return { indicator: "success", label: "Verified" };
-  }
-  if (item.received && !item.verified) {
-    return { indicator: "warning", label: "Pending verification" };
+  if (item.received) {
+    return { indicator: "success", label: "Received" };
   }
   return { indicator: "pending", label: "Optional" };
 };
@@ -88,33 +119,17 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const {
     selectedRequest,
     updatePacketStatus,
-    updateLineStatus,
     updateLine,
     addPacketLines,
-    createBatch,
-    updateBatchStatus,
     createRecurringLines,
-    updateEvidence,
     communications,
     addCommunication,
-    sendPacketEmail,
     reloadRequests,
+    paymentTypeMappingLookup,
+    paymentTypeMappingLoading,
   } = usePaymentsData();
   const [selectedLineId, setSelectedLineId] = useState(null);
-  const [selectedLineIds, setSelectedLineIds] = useState([]);
-  const [emailStatus, setEmailStatus] = useState(null);
-  const [sendingEmail, setSendingEmail] = useState(false);
   const [actionStatus, setActionStatus] = useState(null);
-  const [markPaidModalOpen, setMarkPaidModalOpen] = useState(false);
-  const [markPaidSubmitting, setMarkPaidSubmitting] = useState(false);
-  const [markPaidError, setMarkPaidError] = useState(null);
-  const [paidDate, setPaidDate] = useState("");
-  const [paymentReference, setPaymentReference] = useState("");
-  const [paymentProofFiles, setPaymentProofFiles] = useState([]);
-  const [batchSubmitting, setBatchSubmitting] = useState(false);
-  const [batchApproving, setBatchApproving] = useState(false);
-  const [batchExporting, setBatchExporting] = useState(false);
-  const [auditDownloading, setAuditDownloading] = useState(false);
   const [recurringModalOpen, setRecurringModalOpen] = useState(false);
   const [recurringSubmitting, setRecurringSubmitting] = useState(false);
   const [recurringError, setRecurringError] = useState(null);
@@ -129,11 +144,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [evidenceFiles, setEvidenceFiles] = useState([]);
   const [evidenceUploading, setEvidenceUploading] = useState(false);
   const [evidenceError, setEvidenceError] = useState(null);
-  const [verifyingEvidenceId, setVerifyingEvidenceId] = useState(null);
-  const [returnModalOpen, setReturnModalOpen] = useState(false);
-  const [returnReason, setReturnReason] = useState("");
-  const [returnSubmitting, setReturnSubmitting] = useState(false);
-  const [returnError, setReturnError] = useState(null);
   const [lineModalOpen, setLineModalOpen] = useState(false);
   const [lineModalMode, setLineModalMode] = useState("create");
   const [lineForm, setLineForm] = useState({
@@ -155,33 +165,51 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [noteText, setNoteText] = useState("");
   const [noteSubmitting, setNoteSubmitting] = useState(false);
   const [noteError, setNoteError] = useState(null);
-  const [overrideModalOpen, setOverrideModalOpen] = useState(false);
-  const [overrideReason, setOverrideReason] = useState("");
-  const [overrideSubmitting, setOverrideSubmitting] = useState(false);
-  const [overrideError, setOverrideError] = useState(null);
-  const [overrideContext, setOverrideContext] = useState(null);
+  const requiresLinePeriod = requiresServicePeriod(lineForm.paymentType);
+  const selectedInterventionCode = useMemo(() => {
+    const raw =
+      selectedRequest?.interventionCode ??
+      selectedRequest?.intervention_code ??
+      null;
+    return normalizeInterventionCodeValue(raw);
+  }, [selectedRequest]);
+  const allowedPaymentTypes = useMemo(() => {
+    if (!selectedInterventionCode) return null;
+    if (!paymentTypeMappingLookup || typeof paymentTypeMappingLookup.has !== "function") return null;
+    if (!paymentTypeMappingLookup.has(selectedInterventionCode)) return null;
+    return paymentTypeMappingLookup.get(selectedInterventionCode);
+  }, [paymentTypeMappingLookup, selectedInterventionCode]);
+  const linePaymentTypeOptions = useMemo(() => {
+    if (!allowedPaymentTypes) return PAYMENT_TYPE_OPTIONS;
+    return PAYMENT_TYPE_OPTIONS.filter(option => allowedPaymentTypes.has(option.value));
+  }, [allowedPaymentTypes]);
+  const linePaymentTypeInvalid = useMemo(() => {
+    if (!allowedPaymentTypes) return false;
+    if (!lineForm.paymentType) return false;
+    return !allowedPaymentTypes.has(lineForm.paymentType);
+  }, [allowedPaymentTypes, lineForm.paymentType]);
+  const linePaymentTypeError = useMemo(() => {
+    if (!linePaymentTypeInvalid) return null;
+    return selectedInterventionCode
+      ? `Payment type is not allowed for intervention code ${selectedInterventionCode}.`
+      : "Payment type is not allowed for the selected intervention.";
+  }, [linePaymentTypeInvalid, selectedInterventionCode]);
+  const linePaymentTypeEmptyMessage = useMemo(() => {
+    if (!allowedPaymentTypes) return "No payment types available.";
+    if (allowedPaymentTypes.size === 0) {
+      return "No payment types are available for this intervention.";
+    }
+    return "No payment types match.";
+  }, [allowedPaymentTypes]);
 
   useEffect(() => {
     if (selectedRequest?.lines?.length) {
       const firstId = selectedRequest.lines[0].id;
       setSelectedLineId(firstId);
-      setSelectedLineIds([firstId]);
     } else {
       setSelectedLineId(null);
-      setSelectedLineIds([]);
     }
-    setEmailStatus(null);
     setActionStatus(null);
-    setMarkPaidModalOpen(false);
-    setMarkPaidSubmitting(false);
-    setMarkPaidError(null);
-    setPaidDate("");
-    setPaymentReference("");
-    setPaymentProofFiles([]);
-    setBatchSubmitting(false);
-    setBatchApproving(false);
-    setBatchExporting(false);
-    setAuditDownloading(false);
     setRecurringModalOpen(false);
     setRecurringSubmitting(false);
     setRecurringError(null);
@@ -196,11 +224,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setEvidenceFiles([]);
     setEvidenceUploading(false);
     setEvidenceError(null);
-    setVerifyingEvidenceId(null);
-    setReturnModalOpen(false);
-    setReturnReason("");
-    setReturnSubmitting(false);
-    setReturnError(null);
     setLineModalOpen(false);
     setLineModalMode("create");
     setLineForm({
@@ -220,24 +243,26 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setNoteText("");
     setNoteSubmitting(false);
     setNoteError(null);
-    setOverrideModalOpen(false);
-    setOverrideReason("");
-    setOverrideSubmitting(false);
-    setOverrideError(null);
-    setOverrideContext(null);
   }, [selectedRequest?.id]);
 
+  useEffect(() => {
+    if (!lineModalOpen) return;
+    if (requiresLinePeriod) return;
+    if (!lineForm.servicePeriodStart && !lineForm.servicePeriodEnd) return;
+    setLineForm(current => ({
+      ...current,
+      servicePeriodStart: "",
+      servicePeriodEnd: "",
+    }));
+  }, [
+    lineModalOpen,
+    lineForm.servicePeriodEnd,
+    lineForm.servicePeriodStart,
+    requiresLinePeriod,
+  ]);
+
   const packetLines = selectedRequest?.lines ?? [];
-  const selectedLineSet = useMemo(() => new Set(selectedLineIds), [selectedLineIds]);
-  const selectedLines = packetLines.filter(line => selectedLineSet.has(line.id));
-  const activeLines = packetLines.filter(line => line.status !== "cancelled");
-  const allLinesPaid =
-    activeLines.length > 0 &&
-    activeLines.every(line => line.status === "paid" && line.paidAt && line.paymentReference);
-  const canConfirm = selectedRequest?.status === "sent" && allLinesPaid;
-  const batchLineIds = selectedLines.filter(line => line.status === "approved").map(line => line.id);
-  const selectedLinesWithBatch = selectedLines.filter(line => line.batch?.id);
-  const canCreateBatch = batchLineIds.length > 0 && selectedLinesWithBatch.length === 0;
+  const packetStatusKey = normalizePacketStatusKey(selectedRequest?.status);
 
   const selectedLine = useMemo(() => {
     if (!packetLines.length) return null;
@@ -253,9 +278,9 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         return bTime - aTime;
       });
   }, [communications, selectedRequest?.id]);
-  const selectedBatch = selectedLine?.batch || null;
-  const canApproveBatch = selectedBatch?.status === "draft";
-  const canExportBatch = selectedBatch && ["approved", "exported"].includes(selectedBatch.status);
+  const showLineServicePeriod = selectedLine
+    ? requiresServicePeriod(selectedLine.paymentType)
+    : false;
   const recurringPeriodOptions = [
     { value: "weekly", label: "Weekly" },
     { value: "bi_weekly", label: "Bi-weekly" },
@@ -269,32 +294,51 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const recurringEligible =
     selectedLine &&
     ["livingallowance", "childcare"].includes(normalizeTypeKey(selectedLine.paymentType)) &&
-    selectedLine.status !== "cancelled";
-  const isProgramView = metadata?.mode === "program";
-  const canEditPacketLines =
-    isProgramView &&
-    selectedRequest &&
-    ["draft", "returned"].includes(selectedRequest.status);
+    selectedLine.status !== "cancelled" &&
+    packetStatusKey === "draft";
+  const canEditPacketLines = selectedRequest && packetStatusKey === "draft";
+  const canUploadEvidence = packetStatusKey === "draft";
 
-  const selectedLinePaymentType = useMemo(
-    () => findOptionByValue(PAYMENT_TYPE_OPTIONS, lineForm.paymentType),
-    [lineForm.paymentType]
-  );
+  const selectedLinePaymentType = useMemo(() => {
+    const found = findOptionByValue(linePaymentTypeOptions, lineForm.paymentType);
+    if (found) return found;
+    if (!lineForm.paymentType) return null;
+    const label = linePaymentTypeInvalid
+      ? `${lineForm.paymentType} (not allowed)`
+      : lineForm.paymentType;
+    return { value: lineForm.paymentType, label };
+  }, [lineForm.paymentType, linePaymentTypeInvalid, linePaymentTypeOptions]);
   const selectedLinePayeeType = useMemo(
     () => findOptionByValue(PAYEE_TYPE_OPTIONS, lineForm.payeeType),
     [lineForm.payeeType]
   );
-  const selectedLinePot = useMemo(
-    () => linePotOptions.find(option => option.value === lineForm.potId) || null,
-    [linePotOptions, lineForm.potId]
+  const lineRegionCode = useMemo(
+    () => normalizeRegionCode(selectedRequest?.reportingUnit),
+    [selectedRequest]
   );
-
-  const statusMeta = useMemo(() => {
-    if (!selectedRequest) {
-      return { label: "No packet selected", indicator: "pending" };
+  const filteredLinePotOptions = useMemo(() => {
+    if (!lineRegionCode) return linePotOptions;
+    const filtered = linePotOptions.filter(option => {
+      const regions = Array.isArray(option?.regions)
+        ? option.regions.map(normalizeRegionCode).filter(Boolean)
+        : [];
+      return regions.length > 0 && regions.includes(lineRegionCode);
+    });
+    if (lineModalMode === "edit" && selectedLine?.potId) {
+      const selectedMatch = linePotOptions.find(option => option.value === String(selectedLine.potId));
+      if (selectedMatch && !filtered.some(option => option.value === selectedMatch.value)) {
+        return [selectedMatch, ...filtered];
+      }
     }
-    return packetStatusMeta[selectedRequest.status] ?? { label: selectedRequest.status, indicator: "info" };
-  }, [selectedRequest]);
+    return filtered;
+  }, [lineModalMode, linePotOptions, lineRegionCode, selectedLine]);
+  const selectedLinePot = useMemo(
+    () => filteredLinePotOptions.find(option => option.value === lineForm.potId) || null,
+    [filteredLinePotOptions, lineForm.potId]
+  );
+  const linePotEmptyMessage = lineRegionCode
+    ? `No budget pots available for ${lineRegionCode}.`
+    : "No budget pots available.";
 
   const evidenceTargetOptions = useMemo(() => {
     if (!selectedRequest) return [];
@@ -383,6 +427,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                 value: String(pot?.id || pot?.value || ""),
                 label: [pot?.code, pot?.name].filter(Boolean).join(" - ") || String(pot?.id || ""),
                 description: pot?.fundingSource || pot?.funding_source || undefined,
+                regions: Array.isArray(pot?.regions) ? pot.regions.filter(Boolean) : [],
               }))
               .filter(option => option.value)
           : [];
@@ -415,87 +460,20 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     }
   };
 
-  const resolveOverrideConfig = err => {
-    const code = err?.code || err?.payload?.error || err?.payload?.code || null;
-    if (!code || !overrideableErrors[code]) {
-      return null;
-    }
-    return { code, ...overrideableErrors[code] };
-  };
-
-  const openOverrideModal = context => {
-    setOverrideContext(context);
-    setOverrideReason("");
-    setOverrideError(null);
-    setOverrideModalOpen(true);
-  };
-
   const handlePacketStatusChange = async (status, options = {}) => {
     if (!selectedRequest || !status) return;
     setActionStatus(null);
     try {
       await updatePacketStatus(selectedRequest.id, status, options);
-      const label = packetStatusMeta[status]?.label || status;
+      const label = packetStatusMeta[normalizePacketStatusKey(status)]?.label || status;
       setActionStatus({ type: "success", message: `Packet updated: ${label}.` });
     } catch (err) {
-      const overrideConfig = resolveOverrideConfig(err);
-      if (overrideConfig) {
-        openOverrideModal({
-          target: "packet",
-          status,
-          options,
-          error: err,
-          overrideType: overrideConfig.overrideType,
-          title: overrideConfig.title,
-        });
-        return;
-      }
+      const detailMessage = formatEvidenceMissingDetails(err?.details || err?.payload?.details);
       setActionStatus({
         type: "error",
-        message: err?.message || "Failed to update packet status.",
+        message: detailMessage || err?.message || "Failed to update packet status.",
       });
     }
-  };
-
-  const handleStatusAction = ({ detail }) => {
-    if (!detail?.id) return;
-    if (detail.id === "returned") {
-      setReturnReason("");
-      setReturnError(null);
-      setReturnModalOpen(true);
-      return;
-    }
-    handlePacketStatusChange(detail.id);
-  };
-
-  const handleSendEmail = async () => {
-    if (!selectedRequest?.id) return;
-    setSendingEmail(true);
-    setEmailStatus(null);
-    try {
-      await sendPacketEmail(selectedRequest.id);
-      setEmailStatus({ type: "success", message: "Finance email sent and logged." });
-    } catch (err) {
-      setEmailStatus({
-        type: "error",
-        message: err?.message || "Failed to send finance email.",
-      });
-    } finally {
-      setSendingEmail(false);
-    }
-  };
-
-  const openMarkPaidModal = () => {
-    if (!selectedLine) return;
-    setPaidDate(
-      selectedLine.paidAt
-        ? String(selectedLine.paidAt).slice(0, 10)
-        : new Date().toISOString().slice(0, 10)
-    );
-    setPaymentReference(selectedLine.paymentReference || "");
-    setPaymentProofFiles([]);
-    setMarkPaidError(null);
-    setMarkPaidModalOpen(true);
   };
 
   const openRecurringModal = () => {
@@ -507,105 +485,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setRecurringOccurrences("");
     setRecurringError(null);
     setRecurringModalOpen(true);
-  };
-
-  const handleMarkPaid = async () => {
-    if (!selectedLine) return;
-    const reference = paymentReference.trim();
-    if (!paidDate) {
-      setMarkPaidError("Paid date is required.");
-      return;
-    }
-    if (!reference) {
-      setMarkPaidError("Payment reference is required.");
-      return;
-    }
-    let proofId = selectedLine.paymentProofDocumentId
-      ? Number(selectedLine.paymentProofDocumentId)
-      : null;
-    const proofFile = paymentProofFiles?.[0] || null;
-    if (proofFile) {
-      const applicantUserId = selectedRequest?.applicantUserId;
-      if (!applicantUserId) {
-        setMarkPaidError("This packet is missing an applicant user ID. Unable to upload proof.");
-        return;
-      }
-      try {
-        const formData = new FormData();
-        formData.append("file", proofFile);
-        formData.append("label", "Payment proof");
-        if (selectedRequest?.caseId) {
-          formData.append("caseId", selectedRequest.caseId);
-        }
-        if (selectedRequest?.applicationId) {
-          formData.append("applicationId", selectedRequest.applicationId);
-        }
-        if (selectedLine?.interventionId || selectedRequest?.interventionId) {
-          formData.append(
-            "interventionId",
-            selectedLine?.interventionId || selectedRequest?.interventionId
-          );
-        }
-        const uploadResp = await apiFetch(
-          `/api/applicants/${encodeURIComponent(applicantUserId)}/documents/upload`,
-          {
-            method: "POST",
-            body: formData,
-          }
-        );
-        if (!uploadResp.ok) {
-          const payload = await uploadResp.json().catch(() => ({}));
-          throw new Error(payload?.message || payload?.error || `Upload failed (${uploadResp.status})`);
-        }
-        const payload = await uploadResp.json().catch(() => ({}));
-        const documentId = payload?.document?.id;
-        if (!documentId) {
-          throw new Error("Upload completed but document ID was not returned.");
-        }
-        proofId = Number(documentId);
-      } catch (err) {
-        setMarkPaidError(err?.message || "Failed to upload payment proof.");
-        return;
-      }
-    }
-    if (!proofId || !Number.isFinite(proofId)) {
-      setMarkPaidError("Proof of payment document is required.");
-      return;
-    }
-    setMarkPaidSubmitting(true);
-    setMarkPaidError(null);
-    setActionStatus(null);
-    try {
-      await updateLineStatus(selectedLine.id, "paid", {
-        paidAt: paidDate,
-        paymentReference: reference,
-        paymentProofDocumentId: proofId,
-      });
-      setActionStatus({ type: "success", message: `Line ${selectedLine.id} marked paid.` });
-      setMarkPaidModalOpen(false);
-    } catch (err) {
-      const overrideConfig = resolveOverrideConfig(err);
-      if (overrideConfig) {
-        openOverrideModal({
-          target: "line",
-          status: "paid",
-          lineId: selectedLine.id,
-          options: {
-            paidAt: paidDate,
-            paymentReference: reference,
-            paymentProofDocumentId: proofId,
-          },
-          error: err,
-          overrideType: overrideConfig.overrideType,
-          title: overrideConfig.title,
-        });
-        setMarkPaidModalOpen(false);
-        return;
-      }
-      setMarkPaidError(err?.message || "Failed to mark line as paid.");
-    } finally {
-      setMarkPaidSubmitting(false);
-    }
   };
 
   const handleCreateRecurring = async () => {
@@ -644,111 +523,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     }
   };
 
-  const handleCreateBatch = async () => {
-    if (!batchLineIds.length) return;
-    setBatchSubmitting(true);
-    setActionStatus(null);
-    try {
-      const batch = await createBatch(batchLineIds);
-      const batchLabel = batch?.id ? `Batch ${batch.id}` : "Batch";
-      setActionStatus({
-        type: "success",
-        message: `${batchLabel} created with ${batchLineIds.length} lines.`,
-      });
-    } catch (err) {
-      setActionStatus({
-        type: "error",
-        message: err?.message || "Failed to create payment batch.",
-      });
-    } finally {
-      setBatchSubmitting(false);
-    }
-  };
-
-  const handleApproveBatch = async () => {
-    if (!selectedBatch?.id) return;
-    setBatchApproving(true);
-    setActionStatus(null);
-    try {
-      await updateBatchStatus(selectedBatch.id, "approved");
-      setActionStatus({ type: "success", message: `Batch ${selectedBatch.id} approved.` });
-    } catch (err) {
-      setActionStatus({
-        type: "error",
-        message: err?.message || "Failed to approve batch.",
-      });
-    } finally {
-      setBatchApproving(false);
-    }
-  };
-
-  const handleExportBatch = async () => {
-    if (!selectedBatch?.id || !["approved", "exported"].includes(selectedBatch.status)) return;
-    setBatchExporting(true);
-    setActionStatus(null);
-    try {
-      const resp = await apiFetch(
-        `/api/finance/payment-batches/${encodeURIComponent(selectedBatch.id)}/export`,
-        { method: "POST" }
-      );
-      if (!resp.ok) {
-        const payload = await resp.json().catch(() => ({}));
-        throw new Error(payload?.message || payload?.error || `Export failed (${resp.status})`);
-      }
-      const blob = await resp.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `payment-batch-${selectedBatch.id}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      setActionStatus({ type: "success", message: `Batch ${selectedBatch.id} exported.` });
-    } catch (err) {
-      setActionStatus({
-        type: "error",
-        message: err?.message || "Failed to export batch CSV.",
-      });
-    } finally {
-      setBatchExporting(false);
-    }
-  };
-
-  const handleDownloadAuditBundle = async () => {
-    if (!selectedRequest?.id) return;
-    setAuditDownloading(true);
-    setActionStatus(null);
-    try {
-      const resp = await apiFetch(
-        `/api/finance/payment-packets/${encodeURIComponent(selectedRequest.id)}/audit-bundle`,
-        { method: "POST" }
-      );
-      if (!resp.ok) {
-        const payload = await resp.json().catch(() => ({}));
-        throw new Error(payload?.message || payload?.error || `Download failed (${resp.status})`);
-      }
-      const blob = await resp.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `payment-packet-${selectedRequest.id}-audit-bundle.zip`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      setActionStatus({ type: "success", message: "Audit bundle downloaded." });
-    } catch (err) {
-      setActionStatus({
-        type: "error",
-        message: err?.message || "Failed to download audit bundle.",
-      });
-    } finally {
-      setAuditDownloading(false);
-    }
-  };
-
   const openEvidenceModal = () => {
+    if (!canUploadEvidence) return;
     setEvidenceError(null);
     setEvidenceFiles([]);
     setEvidenceUploading(false);
@@ -847,107 +623,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     }
   };
 
-  const handleEvidenceVerification = async (item, shouldVerify) => {
-    if (!item?.id) return;
-    setVerifyingEvidenceId(item.id);
-    setActionStatus(null);
-    try {
-      await updateEvidence(item.id, { verified: !!shouldVerify });
-      setActionStatus({
-        type: "success",
-        message: shouldVerify ? "Evidence verified." : "Evidence verification cleared.",
-      });
-    } catch (err) {
-      setActionStatus({
-        type: "error",
-        message: err?.message || "Failed to update evidence verification.",
-      });
-    } finally {
-      setVerifyingEvidenceId(null);
-    }
-  };
-
-  const handleReturnSubmit = async () => {
-    if (!selectedRequest) return;
-    setReturnSubmitting(true);
-    setReturnError(null);
-    try {
-      const trimmed = returnReason.trim();
-      await handlePacketStatusChange("returned", { notes: trimmed || null });
-      setReturnModalOpen(false);
-      setReturnReason("");
-    } catch (err) {
-      setReturnError(err?.message || "Failed to return packet.");
-    } finally {
-      setReturnSubmitting(false);
-    }
-  };
-
-  const renderOverrideDetails = details => {
-    if (!details) return null;
-    if (Array.isArray(details)) {
-      return details.map((entry, index) => {
-        if (!entry || typeof entry !== "object") {
-          return (
-            <Box key={`override-${index}`} variant="p">
-              {String(entry)}
-            </Box>
-          );
-        }
-        const summary = Object.entries(entry)
-          .map(([key, value]) => `${key}: ${value}`)
-          .join(" • ");
-        return (
-          <Box key={`override-${index}`} variant="p">
-            {summary}
-          </Box>
-        );
-      });
-    }
-    if (typeof details === "object") {
-      return (
-        <Box variant="p">{JSON.stringify(details)}</Box>
-      );
-    }
-    return <Box variant="p">{String(details)}</Box>;
-  };
-
-  const handleOverrideSubmit = async () => {
-    if (!overrideContext) return;
-    const reason = overrideReason.trim();
-    if (!reason) {
-      setOverrideError("Override reason is required.");
-      return;
-    }
-    setOverrideSubmitting(true);
-    setOverrideError(null);
-    try {
-      if (overrideContext.target === "packet" && selectedRequest?.id) {
-        await updatePacketStatus(selectedRequest.id, overrideContext.status, {
-          ...(overrideContext.options || {}),
-          override: true,
-          overrideReason: reason,
-          overrideType: overrideContext.overrideType,
-        });
-      } else if (overrideContext.target === "line" && overrideContext.lineId) {
-        await updateLineStatus(overrideContext.lineId, overrideContext.status, {
-          ...(overrideContext.options || {}),
-          override: true,
-          overrideReason: reason,
-          overrideType: overrideContext.overrideType,
-        });
-      }
-      setActionStatus({ type: "success", message: "Override applied." });
-      setOverrideModalOpen(false);
-      setOverrideContext(null);
-      setOverrideReason("");
-    } catch (err) {
-      setOverrideError(err?.message || "Failed to apply override.");
-    } finally {
-      setOverrideSubmitting(false);
-    }
-  };
-
   const handleAddNote = async () => {
     if (!selectedRequest?.id) return;
     const message = noteText.trim();
@@ -990,7 +665,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   };
 
   const openLineCreateModal = () => {
-    if (!selectedRequest) return;
+    if (!selectedRequest || !canEditPacketLines) return;
     setLineError(null);
     setLineModalMode("create");
     resetLineForm({
@@ -1000,7 +675,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   };
 
   const openLineEditModal = () => {
-    if (!selectedLine) return;
+    if (!selectedLine || !canEditPacketLines) return;
     setLineError(null);
     setLineModalMode("edit");
     resetLineForm({
@@ -1018,15 +693,40 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setLineModalOpen(true);
   };
 
+  useEffect(() => {
+    if (!lineModalOpen) return;
+    if (lineModalMode !== "create") return;
+    if (!allowedPaymentTypes) return;
+    if (!lineForm.paymentType) return;
+    if (allowedPaymentTypes.has(lineForm.paymentType)) return;
+    setLineForm(current => ({ ...current, paymentType: "" }));
+  }, [allowedPaymentTypes, lineForm.paymentType, lineModalMode, lineModalOpen]);
+
   const handleLineSubmit = async () => {
     if (!selectedRequest) return;
+    if (!canEditPacketLines) {
+      setLineError("Packet is submitted and cannot be edited.");
+      return;
+    }
     const paymentType = lineForm.paymentType;
     const payeeType = lineForm.payeeType;
     const payeeName = lineForm.payeeName.trim();
     const amountValue = Number(lineForm.amount);
     const potId = lineForm.potId;
+    if (allowedPaymentTypes && allowedPaymentTypes.size === 0) {
+      setLineError("No payment types are available for the selected intervention.");
+      return;
+    }
     if (!paymentType || !payeeType || !payeeName) {
       setLineError("Payment type, payee type, and payee name are required.");
+      return;
+    }
+    if (allowedPaymentTypes && !allowedPaymentTypes.has(paymentType)) {
+      setLineError(
+        selectedInterventionCode
+          ? `Payment type is not allowed for intervention code ${selectedInterventionCode}.`
+          : "Payment type is not allowed for the selected intervention.",
+      );
       return;
     }
     if (!Number.isFinite(amountValue) || amountValue <= 0) {
@@ -1037,7 +737,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setLineError("Select a budget pot for the payment line.");
       return;
     }
-    const requiresPeriod = ["LivingAllowance", "WageSubsidyEmployer"].includes(paymentType);
+    const requiresPeriod = requiresServicePeriod(paymentType);
     if (requiresPeriod && (!lineForm.servicePeriodStart || !lineForm.servicePeriodEnd)) {
       setLineError("Service period start and end are required for this payment type.");
       return;
@@ -1066,7 +766,12 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       }
       setLineModalOpen(false);
     } catch (err) {
-      setLineError(err?.message || "Failed to save payment line.");
+      const detailMessages = formatLineErrorDetails(err?.details || err?.payload?.details);
+      if (detailMessages?.length) {
+        setLineError(detailMessages);
+      } else {
+        setLineError(err?.message || "Failed to save payment line.");
+      }
     } finally {
       setLineSubmitting(false);
     }
@@ -1102,7 +807,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       id: "status",
       header: "Status",
       cell: item => {
-        const meta = lineStatusMeta[item.status] ?? { label: item.status, indicator: "info" };
+        const meta = resolveLineStatusMeta(item, packetStatusKey);
         return <StatusIndicator type={meta.indicator}>{meta.label}</StatusIndicator>;
       },
     },
@@ -1110,11 +815,22 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       id: "evidence",
       header: "Evidence",
       cell: item => {
-        const summary = item.evidenceSummary;
+        const summary = item.evidenceSummary || { required: 0, received: 0, missing: 0 };
+        const baselineMissing = selectedRequest?.baselineEvidenceSummary?.missing ?? 0;
+        if (!summary.required) {
+          if (baselineMissing > 0) {
+            return (
+              <StatusIndicator type="warning">
+                Baseline missing: {baselineMissing}
+              </StatusIndicator>
+            );
+          }
+          return <StatusIndicator type="info">No evidence required</StatusIndicator>;
+        }
         const indicator = summary.missing === 0 ? "success" : "warning";
         return (
           <StatusIndicator type={indicator}>
-            {summary.verified}/{summary.required}
+            {summary.received}/{summary.required}
           </StatusIndicator>
         );
       },
@@ -1129,74 +845,17 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       header: "Pot",
       cell: item => item.potName,
     },
-    {
-      id: "holdReason",
-      header: "Hold reason",
-      cell: item => item.holdReason ?? "-",
-    },
   ];
 
-  const financeStatusActions = [
-    { id: "finance_review", text: "Move to Finance review" },
-    { id: "finance_approved", text: "Mark Finance approved" },
-    { id: "sent", text: "Mark Sent" },
-    { id: "confirmed", text: "Mark Confirmed", disabled: !canConfirm },
-    { id: "on_hold", text: "Place On Hold" },
-    { id: "returned", text: "Return to Program" },
-  ];
+  const canSubmitPacket = packetStatusKey === "draft";
 
-  const programStatusActions = [
-    { id: "draft", text: "Move to Draft" },
-    { id: "submitted", text: "Submit for program review" },
-    { id: "program_review", text: "Mark In Program Review" },
-    { id: "program_approved", text: "Approve for finance" },
-    { id: "returned", text: "Return for evidence" },
-  ];
-
-  const statusActions = isProgramView ? programStatusActions : financeStatusActions;
-  const showFinanceActions = !isProgramView;
-  const canSendToFinance = !isProgramView || selectedRequest?.status === "program_approved";
-
-  const formatOptionalCurrency = value =>
-    Number.isFinite(value) ? formatCurrency(value) : "-";
-
-  const authorizationSummary = selectedLine?.authorization
-    ? [
-        selectedLine.authorization.category ? `Category: ${selectedLine.authorization.category}` : null,
-        Number.isFinite(selectedLine.authorization.remainingAmount)
-          ? `Remaining: ${formatOptionalCurrency(selectedLine.authorization.remainingAmount)}`
-          : null,
-        Number.isFinite(selectedLine.authorization.authorizedAmount)
-          ? `Cap: ${formatOptionalCurrency(selectedLine.authorization.authorizedAmount)}`
-          : null,
-        Number.isFinite(selectedLine.authorization.totalRemaining)
-          ? `Total remaining: ${formatOptionalCurrency(selectedLine.authorization.totalRemaining)}`
-          : null,
-      ]
-        .filter(Boolean)
-        .join(" | ")
-    : "-";
-
-  const canMarkPaid =
-    !!selectedLine &&
-    selectedLine.status === "batched" &&
-    ["approved", "exported"].includes(selectedBatch?.status);
-
-  const batchTotals = useMemo(() => {
-    if (!selectedLines.length) return null;
-    const totals = { totalAmount: 0, streams: {} };
-    selectedLines.forEach(line => {
-      if (line.status !== "approved") return;
-      totals.totalAmount += Number(line.amount || 0);
-      const stream = line.fundingStream || "Unclassified";
-      totals.streams[stream] = (totals.streams[stream] || 0) + Number(line.amount || 0);
-    });
-    return totals;
-  }, [selectedLines]);
-  const detailDescription = isProgramView
-    ? "Upload evidence, resolve returns, and submit packets for approval."
-    : "Review packet metadata, evidence, approvals, and batch-ready actions.";
-
+  const formatOptionalText = value => {
+    if (value === null || value === undefined) return "-";
+    const trimmed = String(value).trim();
+    return trimmed ? trimmed : "-";
+  };
+  const detailDescription =
+    "Add payment lines, attach evidence, then submit to finance (submission emails finance and locks edits).";
   return (
     <BoardItem
       header={
@@ -1227,72 +886,14 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               {actionStatus.message}
             </Alert>
           )}
-          {emailStatus && (
-            <Alert type={emailStatus.type} onDismiss={() => setEmailStatus(null)}>
-              {emailStatus.message}
-            </Alert>
-          )}
-          <ColumnLayout columns={3} variant="text-grid">
-            <SpaceBetween size="xs">
-              <Box variant="awsui-key-label">Packet</Box>
-              <Box variant="strong">{selectedRequest.id}</Box>
-              <Box variant="p">{selectedRequest.clientName ?? "No client linked"}</Box>
-              <Box variant="p">{selectedRequest.interventionName ?? "No intervention linked"}</Box>
-              <Box variant="p">Case: {selectedRequest.caseId ?? "-"}</Box>
-              <Box variant="p">{selectedRequest.reportingUnit}</Box>
-              <Box variant="p">{selectedRequest.potName}</Box>
-            </SpaceBetween>
-            <SpaceBetween size="xs">
-              <Box variant="awsui-key-label">Status</Box>
-              <StatusIndicator type={statusMeta.indicator}>{statusMeta.label}</StatusIndicator>
-              <Box variant="awsui-key-label">Total</Box>
-              <Box variant="strong">{formatCurrency(selectedRequest.totalAmount)}</Box>
-              <Box variant="awsui-key-label">Stream totals</Box>
-              <Box variant="p">
-                {selectedRequest.streamTotals?.CRF ? `CRF ${formatCurrency(selectedRequest.streamTotals.CRF)}` : "CRF -"}
-                {" | "}
-                {selectedRequest.streamTotals?.EI ? `EI ${formatCurrency(selectedRequest.streamTotals.EI)}` : "EI -"}
-              </Box>
-              <Box variant="awsui-key-label">Baseline compliance</Box>
-              <StatusIndicator
-                type={selectedRequest.baselineEvidenceSummary.missing === 0 ? "success" : "warning"}
-              >
-                {selectedRequest.baselineEvidenceSummary.missing === 0
-                  ? "Complete"
-                  : `${selectedRequest.baselineEvidenceSummary.missing} missing`}
-              </StatusIndicator>
-            </SpaceBetween>
-            <SpaceBetween size="xs">
-              <Box variant="awsui-key-label">Requester</Box>
-              <Box variant="p">{selectedRequest.requester}</Box>
-              <Box variant="p">{selectedRequest.requesterRole}</Box>
-              <Box variant="awsui-key-label">Timeline</Box>
-              <Box variant="p">Submitted: {selectedRequest.submittedOn}</Box>
-              <Box variant="p">Due by: {selectedRequest.dueBy}</Box>
-              <Box variant="awsui-key-label">Risk flags</Box>
-              {selectedRequest.riskFlags?.length ? (
-                <SpaceBetween direction="horizontal" size="xs">
-                  {selectedRequest.riskFlags.map(flag => (
-                    <Badge key={flag} color="red">
-                      {flag}
-                    </Badge>
-                  ))}
-                </SpaceBetween>
-              ) : (
-                <Box variant="p">None</Box>
-              )}
-            </SpaceBetween>
-          </ColumnLayout>
-
           <Table
             trackBy="id"
             items={packetLines}
-            selectionType="multi"
-            selectedItems={selectedLines}
+            selectionType="single"
+            selectedItems={selectedLine ? [selectedLine] : []}
             onSelectionChange={({ detail }) => {
-              const ids = (detail.selectedItems || []).map(item => item.id);
-              setSelectedLineIds(ids);
-              setSelectedLineId(ids[0] ?? null);
+              const nextItem = (detail.selectedItems || [])[0] || null;
+              setSelectedLineId(nextItem?.id ?? null);
             }}
             columnDefinitions={lineColumns}
             variant="embedded"
@@ -1301,7 +902,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                 variant="h3"
                 counter={`(${packetLines.length})`}
                 actions={
-                  isProgramView ? (
+                  canEditPacketLines ? (
                     <SpaceBetween direction="horizontal" size="xs">
                       <Button onClick={openLineCreateModal} disabled={!canEditPacketLines}>
                         Add line
@@ -1324,80 +925,54 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
 
           {selectedLine ? (
             <SpaceBetween size="m">
-              <ColumnLayout columns={3} variant="text-grid">
-                <SpaceBetween size="xs">
-                  <Box variant="awsui-key-label">Selected line</Box>
-                  <Box variant="strong">{selectedLine.id}</Box>
-                  <Box variant="p">{selectedLine.paymentType}</Box>
-                  <Box variant="p">
-                    {selectedLine.payeeName} ({selectedLine.payeeType})
-                  </Box>
-                  <Box variant="p">{selectedLine.potName || "-"}</Box>
-                </SpaceBetween>
-                <SpaceBetween size="xs">
-                  <Box variant="awsui-key-label">Status</Box>
-                  <StatusIndicator
-                    type={(lineStatusMeta[selectedLine.status] || {}).indicator || "info"}
-                  >
-                    {(lineStatusMeta[selectedLine.status] || {}).label || selectedLine.status}
-                  </StatusIndicator>
-                  <Box variant="awsui-key-label">Amount</Box>
-                  <Box variant="strong">{formatCurrency(selectedLine.amount)}</Box>
-                  <Box variant="awsui-key-label">Service period</Box>
-                  <Box variant="p">{selectedLine.servicePeriodLabel}</Box>
-                  <Box variant="awsui-key-label">Stream</Box>
-                  <Box variant="p">{selectedLine.fundingStream || "-"}</Box>
-                </SpaceBetween>
-                <SpaceBetween size="xs">
-                  <Box variant="awsui-key-label">Paid on</Box>
-                  <Box variant="p">{selectedLine.paidAt || "-"}</Box>
-                  <Box variant="awsui-key-label">Payment reference</Box>
-                  <Box variant="p">{selectedLine.paymentReference || "-"}</Box>
-                  <Box variant="awsui-key-label">Proof document ID</Box>
-                  <Box variant="p">{selectedLine.paymentProofDocumentId || "-"}</Box>
-                  <Box variant="awsui-key-label">Batch</Box>
-                  <Box variant="p">
-                    {selectedBatch?.id
-                      ? `${selectedBatch.id} (${selectedBatch.status || "draft"})`
-                      : "Not batched"}
-                  </Box>
-                  <Box variant="awsui-key-label">Batch approved by</Box>
-                  <Box variant="p">{selectedBatch?.approvedBy || "-"}</Box>
-                  <Box variant="awsui-key-label">Authorization</Box>
-                  <Box variant="p">{authorizationSummary}</Box>
-                </SpaceBetween>
+              <ColumnLayout columns={2}>
+                <Container header={<Header variant="h3">Line</Header>}>
+                  <KeyValuePairs
+                    columns={1}
+                    items={[
+                      { label: "Line ID", value: selectedLine.id || "-" },
+                      { label: "Payment type", value: formatOptionalText(selectedLine.paymentType) },
+                      {
+                        label: "Payee",
+                        value: selectedLine.payeeName
+                          ? `${selectedLine.payeeName} (${selectedLine.payeeType || "-"})`
+                          : "-",
+                      },
+                      { label: "Budget pot", value: formatOptionalText(selectedLine.potName) },
+                    ]}
+                  />
+                </Container>
+                <Container header={<Header variant="h3">Status and amount</Header>}>
+                  <KeyValuePairs
+                    columns={1}
+                    items={[
+                      {
+                        label: "Status",
+                        value: (
+                          <StatusIndicator
+                            type={resolveLineStatusMeta(selectedLine, packetStatusKey).indicator}
+                          >
+                            {resolveLineStatusMeta(selectedLine, packetStatusKey).label}
+                          </StatusIndicator>
+                        ),
+                      },
+                      {
+                        label: "Amount",
+                        value: <Box variant="strong">{formatCurrency(selectedLine.amount)}</Box>,
+                      },
+                      {
+                        label: "Service period",
+                        value: showLineServicePeriod ? selectedLine.servicePeriodLabel : "-",
+                      },
+                      { label: "Stream", value: formatOptionalText(selectedLine.fundingStream) },
+                    ]}
+                  />
+                </Container>
               </ColumnLayout>
-              <SpaceBetween size="xs">
-                <Box variant="awsui-key-label">Batch selection</Box>
-                <Box variant="p">
-                  {selectedLines.length
-                    ? `${selectedLines.length} selected • ${batchLineIds.length} approved for batch`
-                    : "Select one or more lines to batch."}
-                </Box>
-                {selectedLinesWithBatch.length ? (
-                  <Box variant="p">Some selected lines are already batched.</Box>
-                ) : null}
-                {batchTotals && batchLineIds.length ? (
-                  <Box variant="p">
-                    Total: {formatCurrency(batchTotals.totalAmount)}{" "}
-                    {Object.keys(batchTotals.streams || {}).length
-                      ? `• ${Object.entries(batchTotals.streams)
-                          .map(([stream, value]) => `${stream} ${formatCurrency(value)}`)
-                          .join(" | ")}`
-                      : ""}
-                    {selectedRequest?.reportingUnit ? ` • ${selectedRequest.reportingUnit}` : ""}
-                  </Box>
-                ) : null}
-              </SpaceBetween>
               <SpaceBetween direction="horizontal" size="xs">
                 <Button onClick={openRecurringModal} disabled={!recurringEligible}>
                   Generate recurring lines
                 </Button>
-                {!isProgramView ? (
-                  <Button onClick={openMarkPaidModal} disabled={!canMarkPaid}>
-                    Mark paid
-                  </Button>
-                ) : null}
               </SpaceBetween>
             </SpaceBetween>
           ) : (
@@ -1416,16 +991,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                       <Box variant="p">{item.type}</Box>
                       {item.note ? <Box variant="p">{item.note}</Box> : null}
                       {item.documentName ? <Box variant="p">{item.documentName}</Box> : null}
-                      {item.verifiedBy ? <Box variant="p">Verified by {item.verifiedBy}</Box> : null}
-                      {!isProgramView && item.id ? (
-                        <Button
-                          variant="link"
-                          onClick={() => handleEvidenceVerification(item, !item.verified)}
-                          disabled={verifyingEvidenceId === item.id}
-                        >
-                          {item.verified ? "Clear verification" : "Verify"}
-                        </Button>
-                      ) : null}
                     </SpaceBetween>
                   );
                 })}
@@ -1440,24 +1005,14 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                       <Box variant="p">{item.type}</Box>
                       {item.note ? <Box variant="p">{item.note}</Box> : null}
                       {item.documentName ? <Box variant="p">{item.documentName}</Box> : null}
-                      {item.verifiedBy ? <Box variant="p">Verified by {item.verifiedBy}</Box> : null}
-                      {!isProgramView && item.id ? (
-                        <Button
-                          variant="link"
-                          onClick={() => handleEvidenceVerification(item, !item.verified)}
-                          disabled={verifyingEvidenceId === item.id}
-                        >
-                          {item.verified ? "Clear verification" : "Verify"}
-                        </Button>
-                      ) : null}
                     </SpaceBetween>
                   );
                 })}
               </SpaceBetween>
-              {isProgramView ? (
+              {canUploadEvidence ? (
                 <SpaceBetween size="xs">
                   <Box variant="awsui-key-label">Upload evidence</Box>
-                  <Box variant="p">Attach missing evidence and resubmit the packet when ready.</Box>
+                  <Box variant="p">Attach required evidence before submitting to finance.</Box>
                   <Button onClick={openEvidenceModal} disabled={!selectedRequest?.id}>
                     Upload evidence
                   </Button>
@@ -1466,36 +1021,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             </SpaceBetween>
           </ExpandableSection>
 
-          <ExpandableSection headerText="Approvals and timeline">
-            <ColumnLayout columns={2} variant="text-grid">
-              <SpaceBetween size="xs">
-                <Box variant="awsui-key-label">Approvals</Box>
-                {(selectedRequest.approvals ?? []).map(entry => (
-                  <SpaceBetween key={`${entry.stage}-${entry.by}`} direction="horizontal" size="xs">
-                    <StatusIndicator type={entry.status === "Approved" ? "success" : "info"}>
-                      {entry.status}
-                    </StatusIndicator>
-                    <Box variant="p">{entry.stage}</Box>
-                    <Box variant="p">{entry.by}</Box>
-                    <Box variant="p">{entry.at}</Box>
-                  </SpaceBetween>
-                ))}
-              </SpaceBetween>
-              <SpaceBetween size="xs">
-                <Box variant="awsui-key-label">Timeline</Box>
-                {(selectedRequest.timeline ?? []).map(entry => (
-                  <SpaceBetween key={`${entry.label}-${entry.at}`} direction="horizontal" size="xs">
-                    <Box variant="p">{entry.label}</Box>
-                    <Box variant="p">{entry.at}</Box>
-                    <Box variant="p">{entry.actor}</Box>
-                    {entry.notes ? <Box variant="p">{entry.notes}</Box> : null}
-                  </SpaceBetween>
-                ))}
-              </SpaceBetween>
-            </ColumnLayout>
-          </ExpandableSection>
-
-          <ExpandableSection headerText="Notes & requests">
+          <ExpandableSection headerText="Notes">
             <SpaceBetween size="m">
               {noteError ? <Alert type="error">{noteError}</Alert> : null}
               {internalNotes.length ? (
@@ -1512,13 +1038,13 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                 <Box variant="p">No internal notes logged yet.</Box>
               )}
               <FormField
-                label="Add note or request"
-                description="Use this for program ↔ finance clarification requests and internal notes."
+                label="Add note"
+                description="Use this for internal context on the packet."
               >
                 <Textarea
                   value={noteText}
                   onChange={({ detail }) => setNoteText(detail.value)}
-                  placeholder="e.g., Please confirm attendance report for March is verified."
+                  placeholder="e.g., Follow up on missing receipt."
                 />
               </FormField>
               <Button
@@ -1531,34 +1057,16 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             </SpaceBetween>
           </ExpandableSection>
 
-          {(selectedRequest.duplicateWarnings?.length || selectedRequest.overrideHistory?.length) && (
-            <ColumnLayout columns={2} variant="text-grid">
-              <SpaceBetween size="xs">
-                <Box variant="awsui-key-label">Duplicate warnings</Box>
-                {(selectedRequest.duplicateWarnings ?? []).length ? (
-                  (selectedRequest.duplicateWarnings ?? []).map(warning => (
-                    <Box key={warning} variant="p">
-                      {warning}
-                    </Box>
-                  ))
-                ) : (
-                  <Box variant="p">None</Box>
-                )}
-              </SpaceBetween>
-              <SpaceBetween size="xs">
-                <Box variant="awsui-key-label">Overrides</Box>
-                {(selectedRequest.overrideHistory ?? []).length ? (
-                  (selectedRequest.overrideHistory ?? []).map(entry => (
-                    <Box key={`${entry.by}-${entry.at}`} variant="p">
-                      {entry.at} - {entry.by}: {entry.reason}
-                    </Box>
-                  ))
-                ) : (
-                  <Box variant="p">None</Box>
-                )}
-              </SpaceBetween>
-            </ColumnLayout>
-          )}
+          {(selectedRequest.duplicateWarnings ?? []).length ? (
+            <SpaceBetween size="xs">
+              <Box variant="awsui-key-label">Duplicate warnings</Box>
+              {(selectedRequest.duplicateWarnings ?? []).map(warning => (
+                <Box key={warning} variant="p">
+                  {warning}
+                </Box>
+              ))}
+            </SpaceBetween>
+          ) : null}
 
           <SpaceBetween size="xs">
             <Box variant="awsui-key-label">Notes</Box>
@@ -1579,70 +1087,18 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           </SpaceBetween>
 
           <SpaceBetween direction="horizontal" size="xs">
-            <Button
-              variant="primary"
-              loading={sendingEmail}
-              onClick={handleSendEmail}
-              disabled={!selectedRequest?.id || sendingEmail || !canSendToFinance}
-            >
-              Send to finance
-            </Button>
-            <ButtonDropdown
-              ariaLabel="Payment packet actions"
-              items={statusActions}
-              onItemClick={handleStatusAction}
-            >
-              Update status
-            </ButtonDropdown>
-            {showFinanceActions ? (
+            <StatusIndicator type={packetStatusMeta[packetStatusKey].indicator}>
+              {packetStatusMeta[packetStatusKey].label}
+            </StatusIndicator>
+            {canSubmitPacket ? (
               <Button
-                onClick={() => handlePacketStatusChange("confirmed")}
-                disabled={!canConfirm}
+                variant="primary"
+                onClick={() => handlePacketStatusChange("submitted")}
+                disabled={!selectedRequest?.id}
               >
-                Mark confirmed
+                Submit to finance
               </Button>
             ) : null}
-            {showFinanceActions ? (
-              <Button
-                onClick={handleCreateBatch}
-                disabled={!canCreateBatch || batchSubmitting}
-                loading={batchSubmitting}
-              >
-                Create batch
-              </Button>
-            ) : null}
-            {showFinanceActions ? (
-              <Button
-                onClick={handleApproveBatch}
-                disabled={!canApproveBatch || batchApproving}
-                loading={batchApproving}
-              >
-                Approve batch
-              </Button>
-            ) : null}
-            {showFinanceActions ? (
-              <Button
-                iconName="download"
-                onClick={handleExportBatch}
-                disabled={!canExportBatch || batchExporting}
-                loading={batchExporting}
-              >
-                Export batch CSV
-              </Button>
-            ) : null}
-            {showFinanceActions ? (
-              <Button
-                iconName="download"
-                onClick={handleDownloadAuditBundle}
-                disabled={!selectedRequest?.id || auditDownloading}
-                loading={auditDownloading}
-              >
-                Download audit bundle
-              </Button>
-            ) : null}
-            <Button variant="link" href="#">
-              Open packet documents
-            </Button>
           </SpaceBetween>
         </SpaceBetween>
       ) : (
@@ -1679,17 +1135,36 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         }
       >
         <SpaceBetween size="m">
-          {lineError ? <Alert type="error">{lineError}</Alert> : null}
+          {lineError ? (
+            <Alert type="error">
+              {Array.isArray(lineError) ? (
+                <SpaceBetween size="xs">
+                  {lineError.map((message, index) => (
+                    <Box key={`${message}-${index}`} variant="p">
+                      {message}
+                    </Box>
+                  ))}
+                </SpaceBetween>
+              ) : (
+                lineError
+              )}
+            </Alert>
+          ) : null}
           <ColumnLayout columns={2} variant="text-grid">
-            <FormField label="Payment type">
+            <FormField
+              label="Payment type"
+              errorText={linePaymentTypeError || undefined}
+            >
               <Select
                 selectedOption={selectedLinePaymentType}
-                options={PAYMENT_TYPE_OPTIONS}
+                options={linePaymentTypeOptions}
                 onChange={({ detail }) =>
                   setLineForm(current => ({ ...current, paymentType: detail.selectedOption?.value || "" }))
                 }
                 placeholder="Select payment type"
                 filteringType="auto"
+                statusType={paymentTypeMappingLoading ? "loading" : "finished"}
+                empty={linePaymentTypeEmptyMessage}
               />
             </FormField>
             <FormField label="Payee type">
@@ -1729,40 +1204,44 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             <FormField label="Budget pot">
               <Select
                 selectedOption={selectedLinePot}
-                options={linePotOptions}
+                options={filteredLinePotOptions}
                 onChange={({ detail }) =>
                   setLineForm(current => ({ ...current, potId: detail.selectedOption?.value || "" }))
                 }
                 statusType={linePotLoading ? "loading" : "finished"}
                 placeholder={linePotLoading ? "Loading pots" : "Select budget pot"}
                 filteringType="auto"
-                empty="No budget pots available."
+                empty={linePotEmptyMessage}
               />
             </FormField>
-            <FormField
-              label="Service period start"
-              description="Required for living allowance and wage subsidy."
-            >
-              <DatePicker
-                value={lineForm.servicePeriodStart}
-                onChange={({ detail }) =>
-                  setLineForm(current => ({ ...current, servicePeriodStart: detail.value }))
-                }
-                placeholder="YYYY-MM-DD"
-              />
-            </FormField>
-            <FormField
-              label="Service period end"
-              description="Required for living allowance and wage subsidy."
-            >
-              <DatePicker
-                value={lineForm.servicePeriodEnd}
-                onChange={({ detail }) =>
-                  setLineForm(current => ({ ...current, servicePeriodEnd: detail.value }))
-                }
-                placeholder="YYYY-MM-DD"
-              />
-            </FormField>
+            {requiresLinePeriod ? (
+              <>
+                <FormField
+                  label="Service period start"
+                  description="Required for living allowance and wage subsidy."
+                >
+                  <DatePicker
+                    value={lineForm.servicePeriodStart}
+                    onChange={({ detail }) =>
+                      setLineForm(current => ({ ...current, servicePeriodStart: detail.value }))
+                    }
+                    placeholder="YYYY-MM-DD"
+                  />
+                </FormField>
+                <FormField
+                  label="Service period end"
+                  description="Required for living allowance and wage subsidy."
+                >
+                  <DatePicker
+                    value={lineForm.servicePeriodEnd}
+                    onChange={({ detail }) =>
+                      setLineForm(current => ({ ...current, servicePeriodEnd: detail.value }))
+                    }
+                    placeholder="YYYY-MM-DD"
+                  />
+                </FormField>
+              </>
+            ) : null}
             <FormField label="Requested payment date (optional)">
               <DatePicker
                 value={lineForm.requestedPaymentDate}
@@ -1782,66 +1261,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               />
             </FormField>
           </ColumnLayout>
-        </SpaceBetween>
-      </Modal>
-      <Modal
-        visible={markPaidModalOpen}
-        onDismiss={() => {
-          if (markPaidSubmitting) return;
-          setMarkPaidModalOpen(false);
-          setMarkPaidError(null);
-        }}
-        header="Mark payment line as paid"
-        footer={
-          <SpaceBetween direction="horizontal" size="xs">
-            <Button
-              variant="link"
-              onClick={() => {
-                setMarkPaidModalOpen(false);
-                setMarkPaidError(null);
-              }}
-              disabled={markPaidSubmitting}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleMarkPaid}
-              loading={markPaidSubmitting}
-            >
-              Save paid status
-            </Button>
-          </SpaceBetween>
-        }
-      >
-        <SpaceBetween size="m">
-          {markPaidError && <Alert type="error">{markPaidError}</Alert>}
-          <FormField label="Paid date" description="Date the payment was issued.">
-            <DatePicker
-              value={paidDate}
-              onChange={({ detail }) => setPaidDate(detail.value)}
-              placeholder="YYYY-MM-DD"
-            />
-          </FormField>
-          <FormField label="Payment reference" description="Confirmation or EFT reference number.">
-            <Input
-              value={paymentReference}
-              onChange={({ detail }) => setPaymentReference(detail.value)}
-              placeholder="e.g., EFT-2026-00019"
-            />
-          </FormField>
-          <FormField
-            label="Payment confirmation file"
-            description="Upload the proof of payment confirmation."
-          >
-            <FileUpload
-              value={paymentProofFiles}
-              onChange={({ detail }) => setPaymentProofFiles(detail.value)}
-              multiple={false}
-              constraintText="PDF, Word, Excel, text, PNG, JPG."
-              loading={markPaidSubmitting}
-            />
-          </FormField>
         </SpaceBetween>
       </Modal>
       <Modal
@@ -1983,102 +1402,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               multiple={false}
               constraintText="PDF, Word, Excel, text, PNG, JPG."
               loading={evidenceUploading}
-            />
-          </FormField>
-        </SpaceBetween>
-      </Modal>
-      <Modal
-        visible={returnModalOpen}
-        onDismiss={() => {
-          if (returnSubmitting) return;
-          setReturnModalOpen(false);
-          setReturnError(null);
-        }}
-        header="Return packet for evidence"
-        footer={
-          <SpaceBetween direction="horizontal" size="xs">
-            <Button
-              variant="link"
-              onClick={() => {
-                setReturnModalOpen(false);
-                setReturnError(null);
-              }}
-              disabled={returnSubmitting}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleReturnSubmit}
-              loading={returnSubmitting}
-            >
-              Return packet
-            </Button>
-          </SpaceBetween>
-        }
-      >
-        <SpaceBetween size="m">
-          {returnError && <Alert type="error">{returnError}</Alert>}
-          <FormField
-            label="Return reason"
-            description="Describe what needs to be corrected or uploaded before resubmission."
-          >
-            <Textarea
-              value={returnReason}
-              onChange={({ detail }) => setReturnReason(detail.value)}
-              placeholder="e.g., Attendance report missing for February"
-            />
-          </FormField>
-        </SpaceBetween>
-      </Modal>
-      <Modal
-        visible={overrideModalOpen}
-        onDismiss={() => {
-          if (overrideSubmitting) return;
-          setOverrideModalOpen(false);
-          setOverrideError(null);
-          setOverrideContext(null);
-          setOverrideReason("");
-        }}
-        header={overrideContext?.title || "Override required"}
-        footer={
-          <SpaceBetween direction="horizontal" size="xs">
-            <Button
-              variant="link"
-              onClick={() => {
-                setOverrideModalOpen(false);
-                setOverrideError(null);
-                setOverrideContext(null);
-                setOverrideReason("");
-              }}
-              disabled={overrideSubmitting}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleOverrideSubmit}
-              loading={overrideSubmitting}
-            >
-              Apply override
-            </Button>
-          </SpaceBetween>
-        }
-      >
-        <SpaceBetween size="m">
-          {overrideError ? <Alert type="error">{overrideError}</Alert> : null}
-          {overrideContext?.error?.message ? (
-            <Box variant="p">{overrideContext.error.message}</Box>
-          ) : null}
-          {renderOverrideDetails(overrideContext?.error?.details)}
-          <FormField
-            label="Override reason"
-            description="Explain why this override is justified for audit and compliance."
-          >
-            <Textarea
-              value={overrideReason}
-              onChange={({ detail }) => setOverrideReason(detail.value)}
-              placeholder="Provide a concise justification"
             />
           </FormField>
         </SpaceBetween>

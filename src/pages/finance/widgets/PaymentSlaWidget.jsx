@@ -36,34 +36,16 @@ const PaymentSlaWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
 
   const cards = [
     {
-      label: "Ready for finance review",
-      value: slaSnapshot.readyForFinance,
-      indicator: slaSnapshot.readyForFinance > 0 ? "warning" : "success",
-      helper: "Packets waiting for finance review.",
+      label: "Drafts needing evidence",
+      value: slaSnapshot.draftsNeedingEvidence,
+      indicator: slaSnapshot.draftsNeedingEvidence > 0 ? "warning" : "success",
+      helper: "Draft packets blocked by missing evidence.",
     },
     {
-      label: "Ready for batching",
-      value: slaSnapshot.readyForBatching,
-      indicator: slaSnapshot.readyForBatching > 0 ? "warning" : "success",
-      helper: "Finance-approved packets ready for batch creation.",
-    },
-    {
-      label: "On hold",
-      value: slaSnapshot.onHold,
-      indicator: slaSnapshot.onHold > 0 ? "error" : "success",
-      helper: "Packets paused due to missing evidence or risk flags.",
-    },
-    {
-      label: "Sent awaiting confirmation",
-      value: slaSnapshot.sentAwaitingConfirmation,
-      indicator: slaSnapshot.sentAwaitingConfirmation > 0 ? "warning" : "success",
-      helper: "Packets sent to Finance but not yet confirmed.",
-    },
-    {
-      label: "Confirmed / closed",
-      value: slaSnapshot.confirmed,
-      indicator: "success",
-      helper: "Recently confirmed packets.",
+      label: "Submitted to finance",
+      value: slaSnapshot.submitted,
+      indicator: slaSnapshot.submitted > 0 ? "info" : "success",
+      helper: "Packets emailed to finance.",
     },
     {
       label: "Overdue evidence tasks",
@@ -72,10 +54,10 @@ const PaymentSlaWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       helper: "Lines past receipt or evidence deadlines.",
     },
     {
-      label: "Avg. turnaround (days)",
-      value: slaSnapshot.avgTurnaroundDays.toFixed(1),
+      label: "Avg. submission age (days)",
+      value: slaSnapshot.avgSubmissionAgeDays.toFixed(1),
       indicator: "info",
-      helper: "Average days from submission to confirmation.",
+      helper: "Average days since submission to finance.",
     },
   ];
 

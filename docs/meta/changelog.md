@@ -5,6 +5,33 @@ Format: YYYY-MM-DD - Category: Short description
 ## 2026-01-03
 - Docs: Added Payments module user manual (`docs/guides/payments-module-user-manual.md`).
 
+## 2026-01-04
+- UX: Added Case Workspace quick action for managing payments (payments queue + detail above full-width interventions/action plans).
+- UX: Program Payments widgets now live in the Case Workspace (case-scoped queue + packet detail).
+- UX: Manage Payments quick action now focuses the first intervention with a draft/returned payment packet.
+- UX: Payment packet creation in the Case Workspace now derives reporting unit, pot, and amount from the intervention and supports partial payments.
+- UX: Service period fields now show only for living allowance and wage subsidy payment types in payment packet/line modals.
+- API: Blocked payment initiation for draft/planned/submitted/in_review/changes_requested/cancelled interventions.
+- Payments: Payment type options now filter by intervention code via runtime config and the API blocks mismatched types.
+- UX: Refreshed payment packet detail summary layout for clearer grouping and readability.
+- UX: Payment packet detail now starts with payment lines; summary cards removed.
+- UX: Payment packet queue amount column now shows stream total badges; removed payment type column.
+- UX: Add payment line modal now filters budget pots to the packet reporting unit region (retains existing pot on edit).
+- UX: Add payment line modal now surfaces detailed validation errors from the server.
+- UX: Payment line evidence column now distinguishes between no evidence required and missing baseline evidence.
+- Fix: Supporting documents now auto-move from application to the auto-created intervention on approval.
+- Fix: Evidence checklist items now keep their payment-document IDs so verification works in Finance view.
+- UX: Draft payment packets can be deleted from the payment packet queue.
+- Payments: Supporting documents now auto-attach to new payment packets/lines based on evidence rules.
+- Payments: Initial interventions created on application approval now auto-generate draft payment packets.
+- Feature: Assessment submissions now generate an application-form PDF alongside the assessment PDF (stored as `application_form` documents).
+- Feature: Assessment submissions now generate a financial overview PDF alongside the assessment PDF (stored as `financial_overview` documents).
+- UX: Case manager assessment PDF layout now matches the application and financial overview PDF styling.
+- Fix: Case manager assessment PDF now includes intervention framing, childcare, and cost schedule fields captured in the assessment wizard.
+- Payments: Simplified the workflow to Draft -> Submitted only; removed verification/approval/batching/mark-paid steps and locked packets after submission.
+- Payments: Submission now emails finance from the status update and evidence gates use received evidence instead of verification.
+- Docs: Updated payments requirements, user manual, and help copy to reflect the simplified workflow.
+
 ## 2026-01-24
 - Payments: Auto-generate draft payment packets from approved interventions.
 - Payments: Evidence verification required before approvals; verify/unverify controls added.

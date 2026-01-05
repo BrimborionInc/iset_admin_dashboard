@@ -437,6 +437,12 @@ const answersDiff = (baseline = {}, updated = {}) => {
 };
 
 const REGISTRATION_KEYS = ['sfn-registration-number', 'nsfn-registration-number', 'metis-registration-number', 'inuit-registration-number', 'registration-number'];
+const REGISTRATION_KEY_BY_IDENTITY = {
+  first_nations_status: 'sfn-registration-number',
+  first_nations_non_status: 'nsfn-registration-number',
+  metis: 'metis-registration-number',
+  inuit: 'inuit-registration-number'
+};
 
 const getRegistrationValue = (answers = {}) => {
   for (const key of REGISTRATION_KEYS) {
@@ -448,11 +454,21 @@ const getRegistrationValue = (answers = {}) => {
 
 const getRegistrationTargetKey = (answers = {}) => {
   for (const key of REGISTRATION_KEYS) {
-    if (answers && Object.prototype.hasOwnProperty.call(answers, key) && String(answers[key] ?? '').length > 0) {
+    if (answers && Object.prototype.hasOwnProperty.call(answers, key) && String(answers[key] ?? '').trim().length > 0) {
       return key;
     }
   }
+  const identityKey = REGISTRATION_KEY_BY_IDENTITY[answers?.['legal-indigenous-identity']];
+  if (identityKey) {
+    return identityKey;
+  }
   return 'sfn-registration-number';
+};
+
+const buildEditableAnswers = (source = {}) => {
+  const next = cloneAnswers(source);
+  next['registration-number'] = getRegistrationValue(source);
+  return next;
 };
 
 
@@ -1241,9 +1257,7 @@ const IsetApplicationFormWidget = ({
 
   useEffect(() => {
     if (!isEditing) {
-      const next = cloneAnswers(answers);
-      next['registration-number'] = getRegistrationValue(answers);
-      setEditableAnswers(next);
+      setEditableAnswers(buildEditableAnswers(answers));
     }
   }, [answers, isEditing]);
 
@@ -1379,12 +1393,12 @@ const IsetApplicationFormWidget = ({
     }
     setShowEditConfirm(false);
     setIsEditing(true);
-    setEditableAnswers(cloneAnswers(answers));
+    setEditableAnswers(buildEditableAnswers(answers));
   }, [acquireLock, answers, isDecisionFinal, locking, lockedByAnotherUser, pushFlash]);
 
   const handleCancelEditing = useCallback(() => {
     setIsEditing(false);
-    setEditableAnswers(cloneAnswers(answers));
+    setEditableAnswers(buildEditableAnswers(answers));
     releaseLock({ silent: true }).catch(() => {});
   }, [answers, releaseLock]);
 

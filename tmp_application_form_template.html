@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ISET Application Form</title>
+  <style>
+    :root {
+      --ink: #111111;
+      --muted: #555555;
+      --line: #666666;
+      --sans: Arial, Helvetica, sans-serif;
+      --bg: #f0f4f8;
+    }
+
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: var(--sans);
+      color: var(--ink);
+      background: #ffffff;
+      font-size: 10.5px;
+      line-height: 1.2;
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 8px auto;
+      padding: 0 10px 18px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo {
+      height: 32px;
+      width: auto;
+    }
+
+    .title-block {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+
+    .confidential {
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .meta .field label {
+      display: block;
+      font-size: 9.5px;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+
+    .meta .field input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid var(--line);
+      padding: 2px 4px;
+      font-size: 10px;
+    }
+
+    .section-title {
+      margin-top: 8px;
+      background: var(--bg);
+      font-weight: 700;
+      text-align: center;
+      padding: 4px 6px;
+      border: 1px solid var(--line);
+      border-bottom: none;
+      letter-spacing: 0.3px;
+    }
+
+    table.form-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      border: 1px solid var(--line);
+    }
+
+    table.form-table td {
+      border: 1px solid var(--line);
+      padding: 4px;
+      vertical-align: top;
+    }
+
+    .label {
+      font-weight: 700;
+      font-size: 9.5px;
+    }
+
+    input[type="text"],
+    input[type="date"],
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #999999;
+      padding: 2px 4px;
+      font-size: 10px;
+      background: #ffffff;
+    }
+
+    textarea {
+      min-height: 36px;
+      resize: none;
+    }
+
+    .check-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 2px 8px;
+    }
+
+    .check-grid.small {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+    }
+
+    .check input {
+      width: 11px;
+      height: 11px;
+      margin: 0;
+    }
+
+    .inline-fields {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 4px;
+    }
+
+    .inline-fields input {
+      text-align: center;
+    }
+
+    .subtle {
+      color: var(--muted);
+      font-size: 9px;
+      margin-top: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="header-left">
+        <img class="logo" data-field="nwac_logo" alt="NWAC logo" />
+        <div class="title-block">
+          <div class="title">ISET Application Form</div>
+          <div class="confidential">CONFIDENTIAL</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div class="field">
+        <label>Reference #</label>
+        <input type="text" data-field="reference_number" />
+      </div>
+      <div class="field">
+        <label>Applicant Name</label>
+        <input type="text" data-field="applicant_name" />
+      </div>
+      <div class="field">
+        <label>Received At</label>
+        <input type="text" data-field="received_at" />
+      </div>
+    </div>
+
+    <div class="section-title">APPLICANT DETAILS</div>
+    <table class="form-table">
+      <tr>
+        <td class="label">Social Insurance Number (SIN)</td>
+        <td><input type="text" data-field="sin" /></td>
+        <td class="label">Title</td>
+        <td>
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="title_ms" />Ms.</label>
+            <label class="check"><input type="checkbox" data-field="title_mrs" />Mrs.</label>
+            <label class="check"><input type="checkbox" data-field="title_miss" />Miss</label>
+            <label class="check"><input type="checkbox" data-field="title_mx" />Mx.</label>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Last Name</td>
+        <td><input type="text" data-field="last_name" /></td>
+        <td class="label">First Name</td>
+        <td><input type="text" data-field="first_name" /></td>
+      </tr>
+      <tr>
+        <td class="label">Middle Name(s)/Initials</td>
+        <td><input type="text" data-field="middle_names" /></td>
+        <td class="label">Preferred Name (if applicable)</td>
+        <td><input type="text" data-field="preferred_name" /></td>
+      </tr>
+      <tr>
+        <td class="label">Date of Birth (YYYY-MM-DD)</td>
+        <td>
+          <div class="inline-fields">
+            <input type="text" data-field="dob_year" />
+            <input type="text" data-field="dob_month" />
+            <input type="text" data-field="dob_day" />
+          </div>
+        </td>
+        <td class="label">Gender</td>
+        <td>
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="gender_female" />Female</label>
+            <label class="check"><input type="checkbox" data-field="gender_diverse" />Gender diverse</label>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Indigenous Group</td>
+        <td colspan="3">
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" data-field="indigenous_status" />Status First Nation</label>
+            <label class="check"><input type="checkbox" data-field="indigenous_non_status" />Non-status First Nation</label>
+            <label class="check"><input type="checkbox" data-field="indigenous_metis" />Metis</label>
+            <label class="check"><input type="checkbox" data-field="indigenous_inuit" />Inuit</label>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td class="label">First Nation/Inuit/Metis Number</td>
+        <td><input type="text" data-field="registration_number" /></td>
+        <td class="label">Home Community</td>
+        <td><input type="text" data-field="home_community" /></td>
+      </tr>
+    </table>
+
+    <div class="section-title">CONTACT INFORMATION</div>
+    <table class="form-table">
+      <tr>
+        <td class="label">Apt. or Box #</td>
+        <td><input type="text" data-field="address_unit" /></td>
+        <td class="label">Street Address</td>
+        <td><input type="text" data-field="address_line1" /></td>
+      </tr>
+      <tr>
+        <td class="label">City</td>
+        <td><input type="text" data-field="address_city" /></td>
+        <td class="label">Province</td>
+        <td><input type="text" data-field="address_province" /></td>
+      </tr>
+      <tr>
+        <td class="label">Postal Code</td>
+        <td><input type="text" data-field="address_postal" /></td>
+        <td class="label"></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td class="label">Mailing Address (if different)</td>
+        <td colspan="3"><textarea data-field="mailing_address"></textarea></td>
+      </tr>
+      <tr>
+        <td class="label">Daytime Phone #</td>
+        <td><input type="text" data-field="phone_day" /></td>
+        <td class="label">Alternate Phone #</td>
+        <td><input type="text" data-field="phone_alt" /></td>
+      </tr>
+      <tr>
+        <td class="label">Email Address</td>
+        <td colspan="3"><input type="text" data-field="email" /></td>
+      </tr>
+      <tr>
+        <td class="label">Emergency Contact Name</td>
+        <td><input type="text" data-field="emergency_name" /></td>
+        <td class="label">Emergency Contact Phone #</td>
+        <td><input type="text" data-field="emergency_phone" /></td>
+      </tr>
+      <tr>
+        <td class="label">Relationship to Applicant</td>
+        <td><input type="text" data-field="emergency_relationship" /></td>
+        <td class="label"></td>
+        <td></td>
+      </tr>
+    </table>
+
+    <div class="section-title">DEMOGRAPHICS</div>
+    <table class="form-table">
+      <tr>
+        <td class="label">Visible minority group?</td>
+        <td>
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="visible_minority_no" />No</label>
+            <label class="check"><input type="checkbox" data-field="visible_minority_yes" />Yes</label>
+          </div>
+        </td>
+        <td class="label">Preferred Language</td>
+        <td><input type="text" data-field="preferred_language" /></td>
+      </tr>
+      <tr>
+        <td class="label">Marital Status</td>
+        <td colspan="3">
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" data-field="marital_married" />Married or equivalent</label>
+            <label class="check"><input type="checkbox" data-field="marital_single" />Single</label>
+            <label class="check"><input type="checkbox" data-field="marital_separated" />Separated</label>
+            <label class="check"><input type="checkbox" data-field="marital_divorced" />Divorced</label>
+            <label class="check"><input type="checkbox" data-field="marital_widowed" />Widowed</label>
+          </div>
+          <div class="subtle">If married or equivalent, spouse's name:</div>
+          <input type="text" data-field="spouse_name" />
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Dependent Children</td>
+        <td>
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="dependent_no" />No</label>
+            <label class="check"><input type="checkbox" data-field="dependent_yes" />Yes</label>
+          </div>
+        </td>
+        <td class="label">If yes, list ages of children</td>
+        <td><input type="text" data-field="dependent_ages" /></td>
+      </tr>
+      <tr>
+        <td class="label">Do you consider yourself to have a disability?</td>
+        <td>
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="disability_no" />No</label>
+            <label class="check"><input type="checkbox" data-field="disability_yes" />Yes</label>
+          </div>
+        </td>
+        <td class="label">If yes, please specify</td>
+        <td><input type="text" data-field="disability_details" /></td>
+      </tr>
+      <tr>
+        <td class="label">Receiving social assistance?</td>
+        <td>
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="social_assistance_no" />No</label>
+            <label class="check"><input type="checkbox" data-field="social_assistance_yes" />Yes</label>
+          </div>
+        </td>
+        <td class="label">Top-up amount (if applicable)</td>
+        <td><input type="text" data-field="top_up_amount" /></td>
+      </tr>
+    </table>
+
+    <div class="section-title">LABOUR FORCE ATTACHMENT</div>
+    <table class="form-table">
+      <tr>
+        <td class="label">Current status</td>
+        <td colspan="3">
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" data-field="labour_unemployed" />Unemployed</label>
+            <label class="check"><input type="checkbox" data-field="labour_underemployed" />Under-employed</label>
+            <label class="check"><input type="checkbox" data-field="labour_employed_full" />Employed full-time</label>
+            <label class="check"><input type="checkbox" data-field="labour_employed_part" />Employed part-time</label>
+            <label class="check"><input type="checkbox" data-field="labour_self_employed" />Self-employed</label>
+            <label class="check"><input type="checkbox" data-field="labour_student" />Student</label>
+            <label class="check"><input type="checkbox" data-field="labour_other" />Other</label>
+          </div>
+        </td>
+      </tr>
+    </table>
+
+    <div class="section-title">EDUCATION</div>
+    <table class="form-table">
+      <tr>
+        <td class="label">Education (select all that apply)</td>
+        <td colspan="3">
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" data-field="education_no_formal" />No formal education</label>
+            <label class="check"><input type="checkbox" data-field="education_grade_7_8" />Up to Grade 7-8 (Secondaire I-II)</label>
+            <label class="check"><input type="checkbox" data-field="education_grade_9_10" />Grade 9-10 (Secondaire III)</label>
+            <label class="check"><input type="checkbox" data-field="education_grade_11_12" />Grade 11-12 (Secondaire IV-V)</label>
+            <label class="check"><input type="checkbox" data-field="education_secondary_diploma" />Secondary School Diploma or GED</label>
+            <label class="check"><input type="checkbox" data-field="education_post_secondary" />Some post-secondary training</label>
+            <label class="check"><input type="checkbox" data-field="education_apprenticeship" />Apprenticeship/trades certificate or diploma</label>
+            <label class="check"><input type="checkbox" data-field="education_cegep" />CEGEP or other non-university certificate/diploma</label>
+            <label class="check"><input type="checkbox" data-field="education_college" />College or other non-university certificate/diploma</label>
+            <label class="check"><input type="checkbox" data-field="education_university_certificate" />University certificate or diploma</label>
+            <label class="check"><input type="checkbox" data-field="education_bachelors" />University - Bachelor Degree</label>
+            <label class="check"><input type="checkbox" data-field="education_masters" />University - Masters Degree</label>
+            <label class="check"><input type="checkbox" data-field="education_doctorate" />University - Doctorate</label>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Year completed</td>
+        <td><input type="text" data-field="education_year" /></td>
+        <td class="label">Province/Territory (highest level)</td>
+        <td><input type="text" data-field="education_location" /></td>
+      </tr>
+    </table>
+
+    <div class="section-title">EMPLOYMENT GOALS</div>
+    <table class="form-table">
+      <tr>
+        <td class="label">Long-term training and employment goal (as it relates to ISET support)</td>
+        <td colspan="3"><textarea data-field="long_term_goal"></textarea></td>
+      </tr>
+      <tr>
+        <td class="label">Barriers (select all that apply)</td>
+        <td colspan="3">
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" data-field="barrier_education" />Education</label>
+            <label class="check"><input type="checkbox" data-field="barrier_funding" />Funding</label>
+            <label class="check"><input type="checkbox" data-field="barrier_lack_jobs" />Lack of job opportunities</label>
+            <label class="check"><input type="checkbox" data-field="barrier_location" />Location (remote community)</label>
+            <label class="check"><input type="checkbox" data-field="barrier_other" />Other (specify)</label>
+          </div>
+          <input type="text" data-field="barrier_other_details" />
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Identified program or employer (select one)</td>
+        <td colspan="3">
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="target_program_skills" />Skills Development (Education)</label>
+            <label class="check"><input type="checkbox" data-field="target_program_tws" />Targeted Wage Subsidy</label>
+            <label class="check"><input type="checkbox" data-field="target_program_jcp" />Job Creation Partnership</label>
+          </div>
+        </td>
+      </tr>
+    </table>
+
+    <div class="section-title">SUPPORTS REQUESTED</div>
+    <table class="form-table">
+      <tr>
+        <td class="label">Financial supports requested (select all that apply)</td>
+        <td colspan="3">
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" data-field="support_tuition" />Tuition</label>
+            <label class="check"><input type="checkbox" data-field="support_books" />Books/Program materials</label>
+            <label class="check"><input type="checkbox" data-field="support_living" />Living allowance</label>
+            <label class="check"><input type="checkbox" data-field="support_transportation" />Transportation</label>
+            <label class="check"><input type="checkbox" data-field="support_childcare" />Childcare</label>
+            <label class="check"><input type="checkbox" data-field="support_other" />Other (specify)</label>
+          </div>
+          <input type="text" data-field="support_other_details" />
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Childcare (is a childcare subsidy being requested?)</td>
+        <td>
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="childcare_no" />No</label>
+            <label class="check"><input type="checkbox" data-field="childcare_yes" />Yes</label>
+          </div>
+        </td>
+        <td class="label">Childcare funded (support currently received)</td>
+        <td>
+          <div class="check-grid">
+            <label class="check"><input type="checkbox" data-field="childcare_not_applicable" />Not applicable</label>
+            <label class="check"><input type="checkbox" data-field="childcare_ei_crf" />EI/CRF</label>
+            <label class="check"><input type="checkbox" data-field="childcare_provincial" />Provincial funding/subsidy</label>
+            <label class="check"><input type="checkbox" data-field="childcare_fnicci" />FNICCI</label>
+            <label class="check"><input type="checkbox" data-field="childcare_no_funding" />No funding received</label>
+            <label class="check"><input type="checkbox" data-field="childcare_daycare_unavailable" />Daycare not available</label>
+            <label class="check"><input type="checkbox" data-field="childcare_family" />Assisted by family</label>
+            <label class="check"><input type="checkbox" data-field="childcare_self_funded" />Self-funded</label>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Other funding sources (Band funding, loans, grants, etc.)</td>
+        <td>
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="other_funding_no" />No</label>
+            <label class="check"><input type="checkbox" data-field="other_funding_yes" />Yes</label>
+          </div>
+        </td>
+        <td class="label">If yes, specify program and amount</td>
+        <td><input type="text" data-field="other_funding_details" /></td>
+      </tr>
+    </table>
+  </div>
+</body>
+</html>

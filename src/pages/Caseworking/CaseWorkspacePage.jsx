@@ -14,6 +14,8 @@ import CompliancePanelWidget from "./caseWorkspace/widgets/CompliancePanelWidget
 import ParticipantDetailsWidget from "./caseWorkspace/widgets/ParticipantDetailsWidget.jsx";
 import ExportPreviewWidget from "./caseWorkspace/widgets/ExportPreviewWidget.jsx";
 import InterventionAssessmentWidget from "./caseWorkspace/widgets/InterventionAssessmentWidget.jsx";
+import CasePaymentRequestsWidget from "./caseWorkspace/widgets/CasePaymentRequestsWidget.jsx";
+import CasePaymentDetailWidget from "./caseWorkspace/widgets/CasePaymentDetailWidget.jsx";
 import CaseWorkspaceCaseHeaderHelp from "../../helpPanelContents/caseWorkspaceCaseHeaderHelp.js";
 import SupportingDocumentsHelp from "../../helpPanelContents/supportingDocumentsHelp.js";
 import SecureMessagesHelpPanelContent from "../../helpPanelContents/secureMessagesHelpPanelContent.js";
@@ -27,6 +29,7 @@ import CaseWorkspaceParticipantDetailsHelp from "../../helpPanelContents/caseWor
 import CaseWorkspaceExportPreviewHelp from "../../helpPanelContents/caseWorkspaceExportPreviewHelp.js";
 import CaseWorkspaceHelp from "../../helpPanelContents/caseWorkspaceHelp.js";
 import { CaseWorkspaceProvider } from "./caseWorkspace/CaseWorkspaceContext.jsx";
+import { PaymentsDataProvider } from "../finance/widgets/PaymentsDataContext.jsx";
 
 const STORAGE_KEY = "iset-case-workspace-layout-v13";
 
@@ -164,6 +167,22 @@ const widgetRegistry = {
     helpTitle: "Participant details",
     aiContext: CaseWorkspaceParticipantDetailsHelp.aiContext,
   },
+  "payments-queue": {
+    id: "payments-queue",
+    defaultRowSpan: 5,
+    defaultColumnSpan: 4,
+    component: CasePaymentRequestsWidget,
+    title: "Payment packet queue",
+    description: "Program payment packets tied to this case.",
+  },
+  "payments-detail": {
+    id: "payments-detail",
+    defaultRowSpan: 5,
+    defaultColumnSpan: 2,
+    component: CasePaymentDetailWidget,
+    title: "Payment packet detail",
+    description: "Evidence, approvals, and line items for the selected packet.",
+  },
 };
 
 const defaultLayout = [
@@ -201,6 +220,14 @@ const documentsMessagesLayout = [
   { id: "secure-messaging", rowSpan: 6, columnSpan: 2 },
 ];
 
+const managePaymentsLayout = [
+  { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
+  { id: "payments-queue", rowSpan: 5, columnSpan: 4 },
+  { id: "payments-detail", rowSpan: 5, columnSpan: 4 },
+  { id: "interventions", rowSpan: 4, columnSpan: 4 },
+  { id: "actionPlans", rowSpan: 4, columnSpan: 4 },
+];
+
 const esdcValidationLayout = [
   { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
   { id: "compliancePanel", rowSpan: 6, columnSpan: 2 },
@@ -211,6 +238,7 @@ const QUICK_ACTION_LAYOUTS = {
   managePlans: managePlansLayout,
   notesCalendar: notesCalendarLayout,
   documentsMessages: documentsMessagesLayout,
+  managePayments: managePaymentsLayout,
   esdcValidation: esdcValidationLayout,
   proposeIntervention: proposeInterventionLayout,
 };
@@ -332,6 +360,7 @@ const CaseWorkspacePage = ({
   toggleHelpPanel,
 }) => {
   const { caseId } = useParams();
+  const paymentFilters = useMemo(() => (caseId ? { caseId } : {}), [caseId]);
   const [layout, setLayout] = useState(() => loadLayoutFromStorage() ?? [...defaultLayout]);
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
   const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
@@ -491,15 +520,17 @@ const CaseWorkspacePage = ({
 
   return (
     <CaseWorkspaceProvider caseId={caseId}>
-      <SpaceBetween size="l">
-        <Board
-          items={boardItems}
-          renderItem={renderBoardItem}
-          onItemsChange={handleItemsChange}
-          i18nStrings={boardI18nStrings}
-          empty={<Box padding="m">No widgets configured.</Box>}
-        />
-      </SpaceBetween>
+      <PaymentsDataProvider filters={paymentFilters}>
+        <SpaceBetween size="l">
+          <Board
+            items={boardItems}
+            renderItem={renderBoardItem}
+            onItemsChange={handleItemsChange}
+            i18nStrings={boardI18nStrings}
+            empty={<Box padding="m">No widgets configured.</Box>}
+          />
+        </SpaceBetween>
+      </PaymentsDataProvider>
     </CaseWorkspaceProvider>
   );
 };

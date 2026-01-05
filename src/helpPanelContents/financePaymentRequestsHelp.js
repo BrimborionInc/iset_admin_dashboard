@@ -6,8 +6,8 @@ const FinancePaymentRequestsHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Manage payment packets across finance review, batching, and confirmation. The queue highlights evidence
-        completeness, risk flags, reporting units, and ageing so Finance can prioritise audit-critical items.
+        Manage draft and submitted payment packets. The queue highlights evidence completeness, risk flags,
+        reporting units, and ageing so submissions stay audit-ready.
       </p>
     </Box>
     <Box>
@@ -23,8 +23,8 @@ const FinancePaymentRequestsHelp = () => (
     <Box>
       <strong>How to use</strong>
       <ul>
-        <li>Select a packet to load lines, evidence, and approvals in the detail widget.</li>
-        <li>Filter by queue state (finance review, batching, on hold, sent, confirmed).</li>
+        <li>Select a packet to load lines and evidence in the detail widget.</li>
+        <li>Filter by queue state (draft vs submitted).</li>
         <li>Search by packet ID, client, intervention, reporting unit, or risk flags.</li>
         <li>Customise table columns, widths, and pagination via the settings cogwheel.</li>
       </ul>
@@ -39,6 +39,6 @@ const FinancePaymentRequestsHelp = () => (
 );
 
 FinancePaymentRequestsHelp.aiContext =
-  "Explain the payment packet queue: columns (evidence, stream totals, reporting unit, age, risk flags), status filters, and how selecting a row drives the detail widget.";
+  "Explain the payment packet queue: columns (evidence, stream totals, reporting unit, age, risk flags), draft/submitted filters, and how selecting a row drives the detail widget.";
 
 export default FinancePaymentRequestsHelp;

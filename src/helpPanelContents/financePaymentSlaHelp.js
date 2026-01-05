@@ -6,40 +6,36 @@ const FinancePaymentSlaHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Visualise workload and timeliness across the payments pipeline so Finance can intervene before packets breach
-        service-level agreements.
+        Visualise workload and timeliness across draft and submitted packets so staff can spot delays before submission.
       </p>
     </Box>
     <Box>
       <strong>What each metric means</strong>
       <ul>
-        <li>Ready for finance review: packets waiting on finance validation.</li>
-        <li>Ready for batching: finance-approved packets awaiting EFT grouping.</li>
-        <li>On hold: blocked by missing evidence or risk flags.</li>
-        <li>Sent awaiting confirmation: payments issued but not confirmed.</li>
+        <li>Drafts needing evidence: packets blocked by missing documents.</li>
+        <li>Submitted to finance: packets already emailed to finance.</li>
         <li>Overdue evidence tasks: missing documents past due.</li>
-        <li>Avg. turnaround: submission-to-confirmation cycle time.</li>
+        <li>Avg. submission age: time since submission to finance.</li>
       </ul>
     </Box>
     <Box>
       <strong>How to use</strong>
       <ul>
-        <li>Monitor counts for finance review, batching, on-hold, and sent queues.</li>
-        <li>Watch overdue evidence tasks that could block confirmation.</li>
-        <li>Review the average turnaround time to spot bottlenecks.</li>
+        <li>Monitor drafts with missing evidence to keep submissions moving.</li>
+        <li>Track submitted packets to ensure finance has received them.</li>
+        <li>Review average submission age to spot bottlenecks.</li>
       </ul>
     </Box>
     <Box>
       <strong>Notes</strong>
       <p>
-        SLA metrics are driven by packet status changes; align thresholds and escalation rules in Finance Settings so
-        alerts match organisational expectations.
+        SLA metrics are driven by packet status changes and evidence receipt; align internal targets accordingly.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinancePaymentSlaHelp.aiContext =
-  "Explain the payments SLA snapshot metrics, what each bucket means, and how Finance should use them to triage delays and overdue evidence.";
+  "Explain the payments SLA snapshot metrics for drafts and submitted packets, what each bucket means, and how staff should use them to triage delays and overdue evidence.";
 
 export default FinancePaymentSlaHelp;

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
   Box,
@@ -19,6 +19,9 @@ import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 import { apiFetch } from "../../../../auth/apiClient.js";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import { toCanonicalRole } from "../../../../context/RoleMatrixContext.js";
+import { usePaymentsData } from "../../../finance/widgets/PaymentsDataContext.jsx";
+
+const AWAITING_SUBMISSION_STATUSES = new Set(["draft", "returned"]);
 
 const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
@@ -32,6 +35,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     refresh,
     selectedActionPlanId,
   } = useCaseWorkspace();
+  const { requests: paymentRequests, loading: paymentsLoading } = usePaymentsData();
   const currentUser = useCurrentUser();
   const [actionError, setActionError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -57,6 +61,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const isProgramAdmin = canonicalRole === "Program Administrator";
   const isRegionalManager = canonicalRole === "Regional Coordinator";
   const currentRegionId = currentUser?.regionId ?? null;
+  const pendingManagePaymentsRef = useRef(false);
 
   const DetailItem = ({ label, value }) => (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
@@ -416,6 +421,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       items.push({ id: "propose-intervention", text: "Propose new intervention" });
     }
     items.push({ id: "manage-plans-interventions", text: "Manage plans and interventions" });
+    items.push({ id: "manage-payments", text: "Manage payments" });
     items.push({ id: "view-notes-calendar", text: "View notes and case calendar" });
     items.push({ id: "documents-messages", text: "Documents and messages" });
     items.push({ id: "esdc-validation", text: "ESDC validation" });
@@ -706,6 +712,36 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     }
   }, [caseData?.id, selectedAssignee, refresh]);
 
+  const focusFirstAwaitingSubmissionIntervention = useCallback(() => {
+    if (typeof window === "undefined") return false;
+    const candidate = (paymentRequests || []).find(
+      item => AWAITING_SUBMISSION_STATUSES.has(item.status) && item.interventionId
+    );
+    if (!candidate) return false;
+    const interventionIdValue = String(candidate.interventionId);
+    const plans = caseData?.actionPlans || [];
+    const planMatch = plans.find(plan =>
+      (plan?.interventions || []).some(intervention => String(intervention?.id) === interventionIdValue)
+    );
+    if (!planMatch?.id) return false;
+    window.dispatchEvent(
+      new CustomEvent("iset:focus-intervention", {
+        detail: { planId: planMatch.id, interventionId: interventionIdValue },
+      })
+    );
+    return true;
+  }, [caseData?.actionPlans, paymentRequests]);
+
+  useEffect(() => {
+    if (!pendingManagePaymentsRef.current) return;
+    if (paymentsLoading || isLoading) return;
+    if (focusFirstAwaitingSubmissionIntervention()) {
+      pendingManagePaymentsRef.current = false;
+      return;
+    }
+    pendingManagePaymentsRef.current = false;
+  }, [focusFirstAwaitingSubmissionIntervention, isLoading, paymentsLoading]);
+
   const requestLayoutSwitch = useCallback(layoutId => {
     if (typeof window === "undefined") return;
     window.dispatchEvent(
@@ -779,6 +815,19 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         }
       } else if (detail.id === "manage-plans-interventions") {
         requestLayoutSwitch("managePlans");
+      } else if (detail.id === "manage-payments") {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("iset-case-workspace:manage-payments", {
+              detail: { caseId: caseData?.id || null },
+            })
+          );
+        }
+        pendingManagePaymentsRef.current = true;
+        if (focusFirstAwaitingSubmissionIntervention()) {
+          pendingManagePaymentsRef.current = false;
+        }
+        requestLayoutSwitch("managePayments");
       } else if (detail.id === "view-notes-calendar") {
         requestLayoutSwitch("notesCalendar");
       } else if (detail.id === "documents-messages") {
@@ -793,6 +842,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       refresh,
       openValidationModal,
       buildValidationSummary,
+      focusFirstAwaitingSubmissionIntervention,
       loadAssignable,
       selectedActionPlanId,
       caseData,

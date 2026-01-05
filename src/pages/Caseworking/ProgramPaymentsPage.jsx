@@ -1,48 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Board from "@cloudscape-design/board-components/board";
-import { SpaceBetween, Box } from "@cloudscape-design/components";
+import { SpaceBetween, Box, Link } from "@cloudscape-design/components";
 
-import { PaymentsDataProvider } from "../finance/widgets/PaymentsDataContext.jsx";
-import PaymentRequestsWidget from "../finance/widgets/PaymentRequestsWidget.jsx";
-import PaymentDetailWidget from "../finance/widgets/PaymentDetailWidget.jsx";
+const STORAGE_KEY = "program-payments-layout-v2";
 
-const STORAGE_KEY = "program-payments-layout-v1";
+const widgetRegistry = {};
 
-const PROGRAM_STATUS_OPTIONS = [
-  { value: "all", label: "All packets" },
-  { value: "draft", label: "My drafts / needs evidence", statuses: ["draft"] },
-  {
-    value: "submitted",
-    label: "Submitted / in program review",
-    statuses: ["submitted", "program_review"],
-  },
-  { value: "returned", label: "Returned", statuses: ["returned"] },
-  { value: "program_approved", label: "Program approved", statuses: ["program_approved"] },
-];
-
-const widgetRegistry = {
-  requests: {
-    id: "requests",
-    component: PaymentRequestsWidget,
-    title: "Program payment queue",
-    description: "Draft, submitted, returned, and approved packets awaiting finance review.",
-    defaultRowSpan: 4,
-    defaultColumnSpan: 4,
-  },
-  detail: {
-    id: "detail",
-    component: PaymentDetailWidget,
-    title: "Payment packet detail",
-    description: "Upload evidence, resolve returns, and submit packets for approval.",
-    defaultRowSpan: 4,
-    defaultColumnSpan: 2,
-  },
-};
-
-const defaultLayout = [
-  { id: "requests", rowSpan: 5, columnSpan: 4 },
-  { id: "detail", rowSpan: 5, columnSpan: 2 },
-];
+const defaultLayout = [];
 
 const exportLayout = items =>
   items.map(({ id, rowSpan, columnSpan, columnOffset }) => ({
@@ -66,8 +30,6 @@ const toBoardItems = layout =>
           title: definition.title,
           description: definition.description,
           component: definition.component,
-          mode: "program",
-          statusOptions: PROGRAM_STATUS_OPTIONS,
         },
       };
     })
@@ -250,17 +212,20 @@ const ProgramPaymentsPage = ({
   }, [paletteItems, setAvailableItems, setSplitPanelOpen]);
 
   return (
-    <PaymentsDataProvider>
-      <SpaceBetween size="l">
-        <Board
-          i18nStrings={boardI18nStrings}
-          items={boardItems}
-          onItemsChange={handleItemsChange}
-          renderItem={renderBoardItem}
-          empty={<Box padding="m">No widgets on the Program Payments dashboard.</Box>}
-        />
-      </SpaceBetween>
-    </PaymentsDataProvider>
+    <SpaceBetween size="l">
+      <Board
+        i18nStrings={boardI18nStrings}
+        items={boardItems}
+        onItemsChange={handleItemsChange}
+        renderItem={renderBoardItem}
+        empty={
+          <Box padding="m">
+            Program payments now live in the case workspace.{" "}
+            <Link href="/iset/cases">Open the case portfolio</Link> to manage payment packets.
+          </Box>
+        }
+      />
+    </SpaceBetween>
   );
 };
 

@@ -29,6 +29,8 @@ const INTAKE_ROOT = path.resolve(__dirname, '..', 'ISET-intake');
 const INTAKE_UPLOADS_ROOT = path.join(INTAKE_ROOT, 'uploads');
 const ADMIN_MANUAL_UPLOAD_DIR = path.join(INTAKE_UPLOADS_ROOT, 'manual');
 const ASSESSMENT_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_assessment_template.html');
+const APPLICATION_FORM_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_application_form_template.html');
+const FINANCIAL_OVERVIEW_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_financial_overview_template.html');
 const ADMIN_UPLOAD_ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
   'image/jpeg',
@@ -751,6 +753,8 @@ function escapeHtml(value) {
 }
 
 let cachedAssessmentTemplateHtml = null;
+let cachedApplicationFormTemplateHtml = null;
+let cachedFinancialOverviewTemplateHtml = null;
 
 function getAssessmentTemplateHtml() {
   if (cachedAssessmentTemplateHtml) return cachedAssessmentTemplateHtml;
@@ -761,6 +765,28 @@ function getAssessmentTemplateHtml() {
     cachedAssessmentTemplateHtml = null;
   }
   return cachedAssessmentTemplateHtml;
+}
+
+function getApplicationFormTemplateHtml() {
+  if (cachedApplicationFormTemplateHtml) return cachedApplicationFormTemplateHtml;
+  try {
+    cachedApplicationFormTemplateHtml = fs.readFileSync(APPLICATION_FORM_PDF_TEMPLATE_PATH, 'utf8');
+  } catch (err) {
+    console.error('[application-form-pdf] template load failed:', err?.message || err);
+    cachedApplicationFormTemplateHtml = null;
+  }
+  return cachedApplicationFormTemplateHtml;
+}
+
+function getFinancialOverviewTemplateHtml() {
+  if (cachedFinancialOverviewTemplateHtml) return cachedFinancialOverviewTemplateHtml;
+  try {
+    cachedFinancialOverviewTemplateHtml = fs.readFileSync(FINANCIAL_OVERVIEW_PDF_TEMPLATE_PATH, 'utf8');
+  } catch (err) {
+    console.error('[financial-overview-pdf] template load failed:', err?.message || err);
+    cachedFinancialOverviewTemplateHtml = null;
+  }
+  return cachedFinancialOverviewTemplateHtml;
 }
 
 const normalizeYesNoValue = (value) => {
@@ -799,6 +825,13 @@ const parseCurrencyValue = (value) => {
 const formatCurrencyValue = (value) => {
   const num = parseCurrencyValue(value);
   if (num === null) return '';
+  return num.toFixed(2);
+};
+
+const formatCurrencyField = (value) => {
+  if (value === null || typeof value === 'undefined' || value === '') return '';
+  const num = parseCurrencyValue(value);
+  if (num === null) return normaliseString(value) || '';
   return num.toFixed(2);
 };
 
@@ -878,6 +911,158 @@ async function storeAssessmentPdfDocument({
   const documentType = 'case_assessment';
   const label = 'Case manager assessment';
   const displayName = `case-manager-assessment-${trackingId || applicationId}.pdf`;
+  const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
+  const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
+  const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
+  const normalizedActorUserId = normalisePositiveInteger(actorUserId);
+  const storageMode = resolveUploadStorageMode();
+  let relativePath = null;
+  if (storageMode === 's3') {
+    const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+    if (DRIVER !== 's3') {
+      throw new Error('s3_upload_unavailable');
+    }
+    const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
+    const presigned = await presignPut({ key, contentType: 'application/pdf' });
+    await axios.put(presigned.url, pdfBuffer, {
+      headers: {
+        ...(presigned.headers || {}),
+        'Content-Type': 'application/pdf',
+        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+      }
+    });
+    relativePath = key;
+  } else {
+    const safeName = sanitiseUploadFilename(displayName);
+    const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, safeName);
+    await fs.promises.writeFile(targetPath, pdfBuffer);
+    relativePath = toIntakeRelativePath(targetPath);
+  }
+  if (!relativePath) {
+    throw new Error('path_resolution_failed');
+  }
+
+  await pool.query(
+    `UPDATE iset_document
+        SET status = 'archived', updated_at = NOW()
+      WHERE application_id = ?
+        AND document_category = ?
+        AND status = 'active'`,
+    [applicationId, documentType]
+  );
+
+  const metadata = JSON.stringify({ label, document_type: documentType });
+  const insertPayload = [
+    caseId || null,
+    applicationId,
+    normalizedApplicantUserId,
+    normalizedActorUserId,
+    displayName,
+    relativePath,
+    'application/pdf',
+    label,
+    metadata,
+    sizeBytes,
+    checksum,
+    documentType
+  ];
+  const [result] = await pool.query(
+    `INSERT INTO iset_document
+       (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+     VALUES (?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+    insertPayload
+  );
+  return result?.insertId || null;
+}
+
+async function storeApplicationFormPdfDocument({
+  applicationId,
+  caseId,
+  applicantUserId,
+  actorUserId,
+  referenceNumber,
+  pdfBuffer
+}) {
+  if (!applicationId || !pdfBuffer) return null;
+  const documentType = 'application_form';
+  const label = 'Application form';
+  const displayName = `application-form-${referenceNumber || applicationId}.pdf`;
+  const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
+  const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
+  const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
+  const normalizedActorUserId = normalisePositiveInteger(actorUserId);
+  const storageMode = resolveUploadStorageMode();
+  let relativePath = null;
+  if (storageMode === 's3') {
+    const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+    if (DRIVER !== 's3') {
+      throw new Error('s3_upload_unavailable');
+    }
+    const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
+    const presigned = await presignPut({ key, contentType: 'application/pdf' });
+    await axios.put(presigned.url, pdfBuffer, {
+      headers: {
+        ...(presigned.headers || {}),
+        'Content-Type': 'application/pdf',
+        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+      }
+    });
+    relativePath = key;
+  } else {
+    const safeName = sanitiseUploadFilename(displayName);
+    const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, safeName);
+    await fs.promises.writeFile(targetPath, pdfBuffer);
+    relativePath = toIntakeRelativePath(targetPath);
+  }
+  if (!relativePath) {
+    throw new Error('path_resolution_failed');
+  }
+
+  await pool.query(
+    `UPDATE iset_document
+        SET status = 'archived', updated_at = NOW()
+      WHERE application_id = ?
+        AND document_category = ?
+        AND status = 'active'`,
+    [applicationId, documentType]
+  );
+
+  const metadata = JSON.stringify({ label, document_type: documentType });
+  const insertPayload = [
+    caseId || null,
+    applicationId,
+    normalizedApplicantUserId,
+    normalizedActorUserId,
+    displayName,
+    relativePath,
+    'application/pdf',
+    label,
+    metadata,
+    sizeBytes,
+    checksum,
+    documentType
+  ];
+  const [result] = await pool.query(
+    `INSERT INTO iset_document
+       (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+     VALUES (?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+    insertPayload
+  );
+  return result?.insertId || null;
+}
+
+async function storeFinancialOverviewPdfDocument({
+  applicationId,
+  caseId,
+  applicantUserId,
+  actorUserId,
+  referenceNumber,
+  pdfBuffer
+}) {
+  if (!applicationId || !pdfBuffer) return null;
+  const documentType = 'financial_overview';
+  const label = 'Financial overview/budget';
+  const displayName = `financial-overview-${referenceNumber || applicationId}.pdf`;
   const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
   const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
@@ -1189,7 +1374,9 @@ async function fetchAssessmentApplicantContext({ applicationId, applicantUserId 
 
 function buildAssessmentPdfFields({
   caseRow,
-  applicantName
+  applicantName,
+  referenceNumber,
+  caseContext
 }) {
   const barriers = Array.isArray(caseRow?.assessment_employment_barriers)
     ? caseRow.assessment_employment_barriers
@@ -1224,6 +1411,64 @@ function buildAssessmentPdfFields({
   const previouslyFundedValue = normalizeYesNoValue(caseRow?.assessment_previous_iset);
   const esdcEligibilityValue = normalizeEsdcEligibilityValue(caseRow?.assessment_esdc_eligibility);
   const agreeCoordinatorValue = caseRow?.assessment_nwac_review ? String(caseRow.assessment_nwac_review).trim() : null;
+  const interventionLabel = normaliseString(caseRow?.assessment_intervention_label);
+  const interventionCode = normaliseString(caseRow?.assessment_intervention_code);
+  const interventionDisplay = interventionLabel
+    ? (interventionCode ? `${interventionLabel} (${interventionCode})` : interventionLabel)
+    : (interventionCode || '');
+  const interventionDuration = normaliseString(caseRow?.assessment_intervention_duration_days);
+  const nocCode = normaliseString(caseRow?.assessment_intervention_related_noc);
+  const nocVersion = normaliseString(caseRow?.assessment_intervention_related_noc_version);
+
+  const resolvedCaseContext =
+    caseContext ||
+    caseRow?.caseContext ||
+    (caseRow?.case_context_json ? safeJsonParse(caseRow.case_context_json, null) : null) ||
+    {};
+  const costSettings = resolvedCaseContext?.assessmentCostSettings || resolvedCaseContext?.assessment_cost_settings || null;
+  const costTypeRaw = typeof costSettings?.type === 'string' ? costSettings.type.trim().toLowerCase() : '';
+  let costType = costTypeRaw === 'recurring' ? 'recurring' : costTypeRaw === 'one_time' ? 'one_time' : null;
+  if (!costType && parseCurrencyValue(caseRow?.assessment_intervention_cost_total) !== null) {
+    costType = 'one_time';
+  }
+  const recurringPeriodRaw = costSettings?.period || costSettings?.recurringPeriod || '';
+  const recurringPeriod = recurringPeriodRaw ? formatCaseStatusLabel(recurringPeriodRaw) : '';
+  const recurringAmountRaw = costSettings?.amountPerPeriod ?? costSettings?.amount_per_period ?? null;
+  const recurringOccurrencesRaw = costSettings?.occurrences ?? costSettings?.occurrence ?? null;
+  const recurringTotalRaw =
+    costSettings?.calculatedTotal ??
+    costSettings?.calculated_total ??
+    (costType === 'recurring' ? caseRow?.assessment_intervention_cost_total : null);
+  const interventionCostTotalRaw =
+    costSettings?.calculatedTotal ??
+    costSettings?.calculated_total ??
+    caseRow?.assessment_intervention_cost_total ??
+    null;
+
+  const deliveryModeRaw = resolvedCaseContext?.assessmentDeliveryMode || resolvedCaseContext?.deliveryMode || '';
+  const deliveryModeLabel = deliveryModeRaw === 'in_house'
+    ? 'In-house (no external partner)'
+    : deliveryModeRaw
+      ? 'External delivery partner'
+      : '';
+
+  const childcareNeedValue = normalizeYesNoValue(caseRow?.assessment_childcare_need);
+  const childcareNeedYes = childcareNeedValue === 'yes';
+  const childcareNeedNo = childcareNeedValue === 'no';
+
+  const budgetPotCode = normaliseString(caseRow?.assessment_intervention_pot_code);
+  const budgetPotName = normaliseString(caseRow?.assessment_intervention_pot_name);
+  const budgetPotLabel = budgetPotCode && budgetPotName
+    ? `${budgetPotCode} - ${budgetPotName}`
+    : (budgetPotCode || budgetPotName || '');
+  const postingContextLabel = caseRow?.assessment_posting_context
+    ? formatCaseStatusLabel(caseRow.assessment_posting_context)
+    : '';
+
+  const conflictChoice = normaliseString(caseRow?.assessment_conflict_declaration_choice);
+  const conflictChoiceNormalized = conflictChoice ? conflictChoice.toLowerCase() : null;
+  const conflictChoiceNo = conflictChoiceNormalized === 'no_conflict';
+  const conflictChoiceYes = conflictChoiceNormalized === 'conflict';
 
   const barrierFields = {
     barriers_none: barrierSet.has('none'),
@@ -1252,21 +1497,57 @@ function buildAssessmentPdfFields({
     priorities_non_targeted: prioritySet.has('non-targeted')
   };
 
+  const resolvedReference =
+    normaliseString(referenceNumber) ||
+    normaliseString(caseRow?.tracking_id) ||
+    normaliseString(caseRow?.reference_number) ||
+    (caseRow?.application_id ? String(caseRow.application_id) : '');
+
   return {
     nwac_logo: getNwacLogoDataUri(),
+    reference_number: resolvedReference,
     date_of_assessment: toDateOnlyString(caseRow?.assessment_date_of_assessment),
     client_name: applicantName || '',
-    conflict_of_interest_confirmed: Boolean(caseRow?.assessment_conflict_declaration_signed),
+    conflict_declaration_signed: Boolean(caseRow?.assessment_conflict_declaration_signed),
+    conflict_choice_no: conflictChoiceNo,
+    conflict_choice_yes: conflictChoiceYes,
+    conflict_details: caseRow?.assessment_conflict_declaration_details || '',
     client_application_overview: caseRow?.case_summary || caseRow?.overview || '',
     training_employment_goal: caseRow?.assessment_employment_goals || '',
     previously_funded_iset: previouslyFundedValue,
     previously_funded_iset_details: caseRow?.assessment_previous_iset_details || '',
     other_funding_sources_details: caseRow?.assessment_other_funding_details || '',
     esdc_eligibility: esdcEligibilityValue,
+    intervention_code: interventionDisplay,
+    delivery_mode: deliveryModeLabel,
     intervention_start_date: toDateOnlyString(caseRow?.assessment_intervention_start_date),
     intervention_end_date: toDateOnlyString(caseRow?.assessment_intervention_end_date),
+    intervention_duration_days: interventionDuration || '',
     training_institution_or_employer: caseRow?.assessment_institution || '',
     program_name: caseRow?.assessment_program_name || '',
+    intervention_noc: nocCode || '',
+    intervention_noc_version: nocVersion || '',
+    itp_details: itp.details || '',
+    wage_subsidy_details: wage.subsidyDetails || '',
+    childcare_need_yes: childcareNeedYes,
+    childcare_need_no: childcareNeedNo,
+    childcare_funding_details: caseRow?.assessment_childcare_funding_details || '',
+    intervention_cost_total: interventionCostTotalRaw === null || typeof interventionCostTotalRaw === 'undefined'
+      ? ''
+      : formatCurrencyValue(interventionCostTotalRaw),
+    cost_type: costType,
+    recurring_period: recurringPeriod,
+    recurring_amount: recurringAmountRaw === null || typeof recurringAmountRaw === 'undefined'
+      ? ''
+      : formatCurrencyValue(recurringAmountRaw),
+    recurring_occurrences: recurringOccurrencesRaw === null || typeof recurringOccurrencesRaw === 'undefined'
+      ? ''
+      : String(recurringOccurrencesRaw),
+    recurring_total: recurringTotalRaw === null || typeof recurringTotalRaw === 'undefined'
+      ? ''
+      : formatCurrencyValue(recurringTotalRaw),
+    budget_pot_label: budgetPotLabel,
+    posting_context: postingContextLabel,
     itp_tuition_amount: formatCurrencyValue(itp.tuition),
     itp_books_materials_amount: booksMaterialsTotal === null ? '' : formatCurrencyValue(booksMaterialsTotal),
     itp_living_allowance_amount: formatCurrencyValue(itp.living),
@@ -1292,12 +1573,493 @@ function buildAssessmentPdfFields({
   };
 }
 
-async function generateAssessmentPdfBuffer({ caseRow, applicantName }) {
+const APPLICATION_FORM_REGISTRATION_KEYS = [
+  'sfn-registration-number',
+  'nsfn-registration-number',
+  'metis-registration-number',
+  'inuit-registration-number',
+  'registration-number'
+];
+
+const APPLICATION_FORM_PROVINCE_LABELS = {
+  AB: 'Alberta',
+  BC: 'British Columbia',
+  MB: 'Manitoba',
+  NB: 'New Brunswick',
+  NL: 'Newfoundland and Labrador',
+  NS: 'Nova Scotia',
+  NT: 'Northwest Territories',
+  NU: 'Nunavut',
+  ON: 'Ontario',
+  PE: 'Prince Edward Island',
+  QC: 'Quebec',
+  SK: 'Saskatchewan',
+  YT: 'Yukon Territory'
+};
+
+const APPLICATION_FORM_LANGUAGE_LABELS = {
+  en: 'English',
+  fr: 'French',
+  english: 'English',
+  french: 'French'
+};
+
+const APPLICATION_FORM_MARITAL_FIELDS = {
+  married: 'marital_married',
+  single: 'marital_single',
+  separated: 'marital_separated',
+  divorced: 'marital_divorced',
+  widowed: 'marital_widowed'
+};
+
+const APPLICATION_FORM_LABOUR_FIELDS = {
+  unemployed: 'labour_unemployed',
+  underemployed: 'labour_underemployed',
+  employed_full_time: 'labour_employed_full',
+  employed_part_time: 'labour_employed_part',
+  self_employed: 'labour_self_employed',
+  student: 'labour_student',
+  other: 'labour_other'
+};
+
+const APPLICATION_FORM_EDUCATION_FIELDS = {
+  no_formal_education: 'education_no_formal',
+  grade_7_8: 'education_grade_7_8',
+  grade_9_10: 'education_grade_9_10',
+  grade_11_12: 'education_grade_11_12',
+  secondary_school_diploma_or_ged: 'education_secondary_diploma',
+  post_secondary_training: 'education_post_secondary',
+  apprenticeship_trades: 'education_apprenticeship',
+  cegep: 'education_cegep',
+  college: 'education_college',
+  university_certificate: 'education_university_certificate',
+  bachelors_degree: 'education_bachelors',
+  masters_degree: 'education_masters',
+  doctorate: 'education_doctorate'
+};
+
+const APPLICATION_FORM_BARRIER_FIELDS = {
+  education: 'barrier_education',
+  funding: 'barrier_funding',
+  lack_of_job_opportunities: 'barrier_lack_jobs',
+  location: 'barrier_location',
+  other: 'barrier_other'
+};
+
+const APPLICATION_FORM_TARGET_PROGRAM_FIELDS = {
+  skills_development: 'target_program_skills',
+  tws: 'target_program_tws',
+  jcp: 'target_program_jcp'
+};
+
+const APPLICATION_FORM_SUPPORT_FIELDS = {
+  tuition: 'support_tuition',
+  books: 'support_books',
+  living: 'support_living',
+  transportation: 'support_transportation',
+  childcare: 'support_childcare',
+  other: 'support_other'
+};
+
+const APPLICATION_FORM_CHILDCARE_STATUS_FIELDS = {
+  ei_crf: 'childcare_ei_crf',
+  provincial_funding_subsidy: 'childcare_provincial',
+  fnicci: 'childcare_fnicci',
+  no_funding_received: 'childcare_no_funding',
+  daycare_not_available: 'childcare_daycare_unavailable',
+  assisted_by_family: 'childcare_family',
+  self_funded: 'childcare_self_funded'
+};
+
+const APPLICATION_FORM_INDIGENOUS_FIELDS = {
+  first_nations_status: 'indigenous_status',
+  first_nations_non_status: 'indigenous_non_status',
+  metis: 'indigenous_metis',
+  inuit: 'indigenous_inuit'
+};
+
+const FINANCIAL_OVERVIEW_INCOME_FIELDS = [
+  { key: 'income-employment', field: 'income_employment' },
+  { key: 'income-spousal', field: 'income_spousal' },
+  { key: 'income-social-assist', field: 'income_social_assist' },
+  { key: 'income-child-support', field: 'income_child_support' },
+  { key: 'income-child-benefit', field: 'income_child_benefit' },
+  { key: 'income-jordans', field: 'income_jordans' },
+  { key: 'income-band-funding', field: 'income_band_funding' },
+  { key: 'income-alimony', field: 'income_alimony' },
+  { key: 'income-other-description', field: 'income_other_amount' }
+];
+
+const FINANCIAL_OVERVIEW_EXPENSE_FIELDS = [
+  { key: 'expenses-rent', field: 'expenses_rent' },
+  { key: 'expenses-groceries', field: 'expenses_groceries' },
+  { key: 'expenses-electricity', field: 'expenses_electricity' },
+  { key: 'expenses-heating', field: 'expenses_heating' },
+  { key: 'expenses-water', field: 'expenses_water' },
+  { key: 'expenses-sewerage', field: 'expenses_sewerage' },
+  { key: 'expenses-garbage', field: 'expenses_garbage' },
+  { key: 'expenses_bus_pass', field: 'expenses_bus_pass' },
+  { key: 'expenses-parking', field: 'expenses_parking' },
+  { key: 'expenses-other-total', field: 'expenses_other_total' }
+];
+
+const formatPdfDateTime = value => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('en-CA', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
+const formatPdfDateParts = value => {
+  const date = parseDate(value);
+  if (!date) return { year: '', month: '', day: '' };
+  return {
+    year: String(date.getFullYear()),
+    month: String(date.getMonth() + 1).padStart(2, '0'),
+    day: String(date.getDate()).padStart(2, '0')
+  };
+};
+
+const normaliseEnumKey = value => {
+  const raw = normaliseString(value);
+  if (!raw) return null;
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+};
+
+const toKeySet = value => {
+  if (Array.isArray(value)) {
+    return new Set(value.map(entry => normaliseEnumKey(entry)).filter(Boolean));
+  }
+  if (typeof value === 'string') {
+    return new Set(value.split(',').map(entry => normaliseEnumKey(entry)).filter(Boolean));
+  }
+  if (value !== null && typeof value !== 'undefined') {
+    const key = normaliseEnumKey(value);
+    return new Set(key ? [key] : []);
+  }
+  return new Set();
+};
+
+const mapSelectionToFields = (selectedKey, fieldMap) => {
+  const result = {};
+  Object.values(fieldMap).forEach(field => {
+    result[field] = false;
+  });
+  if (!selectedKey) return result;
+  const field = fieldMap[selectedKey];
+  if (field) {
+    result[field] = true;
+  }
+  return result;
+};
+
+const mapSetToFields = (selectedSet, fieldMap) => {
+  const result = {};
+  Object.entries(fieldMap).forEach(([key, field]) => {
+    result[field] = selectedSet.has(key);
+  });
+  return result;
+};
+
+const extractRegistrationNumber = answers => {
+  for (const key of APPLICATION_FORM_REGISTRATION_KEYS) {
+    const raw = answers?.[key];
+    const value = normaliseString(raw);
+    if (value) return value;
+  }
+  return '';
+};
+
+function buildApplicationFormPdfFields({
+  applicationRow,
+  payload = {},
+  answers = {},
+  applicantName,
+  referenceNumber,
+  receivedAt
+}) {
+  const readAnswer = key => {
+    if (!answers || typeof answers !== 'object') return undefined;
+    if (Object.prototype.hasOwnProperty.call(answers, key)) return answers[key];
+    const altKey = key.replace(/-/g, '_');
+    if (Object.prototype.hasOwnProperty.call(answers, altKey)) return answers[altKey];
+    return answers[key] ?? answers[altKey];
+  };
+  const safeText = value => normaliseString(value) || '';
+  const preferredName = safeText(readAnswer('preferred-name'));
+  const firstName = safeText(readAnswer('first-name'));
+  const middleNames = safeText(readAnswer('middle-names'));
+  const lastName = safeText(readAnswer('last-name'));
+  const applicantNameFromAnswers = [firstName, middleNames, lastName].filter(Boolean).join(' ');
+  const resolvedApplicantName =
+    normaliseString(applicantName) ||
+    safeText(payload?.personal?.full_name) ||
+    safeText(payload?.submission_snapshot?.full_name) ||
+    applicantNameFromAnswers;
+
+  const resolvedReference =
+    normaliseString(referenceNumber) ||
+    safeText(payload?.submission_snapshot?.reference_number) ||
+    safeText(applicationRow?.reference_number) ||
+    safeText(applicationRow?.id);
+
+  const resolvedReceivedAt = formatPdfDateTime(receivedAt || applicationRow?.created_at);
+  const dobParts = formatPdfDateParts(readAnswer('dob') || readAnswer('date-of-birth'));
+
+  const genderValue = normaliseEnumKey(
+    readAnswer('gender_identity') ||
+    readAnswer('gender-identity') ||
+    readAnswer('gender') ||
+    readAnswer('biological_sex')
+  );
+  const genderFemale = genderValue === 'female';
+  const genderMale = genderValue === 'male';
+  const genderDiverse = Boolean(genderValue && !genderFemale && !genderMale);
+
+  const indigenousKey = normaliseEnumKey(readAnswer('legal-indigenous-identity'));
+  const indigenousFields = mapSelectionToFields(indigenousKey, APPLICATION_FORM_INDIGENOUS_FIELDS);
+
+  const visibleMinority = coerceBoolean(readAnswer('visible-minority'));
+  const hasVisibleMinority = visibleMinority === true;
+  const hasNoVisibleMinority = visibleMinority === false;
+
+  const maritalKey = normaliseEnumKey(readAnswer('marital-status'));
+  const maritalFields = mapSelectionToFields(maritalKey, APPLICATION_FORM_MARITAL_FIELDS);
+
+  const dependentChildren = coerceBoolean(readAnswer('dependent-children'));
+  const dependentYes = dependentChildren === true;
+  const dependentNo = dependentChildren === false;
+
+  const disability = coerceBoolean(readAnswer('has-disability'));
+  const disabilityYes = disability === true;
+  const disabilityNo = disability === false;
+
+  const socialAssistance = coerceBoolean(readAnswer('social-assistance'));
+  const socialYes = socialAssistance === true;
+  const socialNo = socialAssistance === false;
+
+  const labourKey = normaliseEnumKey(readAnswer('labour-force-status'));
+  const labourFields = mapSelectionToFields(labourKey, APPLICATION_FORM_LABOUR_FIELDS);
+
+  const educationKey = normaliseEnumKey(readAnswer('highest-education'));
+  const educationFields = mapSelectionToFields(educationKey, APPLICATION_FORM_EDUCATION_FIELDS);
+
+  const barrierSet = toKeySet(readAnswer('barriers'));
+  const barrierFields = mapSetToFields(barrierSet, APPLICATION_FORM_BARRIER_FIELDS);
+
+  const targetProgramKey = normaliseEnumKey(readAnswer('target-program'));
+  const targetProgramFields = mapSelectionToFields(targetProgramKey, APPLICATION_FORM_TARGET_PROGRAM_FIELDS);
+
+  const supportsSet = toKeySet(readAnswer('requested-supports'));
+  const supportFields = mapSetToFields(supportsSet, APPLICATION_FORM_SUPPORT_FIELDS);
+  const hasSupports = supportsSet.size > 0;
+  const childcareRequested = supportsSet.has('childcare');
+  const childcareYes = hasSupports && childcareRequested;
+  const childcareNo = hasSupports && !childcareRequested;
+
+  const childcareStatusSet = toKeySet(readAnswer('childcare-fuding-status'));
+  const childcareStatusFields = mapSetToFields(childcareStatusSet, APPLICATION_FORM_CHILDCARE_STATUS_FIELDS);
+  const childcareNotApplicable = hasSupports && !childcareRequested;
+
+  const otherFunding = coerceBoolean(readAnswer('loan-grant'));
+  const otherFundingYes = otherFunding === true;
+  const otherFundingNo = otherFunding === false;
+
+  const languageKey = normaliseEnumKey(readAnswer('preferred-language'));
+  const preferredLanguageLabel = APPLICATION_FORM_LANGUAGE_LABELS[languageKey] || safeText(readAnswer('preferred-language'));
+
+  const addressProvinceRaw = safeText(readAnswer('address-province'));
+  const provinceCode = addressProvinceRaw
+    ? (PROVINCE_CODE_MAP[addressProvinceRaw.toLowerCase()] || addressProvinceRaw.toUpperCase())
+    : '';
+  const provinceLabel = APPLICATION_FORM_PROVINCE_LABELS[provinceCode] || provinceCode || addressProvinceRaw;
+
+  const educationLocationRaw = safeText(readAnswer('education-location'));
+  const educationProvinceCode = educationLocationRaw
+    ? (PROVINCE_CODE_MAP[educationLocationRaw.toLowerCase()] || educationLocationRaw.toUpperCase())
+    : '';
+  const educationLocationLabel = APPLICATION_FORM_PROVINCE_LABELS[educationProvinceCode] || educationLocationRaw;
+
+  return {
+    nwac_logo: getNwacLogoDataUri(),
+    reference_number: resolvedReference,
+    applicant_name: resolvedApplicantName,
+    received_at: resolvedReceivedAt,
+    sin: safeText(readAnswer('social-insurance-number')),
+    title_ms: false,
+    title_mrs: false,
+    title_miss: false,
+    title_mx: false,
+    last_name: lastName,
+    first_name: firstName,
+    middle_names: middleNames,
+    preferred_name: preferredName,
+    dob_year: dobParts.year,
+    dob_month: dobParts.month,
+    dob_day: dobParts.day,
+    gender_female: genderFemale,
+    gender_diverse: genderDiverse,
+    ...indigenousFields,
+    registration_number: extractRegistrationNumber(answers),
+    home_community: safeText(readAnswer('home-comminuty')),
+    address_unit: '',
+    address_line1: safeText(readAnswer('address-street-address')),
+    address_city: safeText(readAnswer('address-city')),
+    address_province: provinceLabel,
+    address_postal: safeText(readAnswer('address-postcode')),
+    mailing_address: safeText(readAnswer('address-mailing-address')),
+    phone_day: safeText(readAnswer('telephone-day')),
+    phone_alt: safeText(readAnswer('telephone-alt')),
+    email: safeText(readAnswer('contact-email-address')),
+    emergency_name: safeText(readAnswer('emergency-contact-name')),
+    emergency_phone: safeText(readAnswer('emergency-contact-telephone')),
+    emergency_relationship: safeText(readAnswer('emergency-contact-relationship')),
+    visible_minority_yes: hasVisibleMinority,
+    visible_minority_no: hasNoVisibleMinority,
+    preferred_language: preferredLanguageLabel,
+    ...maritalFields,
+    spouse_name: safeText(readAnswer('spouses-name')),
+    dependent_yes: dependentYes,
+    dependent_no: dependentNo,
+    dependent_ages: safeText(readAnswer('ages-of-children')),
+    disability_yes: disabilityYes,
+    disability_no: disabilityNo,
+    disability_details: safeText(readAnswer('disability-description')),
+    social_assistance_yes: socialYes,
+    social_assistance_no: socialNo,
+    top_up_amount: safeText(readAnswer('top-up-amount')),
+    ...labourFields,
+    ...educationFields,
+    education_year: safeText(readAnswer('education-year')),
+    education_location: educationLocationLabel,
+    long_term_goal: safeText(readAnswer('long-term-goal')),
+    ...barrierFields,
+    barrier_other_details: safeText(readAnswer('other-barrier')),
+    ...targetProgramFields,
+    ...supportFields,
+    support_other_details: safeText(readAnswer('other-requested-support')),
+    childcare_yes: childcareYes,
+    childcare_no: childcareNo,
+    childcare_not_applicable: childcareNotApplicable,
+    ...childcareStatusFields,
+    other_funding_yes: otherFundingYes,
+    other_funding_no: otherFundingNo,
+    other_funding_details: safeText(readAnswer('loan-grant-details'))
+  };
+}
+
+function buildFinancialOverviewPdfFields({
+  applicationRow,
+  payload = {},
+  answers = {},
+  applicantName,
+  referenceNumber,
+  receivedAt
+}) {
+  const readAnswer = key => {
+    if (!answers || typeof answers !== 'object') return undefined;
+    if (Object.prototype.hasOwnProperty.call(answers, key)) return answers[key];
+    const altKey = key.replace(/-/g, '_');
+    if (Object.prototype.hasOwnProperty.call(answers, altKey)) return answers[altKey];
+    return answers[key] ?? answers[altKey];
+  };
+  const safeText = value => normaliseString(value) || '';
+
+  const preferredName = safeText(readAnswer('preferred-name'));
+  const firstName = safeText(readAnswer('first-name'));
+  const middleNames = safeText(readAnswer('middle-names'));
+  const lastName = safeText(readAnswer('last-name'));
+  const applicantNameFromAnswers = [firstName, middleNames, lastName].filter(Boolean).join(' ');
+
+  const resolvedApplicantName =
+    normaliseString(applicantName) ||
+    safeText(payload?.personal?.full_name) ||
+    safeText(payload?.submission_snapshot?.full_name) ||
+    applicantNameFromAnswers;
+
+  const resolvedReference =
+    normaliseString(referenceNumber) ||
+    safeText(payload?.submission_snapshot?.reference_number) ||
+    safeText(applicationRow?.reference_number) ||
+    safeText(applicationRow?.id);
+
+  const resolvedReceivedAt = formatPdfDateTime(receivedAt || applicationRow?.created_at);
+
+  const incomeFields = {};
+  FINANCIAL_OVERVIEW_INCOME_FIELDS.forEach(({ key, field }) => {
+    incomeFields[field] = formatCurrencyField(readAnswer(key));
+  });
+
+  const expenseFields = {};
+  FINANCIAL_OVERVIEW_EXPENSE_FIELDS.forEach(({ key, field }) => {
+    expenseFields[field] = formatCurrencyField(readAnswer(key));
+  });
+
+  const incomeTotal = sumCurrencyValues(
+    ...FINANCIAL_OVERVIEW_INCOME_FIELDS.map(({ key }) => readAnswer(key))
+  );
+  const expensesTotal = sumCurrencyValues(
+    ...FINANCIAL_OVERVIEW_EXPENSE_FIELDS.map(({ key }) => readAnswer(key))
+  );
+
+  const transportSet = toKeySet(readAnswer('expenses-transport'));
+  const transportBusPass =
+    transportSet.has('buss_pass') || transportSet.has('bus_pass') || transportSet.has('bus');
+  const transportParking = transportSet.has('parking');
+  const transportMileage = transportSet.has('mileage');
+
+  const loanGrant = coerceBoolean(readAnswer('loan-grant'));
+  const loanGrantYes = loanGrant === true;
+  const loanGrantNo = loanGrant === false;
+
+  const socialAssistance = coerceBoolean(readAnswer('social-assistance'));
+  const socialAssistanceYes = socialAssistance === true;
+  const socialAssistanceNo = socialAssistance === false;
+
+  const supportsSet = toKeySet(readAnswer('requested-supports'));
+  const childcareRequested = supportsSet.has('childcare');
+  const childcareNotApplicable = supportsSet.size > 0 && !childcareRequested;
+  const childcareStatusSet = toKeySet(readAnswer('childcare-fuding-status'));
+  const childcareStatusFields = mapSetToFields(childcareStatusSet, APPLICATION_FORM_CHILDCARE_STATUS_FIELDS);
+
+  return {
+    nwac_logo: getNwacLogoDataUri(),
+    reference_number: resolvedReference,
+    applicant_name: resolvedApplicantName,
+    received_at: resolvedReceivedAt,
+    ...incomeFields,
+    income_total: incomeTotal === null ? '' : formatCurrencyValue(incomeTotal),
+    income_other_sources: safeText(readAnswer('income-other')),
+    ...expenseFields,
+    expenses_total: expensesTotal === null ? '' : formatCurrencyValue(expensesTotal),
+    expenses_other_list: safeText(readAnswer('expenses-other-list')),
+    social_assistance_yes: socialAssistanceYes,
+    social_assistance_no: socialAssistanceNo,
+    top_up_amount: formatCurrencyField(readAnswer('top-up-amount')),
+    ...childcareStatusFields,
+    childcare_not_applicable: childcareNotApplicable,
+    transport_bus_pass: transportBusPass,
+    transport_parking: transportParking,
+    transport_mileage: transportMileage,
+    transport_mileage_km: safeText(readAnswer('expenses_transport_mileage')),
+    loan_grant_yes: loanGrantYes,
+    loan_grant_no: loanGrantNo,
+    loan_grant_details: safeText(readAnswer('loan-grant-details'))
+  };
+}
+
+async function generateAssessmentPdfBuffer({ caseRow, applicantName, referenceNumber }) {
   const templateHtml = getAssessmentTemplateHtml();
   if (!templateHtml) {
     throw new Error('assessment_template_missing');
   }
-  const fields = buildAssessmentPdfFields({ caseRow, applicantName });
+  const fields = buildAssessmentPdfFields({ caseRow, applicantName, referenceNumber });
   const html = buildAssessmentPdfHtml({ templateHtml, fields });
   let browser;
   try {
@@ -1308,9 +2070,95 @@ async function generateAssessmentPdfBuffer({ caseRow, applicantName }) {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
     const pdfBuffer = await page.pdf({
-      format: 'A4',
+      format: 'Letter',
       printBackground: true,
-      margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' }
+      margin: { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' }
+    });
+    await page.close();
+    return pdfBuffer;
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (_) {}
+    }
+  }
+}
+
+async function generateApplicationFormPdfBuffer({
+  applicationRow,
+  payload,
+  answers,
+  applicantName,
+  referenceNumber,
+  receivedAt
+}) {
+  const templateHtml = getApplicationFormTemplateHtml();
+  if (!templateHtml) {
+    throw new Error('application_form_template_missing');
+  }
+  const fields = buildApplicationFormPdfFields({
+    applicationRow,
+    payload,
+    answers,
+    applicantName,
+    referenceNumber,
+    receivedAt
+  });
+  const html = buildAssessmentPdfHtml({ templateHtml, fields });
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'Letter',
+      printBackground: true,
+      margin: { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' }
+    });
+    await page.close();
+    return pdfBuffer;
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (_) {}
+    }
+  }
+}
+
+async function generateFinancialOverviewPdfBuffer({
+  applicationRow,
+  payload,
+  answers,
+  applicantName,
+  referenceNumber,
+  receivedAt
+}) {
+  const templateHtml = getFinancialOverviewTemplateHtml();
+  if (!templateHtml) {
+    throw new Error('financial_overview_template_missing');
+  }
+  const fields = buildFinancialOverviewPdfFields({
+    applicationRow,
+    payload,
+    answers,
+    applicantName,
+    referenceNumber,
+    receivedAt
+  });
+  const html = buildAssessmentPdfHtml({ templateHtml, fields });
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'Letter',
+      printBackground: true,
+      margin: { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' }
     });
     await page.close();
     return pdfBuffer;
@@ -1493,6 +2341,16 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_case_financial_snapshot',
   'iset_case_intervention',
   'finance_transaction',
+  'payment_line_transaction',
+  'payment_batch_line',
+  'payment_packet_document',
+  'payment_packet_communication',
+  'payment_status_event',
+  'payment_override',
+  'payment_packet_line',
+  'payment_batch',
+  'payment_packet',
+  'payee_profile',
   'iset_case_note',
   'iset_case_task',
   'iset_case_watch',
@@ -1863,6 +2721,14 @@ const PROVINCE_CODE_MAP = {
   other: 'OT',
   'other country': 'OT'
 };
+
+function formatCaseStatusLabel(value) {
+  if (!value) return '';
+  return String(value)
+    .trim()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
 
 function normaliseString(value) {
   if (value === null || typeof value === 'undefined') return null;
@@ -5419,6 +6285,31 @@ async function fetchInterventionCodeLabel(connection, code) {
   return row ? row.label || null : null;
 }
 
+async function moveApplicationDocumentsToIntervention(connection, {
+  caseId,
+  applicationId,
+  interventionId,
+} = {}) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedInterventionId = normalisePositiveInteger(interventionId);
+  if (!connection || !normalizedApplicationId || !normalizedInterventionId) {
+    return { moved: 0 };
+  }
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const [result] = await connection.query(
+    `UPDATE iset_document
+       SET case_id = COALESCE(case_id, ?),
+           linked_intervention_id = ?,
+           application_id = NULL,
+           updated_at = NOW()
+     WHERE application_id = ?
+       AND (linked_intervention_id IS NULL OR linked_intervention_id = 0)
+       AND status = 'active'`,
+    [normalizedCaseId || null, normalizedInterventionId, normalizedApplicationId]
+  );
+  return { moved: result?.affectedRows || 0 };
+}
+
 async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   caseId,
   caseRow,
@@ -5426,7 +6317,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   budgetPotId
 }) {
   if (!Number.isInteger(caseId) || caseId <= 0) {
-    return { createdPlan: false, createdIntervention: false };
+    return { createdPlan: false, createdIntervention: false, interventionId: null };
   }
 
   const budgetPotIdNumeric = Number.isFinite(Number(budgetPotId)) && Number(budgetPotId) > 0
@@ -5445,7 +6336,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     [caseId]
   );
   if (!assessmentRow) {
-    return { createdPlan: false, createdIntervention: false };
+    return { createdPlan: false, createdIntervention: false, interventionId: null };
   }
 
   if (!validatedBudgetPotId) {
@@ -5461,7 +6352,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   const codeRaw = assessmentRow.intervention_code;
   const code = codeRaw !== null && typeof codeRaw !== 'undefined' ? String(codeRaw).trim() : '';
   if (!code) {
-    return { createdPlan: false, createdIntervention: false };
+    return { createdPlan: false, createdIntervention: false, interventionId: null };
   }
 
   const startDate = toDateOnlyString(assessmentRow.intervention_start_date);
@@ -5520,7 +6411,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     [caseId, AUTO_PLAN_METADATA_SOURCE]
   );
   if (existingAutoPlan) {
-    return { createdPlan: false, createdIntervention: false };
+    return { createdPlan: false, createdIntervention: false, interventionId: null };
   }
 
   const [[existingPlan]] = await connection.query(
@@ -5532,7 +6423,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   );
   if (existingPlan) {
     // Preserve manually created plan; do not auto-generate duplicates.
-    return { createdPlan: false, createdIntervention: false };
+    return { createdPlan: false, createdIntervention: false, interventionId: null };
   }
 
   const interventionLabel = await fetchInterventionCodeLabel(connection, code);
@@ -6113,11 +7004,27 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     });
   }
 
+  let movedDocuments = 0;
+  if (interventionId) {
+    try {
+      const moveResult = await moveApplicationDocumentsToIntervention(connection, {
+        caseId,
+        applicationId: caseRow?.application_id,
+        interventionId,
+      });
+      movedDocuments = moveResult.moved || 0;
+    } catch (err) {
+      console.warn('[auto-plan] failed to move supporting documents', err?.message || err);
+    }
+  }
+
   return {
     createdPlan: true,
     createdIntervention: true,
+    interventionId: interventionId || null,
     planStatus,
-    suggestedCaseStatus: 'initiated'
+    suggestedCaseStatus: 'initiated',
+    movedDocuments
   };
 }
 
@@ -7402,8 +8309,9 @@ async function dispatchMessageReceivedEmail({ pool, event, logger = console }) {
   }
 }
 
-async function fetchCaseRow(caseId) {
-  const [[row]] = await pool.query(
+async function fetchCaseRow(caseId, connection = null) {
+  const runner = connection || pool;
+  const [[row]] = await runner.query(
     'SELECT id, application_id, client_id, assigned_to_user_id, status FROM iset_case WHERE id = ? LIMIT 1',
     [caseId]
   );
@@ -8127,6 +9035,18 @@ function normaliseInterventionStatus(status) {
   if (direct.has(value)) return value;
   return value || 'planned';
 }
+
+const PAYMENT_BLOCKED_INTERVENTION_STATUSES = new Set([
+  'draft',
+  'planned',
+  'submitted',
+  'in_review',
+  'changes_requested',
+  'cancelled',
+]);
+
+const isPaymentBlockedInterventionStatus = status =>
+  PAYMENT_BLOCKED_INTERVENTION_STATUSES.has(normaliseInterventionStatus(status));
 
 function isInterventionClosedStatus(status) {
   const value = normaliseInterventionStatus(status);
@@ -31975,6 +32895,9 @@ const isFinancePaymentsRole = role => {
   return FINANCE_PAYMENTS_ROLE_ALLOWLIST.has(canonical);
 };
 
+const SIMPLE_PAYMENT_WORKFLOW = true;
+const SIMPLE_PAYMENT_PACKET_STATUSES = new Set(['draft', 'submitted', 'cancelled']);
+
 const PAYMENT_PACKET_STATUSES = new Set([
   'draft',
   'submitted',
@@ -32005,37 +32928,14 @@ const PAYMENT_LINE_STATUSES = new Set([
 const PAYMENT_BATCH_STATUSES = new Set(['draft', 'approved', 'exported', 'closed']);
 
 const PACKET_STATUS_TO_LINE_STATUS = {
+  draft: 'needs_evidence',
   submitted: 'ready_for_program',
-  program_review: 'ready_for_program',
-  program_approved: 'ready_for_finance',
-  finance_review: 'ready_for_finance',
-  finance_approved: 'approved',
-  batched: 'batched',
-  sent: 'approved',
-  confirmed: 'paid',
-  closed: 'paid',
-  on_hold: 'held',
-  returned: 'needs_evidence',
   cancelled: 'cancelled',
 };
 
-const EVIDENCE_GATE_PACKET_STATUSES = new Set([
-  'program_approved',
-  'finance_review',
-  'finance_approved',
-  'batched',
-  'sent',
-  'confirmed',
-  'closed',
-]);
+const EVIDENCE_GATE_PACKET_STATUSES = new Set(['submitted']);
 
-const EVIDENCE_GATE_LINE_STATUSES = new Set([
-  'ready_for_program',
-  'ready_for_finance',
-  'approved',
-  'batched',
-  'paid',
-]);
+const EVIDENCE_GATE_LINE_STATUSES = new Set(['ready_for_program']);
 
 const DUPLICATE_GATE_PACKET_STATUSES = new Set([
   'finance_approved',
@@ -32051,10 +32951,17 @@ const DUPLICATE_GATE_LINE_STATUSES = new Set([
   'paid',
 ]);
 
-const EI_GATE_PACKET_STATUSES = new Set(['program_approved', 'finance_approved']);
+const EI_GATE_PACKET_STATUSES = new Set(['submitted']);
 const EI_GATE_LINE_STATUSES = new Set(['ready_for_finance', 'approved', 'batched', 'paid']);
 
 const RECURRING_PERIOD_OPTIONS = new Set(['weekly', 'bi_weekly', 'monthly', 'quarterly']);
+
+const normalizePacketWorkflowStage = status => {
+  if (!status) return 'draft';
+  if (status === 'draft' || status === 'returned') return 'draft';
+  if (status === 'cancelled') return 'cancelled';
+  return 'submitted';
+};
 
 function requirePaymentsRole(req, res) {
   const roleRaw = inferUserRole(req);
@@ -32247,6 +33154,8 @@ const PAYMENT_APPROVAL_RULES_SCOPE = 'finance';
 const PAYMENT_APPROVAL_RULES_KEY = 'payment.approval.rules';
 const PAYMENT_POLICY_RULES_SCOPE = 'finance';
 const PAYMENT_POLICY_RULES_KEY = 'payment.policy.rules';
+const PAYMENT_INTERVENTION_MAPPING_SCOPE = 'finance';
+const PAYMENT_INTERVENTION_MAPPING_KEY = 'payment.intervention.payment_type_map';
 
 const DEFAULT_PAYMENT_APPROVAL_RULES = {
   program: [],
@@ -32259,6 +33168,22 @@ const DEFAULT_PAYMENT_POLICY_RULES = {
   noBackdatingDays: 0,
   amountCaps: {},
   receiptDeadlineDays: 14,
+};
+
+const normalizeInterventionCodeValue = value => {
+  if (value === null || typeof value === 'undefined' || value === '') return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return String(Math.trunc(numeric));
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const cleaned = trimmed.replace(/[^\d]/g, '');
+    if (!cleaned) return null;
+    const parsed = Number.parseInt(cleaned, 10);
+    if (!Number.isFinite(parsed)) return null;
+    return String(parsed);
+  }
+  return null;
 };
 
 const DEFAULT_PAYMENT_EVIDENCE_RULES = {
@@ -32321,6 +33246,53 @@ const DEFAULT_PAYMENT_EVIDENCE_RULES = {
   },
 };
 
+const PAYMENT_EVIDENCE_DOCUMENT_TYPE_MAP = {
+  application_form: ['ClientApplicationSigned'],
+  ei_consent: ['EIConsent'],
+  ei_verification: ['EIVerification'],
+  indigenous_declaration: ['IndigenousIdentity'],
+  status_card: ['IndigenousIdentity'],
+  letter_of_reference: ['IndigenousIdentity'],
+  band_funding_confirmation: ['BandFundingConfirmationOrDenial'],
+  band_funding_denial: ['BandFundingConfirmationOrDenial'],
+  acceptance_letter: ['AcceptanceLetter'],
+  statement_of_account: ['StatementOfAccount', 'TuitionStatementOrInvoice'],
+  funding_agreement: ['FundingAgreement'],
+  case_assessment: ['CaseManagerAssessment'],
+  attendance_form: ['AttendanceReport'],
+  financial_overview: ['FinancialOverview'],
+  financial_records: ['IncomeVerification'],
+  financial_evidence: ['ExpenseVerification'],
+  receipt: ['PaidReceipt', 'EquipmentReceipt'],
+  alternate_payee_letter: ['AlternatePayeeLetter'],
+  institution_letter: ['InstitutionLetter'],
+  equipment_quote: ['Quote'],
+  employer_duties_letter: ['EmployerDutiesLetter'],
+  employer_offer_letter_after_subsidy: ['EmployerOfferLetterAfterSubsidy'],
+  wage_plan: ['WagePlan'],
+};
+
+const normalizeDocumentTypeCode = value => {
+  if (!value) return null;
+  const trimmed = String(value).trim().toLowerCase();
+  return trimmed || null;
+};
+
+const resolveDocumentTypeFromRow = row => {
+  if (!row || typeof row !== 'object') return null;
+  const direct = normalizeDocumentTypeCode(row.document_category);
+  if (direct) return direct;
+  const meta = safeJsonParse(row.metadata, null);
+  return normalizeDocumentTypeCode(meta?.document_type);
+};
+
+const resolveEvidenceTypesForDocument = row => {
+  const docType = resolveDocumentTypeFromRow(row);
+  if (!docType) return [];
+  const types = PAYMENT_EVIDENCE_DOCUMENT_TYPE_MAP[docType];
+  return Array.isArray(types) ? types : [];
+};
+
 const PAYMENT_TYPE_ALIASES = {
   livingallowance: 'LivingAllowance',
   livingallowances: 'LivingAllowance',
@@ -32372,6 +33344,14 @@ const normalizePaymentTypeKey = value => {
   if (!raw) return null;
   const key = raw.toLowerCase().replace(/[^a-z0-9]+/g, '');
   return PAYMENT_TYPE_ALIASES[key] || null;
+};
+
+const normalizePaymentTypeCode = value => {
+  if (!value) return null;
+  const normalized = normalizePaymentTypeKey(value);
+  if (normalized) return normalized;
+  const raw = String(value).trim();
+  return raw ? raw : null;
 };
 
 const normalizePayeeTypeKey = value => {
@@ -32860,6 +33840,166 @@ async function readPaymentPolicyRules(connection = null) {
   }
 }
 
+const normalizePaymentTypeMappingEntry = entry => {
+  if (!entry || typeof entry !== 'object') return null;
+  const code = normalizePaymentTypeCode(
+    entry.code ?? entry.value ?? entry.paymentType ?? entry.payment_type ?? null
+  );
+  if (!code) return null;
+  const labelRaw = entry.label ?? entry.name ?? null;
+  const label = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw.trim() : code;
+  return { code, label };
+};
+
+const normalizePaymentInterventionMappingEntry = entry => {
+  if (!entry || typeof entry !== 'object') return null;
+  const code = normalizeInterventionCodeValue(
+    entry.code ?? entry.interventionCode ?? entry.intervention_code ?? null
+  );
+  if (!code) return null;
+  const nameRaw = entry.name ?? entry.label ?? null;
+  const name = typeof nameRaw === 'string' && nameRaw.trim() ? nameRaw.trim() : null;
+  const listRaw =
+    entry.availablePaymentTypes ||
+    entry.available_payment_types ||
+    entry.paymentTypes ||
+    entry.payment_types ||
+    [];
+  const list = Array.isArray(listRaw)
+    ? listRaw
+    : typeof listRaw === 'string'
+      ? listRaw
+          .split(',')
+          .map(item => item.trim())
+          .filter(Boolean)
+      : [];
+  const normalizedList = Array.from(
+    new Set(list.map(normalizePaymentTypeCode).filter(Boolean))
+  );
+  return {
+    code,
+    name,
+    availablePaymentTypes: normalizedList,
+  };
+};
+
+const buildInterventionPaymentTypeLookup = interventions => {
+  const map = new Map();
+  if (!Array.isArray(interventions)) return map;
+  interventions.forEach(entry => {
+    const code = normalizeInterventionCodeValue(entry?.code);
+    if (!code) return;
+    const types = Array.isArray(entry.availablePaymentTypes)
+      ? entry.availablePaymentTypes
+      : [];
+    const normalizedTypes = Array.from(
+      new Set(types.map(normalizePaymentTypeCode).filter(Boolean))
+    );
+    map.set(code, new Set(normalizedTypes));
+  });
+  return map;
+};
+
+const normalizePaymentInterventionMapping = raw => {
+  if (!raw || typeof raw !== 'object') return null;
+  const version = typeof raw.version === 'string' ? raw.version.trim() : null;
+  const generatedOn =
+    typeof raw.generated_on === 'string'
+      ? raw.generated_on.trim()
+      : typeof raw.generatedOn === 'string'
+        ? raw.generatedOn.trim()
+        : null;
+  const notes = Array.isArray(raw.notes)
+    ? raw.notes.map(note => (typeof note === 'string' ? note.trim() : '')).filter(Boolean)
+    : [];
+  const paymentTypesRaw = raw.payment_types || raw.paymentTypes || [];
+  const paymentTypes = Array.isArray(paymentTypesRaw)
+    ? paymentTypesRaw.map(normalizePaymentTypeMappingEntry).filter(Boolean)
+    : [];
+  const interventionsRaw =
+    raw.interventions || raw.interventionTypes || raw.intervention_types || [];
+  const interventionsMap = new Map();
+  if (Array.isArray(interventionsRaw)) {
+    interventionsRaw.forEach(entry => {
+      const normalized = normalizePaymentInterventionMappingEntry(entry);
+      if (!normalized) return;
+      interventionsMap.set(normalized.code, normalized);
+    });
+  }
+  const interventions = Array.from(interventionsMap.values()).sort((a, b) => {
+    const aNum = Number(a.code);
+    const bNum = Number(b.code);
+    if (Number.isFinite(aNum) && Number.isFinite(bNum)) {
+      return aNum - bNum;
+    }
+    return String(a.code).localeCompare(String(b.code));
+  });
+  if (!paymentTypes.length && !interventions.length) return null;
+  const mapping = {
+    version: version || null,
+    generatedOn: generatedOn || null,
+    notes,
+    paymentTypes,
+    interventions,
+  };
+  mapping.allowedByIntervention = buildInterventionPaymentTypeLookup(interventions);
+  return mapping;
+};
+
+const serializePaymentInterventionMapping = mapping => {
+  if (!mapping || typeof mapping !== 'object') return null;
+  const { allowedByIntervention, ...rest } = mapping;
+  return rest;
+};
+
+async function readPaymentInterventionMapping(connection = null) {
+  const runner = connection || pool;
+  if (!runner) return null;
+  try {
+    await ensureRuntimeConfigTable();
+    const [rows] = await runner.query(
+      'SELECT v FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      [PAYMENT_INTERVENTION_MAPPING_SCOPE, PAYMENT_INTERVENTION_MAPPING_KEY]
+    );
+    if (!rows || rows.length === 0) return null;
+    let payload = rows[0].v;
+    if (payload && typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch (err) {
+        payload = null;
+      }
+    }
+    return normalizePaymentInterventionMapping(payload);
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[payment-intervention-map] failed to read runtime config:', err.message);
+    }
+    return null;
+  }
+}
+
+const resolveAllowedPaymentTypesForIntervention = (mapping, intervention) => {
+  if (!mapping || !intervention) return null;
+  const meta = safeJsonParse(intervention?.metadata_json, null);
+  const metaCode =
+    meta && typeof meta === 'object'
+      ? meta.code || meta.interventionCode || meta.intervention_code || null
+      : null;
+  const code = normalizeInterventionCodeValue(
+    intervention?.intervention_code ??
+      metaCode ??
+      intervention?.interventionCode ??
+      intervention?.code ??
+      intervention?.intervention_type ??
+      null
+  );
+  if (!code) return null;
+  const allowedByIntervention = mapping.allowedByIntervention;
+  if (!allowedByIntervention || !allowedByIntervention.has(code)) return null;
+  return allowedByIntervention.get(code);
+};
+
 const resolveApprovalRuleForAmount = (rules, amount, basis = 'total') => {
   if (!Array.isArray(rules) || !rules.length) return null;
   const numericAmount = Number(amount || 0);
@@ -33073,20 +34213,43 @@ const buildEvidenceChecklist = ({
   const list = [];
   const ruleKeys = new Set();
   const extraKeys = new Set();
+  const extraMap = new Map();
+  (Array.isArray(extras) ? extras : []).forEach(item => {
+    const key = normalizeEvidenceTypeKey(
+      item?.type || item?.evidenceType || item?.evidence_type
+    );
+    if (!key || extraMap.has(key)) return;
+    extraMap.set(key, item);
+  });
   const addRuleItem = (type, requiredFlag) => {
     const key = normalizeEvidenceTypeKey(type);
     if (!key) return;
     ruleKeys.add(key);
     const presence = presenceMap.get(key);
-    const note = notes[key] || presence?.note || null;
+    const extra = extraMap.get(key);
+    const note = notes[key] || presence?.note || extra?.note || extra?.notes || null;
+    const received = !!presence?.received || !!extra?.received;
+    const verified = !!presence?.verified || !!extra?.verified;
+    const idRaw = extra?.id || extra?.linkId || extra?.link_id || null;
+    const documentIdRaw = extra?.documentId || extra?.document_id || null;
+    const documentName =
+      extra?.documentName ||
+      extra?.document_name ||
+      extra?.file_name ||
+      extra?.label ||
+      null;
     list.push({
-      id: `${requiredFlag ? 'required' : 'optional'}-${key}`,
-      documentId: null,
-      type,
+      id: idRaw ? String(idRaw) : null,
+      documentId: documentIdRaw ? String(documentIdRaw) : null,
+      type: extra?.type || extra?.evidenceType || extra?.evidence_type || type,
       required: requiredFlag,
-      received: !!presence?.received,
-      verified: !!presence?.verified,
+      received,
+      verified,
       note,
+      receivedAt: extra?.receivedAt || extra?.received_at || null,
+      verifiedAt: extra?.verifiedAt || extra?.verified_at || null,
+      verifiedBy: extra?.verifiedBy || extra?.verified_by || null,
+      documentName,
     });
   };
   required.forEach(type => addRuleItem(type, true));
@@ -33155,6 +34318,203 @@ const resolveLineEvidenceRules = ({ line, rules, baselineRequiredKeys }) => {
   const optionalMerged = mergeEvidenceTypeLists(optional, postPayRequired);
   return { required, optional: optionalMerged, notes };
 };
+
+async function fetchSupportingDocumentsForPayment({
+  caseId,
+  applicationId,
+  interventionIds = [],
+  connection,
+}) {
+  if (!connection) return [];
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  let normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedInterventionIds = Array.isArray(interventionIds)
+    ? Array.from(
+        new Set(interventionIds.map(id => Number(id)).filter(Number.isFinite))
+      )
+    : [];
+
+  if (!normalizedApplicationId && normalizedCaseId) {
+    const [[caseRow]] = await connection.query(
+      'SELECT application_id FROM iset_case WHERE id = ? LIMIT 1',
+      [normalizedCaseId]
+    );
+    normalizedApplicationId = normalisePositiveInteger(caseRow?.application_id);
+  }
+
+  const filters = [];
+  const params = [];
+  if (normalizedInterventionIds.length) {
+    filters.push(`d.linked_intervention_id IN (${normalizedInterventionIds.map(() => '?').join(',')})`);
+    params.push(...normalizedInterventionIds);
+  }
+  if (normalizedCaseId) {
+    filters.push('(d.case_id = ? AND (d.linked_intervention_id IS NULL OR d.linked_intervention_id = 0))');
+    params.push(normalizedCaseId);
+  }
+  if (normalizedApplicationId) {
+    filters.push('(d.application_id = ? AND (d.linked_intervention_id IS NULL OR d.linked_intervention_id = 0))');
+    params.push(normalizedApplicationId);
+  }
+  if (!filters.length) return [];
+
+  const [rows] = await connection.query(
+    `SELECT d.id, d.document_category, d.metadata, d.linked_intervention_id, d.created_at, d.checksum_sha256
+       FROM iset_document d
+      WHERE d.status = 'active'
+        AND (${filters.join(' OR ')})
+      ORDER BY d.created_at ASC`,
+    params
+  );
+  const seen = new Set();
+  const docs = [];
+  (rows || []).forEach(row => {
+    const docId = Number(row.id);
+    if (!Number.isFinite(docId) || seen.has(docId)) return;
+    seen.add(docId);
+    docs.push(row);
+  });
+  return docs;
+}
+
+async function attachSupportingDocumentsToPaymentPacket({
+  packetId,
+  caseId,
+  clientId,
+  applicationId,
+  interventionIds = [],
+  connection,
+}) {
+  if (!connection || !Number.isFinite(packetId)) return { attached: 0 };
+
+  const docs = await fetchSupportingDocumentsForPayment({
+    caseId,
+    applicationId,
+    interventionIds,
+    connection,
+  });
+  if (!docs.length) return { attached: 0 };
+
+  const rules = await readPaymentEvidenceRules(connection);
+  const requiresBaseline = shouldApplyBaselineEvidence({
+    case_id: caseId,
+    client_id: clientId,
+  });
+  const baselineRules = requiresBaseline ? rules?.baseline : null;
+  const baselineRequired = Array.isArray(baselineRules?.required) ? baselineRules.required : [];
+  const baselineOptional = mergeEvidenceTypeLists(
+    Array.isArray(baselineRules?.optional) ? baselineRules.optional : [],
+    Array.isArray(baselineRules?.postPayRequired) ? baselineRules.postPayRequired : []
+  );
+  const baselineRequiredKeys = new Set(baselineRequired.map(normalizeEvidenceTypeKey).filter(Boolean));
+  const baselineOptionalKeys = new Set(baselineOptional.map(normalizeEvidenceTypeKey).filter(Boolean));
+  const baselineKeys = new Set([...baselineRequiredKeys, ...baselineOptionalKeys]);
+
+  const [lineRows] = await connection.query(
+    'SELECT id, intervention_id, payment_type, payee_type FROM payment_packet_line WHERE payment_packet_id = ?',
+    [packetId]
+  );
+  const lineInfos = (lineRows || []).map(row => {
+    const lineRules = resolveLineEvidenceRules({
+      line: { payment_type: row.payment_type, payee_type: row.payee_type },
+      rules,
+      baselineRequiredKeys,
+    });
+    const requiredKeys = new Set(
+      (lineRules.required || []).map(normalizeEvidenceTypeKey).filter(Boolean)
+    );
+    const optionalKeys = new Set(
+      (lineRules.optional || []).map(normalizeEvidenceTypeKey).filter(Boolean)
+    );
+    return {
+      id: row.id,
+      interventionId: row.intervention_id ? Number(row.intervention_id) : null,
+      requiredKeys,
+      optionalKeys,
+    };
+  });
+
+  const [existingRows] = await connection.query(
+    'SELECT payment_packet_line_id, document_id, evidence_type FROM payment_packet_document WHERE payment_packet_id = ?',
+    [packetId]
+  );
+  const existingKeys = new Set();
+  (existingRows || []).forEach(row => {
+    const lineKey = row.payment_packet_line_id ? String(row.payment_packet_line_id) : 'packet';
+    const docKey = row.document_id ? String(row.document_id) : '';
+    const evidenceKey = normalizeEvidenceTypeKey(row.evidence_type) || String(row.evidence_type || '');
+    existingKeys.add(`${lineKey}:${docKey}:${evidenceKey}`);
+  });
+
+  const attachments = [];
+  const pushAttachment = ({ lineId, documentId, evidenceType, required, receivedAt }) => {
+    const lineKey = lineId ? String(lineId) : 'packet';
+    const evidenceKey = normalizeEvidenceTypeKey(evidenceType) || String(evidenceType || '');
+    const key = `${lineKey}:${documentId}:${evidenceKey}`;
+    if (existingKeys.has(key)) return;
+    existingKeys.add(key);
+    attachments.push([
+      packetId,
+      lineId || null,
+      documentId,
+      evidenceType,
+      required ? 1 : 0,
+      receivedAt,
+    ]);
+  };
+
+  docs.forEach(doc => {
+    const documentId = Number(doc.id);
+    if (!Number.isFinite(documentId)) return;
+    if (!doc.checksum_sha256 || String(doc.checksum_sha256).length !== 64) {
+      return;
+    }
+    const evidenceTypes = resolveEvidenceTypesForDocument(doc);
+    if (!evidenceTypes.length) return;
+    const receivedAt = doc.created_at || new Date();
+    evidenceTypes.forEach(type => {
+      const evidenceKey = normalizeEvidenceTypeKey(type);
+      if (!evidenceKey) return;
+      if (baselineKeys.has(evidenceKey)) {
+        pushAttachment({
+          lineId: null,
+          documentId,
+          evidenceType: type,
+          required: baselineRequiredKeys.has(evidenceKey),
+          receivedAt,
+        });
+        return;
+      }
+      lineInfos.forEach(line => {
+        if (doc.linked_intervention_id && Number(doc.linked_intervention_id) !== Number(line.interventionId)) {
+          return;
+        }
+        if (line.requiredKeys.has(evidenceKey) || line.optionalKeys.has(evidenceKey)) {
+          pushAttachment({
+            lineId: line.id,
+            documentId,
+            evidenceType: type,
+            required: line.requiredKeys.has(evidenceKey),
+            receivedAt,
+          });
+        }
+      });
+    });
+  });
+
+  if (!attachments.length) {
+    return { attached: 0 };
+  }
+
+  await connection.query(
+    `INSERT INTO payment_packet_document
+      (payment_packet_id, payment_packet_line_id, document_id, evidence_type, required, received_at, created_at)
+     VALUES ?`,
+    [attachments.map(entry => [...entry, new Date()])]
+  );
+
+  return { attached: attachments.length };
+}
 
 const applyEvidenceRulesToPacket = (packet, rules) => {
   if (!packet || !rules) return;
@@ -33867,9 +35227,12 @@ const validatePaymentLinePolicy = ({
   intervention,
   evidenceTypeKeys,
   policyRules,
+  interventionPaymentTypeMap,
 }) => {
   const errors = [];
-  const paymentTypeKey = normalizePaymentTypeKey(line?.payment_type || line?.paymentType);
+  const paymentTypeRaw = line?.payment_type || line?.paymentType;
+  const paymentTypeKey = normalizePaymentTypeKey(paymentTypeRaw);
+  const paymentTypeCode = normalizePaymentTypeCode(paymentTypeRaw);
   const amount = Number(line?.amount || 0);
   const cap = paymentTypeKey ? policyRules?.amountCaps?.[paymentTypeKey] : null;
   if (cap && Number.isFinite(cap) && Number.isFinite(amount) && amount > cap) {
@@ -33878,6 +35241,32 @@ const validatePaymentLinePolicy = ({
       code: 'amount_cap_exceeded',
       message: `Amount exceeds configured cap (${cap}).`,
     });
+  }
+
+  if (paymentTypeCode && interventionPaymentTypeMap) {
+    const allowed = resolveAllowedPaymentTypesForIntervention(interventionPaymentTypeMap, intervention);
+    if (allowed && !allowed.has(paymentTypeCode)) {
+      const meta = safeJsonParse(intervention?.metadata_json, null);
+      const metaCode =
+        meta && typeof meta === 'object'
+          ? meta.code || meta.interventionCode || meta.intervention_code || null
+          : null;
+      const interventionCode = normalizeInterventionCodeValue(
+        intervention?.intervention_code ??
+          metaCode ??
+          intervention?.interventionCode ??
+          intervention?.code ??
+          intervention?.intervention_type ??
+          null
+      );
+      errors.push({
+        field: 'paymentType',
+        code: 'payment_type_not_allowed',
+        message: interventionCode
+          ? `Payment type is not allowed for intervention code ${interventionCode}.`
+          : 'Payment type is not allowed for the selected intervention.',
+      });
+    }
   }
 
   if (paymentTypeKey === 'LivingAllowance') {
@@ -34019,8 +35408,11 @@ const fetchInterventionsById = async ({ ids, connection }) => {
     `SELECT id,
             case_id,
             action_plan_id,
+            status,
             start_date,
             end_date,
+            intervention_code,
+            intervention_type,
             intervention_cost,
             budget_amount,
             approved_amount,
@@ -34403,6 +35795,7 @@ const updatePaymentPacketStatus = async ({ packetId, status, actorUserId, notes,
 const applyPostPayEvidenceHolds = async ({ packets, connection }) => {
   const runner = connection || pool;
   if (!runner || !Array.isArray(packets) || !packets.length) return;
+  if (SIMPLE_PAYMENT_WORKFLOW) return;
   const evidenceRules = await readPaymentEvidenceRules(runner);
   const policyRules = await readPaymentPolicyRules(runner);
   const now = new Date();
@@ -34553,6 +35946,52 @@ const parsePaymentBatchId = raw => {
   return null;
 };
 
+const deletePaymentPacket = async ({ packetId, connection }) => {
+  if (!connection || !Number.isFinite(packetId)) {
+    return { deleted: false };
+  }
+  const [[packetRow]] = await connection.query(
+    'SELECT id, status FROM payment_packet WHERE id = ? LIMIT 1',
+    [packetId]
+  );
+  if (!packetRow) {
+    return { deleted: false, missing: true };
+  }
+  const status = packetRow.status || null;
+  if (status !== 'draft') {
+    return { deleted: false, notDraft: true, status };
+  }
+
+  const [lineRows] = await connection.query(
+    'SELECT id FROM payment_packet_line WHERE payment_packet_id = ?',
+    [packetId]
+  );
+  const lineIds = (lineRows || [])
+    .map(row => Number(row.id))
+    .filter(Number.isFinite);
+
+  if (lineIds.length) {
+    const placeholders = lineIds.map(() => '?').join(',');
+    await connection.query(
+      `DELETE FROM payment_line_transaction WHERE payment_packet_line_id IN (${placeholders})`,
+      lineIds
+    );
+    await connection.query(
+      `DELETE FROM payment_batch_line WHERE payment_packet_line_id IN (${placeholders})`,
+      lineIds
+    );
+  }
+
+  await connection.query('DELETE FROM payment_packet_document WHERE payment_packet_id = ?', [packetId]);
+  await connection.query('DELETE FROM payment_packet_communication WHERE payment_packet_id = ?', [packetId]);
+  await connection.query('DELETE FROM payment_status_event WHERE payment_packet_id = ?', [packetId]);
+  await connection.query('DELETE FROM payment_override WHERE payment_packet_id = ?', [packetId]);
+  await connection.query('DELETE FROM payment_packet_line WHERE payment_packet_id = ?', [packetId]);
+  await connection.query('DELETE FROM payment_packet WHERE id = ?', [packetId]);
+
+  return { deleted: true, status, lineCount: lineIds.length };
+};
+
 const formatStatusLabel = value => {
   if (!value) return '';
   return String(value)
@@ -34637,6 +36076,12 @@ const mapPaymentPacketRow = row => {
     clientName: resolveClientNameFromRow(row) || metadata.clientName || null,
     interventionId: row.intervention_id ? String(row.intervention_id) : null,
     interventionName: resolveInterventionNameFromRow(row) || metadata.interventionName || null,
+    interventionCode: normalizeInterventionCodeValue(
+      row?.intervention_code ??
+        metadata.interventionCode ??
+        metadata.intervention_code ??
+        null
+    ),
     reportingUnit: row.reporting_unit || metadata.reportingUnit || metadata.reporting_unit || null,
     potId: null,
     potName: null,
@@ -35075,7 +36520,7 @@ async function fetchMissingRequiredEvidence({ packetId, lineId = null, connectio
       const key = normalizeEvidenceTypeKey(type);
       if (!key) return;
       const presence = presenceMap.get(key);
-      if (!presence?.verified) {
+      if (!presence?.received) {
         missing.push({ lineId: target, evidenceType: type });
       }
     });
@@ -35156,7 +36601,7 @@ async function createAutoPaymentPacketFromIntervention({
   }
 
   const caseId = Number(interventionRow.case_id) || null;
-  const caseRow = caseId ? await fetchCaseRow(caseId) : null;
+  const caseRow = caseId ? await fetchCaseRow(caseId, runner) : null;
   const clientId = Number(caseRow?.client_id) || null;
   const applicationId = Number(caseRow?.application_id) || null;
 
@@ -35277,7 +36722,7 @@ async function createAutoPaymentPacketFromIntervention({
       interventionId,
       reportingUnit || null,
       actorUserId || null,
-      'Auto-generated from approved intervention.',
+      'Auto-generated from intervention.',
       JSON.stringify(riskFlags),
       JSON.stringify(packetMeta),
     ]
@@ -35313,7 +36758,7 @@ async function createAutoPaymentPacketFromIntervention({
   await runner.query(
     `INSERT INTO payment_status_event
       (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, notes, metadata, created_at)
-     VALUES (?, NULL, NULL, 'draft', ?, 'Auto-generated from intervention approval', NULL, NOW())`,
+     VALUES (?, NULL, NULL, 'draft', ?, 'Auto-generated from intervention', NULL, NOW())`,
     [packetId, actorUserId || null]
   );
 
@@ -35417,6 +36862,7 @@ async function fetchPaymentPacketById(packetId, connection = null) {
             cl.last_name AS client_last_name,
             ci.metadata_json AS intervention_metadata_json,
             ci.notes AS intervention_notes,
+            ci.intervention_code AS intervention_code,
             ci.intervention_type AS intervention_type,
             req.name AS requester_name,
             req.email AS requester_email,
@@ -35702,17 +37148,18 @@ const buildPacketAttachmentSummary = packet => {
     .filter(entry => entry.documentId || entry.name || entry.type);
 };
 
-const buildPaymentPacketEmail = ({ packet, regionCode, note }) => {
+const buildPaymentPacketEmail = ({ packet, regionCode, note, statusOverride = null }) => {
   const lines = Array.isArray(packet?.lines) ? packet.lines : [];
   const totalAmount = lines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
   const packetIdLabel = formatPacketIdLabel(packet?.id || '');
   const subject = packetIdLabel
-    ? `${packetIdLabel} payment packet for review`
-    : 'Payment packet for review';
+    ? `${packetIdLabel} payment packet submitted to finance`
+    : 'Payment packet submitted to finance';
+  const statusValue = statusOverride || packet?.status;
 
   const headerRows = [
     `Packet: ${packetIdLabel || packet?.id || '-'}`,
-    `Status: ${formatStatusLabel(packet?.status) || packet?.status || '-'}`,
+    `Status: ${formatStatusLabel(statusValue) || statusValue || '-'}`,
     `Reporting unit: ${packet?.reportingUnit || packet?.reporting_unit || '-'}`,
     `Region code: ${regionCode || '-'}`,
     `Client: ${packet?.clientName || packet?.client_name || '-'}`,
@@ -35740,7 +37187,7 @@ const buildPaymentPacketEmail = ({ packet, regionCode, note }) => {
   });
 
   const bodyText = [
-    'A payment packet is ready for finance review.',
+    'A payment packet has been submitted to finance.',
     '',
     ...headerRows,
     ...(note ? ['', 'Requester note:', note] : []),
@@ -35753,7 +37200,7 @@ const buildPaymentPacketEmail = ({ packet, regionCode, note }) => {
   ].join('\n');
 
   const bodyHtml = `
-    <p>A payment packet is ready for finance review.</p>
+    <p>A payment packet has been submitted to finance.</p>
     <ul>
       ${headerRows.map(row => `<li>${row}</li>`).join('')}
     </ul>
@@ -35770,6 +37217,89 @@ const buildPaymentPacketEmail = ({ packet, regionCode, note }) => {
 
   return { subject, bodyText, bodyHtml, attachments };
 };
+
+async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = null, req, connection = null }) {
+  const runner = connection || pool;
+  if (!runner || !packetId) {
+    return { error: 'invalid_payment_packet_id' };
+  }
+  let row = packetRow;
+  if (!row) {
+    [[row]] = await runner.query(
+      'SELECT * FROM payment_packet WHERE id = ? LIMIT 1',
+      [packetId]
+    );
+  }
+  if (!row) {
+    return { error: 'payment_packet_not_found' };
+  }
+  const packet = await fetchPaymentPacketById(packetId, runner);
+  const { regionCode, email } = await resolveFinanceEmailForPacket(row, runner);
+  if (!email) {
+    return {
+      error: 'finance_email_missing',
+      message: 'No finance email configured for this packet region.',
+      regionCode,
+    };
+  }
+  const { subject, bodyText, bodyHtml, attachments } = buildPaymentPacketEmail({
+    packet,
+    regionCode,
+    note,
+    statusOverride: 'submitted',
+  });
+  const recipients = { to: [email] };
+  const senderUserId = await resolveOrCreateUserIdFromAuth(req);
+  const senderLabel =
+    req?.auth?.name ||
+    req?.staffProfile?.display_name ||
+    req?.staffProfile?.name ||
+    req?.auth?.email ||
+    req?.staffProfile?.email ||
+    null;
+  let status = 'sent';
+  let messageId = null;
+  let errorMessage = null;
+  try {
+    const result = await sendNotificationEmail({
+      to: recipients.to,
+      subject,
+      bodyHtml,
+      bodyText,
+    });
+    messageId = result?.MessageId || result?.messageId || null;
+  } catch (err) {
+    status = 'failed';
+    errorMessage = err?.message || 'SES send failed';
+  }
+  const communication = await createPaymentCommunication({
+    packetId,
+    direction: 'outbound',
+    channel: 'email',
+    senderUserId,
+    senderLabel,
+    recipients,
+    subject,
+    templateKey: FINANCE_EMAIL_TEMPLATE_KEY,
+    attachments,
+    status,
+    providerMessageId: messageId,
+    errorMessage,
+    sentAt: status === 'sent' ? new Date() : null,
+    connection: runner,
+  });
+
+  if (status !== 'sent') {
+    return {
+      error: 'finance_email_send_failed',
+      message: errorMessage,
+      regionCode,
+      communication,
+    };
+  }
+
+  return { ok: true, regionCode, recipients, communication };
+}
 
 async function fetchPaymentCommunicationById(commId, connection = null) {
   const runner = connection || pool;
@@ -37774,6 +39304,23 @@ app.post('/api/finance/budget-drafts/:id/publish', async (req, res) => {
 
 // --- Finance: Payments ---
 
+app.get('/api/finance/payment-intervention-type-map', async (req, res) => {
+  if (requirePaymentsRole(req, res)) return;
+  try {
+    const mapping = await readPaymentInterventionMapping(pool);
+    if (!mapping) {
+      return res.status(200).json({ enabled: false });
+    }
+    return res.status(200).json({
+      enabled: true,
+      ...serializePaymentInterventionMapping(mapping),
+    });
+  } catch (err) {
+    console.error('[payments] failed to fetch intervention payment mapping', err);
+    return res.status(500).json({ error: 'payment_intervention_map_fetch_failed' });
+  }
+});
+
 app.get('/api/finance/payment-packets', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
   try {
@@ -37842,6 +39389,7 @@ app.get('/api/finance/payment-packets', async (req, res) => {
               cl.last_name AS client_last_name,
               ci.metadata_json AS intervention_metadata_json,
               ci.notes AS intervention_notes,
+              ci.intervention_code AS intervention_code,
               ci.intervention_type AS intervention_type,
               req.name AS requester_name,
               req.email AS requester_email,
@@ -38006,82 +39554,29 @@ app.post('/api/finance/payment-packets/:id/send-email', async (req, res) => {
   const note = typeof req.body?.note === 'string' ? req.body.note.trim() : null;
   const conn = await pool.getConnection();
   try {
-    const [[packetRow]] = await conn.query(
-      'SELECT * FROM payment_packet WHERE id = ? LIMIT 1',
-      [packetId]
-    );
-    if (!packetRow) {
-      return res.status(404).json({ error: 'payment_packet_not_found' });
+    const result = await sendFinanceEmailForPacket({ packetId, note, req, connection: conn });
+    if (result?.error === 'payment_packet_not_found') {
+      return res.status(404).json({ error: result.error });
     }
-    const packet = await fetchPaymentPacketById(packetId, conn);
-    const { regionCode, email } = await resolveFinanceEmailForPacket(packetRow, conn);
-    if (!email) {
+    if (result?.error === 'finance_email_missing') {
       return res.status(409).json({
-        error: 'finance_email_missing',
-        message: 'No finance email configured for this packet region.',
-        regionCode,
+        error: result.error,
+        message: result.message,
+        regionCode: result.regionCode,
       });
     }
-    const { subject, bodyText, bodyHtml, attachments } = buildPaymentPacketEmail({
-      packet,
-      regionCode,
-      note,
-    });
-    const recipients = { to: [email] };
-    const senderUserId = await resolveOrCreateUserIdFromAuth(req);
-    const senderLabel =
-      req?.auth?.name ||
-      req?.staffProfile?.display_name ||
-      req?.staffProfile?.name ||
-      req?.auth?.email ||
-      req?.staffProfile?.email ||
-      null;
-    let status = 'sent';
-    let messageId = null;
-    let errorMessage = null;
-    try {
-      const result = await sendNotificationEmail({
-        to: recipients.to,
-        subject,
-        bodyHtml,
-        bodyText,
-      });
-      messageId = result?.MessageId || result?.messageId || null;
-    } catch (err) {
-      status = 'failed';
-      errorMessage = err?.message || 'SES send failed';
-    }
-
-    const communication = await createPaymentCommunication({
-      packetId,
-      direction: 'outbound',
-      channel: 'email',
-      senderUserId,
-      senderLabel,
-      recipients,
-      subject,
-      templateKey: FINANCE_EMAIL_TEMPLATE_KEY,
-      attachments,
-      status,
-      providerMessageId: messageId,
-      errorMessage,
-      sentAt: status === 'sent' ? new Date() : null,
-      connection: conn,
-    });
-
-    if (status !== 'sent') {
+    if (result?.error) {
       return res.status(500).json({
-        error: 'finance_email_send_failed',
-        message: errorMessage,
-        communication,
+        error: result.error,
+        message: result.message,
+        communication: result.communication,
       });
     }
-
     res.status(200).json({
       ok: true,
-      regionCode,
-      to: recipients.to,
-      communication,
+      regionCode: result.regionCode,
+      to: result.recipients?.to || [],
+      communication: result.communication,
     });
   } catch (err) {
     console.error('[payments] failed to send finance email', err);
@@ -38163,6 +39658,7 @@ app.post('/api/finance/payment-packets', async (req, res) => {
 
   const caseId = normalisePositiveInteger(body.caseId || body.case_id) || null;
   const clientId = normalisePositiveInteger(body.clientId || body.client_id) || null;
+  const applicationId = normalisePositiveInteger(body.applicationId || body.application_id) || null;
   const interventionId = normalisePositiveInteger(body.interventionId || body.intervention_id) || null;
   const reportingUnit =
     typeof body.reportingUnit === 'string'
@@ -38277,6 +39773,11 @@ app.post('/api/finance/payment-packets', async (req, res) => {
     );
     const packetId = result.insertId;
 
+    const interventionIdsForEvidence = new Set();
+    if (interventionId) {
+      interventionIdsForEvidence.add(interventionId);
+    }
+
     if (linesPayload.length > 0) {
       const lineErrors = [];
       const lineInputs = linesPayload.map((line, index) => {
@@ -38350,44 +39851,60 @@ app.post('/api/finance/payment-packets', async (req, res) => {
         );
         potRows.forEach(row => potMap.set(Number(row.id), row));
       }
-    const missingPotIds = potIds.filter(id => !potMap.has(id));
-    if (missingPotIds.length) {
-      await conn.rollback();
-      return res.status(400).json({ error: 'invalid_budget_pot_ids', invalidPotIds: missingPotIds });
-    }
+      const missingPotIds = potIds.filter(id => !potMap.has(id));
+      if (missingPotIds.length) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'invalid_budget_pot_ids', invalidPotIds: missingPotIds });
+      }
 
-    const policyRules = await readPaymentPolicyRules(conn);
-    const interventionIds = lineInputs.map(line => line.interventionId).filter(Boolean);
-    const interventionMap = await fetchInterventionsById({ ids: interventionIds, connection: conn });
-    lineInputs.forEach((line, index) => {
-      const intervention = line.interventionId ? interventionMap.get(Number(line.interventionId)) : null;
-      const validationErrors = validatePaymentLinePolicy({
-        line: {
-          payment_type: line.paymentType,
-          amount: line.amount,
-          service_period_start: line.servicePeriodStart,
-          service_period_end: line.servicePeriodEnd,
-          payee_name: line.payeeName,
-          metadata: line.metadata,
-        },
-        intervention,
-        evidenceTypeKeys: new Set(),
-        policyRules,
+      const policyRules = await readPaymentPolicyRules(conn);
+      const paymentTypeMap = await readPaymentInterventionMapping(conn);
+      const interventionIds = Array.from(
+        new Set(lineInputs.map(line => line.interventionId).filter(Boolean))
+      );
+      const interventionMap = await fetchInterventionsById({ ids: interventionIds, connection: conn });
+      const blockedInterventionIds = interventionIds.filter(id => {
+        const intervention = interventionMap.get(Number(id));
+        return intervention && isPaymentBlockedInterventionStatus(intervention.status);
       });
-      if (validationErrors.length) {
-        validationErrors.forEach(err => {
-          lineErrors.push({ index, field: err.field, error: err.code, message: err.message });
+      if (blockedInterventionIds.length) {
+        await conn.rollback();
+        return res.status(400).json({
+          error: 'intervention_status_blocked',
+          message: 'Selected intervention is not eligible for payment initiation.',
+          blockedInterventionIds,
         });
       }
-    });
-    if (lineErrors.length) {
-      await conn.rollback();
-      return res.status(400).json({ error: 'invalid_line_items', details: lineErrors });
-    }
+      lineInputs.forEach((line, index) => {
+        const intervention = line.interventionId ? interventionMap.get(Number(line.interventionId)) : null;
+        const validationErrors = validatePaymentLinePolicy({
+          line: {
+            payment_type: line.paymentType,
+            amount: line.amount,
+            service_period_start: line.servicePeriodStart,
+            service_period_end: line.servicePeriodEnd,
+            payee_name: line.payeeName,
+            metadata: line.metadata,
+          },
+          intervention,
+          evidenceTypeKeys: new Set(),
+          policyRules,
+          interventionPaymentTypeMap: paymentTypeMap,
+        });
+        if (validationErrors.length) {
+          validationErrors.forEach(err => {
+            lineErrors.push({ index, field: err.field, error: err.code, message: err.message });
+          });
+        }
+      });
+      if (lineErrors.length) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'invalid_line_items', details: lineErrors });
+      }
 
-    const lineValues = lineInputs.map(line => {
-      const pot = potMap.get(line.potId);
-      const fallbackStream = pot?.funding_source ? normalizeFundingSource(pot.funding_source) : null;
+      const lineValues = lineInputs.map(line => {
+        const pot = potMap.get(line.potId);
+        const fallbackStream = pot?.funding_source ? normalizeFundingSource(pot.funding_source) : null;
         const fundingStream = line.fundingStream ? normalizeFundingSource(line.fundingStream) : fallbackStream;
         return [
           packetId,
@@ -38415,11 +39932,26 @@ app.post('/api/finance/payment-packets', async (req, res) => {
         `INSERT INTO payment_packet_line
           (payment_packet_id, intervention_id, payment_type, payee_type, payee_name, payee_profile_id, payee_reference,
            amount, currency, service_period_start, service_period_end, invoice_reference_number, requested_payment_date,
-           budget_pot_id, funding_stream, status, hold_reason, metadata, created_at, updated_at)
+           budget_pot_id, funding_stream, status, hold_reason, metadata)
          VALUES ?`,
         [lineValues]
       );
+
+      lineInputs.forEach(line => {
+        if (line.interventionId) {
+          interventionIdsForEvidence.add(line.interventionId);
+        }
+      });
     }
+
+    await attachSupportingDocumentsToPaymentPacket({
+      packetId,
+      caseId,
+      clientId,
+      applicationId,
+      interventionIds: Array.from(interventionIdsForEvidence),
+      connection: conn,
+    });
 
     await conn.query(
       `INSERT INTO payment_status_event
@@ -38522,6 +40054,45 @@ app.put('/api/finance/payment-packets/:id', async (req, res) => {
   }
 });
 
+app.delete('/api/finance/payment-packets/:id', async (req, res) => {
+  if (requirePaymentsRole(req, res)) return;
+  const packetId = parsePaymentPacketId(req.params.id);
+  if (!Number.isFinite(packetId)) {
+    return res.status(400).json({ error: 'invalid_payment_packet_id' });
+  }
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const result = await deletePaymentPacket({ packetId, connection: conn });
+    if (result.missing) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    if (result.notDraft) {
+      await conn.rollback();
+      return res.status(409).json({
+        error: 'payment_packet_not_draft',
+        status: result.status || null,
+      });
+    }
+    await conn.commit();
+    return res.json({
+      ok: true,
+      deleted: true,
+      packetId,
+      lineCount: result.lineCount || 0,
+    });
+  } catch (err) {
+    try {
+      await conn.rollback();
+    } catch (_) {}
+    console.error('[payments] failed to delete payment packet', err);
+    return res.status(500).json({ error: 'failed_to_delete_payment_packet' });
+  } finally {
+    conn.release();
+  }
+});
+
 app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
   const packetId = parsePaymentPacketId(req.params.id);
@@ -38532,6 +40103,9 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
   const nextStatus = normalizePaymentStatus(body.status);
   if (!nextStatus) {
     return res.status(400).json({ error: 'invalid_status' });
+  }
+  if (SIMPLE_PAYMENT_WORKFLOW && !SIMPLE_PAYMENT_PACKET_STATUSES.has(nextStatus)) {
+    return res.status(400).json({ error: 'status_not_supported' });
   }
   const actorUserId =
     normalisePositiveInteger(body.actorUserId || body.actor_user_id) ||
@@ -38560,6 +40134,21 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       return res.status(404).json({ error: 'payment_packet_not_found' });
     }
     const fromStatus = packetRow.status || null;
+    if (SIMPLE_PAYMENT_WORKFLOW) {
+      const fromStage = normalizePacketWorkflowStage(fromStatus);
+      const nextStage = normalizePacketWorkflowStage(nextStatus);
+      if (fromStage !== 'draft' && nextStage !== fromStage) {
+        await conn.rollback();
+        return res.status(409).json({ error: 'payment_packet_locked', status: fromStatus });
+      }
+      if (fromStage === 'draft' && nextStage === 'draft' && fromStatus === nextStatus) {
+        await conn.rollback();
+        const packet = await fetchPaymentPacketById(packetId);
+        return packet
+          ? res.status(200).json(packet)
+          : res.status(404).json({ error: 'payment_packet_not_found' });
+      }
+    }
     const [lineRows] = await conn.query(
       `SELECT id, payment_packet_id, amount, status, payment_type, payee_name, payee_reference,
               service_period_start, service_period_end, invoice_reference_number, requested_payment_date,
@@ -38575,8 +40164,9 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       return Number.isFinite(value) ? Math.max(max, value) : max;
     }, 0);
 
-    if (nextStatus === 'program_approved' || nextStatus === 'finance_approved') {
+    if (nextStatus === 'submitted') {
       const policyRules = await readPaymentPolicyRules(conn);
+      const paymentTypeMap = await readPaymentInterventionMapping(conn);
       const interventionIds = activeLines.map(line => line.intervention_id).filter(Boolean);
       if (packetRow.intervention_id) {
         interventionIds.push(packetRow.intervention_id);
@@ -38605,6 +40195,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
           intervention,
           evidenceTypeKeys: lineEvidence,
           policyRules,
+          interventionPaymentTypeMap: paymentTypeMap,
         });
         validationErrors.forEach(err => {
           policyErrors.push({
@@ -38641,7 +40232,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       }
     }
 
-    const requiresFundingCheck = ['program_approved', 'finance_approved', 'confirmed', 'closed'].includes(nextStatus);
+    const requiresFundingCheck = ['submitted', 'program_approved', 'finance_approved', 'confirmed', 'closed'].includes(nextStatus);
     if (requiresFundingCheck) {
       const interventionIds = new Set();
       activeLines.forEach(line => {
@@ -38813,6 +40404,36 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
           fromStatus,
           toStatus: nextStatus,
           connection: conn,
+        });
+      }
+    }
+
+    if (nextStatus === 'submitted') {
+      const emailResult = await sendFinanceEmailForPacket({
+        packetId,
+        packetRow,
+        note: notes,
+        req,
+        connection: conn,
+      });
+      if (emailResult?.error === 'finance_email_missing') {
+        await conn.rollback();
+        return res.status(409).json({
+          error: emailResult.error,
+          message: emailResult.message,
+          regionCode: emailResult.regionCode,
+        });
+      }
+      if (emailResult?.error === 'payment_packet_not_found') {
+        await conn.rollback();
+        return res.status(404).json({ error: emailResult.error });
+      }
+      if (emailResult?.error) {
+        await conn.rollback();
+        return res.status(500).json({
+          error: emailResult.error,
+          message: emailResult.message,
+          communication: emailResult.communication,
         });
       }
     }
@@ -39075,8 +40696,23 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
     }
 
     const policyRules = await readPaymentPolicyRules(conn);
-    const interventionIds = lineInputs.map(line => line.interventionId).filter(Boolean);
+    const paymentTypeMap = await readPaymentInterventionMapping(conn);
+    const interventionIds = Array.from(
+      new Set(lineInputs.map(line => line.interventionId).filter(Boolean))
+    );
     const interventionMap = await fetchInterventionsById({ ids: interventionIds, connection: conn });
+    const blockedInterventionIds = interventionIds.filter(id => {
+      const intervention = interventionMap.get(Number(id));
+      return intervention && isPaymentBlockedInterventionStatus(intervention.status);
+    });
+    if (blockedInterventionIds.length) {
+      await conn.rollback();
+      return res.status(400).json({
+        error: 'intervention_status_blocked',
+        message: 'Selected intervention is not eligible for payment initiation.',
+        blockedInterventionIds,
+      });
+    }
     lineInputs.forEach((line, index) => {
       const intervention = line.interventionId ? interventionMap.get(Number(line.interventionId)) : null;
       const validationErrors = validatePaymentLinePolicy({
@@ -39091,6 +40727,7 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
         intervention,
         evidenceTypeKeys: new Set(),
         policyRules,
+        interventionPaymentTypeMap: paymentTypeMap,
       });
       if (validationErrors.length) {
         validationErrors.forEach(err => {
@@ -39144,7 +40781,7 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
       `INSERT INTO payment_packet_line
         (payment_packet_id, intervention_id, payment_type, payee_type, payee_name, payee_profile_id, payee_reference,
          amount, currency, service_period_start, service_period_end, invoice_reference_number, requested_payment_date,
-         budget_pot_id, funding_stream, status, hold_reason, metadata, created_at, updated_at)
+         budget_pot_id, funding_stream, status, hold_reason, metadata)
        VALUES ?`,
       [lineValues]
     );
@@ -39178,6 +40815,21 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
         connection: conn,
       });
     }
+
+    const interventionIdsForEvidence = new Set(
+      lineInputs.map(line => line.interventionId).filter(Boolean)
+    );
+    if (packetRow.intervention_id) {
+      interventionIdsForEvidence.add(packetRow.intervention_id);
+    }
+    await attachSupportingDocumentsToPaymentPacket({
+      packetId,
+      caseId: packetRow.case_id,
+      clientId: packetRow.client_id,
+      interventionIds: Array.from(interventionIdsForEvidence),
+      connection: conn,
+    });
+
     await conn.commit();
     const packet = await fetchPaymentPacketById(packetId);
     res.status(201).json(packet);
@@ -39375,8 +41027,22 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
     }
 
     const policyRules = await readPaymentPolicyRules(conn);
-    const interventionIds = lineInputs.map(line => line.interventionId).filter(Boolean);
+    const interventionIds = Array.from(
+      new Set(lineInputs.map(line => line.interventionId).filter(Boolean))
+    );
     const interventionMap = await fetchInterventionsById({ ids: interventionIds, connection: conn });
+    const blockedInterventionIds = interventionIds.filter(id => {
+      const intervention = interventionMap.get(Number(id));
+      return intervention && isPaymentBlockedInterventionStatus(intervention.status);
+    });
+    if (blockedInterventionIds.length) {
+      await conn.rollback();
+      return res.status(400).json({
+        error: 'intervention_status_blocked',
+        message: 'Selected intervention is not eligible for payment initiation.',
+        blockedInterventionIds,
+      });
+    }
     const validationErrors = [];
     lineInputs.forEach((line, index) => {
       const intervention = line.interventionId ? interventionMap.get(Number(line.interventionId)) : null;
@@ -39392,6 +41058,7 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
         intervention,
         evidenceTypeKeys: new Set(),
         policyRules,
+        interventionPaymentTypeMap: paymentTypeMap,
       });
       if (errors.length) {
         errors.forEach(err => {
@@ -39445,7 +41112,7 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
       `INSERT INTO payment_packet_line
         (payment_packet_id, intervention_id, payment_type, payee_type, payee_name, payee_profile_id, payee_reference,
          amount, currency, service_period_start, service_period_end, invoice_reference_number, requested_payment_date,
-         budget_pot_id, funding_stream, status, hold_reason, metadata, created_at, updated_at)
+         budget_pot_id, funding_stream, status, hold_reason, metadata)
        VALUES ?`,
       [lineValues]
     );
@@ -39479,6 +41146,20 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
         connection: conn,
       });
     }
+
+    const interventionIdsForEvidence = new Set(
+      lineInputs.map(line => line.interventionId).filter(Boolean)
+    );
+    if (packetRow.intervention_id) {
+      interventionIdsForEvidence.add(packetRow.intervention_id);
+    }
+    await attachSupportingDocumentsToPaymentPacket({
+      packetId,
+      caseId: packetRow.case_id,
+      clientId: packetRow.client_id,
+      interventionIds: Array.from(interventionIdsForEvidence),
+      connection: conn,
+    });
 
     await conn.commit();
     const packet = await fetchPaymentPacketById(packetId);
@@ -39620,6 +41301,7 @@ app.put('/api/finance/payment-lines/:id', async (req, res) => {
       [nextLine.payment_packet_id]
     );
     const policyRules = await readPaymentPolicyRules(pool);
+    const paymentTypeMap = await readPaymentInterventionMapping(pool);
     const primaryInterventionId = nextLine.intervention_id || packetRow?.intervention_id || null;
     const interventionMap = await fetchInterventionsById({
       ids: primaryInterventionId ? [primaryInterventionId] : [],
@@ -39638,6 +41320,7 @@ app.put('/api/finance/payment-lines/:id', async (req, res) => {
       intervention,
       evidenceTypeKeys,
       policyRules,
+      interventionPaymentTypeMap: paymentTypeMap,
     });
     if (validationErrors.length) {
       return res.status(400).json({
@@ -39827,6 +41510,7 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
     }
     if (nextStatus === 'paid') {
       const policyRules = await readPaymentPolicyRules(conn);
+      const paymentTypeMap = await readPaymentInterventionMapping(conn);
       const interventionMap = await fetchInterventionsById({
         ids: [lineRow.intervention_id || lineRow.interventionId],
         connection: conn,
@@ -39844,6 +41528,7 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
         intervention,
         evidenceTypeKeys,
         policyRules,
+        interventionPaymentTypeMap: paymentTypeMap,
       });
       if (validationErrors.length) {
         await conn.rollback();
@@ -42858,6 +44543,7 @@ app.put('/api/cases/:id', async (req, res) => {
   let shouldMarkSubmissionNeedsReview = false;
   let shouldRecomputeCaseStatus = false;
   let autoPlanSuggestion = null;
+  let autoPlanApprovalUserId = null;
   let assessmentBudgetPotId = undefined;
   let assessmentBudgetPotProvided = false;
   let previousConflictDeclarationSigned = null;
@@ -43354,10 +45040,11 @@ app.put('/api/cases/:id', async (req, res) => {
       const approvalUserId = identity && typeof identity.userId !== 'undefined'
         ? Number(identity.userId)
         : null;
+      autoPlanApprovalUserId = Number.isFinite(approvalUserId) ? approvalUserId : null;
       autoPlanSuggestion = await ensureAutoPlanAndInterventionFromAssessment(conn, {
         caseId,
         caseRow: existingCase,
-        approvalUserId: Number.isFinite(approvalUserId) ? approvalUserId : null,
+        approvalUserId: autoPlanApprovalUserId,
         budgetPotId: assessmentBudgetPotId,
       });
       if (autoPlanSuggestion.createdPlan || autoPlanSuggestion.createdIntervention) {
@@ -43376,6 +45063,31 @@ app.put('/api/cases/:id', async (req, res) => {
         actorName: requestActorName || null
       });
       await ensureEsdcParticipantSubmissionRecord(conn, caseId, applicationId);
+    }
+
+    if (autoPlanSuggestion?.createdIntervention && autoPlanSuggestion?.interventionId) {
+      try {
+        const [[interventionRow]] = await conn.query(
+          'SELECT * FROM iset_case_intervention WHERE id = ? LIMIT 1',
+          [Number(autoPlanSuggestion.interventionId)]
+        );
+        if (interventionRow) {
+          const actorRole = canonicaliseAccessRole(identity.role) || identity.role || null;
+          const actorUserId = Number.isFinite(autoPlanApprovalUserId)
+            ? autoPlanApprovalUserId
+            : Number.isFinite(Number(identity?.userId))
+              ? Number(identity.userId)
+              : null;
+          await createAutoPaymentPacketFromIntervention({
+            interventionRow,
+            actorUserId,
+            actorRole,
+            connection: conn,
+          });
+        }
+      } catch (err) {
+        console.warn('[payments] auto-generate packet from assessment failed', err?.message || err);
+      }
     }
 
     if (hasAssessmentPayload && targetStatus === CASE_STATUS_DERIVED_VALUES.initiated) {
@@ -43427,7 +45139,7 @@ app.put('/api/cases/:id', async (req, res) => {
   try {
     const conflictSummaryStaffId = Number.isFinite(identity.userId) ? Number(identity.userId) : 0;
     const [[caseRow]] = await pool.query(
-      `SELECT c.status, c.application_id, a.status AS application_status,
+      `SELECT c.status, c.application_id, c.case_context_json, a.status AS application_status,
               COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
               COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
               a.row_version AS application_row_version,
@@ -43452,11 +45164,16 @@ app.put('/api/cases/:id', async (req, res) => {
               ca.nwac_review AS assessment_nwac_review,
               ca.nwac_reason AS assessment_nwac_reason,
               ca.intervention_code AS assessment_intervention_code,
+              ic.label AS assessment_intervention_label,
               ca.intervention_outcome_code AS assessment_intervention_outcome_code,
               ca.intervention_duration_days AS assessment_intervention_duration_days,
               ca.intervention_cost_total AS assessment_intervention_cost_total,
               ca.intervention_related_noc AS assessment_intervention_related_noc,
               ca.intervention_related_noc_version AS assessment_intervention_related_noc_version,
+              ca.intervention_budget_pot_id AS assessment_intervention_pot_id,
+              bp.code AS assessment_intervention_pot_code,
+              bp.name AS assessment_intervention_pot_name,
+              ca.posting_context AS assessment_posting_context,
               ca.childcare_need AS assessment_childcare_need,
               ca.childcare_funding_details AS assessment_childcare_funding_details,
               ca.action_plan_result_code AS assessment_action_plan_result_code,
@@ -43470,6 +45187,8 @@ app.put('/api/cases/:id', async (req, res) => {
          JOIN iset_application a ON c.application_id = a.id
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
          LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+         LEFT JOIN esdc_intervention_code ic ON ic.code = ca.intervention_code
+         LEFT JOIN budget_pot bp ON bp.id = ca.intervention_budget_pot_id
          LEFT JOIN iset_case_conflict_declaration cd2
            ON cd2.case_id = c.id
           AND cd2.staff_profile_id = ?
@@ -43562,6 +45281,40 @@ app.put('/api/cases/:id', async (req, res) => {
     }
     if (typeof caseRow.assessment_intervention_related_noc_version === 'string') {
       caseRow.assessment_intervention_related_noc_version = caseRow.assessment_intervention_related_noc_version.trim();
+    }
+    if (typeof caseRow.assessment_intervention_label === 'string') {
+      const trimmed = caseRow.assessment_intervention_label.trim();
+      caseRow.assessment_intervention_label = trimmed || null;
+    } else if (caseRow.assessment_intervention_label === undefined) {
+      caseRow.assessment_intervention_label = null;
+    }
+    if (caseRow.assessment_intervention_pot_id !== null && caseRow.assessment_intervention_pot_id !== undefined) {
+      const potId = Number(caseRow.assessment_intervention_pot_id);
+      caseRow.assessment_intervention_pot_id = Number.isNaN(potId) ? null : String(potId);
+    }
+    if (typeof caseRow.assessment_intervention_pot_code === 'string') {
+      const trimmed = caseRow.assessment_intervention_pot_code.trim();
+      caseRow.assessment_intervention_pot_code = trimmed || null;
+    } else if (caseRow.assessment_intervention_pot_code === undefined) {
+      caseRow.assessment_intervention_pot_code = null;
+    }
+    if (typeof caseRow.assessment_intervention_pot_name === 'string') {
+      const trimmed = caseRow.assessment_intervention_pot_name.trim();
+      caseRow.assessment_intervention_pot_name = trimmed || null;
+    } else if (caseRow.assessment_intervention_pot_name === undefined) {
+      caseRow.assessment_intervention_pot_name = null;
+    }
+    if (typeof caseRow.assessment_posting_context === 'string') {
+      const trimmed = caseRow.assessment_posting_context.trim();
+      caseRow.assessment_posting_context = trimmed || null;
+    } else if (caseRow.assessment_posting_context === undefined) {
+      caseRow.assessment_posting_context = null;
+    }
+    if (typeof caseRow.case_context_json === 'string') {
+      const trimmed = caseRow.case_context_json.trim();
+      caseRow.case_context_json = trimmed || null;
+    } else if (caseRow.case_context_json === undefined) {
+      caseRow.case_context_json = null;
     }
     if (caseRow.assessment_childcare_need !== null && caseRow.assessment_childcare_need !== undefined) {
       const need = Number(caseRow.assessment_childcare_need);
@@ -43717,7 +45470,8 @@ app.put('/api/cases/:id', async (req, res) => {
         });
         const pdfBuffer = await generateAssessmentPdfBuffer({
           caseRow,
-          applicantName: applicantContext.applicantName
+          applicantName: applicantContext.applicantName,
+          referenceNumber: applicantContext.trackingId || trackingId
         });
         await storeAssessmentPdfDocument({
           applicationId: caseRow.application_id,
@@ -43727,6 +45481,54 @@ app.put('/api/cases/:id', async (req, res) => {
           trackingId: applicantContext.trackingId || trackingId,
           pdfBuffer
         });
+        try {
+          const applicationPayload = await readApplicationPayload(pool, caseRow.application_id, { forUpdate: false });
+          if (!applicationPayload) {
+            throw new Error('application_payload_missing');
+          }
+          const payload = applicationPayload.payload || {};
+          const rawAnswers = payload.answers || payload.intake_answers || payload;
+          const answers = rawAnswers && typeof rawAnswers === 'object' ? rawAnswers : {};
+          const referenceNumber = applicantContext.trackingId || trackingId;
+          const appPdfBuffer = await generateApplicationFormPdfBuffer({
+            applicationRow: applicationPayload.row,
+            payload,
+            answers,
+            applicantName: applicantContext.applicantName,
+            referenceNumber,
+            receivedAt: applicationPayload.row?.created_at
+          });
+          await storeApplicationFormPdfDocument({
+            applicationId: caseRow.application_id,
+            caseId,
+            applicantUserId: applicantContext.applicantUserId,
+            actorUserId: actorId,
+            referenceNumber,
+            pdfBuffer: appPdfBuffer
+          });
+          try {
+            const financialPdfBuffer = await generateFinancialOverviewPdfBuffer({
+              applicationRow: applicationPayload.row,
+              payload,
+              answers,
+              applicantName: applicantContext.applicantName,
+              referenceNumber,
+              receivedAt: applicationPayload.row?.created_at
+            });
+            await storeFinancialOverviewPdfDocument({
+              applicationId: caseRow.application_id,
+              caseId,
+              applicantUserId: applicantContext.applicantUserId,
+              actorUserId: actorId,
+              referenceNumber,
+              pdfBuffer: financialPdfBuffer
+            });
+          } catch (financialPdfErr) {
+            console.error('[financial-overview-pdf] generation failed:', financialPdfErr?.message || financialPdfErr);
+          }
+        } catch (appPdfErr) {
+          console.error('[application-form-pdf] generation failed:', appPdfErr?.message || appPdfErr);
+        }
       } catch (err) {
         console.error('[assessment-pdf] generation failed:', err?.message || err);
       }

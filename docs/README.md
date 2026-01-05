@@ -32,6 +32,15 @@ This library captures the working knowledge for the admin dashboard. The goal is
 4. Use TODO lines for known gaps or follow-ups.
 5. Keep credentials, secrets, and environment-specific tokens out of this library.
 
+## Collaboration Workflow (Design → Planning → Implementation)
+
+- Create a combined tracker in `docs/planning/` for each feature (design, planning, implementation in one file).
+- Work in three phases: design first, then planning, then implementation; update the tracker phase status.
+- Design phase: ask short, focused questions to resolve unknowns; document decisions and open questions as they evolve.
+- Planning phase: outline steps, data sources, and risks; capture dependencies and validation notes in the tracker.
+- Implementation phase: follow the plan, record key changes in the tracker, and update `docs/meta/changelog.md` for user-visible changes.
+- Keep questions brief and iterative; don’t assume intent when requirements are unclear.
+
 ### Dashboard UI conventions
 
 - Favor Cloudscape components over native HTML for all in-product UI; use native elements only when there is no Cloudscape equivalent.

@@ -55,6 +55,8 @@ Use this note when spinning up a fresh chat so the LLM has the context it needs 
 - Assessment dashboard status flow: `/api/cases/:id` now returns `application_status`, the Application Overview widget listens for the normalised payload, and both the overview and NWAC widgets trigger `refreshCaseData` on submit/approval. Earlier we spent hours chasing front-end cache issues because the SQL query omitted `a.status`; always verify the API is projecting new fields before debugging UI state.
 - Coordinator Assessment persistence: the `Save`, `Submit`, and NWAC completion paths now serialise the same assessment payload. Intervention code/duration/cost, NOC version/code, childcare answers, and the "previously funded" toggle map straight into the new `iset_case_assessment` columns (see `sql/20251101_01_alter_case_assessment_esdc_fields.sql`). Reloading the widget after saving should recover every field without relying on ad-hoc browser state.
 - Workspace alerts: all Cloudscape `Alert` instances in the action plan/intervention widgets and modals are now dismissible so users can clear success/error banners after reviewing them.
+- Payment packet creation in the Case Workspace now derives reporting unit, pot, and amount from the selected intervention (partial payments unlock amount entry), hides service period fields unless the payment type requires them, and the Manage Payments quick action focuses the first intervention with a draft/returned packet.
+- Payment type options now filter by intervention code using runtime config `payment.intervention.payment_type_map`, and the backend blocks disallowed types.
 
 ## 6. Handy Reminders When Picking Up Work
 - Confirm the dev servers are running before testing UI changes.

@@ -6,14 +6,12 @@ const FinancePaymentDetailHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Provide Finance and program staff with a single view of packet metadata, payment lines, evidence checklists,
-        approvals, and status history.
+        Provide program staff with a single view of payment lines and evidence before submission to finance.
       </p>
     </Box>
     <Box>
       <strong>Packet overview</strong>
       <ul>
-        <li>Total amount and stream split (CRF vs EI).</li>
         <li>Reporting unit and case/client context.</li>
         <li>Baseline compliance status and risk flags.</li>
       </ul>
@@ -23,28 +21,26 @@ const FinancePaymentDetailHelp = () => (
       <ul>
         <li>Each line carries payee, amount, service period, pot, and line status.</li>
         <li>Evidence checklist shows required vs received items per line.</li>
-        <li>Missing required evidence blocks key status changes.</li>
+        <li>Missing required evidence blocks submission.</li>
       </ul>
     </Box>
     <Box>
       <strong>Actions</strong>
       <ul>
-        <li>Send to finance logs an outbound email to the configured region address.</li>
-        <li>Update status to move through review, batching, sent, and confirmed.</li>
-        <li>Mark confirmed when proof of payment is attached.</li>
+        <li>Submit to finance emails the configured region address.</li>
+        <li>Submission locks edits to lines and evidence.</li>
       </ul>
     </Box>
     <Box>
       <strong>Notes</strong>
       <p>
-        Actions here update the audit trail. Confirmed packets post finance transactions for reporting, so verify
-        evidence completeness before advancing a packet.
+        Actions here update the audit trail. Confirm required evidence is received before submitting a packet.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinancePaymentDetailHelp.aiContext =
-  "Explain the payment detail widget: packet metadata, line items, evidence checklist, approvals/timeline, and actions (send to finance, status updates, mark confirmed). Mention evidence gates and that confirmation posts transactions.";
+  "Explain the payment detail widget: line items, evidence checklist, and submit-to-finance action. Mention evidence gates and that submission emails finance and locks edits.";
 
 export default FinancePaymentDetailHelp;

@@ -7,12 +7,11 @@ const summarizeEvidence = items => {
   const requiredItems = items.filter(item => item.required);
   const requiredCount = requiredItems.length;
   const receivedCount = requiredItems.filter(item => item.received).length;
-  const verifiedCount = requiredItems.filter(item => item.received && item.verified).length;
   return {
     required: requiredCount,
     received: receivedCount,
-    verified: verifiedCount,
-    missing: Math.max(0, requiredCount - verifiedCount),
+    verified: receivedCount,
+    missing: Math.max(0, requiredCount - receivedCount),
   };
 };
 
@@ -121,6 +120,18 @@ const normalizeCommunication = raw => {
   };
 };
 
+const normalizeInterventionCodeValue = value => {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return String(Math.trunc(numeric));
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const digits = trimmed.replace(/[^\d]/g, "");
+  if (!digits) return null;
+  const parsed = Number.parseInt(digits, 10);
+  return Number.isFinite(parsed) ? String(parsed) : null;
+};
+
 const buildLine = line => {
   const amount = Number(line.amount || 0);
   const evidenceSummary = summarizeEvidence(line.evidenceChecklist ?? []);
@@ -213,6 +224,7 @@ const normalizePacket = packet => {
     clientName: packet?.clientName || packet?.client_name || null,
     interventionId: packet?.interventionId || packet?.intervention_id || null,
     interventionName: packet?.interventionName || packet?.intervention_name || null,
+    interventionCode: packet?.interventionCode || packet?.intervention_code || null,
     reportingUnit: packet?.reportingUnit || packet?.reporting_unit || null,
     potId: packet?.potId || packet?.pot_id || null,
     potName: packet?.potName || packet?.pot_name || null,
@@ -234,61 +246,184 @@ const normalizePacket = packet => {
   });
 };
 
+const normalizePaymentTypeMappingPayload = payload => {
+  if (!payload || payload.enabled === false) return null;
+  const interventionsRaw = Array.isArray(payload.interventions) ? payload.interventions : [];
+  const interventions = interventionsRaw
+    .map(entry => {
+      if (!entry || typeof entry !== "object") return null;
+      const codeRaw = entry.code ?? entry.interventionCode ?? entry.intervention_code ?? null;
+      const code = normalizeInterventionCodeValue(codeRaw);
+      if (!code) return null;
+      const typesRaw =
+        entry.availablePaymentTypes ||
+        entry.available_payment_types ||
+        entry.paymentTypes ||
+        entry.payment_types ||
+        [];
+      const types = Array.isArray(typesRaw)
+        ? Array.from(
+            new Set(
+              typesRaw
+                .map(value => (value === null || value === undefined ? "" : String(value).trim()))
+                .filter(Boolean),
+            ),
+          )
+        : [];
+      return {
+        code,
+        name: entry.name || entry.label || null,
+        availablePaymentTypes: types,
+      };
+    })
+    .filter(Boolean);
+  if (!interventions.length) return null;
+  return {
+    ...payload,
+    interventions,
+  };
+};
+
+const buildPaymentTypeMappingLookup = mapping => {
+  const lookup = new Map();
+  if (!mapping?.interventions) return lookup;
+  mapping.interventions.forEach(entry => {
+    const code = normalizeInterventionCodeValue(entry?.code);
+    if (!code) return;
+    const types = Array.isArray(entry.availablePaymentTypes)
+      ? entry.availablePaymentTypes.filter(Boolean)
+      : [];
+    lookup.set(code, new Set(types));
+  });
+  return lookup;
+};
+
 const computeSlaSnapshot = requests => {
   const snapshot = {
-    readyForFinance: 0,
-    readyForBatching: 0,
-    onHold: 0,
-    sentAwaitingConfirmation: 0,
-    confirmed: 0,
+    draftsNeedingEvidence: 0,
+    submitted: 0,
     overdueEvidence: 0,
-    avgTurnaroundDays: 0,
+    avgSubmissionAgeDays: 0,
   };
-  const turnaround = [];
+  const submissionAges = [];
 
   requests.forEach(packet => {
-    switch (packet.status) {
-      case "finance_review":
-        snapshot.readyForFinance += 1;
-        break;
-      case "finance_approved":
-        snapshot.readyForBatching += 1;
-        break;
-      case "on_hold":
-        snapshot.onHold += 1;
-        break;
-      case "sent":
-        snapshot.sentAwaitingConfirmation += 1;
-        break;
-      case "confirmed":
-      case "closed":
-        snapshot.confirmed += 1;
-        if (Number.isFinite(packet.turnaroundDays)) {
-          turnaround.push(packet.turnaroundDays);
-        }
-        break;
-      default:
-        break;
+    const statusKey =
+      packet.status === "draft" || packet.status === "returned"
+        ? "draft"
+        : packet.status === "cancelled"
+          ? "cancelled"
+          : "submitted";
+    if (statusKey === "draft") {
+      const missing = packet.evidenceSummary?.missing ?? 0;
+      if (missing > 0) {
+        snapshot.draftsNeedingEvidence += 1;
+      }
+    } else if (statusKey === "submitted") {
+      snapshot.submitted += 1;
+      if (Number.isFinite(packet.ageDays)) {
+        submissionAges.push(packet.ageDays);
+      }
     }
     if ((packet.riskFlags ?? []).some(flag => flag.toLowerCase().includes("overdue"))) {
       snapshot.overdueEvidence += 1;
     }
   });
 
-  if (turnaround.length) {
-    const total = turnaround.reduce((sum, value) => sum + value, 0);
-    snapshot.avgTurnaroundDays = total / turnaround.length;
+  if (submissionAges.length) {
+    const total = submissionAges.reduce((sum, value) => sum + value, 0);
+    snapshot.avgSubmissionAgeDays = total / submissionAges.length;
   }
 
   return snapshot;
 };
 
-export const PaymentsDataProvider = ({ children }) => {
+const normalizeFilterValue = value => {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed ? trimmed : null;
+};
+
+const buildPaymentsQuery = ({
+  status,
+  statuses,
+  caseId,
+  clientId,
+  interventionId,
+  reportingUnit,
+  limit,
+} = {}) => {
+  const params = new URLSearchParams();
+  const normalizedStatus = normalizeFilterValue(status);
+  const normalizedCaseId = normalizeFilterValue(caseId);
+  const normalizedClientId = normalizeFilterValue(clientId);
+  const normalizedInterventionId = normalizeFilterValue(interventionId);
+  const normalizedReportingUnit = normalizeFilterValue(reportingUnit);
+  const normalizedLimit = normalizeFilterValue(limit);
+  const statusList = Array.isArray(statuses)
+    ? statuses.map(item => normalizeFilterValue(item)).filter(Boolean)
+    : normalizeFilterValue(statuses)
+      ? String(statuses)
+          .split(",")
+          .map(item => normalizeFilterValue(item))
+          .filter(Boolean)
+      : [];
+
+  if (normalizedStatus) {
+    params.set("status", normalizedStatus);
+  }
+  if (statusList.length) {
+    params.set("statuses", statusList.join(","));
+  }
+  if (normalizedCaseId) {
+    params.set("caseId", normalizedCaseId);
+  }
+  if (normalizedClientId) {
+    params.set("clientId", normalizedClientId);
+  }
+  if (normalizedInterventionId) {
+    params.set("interventionId", normalizedInterventionId);
+  }
+  if (normalizedReportingUnit) {
+    params.set("reportingUnit", normalizedReportingUnit);
+  }
+  if (normalizedLimit) {
+    params.set("limit", normalizedLimit);
+  }
+
+  return params.toString();
+};
+
+export const PaymentsDataProvider = ({ children, filters = {} }) => {
+  const {
+    status,
+    statuses,
+    caseId,
+    clientId,
+    interventionId,
+    reportingUnit,
+    limit,
+  } = filters || {};
+  const queryString = useMemo(
+    () =>
+      buildPaymentsQuery({
+        status,
+        statuses,
+        caseId,
+        clientId,
+        interventionId,
+        reportingUnit,
+        limit,
+      }),
+    [status, statuses, caseId, clientId, interventionId, reportingUnit, limit]
+  );
   const [requests, setRequests] = useState([]);
   const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [communications, setCommunications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [paymentTypeMapping, setPaymentTypeMapping] = useState(null);
+  const [paymentTypeMappingLoading, setPaymentTypeMappingLoading] = useState(false);
 
   const loadCommunications = useCallback(async () => {
     try {
@@ -307,11 +442,32 @@ export const PaymentsDataProvider = ({ children }) => {
     }
   }, []);
 
+  const loadPaymentTypeMapping = useCallback(async () => {
+    setPaymentTypeMappingLoading(true);
+    try {
+      const resp = await apiFetch("/api/finance/payment-intervention-type-map");
+      if (!resp.ok) {
+        throw new Error(`Mapping load failed (${resp.status})`);
+      }
+      const payload = await resp.json();
+      const normalized = normalizePaymentTypeMappingPayload(payload);
+      setPaymentTypeMapping(normalized);
+    } catch (err) {
+      console.error("[Payments] failed to load payment type mapping", err);
+      setPaymentTypeMapping(null);
+    } finally {
+      setPaymentTypeMappingLoading(false);
+    }
+  }, []);
+
   const loadRequests = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const resp = await apiFetch("/api/finance/payment-packets");
+      const endpoint = queryString
+        ? `/api/finance/payment-packets?${queryString}`
+        : "/api/finance/payment-packets";
+      const resp = await apiFetch(endpoint);
       if (!resp.ok) {
         throw new Error(`Load failed (${resp.status})`);
       }
@@ -325,7 +481,7 @@ export const PaymentsDataProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [queryString]);
 
   useEffect(() => {
     loadRequests();
@@ -334,6 +490,10 @@ export const PaymentsDataProvider = ({ children }) => {
   useEffect(() => {
     loadCommunications();
   }, [loadCommunications]);
+
+  useEffect(() => {
+    loadPaymentTypeMapping();
+  }, [loadPaymentTypeMapping]);
 
   useEffect(() => {
     if (!requests.length) {
@@ -387,7 +547,7 @@ export const PaymentsDataProvider = ({ children }) => {
       console.error("[Payments] failed to update packet status", err);
       const message = err.message || "Failed to update packet status";
       setError(message);
-      throw new Error(message);
+      throw err;
     }
   }, []);
 
@@ -443,7 +603,7 @@ export const PaymentsDataProvider = ({ children }) => {
       console.error("[Payments] failed to update line status", err);
       const message = err.message || "Failed to update payment line status";
       setError(message);
-      throw new Error(message);
+      throw err;
     }
   }, []);
 
@@ -460,7 +620,7 @@ export const PaymentsDataProvider = ({ children }) => {
       );
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        throw new Error(data?.message || data?.error || `Update failed (${resp.status})`);
+        throw buildApiError(resp, data, `Update failed (${resp.status})`);
       }
       const updatedLine = normalizeLine(data);
       let updatedPacket = null;
@@ -499,7 +659,7 @@ export const PaymentsDataProvider = ({ children }) => {
       console.error("[Payments] failed to update payment line", err);
       const message = err.message || "Failed to update payment line";
       setError(message);
-      throw new Error(message);
+      throw err;
     }
   }, []);
 
@@ -512,7 +672,7 @@ export const PaymentsDataProvider = ({ children }) => {
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        throw new Error(data?.message || data?.error || `Create failed (${resp.status})`);
+        throw buildApiError(resp, data, `Create failed (${resp.status})`);
       }
       const created = normalizePacket(data);
       setRequests(prev => {
@@ -533,6 +693,35 @@ export const PaymentsDataProvider = ({ children }) => {
       throw new Error(message);
     }
   }, []);
+
+  const deletePacket = useCallback(async packetId => {
+    if (!packetId) return null;
+    try {
+      const resp = await apiFetch(
+        `/api/finance/payment-packets/${encodeURIComponent(packetId)}`,
+        { method: "DELETE" }
+      );
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw buildApiError(resp, payload, `Delete failed (${resp.status})`);
+      }
+      setRequests(prev => {
+        const next = Array.isArray(prev)
+          ? prev.filter(entry => entry.id !== String(packetId))
+          : [];
+        if (selectedRequestId && String(selectedRequestId) === String(packetId)) {
+          setSelectedRequestId(next[0]?.id ?? null);
+        }
+        return next;
+      });
+      return payload;
+    } catch (err) {
+      console.error("[Payments] failed to delete payment packet", err);
+      const message = err.message || "Failed to delete payment packet";
+      setError(message);
+      throw err;
+    }
+  }, [selectedRequestId]);
 
   const addPacketLines = useCallback(async (packetId, payload = {}) => {
     if (!packetId) return null;
@@ -565,7 +754,7 @@ export const PaymentsDataProvider = ({ children }) => {
       console.error("[Payments] failed to add payment lines", err);
       const message = err.message || "Failed to add payment lines";
       setError(message);
-      throw new Error(message);
+      throw err;
     }
   }, []);
 
@@ -744,6 +933,11 @@ export const PaymentsDataProvider = ({ children }) => {
     [requests, selectedRequestId],
   );
 
+  const paymentTypeMappingLookup = useMemo(
+    () => buildPaymentTypeMappingLookup(paymentTypeMapping),
+    [paymentTypeMapping],
+  );
+
   const slaSnapshot = useMemo(() => computeSlaSnapshot(requests), [requests]);
 
   const value = useMemo(
@@ -756,6 +950,7 @@ export const PaymentsDataProvider = ({ children }) => {
       updateLineStatus,
       updateLine,
       createPacket,
+      deletePacket,
       addPacketLines,
       createBatch,
       updateBatchStatus,
@@ -765,10 +960,14 @@ export const PaymentsDataProvider = ({ children }) => {
       addCommunication,
       sendPacketEmail,
       slaSnapshot,
+      paymentTypeMapping,
+      paymentTypeMappingLookup,
+      paymentTypeMappingLoading,
       loading,
       error,
       reloadRequests: loadRequests,
       reloadCommunications: loadCommunications,
+      reloadPaymentTypeMapping: loadPaymentTypeMapping,
     }),
     [
       requests,
@@ -779,6 +978,7 @@ export const PaymentsDataProvider = ({ children }) => {
       updateLineStatus,
       updateLine,
       createPacket,
+      deletePacket,
       addPacketLines,
       createBatch,
       updateBatchStatus,
@@ -788,10 +988,14 @@ export const PaymentsDataProvider = ({ children }) => {
       addCommunication,
       sendPacketEmail,
       slaSnapshot,
+      paymentTypeMapping,
+      paymentTypeMappingLookup,
+      paymentTypeMappingLoading,
       loading,
       error,
       loadRequests,
       loadCommunications,
+      loadPaymentTypeMapping,
     ],
   );
 
