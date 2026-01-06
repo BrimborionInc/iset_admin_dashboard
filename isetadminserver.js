@@ -11866,8 +11866,7 @@ const METRICS_NON_LEGACY_APPLICATION_STATUSES = [
   'pending_approval',
   'decision_ready',
   'completed',
-  'closed',
-  'archived'
+  'closed'
 ];
 const METRICS_APPLICATION_DECISION_STATUSES = ['decision_ready', 'completed'];
 const METRICS_INTERVENTION_DECISION_STATUSES = ['approved', 'changes_requested', 'rejected'];
@@ -12838,6 +12837,36 @@ function inferUserRole(req) {
     if (headerRole) return headerRole;
   }
   return null;
+}
+
+const ARCHIVED_APPLICATION_STATUS = 'archived';
+
+function isArchivedApplicationStatus(status) {
+  if (!status) return false;
+  return String(status).trim().toLowerCase() === ARCHIVED_APPLICATION_STATUS;
+}
+
+function canViewArchivedApplications(req) {
+  const role = canonicaliseAccessRole(inferUserRole(req));
+  return role === 'System Administrator';
+}
+
+function buildArchivedApplicationFilter(req, alias = 'a') {
+  if (canViewArchivedApplications(req)) return null;
+  return `(${alias}.status IS NULL OR LOWER(${alias}.status) <> '${ARCHIVED_APPLICATION_STATUS}')`;
+}
+
+async function enforceApplicationVisibility(req, applicationId, connection = pool) {
+  if (canViewArchivedApplications(req)) return { ok: true };
+  const [[row]] = await connection.query(
+    'SELECT status FROM iset_application WHERE id = ? LIMIT 1',
+    [applicationId]
+  );
+  if (!row) return { ok: false, reason: 'not_found' };
+  if (isArchivedApplicationStatus(row.status)) {
+    return { ok: false, reason: 'archived' };
+  }
+  return { ok: true };
 }
 
 function hasSlaAdminAccess(req) {
@@ -24275,6 +24304,8 @@ app.get('/api/applicants/:id/applications', async (req, res) => {
     return res.status(400).json({ error: 'invalid_applicant_id' });
   }
   try {
+    const archivedFilter = buildArchivedApplicationFilter(req, 'a');
+    const archivedClause = archivedFilter ? ` AND ${archivedFilter}` : '';
     const [rows] = await pool.query(
       `SELECT
           c.id AS case_id,
@@ -24289,7 +24320,7 @@ app.get('/api/applicants/:id/applications', async (req, res) => {
        FROM iset_application_submission s
        JOIN iset_application a ON a.submission_id = s.id
        LEFT JOIN iset_case c ON c.application_id = a.id
-      WHERE s.user_id = ?
+      WHERE s.user_id = ?${archivedClause}
       ORDER BY a.created_at DESC`,
       [applicantId]
     );
@@ -37506,6 +37537,21 @@ async function createAutoPaymentPacketFromIntervention({
     }
   }
 
+  if (packetId) {
+    try {
+      await attachSupportingDocumentsToPaymentPacket({
+        packetId,
+        caseId,
+        clientId,
+        applicationId,
+        interventionIds: interventionId ? [interventionId] : [],
+        connection: runner,
+      });
+    } catch (err) {
+      console.warn('[payments] failed to attach evidence for auto packet', err?.message || err);
+    }
+  }
+
   await runner.query(
     `INSERT INTO payment_status_event
       (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, notes, metadata, created_at)
@@ -43575,6 +43621,10 @@ app.get('/api/applications/:id', async (req, res) => {
         }
       }
     } catch (_) {}
+    const archivedFilter = buildArchivedApplicationFilter(req, 'a');
+    if (archivedFilter) {
+      appSql += ` AND ${archivedFilter}`;
+    }
     const [[application]] = await pool.query(appSql, appParams);
     if (!application) {
       return res.status(404).json({ error: 'Application not found' });
@@ -43708,6 +43758,10 @@ app.get('/api/applications/:id', async (req, res) => {
 app.get('/api/applications/:id/ptma', async (req, res) => {
   const applicationId = req.params.id;
   try {
+    const visibility = await enforceApplicationVisibility(req, applicationId);
+    if (!visibility.ok) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
     // Get assigned evaluator for this application (via iset_case)
     let s = 'SELECT assigned_to_user_id FROM iset_case c WHERE application_id = ?';
     const sParams = [applicationId];
@@ -43747,6 +43801,10 @@ app.put('/api/applications/:id/ptma-case-summary', async (req, res) => {
     return res.status(400).json({ error: 'Missing case_summary in request body' });
   }
   try {
+    const visibility = await enforceApplicationVisibility(req, applicationId);
+    if (!visibility.ok) {
+      return res.status(404).json({ error: 'Case not found for this application' });
+    }
     // Update the case_summary in iset_case for the given application_id
     let upd = 'UPDATE iset_case c SET case_summary = ? WHERE application_id = ?';
     const updParams = [case_summary, applicationId];
@@ -43783,8 +43841,11 @@ app.patch('/api/applications/:id/answers', async (req, res) => {
   }
   try {
     // Load current payload plus submission id
-  const [[row]] = await pool.query('SELECT payload_json, submission_id FROM iset_application WHERE id = ? LIMIT 1', [applicationId]);
+  const [[row]] = await pool.query('SELECT payload_json, submission_id, status FROM iset_application WHERE id = ? LIMIT 1', [applicationId]);
     if (!row) return res.status(404).json({ error: 'Application not found' });
+    if (!canViewArchivedApplications(req) && isArchivedApplicationStatus(row.status)) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
     let payload = row.payload_json;
     if (payload && typeof payload === 'string') { try { payload = JSON.parse(payload); } catch { payload = {}; } }
     if (!payload || typeof payload !== 'object') payload = {};
@@ -43858,6 +43919,9 @@ app.get('/api/applications/:id/versions', async (req, res) => {
     if (!current) {
       return res.status(404).json({ error: 'Application not found' });
     }
+    if (!canViewArchivedApplications(req) && isArchivedApplicationStatus(current.row?.status)) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
     await ensureApplicationVersionTable();
     const [rows] = await connection.query(
       'SELECT id, application_id, version, change_summary, created_by_id, created_by_name, restored_from_version, created_at FROM iset_application_version WHERE application_id = ? ORDER BY version DESC, id DESC',
@@ -43918,6 +43982,9 @@ app.get('/api/applications/:id/versions/:versionId', async (req, res) => {
   try {
     const current = await readApplicationPayload(connection, applicationId);
     if (!current) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+    if (!canViewArchivedApplications(req) && isArchivedApplicationStatus(current.row?.status)) {
       return res.status(404).json({ error: 'Application not found' });
     }
     const currentVersionNumber = Number(current.row.version || 1);
@@ -44322,6 +44389,10 @@ app.post('/api/applications/:id/versions', async (req, res) => {
       await connection.rollback();
       return res.status(404).json({ error: 'Application not found' });
     }
+    if (!canViewArchivedApplications(req) && isArchivedApplicationStatus(current.row?.status)) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Application not found' });
+    }
     currentRowVersion = Number(current.row.row_version || 1);
     if (currentRowVersion !== expectedRowVersionNumber) {
       await connection.rollback();
@@ -44403,6 +44474,10 @@ app.post('/api/applications/:id/versions/:versionId/restore', async (req, res) =
     await connection.beginTransaction();
     const current = await readApplicationPayload(connection, applicationId);
     if (!current) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Application not found', lock: null });
+    }
+    if (!canViewArchivedApplications(req) && isArchivedApplicationStatus(current.row?.status)) {
       await connection.rollback();
       return res.status(404).json({ error: 'Application not found', lock: null });
     }
@@ -44548,6 +44623,7 @@ app.get('/api/applications', async (req, res) => {
     const { status, limit = 50, offset = 0, search } = req.query;
     const role = req.auth.role;
     const regionId = req.auth.regionId || req.staffProfile?.region_id || null;
+    const archivedFilter = buildArchivedApplicationFilter(req, 'a');
 
     // Base case + application join using new lean model.
     // Assignment user now from staff_profiles (nullable); tracking_id fallback derived from payload_json->submission_snapshot.reference_number if tracking_id column absent.
@@ -44604,6 +44680,9 @@ app.get('/api/applications', async (req, res) => {
   where.push("(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) LIKE ? OR sp.email LIKE ? OR c.case_summary LIKE ?)");
       params.push(term, term, term);
     }
+    if (archivedFilter) {
+      where.push(archivedFilter);
+    }
 
     if (role === 'Application Assessor') {
       if (!req.staffProfile?.id) return res.json({ count: 0, rows: [] });
@@ -44659,7 +44738,7 @@ app.get('/api/applications', async (req, res) => {
         FROM iset_application a
         LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
         LEFT JOIN iset_case c2 ON c2.application_id = a.id
-        WHERE c2.id IS NULL
+        WHERE c2.id IS NULL${archivedFilter ? ` AND ${archivedFilter}` : ''}
       )`;
     }
 
@@ -44675,7 +44754,9 @@ app.get('/api/applications', async (req, res) => {
         let countCaseSql = 'SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c JOIN iset_application a ON c.application_id = a.id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id';
         if (where.length) countCaseSql += ' WHERE ' + where.join(' AND ');
         const [[caseCnt]] = await pool.query(countCaseSql, params);
-        const [[unassignedCnt]] = await pool.query('SELECT COUNT(*) AS cnt FROM iset_application a LEFT JOIN iset_case c2 ON c2.application_id = a.id WHERE c2.id IS NULL');
+        const unassignedSql =
+          `SELECT COUNT(*) AS cnt FROM iset_application a LEFT JOIN iset_case c2 ON c2.application_id = a.id WHERE c2.id IS NULL${archivedFilter ? ` AND ${archivedFilter}` : ''}`;
+        const [[unassignedCnt]] = await pool.query(unassignedSql);
         count = (caseCnt?.cnt || 0) + (unassignedCnt?.cnt || 0);
       } else {
         let countSql = 'SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c JOIN iset_application a ON c.application_id = a.id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id';
@@ -46007,7 +46088,12 @@ app.put('/api/cases/:id', async (req, res) => {
 
     const targetStatus = statusToPersist || beforeStatusNormalised;
 
-    if (applicationStatusToPersist === 'approved' || (applicationStatusToPersist === 'decision_ready' && targetStatus === CASE_STATUS_DERIVED_VALUES.initiated)) {
+    const shouldAutoPlanOnCompletion =
+      applicationStatusToPersist === 'completed' &&
+      beforeApplicationStatus !== 'completed' &&
+      (beforeApplicationStatus === 'decision_ready' || beforeApplicationStatus === 'approved');
+
+    if (shouldAutoPlanOnCompletion) {
       let approvalUserId = await resolveOrCreateUserIdFromAuth(req, conn);
       approvalUserId = Number.isFinite(Number(approvalUserId)) ? Number(approvalUserId) : null;
       if (!approvalUserId) {

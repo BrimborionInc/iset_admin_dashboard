@@ -42,6 +42,7 @@ Format: YYYY-MM-DD - Category: Short description
 - Fix: Auto-generated payment packets now resolve requester user IDs to avoid FK insert failures.
 - UX: Submit-to-finance alerts now summarize policy blockers with line ranges.
 - Fix: Payment packet bundle generation now handles typed-array buffers to avoid archiver crashes.
+- Access: Archived applications now only appear to System Administrators in application lists and counts.
 
 ## 2026-01-24
 - Payments: Auto-generate draft payment packets from approved interventions.
