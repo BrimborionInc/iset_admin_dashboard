@@ -17,6 +17,7 @@ import {
   Tabs,
   StatusIndicator,
   Select,
+  Multiselect,
   Hotspot
 } from '@cloudscape-design/components';
 import SupportingDocumentsHelp from '../helpPanelContents/supportingDocumentsHelp';
@@ -37,10 +38,12 @@ const DOCUMENT_TYPE_OPTIONS_FALLBACK = [
   { value: 'ei_verification', label: 'EI Eligibility Verification', scope: 'application' },
   { value: 'indigenous_declaration', label: 'Indigenous declaration', scope: 'client' },
   { value: 'conflict_of_interest', label: 'Conflict of Interest Form', scope: 'application' },
+  { value: 'status_card', label: 'Status card', scope: 'client' },
+  { value: 'letter_of_reference', label: 'Letter of reference', scope: 'client' },
   { value: 'identity_document', label: 'Identity document', scope: 'client' },
   { value: 'supporting_evidence', label: 'Supporting evidence', scope: 'application' },
   { value: 'client_acknowledgement', label: 'Client acknowledgement', scope: 'application' },
-  { value: 'iset_client_info_release', label: 'Authorization for the Release of ISET Client Information', scope: 'application' },
+  { value: 'iset_client_info_release', label: 'Authorization for the Release of ISET Client Information', scope: 'client' },
   { value: 'media_consent', label: 'Media consent', scope: 'application' },
   { value: 'financial_overview', label: 'Financial overview/budget', scope: 'application' },
   { value: 'financial_records', label: 'Income evidence', scope: 'application' },
@@ -51,19 +54,19 @@ const DOCUMENT_TYPE_OPTIONS_FALLBACK = [
   { value: 'band_funding_denial', label: 'Band funding denial', scope: 'application' },
   { value: 'medical_documentation', label: 'Medical documentation', scope: 'application' },
   { value: 'resume', label: 'Resume', scope: 'client' },
-  { value: 'case_assessment', label: 'Case manager assessment', scope: 'application' },
+  { value: 'case_assessment', label: 'Case manager assessment', scope: 'case' },
   { value: 'assessment_approval_letter', label: 'Assessment approval letter', scope: 'application' },
   { value: 'assessment_denial_letter', label: 'Assessment denial letter', scope: 'application' },
-  { value: 'funding_agreement', label: 'Funding agreement', scope: 'application' },
-  { value: 'attendance_form', label: 'Attendance form', scope: 'application' },
-  { value: 'alternate_payee_letter', label: 'Alternate payee letter', scope: 'application' },
-  { value: 'institution_letter', label: 'Institution letter', scope: 'application' },
-  { value: 'equipment_quote', label: 'Equipment quote', scope: 'application' },
-  { value: 'employer_duties_letter', label: 'Employer duties letter', scope: 'application' },
-  { value: 'employer_offer_letter_after_subsidy', label: 'Employer offer letter after subsidy', scope: 'application' },
-  { value: 'wage_plan', label: 'Wage plan / MERCs schedule', scope: 'application' },
-  { value: 'receipt', label: 'Receipt', scope: 'application' },
-  { value: 'voided_cheque', label: 'Voided cheque', scope: 'client' }
+  { value: 'funding_agreement', label: 'Funding agreement', scope: 'action_plan' },
+  { value: 'attendance_form', label: 'Attendance form', scope: 'action_plan' },
+  { value: 'alternate_payee_letter', label: 'Alternate payee letter', scope: 'payment_packet' },
+  { value: 'institution_letter', label: 'Institution letter', scope: 'action_plan' },
+  { value: 'equipment_quote', label: 'Equipment quote', scope: 'action_plan' },
+  { value: 'employer_duties_letter', label: 'Employer duties letter', scope: 'action_plan' },
+  { value: 'employer_offer_letter_after_subsidy', label: 'Employer offer letter after subsidy', scope: 'action_plan' },
+  { value: 'wage_plan', label: 'Wage plan / MERCs schedule', scope: 'action_plan' },
+  { value: 'receipt', label: 'Receipt', scope: 'payment_packet' },
+  { value: 'voided_cheque', label: 'Voided cheque', scope: 'payment_packet' }
 ];
 
 const formatDate = value => {
@@ -102,6 +105,20 @@ const formatApplicationStatus = value => {
   if (!value) return '';
   return String(value).trim().replace(/_/g, ' ');
 };
+
+const normalizeIdList = list =>
+  Array.from(new Set((Array.isArray(list) ? list : []).map(value => String(value)).filter(Boolean)))
+    .sort();
+
+const SCOPE_LABELS = {
+  client: 'Client',
+  application: 'Application',
+  case: 'Case',
+  action_plan: 'Action plan',
+  payment_packet: 'Payment packet'
+};
+
+const formatScopeLabel = scope => SCOPE_LABELS[scope] || 'Application';
 
 const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) => {
   const workspace = useCaseWorkspace();
@@ -172,15 +189,17 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [editDocument, setEditDocument] = useState(null);
   const [editCategory, setEditCategory] = useState('');
   const [editCategoryError, setEditCategoryError] = useState('');
-  const [editAttachType, setEditAttachType] = useState('none');
-  const [editAttachTarget, setEditAttachTarget] = useState('');
+  const [editApplicationId, setEditApplicationId] = useState('');
+  const [editActionPlanId, setEditActionPlanId] = useState('');
+  const [editInterventionIds, setEditInterventionIds] = useState([]);
   const [editAttachError, setEditAttachError] = useState('');
   const [pendingCategory, setPendingCategory] = useState('');
   const [pendingCategoryError, setPendingCategoryError] = useState('');
   const [pendingApplication, setPendingApplication] = useState('');
   const [pendingApplicationError, setPendingApplicationError] = useState('');
-  const [pendingIntervention, setPendingIntervention] = useState('');
-  const [pendingInterventionError, setPendingInterventionError] = useState('');
+  const [pendingActionPlan, setPendingActionPlan] = useState('');
+  const [pendingActionPlanError, setPendingActionPlanError] = useState('');
+  const [pendingInterventions, setPendingInterventions] = useState([]);
   const [selectedApplicationFilter, setSelectedApplicationFilter] = useState('');
   const [selectedInterventionFilter, setSelectedInterventionFilter] = useState('');
   const [interventionSelectionMode, setInterventionSelectionMode] = useState('auto');
@@ -189,8 +208,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [duplicateDocument, setDuplicateDocument] = useState(null);
   const [duplicateLabel, setDuplicateLabel] = useState('');
   const [duplicateCategory, setDuplicateCategory] = useState('');
-  const [duplicateAttachType, setDuplicateAttachType] = useState('application');
-  const [duplicateAttachTarget, setDuplicateAttachTarget] = useState('');
+  const [duplicateApplicationId, setDuplicateApplicationId] = useState('');
+  const [duplicateActionPlanId, setDuplicateActionPlanId] = useState('');
+  const [duplicateInterventionIds, setDuplicateInterventionIds] = useState([]);
   const [duplicateError, setDuplicateError] = useState('');
   const [duplicateSubmitting, setDuplicateSubmitting] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState(() => {
@@ -236,7 +256,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const nextUploadLabelRef = useRef('');
   const nextUploadCategoryRef = useRef('');
   const nextUploadApplicationIdRef = useRef('');
-  const nextUploadInterventionIdRef = useRef('');
+  const nextUploadActionPlanIdRef = useRef('');
+  const nextUploadInterventionIdsRef = useRef([]);
   const applicantUserId =
     caseData?.applicant_user_id ??
     caseData?.applicantUserId ??
@@ -259,6 +280,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     const plans = caseData?.actionPlans || [];
     const options = [];
     plans.forEach(plan => {
+      if (!plan?.id) return;
+      const planId = String(plan.id);
       const planLabel = plan?.title || plan?.name || '';
       const list = Array.isArray(plan?.interventions) ? plan.interventions : [];
       list.forEach(intervention => {
@@ -269,7 +292,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           value: String(intervention.id),
           label: title,
           description,
-          status: intervention.status || null
+          status: intervention.status || null,
+          planId
         });
       });
     });
@@ -282,6 +306,57 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     });
     return map;
   }, [interventionOptions]);
+  const actionPlanOptions = useMemo(() => {
+    const plans = caseData?.actionPlans || [];
+    return plans
+      .filter(plan => plan?.id)
+      .map(plan => ({
+        value: String(plan.id),
+        label: plan.title || plan.name || `Action plan ${plan.id}`,
+        description: plan.status ? formatApplicationStatus(plan.status) : undefined
+      }));
+  }, [caseData]);
+  const actionPlanOptionMap = useMemo(() => {
+    const map = new Map();
+    actionPlanOptions.forEach(option => {
+      map.set(String(option.value), option);
+    });
+    return map;
+  }, [actionPlanOptions]);
+  const actionPlanInterventionMap = useMemo(() => {
+    const map = new Map();
+    const plans = caseData?.actionPlans || [];
+    plans.forEach(plan => {
+      if (!plan?.id) return;
+      const planId = String(plan.id);
+      const planLabel = plan?.title || plan?.name || '';
+      const list = Array.isArray(plan?.interventions) ? plan.interventions : [];
+      const options = list
+        .filter(intervention => intervention?.id)
+        .map(intervention => ({
+          value: String(intervention.id),
+          label: intervention.title || intervention.code || `Intervention ${intervention.id}`,
+          description: planLabel ? `Plan: ${planLabel}` : undefined,
+          status: intervention.status || null
+        }));
+      map.set(planId, options);
+    });
+    return map;
+  }, [caseData]);
+  const interventionPlanMap = useMemo(() => {
+    const map = new Map();
+    const plans = caseData?.actionPlans || [];
+    plans.forEach(plan => {
+      if (!plan?.id) return;
+      const planId = String(plan.id);
+      const list = Array.isArray(plan?.interventions) ? plan.interventions : [];
+      list.forEach(intervention => {
+        if (!intervention?.id) return;
+        map.set(String(intervention.id), planId);
+      });
+    });
+    return map;
+  }, [caseData]);
 
   const resolveDocumentType = useCallback(item => {
     if (!item) return '';
@@ -513,7 +588,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   useEffect(() => {
     if (!isCaseWorkspace) {
       setSelectedInterventionFilter('');
-      setPendingIntervention('');
+      setPendingActionPlan('');
+      setPendingInterventions([]);
       setInterventionSelectionMode('auto');
       lastInterventionContextRef.current = '';
       return;
@@ -527,7 +603,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         selectedInterventionFilter === value;
       if (shouldSync) {
         setSelectedInterventionFilter(value);
-        setPendingIntervention(value);
+        setPendingInterventions([value]);
+        const planId = interventionPlanMap.get(value) || '';
+        setPendingActionPlan(planId);
         setInterventionSelectionMode('auto');
       }
       lastInterventionContextRef.current = value;
@@ -541,7 +619,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     selectedInterventionId,
     selectedInterventionFilter,
     interventionOptions,
-    interventionSelectionMode
+    interventionSelectionMode,
+    interventionPlanMap
   ]);
 
   useEffect(() => {
@@ -609,20 +688,35 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     }
     setLabelError('');
     setPendingApplicationError('');
-    setPendingInterventionError('');
+    setPendingActionPlanError('');
     setPendingCategoryError('');
+    const initialApplication =
+      selectedApplicationFilter ||
+      (applicationId ? String(applicationId) : '') ||
+      (applicationOptions.length === 1 ? applicationOptions[0].value : '');
+    setPendingApplication(initialApplication || '');
     if (isCaseWorkspace) {
       const initialIntervention =
         selectedInterventionFilter ||
         (selectedInterventionId ? String(selectedInterventionId) : '') ||
         (interventionOptions.length === 1 ? interventionOptions[0].value : '');
-      setPendingIntervention(initialIntervention || '');
+      const initialPlan =
+        (initialIntervention && interventionPlanMap.get(initialIntervention)) ||
+        (actionPlanOptions.length === 1 ? actionPlanOptions[0].value : '');
+      setPendingActionPlan(initialPlan || '');
+      if (initialPlan && initialIntervention) {
+        const allowed = new Set(
+          (actionPlanInterventionMap.get(String(initialPlan)) || []).map(opt => opt.value)
+        );
+        setPendingInterventions(allowed.has(initialIntervention) ? [initialIntervention] : []);
+      } else if (initialIntervention) {
+        setPendingInterventions([initialIntervention]);
+      } else {
+        setPendingInterventions([]);
+      }
     } else {
-      const initialApplication =
-        selectedApplicationFilter ||
-        (applicationId ? String(applicationId) : '') ||
-        (applicationOptions.length === 1 ? applicationOptions[0].value : '');
-      setPendingApplication(initialApplication || '');
+      setPendingActionPlan('');
+      setPendingInterventions([]);
     }
     setLabelModalVisible(true);
     setPendingLabel(prev => prev || '');
@@ -635,13 +729,16 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     selectedInterventionId,
     applicationId,
     applicationOptions,
-    interventionOptions
+    interventionOptions,
+    actionPlanOptions,
+    actionPlanInterventionMap,
+    interventionPlanMap
   ]);
   const handleLabelModalDismiss = useCallback(() => {
     setLabelModalVisible(false);
     setLabelError('');
     setPendingApplicationError('');
-    setPendingInterventionError('');
+    setPendingActionPlanError('');
     setPendingCategoryError('');
   }, []);
   const handleLabelConfirm = useCallback(() => {
@@ -657,22 +754,38 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     }
     const scope = getDocumentTypeScope(categoryTrimmed);
     let targetApplicationId = '';
-    let targetInterventionId = '';
+    let targetActionPlanId = '';
+    let targetInterventionIds = [];
     if (scope === 'application') {
-      if (isCaseWorkspace) {
-        targetInterventionId = (pendingIntervention || '').trim();
-      } else {
-        targetApplicationId = (pendingApplication || '').trim();
+      targetApplicationId = (pendingApplication || '').trim();
+      if (!targetApplicationId) {
+        setPendingApplicationError('Select which application this document should be attached to.');
+        return;
       }
+    }
+    if (scope === 'case') {
+      if (!caseId) {
+        setLabelError('This document type must be attached to a case.');
+        return;
+      }
+    }
+    if (scope === 'action_plan') {
+      targetActionPlanId = (pendingActionPlan || '').trim();
+      if (!targetActionPlanId) {
+        setPendingActionPlanError('Select which action plan this document should be attached to.');
+        return;
+      }
+      targetInterventionIds = normalizeIdList(pendingInterventions);
     }
     nextUploadLabelRef.current = trimmed;
     nextUploadCategoryRef.current = categoryTrimmed;
     nextUploadApplicationIdRef.current = targetApplicationId || '';
-    nextUploadInterventionIdRef.current = targetInterventionId || '';
+    nextUploadActionPlanIdRef.current = targetActionPlanId || '';
+    nextUploadInterventionIdsRef.current = targetInterventionIds;
     setLabelError('');
     setPendingCategoryError('');
     setPendingApplicationError('');
-    setPendingInterventionError('');
+    setPendingActionPlanError('');
     setLabelModalVisible(false);
     if (fileInputRef.current) {
       fileInputRef.current.click();
@@ -681,9 +794,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     pendingLabel,
     pendingCategory,
     pendingApplication,
-    pendingIntervention,
+    pendingActionPlan,
+    pendingInterventions,
     isCaseWorkspace,
-    getDocumentTypeScope
+    getDocumentTypeScope,
+    caseId
   ]);
   const handleFileSelected = useCallback(
     async event => {
@@ -705,8 +820,12 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         if (caseId) formData.append('caseId', caseId);
         const applicationIdForUpload = (nextUploadApplicationIdRef.current || '').trim();
         if (applicationIdForUpload) formData.append('applicationId', applicationIdForUpload);
-        const interventionIdForUpload = (nextUploadInterventionIdRef.current || '').trim();
-        if (interventionIdForUpload) formData.append('interventionId', interventionIdForUpload);
+        const actionPlanIdForUpload = (nextUploadActionPlanIdRef.current || '').trim();
+        if (actionPlanIdForUpload) formData.append('actionPlanId', actionPlanIdForUpload);
+        const interventionIdsForUpload = nextUploadInterventionIdsRef.current;
+        if (Array.isArray(interventionIdsForUpload) && interventionIdsForUpload.length) {
+          formData.append('interventionIds', JSON.stringify(interventionIdsForUpload));
+        }
         const labelForUpload = (nextUploadLabelRef.current || '').trim() || file.name;
         formData.append('label', labelForUpload);
         const categoryForUpload = (nextUploadCategoryRef.current || '').trim();
@@ -741,7 +860,19 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             throw new Error('Unable to determine which applicant this upload belongs to.');
           }
           if (errorCode === 'application_required_for_document') {
-            throw new Error('Select an application or intervention for this document type before uploading.');
+            throw new Error('Select an application for this document type before uploading.');
+          }
+          if (errorCode === 'case_required_for_document') {
+            throw new Error('This document type must be attached to a case.');
+          }
+          if (errorCode === 'action_plan_required_for_document' || errorCode === 'action_plan_required') {
+            throw new Error('Select an action plan for this document type before uploading.');
+          }
+          if (errorCode === 'interventions_multi_plan' || errorCode === 'interventions_plan_mismatch') {
+            throw new Error('Selected interventions must belong to the same action plan.');
+          }
+          if (errorCode === 'interventions_not_found') {
+            throw new Error('One or more selected interventions could not be found.');
           }
           if (errorCode === 'invalid_document_type') {
             throw new Error('The selected document type is not valid or inactive.');
@@ -761,14 +892,16 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         nextUploadLabelRef.current = '';
         nextUploadCategoryRef.current = '';
         nextUploadApplicationIdRef.current = '';
-        nextUploadInterventionIdRef.current = '';
+        nextUploadActionPlanIdRef.current = '';
+        nextUploadInterventionIdsRef.current = [];
         setPendingLabel('');
         setPendingCategory('');
         setPendingApplication(applicationId ? String(applicationId) : '');
-        setPendingIntervention(selectedInterventionId ? String(selectedInterventionId) : '');
+        setPendingActionPlan('');
+        setPendingInterventions([]);
       }
     },
-    [applicantUserId, caseId, applicationId, selectedInterventionId, loadDocuments, loadChecklist]
+    [applicantUserId, caseId, applicationId, loadDocuments, loadChecklist]
   );
   const handleInlineEdit = useCallback(
     async (item, column, newValue) => {
@@ -863,24 +996,27 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     if (!item || !item.id) return;
     const nextType = resolveDocumentType(item);
     const scope = getDocumentTypeScope(nextType);
-    let attachType = 'none';
-    let attachTarget = '';
+    let nextApplicationId = '';
+    let nextActionPlanId = '';
+    let nextInterventionIds = [];
     if (scope === 'application') {
-      if (item.linked_intervention_id) {
-        attachType = 'intervention';
-        attachTarget = String(item.linked_intervention_id);
-      } else if (item.application_id) {
-        attachType = 'application';
-        attachTarget = String(item.application_id);
+      if (item.application_id) {
+        nextApplicationId = String(item.application_id);
       }
+    } else if (scope === 'action_plan') {
+      if (item.action_plan_id) {
+        nextActionPlanId = String(item.action_plan_id);
+      }
+      nextInterventionIds = normalizeIdList(item.intervention_ids);
     }
     setEditDocument(item);
     setEditLabel(item.label || item.file_name || '');
     setEditLabelError('');
     setEditCategory(nextType);
     setEditCategoryError('');
-    setEditAttachType(attachType);
-    setEditAttachTarget(attachTarget);
+    setEditApplicationId(nextApplicationId);
+    setEditActionPlanId(nextActionPlanId);
+    setEditInterventionIds(nextInterventionIds);
     setEditAttachError('');
     setEditModalVisible(true);
   }, [getDocumentTypeScope, resolveDocumentType]);
@@ -892,8 +1028,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     setEditLabelError('');
     setEditCategory('');
     setEditCategoryError('');
-    setEditAttachType('none');
-    setEditAttachTarget('');
+    setEditApplicationId('');
+    setEditActionPlanId('');
+    setEditInterventionIds([]);
     setEditAttachError('');
   }, []);
 
@@ -916,33 +1053,35 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     setEditCategoryError('');
     setEditAttachError('');
     const scope = getDocumentTypeScope(trimmedType);
-    let applicationId = null;
-    let interventionId = null;
+    const payload = { label: trimmedLabel, documentType: trimmedType };
     if (scope === 'application') {
-      if (editAttachType === 'application') {
-        if (!editAttachTarget) {
-          setEditAttachError('Select which application this document should be attached to.');
-          return;
-        }
-        applicationId = editAttachTarget;
-      } else if (editAttachType === 'intervention') {
-        if (!editAttachTarget) {
-          setEditAttachError('Select which intervention this document should be attached to.');
-          return;
-        }
-        interventionId = editAttachTarget;
+      const nextApplicationId = (editApplicationId || '').trim();
+      if (!nextApplicationId) {
+        setEditAttachError('Select which application this document should be attached to.');
+        return;
       }
+      payload.applicationId = nextApplicationId;
+    } else if (scope === 'case') {
+      const nextCaseId = caseId ? String(caseId) : editDocument?.case_id ? String(editDocument.case_id) : '';
+      if (!nextCaseId) {
+        setEditAttachError('This document type must be attached to a case.');
+        return;
+      }
+      payload.caseId = nextCaseId;
+    } else if (scope === 'action_plan') {
+      const nextActionPlanId = (editActionPlanId || '').trim();
+      if (!nextActionPlanId) {
+        setEditAttachError('Select which action plan this document should be attached to.');
+        return;
+      }
+      payload.actionPlanId = nextActionPlanId;
+      payload.interventionIds = normalizeIdList(editInterventionIds);
     }
     try {
       const res = await apiFetch(`/api/documents/${editDocument.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          label: trimmedLabel,
-          documentType: trimmedType,
-          applicationId: applicationId || null,
-          interventionId: interventionId || null
-        })
+        body: JSON.stringify(payload)
       });
       if (!res || !res.ok) {
         let payload = null;
@@ -963,51 +1102,77 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     editLabel,
     editCategory,
     editDocument,
-    editAttachType,
-    editAttachTarget,
+    editApplicationId,
+    editActionPlanId,
+    editInterventionIds,
     getDocumentTypeScope,
     loadDocuments,
     loadChecklist,
-    handleEditDismiss
+    handleEditDismiss,
+    caseId
   ]);
 
   const openDuplicateModal = useCallback(item => {
     if (!item || !item.id) return;
     const nextType = resolveDocumentType(item);
     const scope = getDocumentTypeScope(nextType);
-    let attachType = 'none';
-    let attachTarget = '';
+    let nextApplicationId = '';
+    let nextActionPlanId = '';
+    let nextInterventionIds = [];
     if (scope === 'application') {
-      if (item.linked_intervention_id) {
-        attachType = 'intervention';
-        attachTarget = String(item.linked_intervention_id);
-      } else if (item.application_id) {
-        attachType = 'application';
-        attachTarget = String(item.application_id);
-      } else if (selectedInterventionFilter) {
-        attachType = 'intervention';
-        attachTarget = String(selectedInterventionFilter);
+      if (item.application_id) {
+        nextApplicationId = String(item.application_id);
+      } else if (selectedApplicationFilter) {
+        nextApplicationId = String(selectedApplicationFilter);
       } else if (applicationId) {
-        attachType = 'application';
-        attachTarget = String(applicationId);
+        nextApplicationId = String(applicationId);
+      }
+    } else if (scope === 'action_plan') {
+      if (item.action_plan_id) {
+        nextActionPlanId = String(item.action_plan_id);
+      } else if (selectedInterventionFilter) {
+        nextActionPlanId = interventionPlanMap.get(String(selectedInterventionFilter)) || '';
+      } else if (actionPlanOptions.length === 1) {
+        nextActionPlanId = actionPlanOptions[0].value;
+      }
+      nextInterventionIds = normalizeIdList(item.intervention_ids);
+      if (!nextInterventionIds.length && selectedInterventionFilter) {
+        nextInterventionIds = [String(selectedInterventionFilter)];
+      }
+      if (nextActionPlanId) {
+        const allowed = new Set(
+          (actionPlanInterventionMap.get(String(nextActionPlanId)) || []).map(opt => opt.value)
+        );
+        nextInterventionIds = nextInterventionIds.filter(id => allowed.has(String(id)));
       }
     }
     setDuplicateDocument(item);
     setDuplicateLabel(item.label || item.file_name || '');
     setDuplicateCategory(nextType);
-    setDuplicateAttachType(attachType);
-    setDuplicateAttachTarget(attachTarget);
+    setDuplicateApplicationId(nextApplicationId);
+    setDuplicateActionPlanId(nextActionPlanId);
+    setDuplicateInterventionIds(nextInterventionIds);
     setDuplicateError('');
     setDuplicateModalVisible(true);
-  }, [applicationId, getDocumentTypeScope, resolveDocumentType, selectedInterventionFilter]);
+  }, [
+    actionPlanInterventionMap,
+    actionPlanOptions,
+    applicationId,
+    getDocumentTypeScope,
+    interventionPlanMap,
+    resolveDocumentType,
+    selectedApplicationFilter,
+    selectedInterventionFilter
+  ]);
 
   const handleDuplicateDismiss = useCallback(() => {
     setDuplicateModalVisible(false);
     setDuplicateDocument(null);
     setDuplicateLabel('');
     setDuplicateCategory('');
-    setDuplicateAttachType('application');
-    setDuplicateAttachTarget('');
+    setDuplicateApplicationId('');
+    setDuplicateActionPlanId('');
+    setDuplicateInterventionIds([]);
     setDuplicateError('');
     setDuplicateSubmitting(false);
   }, []);
@@ -1028,22 +1193,29 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       return;
     }
     const scope = getDocumentTypeScope(trimmedType);
-    let applicationIdForCopy = null;
-    let interventionIdForCopy = null;
+    const payload = { label: trimmedLabel, documentType: trimmedType };
     if (scope === 'application') {
-      if (duplicateAttachType === 'application') {
-        if (!duplicateAttachTarget) {
-          setDuplicateError('Select which application this document should be attached to.');
-          return;
-        }
-        applicationIdForCopy = duplicateAttachTarget;
-      } else if (duplicateAttachType === 'intervention') {
-        if (!duplicateAttachTarget) {
-          setDuplicateError('Select which intervention this document should be attached to.');
-          return;
-        }
-        interventionIdForCopy = duplicateAttachTarget;
+      const nextApplicationId = (duplicateApplicationId || '').trim();
+      if (!nextApplicationId) {
+        setDuplicateError('Select which application this document should be attached to.');
+        return;
       }
+      payload.applicationId = nextApplicationId;
+    } else if (scope === 'case') {
+      const nextCaseId = caseId ? String(caseId) : duplicateDocument?.case_id ? String(duplicateDocument.case_id) : '';
+      if (!nextCaseId) {
+        setDuplicateError('This document type must be attached to a case.');
+        return;
+      }
+      payload.caseId = nextCaseId;
+    } else if (scope === 'action_plan') {
+      const nextActionPlanId = (duplicateActionPlanId || '').trim();
+      if (!nextActionPlanId) {
+        setDuplicateError('Select which action plan this document should be attached to.');
+        return;
+      }
+      payload.actionPlanId = nextActionPlanId;
+      payload.interventionIds = normalizeIdList(duplicateInterventionIds);
     }
     setDuplicateSubmitting(true);
     setDuplicateError('');
@@ -1051,12 +1223,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       const res = await apiFetch(`/api/documents/${duplicateDocument.id}/duplicate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          label: trimmedLabel,
-          documentType: trimmedType,
-          applicationId: applicationIdForCopy || null,
-          interventionId: interventionIdForCopy || null
-        })
+        body: JSON.stringify(payload)
       });
       if (!res || !res.ok) {
         let payload = null;
@@ -1079,12 +1246,14 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     duplicateDocument,
     duplicateLabel,
     duplicateCategory,
-    duplicateAttachType,
-    duplicateAttachTarget,
+    duplicateApplicationId,
+    duplicateActionPlanId,
+    duplicateInterventionIds,
     getDocumentTypeScope,
     loadDocuments,
     loadChecklist,
-    handleDuplicateDismiss
+    handleDuplicateDismiss,
+    caseId
   ]);
 
   const handleRefresh = () => {
@@ -1142,12 +1311,23 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       },
       {
         id: 'case_number',
-        header: isCaseWorkspace ? 'Case' : 'Application',
+        header: isCaseWorkspace ? 'Case / Plan' : 'Application',
         cell: item => {
-          if (item.linked_intervention_id) {
-            const key = String(item.linked_intervention_id);
-            const option = interventionOptionMap.get(key);
-            return option?.label ? `Intervention: ${option.label}` : `Intervention ${key}`;
+          const linkedInterventions = Array.isArray(item.intervention_ids) ? item.intervention_ids : [];
+          if (linkedInterventions.length) {
+            const labels = linkedInterventions.map(id => {
+              const key = String(id);
+              const option = interventionOptionMap.get(key);
+              return option?.label ? option.label : `Intervention ${key}`;
+            });
+            if (labels.length === 1) return `Intervention: ${labels[0]}`;
+            if (labels.length <= 2) return `Interventions: ${labels.join(', ')}`;
+            return `Interventions (${labels.length})`;
+          }
+          if (item.action_plan_id) {
+            const planKey = String(item.action_plan_id);
+            const plan = actionPlanOptionMap.get(planKey);
+            return plan?.label ? `Action plan: ${plan.label}` : `Action plan ${planKey}`;
           }
           const referenceNumber = item.reference_number || item.referenceNumber || null;
           if (!isCaseWorkspace) {
@@ -1164,7 +1344,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       {
         id: 'scope',
         header: 'Scope',
-        cell: item => (item.scope === 'client' ? 'Client' : 'Application')
+        cell: item => formatScopeLabel(item.scope)
       },
       {
         id: 'uploaded_at',
@@ -1227,6 +1407,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       pendingDownloads,
       pendingDeletes,
       interventionOptionMap,
+      actionPlanOptionMap,
       isCaseWorkspace,
       hasMultipleApplications
     ]
@@ -1377,7 +1558,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   );
 
   const interventionFilterOptions = useMemo(() => {
-    const opts = [{ value: '', label: 'All documents (client + all interventions)' }];
+    const opts = [{ value: '', label: 'All documents (client + action plans)' }];
     interventionOptions.forEach(opt => {
       opts.push({
         value: opt.value,
@@ -1414,14 +1595,39 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     [applicationOptions]
   );
 
-  const interventionSelectOptions = useMemo(
-    () =>
-      interventionOptions.map(opt => ({
-        ...opt,
-        tags: opt.status ? [opt.status] : undefined
-      })),
-    [interventionOptions]
-  );
+  const pendingActionPlanInterventionOptions = useMemo(() => {
+    const options = actionPlanInterventionMap.get(String(pendingActionPlan || '')) || [];
+    return options.map(opt => ({
+      ...opt,
+      tags: opt.status ? [opt.status] : undefined
+    }));
+  }, [actionPlanInterventionMap, pendingActionPlan]);
+  const editActionPlanInterventionOptions = useMemo(() => {
+    const options = actionPlanInterventionMap.get(String(editActionPlanId || '')) || [];
+    return options.map(opt => ({
+      ...opt,
+      tags: opt.status ? [opt.status] : undefined
+    }));
+  }, [actionPlanInterventionMap, editActionPlanId]);
+  const duplicateActionPlanInterventionOptions = useMemo(() => {
+    const options = actionPlanInterventionMap.get(String(duplicateActionPlanId || '')) || [];
+    return options.map(opt => ({
+      ...opt,
+      tags: opt.status ? [opt.status] : undefined
+    }));
+  }, [actionPlanInterventionMap, duplicateActionPlanId]);
+  const pendingSelectedInterventionOptions = useMemo(() => {
+    const selected = new Set(normalizeIdList(pendingInterventions));
+    return pendingActionPlanInterventionOptions.filter(opt => selected.has(opt.value));
+  }, [pendingActionPlanInterventionOptions, pendingInterventions]);
+  const editSelectedInterventionOptions = useMemo(() => {
+    const selected = new Set(normalizeIdList(editInterventionIds));
+    return editActionPlanInterventionOptions.filter(opt => selected.has(opt.value));
+  }, [editActionPlanInterventionOptions, editInterventionIds]);
+  const duplicateSelectedInterventionOptions = useMemo(() => {
+    const selected = new Set(normalizeIdList(duplicateInterventionIds));
+    return duplicateActionPlanInterventionOptions.filter(opt => selected.has(opt.value));
+  }, [duplicateActionPlanInterventionOptions, duplicateInterventionIds]);
 
   const preferencesComponent = (
     <CollectionPreferences
@@ -1440,55 +1646,39 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const pendingDocScope = getDocumentTypeScope(pendingCategory);
   const editDocType = editCategory || resolveDocumentType(editDocument);
   const editDocScope = editDocType ? getDocumentTypeScope(editDocType) : 'application';
-  const editAttachTypeOptions = [
-    { value: 'none', label: 'No attachment (generic upload)' },
-    { value: 'application', label: 'Application', disabled: !applicationSelectOptions.length },
-    { value: 'intervention', label: 'Intervention', disabled: !interventionSelectOptions.length }
-  ];
-  const editSelectedApplicationOption =
-    applicationSelectOptions.find(opt => opt.value === editAttachTarget) || null;
-  const editSelectedInterventionOption =
-    interventionSelectOptions.find(opt => opt.value === editAttachTarget) || null;
-  const originalAttachType = editDocument?.linked_intervention_id
-    ? 'intervention'
-    : editDocument?.application_id
-    ? 'application'
-    : 'none';
-  const originalAttachTarget = editDocument?.linked_intervention_id
-    ? String(editDocument.linked_intervention_id)
-    : editDocument?.application_id
-    ? String(editDocument.application_id)
-    : '';
-  const editAssociationChanged =
-    editDocScope === 'application' &&
-    (editAttachType !== originalAttachType ||
-      (editAttachType !== 'none' && editAttachTarget && editAttachTarget !== originalAttachTarget));
   const duplicateDocScope = getDocumentTypeScope(duplicateCategory);
-  const duplicateAttachTypeOptions = [
-    { value: 'none', label: 'No attachment (generic upload)' },
-    { value: 'application', label: 'Application', disabled: !applicationSelectOptions.length },
-    { value: 'intervention', label: 'Intervention', disabled: !interventionSelectOptions.length }
-  ];
-  const duplicateSelectedApplicationOption =
-    applicationSelectOptions.find(opt => opt.value === duplicateAttachTarget) || null;
-  const duplicateSelectedInterventionOption =
-    interventionSelectOptions.find(opt => opt.value === duplicateAttachTarget) || null;
   const uploadApplicationOptions = useMemo(() => {
     if (!applicationSelectOptions.length) {
       return [{ value: '', label: 'No applications available' }];
     }
-    return [{ value: '', label: 'No application (generic upload)' }, ...applicationSelectOptions];
+    return applicationSelectOptions;
   }, [applicationSelectOptions]);
-  const uploadInterventionOptions = useMemo(() => {
-    if (!interventionSelectOptions.length) {
-      return [{ value: '', label: 'No interventions available' }];
-    }
-    return [{ value: '', label: 'No intervention (generic upload)' }, ...interventionSelectOptions];
-  }, [interventionSelectOptions]);
   const uploadSelectedApplicationOption =
     uploadApplicationOptions.find(opt => opt.value === pendingApplication) || uploadApplicationOptions[0];
-  const uploadSelectedInterventionOption =
-    uploadInterventionOptions.find(opt => opt.value === pendingIntervention) || uploadInterventionOptions[0];
+  const selectedEditApplicationOption =
+    applicationSelectOptions.find(opt => opt.value === editApplicationId) || null;
+  const selectedDuplicateApplicationOption =
+    applicationSelectOptions.find(opt => opt.value === duplicateApplicationId) || null;
+  const selectedPendingActionPlanOption =
+    actionPlanOptions.find(opt => opt.value === pendingActionPlan) || null;
+  const selectedEditActionPlanOption =
+    actionPlanOptions.find(opt => opt.value === editActionPlanId) || null;
+  const selectedDuplicateActionPlanOption =
+    actionPlanOptions.find(opt => opt.value === duplicateActionPlanId) || null;
+  const originalApplicationId = editDocument?.application_id
+    ? String(editDocument.application_id)
+    : '';
+  const originalActionPlanId = editDocument?.action_plan_id
+    ? String(editDocument.action_plan_id)
+    : '';
+  const originalInterventionIds = normalizeIdList(editDocument?.intervention_ids);
+  const editAssociationChanged =
+    (editDocScope === 'application' &&
+      editApplicationId &&
+      editApplicationId !== originalApplicationId) ||
+    (editDocScope === 'action_plan' &&
+      ((editActionPlanId || '') !== originalActionPlanId ||
+        JSON.stringify(normalizeIdList(editInterventionIds)) !== JSON.stringify(originalInterventionIds)));
 
 
   return (
@@ -1542,40 +1732,34 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             placeholder="Select document type"
           />
         </FormField>
-        {isCaseWorkspace ? (
+        {pendingDocScope === 'client' || pendingDocScope === 'payment_packet' ? (
+          <Alert type="info">
+            {pendingDocScope === 'client'
+              ? 'Client-scoped documents are reusable across all cases.'
+              : 'Payment packet documents are reusable and do not need an application or action plan.'}
+          </Alert>
+        ) : null}
+        {pendingDocScope === 'case' ? (
           <FormField
-            label="Attach to intervention"
-            description={
-              pendingDocScope === 'client'
-                ? 'Client-scoped documents are reusable and do not need an intervention.'
-                : 'Select which intervention this document should be attached to, or leave blank for a generic upload.'
-            }
-            errorText={pendingInterventionError}
+            label="Case"
+            description="This document will be attached to the active case."
           >
-            <Select
-              disabled={pendingDocScope === 'client'}
-              selectedOption={uploadSelectedInterventionOption}
-              onChange={({ detail }) => {
-                setPendingInterventionError('');
-                setPendingIntervention(detail.selectedOption.value || '');
-              }}
-              options={uploadInterventionOptions}
-              placeholder={interventionSelectOptions.length ? 'Select intervention' : 'No interventions available'}
-              filteringType="none"
-            />
+            <Box>
+              {caseData?.case_number || caseData?.caseNumber
+                ? `Case ${caseData.case_number || caseData.caseNumber}`
+                : caseId
+                  ? `Case ${caseId}`
+                  : 'No case selected'}
+            </Box>
           </FormField>
-        ) : (
+        ) : null}
+        {pendingDocScope === 'application' ? (
           <FormField
             label="Attach to application"
-            description={
-              pendingDocScope === 'client'
-                ? 'Client-scoped documents are reusable across all applications.'
-                : 'Select which application this document should be attached to, or leave blank for a generic upload.'
-            }
+            description="Select which application this document should be attached to."
             errorText={pendingApplicationError}
           >
             <Select
-              disabled={pendingDocScope === 'client'}
               selectedOption={uploadSelectedApplicationOption}
               onChange={({ detail }) => {
                 setPendingApplicationError('');
@@ -1587,7 +1771,48 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
               filteringType="none"
             />
           </FormField>
-        )}
+        ) : null}
+        {pendingDocScope === 'action_plan' ? (
+          <>
+            <FormField
+              label="Action plan"
+              description="Select which action plan this document should be attached to."
+              errorText={pendingActionPlanError}
+            >
+              <Select
+                selectedOption={selectedPendingActionPlanOption}
+                onChange={({ detail }) => {
+                  setPendingActionPlanError('');
+                  const nextPlan = detail.selectedOption?.value || '';
+                  setPendingActionPlan(nextPlan);
+                  setPendingInterventions([]);
+                }}
+                options={actionPlanOptions}
+                placeholder={actionPlanOptions.length ? 'Select action plan' : 'No action plans available'}
+                filteringType="none"
+              />
+            </FormField>
+            <FormField
+              label="Link interventions (optional)"
+              description="Select one or more interventions this document supports."
+            >
+              <Multiselect
+                selectedOptions={pendingSelectedInterventionOptions}
+                onChange={({ detail }) => {
+                  const nextIds = (detail.selectedOptions || []).map(opt => opt.value);
+                  setPendingInterventions(nextIds);
+                }}
+                options={pendingActionPlanInterventionOptions}
+                placeholder={
+                  pendingActionPlanInterventionOptions.length
+                    ? 'Select interventions'
+                    : 'No interventions available'
+                }
+                disabled={!pendingActionPlan}
+              />
+            </FormField>
+          </>
+        ) : null}
       </Modal>
       <Modal
         visible={deleteModalVisible}
@@ -1656,52 +1881,22 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           {editDocScope === 'application' && (
             <>
               <FormField
-                label="Attachment"
-                description="Application-scoped documents can be attached to an application, an intervention, or left unassigned."
+                label="Attach to application"
+                description="Application-scoped documents must be attached to an application."
                 errorText={editAttachError}
               >
                 <Select
-                  selectedOption={editAttachTypeOptions.find(opt => opt.value === editAttachType) || editAttachTypeOptions[0]}
+                  selectedOption={selectedEditApplicationOption}
                   onChange={({ detail }) => {
-                    const nextType = detail?.selectedOption?.value || 'none';
-                    setEditAttachType(nextType);
-                    setEditAttachTarget('');
                     setEditAttachError('');
+                    setEditApplicationId(detail.selectedOption?.value || '');
                   }}
-                  options={editAttachTypeOptions}
-                  selectedAriaLabel="Selected attachment type"
-                  placeholder="Select attachment type"
+                  options={applicationSelectOptions}
+                  placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
+                  loading={applicationsLoading}
+                  filteringType="none"
                 />
               </FormField>
-              {editAttachType === 'application' && (
-                <FormField label="Select application" errorText={editAttachError}>
-                  <Select
-                    selectedOption={editSelectedApplicationOption}
-                    onChange={({ detail }) => {
-                      setEditAttachError('');
-                      setEditAttachTarget(detail.selectedOption?.value || '');
-                    }}
-                    options={applicationSelectOptions}
-                    placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
-                    loading={applicationsLoading}
-                    filteringType="none"
-                  />
-                </FormField>
-              )}
-              {editAttachType === 'intervention' && (
-                <FormField label="Select intervention" errorText={editAttachError}>
-                  <Select
-                    selectedOption={editSelectedInterventionOption}
-                    onChange={({ detail }) => {
-                      setEditAttachError('');
-                      setEditAttachTarget(detail.selectedOption?.value || '');
-                    }}
-                    options={interventionSelectOptions}
-                    placeholder={interventionSelectOptions.length ? 'Select intervention' : 'No interventions available'}
-                    filteringType="none"
-                  />
-                </FormField>
-              )}
               {editAssociationChanged && (
                 <Alert type="warning" header="Moving this document">
                   Changing the attachment will remove this document from the original submission and may make it
@@ -1709,6 +1904,61 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                 </Alert>
               )}
             </>
+          )}
+          {editDocScope === 'case' && (
+            <Alert type="info">Case-scoped documents are attached to the current case.</Alert>
+          )}
+          {editDocScope === 'action_plan' && (
+            <>
+              <FormField
+                label="Action plan"
+                description="Select which action plan this document should be attached to."
+                errorText={editAttachError}
+              >
+                <Select
+                  selectedOption={selectedEditActionPlanOption}
+                  onChange={({ detail }) => {
+                    setEditAttachError('');
+                    const nextPlan = detail.selectedOption?.value || '';
+                    setEditActionPlanId(nextPlan);
+                    setEditInterventionIds([]);
+                  }}
+                  options={actionPlanOptions}
+                  placeholder={actionPlanOptions.length ? 'Select action plan' : 'No action plans available'}
+                  filteringType="none"
+                />
+              </FormField>
+              <FormField
+                label="Link interventions (optional)"
+                description="Select the interventions this document supports."
+              >
+                <Multiselect
+                  selectedOptions={editSelectedInterventionOptions}
+                  onChange={({ detail }) => {
+                    const nextIds = (detail.selectedOptions || []).map(opt => opt.value);
+                    setEditInterventionIds(nextIds);
+                  }}
+                  options={editActionPlanInterventionOptions}
+                  placeholder={
+                    editActionPlanInterventionOptions.length
+                      ? 'Select interventions'
+                      : 'No interventions available'
+                  }
+                  disabled={!editActionPlanId}
+                />
+              </FormField>
+              {editAssociationChanged && (
+                <Alert type="warning" header="Moving this document">
+                  Changing the action plan or interventions will update where this document appears.
+                </Alert>
+              )}
+            </>
+          )}
+          {editDocScope === 'client' && (
+            <Alert type="info">Client-scoped documents do not require an attachment.</Alert>
+          )}
+          {editDocScope === 'payment_packet' && (
+            <Alert type="info">Payment packet documents are attached to the client.</Alert>
           )}
         </SpaceBetween>
       </Modal>
@@ -1748,60 +1998,65 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             />
           </FormField>
           {duplicateDocScope === 'application' && (
+            <FormField label="Attach to application">
+              <Select
+                selectedOption={selectedDuplicateApplicationOption}
+                onChange={({ detail }) => {
+                  setDuplicateError('');
+                  setDuplicateApplicationId(detail.selectedOption?.value || '');
+                }}
+                options={applicationSelectOptions}
+                placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
+                loading={applicationsLoading}
+                filteringType="none"
+              />
+            </FormField>
+          )}
+          {duplicateDocScope === 'case' && (
+            <Alert type="info">Case-scoped documents will attach to the current case.</Alert>
+          )}
+          {duplicateDocScope === 'action_plan' && (
             <>
-              <FormField
-                label="Attach to"
-                description="Choose where the duplicated document should be attached."
-              >
+              <FormField label="Action plan">
                 <Select
-                  selectedOption={
-                    duplicateAttachTypeOptions.find(opt => opt.value === duplicateAttachType) ||
-                    duplicateAttachTypeOptions[0]
-                  }
+                  selectedOption={selectedDuplicateActionPlanOption}
                   onChange={({ detail }) => {
-                    const nextType = detail?.selectedOption?.value || 'none';
-                    setDuplicateAttachType(nextType);
-                    setDuplicateAttachTarget('');
                     setDuplicateError('');
+                    const nextPlan = detail.selectedOption?.value || '';
+                    setDuplicateActionPlanId(nextPlan);
+                    setDuplicateInterventionIds([]);
                   }}
-                  options={duplicateAttachTypeOptions}
-                  selectedAriaLabel="Selected attachment type"
-                  placeholder="Select attachment type"
+                  options={actionPlanOptions}
+                  placeholder={actionPlanOptions.length ? 'Select action plan' : 'No action plans available'}
+                  filteringType="none"
                 />
               </FormField>
-              {duplicateAttachType === 'application' && (
-                <FormField label="Select application">
-                  <Select
-                    selectedOption={duplicateSelectedApplicationOption}
-                    onChange={({ detail }) => {
-                      setDuplicateError('');
-                      setDuplicateAttachTarget(detail.selectedOption?.value || '');
-                    }}
-                    options={applicationSelectOptions}
-                    placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
-                    loading={applicationsLoading}
-                    filteringType="none"
-                  />
-                </FormField>
-              )}
-              {duplicateAttachType === 'intervention' && (
-                <FormField label="Select intervention">
-                  <Select
-                    selectedOption={duplicateSelectedInterventionOption}
-                    onChange={({ detail }) => {
-                      setDuplicateError('');
-                      setDuplicateAttachTarget(detail.selectedOption?.value || '');
-                    }}
-                    options={interventionSelectOptions}
-                    placeholder={interventionSelectOptions.length ? 'Select intervention' : 'No interventions available'}
-                    filteringType="none"
-                  />
-                </FormField>
-              )}
+              <FormField
+                label="Link interventions (optional)"
+                description="Select the interventions this document supports."
+              >
+                <Multiselect
+                  selectedOptions={duplicateSelectedInterventionOptions}
+                  onChange={({ detail }) => {
+                    const nextIds = (detail.selectedOptions || []).map(opt => opt.value);
+                    setDuplicateInterventionIds(nextIds);
+                  }}
+                  options={duplicateActionPlanInterventionOptions}
+                  placeholder={
+                    duplicateActionPlanInterventionOptions.length
+                      ? 'Select interventions'
+                      : 'No interventions available'
+                  }
+                  disabled={!duplicateActionPlanId}
+                />
+              </FormField>
             </>
           )}
           {duplicateDocScope === 'client' && (
-            <Alert type="info">Client-scoped documents do not need an application or intervention association.</Alert>
+            <Alert type="info">Client-scoped documents do not need an application association.</Alert>
+          )}
+          {duplicateDocScope === 'payment_packet' && (
+            <Alert type="info">Payment packet documents are attached to the client.</Alert>
           )}
         </SpaceBetween>
       </Modal>
@@ -1870,8 +2125,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     >
       <SpaceBetween size="s">
         <Box variant="small">
-          This widget displays documents related to the applicant, including application, intervention, and secure
-          message attachments.
+          This widget displays documents related to the applicant, including application, action plan, payment packet,
+          and secure message attachments.
         </Box>
         <FormField label={isCaseWorkspace ? 'View documents for intervention' : 'View documents for'}>
           <Select

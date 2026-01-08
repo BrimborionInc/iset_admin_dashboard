@@ -13,7 +13,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Require an active Action Plan before an intervention can start (`in_progress`); if no active plan, prompt to activate/create one.
 
 ## Implementation Progress (UI)
-- Supporting Documents widget now supports intervention filtering in Case Workspace, intervention-linked uploads, and generic uploads without associations. Edit details allow reassociation between application and intervention, and a new “Duplicate” flow copies submission-scoped docs.
+- Supporting Documents widget now supports intervention filtering in Case Workspace, action-plan scoped uploads with multi-intervention linking, and generic uploads without associations. Edit details allow reassociation between application and action plan links, and a new “Duplicate” flow copies scoped docs.
 - Intervention Assessment wizard now loads the intervention checklist by stage (draft vs submitted), makes the documents step mandatory, adds contextual upload links, and includes manual refresh + auto-refresh. Save Progress is separate from Submit Decision.
 - EI verification step now validates eligibility on Next and triggers uploads on Next/Save Progress when a file is selected (no standalone upload button). Uploads attach to the intervention (not application) and show a blocking alert if no intervention record exists. Submit Decision is gated on decision outcome, EI status, and submitted-stage checklist completeness.
 - EI verification step now blocks progression when EI status implies a funding stream mismatch with the selected Action Plan, shows instructions to close/create the correct plan, and provides an Action Plan picker to reassign.
@@ -35,7 +35,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Wizard step storage now uses a module-level store (with last-key tracking per case) so step state survives provider remounts; wizard key falls back to the last stored key when selection is lost.
 - Fixed a scope error in Interventions widget by initializing the plan-change ref after `activePlan` is defined.
 - Draft form entries are now stored outside the widget and merged during hydration so in-progress fields (e.g., employer/wage subsidy details) survive board remounts; draft state is cleared when the widget is removed.
-- DB check: `document_type.code='ei_verification'` is scoped as `application`, which is correct for intervention uploads; the latest EI verification upload is stored with `application_id=1` and `linked_intervention_id=NULL` (doc id 19), so the intervention checklist cannot see it. That record predates the latest intervention (intervention id 5), which suggests the upload came from the application flow or an older UI that did not send `interventionId`.
+- DB check: `document_type.code='ei_verification'` remains scoped as `application`. Intervention checklists now match application-scoped documents via the intervention’s case/application and action-plan docs via `iset_document_intervention`, so EI verification uploads appear without relying on a `linked_intervention_id`.
 - Interventions table row click no longer opens the modal; only the Type link triggers view, preventing action menu clicks from opening the modal.
 - Interventions table selection now only opens the proposal wizard for draft/submitted items; other rows simply select without opening the modal. The row Actions menu no longer triggers selection/open due to event stop-propagation.
 - Removed temporary console logging around intervention table selection and wizard hydration after resolving proposal loading issues.
@@ -99,7 +99,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Track reviewer metadata (`reviewed_by_staff_profile_id`, `reviewed_at`, `review_notes`, `eligibility_result`, `funding_stream_decision`, `required_docs_flags`) alongside the intervention; no separate approval-status column.
 - Consider computed views or API filters for queues; reuse Interventions list queries with status filters.
 - DB impact: `iset_case_intervention.status` is varchar (no enum) so new states require no type change. Add reviewer/eligibility columns via migration (`sql/20251223_add_intervention_review_fields.sql`). Funding stream column was dropped (see `sql/20251210_drop_intervention_funding_stream.sql`); keep funding stream selection at the Action Plan level. Enforce plan linkage + active-plan start guard in service logic; a NOT NULL on `action_plan_id` is a stretch goal if legacy rows allow it.
-- Document scope (EI verification): keep the existing `document_type.scope` enum (`client`, `application`) and reuse `ei_verification` (application-scoped) for intervention submissions. Application-scoped document types must be associated with either an application or an intervention (no new scope), using `iset_document.application_id` or `iset_document.linked_intervention_id` respectively.
+- Document scope (EI verification): keep `ei_verification` as `application` scope. Application-scoped document types attach to `iset_document.application_id`; action-plan scoped documents attach to `iset_document.action_plan_id` with optional intervention links via `iset_document_intervention`.
 - Checklist behavior: required documents fall into two categories—client-scoped docs that persist across submissions, and submission-scoped docs that must be re-provided per application or per intervention proposal. EI verification (`document_types.code = ei_verification`) is in the submission-scoped category and must be uploaded anew for each intervention proposal.
 - Checklist definition: create a separate intervention-specific checklist, initially copied from the application checklist and adjusted later as needed.
 - Checklist by status: use a reduced draft checklist for proposals, then add `ei_verification` once the intervention is submitted; revalidate the submitted checklist during approval.
@@ -122,7 +122,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Exact gating rules for “Ready to Activate” when multiple draft/active plans exist.
 - Do we auto-create reminders for review follow-ups / ready-to-close checks? If so, reuse existing reminders API.
 - How to surface review state in dashboards beyond the Case Workspace (badges vs filter chips).
-- Application-scoped documents: enforce mutual exclusivity between `application_id` and `linked_intervention_id` in the UI; update checklist queries accordingly.
+- Application-scoped documents: enforce `application_id` attachment only; action-plan scoped documents manage intervention links; checklist queries align to application/case/action plan context.
 - Checklist configurability: future work to let sysadmins manage checklist rules via a widget stored in `iset_runtime_config`.
 
 ## Implementation Proposal (initial pass)
@@ -152,8 +152,8 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Permissions: CM can edit in `draft/changes_requested`; RM/NWAC can edit eligibility fields and decide in `submitted/in_review`; fields lock after submission except review notes/eligibility for RM; unlock only on `changes_requested`.
 - Interventions table: add filters/badges for pre-approval statuses; add “Ready to activate” hint when `approved` and plan not active.
 - No new Case Workspace widget; keep flow in the modal to avoid layout bloat.
-- Supporting Documents manual upload: allow application-scoped document types (including `ei_verification`) to be attached to a specific intervention; update the attach control to offer interventions in addition to applications, respecting one submission association at a time (or none for generic uploads).
-- Workspace-aware attachments: in Application Workspace, the “Attach to” list shows applications; in Case Workspace, it shows interventions (default to the selected intervention if present). Secure Messaging form uploads should follow the same rule: forms sent from Case Workspace attach to the selected intervention, while forms sent from Application Workspace attach to the selected application.
+- Supporting Documents manual upload: allow action-plan scoped document types to attach to a specific Action Plan with optional multi-intervention linking; application-scoped documents attach to applications only.
+- Workspace-aware attachments: in Application Workspace, the “Attach to” list shows applications; in Case Workspace, action-plan documents attach to the selected Action Plan (defaulted from the selected intervention when available) with optional intervention links. Secure Messaging form uploads attach to the case/application context, not to interventions.
 - Attach selector scope: in Case Workspace, show all interventions (including completed/cancelled) for now; revisit restrictions during user testing.
 - EI verification step gating: only available once the intervention is submitted (so a DB record exists). If the record is missing, show a Cloudscape error alert and block upload.
 - Wizard sequencing: keep EI verification (and decision) steps hidden in draft; only append them after status transitions to submitted so the final draft step remains “Review and submit”.
@@ -161,7 +161,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - EI status edits: EI status is editable until approval, then locked because it drives the funding stream/action plan.
 - EI status entry: require explicit selection for every intervention (no auto-fill on upload); the workflow assumes a fresh ESDC lookup per intervention.
 - Decision step actions: relabel the Step 8 action to “Submit Decision” (distinct from the board-level “Save Progress”). Submitting runs validation; “Approve” is blocked until EI status + submitted-state checklist are complete, while other outcomes can proceed.
-- Generic uploads: allow uploads even when no submission is selected; extend “Edit document details” to manually associate/reassociate application-scoped documents to either applications or interventions (client-scoped types are not assignable). Reassociation is allowed for any user with edit access.
+- Generic uploads: allow uploads even when no submission is selected; extend “Edit document details” to manually associate/reassociate application-scoped documents to applications and action-plan scoped documents to action plans/interventions (client/payment packet types are not assignable). Reassociation is allowed for any user with edit access.
 - Duplicate-to action: add a “Duplicate to…” control so users can copy a submission-scoped document to a new application or intervention while retaining the original association; prefill label/type from the source with optional edits.
 - Move warning: when reassigning a document, warn that the original submission may become incomplete.
 

@@ -784,7 +784,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             body: JSON.stringify({
               documentId,
               evidenceType: activeEvidenceRow.evidenceType,
-              lineId: activeEvidenceRow.lineId || null,
               required: activeEvidenceRow.required,
               received: true,
             }),
@@ -878,7 +877,13 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           throw new Error("Unable to determine which applicant this upload belongs to.");
         }
         if (errorCode === "application_required_for_document") {
-          throw new Error("Select an application or intervention for this document type before uploading.");
+          throw new Error("Select an application for this document type before uploading.");
+        }
+        if (errorCode === "case_required_for_document") {
+          throw new Error("This document type must be attached to a case.");
+        }
+        if (errorCode === "action_plan_required_for_document" || errorCode === "action_plan_required") {
+          throw new Error("Select an action plan for this document type before uploading.");
         }
         if (errorCode === "invalid_document_type") {
           throw new Error("The selected document type is not valid or inactive.");
@@ -901,7 +906,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           body: JSON.stringify({
             documentId,
             evidenceType: activeEvidenceRow.evidenceType,
-            lineId: activeEvidenceRow.lineId || null,
             required: activeEvidenceRow.required,
             received: true,
           }),

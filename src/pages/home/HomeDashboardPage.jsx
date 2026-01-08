@@ -3,6 +3,7 @@ import { Box, Button, SpaceBetween } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../../auth/cognito';
 import { apiFetch } from '../../auth/apiClient';
+import useCurrentUser from '../../hooks/useCurrentUser';
 import ProgramAdminWorkQueueWidget, { PROGRAM_ADMIN_BUCKETS, PROGRAM_ADMIN_SAMPLE_ITEMS } from './widgets/ProgramAdminWorkQueueWidget';
 import IsetCoordinatorWorkQueueWidget, { ISET_COORDINATOR_BUCKETS, ISET_COORDINATOR_SAMPLE_ITEMS } from './widgets/IsetCoordinatorWorkQueueWidget';
 import WorkQueueItemsTableWidget from './widgets/WorkQueueItemsTableWidget';
@@ -350,8 +351,19 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         }
         return simulatedRole || tokenRole || 'Guest';
     }, [iamOn, tokenRole, simulatedRole]);
+    const { userId: currentUserId, email: currentUserEmail } = useCurrentUser();
     const isWorkQueueRole = role === 'Program Administrator' || role === 'Regional Coordinator';
     const isIsetCoordinatorRole = role === 'Application Assessor';
+    const isRegionalCoordinatorRole = role === 'Regional Coordinator' || role === 'Regional Manager';
+
+    const workQueueBuckets = useMemo(() => {
+        if (!isWorkQueueRole) return [];
+        if (isRegionalCoordinatorRole) {
+            const myBucket = ISET_COORDINATOR_BUCKETS.find(bucket => bucket.id === 'my-new-applications') || null;
+            return myBucket ? [myBucket, ...PROGRAM_ADMIN_BUCKETS] : PROGRAM_ADMIN_BUCKETS;
+        }
+        return PROGRAM_ADMIN_BUCKETS;
+    }, [isWorkQueueRole, isRegionalCoordinatorRole]);
 
     const simulateSignedOut = useMemo(() => {
         try {
@@ -363,7 +375,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
 
     const initialItems =
         isIsetCoordinatorRole ? ISET_COORDINATOR_SAMPLE_ITEMS : PROGRAM_ADMIN_SAMPLE_ITEMS;
-    const initialBucket = isIsetCoordinatorRole ? ISET_COORDINATOR_BUCKETS[0]?.id : PROGRAM_ADMIN_BUCKETS[0]?.id;
+    const initialBucket = isIsetCoordinatorRole ? ISET_COORDINATOR_BUCKETS[0]?.id : workQueueBuckets[0]?.id;
     const [programAdminItems, setProgramAdminItems] = useState(() => initialItems);
     const [programAdminBucketId, setProgramAdminBucketId] = useState(() => initialBucket || null);
     const [programAdminSelectedItemId, setProgramAdminSelectedItemId] = useState(() => {
@@ -373,15 +385,15 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
     const [programAdminCounts, setProgramAdminCounts] = useState(() => ({}));
     const [programAdminRefresh, setProgramAdminRefresh] = useState(0);
     const bucketDefinitions = useMemo(() => {
-        if (isWorkQueueRole) return PROGRAM_ADMIN_BUCKETS;
+        if (isWorkQueueRole) return workQueueBuckets;
         if (isIsetCoordinatorRole) return ISET_COORDINATOR_BUCKETS;
         return [];
-    }, [isWorkQueueRole, isIsetCoordinatorRole]);
+    }, [isWorkQueueRole, isIsetCoordinatorRole, workQueueBuckets]);
 
     useEffect(() => {
         if (isWorkQueueRole) {
             setProgramAdminItems(PROGRAM_ADMIN_SAMPLE_ITEMS);
-            const first = PROGRAM_ADMIN_BUCKETS[0]?.id || null;
+            const first = workQueueBuckets[0]?.id || null;
             setProgramAdminBucketId(first);
             const firstItem = PROGRAM_ADMIN_SAMPLE_ITEMS.find(item => item.bucketId === first);
             setProgramAdminSelectedItemId(firstItem?.id || null);
@@ -401,7 +413,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         setProgramAdminBucketId(null);
         setProgramAdminSelectedItemId(null);
         setProgramAdminCounts({});
-    }, [isWorkQueueRole, isIsetCoordinatorRole]);
+    }, [isWorkQueueRole, isIsetCoordinatorRole, workQueueBuckets]);
 
     const allowedWidgets = useMemo(() => filterWidgetsForRole(role), [role]);
     const storageKey = useMemo(() => `${STORAGE_PREFIX}.${role || 'guest'}`, [role]);
@@ -521,6 +533,8 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                     id: `esc-${row.id || idx}`,
                     title: `${tracking} · ${applicantName}`,
                     trackingId: tracking,
+                    escalation_id: row.id || null,
+                    escalationId: row.id || null,
                     application_id: row.application_id || null,
                     case_id: row.case_id || null,
                     bucketId: 'exceptions-escalations',
@@ -598,6 +612,109 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         loadProgramAdminCounts();
         return () => { ignore = true; };
     }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+
+    useEffect(() => {
+        if (!isRegionalCoordinatorRole) {
+            return;
+        }
+        const currentUserIdValue = currentUserId ? String(currentUserId) : null;
+        const currentUserEmailValue = currentUserEmail ? String(currentUserEmail).toLowerCase() : null;
+        if (!currentUserIdValue && !currentUserEmailValue) {
+            setProgramAdminItems(current => current.filter(item => item.bucketId !== 'my-new-applications'));
+            setProgramAdminCounts(current => ({
+                ...current,
+                'my-new-applications': 0
+            }));
+            return;
+        }
+        let ignore = false;
+        const loadRegionalManagerAssignedApplications = async () => {
+            try {
+                const response = await apiFetch(`/api/applications?status=${coordinatorStatusesParam}&limit=200&offset=0`, {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                if (!payload || !Array.isArray(payload.rows)) {
+                    throw new Error('Unexpected response format while loading regional manager assigned applications.');
+                }
+                const assignedRows = payload.rows.filter(row => {
+                    const assignedId = row.assigned_user_id || row.assigned_to_user_id || null;
+                    const assignedEmail = row.assigned_user_email || row.assignedUserEmail || null;
+                    if (currentUserIdValue && assignedId && String(assignedId) === currentUserIdValue) {
+                        return true;
+                    }
+                    if (currentUserEmailValue && assignedEmail && assignedEmail.toLowerCase() === currentUserEmailValue) {
+                        return true;
+                    }
+                    return false;
+                });
+                const mapped = assignedRows.map((row, idx) => {
+                    const id = row.tracking_id || row.case_id || row.application_id || `assigned-${idx}`;
+                    const applicantName =
+                        row.applicant_name ||
+                        row.applicantName ||
+                        row.client?.displayName ||
+                        row.client?.name ||
+                        [row.client?.firstName, row.client?.lastName].filter(Boolean).join(' ') ||
+                        row.client?.firstName ||
+                        row.client?.lastName ||
+                        [row.client?.first_name, row.client?.last_name].filter(Boolean).join(' ') ||
+                        row.client?.first_name ||
+                        row.client?.last_name ||
+                        row.tracking_id ||
+                        'Applicant';
+                    const submitted = row.submitted_at || row.created_at || null;
+                    return {
+                        id,
+                        title: applicantName,
+                        trackingId: row.tracking_id || row.trackingId || null,
+                        application_id: row.application_id || row.applicationId || null,
+                        case_id: row.case_id || row.caseId || null,
+                        bucketId: 'my-new-applications',
+                        type: 'Application',
+                        applicant: applicantName,
+                        applicant_name: applicantName,
+                        region: row.region || row.address_province || '—',
+                        address_province: row.address_province || row.region || null,
+                        owner: row.assigned_user_email || 'You',
+                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        status: row.application_status || row.status || 'Submitted',
+                        dueDate: null,
+                        submittedAt: submitted,
+                        updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
+                        summary: submitted ? `Submitted ${submitted}` : 'Assigned application',
+                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                    };
+                });
+                setProgramAdminItems(current => {
+                    const nonAssigned = current.filter(item => item.bucketId !== 'my-new-applications');
+                    return [...mapped, ...nonAssigned];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'my-new-applications': mapped.length
+                }));
+                if (mapped.length) {
+                    setProgramAdminBucketId(bucket => bucket || 'my-new-applications');
+                    setProgramAdminSelectedItemId(current => {
+                        if (mapped.some(item => item.id === current)) {
+                            return current;
+                        }
+                        return mapped[0].id;
+                    });
+                }
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadRegionalManagerAssignedApplications();
+        return () => { ignore = true; };
+    }, [role, authVersion, programAdminRefresh, isRegionalCoordinatorRole, coordinatorStatusesParam, currentUserId, currentUserEmail]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -1747,6 +1864,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                     refreshKey={authVersion}
                     selectedBucketId={programAdminBucketId}
                     onSelectBucket={handleProgramAdminBucketSelect}
+                    bucketDefinitions={bucketDefinitions}
                     items={programAdminItems}
                     countsByBucket={programAdminCounts}
                     onRefresh={handleProgramAdminRefresh}

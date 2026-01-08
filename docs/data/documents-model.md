@@ -1,9 +1,9 @@
 # Unified Documents Model (iset_document)
 
-Date: 2025-09-21
+Date: 2026-01-08
 
 ## Summary
-Replaced the previously dropped `iset_case_document` table with a generalized `iset_document` table that can represent any uploaded or adopted file associated with an applicant, application, case, or secure message.
+The unified `iset_document` table now anchors every document to a single `client_id`, with optional links to applications, cases, or action plans. Intervention links are stored in the `iset_document_intervention` join table, and payment evidence attachments live in `payment_packet_document`.
 
 ## Drivers
 - Need a single list of all supporting documents for an applicant regardless of origin.
@@ -14,10 +14,20 @@ Replaced the previously dropped `iset_case_document` table with a generalized `i
 ## Table Definition
 See migration script: `sql/20250919_create_iset_document.sql`.
 Key columns:
-- `applicant_user_id`, `application_id`, `case_id` for scoping.
+- `client_id` (required) for ownership; every document belongs to exactly one client.
+- `applicant_user_id` plus optional `application_id`, `case_id`, or `action_plan_id` for scoping.
 - `origin_message_id` + `source` to trace provenance.
 - `file_path` canonical relative path (unique) + `file_name` original display name.
 - `status` for archival / soft delete.
+
+Related tables:
+- `iset_document_intervention` (`document_id`, `intervention_id`) stores action-plan intervention links (many-to-many).
+- `payment_packet_document` stores payment packet evidence links (packet-level; line-level inferred).
+
+## Scope Rules
+- `document_type.scope` supports: `client`, `application`, `case`, `action_plan`, `payment_packet`.
+- Action plan documents attach to `action_plan_id` and optionally link to one or more interventions via `iset_document_intervention`.
+- Application and case documents attach to their respective IDs only.
 
 ## Source Values
 - `application_submission`: Uploaded or generated as part of the original application submission.
@@ -26,11 +36,14 @@ Key columns:
 - `manual_upload`: Uploaded directly by staff in the admin workspace.
 
 ## Endpoint Changes
-- `GET /api/applicants/:id/documents` now queries `iset_document` where `applicant_user_id = :id AND status='active'`.
-- `GET /api/admin/messages/:id/attachments` auto-inserts (upserts) each attachment into `iset_document` when a `case_id` query param is provided, updating applicant/application/user columns if they were previously null.
+- `GET /api/applicants/:id/documents` now returns action plan context (`action_plan_id`, `intervention_ids`) alongside case/application references.
+- `POST /api/applicants/:id/documents/upload` enforces `document_type.scope` rules, requires `client_id`, and accepts action plan + intervention links.
+- `PUT /api/documents/:id` and `/api/documents/:id/duplicate` update action plan + intervention associations (no `linked_intervention_id`).
+- `GET /api/admin/messages/:id/attachments` upserts attachments into `iset_document` with `client_id` + case/application context when a `case_id` query param is provided.
+- `POST /api/finance/payment-packets/:id/documents` validates `iset_document.client_id` matches the packet.
 
 ## Widget Updates
-`SupportingDocumentsWidget` now shows File, Source, Uploaded, and Actions columns, includes a refresh button, listens for the `iset:supporting-documents:refresh` event fired by Secure Messaging, and uses `created_at AS uploaded_at` with normalized URLs.
+`SupportingDocumentsWidget` supports action plan scoping with optional multi-intervention links, updates scope labels (client/application/case/action plan/payment packet), and continues to refresh from the `iset:supporting-documents:refresh` event fired by Secure Messaging.
 
 ## Cross-widget Hooks (2025-09-21)
 - SecureMessagingWidget dispatches `iset:supporting-documents:refresh` after attachments load, giving SupportingDocumentsWidget an immediate view of newly adopted files.
@@ -38,7 +51,7 @@ Key columns:
 
 ## Adoption Logic Notes
 - Attachments adoption only occurs when the attachments endpoint is called with `?case_id=...`.
-- Applicant linkage derived via `case -> application -> user` resolution.
+- Applicant linkage derived via `case -> application -> user` resolution; `client_id` is resolved from the case/application/applicant_user_id chain.
 - Idempotency: enforced via `UNIQUE (file_path)` + `ON DUPLICATE KEY UPDATE` for applicant/application/user/origin fields so re-opening a message repairs missing metadata.
 
 ## Future Enhancements
@@ -52,19 +65,21 @@ The public intake portal and the admin dashboard SHARE the same MySQL database c
 
 - Dual-write strategy: Portal upload endpoints can insert directly into `iset_document` within the same transaction (or a best-effort follow-up) after they persist rows to the legacy `iset_application_file` table.
 - No HTTP bridge needed: Previous contingency task to call an admin API for ingestion can be deprecated in favor of direct SQL insert.
-- Consistency approach: A failure to insert into `iset_document` must NOT block the user upload. Log error and continue; an async reconciliation script can later backfill from `iset_application_file` for any missed rows.
+- Consistency approach: Uploads must resolve `client_id` before writing documents, and inserts into `iset_document` are required (no best-effort fallback). If the insert fails, the upload should fail and surface the error.
 - Removal / soft delete: Portal deletion (or mark-removed) operations should update `iset_document.status='deleted'` rather than hard deleting the unified record.
 
 ### Planned Portal Changes
-1. Augment upload finalize logic: After writing the file and inserting into `iset_application_file`, perform an INSERT IGNORE (or ON DUPLICATE KEY UPDATE to refresh metadata) into `iset_document` with:
-	- `applicant_user_id` (resolved from session / application context)
-	- `application_id`
+1. Resolve or create the `client_id` before uploads (via intake JSON + Cognito fallback), and store it in `input_json_state` for reuse.
+2. Insert into `iset_document` in the same upload flow with:
+	- `client_id` (required)
+	- `applicant_user_id` (from session context)
+	- `application_id` (when scope is application)
 	- `file_path` (canonical relative path used today in portal storage)
 	- `file_name`
 	- `source='application_submission'`
 	- `status='active'`
-2. Add soft delete path: On removal, attempt `UPDATE iset_document SET status='deleted', updated_at=NOW() WHERE file_path=?`.
-3. Backfill job (one-off/script): Insert any historical rows missing from `iset_document` by selecting from `iset_application_file` NOT IN existing document `file_path`s.
+3. Add soft delete path: On removal, attempt `UPDATE iset_document SET status='deleted', updated_at=NOW() WHERE file_path=?`.
+4. Backfill job: not planned for dev (no legacy documents expected).
 
 ### Deprecation Considerations
 Once portal writes reliably populate `iset_document`, UI or services needing applicant documents should stop querying `iset_application_file` directly. That table can remain for historical audit until confidence is established.

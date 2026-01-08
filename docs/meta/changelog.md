@@ -2,6 +2,26 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-01-08
+- Ops: Intake uploads now ensure a client record exists pre-upload and pin `client_id` for the session.
+- Data: Added `client.applicant_cognito_sub` and `iset_document.client_id` to anchor intake documents to clients.
+- Ops: Intake-generated PDFs now attach to the resolved client record.
+- Data: Added `iset_document.action_plan_id` + `iset_document_intervention`, expanded `document_type.scope`, and removed `linked_intervention_id`.
+- Fix: Aligned `client.applicant_cognito_sub` collation to match `user.cognito_sub` to avoid ER_CANT_AGGREGATE_2COLLATIONS during document uploads.
+- UX: Supporting Documents widget now supports action-plan scoping with optional multi-intervention links and updated scope labels.
+- Payments: Evidence links now attach at the packet level and require client ID matches when attaching documents.
+- UX: Sending decision letters now generates a PDF supporting document tied to the client/application and refreshes the decision checklist.
+- Fix: Communication step now loads Gate 6 checklist items and blocks completion until required agreements are present.
+- Fix: Checklist progression now skips Gate 1 in admin, enforces Gate 2 on the eligibility step, and enforces Gate 3 for assessment submission before switching to Gate 6.
+- Authoring: File-upload components now expose the validation panel and persist rules into published workflows.
+
+## 2026-01-06
+- UX: Regional Manager work queue now includes a My Applications bucket for assigned files.
+- Fix: Conflict of interest signing now routes no-conflict submissions to step 1 and blocks progress with a modal when a conflict is declared.
+- Fix: Work queue escalation actions now open a modal and submit to the escalation API.
+- UX: Messaging recipient list now shows region-coded role labels for ISET Coordinators and Regional Managers.
+- Fix: Escalation action notes now create case notes automatically.
+
 ## 2026-01-03
 - Docs: Added Payments module user manual (`docs/guides/payments-module-user-manual.md`).
 

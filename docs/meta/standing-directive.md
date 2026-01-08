@@ -25,7 +25,7 @@ Addendum 2025-09-15:
 - Do NOT present "options" or "next options" after completing routine sub-steps. Proceed autonomously unless an irreversible architectural/destructive decision is required or user explicitly writes "REQUEST SUGGESTIONS".
 
 Addendum 2025-09-15 (B):
-- Validation Panel Suppression: Auto-hide the generic validation panel when editing `file-upload` components; its output is not contextually relevant.
+- Validation Panel: Show the standard validation panel for `file-upload` components so required rules can be authored.
 
 Addendum 2025-09-15 (C):
 - The user will not answer technical / codebase implementation questions. The assistant must proceed using its own analysis, inspecting code directly without relying on user confirmation for technical details.

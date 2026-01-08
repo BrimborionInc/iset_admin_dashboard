@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Button, FormField, Input, Multiselect, SpaceBetween, Textarea } from '@cloudscape-design/components';
 import { apiFetch } from '../../auth/apiClient';
+import { getRoleDisplayName } from '../../utils/roleDisplay';
 import { useMessaging } from './MessagingContext';
 
 const formatDateTime = value => {
@@ -38,19 +39,37 @@ const PinnedMessagePanel = () => {
     };
   }, [pinnedMessage]);
 
+  const formatRoleDescription = useCallback((profile) => {
+    if (!profile) return '';
+    const rawRole = profile.primaryRole || profile.primary_role || '';
+    if (!rawRole) return '';
+    const displayRole = getRoleDisplayName(rawRole);
+    const shouldShowRegion = displayRole === 'ISET Coordinator' || displayRole === 'Regional Manager';
+    const roleLabel = shouldShowRegion ? displayRole : rawRole;
+    const regionCode = profile.regionCode || profile.region_code || null;
+    if (shouldShowRegion && regionCode) {
+      const trimmedRegion = String(regionCode).trim();
+      if (trimmedRegion) {
+        return `${roleLabel} (${trimmedRegion.toUpperCase()})`;
+      }
+    }
+    return roleLabel;
+  }, []);
+
   const profileToOption = useCallback((profile) => {
     if (!profile) return null;
     const id = profile.staffProfileId || profile.staff_profile_id || profile.id;
     if (!id) return null;
     const label = profile.displayName || profile.display_name || profile.email || `Staff #${id}`;
-    const desc = profile.primaryRole || profile.primary_role || '';
+    const desc = formatRoleDescription(profile) || profile.primaryRole || profile.primary_role || '';
+    const rawRole = profile.primaryRole || profile.primary_role || '';
     return {
       value: String(id),
       label,
       description: desc || undefined,
-      filteringTags: [profile.email, desc].filter(Boolean),
+      filteringTags: [profile.email, desc, rawRole].filter(Boolean),
     };
-  }, []);
+  }, [formatRoleDescription]);
 
   const loadStaffOptions = useCallback(async (filteringText = '') => {
     setStaffStatus('loading');

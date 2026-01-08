@@ -19,7 +19,7 @@ export const PROGRAM_ADMIN_BUCKETS = [
   {
     id: 'unassigned-applications',
     label: 'Unassigned Applications',
-    description: 'New submissions that do not yet have an owner.'
+    description: 'Applications in your region that lack an owner.'
   },
   {
     id: 'unresolved-conflicts',
@@ -39,7 +39,7 @@ export const PROGRAM_ADMIN_BUCKETS = [
   {
     id: 'applications-awaiting-approval',
     label: 'Application Approvals',
-    description: 'New application assessments needing a decision.'
+    description: 'Assessed applications awaiting your review.'
   },
   {
     id: 'interventions-awaiting-approval',
@@ -243,6 +243,7 @@ const WorkQueueHeaderSettings = ({ actions }) =>
   ) : undefined;
 
 const ProgramAdminWorkQueueWidget = ({
+  bucketDefinitions = PROGRAM_ADMIN_BUCKETS,
   selectedBucketId,
   onSelectBucket,
   items = PROGRAM_ADMIN_SAMPLE_ITEMS,
@@ -252,7 +253,7 @@ const ProgramAdminWorkQueueWidget = ({
   toggleHelpPanel
 }) => {
   const bucketCounts = useMemo(() => {
-    return PROGRAM_ADMIN_BUCKETS.map(bucket => {
+    return bucketDefinitions.map(bucket => {
       const derivedCount = items.filter(item => item.bucketId === bucket.id).length;
       const override = countsByBucket[bucket.id];
       const isDisabled = DISABLED_BUCKET_IDS.has(bucket.id);
@@ -261,7 +262,7 @@ const ProgramAdminWorkQueueWidget = ({
         count: isDisabled ? '-' : (Number.isFinite(override) ? override : derivedCount)
       };
     });
-  }, [countsByBucket, items]);
+  }, [bucketDefinitions, countsByBucket, items]);
 
   const selectedBucket =
     bucketCounts.find(bucket => bucket.id === selectedBucketId) || bucketCounts[0] || null;
@@ -287,9 +288,12 @@ const ProgramAdminWorkQueueWidget = ({
           actions={
             typeof onRefresh === 'function'
               ? (
-                <Button iconName="refresh" onClick={() => onRefresh()}>
-                  Refresh
-                </Button>
+                <Button
+                  iconName="refresh"
+                  variant="icon"
+                  ariaLabel="Refresh work queue"
+                  onClick={() => onRefresh()}
+                />
               )
               : undefined
           }
@@ -351,6 +355,7 @@ const ProgramAdminWorkQueueWidget = ({
 };
 
 export const ProgramAdminWorkItemsWidget = ({
+  bucketDefinitions = PROGRAM_ADMIN_BUCKETS,
   selectedBucketId,
   selectedItemId,
   onSelectItem,
@@ -358,7 +363,7 @@ export const ProgramAdminWorkItemsWidget = ({
   actions
 }) => {
   const selectedBucket =
-    PROGRAM_ADMIN_BUCKETS.find(bucket => bucket.id === selectedBucketId) || PROGRAM_ADMIN_BUCKETS[0] || null;
+    bucketDefinitions.find(bucket => bucket.id === selectedBucketId) || bucketDefinitions[0] || null;
 
   const queueItems = useMemo(() => {
     if (!selectedBucket) return [];

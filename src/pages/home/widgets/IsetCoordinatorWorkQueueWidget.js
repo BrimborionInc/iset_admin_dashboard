@@ -7,7 +7,7 @@ export const ISET_COORDINATOR_BUCKETS = [
   {
     id: 'my-new-applications',
     label: 'My Applications',
-    description: 'Applications assigned to you that need action or follow-up.'
+    description: 'Applications assigned to you.'
   },
   {
     id: 'missing-docs',
@@ -286,9 +286,12 @@ const IsetCoordinatorWorkQueueWidget = ({
           actions={
             typeof onRefresh === 'function'
               ? (
-                <Button iconName="refresh" onClick={() => onRefresh()}>
-                  Refresh
-                </Button>
+                <Button
+                  iconName="refresh"
+                  variant="icon"
+                  ariaLabel="Refresh work queue"
+                  onClick={() => onRefresh()}
+                />
               )
               : undefined
           }

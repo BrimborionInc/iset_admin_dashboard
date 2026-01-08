@@ -31,7 +31,7 @@ During publish (normalization pipeline), `file-upload` components with draft con
 - Supports top-level `component.conditions` and legacy `props.conditions`.
 
 ## Editing UX Notes
-- Validation panel auto-suppressed for `file-upload` (per standing directive addendum).
+- Validation panel is available for `file-upload` components to author required rules.
 - Value entry in condition rows uses internal React state to remain editable without premature commit.
 
 ## Non-Goals

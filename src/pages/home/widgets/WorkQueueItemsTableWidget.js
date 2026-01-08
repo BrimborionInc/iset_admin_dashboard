@@ -22,6 +22,7 @@ import {
 } from '@cloudscape-design/components';
 import { PROGRAM_ADMIN_BUCKETS } from './ProgramAdminWorkQueueWidget';
 import { apiFetch } from '../../../auth/apiClient';
+import { buildLockConflictMessage } from '../../../hooks/useApplicationLock';
 import HomeWorkQueueItemsHelp from '../../../helpPanelContents/homeWorkQueueItemsHelp';
 
 const COLUMN_WIDTHS_STORAGE_KEY = 'work-queue-items-column-widths-v1';
@@ -679,6 +680,10 @@ const WorkQueueItemsTableWidget = ({
   const [watchPending, setWatchPending] = useState(new Set());
   const [resolveTarget, setResolveTarget] = useState(null);
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
+  const [escalationAction, setEscalationAction] = useState(null);
+  const [escalationNote, setEscalationNote] = useState('');
+  const [escalationSubmitting, setEscalationSubmitting] = useState(false);
+  const [escalationError, setEscalationError] = useState(null);
   const applicantProvinceCode = normalizeProvinceCode(decisionTarget?.address_province || decisionTarget?.region);
   const applicantProvinceLabel = applicantProvinceCode
     ? PROVINCE_LABELS[applicantProvinceCode.toLowerCase()] || applicantProvinceCode
@@ -772,13 +777,129 @@ const WorkQueueItemsTableWidget = ({
   }, [queueItems]);
 
   const [slaTargets, setSlaTargets] = useState(SLA_DEFAULT_DAYS);
-  const fireEscalationAction = (item, actionId) => {
-    try {
-      window.dispatchEvent(new CustomEvent('escalation:action', { detail: { actionId, item } }));
-    } catch (_) {
-      // no-op if window unavailable
+  const resolveEscalationActionMeta = (actionId) => {
+    if (actionId === 'respond') {
+      return {
+        title: 'Respond to escalation',
+        body: 'Add guidance or next steps for the requester.',
+        submitLabel: 'Send response',
+        noteLabel: 'Response notes'
+      };
     }
+    if (actionId === 'resolve') {
+      return {
+        title: 'Resolve escalation',
+        body: 'Resolving will close the escalation. Add a brief note describing the resolution.',
+        submitLabel: 'Resolve',
+        noteLabel: 'Resolution notes'
+      };
+    }
+    if (actionId === 'escalate_up') {
+      return {
+        title: 'Escalate to Program Administrator',
+        body: 'Forward this escalation to Program Administrators. Include the context and what you are requesting.',
+        submitLabel: 'Escalate',
+        noteLabel: 'Escalation notes'
+      };
+    }
+    return null;
   };
+  const openEscalationModal = useCallback((item, actionId) => {
+    const meta = resolveEscalationActionMeta(actionId);
+    if (!meta) return;
+    setEscalationAction({
+      actionId,
+      item,
+      ...meta
+    });
+    setEscalationNote('');
+    setEscalationError(null);
+  }, []);
+  const resolveEscalationId = item => item?.escalation_id || item?.escalationId || null;
+  const resolveEscalationApplicationId = item => item?.application_id || item?.applicationId || null;
+  const handleEscalationSubmit = useCallback(async () => {
+    if (!escalationAction) return;
+    const note = escalationNote.trim();
+    if (!note) {
+      setEscalationError('Add notes before continuing.');
+      return;
+    }
+    const escalationId = resolveEscalationId(escalationAction.item);
+    if (!escalationId) {
+      setEscalationError('Escalation record missing for this item.');
+      return;
+    }
+    const applicationId = resolveEscalationApplicationId(escalationAction.item);
+    if (!applicationId) {
+      setEscalationError('Application reference missing for this escalation.');
+      return;
+    }
+    setEscalationSubmitting(true);
+    setEscalationError(null);
+    let releaseLockAfter = false;
+    try {
+      const lockResponse = await apiFetch(`/api/locks/application/${applicationId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      let lockBody = null;
+      try {
+        lockBody = await lockResponse.json();
+      } catch (_) {
+        lockBody = null;
+      }
+      if (!lockResponse.ok) {
+        const reason = lockBody?.reason || lockBody?.error || 'locked';
+        const message = lockResponse.status === 423
+          ? buildLockConflictMessage({ reason, lock: lockBody?.lock })
+          : (lockBody?.message || lockBody?.error || 'Failed to acquire a lock for this application.');
+        setEscalationError(message);
+        return;
+      }
+      releaseLockAfter = !lockBody?.lock?.reused;
+
+      const actionId = escalationAction.actionId;
+      const action = actionId === 'escalate_up' ? 'escalate' : actionId;
+      const payload = {
+        action,
+        note,
+        disposition: actionId
+      };
+      if (actionId === 'escalate_up') {
+        payload.targetRole = 'program_administrator';
+      }
+      const response = await apiFetch(`/api/escalations/${escalationId}/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const body = await response.json().catch(() => null);
+      if (response.status === 423) {
+        const message = buildLockConflictMessage({ reason: body?.reason || body?.error, lock: body?.lock });
+        setEscalationError(message);
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(body?.message || body?.error || 'Escalation action failed.');
+      }
+      setEscalationAction(null);
+      setEscalationNote('');
+      setEscalationError(null);
+      if (typeof onRefresh === 'function') {
+        onRefresh();
+      }
+    } catch (error) {
+      setEscalationError(error?.message || 'Escalation action failed.');
+    } finally {
+      setEscalationSubmitting(false);
+      if (releaseLockAfter) {
+        try {
+          await apiFetch(`/api/locks/application/${applicationId}`, { method: 'DELETE' });
+        } catch (_) {}
+      }
+    }
+  }, [escalationAction, escalationNote, onRefresh]);
 
   const notifyWatchlistRefresh = useCallback((detail = {}) => {
     try {
@@ -1120,7 +1241,7 @@ const WorkQueueItemsTableWidget = ({
                             href="#"
                             onFollow={event => {
                               event.preventDefault();
-                              fireEscalationAction(item, 'respond');
+                              openEscalationModal(item, 'respond');
                             }}
                           >
                             Respond
@@ -1130,7 +1251,7 @@ const WorkQueueItemsTableWidget = ({
                               href="#"
                               onFollow={event => {
                                 event.preventDefault();
-                                fireEscalationAction(item, 'escalate_up');
+                                openEscalationModal(item, 'escalate_up');
                               }}
                             >
                               Escalate to Program Admin
@@ -1140,7 +1261,7 @@ const WorkQueueItemsTableWidget = ({
                             href="#"
                             onFollow={event => {
                               event.preventDefault();
-                              fireEscalationAction(item, 'resolve');
+                              openEscalationModal(item, 'resolve');
                             }}
                           >
                             Resolve
@@ -1614,6 +1735,11 @@ const WorkQueueItemsTableWidget = ({
       setResolveSubmitting(false);
     }
   };
+  const escalationHeader = (() => {
+    const target = escalationAction?.item?.trackingId || escalationAction?.item?.title || null;
+    if (escalationAction?.title && target) return `${escalationAction.title} — ${target}`;
+    return escalationAction?.title || 'Escalation action';
+  })();
 
   return (
     <BoardItem
@@ -1935,6 +2061,50 @@ const WorkQueueItemsTableWidget = ({
               onChange={({ detail }) => setSelectedAssignee(detail.selectedOption || null)}
               disabled={assignLoading}
               filteringType="auto"
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={Boolean(escalationAction)}
+        onDismiss={() => {
+          setEscalationAction(null);
+          setEscalationNote('');
+          setEscalationError(null);
+        }}
+        header={escalationHeader}
+        closeAriaLabel="Close escalation action"
+        footer={
+          <SpaceBetween size="xs" direction="horizontal">
+            <Button
+              onClick={() => {
+                setEscalationAction(null);
+                setEscalationNote('');
+                setEscalationError(null);
+              }}
+              disabled={escalationSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              loading={escalationSubmitting}
+              disabled={escalationSubmitting || !escalationNote.trim()}
+              onClick={handleEscalationSubmit}
+            >
+              {escalationAction?.submitLabel || 'Continue'}
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          {escalationError && <Box color="text-status-error">{escalationError}</Box>}
+          {escalationAction?.body && <Box>{escalationAction.body}</Box>}
+          <FormField label={escalationAction?.noteLabel || 'Notes'} stretch>
+            <Textarea
+              value={escalationNote}
+              onChange={({ detail }) => setEscalationNote(detail.value)}
+              rows={3}
             />
           </FormField>
         </SpaceBetween>

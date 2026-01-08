@@ -1742,13 +1742,6 @@ const ModifyComponent = () => {
   // Modal for detailed issue view
   const [activeIssue, setActiveIssue] = useState(null);
 
-  // Auto-suppress generic validation panel for file-upload components (panel not relevant)
-  useEffect(() => {
-    if (selectedComponent && (selectedComponent.type === 'file-upload' || selectedComponent.template_key === 'file-upload')) {
-      if (showValidationPanel) setShowValidationPanel(false);
-    }
-  }, [selectedComponent, showValidationPanel]);
-
   const runValidation = useCallback(() => {
     const stepObj = { name, status, components };
     const issues = validateStep(stepObj);
@@ -1867,7 +1860,7 @@ const ModifyComponent = () => {
           </Box>
 
           <Box padding="m">
-            {showValidationPanel && !(selectedComponent && (selectedComponent.type === 'file-upload' || selectedComponent.template_key === 'file-upload')) && (
+            {showValidationPanel && (
               <ExpandableSection headerText={`Validation Results (${validationIssues.length})`} defaultExpanded>
                 <SpaceBetween size="s">
                   {validationIssues.length === 0 && <Box color="text-body-secondary">No issues found.</Box>}
@@ -1986,8 +1979,8 @@ const ModifyComponent = () => {
               </ExpandableSection>
               {selectedComponent && (() => {
                 const t = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
-                const allowed = new Set(['textarea','select','radio','radios','password-input','input','date-input','checkbox','checkboxes','character-count']);
-                if (!allowed.has(t)) return null; // file-upload intentionally excluded (no per-component validation panel)
+                const allowed = new Set(['textarea','select','radio','radios','password-input','input','date-input','checkbox','checkboxes','character-count','file-upload']);
+                if (!allowed.has(t)) return null;
                 return (
                   <ExpandableSection headerText="Validation" defaultExpanded={false}>
                     <ValidationEditor
@@ -2216,7 +2209,7 @@ const ModifyComponent = () => {
                 );
               })()}
               {/* Step Validation (Stop Conditions) UI removed */}
-              {!showValidationPanel && validationIssues.length > 0 && !(selectedComponent && (selectedComponent.type === 'file-upload' || selectedComponent.template_key === 'file-upload')) && (
+              {!showValidationPanel && validationIssues.length > 0 && (
                 <Alert type={validationIssues.some(i=>i.severity==='error')? 'warning':'info'}>
                   Previous validation run found {validationIssues.length} issue(s). <Button variant="inline-link" onClick={()=>setShowValidationPanel(true)}>Show details</Button>
                 </Alert>

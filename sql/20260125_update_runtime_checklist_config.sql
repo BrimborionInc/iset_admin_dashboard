@@ -1,4 +1,7 @@
-{
+-- Update runtime checklist configuration for application compliance
+-- Source: src/server/config/checklists/iset-intervention.json
+
+SET @checklist_json = '{
   "id": "iset-compliance-v1",
   "label": "ISET Compliance Checklist",
   "version": "2026-01-20",
@@ -130,7 +133,7 @@
           "documentTypes": [
             "acceptance_letter"
           ],
-          "notes": "Required for applications other than 'Self-employment Support'."
+          "notes": "Required for applications other than ''Self-employment Support''."
         },
         {
           "id": "medical-documentation",
@@ -637,4 +640,8 @@
       ]
     }
   ]
-}
+}';
+
+INSERT INTO iset_runtime_config (scope, k, v, updated_at)
+VALUES ('checklist', 'checklist.compliance.iset', CAST(@checklist_json AS JSON), NOW())
+ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = NOW();

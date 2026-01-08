@@ -292,8 +292,15 @@ function coerceChecklistConfig(raw, templateConfig) {
   return applyChecklistMigrations(templateConfig || raw || null);
 }
 
-function resolveChecklistGate(checklist, { applicationStatus, caseStatus, interventionStatus } = {}) {
+function resolveChecklistGate(checklist, { applicationStatus, caseStatus, interventionStatus, stageId } = {}) {
   if (!checklist || !Array.isArray(checklist.gates)) return null;
+  const normalizedStage = stageId ? normaliseChecklistId(stageId) : '';
+  if (normalizedStage) {
+    const stageMatch = checklist.gates.find(
+      gate => gate && normaliseChecklistId(gate.id) === normalizedStage
+    );
+    if (stageMatch) return stageMatch;
+  }
   for (const gate of checklist.gates) {
     if (!gate || !Array.isArray(gate.items)) continue;
     const statuses = Array.isArray(gate.statuses) ? gate.statuses : [];
@@ -335,6 +342,275 @@ async function loadDocumentTypeScopeMap(executor = pool) {
   } catch (err) {
     console.warn('[document-types] scope map load failed', err?.message || err);
   }
+  return map;
+}
+
+const normalizeIdList = value => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return Array.from(new Set(
+      value.map(entry => normalisePositiveInteger(entry)).filter(Boolean)
+    ));
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return normalizeIdList(parsed);
+        }
+      } catch (_) {
+        // fall through to comma parsing
+      }
+    }
+    return Array.from(new Set(
+      trimmed
+        .split(',')
+        .map(token => normalisePositiveInteger(token))
+        .filter(Boolean)
+    ));
+  }
+  const single = normalisePositiveInteger(value);
+  return single ? [single] : [];
+};
+
+async function resolveClientIdFromApplicantUserId(applicantUserId, connection = pool) {
+  const normalizedUserId = normalisePositiveInteger(applicantUserId);
+  if (!normalizedUserId) return null;
+  const [[row]] = await connection.query(
+    `SELECT cl.id
+       FROM user u
+       JOIN client cl ON cl.applicant_cognito_sub = u.cognito_sub
+      WHERE u.id = ?
+      LIMIT 1`,
+    [normalizedUserId]
+  );
+  return row?.id ? Number(row.id) : null;
+}
+
+async function resolveClientIdFromCaseId(caseId, connection = pool) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!normalizedCaseId) return null;
+  const [[row]] = await connection.query(
+    'SELECT client_id FROM iset_case WHERE id = ? LIMIT 1',
+    [normalizedCaseId]
+  );
+  return row?.client_id ? Number(row.client_id) : null;
+}
+
+async function resolveClientIdFromActionPlanId(actionPlanId, connection = pool) {
+  const normalizedPlanId = normalisePositiveInteger(actionPlanId);
+  if (!normalizedPlanId) return null;
+  const [[row]] = await connection.query(
+    `SELECT c.client_id
+       FROM iset_case_action_plan ap
+       JOIN iset_case c ON c.id = ap.case_id
+      WHERE ap.id = ?
+      LIMIT 1`,
+    [normalizedPlanId]
+  );
+  return row?.client_id ? Number(row.client_id) : null;
+}
+
+async function resolveClientIdFromApplicationId(applicationId, connection = pool) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedApplicationId) return null;
+  const [[caseRow]] = await connection.query(
+    'SELECT client_id FROM iset_case WHERE application_id = ? LIMIT 1',
+    [normalizedApplicationId]
+  );
+  if (caseRow?.client_id) return Number(caseRow.client_id);
+  const [[userRow]] = await connection.query(
+    `SELECT u.id, u.cognito_sub
+       FROM iset_application a
+       JOIN iset_application_submission s ON s.id = a.submission_id
+       JOIN user u ON u.id = s.user_id
+      WHERE a.id = ?
+      LIMIT 1`,
+    [normalizedApplicationId]
+  );
+  if (!userRow?.cognito_sub) return null;
+  const [[clientRow]] = await connection.query(
+    'SELECT id FROM client WHERE applicant_cognito_sub = ? LIMIT 1',
+    [userRow.cognito_sub]
+  );
+  return clientRow?.id ? Number(clientRow.id) : null;
+}
+
+async function resolveClientIdForDocument({
+  applicantUserId = null,
+  caseId = null,
+  actionPlanId = null,
+  applicationId = null,
+  connection = pool,
+} = {}) {
+  const candidates = [];
+  const pushCandidate = (source, value) => {
+    const normalized = Number(value);
+    if (!Number.isFinite(normalized) || normalized <= 0) return;
+    candidates.push({ source, id: normalized });
+  };
+  if (actionPlanId) {
+    const clientId = await resolveClientIdFromActionPlanId(actionPlanId, connection);
+    if (clientId) pushCandidate('action_plan', clientId);
+  }
+  if (caseId) {
+    const clientId = await resolveClientIdFromCaseId(caseId, connection);
+    if (clientId) pushCandidate('case', clientId);
+  }
+  if (applicationId) {
+    const clientId = await resolveClientIdFromApplicationId(applicationId, connection);
+    if (clientId) pushCandidate('application', clientId);
+  }
+  if (applicantUserId) {
+    const clientId = await resolveClientIdFromApplicantUserId(applicantUserId, connection);
+    if (clientId) pushCandidate('applicant', clientId);
+  }
+  const unique = Array.from(new Set(candidates.map(entry => entry.id)));
+  if (unique.length > 1) {
+    const err = new Error('client_id_mismatch');
+    err.code = 'client_id_mismatch';
+    err.details = candidates;
+    throw err;
+  }
+  return unique.length ? unique[0] : null;
+}
+
+async function resolveCaseIdForActionPlan(actionPlanId, connection = pool) {
+  const normalizedPlanId = normalisePositiveInteger(actionPlanId);
+  if (!normalizedPlanId) return null;
+  const [[row]] = await connection.query(
+    'SELECT case_id FROM iset_case_action_plan WHERE id = ? LIMIT 1',
+    [normalizedPlanId]
+  );
+  return row?.case_id ? Number(row.case_id) : null;
+}
+
+async function resolveApplicationIdForCaseId(caseId, connection = pool) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!normalizedCaseId) return null;
+  const [[row]] = await connection.query(
+    'SELECT application_id FROM iset_case WHERE id = ? LIMIT 1',
+    [normalizedCaseId]
+  );
+  return row?.application_id ? Number(row.application_id) : null;
+}
+
+async function resolveActionPlanIdForInterventions({ interventionIds, connection = pool } = {}) {
+  const ids = Array.from(new Set((interventionIds || []).map(id => Number(id)).filter(Number.isFinite)));
+  if (!ids.length) return null;
+  const placeholders = ids.map(() => '?').join(',');
+  const [rows] = await connection.query(
+    `SELECT id, action_plan_id
+       FROM iset_case_intervention
+      WHERE id IN (${placeholders})`,
+    ids
+  );
+  if (!rows.length) {
+    const err = new Error('interventions_not_found');
+    err.code = 'interventions_not_found';
+    throw err;
+  }
+  const rowMap = new Map(rows.map(row => [Number(row.id), row]));
+  const missing = ids.filter(id => !rowMap.has(id));
+  if (missing.length) {
+    const err = new Error('interventions_not_found');
+    err.code = 'interventions_not_found';
+    err.details = missing;
+    throw err;
+  }
+  const planIds = Array.from(new Set(rows.map(row => row.action_plan_id).filter(Boolean)));
+  if (planIds.length !== 1) {
+    const err = new Error('interventions_multi_plan');
+    err.code = 'interventions_multi_plan';
+    err.details = planIds;
+    throw err;
+  }
+  return Number(planIds[0]);
+}
+
+async function ensureInterventionsBelongToActionPlan({
+  actionPlanId,
+  interventionIds,
+  connection = pool,
+} = {}) {
+  const normalizedPlanId = normalisePositiveInteger(actionPlanId);
+  const ids = Array.from(new Set((interventionIds || []).map(id => Number(id)).filter(Number.isFinite)));
+  if (!ids.length) return [];
+  if (!normalizedPlanId) {
+    const err = new Error('action_plan_required');
+    err.code = 'action_plan_required';
+    throw err;
+  }
+  const placeholders = ids.map(() => '?').join(',');
+  const [rows] = await connection.query(
+    `SELECT id, action_plan_id
+       FROM iset_case_intervention
+      WHERE id IN (${placeholders})`,
+    ids
+  );
+  const rowMap = new Map(rows.map(row => [Number(row.id), row]));
+  const missing = ids.filter(id => !rowMap.has(id));
+  if (missing.length) {
+    const err = new Error('interventions_not_found');
+    err.code = 'interventions_not_found';
+    err.details = missing;
+    throw err;
+  }
+  const mismatched = rows
+    .filter(row => Number(row.action_plan_id) !== Number(normalizedPlanId))
+    .map(row => row.id);
+  if (mismatched.length) {
+    const err = new Error('interventions_plan_mismatch');
+    err.code = 'interventions_plan_mismatch';
+    err.details = mismatched;
+    throw err;
+  }
+  return ids;
+}
+
+async function updateDocumentInterventionLinks({
+  documentId,
+  interventionIds = [],
+  connection = pool,
+} = {}) {
+  const normalizedDocId = normalisePositiveInteger(documentId);
+  if (!normalizedDocId) return;
+  const ids = Array.from(new Set((interventionIds || []).map(id => Number(id)).filter(Number.isFinite)));
+  await connection.query(
+    'DELETE FROM iset_document_intervention WHERE document_id = ?',
+    [normalizedDocId]
+  );
+  if (!ids.length) return;
+  const values = ids.map(id => [normalizedDocId, id]);
+  await connection.query(
+    'INSERT INTO iset_document_intervention (document_id, intervention_id, created_at) VALUES ?',
+    [values.map(entry => [...entry, new Date()])]
+  );
+}
+
+async function fetchDocumentInterventionMap({ documentIds = [], connection = pool } = {}) {
+  const ids = Array.from(new Set((documentIds || []).map(id => Number(id)).filter(Number.isFinite)));
+  const map = new Map();
+  if (!ids.length) return map;
+  const placeholders = ids.map(() => '?').join(',');
+  const [rows] = await connection.query(
+    `SELECT document_id, intervention_id
+       FROM iset_document_intervention
+      WHERE document_id IN (${placeholders})`,
+    ids
+  );
+  rows.forEach(row => {
+    const docId = Number(row.document_id);
+    const interventionId = Number(row.intervention_id);
+    if (!Number.isFinite(docId) || !Number.isFinite(interventionId)) return;
+    if (!map.has(docId)) {
+      map.set(docId, []);
+    }
+    map.get(docId).push(interventionId);
+  });
   return map;
 }
 
@@ -1122,6 +1398,92 @@ async function storeFinancialOverviewPdfDocument({
     `INSERT INTO iset_document
        (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
      VALUES (?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+    insertPayload
+  );
+  return result?.insertId || null;
+}
+
+async function storeDecisionLetterPdfDocument({
+  docType,
+  applicationId,
+  applicantUserId,
+  actorUserId,
+  clientId,
+  trackingId,
+  signingRequestId,
+  pdfBuffer
+}) {
+  if (!docType || !applicationId || !pdfBuffer) return null;
+  const label = DECISION_LETTER_LABELS[docType] || 'Decision letter';
+  const docSlug = String(docType).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const baseRef = normaliseString(trackingId) || String(applicationId);
+  const timestamp = Date.now();
+  const displayName = `${docSlug}-${baseRef}-${signingRequestId || timestamp}.pdf`;
+  const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
+  const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
+  const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
+  const normalizedActorUserId = normalisePositiveInteger(actorUserId);
+  const normalizedClientId = normalisePositiveInteger(clientId);
+  if (!normalizedClientId) {
+    throw new Error('client_id_required');
+  }
+  const storageMode = resolveUploadStorageMode();
+  let relativePath = null;
+  if (storageMode === 's3') {
+    const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+    if (DRIVER !== 's3') {
+      throw new Error('s3_upload_unavailable');
+    }
+    const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
+    const presigned = await presignPut({ key, contentType: 'application/pdf' });
+    await axios.put(presigned.url, pdfBuffer, {
+      headers: {
+        ...(presigned.headers || {}),
+        'Content-Type': 'application/pdf',
+        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+      }
+    });
+    relativePath = key;
+  } else {
+    const safeName = sanitiseUploadFilename(displayName);
+    const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, safeName);
+    await fs.promises.writeFile(targetPath, pdfBuffer);
+    relativePath = toIntakeRelativePath(targetPath);
+  }
+  if (!relativePath) {
+    throw new Error('path_resolution_failed');
+  }
+
+  await pool.query(
+    `UPDATE iset_document
+        SET status = 'archived', updated_at = NOW()
+      WHERE application_id = ?
+        AND document_category = ?
+        AND status = 'active'`,
+    [applicationId, docType]
+  );
+
+  const metadata = JSON.stringify({ label, document_type: docType });
+  const insertPayload = [
+    null,
+    applicationId,
+    null,
+    normalizedClientId,
+    normalizedApplicantUserId,
+    normalizedActorUserId,
+    displayName,
+    relativePath,
+    'application/pdf',
+    label,
+    metadata,
+    sizeBytes,
+    checksum,
+    docType
+  ];
+  const [result] = await pool.query(
+    `INSERT INTO iset_document
+       (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+     VALUES (?,?,?,?,?,?,'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
     insertPayload
   );
   return result?.insertId || null;
@@ -6162,6 +6524,141 @@ function applyPrefillTokensToSchema(schema, tokens) {
   return { ...schema, steps };
 }
 
+const DECISION_LETTER_LABELS = {
+  assessment_approval_letter: 'Assessment approval letter',
+  assessment_denial_letter: 'Assessment denial letter'
+};
+
+function renderDecisionLetterComponent(comp, values = {}, signedAt = null) {
+  if (!comp || typeof comp !== 'object') return '';
+  const type = String(comp.type || '').toLowerCase();
+  const key = comp.storageKey || comp.id;
+  const value = values[key];
+  const resolveLabel = () => {
+    if (!comp) return key;
+    const lbl = comp.label || comp.title || null;
+    if (lbl && typeof lbl === 'object') {
+      if (typeof lbl.text === 'object') return lbl.text.en || lbl.text.fr || lbl.text;
+      if (lbl.en || lbl.fr) return lbl.en || lbl.fr;
+    }
+    if (lbl) return lbl;
+    return key;
+  };
+  const label = resolveLabel();
+  const resolveHtml = () => {
+    const raw = comp.html ?? comp.label ?? comp.text ?? null;
+    if (!raw) return null;
+    if (typeof raw === 'string') return raw;
+    if (typeof raw === 'object') return raw.en || raw.fr || null;
+    return null;
+  };
+  const resolveText = () => {
+    if (comp.text && typeof comp.text === 'object') return comp.text.en || comp.text.fr || '';
+    return comp.text || '';
+  };
+  const resolveClass = () => comp.class || comp.classes || comp.className || '';
+  switch (type) {
+    case 'paragraph': {
+      const html = resolveHtml();
+      const cls = resolveClass();
+      const headingMap = [
+        { re: /govuk-heading-xl/, tag: 'h1' },
+        { re: /govuk-heading-l/, tag: 'h2' },
+        { re: /govuk-heading-m/, tag: 'h3' },
+        { re: /govuk-heading-s/, tag: 'h4' }
+      ];
+      const matched = headingMap.find(h => h.re.test(cls));
+      const Tag = matched ? matched.tag : 'p';
+      if (html) return `<${Tag} class="paragraph ${escapeHtml(cls)}">${html}</${Tag}>`;
+      const txt = escapeHtml(resolveText());
+      return `<${Tag} class="paragraph ${escapeHtml(cls)}">${txt}</${Tag}>`;
+    }
+    case 'signature-ack': {
+      const signedObj = value && typeof value === 'object' ? value : null;
+      const signedName = signedObj ? (signedObj.name || signedObj.value || signedObj.signed_name || '') : value;
+      const signedValue = escapeHtml(signedName || '');
+      const signedAtStr = signedAt
+        ? new Date(signedAt).toLocaleString('en-CA', { timeZone: 'UTC', hour12: false })
+        : null;
+      return `
+        <div class="field">
+          <div class="field-label">${escapeHtml(label || 'Signature')}</div>
+          <div class="signature-box">${signedValue || ''}</div>
+          ${signedAtStr ? `<div class="signature-meta">Signed at: ${escapeHtml(signedAtStr)} UTC</div>` : ''}
+        </div>`;
+    }
+    case 'input':
+    case 'text':
+    case 'email':
+    case 'phone':
+    case 'number':
+    case 'textarea':
+    case 'date':
+    case 'select':
+    case 'radio':
+    case 'checkbox':
+    case 'checkboxes':
+      return `
+        <div class="field">
+          <div class="field-label">${escapeHtml(label || key)}</div>
+          <div class="field-value">${escapeHtml(
+            Array.isArray(value) ? value.join(', ') : (value == null ? '' : String(value))
+          ) || ''}</div>
+        </div>`;
+    default:
+      return '';
+  }
+}
+
+async function generateDecisionLetterPdfBuffer({ workflowName, steps, values, signedAt }) {
+  const logo = getNwacLogoDataUri();
+  const componentsHtml = (steps || [])
+    .flatMap(step => (step.components || []).map(comp => renderDecisionLetterComponent(comp, values, signedAt)))
+    .join('\n');
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(workflowName || 'Document')}</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; color: #1b1b1b; margin: 24px; line-height: 1.5; }
+    h1 { text-align: center; font-size: 22px; margin: 8px 0 12px 0; }
+    h2, h3, h4 { margin: 12px 0 8px 0; }
+    .logo { text-align: center; margin-top: 8px; margin-bottom: 12px; }
+    .logo img { max-height: 70px; width: auto; }
+    .paragraph { margin-bottom: 12px; }
+    .field { margin-bottom: 12px; }
+    .field-label { font-weight: 600; margin-bottom: 4px; }
+    .field-value { background: #f8fafc; padding: 8px 12px; border-radius: 6px; }
+    .signature-box { border: 1px solid #9ba7b6; border-radius: 6px; padding: 12px; min-height: 60px; display: flex; align-items: center; font-size: 20px; font-family: 'Segoe Script', 'Lucida Handwriting', cursive; }
+    .signature-meta { font-size: 12px; color: #4b5563; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div class="logo">${logo ? `<img src="${logo}" alt="Native Women's Association of Canada logo" />` : ''}</div>
+  <h1>${escapeHtml(workflowName || 'Document')}</h1>
+  ${componentsHtml || '<p class="paragraph">No content available.</p>'}
+</body>
+</html>`;
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const buffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '20mm', bottom: '15mm', left: '15mm', right: '15mm' }
+    });
+    return buffer;
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (_) {}
+    }
+  }
+}
+
 async function resolveStaffDisplayName(pool, req) {
   const direct = normaliseString(req?.staffProfile?.display_name || req?.staffProfile?.name || null);
   if (direct) return direct;
@@ -6306,24 +6803,9 @@ async function moveApplicationDocumentsToIntervention(connection, {
   applicationId,
   interventionId,
 } = {}) {
-  const normalizedApplicationId = normalisePositiveInteger(applicationId);
-  const normalizedInterventionId = normalisePositiveInteger(interventionId);
-  if (!connection || !normalizedApplicationId || !normalizedInterventionId) {
-    return { moved: 0 };
-  }
-  const normalizedCaseId = normalisePositiveInteger(caseId);
-  const [result] = await connection.query(
-    `UPDATE iset_document
-       SET case_id = COALESCE(case_id, ?),
-           linked_intervention_id = ?,
-           application_id = NULL,
-           updated_at = NOW()
-     WHERE application_id = ?
-       AND (linked_intervention_id IS NULL OR linked_intervention_id = 0)
-       AND status = 'active'`,
-    [normalizedCaseId || null, normalizedInterventionId, normalizedApplicationId]
-  );
-  return { moved: result?.affectedRows || 0 };
+  // Deprecated: intervention links now use iset_document_intervention + action_plan_id.
+  // Application-scoped documents are no longer moved automatically.
+  return { moved: 0 };
 }
 
 async function ensureAutoPlanAndInterventionFromAssessment(connection, {
@@ -18588,6 +19070,35 @@ function normaliseEscalationAction(action) {
   return null;
 }
 
+function buildEscalationCaseNoteBody(reason, details) {
+  const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+  const trimmedDetails = typeof details === 'string' ? details.trim() : '';
+  if (trimmedReason && trimmedDetails && trimmedReason !== trimmedDetails) {
+    return `${trimmedReason}\n\n${trimmedDetails}`;
+  }
+  return trimmedDetails || trimmedReason;
+}
+
+async function insertEscalationCaseNote(connection, { caseId, body, staffProfileId, authorUserId }) {
+  const numericCaseId = Number(caseId);
+  if (!Number.isInteger(numericCaseId) || numericCaseId <= 0) return null;
+  const trimmed = typeof body === 'string' ? body.trim() : '';
+  if (!trimmed) return null;
+  const limited = trimmed.length > CASE_NOTE_MAX_LENGTH ? trimmed.slice(0, CASE_NOTE_MAX_LENGTH) : trimmed;
+  try {
+    const [result] = await connection.query(
+      'INSERT INTO iset_case_note (case_id, author_staff_profile_id, author_user_id, body, is_internal, is_pinned, follow_up_at) VALUES (?,?,?,?,1,0,NULL)',
+      [numericCaseId, staffProfileId || null, authorUserId || null, limited]
+    );
+    return { id: result.insertId, caseId: numericCaseId, body: limited };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[case-notes] failed to add escalation note', err?.message || err);
+    }
+    return null;
+  }
+}
+
   function escalationRoleAllowedForCreation(roleKey) {
   return roleKey === 'coordinator' || roleKey === 'regional_manager' || roleKey === 'system_administrator';
 }
@@ -18622,6 +19133,9 @@ app.post('/api/escalations', async (req, res) => {
     const caseIdRaw = req.body?.caseId || req.body?.case_id || null;
     const reason = toNull(req.body?.reason);
     const details = toNull(req.body?.details);
+    const staffProfileId = req.staffProfile?.id || null;
+    const authorUserId = getAuthenticatedNumericUserId(req);
+    const escalationNoteBody = buildEscalationCaseNoteBody(reason, details);
     const targetRoleKey = canonicalEscalationRole(req.body?.targetRole || req.body?.target_role || (roleKey === 'regional_manager' ? 'program_administrator' : 'regional_manager'));
     if (!targetRoleKey) {
       return res.status(400).json({ error: 'target_role_required' });
@@ -18705,6 +19219,12 @@ app.post('/api/escalations', async (req, res) => {
         'UPDATE iset_application SET has_open_escalation = 1, current_escalation_id = ? WHERE id = ?',
         [existing.id, applicationId]
       );
+      const noteResult = await insertEscalationCaseNote(conn, {
+        caseId,
+        body: escalationNoteBody,
+        staffProfileId,
+        authorUserId
+      });
       await conn.commit();
 
       const actor = resolveRequestActor(req);
@@ -18726,6 +19246,20 @@ app.post('/api/escalations', async (req, res) => {
         trackingId: null,
         correlationId: null,
       });
+      if (noteResult) {
+        captureCaseEvent({
+          type: 'note_added',
+          caseId: noteResult.caseId,
+          payload: {
+            note_id: noteResult.id,
+            body: noteResult.body,
+            is_pinned: false,
+            follow_up_at: null,
+          },
+          actorId: actor.actorId || null,
+          actorName: actor.actorName || null,
+        });
+      }
 
       return res.status(200).json({
         id: existing.id,
@@ -18769,6 +19303,13 @@ app.post('/api/escalations', async (req, res) => {
       [insert.insertId, applicationId]
     );
 
+    const noteResult = await insertEscalationCaseNote(conn, {
+      caseId,
+      body: escalationNoteBody,
+      staffProfileId,
+      authorUserId: authorUserId || requesterUserId || null,
+    });
+
     await conn.commit();
 
     const actor = resolveRequestActor(req);
@@ -18790,6 +19331,20 @@ app.post('/api/escalations', async (req, res) => {
       trackingId: null,
       correlationId: null,
     });
+    if (noteResult) {
+      captureCaseEvent({
+        type: 'note_added',
+        caseId: noteResult.caseId,
+        payload: {
+          note_id: noteResult.id,
+          body: noteResult.body,
+          is_pinned: false,
+          follow_up_at: null,
+        },
+        actorId: actor.actorId || null,
+        actorName: actor.actorName || null,
+      });
+    }
 
     return res.status(201).json({
       id: insert.insertId,
@@ -18831,6 +19386,8 @@ app.post('/api/escalations/:id/respond', async (req, res) => {
     const action = normaliseEscalationAction(req.body?.action || req.body?.type || null) || 'respond';
     const note = toNull(req.body?.note || req.body?.notes || req.body?.message);
     const disposition = toNull(req.body?.disposition) || action;
+    const staffProfileId = req.staffProfile?.id || null;
+    const authorUserId = getAuthenticatedNumericUserId(req);
     const escalateToRoleKey = canonicalEscalationRole(req.body?.targetRole || req.body?.target_role || req.body?.escalateToRole || null);
 
     const lockConfig = await readLockConfig();
@@ -18853,6 +19410,12 @@ app.post('/api/escalations/:id/respond', async (req, res) => {
     if (escRow.state === ESCALATION_STATES.resolved) {
       await conn.rollback();
       return res.status(409).json({ error: 'escalation_closed' });
+    }
+
+    let escalationCaseId = Number(escRow.case_id);
+    if (!Number.isInteger(escalationCaseId) || escalationCaseId <= 0) {
+      const [[caseRow]] = await conn.query('SELECT id FROM iset_case WHERE application_id = ? LIMIT 1', [escRow.application_id]);
+      escalationCaseId = caseRow ? Number(caseRow.id) : null;
     }
 
     const lockCheck = await enforceApplicationLock(conn, escRow.application_id, req, lockConfig);
@@ -18926,6 +19489,13 @@ app.post('/api/escalations/:id/respond', async (req, res) => {
       );
     }
 
+    const noteResult = await insertEscalationCaseNote(conn, {
+      caseId: escalationCaseId,
+      body: note,
+      staffProfileId,
+      authorUserId
+    });
+
     await conn.commit();
 
     const actor = resolveRequestActor(req);
@@ -18968,11 +19538,25 @@ app.post('/api/escalations/:id/respond', async (req, res) => {
       trackingId: null,
       correlationId: null,
     });
+    if (noteResult) {
+      captureCaseEvent({
+        type: 'note_added',
+        caseId: noteResult.caseId,
+        payload: {
+          note_id: noteResult.id,
+          body: noteResult.body,
+          is_pinned: false,
+          follow_up_at: null,
+        },
+        actorId: actor.actorId || null,
+        actorName: actor.actorName || null,
+      });
+    }
 
     return res.json({
       id: escalationId,
       application_id: escRow.application_id,
-      case_id: escRow.case_id,
+      case_id: escalationCaseId || escRow.case_id,
       state: nextState,
       current_owner_role: nextOwnerRoleKey,
       disposition,
@@ -23778,18 +24362,61 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
     if (label) metadataObj.label = label;
     if (docType) metadataObj.document_type = docType;
     const metadata = Object.keys(metadataObj).length ? JSON.stringify(metadataObj) : null;
-    const caseId = normalisePositiveInteger(req.body?.caseId);
-    const applicationIdRaw = normalisePositiveInteger(req.body?.applicationId);
+    const caseIdRaw = normalisePositiveInteger(req.body?.caseId || req.body?.case_id);
+    const applicationIdRaw = normalisePositiveInteger(req.body?.applicationId || req.body?.application_id);
+    const actionPlanIdRaw = normalisePositiveInteger(req.body?.actionPlanId || req.body?.action_plan_id);
     const interventionIdRaw = normalisePositiveInteger(req.body?.interventionId || req.body?.linkedInterventionId);
+    const interventionIdsRaw = normalizeIdList(req.body?.interventionIds || req.body?.intervention_ids);
+    let caseId = caseIdRaw;
     let applicationId = applicationIdRaw;
-    let interventionId = interventionIdRaw;
-    if (docTypeScope === 'client') {
-      applicationId = null;
-      interventionId = null;
-    } else if (docType && docTypeScope === 'application') {
-      if (interventionId) {
+    let actionPlanId = actionPlanIdRaw;
+    let interventionIds = Array.from(new Set([...interventionIdsRaw, interventionIdRaw].filter(Boolean)));
+    const normalizedScope = docTypeScope || 'application';
+
+    try {
+      if (normalizedScope === 'client' || normalizedScope === 'payment_packet') {
+        caseId = null;
+        applicationId = null;
+        actionPlanId = null;
+        interventionIds = [];
+      } else if (normalizedScope === 'case') {
+        if (!caseId) {
+          cleanupUploadedFile();
+          return res.status(400).json({ error: 'case_required_for_document' });
+        }
+        applicationId = null;
+        actionPlanId = null;
+        interventionIds = [];
+      } else if (normalizedScope === 'application') {
+        if (!applicationId && caseId) {
+          applicationId = await resolveApplicationIdForCaseId(caseId);
+        }
+        if (!applicationId) {
+          cleanupUploadedFile();
+          return res.status(400).json({ error: 'application_required_for_document' });
+        }
+        caseId = null;
+        actionPlanId = null;
+        interventionIds = [];
+      } else if (normalizedScope === 'action_plan') {
+        if (!actionPlanId && interventionIds.length) {
+          actionPlanId = await resolveActionPlanIdForInterventions({ interventionIds });
+        }
+        if (!actionPlanId) {
+          cleanupUploadedFile();
+          return res.status(400).json({ error: 'action_plan_required_for_document' });
+        }
+        interventionIds = await ensureInterventionsBelongToActionPlan({
+          actionPlanId,
+          interventionIds,
+        });
+        caseId = null;
         applicationId = null;
       }
+    } catch (err) {
+      cleanupUploadedFile();
+      const errorCode = err?.code || 'document_link_validation_failed';
+      return res.status(400).json({ error: errorCode });
     }
     const source = 'manual_upload';
     const uploaderUserId = resolveAdminActorUserId(req);
@@ -23835,11 +24462,30 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
     }
 
     let insertId = null;
+    let resolvedClientId = null;
+    try {
+      resolvedClientId = await resolveClientIdForDocument({
+        applicantUserId: applicantId,
+        caseId,
+        actionPlanId,
+        applicationId,
+      });
+      if (!resolvedClientId) {
+        cleanupUploadedFile();
+        return res.status(422).json({ error: 'client_id_required' });
+      }
+    } catch (err) {
+      cleanupUploadedFile();
+      const errorCode = err?.code || 'client_id_resolution_failed';
+      return res.status(400).json({ error: errorCode });
+    }
+
     try {
       const insertPayload = [
         caseId,
         applicationId,
-        interventionId,
+        actionPlanId,
+        resolvedClientId,
         applicantId,
         uploaderUserId,
         source,
@@ -23854,13 +24500,14 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
       ];
       const [result] = await pool.query(
         `INSERT INTO iset_document
-           (case_id, application_id, linked_intervention_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)
+           (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)
          ON DUPLICATE KEY UPDATE
            applicant_user_id = VALUES(applicant_user_id),
            application_id = VALUES(application_id),
-           linked_intervention_id = VALUES(linked_intervention_id),
+           action_plan_id = VALUES(action_plan_id),
            case_id = VALUES(case_id),
+           client_id = VALUES(client_id),
            user_id = VALUES(user_id),
            label = VALUES(label),
            metadata = VALUES(metadata),
@@ -23879,12 +24526,14 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
       return res.status(500).json({ error: 'document_store_failed' });
     }
 
+    const documentIdForLinks = insertId || null;
+
       try {
         const lookupKey = insertId
           ? ['id = ?', [insertId]]
           : ['file_path = ?', [relativePath]];
         const [rows] = await pool.query(
-        `SELECT id, case_id, application_id, linked_intervention_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
+        `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
            FROM iset_document
          WHERE ${lookupKey[0]}
          LIMIT 1`,
@@ -23898,9 +24547,29 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
           });
         }
         const documentRow = rows[0];
+        if (interventionIds.length) {
+          documentRow.intervention_ids = interventionIds;
+        }
+        const resolvedDocId = documentIdForLinks || documentRow?.id || null;
+        if (resolvedDocId && interventionIds.length) {
+          try {
+            await updateDocumentInterventionLinks({
+              documentId: resolvedDocId,
+              interventionIds,
+            });
+          } catch (linkErr) {
+            console.warn('[admin:documents:upload] intervention link failed', linkErr?.message || linkErr);
+          }
+        }
 
-        const resolvedCaseId = caseId || normalisePositiveInteger(documentRow?.case_id);
-        const resolvedApplicationId = applicationId || normalisePositiveInteger(documentRow?.application_id);
+        let resolvedCaseId = caseId || normalisePositiveInteger(documentRow?.case_id);
+        if (!resolvedCaseId && documentRow?.action_plan_id) {
+          resolvedCaseId = await resolveCaseIdForActionPlan(documentRow.action_plan_id);
+        }
+        let resolvedApplicationId = applicationId || normalisePositiveInteger(documentRow?.application_id);
+        if (!resolvedApplicationId && resolvedCaseId) {
+          resolvedApplicationId = await resolveApplicationIdForCaseId(resolvedCaseId);
+        }
 
         if (resolvedCaseId) {
           await emitDocumentUploadedEvent({
@@ -24083,16 +24752,42 @@ app.put('/api/documents/:id', async (req, res) => {
   }
   const rawDocType = typeof req.body?.documentType === 'string' ? req.body.documentType.trim() : '';
   const docType = rawDocType || null;
-  const applicationIdProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'applicationId');
-  const interventionIdProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'interventionId') || Object.prototype.hasOwnProperty.call(req.body || {}, 'linkedInterventionId');
-  const applicationId = applicationIdProvided ? normalisePositiveInteger(req.body?.applicationId) : undefined;
-  const interventionId = interventionIdProvided
-    ? normalisePositiveInteger(req.body?.interventionId || req.body?.linkedInterventionId)
+  const caseIdProvided =
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'caseId') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'case_id');
+  const applicationIdProvided =
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'applicationId') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'application_id');
+  const actionPlanIdProvided =
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'actionPlanId') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'action_plan_id');
+  const interventionIdsProvided =
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'interventionIds') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'intervention_ids') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'interventionId') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'linkedInterventionId');
+  const caseId = caseIdProvided ? normalisePositiveInteger(req.body?.caseId || req.body?.case_id) : undefined;
+  const applicationId = applicationIdProvided
+    ? normalisePositiveInteger(req.body?.applicationId || req.body?.application_id)
+    : undefined;
+  const actionPlanId = actionPlanIdProvided
+    ? normalisePositiveInteger(req.body?.actionPlanId || req.body?.action_plan_id)
+    : undefined;
+  const interventionIds = interventionIdsProvided
+    ? Array.from(new Set([
+        ...normalizeIdList(req.body?.interventionIds || req.body?.intervention_ids),
+        normalisePositiveInteger(req.body?.interventionId || req.body?.linkedInterventionId),
+      ].filter(Boolean)))
     : undefined;
   let metadataObj = {};
+  let existingRow = null;
   try {
-    const [rows] = await pool.query('SELECT metadata, document_category FROM iset_document WHERE id = ? LIMIT 1', [documentId]);
+    const [rows] = await pool.query(
+      'SELECT metadata, document_category, client_id, application_id, case_id, action_plan_id, applicant_user_id FROM iset_document WHERE id = ? LIMIT 1',
+      [documentId]
+    );
     if (rows && rows[0]) {
+      existingRow = rows[0];
       const existingMetadata = rows[0].metadata;
       if (existingMetadata && typeof existingMetadata === 'object') {
         metadataObj = { ...existingMetadata };
@@ -24104,30 +24799,119 @@ app.put('/api/documents/:id', async (req, res) => {
   } catch (_) {
     metadataObj = {};
   }
+  if (!existingRow) {
+    return res.status(404).json({ error: 'document_not_found' });
+  }
   if (!metadataObj || typeof metadataObj !== 'object') metadataObj = {};
   metadataObj.label = label;
   if (docType) metadataObj.document_type = docType;
   const metadata = JSON.stringify(metadataObj);
+
+  const effectiveDocType = docType || metadataObj.document_type || null;
+  let docTypeScope = 'application';
+  if (effectiveDocType) {
+    try {
+      const [[docTypeRow]] = await pool.query(
+        'SELECT COALESCE(scope, "application") AS scope FROM document_type WHERE code = ? AND is_active = 1 LIMIT 1',
+        [effectiveDocType]
+      );
+      if (!docTypeRow) {
+        return res.status(400).json({ error: 'invalid_document_type' });
+      }
+      docTypeScope = docTypeRow.scope || 'application';
+    } catch (err) {
+      console.error('[admin:documents:update] doc type lookup failed', err);
+      return res.status(500).json({ error: 'document_type_lookup_failed' });
+    }
+  }
+
+  const interventionMap = await fetchDocumentInterventionMap({ documentIds: [documentId] });
+  const existingInterventionIds = interventionMap.get(documentId) || [];
+  let nextCaseId = caseIdProvided ? caseId : normalisePositiveInteger(existingRow.case_id);
+  let nextApplicationId = applicationIdProvided ? applicationId : normalisePositiveInteger(existingRow.application_id);
+  let nextActionPlanId = actionPlanIdProvided ? actionPlanId : normalisePositiveInteger(existingRow.action_plan_id);
+  let nextInterventionIds = interventionIdsProvided ? interventionIds : existingInterventionIds;
+
+  try {
+    if (docTypeScope === 'client' || docTypeScope === 'payment_packet') {
+      nextCaseId = null;
+      nextApplicationId = null;
+      nextActionPlanId = null;
+      nextInterventionIds = [];
+    } else if (docTypeScope === 'case') {
+      if (!nextCaseId) {
+        return res.status(400).json({ error: 'case_required_for_document' });
+      }
+      nextApplicationId = null;
+      nextActionPlanId = null;
+      nextInterventionIds = [];
+    } else if (docTypeScope === 'application') {
+      if (!nextApplicationId && nextCaseId) {
+        nextApplicationId = await resolveApplicationIdForCaseId(nextCaseId);
+      }
+      if (!nextApplicationId) {
+        return res.status(400).json({ error: 'application_required_for_document' });
+      }
+      nextCaseId = null;
+      nextActionPlanId = null;
+      nextInterventionIds = [];
+    } else if (docTypeScope === 'action_plan') {
+      if (!nextActionPlanId && nextInterventionIds.length) {
+        nextActionPlanId = await resolveActionPlanIdForInterventions({ interventionIds: nextInterventionIds });
+      }
+      if (!nextActionPlanId) {
+        return res.status(400).json({ error: 'action_plan_required_for_document' });
+      }
+      nextInterventionIds = await ensureInterventionsBelongToActionPlan({
+        actionPlanId: nextActionPlanId,
+        interventionIds: nextInterventionIds,
+      });
+      nextCaseId = null;
+      nextApplicationId = null;
+    }
+  } catch (err) {
+    const errorCode = err?.code || 'document_link_validation_failed';
+    return res.status(400).json({ error: errorCode });
+  }
+
+  let resolvedClientId = null;
+  try {
+    resolvedClientId = await resolveClientIdForDocument({
+      applicantUserId: existingRow.applicant_user_id,
+      caseId: nextCaseId,
+      actionPlanId: nextActionPlanId,
+      applicationId: nextApplicationId,
+    });
+    if (!resolvedClientId) {
+      return res.status(422).json({ error: 'client_id_required' });
+    }
+    if (existingRow.client_id && Number(existingRow.client_id) !== Number(resolvedClientId)) {
+      return res.status(409).json({ error: 'client_id_mismatch' });
+    }
+  } catch (err) {
+    const errorCode = err?.code || 'client_id_resolution_failed';
+    return res.status(400).json({ error: errorCode });
+  }
+
   try {
     const updateFields = [
       'label = ?',
       'metadata = ?',
-      'document_category = COALESCE(?, document_category)'
+      'document_category = COALESCE(?, document_category)',
+      'case_id = ?',
+      'application_id = ?',
+      'action_plan_id = ?',
+      'client_id = ?',
     ];
-    const updateParams = [label, metadata, docType || null];
-    if (applicationIdProvided || interventionIdProvided) {
-      let nextApplicationId = applicationId ?? null;
-      let nextInterventionId = interventionId ?? null;
-      if (nextInterventionId) {
-        nextApplicationId = null;
-      } else if (nextApplicationId) {
-        nextInterventionId = null;
-      }
-      updateFields.push('application_id = ?');
-      updateFields.push('linked_intervention_id = ?');
-      updateParams.push(nextApplicationId);
-      updateParams.push(nextInterventionId);
-    }
+    const updateParams = [
+      label,
+      metadata,
+      docType || null,
+      nextCaseId,
+      nextApplicationId,
+      nextActionPlanId,
+      resolvedClientId,
+    ];
     const [result] = await pool.query(
       `UPDATE iset_document
          SET ${updateFields.join(', ')}, updated_at = NOW()
@@ -24137,13 +24921,25 @@ app.put('/api/documents/:id', async (req, res) => {
     if (!result || result.affectedRows === 0) {
       return res.status(404).json({ error: 'document_not_found' });
     }
+    if (docTypeScope === 'action_plan') {
+      await updateDocumentInterventionLinks({
+        documentId,
+        interventionIds: nextInterventionIds,
+      });
+    } else {
+      await updateDocumentInterventionLinks({ documentId, interventionIds: [] });
+    }
     const [[row]] = await pool.query(
-      `SELECT id, case_id, application_id, linked_intervention_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
+      `SELECT id, case_id, application_id, action_plan_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
          FROM iset_document
         WHERE id = ?
         LIMIT 1`,
       [documentId]
     );
+    if (row) {
+      const map = await fetchDocumentInterventionMap({ documentIds: [documentId] });
+      row.intervention_ids = map.get(documentId) || [];
+    }
     return res.json({ ok: true, document: row });
   } catch (err) {
     console.error('[admin:documents:update] error', err);
@@ -24160,19 +24956,37 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
   const labelOverride = rawLabel ? rawLabel.slice(0, 255) : null;
   const rawDocType = typeof req.body?.documentType === 'string' ? req.body.documentType.trim() : '';
   const docTypeOverride = rawDocType || null;
-  const applicationIdRaw = normalisePositiveInteger(req.body?.applicationId);
-  const interventionIdRaw = normalisePositiveInteger(req.body?.interventionId || req.body?.linkedInterventionId);
-  let applicationId = applicationIdRaw;
-  let interventionId = interventionIdRaw;
-  if (interventionId) {
-    applicationId = null;
-  } else if (applicationId) {
-    interventionId = null;
-  }
+  const caseIdProvided =
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'caseId') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'case_id');
+  const applicationIdProvided =
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'applicationId') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'application_id');
+  const actionPlanIdProvided =
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'actionPlanId') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'action_plan_id');
+  const interventionIdsProvided =
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'interventionIds') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'intervention_ids') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'interventionId') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'linkedInterventionId');
+  const caseId = caseIdProvided ? normalisePositiveInteger(req.body?.caseId || req.body?.case_id) : undefined;
+  const applicationId = applicationIdProvided
+    ? normalisePositiveInteger(req.body?.applicationId || req.body?.application_id)
+    : undefined;
+  const actionPlanId = actionPlanIdProvided
+    ? normalisePositiveInteger(req.body?.actionPlanId || req.body?.action_plan_id)
+    : undefined;
+  const interventionIds = interventionIdsProvided
+    ? Array.from(new Set([
+        ...normalizeIdList(req.body?.interventionIds || req.body?.intervention_ids),
+        normalisePositiveInteger(req.body?.interventionId || req.body?.linkedInterventionId),
+      ].filter(Boolean)))
+    : undefined;
 
   try {
     const [[doc]] = await pool.query(
-      `SELECT id, case_id, application_id, linked_intervention_id, applicant_user_id, user_id, origin_message_id,
+      `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, origin_message_id,
               source, file_name, file_path, mime_type, label, metadata, document_category, size_bytes, checksum_sha256
          FROM iset_document
         WHERE id = ? AND status = 'active'
@@ -24184,6 +24998,7 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
     }
 
     const docType = docTypeOverride || doc.document_category || parseMetadata(doc.metadata)?.document_type || null;
+    let docTypeScope = 'application';
     if (docType) {
       try {
         const [[docTypeRow]] = await pool.query(
@@ -24193,14 +25008,79 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
         if (!docTypeRow) {
           return res.status(400).json({ error: 'invalid_document_type' });
         }
-        if (docTypeRow.scope === 'client') {
-          applicationId = null;
-          interventionId = null;
-        }
+        docTypeScope = docTypeRow.scope || 'application';
       } catch (err) {
         console.error('[admin:documents:duplicate] doc type lookup failed', err);
         return res.status(500).json({ error: 'document_type_lookup_failed' });
       }
+    }
+
+    const interventionMap = await fetchDocumentInterventionMap({ documentIds: [documentId] });
+    const existingInterventionIds = interventionMap.get(documentId) || [];
+    let nextCaseId = caseIdProvided ? caseId : normalisePositiveInteger(doc.case_id);
+    let nextApplicationId = applicationIdProvided ? applicationId : normalisePositiveInteger(doc.application_id);
+    let nextActionPlanId = actionPlanIdProvided ? actionPlanId : normalisePositiveInteger(doc.action_plan_id);
+    let nextInterventionIds = interventionIdsProvided ? interventionIds : existingInterventionIds;
+
+    try {
+      if (docTypeScope === 'client' || docTypeScope === 'payment_packet') {
+        nextCaseId = null;
+        nextApplicationId = null;
+        nextActionPlanId = null;
+        nextInterventionIds = [];
+      } else if (docTypeScope === 'case') {
+        if (!nextCaseId) {
+          return res.status(400).json({ error: 'case_required_for_document' });
+        }
+        nextApplicationId = null;
+        nextActionPlanId = null;
+        nextInterventionIds = [];
+      } else if (docTypeScope === 'application') {
+        if (!nextApplicationId && nextCaseId) {
+          nextApplicationId = await resolveApplicationIdForCaseId(nextCaseId);
+        }
+        if (!nextApplicationId) {
+          return res.status(400).json({ error: 'application_required_for_document' });
+        }
+        nextCaseId = null;
+        nextActionPlanId = null;
+        nextInterventionIds = [];
+      } else if (docTypeScope === 'action_plan') {
+        if (!nextActionPlanId && nextInterventionIds.length) {
+          nextActionPlanId = await resolveActionPlanIdForInterventions({ interventionIds: nextInterventionIds });
+        }
+        if (!nextActionPlanId) {
+          return res.status(400).json({ error: 'action_plan_required_for_document' });
+        }
+        nextInterventionIds = await ensureInterventionsBelongToActionPlan({
+          actionPlanId: nextActionPlanId,
+          interventionIds: nextInterventionIds,
+        });
+        nextCaseId = null;
+        nextApplicationId = null;
+      }
+    } catch (err) {
+      const errorCode = err?.code || 'document_link_validation_failed';
+      return res.status(400).json({ error: errorCode });
+    }
+
+    let resolvedClientId = null;
+    try {
+      resolvedClientId = await resolveClientIdForDocument({
+        applicantUserId: doc.applicant_user_id,
+        caseId: nextCaseId,
+        actionPlanId: nextActionPlanId,
+        applicationId: nextApplicationId,
+      });
+      if (!resolvedClientId) {
+        return res.status(422).json({ error: 'client_id_required' });
+      }
+      if (doc.client_id && Number(doc.client_id) !== Number(resolvedClientId)) {
+        return res.status(409).json({ error: 'client_id_mismatch' });
+      }
+    } catch (err) {
+      const errorCode = err?.code || 'client_id_resolution_failed';
+      return res.status(400).json({ error: errorCode });
     }
 
     const metadataObj = parseMetadata(doc.metadata) || {};
@@ -24216,12 +25096,13 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
     });
     const [result] = await pool.query(
       `INSERT INTO iset_document
-         (case_id, application_id, linked_intervention_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)`,
+         (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)`,
       [
-        doc.case_id || null,
-        applicationId,
-        interventionId,
+        nextCaseId,
+        nextApplicationId,
+        nextActionPlanId,
+        resolvedClientId,
         doc.applicant_user_id || null,
         uploaderUserId,
         doc.source || 'manual_upload',
@@ -24236,13 +25117,27 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
       ]
     );
     const insertId = result?.insertId || null;
+    if (insertId) {
+      if (docTypeScope === 'action_plan') {
+        await updateDocumentInterventionLinks({
+          documentId: insertId,
+          interventionIds: nextInterventionIds,
+        });
+      } else {
+        await updateDocumentInterventionLinks({ documentId: insertId, interventionIds: [] });
+      }
+    }
     const [[row]] = await pool.query(
-      `SELECT id, case_id, application_id, linked_intervention_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
+      `SELECT id, case_id, application_id, action_plan_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
          FROM iset_document
         WHERE id = ?
         LIMIT 1`,
       [insertId]
     );
+    if (row) {
+      const map = await fetchDocumentInterventionMap({ documentIds: [insertId] });
+      row.intervention_ids = map.get(insertId) || [];
+    }
     return res.json({ ok: true, document: row });
   } catch (err) {
     console.error('[admin:documents:duplicate] error', err);
@@ -24361,24 +25256,42 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       return res.status(200).json({ items: [], missingRequiredCount: 0 });
     }
     const docTypeScopeMap = await loadDocumentTypeScopeMap();
-    const [[appCountRow] = []] = await pool.query(
-      `SELECT COUNT(*) AS cnt FROM iset_application_submission WHERE user_id = ?`,
-      [applicantId]
-    );
-    const applicantApplicationCount = Number(appCountRow?.cnt || 0);
     const [docs] = await pool.query(
-      `SELECT id, file_name, file_path, label, metadata, document_category, source, application_id, linked_intervention_id, created_at AS uploaded_at
-         FROM iset_document
-        WHERE applicant_user_id = ? AND status = 'active'`,
+      `SELECT d.id,
+              d.file_name,
+              d.file_path,
+              d.label,
+              d.metadata,
+              d.document_category,
+              d.source,
+              d.application_id,
+              d.case_id,
+              d.action_plan_id,
+              apc.id AS action_plan_case_id,
+              apc.application_id AS action_plan_application_id,
+              d.created_at AS uploaded_at
+         FROM iset_document d
+         LEFT JOIN iset_case_action_plan ap ON ap.id = d.action_plan_id
+         LEFT JOIN iset_case apc ON apc.id = ap.case_id
+        WHERE d.applicant_user_id = ? AND d.status = 'active'`,
       [applicantId]
     );
+    const docIds = (docs || []).map(doc => Number(doc.id)).filter(Number.isFinite);
+    const interventionMap = await fetchDocumentInterventionMap({ documentIds: docIds });
     let interventionMetadata = null;
     let interventionStatusLower = '';
+    let interventionCaseId = null;
+    let interventionApplicationId = null;
     if (isIntervention) {
       const [[interventionRow]] = await pool.query(
-        `SELECT status, metadata_json
-           FROM iset_case_intervention
-          WHERE id = ?
+        `SELECT i.status,
+                i.metadata_json,
+                i.case_id,
+                i.action_plan_id,
+                c.application_id
+           FROM iset_case_intervention i
+           LEFT JOIN iset_case c ON c.id = i.case_id
+          WHERE i.id = ?
           LIMIT 1`,
         [interventionId]
       );
@@ -24387,6 +25300,8 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       }
       interventionStatusLower = normaliseCaseStatusValue(interventionRow.status || stageRaw) || '';
       interventionMetadata = parseMetadata(interventionRow.metadata_json) || {};
+      interventionCaseId = normalisePositiveInteger(interventionRow.case_id);
+      interventionApplicationId = normalisePositiveInteger(interventionRow.application_id);
     }
     const applicationAnswerMeta = await loadApplicationAnswers({ applicantId, applicationId });
     const applicationAnswers = applicationAnswerMeta.answers;
@@ -24406,6 +25321,8 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       ? Number(applicationAnswerMeta.assessmentDurationDays)
       : null;
     const disabilitySupportRequested = Boolean(applicationAnswerMeta.disabilitySupportRequested);
+    const resolvedApplicationId = normalisePositiveInteger(applicationId || applicationAnswerMeta.applicationId);
+    const resolvedCaseId = normalisePositiveInteger(applicationAnswerMeta.caseId);
     const normalizedDocs = (docs || []).map(doc => {
       const meta = parseMetadata(doc.metadata);
       const docTypes = [];
@@ -24418,6 +25335,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
         }
         return 'application';
       })();
+      const linkedInterventions = interventionMap.get(Number(doc.id)) || [];
       return {
         id: doc.id,
         file_name: doc.file_name,
@@ -24425,7 +25343,11 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
         source: doc.source,
         uploaded_at: doc.uploaded_at,
         application_id: doc.application_id || null,
-        linked_intervention_id: doc.linked_intervention_id || null,
+        case_id: doc.case_id || null,
+        action_plan_id: doc.action_plan_id || null,
+        action_plan_case_id: doc.action_plan_case_id || null,
+        action_plan_application_id: doc.action_plan_application_id || null,
+        intervention_ids: linkedInterventions,
         scope,
         docTypes,
       };
@@ -24495,15 +25417,31 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       if (!matchesType) return false;
       const scope = d.scope || 'application';
       if (scope === 'client') return true;
+      if (scope === 'payment_packet') return false;
       if (isIntervention) {
-        const docInterventionId = normalisePositiveInteger(d.linked_intervention_id);
-        return docInterventionId !== null && docInterventionId === interventionId;
+        if (scope === 'action_plan') {
+          const linked = Array.isArray(d.intervention_ids) ? d.intervention_ids : [];
+          return linked.some(id => Number(id) === interventionId);
+        }
+        if (scope === 'case') {
+          return interventionCaseId && Number(d.case_id) === Number(interventionCaseId);
+        }
+        if (scope === 'application') {
+          return interventionApplicationId && Number(d.application_id) === Number(interventionApplicationId);
+        }
+        return false;
       }
-      if (!applicationId) return true;
-      const docAppId = normalisePositiveInteger(d.application_id);
-      if (docAppId !== null) return docAppId === applicationId;
-      // Gracefully allow legacy application-scoped docs without an application_id when the applicant has only one application.
-      if (applicantApplicationCount <= 1) return true;
+      if (scope === 'action_plan') {
+        if (resolvedCaseId && Number(d.action_plan_case_id) === Number(resolvedCaseId)) return true;
+        if (resolvedApplicationId && Number(d.action_plan_application_id) === Number(resolvedApplicationId)) return true;
+        return false;
+      }
+      if (scope === 'case') {
+        return resolvedCaseId && Number(d.case_id) === Number(resolvedCaseId);
+      }
+      if (scope === 'application') {
+        return resolvedApplicationId && Number(d.application_id) === Number(resolvedApplicationId);
+      }
       return false;
     });
     const computeStatus = (required, count, min) => {
@@ -24541,7 +25479,8 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       const gate = resolveChecklistGate(checklist, {
         applicationStatus: applicationStatusLower,
         caseStatus: caseStatusLower,
-        interventionStatus: interventionStatusLower
+        interventionStatus: interventionStatusLower,
+        stageId: stageRaw
       });
       const filteredItems = Array.isArray(gate?.items)
         ? gate.items
@@ -24583,15 +25522,12 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       });
     }
 
-    const gate = resolveChecklistGate(checklist, {
-      applicationStatus: applicationStatusLower,
-      caseStatus: caseStatusLower
-    });
-    let filteredItems = Array.isArray(gate?.items)
+    const selectGateItems = gate => Array.isArray(gate?.items)
       ? gate.items
       : (Array.isArray(checklist.items) ? checklist.items : []);
 
-    const items = filteredItems.map(item => {
+    const buildChecklistItems = sourceItems => {
+      const items = (Array.isArray(sourceItems) ? sourceItems : []).map(item => {
       const normalizedId = normaliseId(item.id);
       const baseRequired = item.required !== false;
       const sources = Array.isArray(item.sources) ? item.sources : [];
@@ -24931,14 +25867,58 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
         documentTypes: docTypes,
         sources
       };
+      });
+
+      const missingRequiredCount = items.filter(i => i.required && i.status !== 'complete').length;
+      return { items, missingRequiredCount };
+    };
+
+    const resolveGateById = gateId => resolveChecklistGate(checklist, {
+      applicationStatus: applicationStatusLower,
+      caseStatus: caseStatusLower,
+      stageId: gateId
     });
 
-    const missingRequiredCount = items.filter(i => i.required && i.status !== 'complete').length;
+    if (stageRaw) {
+      const gate = resolveGateById(stageRaw);
+      const { items, missingRequiredCount } = buildChecklistItems(selectGateItems(gate));
+      return res.json({
+        items,
+        missingRequiredCount,
+        gateId: gate?.id || null,
+        gateLabel: gate?.label || null
+      });
+    }
+
+    const startGate = resolveGateById('start_assessment');
+    const startResult = buildChecklistItems(selectGateItems(startGate));
+    if (startResult.missingRequiredCount > 0) {
+      return res.json({
+        items: startResult.items,
+        missingRequiredCount: startResult.missingRequiredCount,
+        gateId: startGate?.id || null,
+        gateLabel: startGate?.label || null
+      });
+    }
+
+    const submitGate = resolveGateById('submit_assessment');
+    const submitResult = buildChecklistItems(selectGateItems(submitGate));
+    if (submitResult.missingRequiredCount > 0) {
+      return res.json({
+        items: submitResult.items,
+        missingRequiredCount: submitResult.missingRequiredCount,
+        gateId: submitGate?.id || null,
+        gateLabel: submitGate?.label || null
+      });
+    }
+
+    const commenceGate = resolveGateById('approve_and_commence');
+    const commenceResult = buildChecklistItems(selectGateItems(commenceGate));
     return res.json({
-      items,
-      missingRequiredCount,
-      gateId: gate?.id || null,
-      gateLabel: gate?.label || null
+      items: commenceResult.items,
+      missingRequiredCount: commenceResult.missingRequiredCount,
+      gateId: commenceGate?.id || null,
+      gateLabel: commenceGate?.label || null
     });
   } catch (err) {
     console.error('[checklist] compute failed', err);
@@ -24959,13 +25939,29 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
     const whereClauses = ['d.applicant_user_id = ?', `d.status = 'active'`];
     const params = [applicantId];
     if (caseFilterId) {
-      whereClauses.push('d.case_id = ?');
-      params.push(caseFilterId);
+      whereClauses.push('(d.case_id = ? OR ap.case_id = ?)');
+      params.push(caseFilterId, caseFilterId);
     } else if (interventionFilterId) {
-      whereClauses.push('d.linked_intervention_id = ?');
-      params.push(interventionFilterId);
+      whereClauses.push(
+        `(EXISTS (
+            SELECT 1
+              FROM iset_document_intervention di
+             WHERE di.document_id = d.id
+               AND di.intervention_id = ?
+          )
+          OR d.case_id = (SELECT case_id FROM iset_case_intervention WHERE id = ?)
+          OR d.application_id = (
+            SELECT c.application_id
+              FROM iset_case_intervention i
+              LEFT JOIN iset_case c ON c.id = i.case_id
+             WHERE i.id = ?
+          )
+          OR (d.case_id IS NULL AND d.application_id IS NULL AND d.action_plan_id IS NULL)
+        )`
+      );
+      params.push(interventionFilterId, interventionFilterId, interventionFilterId);
     } else if (applicationFilterId) {
-      whereClauses.push('(d.application_id = ? OR c.application_id = ?)');
+      whereClauses.push('(d.application_id = ? OR ac.application_id = ?)');
       params.push(applicationFilterId, applicationFilterId);
     }
     const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -24973,9 +25969,9 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
       `SELECT
           d.id,
           d.case_id,
-          c.case_number,
+          COALESCE(c.case_number, ac.case_number) AS case_number,
           d.application_id,
-          d.linked_intervention_id,
+          d.action_plan_id,
           d.file_name,
           d.file_path,
           d.label,
@@ -24989,14 +25985,19 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
           ) AS reference_number
        FROM iset_document d
        LEFT JOIN iset_case c ON c.id = d.case_id
-       LEFT JOIN iset_application a ON a.id = COALESCE(d.application_id, c.application_id)
+       LEFT JOIN iset_case_action_plan ap ON ap.id = d.action_plan_id
+       LEFT JOIN iset_case ac ON ac.id = ap.case_id
+       LEFT JOIN iset_application a ON a.id = COALESCE(d.application_id, c.application_id, ac.application_id)
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        ${whereSql}
        ORDER BY d.created_at DESC`,
       params
     );
+    const docIds = rows.map(row => Number(row.id)).filter(Number.isFinite);
+    const interventionMap = await fetchDocumentInterventionMap({ documentIds: docIds });
     const items = rows.map(row => ({
       ...row,
+      intervention_ids: interventionMap.get(Number(row.id)) || [],
       scope: docTypeScopeMap.get(row.document_category) || 'application'
     }));
     res.status(200).json(items);
@@ -30264,32 +31265,38 @@ app.get('/api/me/staff-profiles', async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     const like = q ? `%${q}%` : null;
 
-    const where = ["COALESCE(status, 'active') = 'active'"];
+    const where = ["COALESCE(sp.status, 'active') = 'active'"];
     const params = [];
     if (like) {
-      where.push('(display_name LIKE ? OR name LIKE ? OR email LIKE ?)');
+      where.push('(sp.display_name LIKE ? OR sp.name LIKE ? OR sp.email LIKE ?)');
       params.push(like, like, like);
     }
     params.push(limit);
 
     const [rows] = await pool.query(
-      `SELECT id, display_name, name, email, primary_role
-         FROM staff_profiles
+      `SELECT sp.id, sp.display_name, sp.name, sp.email, sp.primary_role, sp.region_id, cr.code AS region_code
+         FROM staff_profiles sp
+         LEFT JOIN canada_region cr ON cr.region_id = sp.region_id
         WHERE ${where.join(' AND ')}
-        ORDER BY COALESCE(display_name, name, email, CAST(id AS CHAR)) ASC
+        ORDER BY COALESCE(sp.display_name, sp.name, sp.email, CAST(sp.id AS CHAR)) ASC
         LIMIT ?`,
       params
     );
 
     const items = (rows || [])
-      .map(normaliseStaffProfileSummaryRow)
-      .filter(Boolean)
-      .map((row) => ({
-        id: row.staff_profile_id,
-        displayName: row.display_name,
-        primaryRole: row.primary_role,
-        email: row.email,
-      }));
+      .map((row) => {
+        const summary = normaliseStaffProfileSummaryRow(row);
+        if (!summary) return null;
+        return {
+          id: summary.staff_profile_id,
+          displayName: summary.display_name,
+          primaryRole: summary.primary_role,
+          email: summary.email,
+          regionCode: row.region_code || null,
+          regionId: row.region_id ?? null,
+        };
+      })
+      .filter(Boolean);
 
     return res.json({ items });
   } catch (err) {
@@ -32078,6 +33085,8 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     // Resolve eligible workflow attachments (consent forms only)
     let attachmentRows = [];
     let decisionLetterTokensByWorkflowId = new Map();
+    const decisionLetterDocs = [];
+    const letterDocTypes = new Set(['assessment_approval_letter', 'assessment_denial_letter']);
     if (Array.isArray(attachments) && attachments.length) {
       const wfIds = attachments
         .map(a => parseInt(a?.workflow_id, 10))
@@ -32099,7 +33108,6 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       }
     }
     if (attachmentRows.length) {
-      const letterDocTypes = new Set(['assessment_approval_letter', 'assessment_denial_letter']);
       const approvedCaseStatuses = new Set([
         'initiated',
         'active',
@@ -32353,6 +33361,59 @@ app.post('/api/cases/:id/messages', async (req, res) => {
           `INSERT INTO message_signing_request (message_id, signing_request_id) VALUES (?, ?)`,
           [result.insertId, signingRequestId]
         );
+        if (letterDocTypes.has(docType) && resolvedSchema) {
+          decisionLetterDocs.push({
+            workflowName: wf.name,
+            docType,
+            schema: resolvedSchema,
+            signingRequestId
+          });
+        }
+      }
+    }
+    if (decisionLetterDocs.length) {
+      const decisionApplicationId = normalisePositiveInteger(caseRow?.application_id) || null;
+      if (decisionApplicationId) {
+        let resolvedClientId = null;
+        try {
+          resolvedClientId = await resolveClientIdForDocument({
+            applicantUserId: recipientId,
+            caseId,
+            applicationId: decisionApplicationId
+          });
+        } catch (err) {
+          console.warn('[decision-letter] client resolution failed', err?.message || err);
+          resolvedClientId = null;
+        }
+        if (resolvedClientId) {
+          for (const letter of decisionLetterDocs) {
+            if (!letter?.schema?.steps?.length) continue;
+            try {
+              const pdfBuffer = await generateDecisionLetterPdfBuffer({
+                workflowName: letter.workflowName,
+                steps: letter.schema.steps,
+                values: {},
+                signedAt: null
+              });
+              await storeDecisionLetterPdfDocument({
+                docType: letter.docType,
+                applicationId: decisionApplicationId,
+                applicantUserId: recipientId,
+                actorUserId: senderId,
+                clientId: resolvedClientId,
+                trackingId: trackingReference,
+                signingRequestId: letter.signingRequestId,
+                pdfBuffer
+              });
+            } catch (err) {
+              console.warn('[decision-letter] PDF generation failed', err?.message || err);
+            }
+          }
+        } else {
+          console.warn('[decision-letter] missing client id; skipping document insert');
+        }
+      } else {
+        console.warn('[decision-letter] missing application id; skipping document insert');
       }
     }
     const { actorName } = resolveRequestActor(req);
@@ -34528,16 +35589,29 @@ async function fetchSupportingDocumentsForPayment({
   caseId,
   applicationId,
   interventionIds = [],
+  clientId,
   connection,
 }) {
   if (!connection) return [];
   const normalizedCaseId = normalisePositiveInteger(caseId);
   let normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedClientId = normalisePositiveInteger(clientId);
   const normalizedInterventionIds = Array.isArray(interventionIds)
     ? Array.from(
         new Set(interventionIds.map(id => Number(id)).filter(Number.isFinite))
       )
     : [];
+  let actionPlanId = null;
+  if (normalizedInterventionIds.length) {
+    try {
+      actionPlanId = await resolveActionPlanIdForInterventions({ interventionIds: normalizedInterventionIds, connection });
+    } catch (err) {
+      console.warn('[payments] unable to resolve action plan for interventions', err?.code || err?.message || err);
+      actionPlanId = null;
+    }
+  }
+
+  if (!normalizedClientId) return [];
 
   if (!normalizedApplicationId && normalizedCaseId) {
     const [[caseRow]] = await connection.query(
@@ -34548,32 +35622,56 @@ async function fetchSupportingDocumentsForPayment({
   }
 
   const filters = [];
-  const params = [];
-  if (normalizedInterventionIds.length) {
-    filters.push(`d.linked_intervention_id IN (${normalizedInterventionIds.map(() => '?').join(',')})`);
-    params.push(...normalizedInterventionIds);
-  }
+  const params = [normalizedClientId];
   if (normalizedCaseId) {
-    filters.push('(d.case_id = ? AND (d.linked_intervention_id IS NULL OR d.linked_intervention_id = 0))');
+    filters.push('d.case_id = ?');
     params.push(normalizedCaseId);
   }
   if (normalizedApplicationId) {
-    filters.push('(d.application_id = ? AND (d.linked_intervention_id IS NULL OR d.linked_intervention_id = 0))');
+    filters.push('d.application_id = ?');
     params.push(normalizedApplicationId);
   }
-  if (!filters.length) return [];
+  if (actionPlanId) {
+    filters.push('d.action_plan_id = ?');
+    params.push(actionPlanId);
+  }
+  if (normalizedInterventionIds.length) {
+    filters.push(
+      `EXISTS (SELECT 1 FROM iset_document_intervention di WHERE di.document_id = d.id AND di.intervention_id IN (${normalizedInterventionIds.map(() => '?').join(',')}))`
+    );
+    params.push(...normalizedInterventionIds);
+  }
+  filters.push('(d.case_id IS NULL AND d.application_id IS NULL AND d.action_plan_id IS NULL)');
 
   const [rows] = await connection.query(
-    `SELECT d.id, d.document_category, d.metadata, d.linked_intervention_id, d.created_at, d.checksum_sha256
+    `SELECT d.id,
+            d.document_category,
+            d.metadata,
+            d.case_id,
+            d.application_id,
+            d.action_plan_id,
+            d.client_id,
+            d.created_at,
+            d.checksum_sha256
        FROM iset_document d
       WHERE d.status = 'active'
+        AND d.client_id = ?
         AND (${filters.join(' OR ')})
       ORDER BY d.created_at ASC`,
     params
   );
+  const docTypeScopeMap = await loadDocumentTypeScopeMap();
   const seen = new Set();
   const docs = [];
   (rows || []).forEach(row => {
+    const isUnlinked = !row.case_id && !row.application_id && !row.action_plan_id;
+    if (isUnlinked) {
+      const docType = resolveDocumentTypeFromRow(row);
+      const scope = docType ? docTypeScopeMap.get(docType) || 'application' : 'application';
+      if (scope !== 'client' && scope !== 'payment_packet') {
+        return;
+      }
+    }
     const docId = Number(row.id);
     if (!Number.isFinite(docId) || seen.has(docId)) return;
     seen.add(docId);
@@ -34596,6 +35694,7 @@ async function attachSupportingDocumentsToPaymentPacket({
     caseId,
     applicationId,
     interventionIds,
+    clientId,
     connection,
   });
   if (!docs.length) return { attached: 0 };
@@ -34613,7 +35712,6 @@ async function attachSupportingDocumentsToPaymentPacket({
   );
   const baselineRequiredKeys = new Set(baselineRequired.map(normalizeEvidenceTypeKey).filter(Boolean));
   const baselineOptionalKeys = new Set(baselineOptional.map(normalizeEvidenceTypeKey).filter(Boolean));
-  const baselineKeys = new Set([...baselineRequiredKeys, ...baselineOptionalKeys]);
 
   const [lineRows] = await connection.query(
     'SELECT id, intervention_id, payment_type, payee_type FROM payment_packet_line WHERE payment_packet_id = ?',
@@ -34644,10 +35742,14 @@ async function attachSupportingDocumentsToPaymentPacket({
     [packetId]
   );
   const existingKeys = new Set();
+  const existingDocEvidenceKeys = new Set();
   (existingRows || []).forEach(row => {
     const lineKey = row.payment_packet_line_id ? String(row.payment_packet_line_id) : 'packet';
     const docKey = row.document_id ? String(row.document_id) : '';
     const evidenceKey = normalizeEvidenceTypeKey(row.evidence_type) || String(row.evidence_type || '');
+    if (docKey && evidenceKey) {
+      existingDocEvidenceKeys.add(`${docKey}:${evidenceKey}`);
+    }
     existingKeys.add(`${lineKey}:${docKey}:${evidenceKey}`);
   });
 
@@ -34656,8 +35758,10 @@ async function attachSupportingDocumentsToPaymentPacket({
     const lineKey = lineId ? String(lineId) : 'packet';
     const evidenceKey = normalizeEvidenceTypeKey(evidenceType) || String(evidenceType || '');
     const key = `${lineKey}:${documentId}:${evidenceKey}`;
-    if (existingKeys.has(key)) return;
+    const docEvidenceKey = `${documentId}:${evidenceKey}`;
+    if (existingKeys.has(key) || existingDocEvidenceKeys.has(docEvidenceKey)) return;
     existingKeys.add(key);
+    existingDocEvidenceKeys.add(docEvidenceKey);
     attachments.push([
       packetId,
       lineId || null,
@@ -34667,6 +35771,19 @@ async function attachSupportingDocumentsToPaymentPacket({
       receivedAt,
     ]);
   };
+
+  const lineRequiredKeys = new Set();
+  const lineOptionalKeys = new Set();
+  lineInfos.forEach(line => {
+    line.requiredKeys.forEach(key => lineRequiredKeys.add(key));
+    line.optionalKeys.forEach(key => lineOptionalKeys.add(key));
+  });
+  const requiredKeys = new Set([...baselineRequiredKeys, ...lineRequiredKeys]);
+  const eligibleKeys = new Set([
+    ...requiredKeys,
+    ...baselineOptionalKeys,
+    ...lineOptionalKeys
+  ]);
 
   docs.forEach(doc => {
     const documentId = Number(doc.id);
@@ -34680,29 +35797,13 @@ async function attachSupportingDocumentsToPaymentPacket({
     evidenceTypes.forEach(type => {
       const evidenceKey = normalizeEvidenceTypeKey(type);
       if (!evidenceKey) return;
-      if (baselineKeys.has(evidenceKey)) {
-        pushAttachment({
-          lineId: null,
-          documentId,
-          evidenceType: type,
-          required: baselineRequiredKeys.has(evidenceKey),
-          receivedAt,
-        });
-        return;
-      }
-      lineInfos.forEach(line => {
-        if (doc.linked_intervention_id && Number(doc.linked_intervention_id) !== Number(line.interventionId)) {
-          return;
-        }
-        if (line.requiredKeys.has(evidenceKey) || line.optionalKeys.has(evidenceKey)) {
-          pushAttachment({
-            lineId: line.id,
-            documentId,
-            evidenceType: type,
-            required: line.requiredKeys.has(evidenceKey),
-            receivedAt,
-          });
-        }
+      if (!eligibleKeys.has(evidenceKey)) return;
+      pushAttachment({
+        lineId: null,
+        documentId,
+        evidenceType: type,
+        required: requiredKeys.has(evidenceKey),
+        receivedAt,
       });
     });
   });
@@ -42807,6 +43908,9 @@ app.post('/api/finance/payment-packets/:id/documents', async (req, res) => {
     return res.status(400).json({ error: 'evidenceType_required' });
   }
   const lineId = parsePaymentLineId(body.lineId || body.paymentPacketLineId || body.payment_packet_line_id);
+  if (lineId) {
+    return res.status(400).json({ error: 'line_level_documents_not_supported' });
+  }
   const requiredRaw = body.required;
   const required = requiredRaw !== undefined ? normalizeBooleanLike(requiredRaw) : false;
   if (requiredRaw !== undefined && required === null) {
@@ -42824,21 +43928,15 @@ app.post('/api/finance/payment-packets/:id/documents', async (req, res) => {
   const notes = typeof body.notes === 'string' ? body.notes.trim() : null;
 
   try {
-    const [[packetRow]] = await pool.query('SELECT id FROM payment_packet WHERE id = ? LIMIT 1', [packetId]);
+    const [[packetRow]] = await pool.query(
+      'SELECT id, client_id FROM payment_packet WHERE id = ? LIMIT 1',
+      [packetId]
+    );
     if (!packetRow) {
       return res.status(404).json({ error: 'payment_packet_not_found' });
     }
-    if (lineId) {
-      const [[lineRow]] = await pool.query(
-        'SELECT id FROM payment_packet_line WHERE id = ? AND payment_packet_id = ? LIMIT 1',
-        [lineId, packetId]
-      );
-      if (!lineRow) {
-        return res.status(400).json({ error: 'line_not_in_packet' });
-      }
-    }
     const [[docRow]] = await pool.query(
-      'SELECT id, checksum_sha256 FROM iset_document WHERE id = ? AND status = "active" LIMIT 1',
+      'SELECT id, checksum_sha256, client_id FROM iset_document WHERE id = ? AND status = "active" LIMIT 1',
       [documentId]
     );
     if (!docRow) {
@@ -42847,13 +43945,22 @@ app.post('/api/finance/payment-packets/:id/documents', async (req, res) => {
     if (!docRow.checksum_sha256 || String(docRow.checksum_sha256).length !== 64) {
       return res.status(400).json({ error: 'document_checksum_missing' });
     }
+    if (!packetRow.client_id) {
+      return res.status(422).json({ error: 'packet_client_required' });
+    }
+    if (!docRow.client_id) {
+      return res.status(422).json({ error: 'document_client_required' });
+    }
+    if (Number(docRow.client_id) !== Number(packetRow.client_id)) {
+      return res.status(409).json({ error: 'client_id_mismatch' });
+    }
     const [result] = await pool.query(
       `INSERT INTO payment_packet_document
         (payment_packet_id, payment_packet_line_id, document_id, evidence_type, required, received_at, verified_by_user_id, verified_at, notes, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         packetId,
-        lineId || null,
+        null,
         documentId,
         evidenceType,
         required ? 1 : 0,
@@ -44623,7 +45730,12 @@ app.get('/api/applications', async (req, res) => {
     const { status, limit = 50, offset = 0, search } = req.query;
     const role = req.auth.role;
     const regionId = req.auth.regionId || req.staffProfile?.region_id || null;
+    const normalizedRegionId = Number.isInteger(Number(regionId)) && Number(regionId) > 0 ? Number(regionId) : null;
     const archivedFilter = buildArchivedApplicationFilter(req, 'a');
+    const addressProvinceExpr = `COALESCE(
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."address-province"')),
+      JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."address-province"'))
+    )`;
 
     // Base case + application join using new lean model.
     // Assignment user now from staff_profiles (nullable); tracking_id fallback derived from payload_json->submission_snapshot.reference_number if tracking_id column absent.
@@ -44637,10 +45749,7 @@ app.get('/api/applications', async (req, res) => {
       al.owner_email AS lock_owner_email,
       al.expires_at AS lock_expires_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
-      COALESCE(
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."address-province"')),
-        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."address-province"'))
-      ) AS address_province,
+      ${addressProvinceExpr} AS address_province,
       ca.esdc_eligibility AS assessment_esdc_eligibility,
       ca.intervention_cost_total AS assessment_intervention_cost_total,
       ca.intervention_budget_pot_id AS assessment_intervention_pot_id,
@@ -44684,14 +45793,35 @@ app.get('/api/applications', async (req, res) => {
       where.push(archivedFilter);
     }
 
+    let regionCode = null;
+    if (role === 'Regional Coordinator' && normalizedRegionId) {
+      try {
+        const [[row]] = await pool.query(
+          'SELECT code FROM canada_region WHERE region_id = ? LIMIT 1',
+          [normalizedRegionId]
+        );
+        regionCode = typeof row?.code === 'string' ? row.code.trim().toLowerCase() : null;
+      } catch (err) {
+        if (!isMissingTableErrorLocal(err)) {
+          throw err;
+        }
+      }
+    }
+
     if (role === 'Application Assessor') {
       if (!req.staffProfile?.id) return res.json({ count: 0, rows: [] });
       where.push('c.assigned_to_user_id = ?'); params.push(req.staffProfile.id);
     } else if (role === 'Regional Coordinator') {
       // For now: filter by shared region (when regionId present) OR assignments directly to coordinator
-      if (regionId) {
-        where.push('(sp.region_id = ? OR c.assigned_to_user_id = ?)');
-        params.push(regionId, req.staffProfile?.id || 0);
+      if (normalizedRegionId) {
+        const coordinatorId = req.staffProfile?.id || 0;
+        if (regionCode) {
+          where.push(`(sp.region_id = ? OR c.assigned_to_user_id = ? OR ((c.assigned_to_user_id IS NULL OR c.assigned_to_user_id = 0) AND LOWER(${addressProvinceExpr}) = ?))`);
+          params.push(normalizedRegionId, coordinatorId, regionCode);
+        } else {
+          where.push('(sp.region_id = ? OR c.assigned_to_user_id = ?)');
+          params.push(normalizedRegionId, coordinatorId);
+        }
       } else if (req.staffProfile?.id) {
         where.push('c.assigned_to_user_id = ?'); params.push(req.staffProfile.id);
       } else {
@@ -44716,10 +45846,7 @@ app.get('/api/applications', async (req, res) => {
         NULL AS assigned_user_email, NULL AS assigned_user_role, NULL AS staff_profile_id,
         NULL AS lock_owner_id, NULL AS lock_owner_name, NULL AS lock_owner_email, NULL AS lock_expires_at,
   JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
-        COALESCE(
-          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."address-province"')),
-          JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."address-province"'))
-        ) AS address_province,
+        ${addressProvinceExpr} AS address_province,
         NULL AS assessment_esdc_eligibility,
         NULL AS assessment_intervention_cost_total,
         NULL AS assessment_intervention_pot_id,
@@ -45143,7 +46270,6 @@ app.post('/api/render-njk', (req, res) => {
 app.get('/api/admin/messages/:id/attachments', async (req, res) => {
   const messageId = req.params.id;
   const caseIdFromQuery = req.query.case_id ? parseInt(req.query.case_id, 10) : null;
-  const interventionIdFromQuery = normalisePositiveInteger(req.query.intervention_id || req.query.interventionId);
   try {
     // Get all attachments for this message
     const [attachments] = await pool.query(
@@ -45189,9 +46315,7 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
       }
     }
 
-    const resolvedApplicationId = interventionIdFromQuery
-      ? null
-      : caseApplicationId || message.application_id || null;
+    const resolvedApplicationId = caseApplicationId || message.application_id || null;
     if (!applicantUserId) {
       applicantUserId =
         message.applicant_user_id ||
@@ -45204,6 +46328,20 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
     const adoptedAttachments = [];
 
     if (caseId) {
+      let resolvedClientId = null;
+      try {
+        resolvedClientId = await resolveClientIdForDocument({
+          applicantUserId,
+          caseId,
+          applicationId: resolvedApplicationId,
+        });
+        if (!resolvedClientId) {
+          return res.status(422).json({ error: 'client_id_required' });
+        }
+      } catch (err) {
+        const errorCode = err?.code || 'client_id_resolution_failed';
+        return res.status(400).json({ error: errorCode });
+      }
       for (const att of attachments) {
         const docApplicantUserId =
           applicantUserId ||
@@ -45228,13 +46366,14 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
 
         try {
           const [insertResult] = await pool.query(
-            `INSERT INTO iset_document (case_id, application_id, linked_intervention_id, applicant_user_id, user_id, origin_message_id, source, file_name, file_path, label, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'secure_message_attachment', ?, ?, 'Secure Message Attachment', ?)
-             ON DUPLICATE KEY UPDATE applicant_user_id = VALUES(applicant_user_id), application_id = VALUES(application_id), linked_intervention_id = VALUES(linked_intervention_id), user_id = VALUES(user_id), origin_message_id = VALUES(origin_message_id), updated_at = NOW()` ,
+            `INSERT INTO iset_document (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, origin_message_id, source, file_name, file_path, label, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'secure_message_attachment', ?, ?, 'Secure Message Attachment', ?)
+             ON DUPLICATE KEY UPDATE applicant_user_id = VALUES(applicant_user_id), application_id = VALUES(application_id), action_plan_id = VALUES(action_plan_id), client_id = VALUES(client_id), user_id = VALUES(user_id), origin_message_id = VALUES(origin_message_id), updated_at = NOW()` ,
             [
               caseId,
               resolvedApplicationId,
-              interventionIdFromQuery,
+              null,
+              resolvedClientId,
               docApplicantUserId,
               docUserId,
               messageId,

@@ -472,7 +472,25 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
     } else v.rules=[];
     return v;
   }
-  function valueIsEmpty(val){
+  const FILE_UPLOAD_VALUE_KEYS = ['filePath', 'file_path', 'path', 'key', 'fileId', 'file_id', 'name', 'originalFilename', 'original_filename'];
+  function hasFileUploadValue(val){
+    if (val === undefined || val === null) return false;
+    if (typeof val === 'string') return false;
+    if (typeof val === 'number') return Number.isFinite(val);
+    if (Array.isArray(val)) return val.some(hasFileUploadValue);
+    if (typeof val === 'object') {
+      return FILE_UPLOAD_VALUE_KEYS.some((k) => {
+        const v = val[k];
+        if (v === undefined || v === null) return false;
+        if (typeof v === 'string') return v.trim() !== '';
+        if (typeof v === 'number') return Number.isFinite(v);
+        return false;
+      });
+    }
+    return false;
+  }
+  function valueIsEmpty(val, compType){
+    if (String(compType || '').toLowerCase() === 'file-upload') return !hasFileUploadValue(val);
     if(val==null) return true; if(typeof val==='string') return val.trim()===''; if(Array.isArray(val)) return val.length===0; return false;
   }
   function mergedLogicData(stepObj){
@@ -495,7 +513,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
           const fields = Array.isArray(rule.fields)?rule.fields:[]; const ok = fields.some(f=>{ const v=data[f]; if(v==null) return false; if(Array.isArray(v)) return v.length>0; if(typeof v==='object') return Object.keys(v).length>0; return String(v).trim()!==''; }); return ok?{failed:false}:{failed:true,message:failMsg()||'Provide at least one value.'};
         }
         case 'range': {
-          if(valueIsEmpty(value)) return { failed:false }; const num=Number(value); if(!Number.isFinite(num)) return { failed:false }; if(rule.min!=null && num<rule.min) return { failed:true, message: failMsg()||`Value must be ≥ ${rule.min}`}; if(rule.max!=null && num>rule.max) return { failed:true, message: failMsg()||`Value must be ≤ ${rule.max}`}; return { failed:false };
+          if(valueIsEmpty(value, comp?.type)) return { failed:false }; const num=Number(value); if(!Number.isFinite(num)) return { failed:false }; if(rule.min!=null && num<rule.min) return { failed:true, message: failMsg()||`Value must be ≥ ${rule.min}`}; if(rule.max!=null && num>rule.max) return { failed:true, message: failMsg()||`Value must be ≤ ${rule.max}`}; return { failed:false };
         }
         case 'length': {
           if(typeof value!=='string'||value==='') return { failed:false }; if(rule.minLength!=null && value.length<rule.minLength) return { failed:true, message: failMsg()||`Minimum ${rule.minLength} characters.`}; if(rule.maxLength!=null && value.length>rule.maxLength) return { failed:true, message: failMsg()||`Maximum ${rule.maxLength} characters.`}; return { failed:false };
@@ -569,7 +587,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
       })();
       const migrated = migrateValidation(rawValidation || {});
   const isReq = c.required || (c.props && c.props.required) || migrated.required;
-      if(isReq && valueIsEmpty(val)){
+      if(isReq && valueIsEmpty(val, c?.type)){
         const reqMsg = migrated.requiredMessage ? msgFor(migrated.requiredMessage) : (migrated.errorMessage ? msgFor(migrated.errorMessage) : 'This field is required');
         errs[k]=reqMsg; return; // skip further rules
       }

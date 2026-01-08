@@ -100,6 +100,9 @@ const BASE_STEP_IDS = [
 ];
 const SUBMITTED_STEP_IDS = ['decision'];
 const COMMUNICATION_STEP_IDS = ['communication'];
+const START_ASSESSMENT_STAGE = 'start_assessment';
+const SUBMIT_ASSESSMENT_STAGE = 'submit_assessment';
+const COMMUNICATION_CHECKLIST_STAGE = 'approve_and_commence';
 const STEP_LABELS = {
   eligibility: 'EI Eligibility Check',
   framing: 'What is being proposed?',
@@ -116,11 +119,6 @@ const STEP_LABELS = {
   decision: 'Approval and decision',
   communication: 'Communication & agreement'
 };
-const COMMUNICATION_DOC_TYPES = new Set([
-  'assessment_approval_letter',
-  'assessment_denial_letter',
-  'funding_agreement'
-]);
 const REQUIRED_STEP_IDS = BASE_STEP_IDS.slice(0, BASE_STEP_IDS.length - 1);
 
 const scrollToPageTop = () => {
@@ -978,10 +976,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     [documentChecklistItems]
   );
   const communicationChecklistItems = useMemo(
-    () => documentChecklistItems.filter(item => {
-      const types = Array.isArray(item?.documentTypes) ? item.documentTypes : [];
-      return types.some(type => COMMUNICATION_DOC_TYPES.has(type));
-    }),
+    () => documentChecklistItems,
     [documentChecklistItems]
   );
   const requiredCommunicationChecklistItems = useMemo(
@@ -1575,7 +1570,16 @@ const CoordinatorAssessmentWidget = forwardRef(
     setDocumentChecklistLoading(true);
     setDocumentChecklistError(null);
     try {
-      const query = applicationId ? `?applicationId=${encodeURIComponent(applicationId)}` : '';
+      const params = new URLSearchParams();
+      if (applicationId) {
+        params.set('applicationId', applicationId);
+      }
+      if (currentStep === 'communication') {
+        params.set('stage', COMMUNICATION_CHECKLIST_STAGE);
+      } else if (currentStep === 'docs') {
+        params.set('stage', SUBMIT_ASSESSMENT_STAGE);
+      }
+      const query = params.toString() ? `?${params.toString()}` : '';
       const res = await apiFetch(`/api/applicants/${applicantUserId}/document-checklist${query}`);
       if (!res.ok) {
         throw new Error('Failed to load document checklist.');
@@ -1591,7 +1595,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     } finally {
       setDocumentChecklistLoading(false);
     }
-  }, [applicantUserId, applicationId]);
+  }, [applicantUserId, applicationId, currentStep]);
 
   useEffect(() => {
     if (wizardNavPriming) return;
@@ -2171,6 +2175,9 @@ const CoordinatorAssessmentWidget = forwardRef(
   ]);
   const handleSignDeclaration = useCallback(async () => {
     if (conflictDeclarationSigned || isSigningDeclaration) {
+      if (conflictDeclarationSigned && normalizeConflictDeclarationChoice(conflictDeclarationChoice) === 'conflict') {
+        setConflictHoldModalVisible(true);
+      }
       return;
     }
     const choice = normalizeConflictDeclarationChoice(conflictDeclarationChoice);
@@ -2266,6 +2273,9 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
       if (choice === 'conflict') {
         setConflictHoldModalVisible(true);
+      } else {
+        setCurrentStep(BASE_STEP_IDS[0]);
+        setAttemptedSteps({});
       }
       if (releaseAfterSuccess) {
         releaseLock({ silent: true }).catch(() => {});
@@ -2404,7 +2414,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     return errors;
   };
   const runDocumentChecklist = useCallback(
-    async (onContinue, { allowBypass = true } = {}) => {
+    async (onContinue, { allowBypass = true, stage = null } = {}) => {
       if (!applicantUserId) {
         setChecklistWarningItems([]);
         setChecklistNextAction(null);
@@ -2416,7 +2426,14 @@ const CoordinatorAssessmentWidget = forwardRef(
       setChecklistNextAction(null);
       setCheckingChecklist(true);
       try {
-        const query = applicationId ? `?applicationId=${encodeURIComponent(applicationId)}` : '';
+        const params = new URLSearchParams();
+        if (applicationId) {
+          params.set('applicationId', applicationId);
+        }
+        if (stage) {
+          params.set('stage', stage);
+        }
+        const query = params.toString() ? `?${params.toString()}` : '';
         const res = await apiFetch(`/api/applicants/${applicantUserId}/document-checklist${query}`);
         if (!res.ok) {
           throw new Error('Failed to load document checklist.');
@@ -2602,7 +2619,10 @@ const CoordinatorAssessmentWidget = forwardRef(
         }
       };
 
-      const checklistOk = await runDocumentChecklist(submitAssessment, { allowBypass: false });
+      const checklistOk = await runDocumentChecklist(submitAssessment, {
+        allowBypass: false,
+        stage: SUBMIT_ASSESSMENT_STAGE
+      });
       if (!checklistOk) return;
       await submitAssessment();
     } finally {
@@ -2877,6 +2897,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         statusIconAriaLabel: 'Success'
       });
       dispatchSupportingDocsRefresh();
+      await loadDocumentChecklist();
     } catch (err) {
       setSendingLetterError(err?.message || 'Failed to send the decision letter.');
     } finally {
@@ -3313,7 +3334,10 @@ const CoordinatorAssessmentWidget = forwardRef(
       return;
     }
     setHasSubmitted(true);
-    const checklistOk = await runDocumentChecklist(null, { allowBypass: false });
+    const checklistOk = await runDocumentChecklist(null, {
+      allowBypass: false,
+      stage: COMMUNICATION_CHECKLIST_STAGE
+    });
     if (!checklistOk) return;
     const lockCheck = await ensureLockForOperation();
     if (!lockCheck.ok) return;
@@ -3399,6 +3423,14 @@ const CoordinatorAssessmentWidget = forwardRef(
           if (!uploadOk) {
             return;
           }
+          const checklistOk = await runDocumentChecklist(null, {
+            allowBypass: false,
+            stage: START_ASSESSMENT_STAGE
+          });
+          if (!checklistOk) {
+            return;
+          }
+          dispatchSupportingDocsRefresh();
         }
       }
     }
@@ -5084,6 +5116,43 @@ const CoordinatorAssessmentWidget = forwardRef(
   const wizardSubmitLabel = isCommunicationStep
     ? 'Mark communication complete'
     : (showNWACSection ? 'Commit' : 'Submit assessment');
+  const conflictHoldModal = (
+    <Modal
+      visible={conflictHoldModalVisible}
+      onDismiss={() => {
+        setConflictHoldModalVisible(false);
+        if (typeof window !== 'undefined') {
+          window.location.assign('/');
+        }
+      }}
+      closeAriaLabel="Return to homepage"
+      header="Conflict of Interest Declared"
+      footer={
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button
+            variant="primary"
+            onClick={() => {
+              setConflictHoldModalVisible(false);
+              if (typeof window !== 'undefined') {
+                window.location.assign('/');
+              }
+            }}
+          >
+            Return to homepage
+          </Button>
+        </SpaceBetween>
+      }
+    >
+      <SpaceBetween size="s">
+        <Box>
+          Thank you for declaring a potential conflict of interest. This conflict has been escalated to your manager for resolution.
+        </Box>
+        <Box>
+          If you are cleared to work on the application you will receive a notification, or the application may be reassigned. You will be redirected to your homepage now.
+        </Box>
+      </SpaceBetween>
+    </Modal>
+  );
 
   if (isDeclarationGateActive) {
     return (
@@ -5189,6 +5258,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               )}
             </SpaceBetween>
           </Box>
+          {conflictHoldModal}
         </div>
       </BoardItem>
     );
@@ -5360,41 +5430,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         >
           <Box>Are you sure you want to edit the previously submitted assessment? This will allow you to make changes and resubmit. Your changes will not be saved until you click Save Progress or Submit.</Box>
         </Modal>
-        <Modal
-          visible={conflictHoldModalVisible}
-          onDismiss={() => {
-            setConflictHoldModalVisible(false);
-            if (typeof window !== 'undefined') {
-              window.location.assign('/');
-            }
-          }}
-          closeAriaLabel="Return to homepage"
-          header="Conflict of Interest Declared"
-          footer={
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button
-                variant="primary"
-                onClick={() => {
-                  setConflictHoldModalVisible(false);
-                  if (typeof window !== 'undefined') {
-                    window.location.assign('/');
-                  }
-                }}
-              >
-                Return to homepage
-              </Button>
-            </SpaceBetween>
-          }
-        >
-          <SpaceBetween size="s">
-            <Box>
-              Thank you for declaring a potential conflict of interest. This conflict has been escalated to your manager for resolution.
-            </Box>
-            <Box>
-              If you are cleared to work on the application you will receive a notification, or the application may be reassigned. You will be redirected to your homepage now.
-            </Box>
-          </SpaceBetween>
-        </Modal>
+        {conflictHoldModal}
       </div>
     </BoardItem>
   );
