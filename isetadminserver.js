@@ -1178,6 +1178,7 @@ const buildAssessmentPdfHtml = ({ templateHtml, fields }) => {
 async function storeAssessmentPdfDocument({
   applicationId,
   caseId,
+  clientId,
   applicantUserId,
   actorUserId,
   trackingId,
@@ -1191,6 +1192,7 @@ async function storeAssessmentPdfDocument({
   const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
+  const normalizedClientId = normalisePositiveInteger(clientId);
   const storageMode = resolveUploadStorageMode();
   let relativePath = null;
   if (storageMode === 's3') {
@@ -1231,6 +1233,7 @@ async function storeAssessmentPdfDocument({
   const insertPayload = [
     caseId || null,
     applicationId,
+    normalizedClientId,
     normalizedApplicantUserId,
     normalizedActorUserId,
     displayName,
@@ -1244,8 +1247,8 @@ async function storeAssessmentPdfDocument({
   ];
   const [result] = await pool.query(
     `INSERT INTO iset_document
-       (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
-     VALUES (?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+       (case_id, application_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+     VALUES (?,?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
     insertPayload
   );
   return result?.insertId || null;
@@ -1254,6 +1257,7 @@ async function storeAssessmentPdfDocument({
 async function storeApplicationFormPdfDocument({
   applicationId,
   caseId,
+  clientId,
   applicantUserId,
   actorUserId,
   referenceNumber,
@@ -1267,6 +1271,7 @@ async function storeApplicationFormPdfDocument({
   const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
+  const normalizedClientId = normalisePositiveInteger(clientId);
   const storageMode = resolveUploadStorageMode();
   let relativePath = null;
   if (storageMode === 's3') {
@@ -1307,6 +1312,7 @@ async function storeApplicationFormPdfDocument({
   const insertPayload = [
     caseId || null,
     applicationId,
+    normalizedClientId,
     normalizedApplicantUserId,
     normalizedActorUserId,
     displayName,
@@ -1320,8 +1326,8 @@ async function storeApplicationFormPdfDocument({
   ];
   const [result] = await pool.query(
     `INSERT INTO iset_document
-       (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
-     VALUES (?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+       (case_id, application_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+     VALUES (?,?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
     insertPayload
   );
   return result?.insertId || null;
@@ -1330,6 +1336,7 @@ async function storeApplicationFormPdfDocument({
 async function storeFinancialOverviewPdfDocument({
   applicationId,
   caseId,
+  clientId,
   applicantUserId,
   actorUserId,
   referenceNumber,
@@ -1343,6 +1350,7 @@ async function storeFinancialOverviewPdfDocument({
   const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
+  const normalizedClientId = normalisePositiveInteger(clientId);
   const storageMode = resolveUploadStorageMode();
   let relativePath = null;
   if (storageMode === 's3') {
@@ -1383,6 +1391,7 @@ async function storeFinancialOverviewPdfDocument({
   const insertPayload = [
     caseId || null,
     applicationId,
+    normalizedClientId,
     normalizedApplicantUserId,
     normalizedActorUserId,
     displayName,
@@ -1396,8 +1405,8 @@ async function storeFinancialOverviewPdfDocument({
   ];
   const [result] = await pool.query(
     `INSERT INTO iset_document
-       (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
-     VALUES (?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+       (case_id, application_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+     VALUES (?,?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
     insertPayload
   );
   return result?.insertId || null;
@@ -25879,15 +25888,30 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       stageId: gateId
     });
 
-    if (stageRaw) {
-      const gate = resolveGateById(stageRaw);
+    const buildGatePayload = gateId => {
+      const gate = resolveGateById(gateId);
       const { items, missingRequiredCount } = buildChecklistItems(selectGateItems(gate));
-      return res.json({
+      return {
         items,
         missingRequiredCount,
         gateId: gate?.id || null,
         gateLabel: gate?.label || null
-      });
+      };
+    };
+
+    if (stageRaw) {
+      return res.json(buildGatePayload(stageRaw));
+    }
+
+    const normalizedStatus = applicationStatusLower || caseStatusLower || '';
+    if (normalizedStatus === 'closure_notice') {
+      return res.json(buildGatePayload('deny'));
+    }
+    if (normalizedStatus === CASE_STATUS_DERIVED_VALUES.pendingApproval) {
+      return res.json(buildGatePayload('approve'));
+    }
+    if (decisionReady || legacyApproved || completedStatus || postApproval) {
+      return res.json(buildGatePayload('approve_and_commence'));
     }
 
     const startGate = resolveGateById('start_assessment');
@@ -25901,25 +25925,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       });
     }
 
-    const submitGate = resolveGateById('submit_assessment');
-    const submitResult = buildChecklistItems(selectGateItems(submitGate));
-    if (submitResult.missingRequiredCount > 0) {
-      return res.json({
-        items: submitResult.items,
-        missingRequiredCount: submitResult.missingRequiredCount,
-        gateId: submitGate?.id || null,
-        gateLabel: submitGate?.label || null
-      });
-    }
-
-    const commenceGate = resolveGateById('approve_and_commence');
-    const commenceResult = buildChecklistItems(selectGateItems(commenceGate));
-    return res.json({
-      items: commenceResult.items,
-      missingRequiredCount: commenceResult.missingRequiredCount,
-      gateId: commenceGate?.id || null,
-      gateLabel: commenceGate?.label || null
-    });
+    return res.json(buildGatePayload('submit_assessment'));
   } catch (err) {
     console.error('[checklist] compute failed', err);
     return res.status(500).json({ error: 'checklist_failed' });
@@ -47338,7 +47344,7 @@ app.put('/api/cases/:id', async (req, res) => {
   try {
     const conflictSummaryStaffId = Number.isFinite(identity.userId) ? Number(identity.userId) : 0;
     const [[caseRow]] = await pool.query(
-      `SELECT c.status, c.application_id, c.case_context_json, a.status AS application_status,
+      `SELECT c.status, c.application_id, c.client_id, c.case_context_json, a.status AS application_status,
               COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
               COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
               a.row_version AS application_row_version,
@@ -47675,6 +47681,7 @@ app.put('/api/cases/:id', async (req, res) => {
         await storeAssessmentPdfDocument({
           applicationId: caseRow.application_id,
           caseId,
+          clientId: caseRow.client_id,
           applicantUserId: applicantContext.applicantUserId,
           actorUserId: actorId,
           trackingId: applicantContext.trackingId || trackingId,
@@ -47700,6 +47707,7 @@ app.put('/api/cases/:id', async (req, res) => {
           await storeApplicationFormPdfDocument({
             applicationId: caseRow.application_id,
             caseId,
+            clientId: caseRow.client_id,
             applicantUserId: applicantContext.applicantUserId,
             actorUserId: actorId,
             referenceNumber,
@@ -47717,6 +47725,7 @@ app.put('/api/cases/:id', async (req, res) => {
             await storeFinancialOverviewPdfDocument({
               applicationId: caseRow.application_id,
               caseId,
+              clientId: caseRow.client_id,
               applicantUserId: applicantContext.applicantUserId,
               actorUserId: actorId,
               referenceNumber,

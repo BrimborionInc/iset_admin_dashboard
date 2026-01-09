@@ -179,6 +179,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [checklistLoading, setChecklistLoading] = useState(false);
   const [checklistError, setChecklistError] = useState(null);
   const [missingRequiredCount, setMissingRequiredCount] = useState(0);
+  const [checklistGateLabel, setChecklistGateLabel] = useState('');
   const visibleChecklistItems = useMemo(
     () => checklistItems.filter(item => item.required !== false),
     [checklistItems]
@@ -521,6 +522,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     if (!applicantUserId) {
       setChecklistItems([]);
       setMissingRequiredCount(0);
+      setChecklistGateLabel('');
       return;
     }
     const selectedIntervention =
@@ -530,6 +532,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     if (isCaseWorkspace && !selectedIntervention) {
       setChecklistItems([]);
       setMissingRequiredCount(0);
+      setChecklistGateLabel('');
       setChecklistLoading(false);
       return;
     }
@@ -551,8 +554,10 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       const payload = await res.json().catch(() => ({ items: [], missingRequiredCount: 0 }));
       setChecklistItems(Array.isArray(payload.items) ? payload.items : []);
       setMissingRequiredCount(Number(payload.missingRequiredCount) || 0);
+      setChecklistGateLabel(typeof payload.gateLabel === 'string' ? payload.gateLabel : '');
     } catch (err) {
       setChecklistError(err?.message || 'Failed to load checklist');
+      setChecklistGateLabel('');
     } finally {
       setChecklistLoading(false);
     }
@@ -565,6 +570,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       setRefreshing(false);
       setChecklistItems([]);
       setMissingRequiredCount(0);
+      setChecklistGateLabel('');
       return;
     }
     loadDocuments();
@@ -2199,6 +2205,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                   <Table
                     trackBy="id"
                     variant="embedded"
+                    header={
+                      checklistGateLabel
+                        ? <Header variant="h3">{checklistGateLabel}</Header>
+                        : <Header variant="h3">Checklist</Header>
+                    }
                     loading={checklistLoading}
                     loadingText="Loading checklist"
                     items={visibleChecklistItems}

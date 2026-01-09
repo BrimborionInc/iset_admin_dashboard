@@ -323,6 +323,7 @@ const ApplicationOverviewWidget = ({
   const [checklistMissingCount, setChecklistMissingCount] = useState(null);
   const [checklistLoading, setChecklistLoading] = useState(false);
   const [checklistRefreshKey, setChecklistRefreshKey] = useState(0);
+  const [checklistGateLabel, setChecklistGateLabel] = useState('');
   const [rowVersion, setRowVersion] = useState(() => {
     const fromProp = Number(applicationRowVersion || 0);
     const fromCase = Number(caseData?.application_row_version || 0);
@@ -686,6 +687,7 @@ const ApplicationOverviewWidget = ({
     if (!applicantUserId) {
       setChecklistMissingCount(null);
       setChecklistLoading(false);
+      setChecklistGateLabel('');
       return;
     }
     let cancelled = false;
@@ -703,9 +705,11 @@ const ApplicationOverviewWidget = ({
         const computed = items.filter(item => item && item.required !== false && item.status !== 'complete').length;
         const missingCount = Number.isFinite(reported) ? reported : computed;
         setChecklistMissingCount(missingCount);
+        setChecklistGateLabel(typeof payload?.gateLabel === 'string' ? payload.gateLabel : '');
       })
       .catch(() => {
         if (!cancelled) setChecklistMissingCount(null);
+        if (!cancelled) setChecklistGateLabel('');
       })
       .finally(() => {
         if (!cancelled) setChecklistLoading(false);
@@ -1528,15 +1532,17 @@ const ApplicationOverviewWidget = ({
     if (checklistLoading) {
       checklistValue = 'Loading...';
     } else if (Number.isFinite(checklistMissingCount)) {
-      if (checklistMissingCount > 0) {
-        checklistValue = (
-          <Badge color="severity-high">
-            {`${checklistMissingCount} missing`}
-          </Badge>
-        );
-      } else {
-        checklistValue = <Badge color="green">Complete</Badge>;
-      }
+      const badge = checklistMissingCount > 0
+        ? <Badge color="severity-high">{`${checklistMissingCount} missing`}</Badge>
+        : <Badge color="green">Complete</Badge>;
+      checklistValue = checklistGateLabel
+        ? (
+          <SpaceBetween size="xxs">
+            {badge}
+            <Box color="text-body-secondary" fontSize="body-s">{checklistGateLabel}</Box>
+          </SpaceBetween>
+        )
+        : badge;
     }
     overviewItems.push({ label: 'Document Checklist', value: checklistValue });
   }

@@ -1378,14 +1378,16 @@ const CoordinatorAssessmentWidget = forwardRef(
       postingContext: caseData.assessment_posting_context || caseData.assessmentPostingContext || ''
     };
     const mergedIncoming = { ...buildEmptyAssessment(), ...placeholders };
-    const merged = mergeAssessmentState(assessment, mergedIncoming);
-    const mergedWithLimits = {
-      ...merged,
-      overview: limitWords(merged.overview, OVERVIEW_WORD_LIMIT),
-      employmentGoals: limitWords(merged.employmentGoals, EMPLOYMENT_GOALS_WORD_LIMIT)
-    };
-    setAssessment(mergedWithLimits);
-    setInitialAssessment(mergedWithLimits);
+    setAssessment(prev => {
+      const merged = mergeAssessmentState(prev, mergedIncoming);
+      const mergedWithLimits = {
+        ...merged,
+        overview: limitWords(merged.overview, OVERVIEW_WORD_LIMIT),
+        employmentGoals: limitWords(merged.employmentGoals, EMPLOYMENT_GOALS_WORD_LIMIT)
+      };
+      setInitialAssessment(mergedWithLimits);
+      return mergedWithLimits;
+    });
     setConflictDeclarationSigned(Boolean(caseData?.assessment_conflict_declaration_signed));
     setConflictDeclarationSignedAt(caseData?.assessment_conflict_declaration_signed_at || null);
     const incomingConflictChoice = normalizeConflictDeclarationChoice(
@@ -2310,6 +2312,111 @@ const CoordinatorAssessmentWidget = forwardRef(
     updateRowVersion,
     applicationRowVersionState,
     currentUserId
+  ]);
+  const persistEligibilitySelection = useCallback(async () => {
+    if (!caseData?.id || !isEligibilityAdmin) return { ok: true };
+    const normalize = value => (value ? String(value).trim().toLowerCase() : '');
+    const nextEligibility = assessment.esdcEligibility || '';
+    const currentEligibility = caseData?.assessment_esdc_eligibility || '';
+    if (!normalize(nextEligibility) && !normalize(currentEligibility)) {
+      return { ok: true };
+    }
+    if (normalize(nextEligibility) === normalize(currentEligibility)) {
+      return { ok: true };
+    }
+    const lockCheck = await ensureLockForOperation();
+    if (!lockCheck.ok) return { ok: false };
+    const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
+    const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
+    const payload = { assessment_esdc_eligibility: nextEligibility || null };
+    if (versionToken > 0) {
+      payload.expectedRowVersion = versionToken;
+    }
+    try {
+      const res = await apiFetch(`/api/cases/${caseData.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json().catch(() => ({}));
+      if (res.status === 423) {
+        showLockAlert({ reason: result?.reason || result?.error, lock: result?.lock });
+        if (releaseAfterSuccess) {
+          releaseLock({ silent: true }).catch(() => {});
+        }
+        return { ok: false };
+      }
+      if (res.status === 409) {
+        const latestVersion = Number(result?.currentRowVersion ?? result?.application_row_version);
+        if (latestVersion) updateRowVersion(latestVersion);
+        if (typeof actions?.refreshCaseData === 'function') {
+          try {
+            await actions.refreshCaseData();
+          } catch (_) {}
+        }
+        setAlert({
+          type: 'warning',
+          content: 'Another user updated this case. The latest information has been reloaded; review and try again.',
+          dismissible: true,
+          statusIconAriaLabel: 'Warning'
+        });
+        scrollAfterAction();
+        if (releaseAfterSuccess) {
+          releaseLock({ silent: true }).catch(() => {});
+        }
+        return { ok: false };
+      }
+      if (!res.ok || !result?.success) {
+        throw new Error(result?.error || 'Failed to save eligibility.');
+      }
+      const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
+      if (updatedRowVersion) {
+        updateRowVersion(updatedRowVersion);
+      }
+      if (typeof onCaseUpdate === 'function') {
+        const updates = { assessment_esdc_eligibility: nextEligibility || null };
+        if (updatedRowVersion) updates.application_row_version = updatedRowVersion;
+        onCaseUpdate(updates);
+      }
+      setInitialAssessment(prev => ({ ...prev, esdcEligibility: nextEligibility || '' }));
+      if (typeof actions?.refreshCaseData === 'function') {
+        try {
+          await actions.refreshCaseData();
+        } catch (_) {}
+      }
+      if (releaseAfterSuccess) {
+        releaseLock({ silent: true }).catch(() => {});
+      }
+      return { ok: true };
+    } catch (err) {
+      setAlert({
+        type: 'error',
+        content: err?.message || 'Failed to save eligibility.',
+        dismissible: true,
+        statusIconAriaLabel: 'Error'
+      });
+      scrollAfterAction();
+      if (releaseAfterSuccess) {
+        releaseLock({ silent: true }).catch(() => {});
+      }
+      return { ok: false };
+    }
+  }, [
+    actions,
+    apiFetch,
+    applicationRowVersionState,
+    assessment.esdcEligibility,
+    caseData?.assessment_esdc_eligibility,
+    caseData?.application_row_version,
+    caseData?.id,
+    ensureLockForOperation,
+    isEligibilityAdmin,
+    lockHeldByCurrentUser,
+    onCaseUpdate,
+    releaseLock,
+    scrollAfterAction,
+    showLockAlert,
+    updateRowVersion
   ]);
   const validateAssessment = (assessment) => {
     const errors = {};
@@ -3419,6 +3526,10 @@ const CoordinatorAssessmentWidget = forwardRef(
           return;
         }
         if (!isAssessmentDisabled && currentStep === 'eligibility') {
+          const eligibilitySaved = await persistEligibilitySelection();
+          if (!eligibilitySaved.ok) {
+            return;
+          }
           const uploadOk = await uploadEiVerificationIfSelected();
           if (!uploadOk) {
             return;
