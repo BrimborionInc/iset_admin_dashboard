@@ -66,6 +66,21 @@ const DEFAULT_ASSESSMENT_COSTING_DEFAULTS = {
   ],
   interventions: []
 };
+const PAYMENT_TYPE_LABELS = {
+  LivingAllowance: 'Living allowance',
+  TuitionFeesDirect: 'Tuition fees (direct)',
+  TuitionFeesReimbursement: 'Tuition fees (reimbursement)',
+  SpecializedEquipmentAdvance: 'Specialized equipment (advance)',
+  SpecializedEquipmentReimbursement: 'Specialized equipment (reimbursement)',
+  WageSubsidyEmployer: 'Targeted wage subsidy (employer)',
+  Childcare: 'Childcare',
+  Transportation: 'Transportation',
+  BooksMaterialsDirect: 'Books and materials (direct)',
+  BooksMaterialsReimbursement: 'Books and materials (reimbursement)',
+  JCPProjectCost: 'JCP project cost',
+  SEBSupport: 'SEB support',
+  OtherEligibleCost: 'Other eligible cost'
+};
 
 const CHECKLIST_CACHE_TTL_MS = 30 * 1000;
 const checklistCacheByKey = new Map();
@@ -1136,8 +1151,13 @@ const sumCurrencyValues = (...values) => {
 const setTemplateField = ($, field, value) => {
   const selection = $(`[data-field="${field}"]`);
   if (!selection.length) return;
+  const hasHtml = value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'html');
   selection.each((_idx, node) => {
     const el = $(node);
+    if (hasHtml) {
+      el.html(value.html || '');
+      return;
+    }
     const tag = (node.tagName || '').toLowerCase();
     if (tag === 'input') {
       const inputType = (el.attr('type') || '').toLowerCase();
@@ -1174,6 +1194,7 @@ const setTemplateField = ($, field, value) => {
       }
       return;
     }
+    el.text(value === null || typeof value === 'undefined' ? '' : String(value));
   });
 };
 
@@ -1713,6 +1734,162 @@ function formatMultilineHtml(value) {
   return escapeHtml(value || '').replace(/\r?\n/g, '<br />');
 }
 
+const resolvePaymentTypeLabel = (value) => {
+  const normalized = normalizePaymentTypeCode(value) || normaliseString(value);
+  if (!normalized) return '';
+  return PAYMENT_TYPE_LABELS[normalized] || normalized;
+};
+
+const formatCostLineInstallments = (line) => {
+  if (!line || typeof line !== 'object') return '';
+  const recurrence = line.recurrence && typeof line.recurrence === 'object' ? line.recurrence : {};
+  const occurrencesRaw = recurrence.occurrences;
+  const occurrences = Number.isFinite(Number(occurrencesRaw)) && Number(occurrencesRaw) > 0
+    ? Number(occurrencesRaw)
+    : null;
+  const amountPerPeriod = parseCurrencyValue(recurrence.amountPerPeriod);
+  const startDate = toDateOnlyString(recurrence.startDate);
+  const endDate = toDateOnlyString(recurrence.endDate);
+  const hasRecurrenceData = Boolean(recurrence.enabled || occurrences || amountPerPeriod !== null || startDate || endDate);
+  const base = occurrences
+    ? `in ${occurrences} installment${occurrences === 1 ? '' : 's'}`
+    : (hasRecurrenceData ? 'recurring installments' : 'in 1 installment');
+  const parts = [base];
+  if (amountPerPeriod !== null) {
+    parts.push(`$${amountPerPeriod.toFixed(2)} per period`);
+  }
+  if (startDate || endDate) {
+    parts.push(`${startDate || '...'} to ${endDate || '...'}`);
+  }
+  return parts.join(' ');
+};
+
+const resolveDeliveryModeLabel = (value) => {
+  const normalized = normaliseString(value);
+  if (!normalized) return '';
+  if (normalized === 'in_house') return 'In-house (no external partner)';
+  if (normalized === 'partner') return 'External delivery partner';
+  return formatCaseStatusLabel(normalized) || normalized;
+};
+
+const buildAssessmentProposedInterventionsHtml = ({
+  interventions,
+  interventionLabelLookup,
+  fallbackDeliveryModeLabel
+}) => {
+  const list = Array.isArray(interventions) ? interventions : [];
+  if (!list.length) {
+    return '<div class="empty-state">No proposed interventions recorded.</div>';
+  }
+
+  return list.map((intervention, index) => {
+    const code = normaliseString(intervention?.code);
+    const explicitLabel = normaliseString(
+      intervention?.label ?? intervention?.interventionLabel ?? intervention?.intervention_label
+    );
+    const label = explicitLabel || (code && interventionLabelLookup ? interventionLabelLookup.get(code) : null);
+    const displayLabel = label
+      ? (code ? `${label} (${code})` : label)
+      : (code || '');
+    const title = `Intervention ${index + 1}${displayLabel ? `: ${displayLabel}` : ''}`;
+    const deliveryLabel =
+      resolveDeliveryModeLabel(intervention?.deliveryMode) ||
+      fallbackDeliveryModeLabel ||
+      '';
+    const startDate = toDateOnlyString(intervention?.startDate);
+    const endDate = toDateOnlyString(intervention?.endDate);
+    const durationDays = calculateDurationDaysFromDates(startDate, endDate);
+    const durationText = durationDays === null ? '' : String(durationDays);
+    const nocCode = normaliseString(intervention?.noc);
+    const nocVersion = normaliseString(intervention?.nocVersion);
+    const programName = normaliseString(intervention?.programName);
+    const institution = normaliseString(intervention?.institution);
+    const itpDetails = normaliseString(intervention?.itpDetails);
+    const wageDetails = normaliseString(intervention?.wageSubsidyDetails);
+    const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+
+    const costRows = costLines.map(line => {
+      const typeLabel = resolvePaymentTypeLabel(line?.type);
+      const amountValue = formatCurrencyValue(line?.amount);
+      const amountText = amountValue ? `$${amountValue}` : '';
+      const installments = formatCostLineInstallments(line);
+      const notes = formatMultilineHtml(line?.notes);
+      return `
+        <tr>
+          <td>${escapeHtml(typeLabel || '')}</td>
+          <td class="amount">${escapeHtml(amountText)}</td>
+          <td>${escapeHtml(installments || '')}</td>
+          <td>${notes}</td>
+        </tr>`;
+    }).join('');
+
+    const costRowsHtml = costRows || '<tr><td colspan="4">No cost items recorded.</td></tr>';
+    const costTotal = computeCostLinesTotal(costLines);
+    const fallbackTotal = Number.isFinite(Number(intervention?.costTotal))
+      ? Number(intervention.costTotal)
+      : null;
+    const totalValue = costTotal !== null ? costTotal : fallbackTotal;
+    const totalText = totalValue === null ? '' : `$${formatCurrencyValue(totalValue)}`;
+
+    return `
+      <div class="intervention-block">
+        <div class="intervention-title">${escapeHtml(title)}</div>
+        <table class="form-table intervention-table">
+          <tr>
+            <td class="label">Intervention</td>
+            <td colspan="3">${escapeHtml(displayLabel || '')}</td>
+          </tr>
+          <tr>
+            <td class="label">Delivery mode</td>
+            <td>${escapeHtml(deliveryLabel)}</td>
+            <td class="label">Program name</td>
+            <td>${escapeHtml(programName || '')}</td>
+          </tr>
+          <tr>
+            <td class="label">Start date</td>
+            <td>${escapeHtml(startDate || '')}</td>
+            <td class="label">End date</td>
+            <td>${escapeHtml(endDate || '')}</td>
+          </tr>
+          <tr>
+            <td class="label">Duration (days)</td>
+            <td>${escapeHtml(durationText)}</td>
+            <td class="label">NOC version</td>
+            <td>${escapeHtml(nocVersion || '')}</td>
+          </tr>
+          <tr>
+            <td class="label">NOC code</td>
+            <td>${escapeHtml(nocCode || '')}</td>
+            <td class="label">Training Institution / Employer</td>
+            <td>${escapeHtml(institution || '')}</td>
+          </tr>
+          <tr>
+            <td class="label">ITP details</td>
+            <td colspan="3">${formatMultilineHtml(itpDetails)}</td>
+          </tr>
+          <tr>
+            <td class="label">Wage subsidy details</td>
+            <td colspan="3">${formatMultilineHtml(wageDetails)}</td>
+          </tr>
+        </table>
+        <table class="cost-table">
+          <thead>
+            <tr>
+              <th>Cost item</th>
+              <th>Amount</th>
+              <th>Installments</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${costRowsHtml}
+          </tbody>
+        </table>
+        <div class="cost-total">Intervention total: ${escapeHtml(totalText)}</div>
+      </div>`;
+  }).join('');
+};
+
 async function fetchAssessmentApplicantContext({ applicationId, applicantUserId }) {
   let applicantName = null;
   let trackingId = null;
@@ -1816,6 +1993,10 @@ function buildAssessmentPdfFields({
   const interventionDuration = normaliseString(caseRow?.assessment_intervention_duration_days);
   const nocCode = normaliseString(caseRow?.assessment_intervention_related_noc);
   const nocVersion = normaliseString(caseRow?.assessment_intervention_related_noc_version);
+  const interventionLabelLookup = new Map();
+  if (interventionCode && interventionLabel) {
+    interventionLabelLookup.set(interventionCode, interventionLabel);
+  }
 
   const resolvedCaseContext =
     caseContext ||
@@ -1836,18 +2017,99 @@ function buildAssessmentPdfFields({
     costSettings?.calculatedTotal ??
     costSettings?.calculated_total ??
     (costType === 'recurring' ? caseRow?.assessment_intervention_cost_total : null);
-  const interventionCostTotalRaw =
+  const legacyInterventionCostTotalRaw =
     costSettings?.calculatedTotal ??
     costSettings?.calculated_total ??
     caseRow?.assessment_intervention_cost_total ??
     null;
+  let interventionCostTotalRaw = legacyInterventionCostTotalRaw;
 
   const deliveryModeRaw = resolvedCaseContext?.assessmentDeliveryMode || resolvedCaseContext?.deliveryMode || '';
-  const deliveryModeLabel = deliveryModeRaw === 'in_house'
-    ? 'In-house (no external partner)'
-    : deliveryModeRaw
-      ? 'External delivery partner'
-      : '';
+  const deliveryModeLabel = resolveDeliveryModeLabel(deliveryModeRaw);
+
+  const proposedInterventionsRaw =
+    caseRow?.assessment_proposed_interventions ??
+    caseRow?.assessmentProposedInterventions ??
+    caseRow?.proposed_interventions ??
+    caseRow?.proposedInterventions ??
+    null;
+  let proposedInterventions = normalizeAssessmentProposedInterventions(proposedInterventionsRaw);
+  if (!proposedInterventions.length) {
+    const legacyCostLines = [];
+    const pushLegacyLine = (type, amount, notes) => {
+      const parsed = parseCurrencyValue(amount);
+      if (!Number.isFinite(parsed) || parsed === 0) return;
+      const note = normaliseString(notes);
+      legacyCostLines.push({
+        type,
+        amount: parsed,
+        notes: note || null,
+        recurrence: { enabled: false }
+      });
+    };
+    pushLegacyLine('TuitionFeesDirect', itp.tuition, 'Tuition');
+    pushLegacyLine('BooksMaterialsDirect', itp.books, 'Books');
+    pushLegacyLine('BooksMaterialsDirect', itp.materials, 'Materials');
+    pushLegacyLine('LivingAllowance', itp.living, 'Living allowance');
+    pushLegacyLine('Childcare', itp.childcare, 'Childcare');
+    pushLegacyLine('OtherEligibleCost', itp.otherAmount, itp.otherLabel || 'Other');
+    pushLegacyLine('WageSubsidyEmployer', wage.wages, 'Wages');
+    pushLegacyLine('WageSubsidyEmployer', wage.mercs, 'MERCs');
+    pushLegacyLine('WageSubsidyEmployer', wage.nonwages, 'Non-wages');
+    pushLegacyLine('WageSubsidyEmployer', wage.other1Amount, wage.other1Label || 'Other');
+    pushLegacyLine('WageSubsidyEmployer', wage.other2Amount, wage.other2Label || 'Other');
+    if (!legacyCostLines.length) {
+      const legacyTotal = parseCurrencyValue(caseRow?.assessment_intervention_cost_total);
+      if (Number.isFinite(legacyTotal)) {
+        legacyCostLines.push({
+          type: 'OtherEligibleCost',
+          amount: legacyTotal,
+          notes: null,
+          recurrence: { enabled: false }
+        });
+      }
+    }
+    const legacyHasValues = Boolean(
+      interventionCode ||
+      caseRow?.assessment_intervention_start_date ||
+      caseRow?.assessment_intervention_end_date ||
+      caseRow?.assessment_institution ||
+      caseRow?.assessment_program_name ||
+      itp.details ||
+      wage.subsidyDetails ||
+      nocCode ||
+      nocVersion ||
+      legacyCostLines.length
+    );
+    if (legacyHasValues) {
+      const legacyIntervention = normalizeProposedIntervention({
+        code: interventionCode || null,
+        startDate: caseRow?.assessment_intervention_start_date || null,
+        endDate: caseRow?.assessment_intervention_end_date || null,
+        deliveryMode: deliveryModeRaw || null,
+        institution: caseRow?.assessment_institution || null,
+        programName: caseRow?.assessment_program_name || null,
+        itpDetails: itp.details || null,
+        wageSubsidyDetails: wage.subsidyDetails || null,
+        interventionNoc: nocCode || null,
+        interventionNocVersion: nocVersion || null,
+        costLines: legacyCostLines
+      });
+      if (legacyIntervention) {
+        proposedInterventions = [legacyIntervention];
+      }
+    }
+  }
+  const proposedTotal = computeProposedInterventionsTotal(proposedInterventions);
+  if (proposedTotal !== null) {
+    interventionCostTotalRaw = proposedTotal;
+  }
+  const proposedInterventionsHtml = buildAssessmentProposedInterventionsHtml({
+    interventions: proposedInterventions,
+    interventionLabelLookup,
+    fallbackDeliveryModeLabel: deliveryModeLabel
+  });
+  const interventionCount = String(proposedInterventions.length);
 
   const childcareNeedValue = normalizeYesNoValue(caseRow?.assessment_childcare_need);
   const childcareNeedYes = childcareNeedValue === 'yes';
@@ -1915,6 +2177,7 @@ function buildAssessmentPdfFields({
     previously_funded_iset_details: caseRow?.assessment_previous_iset_details || '',
     other_funding_sources_details: caseRow?.assessment_other_funding_details || '',
     esdc_eligibility: esdcEligibilityValue,
+    proposed_interventions_html: { html: proposedInterventionsHtml },
     intervention_code: interventionDisplay,
     delivery_mode: deliveryModeLabel,
     intervention_start_date: toDateOnlyString(caseRow?.assessment_intervention_start_date),
@@ -1932,6 +2195,7 @@ function buildAssessmentPdfFields({
     intervention_cost_total: interventionCostTotalRaw === null || typeof interventionCostTotalRaw === 'undefined'
       ? ''
       : formatCurrencyValue(interventionCostTotalRaw),
+    intervention_count: interventionCount,
     cost_type: costType,
     recurring_period: recurringPeriod,
     recurring_amount: recurringAmountRaw === null || typeof recurringAmountRaw === 'undefined'
@@ -6150,11 +6414,190 @@ function resolveApplicantNameFromPayload(payload, fallback) {
   return resolved || fallback || null;
 }
 
+const resolveFundingAgreementInterventionLabelBase = (intervention = {}, labelLookup = null) => {
+  if (!intervention || typeof intervention !== 'object') return '';
+  const code = normaliseString(
+    intervention.code ??
+    intervention.interventionCode ??
+    intervention.intervention_code ??
+    null
+  );
+  const explicitLabel = normaliseString(
+    intervention.label ??
+    intervention.interventionLabel ??
+    intervention.intervention_label ??
+    intervention.title ??
+    null
+  );
+  let resolvedLabel = explicitLabel;
+  if (!resolvedLabel && code && labelLookup) {
+    const fetchLabel = (key) => {
+      if (!key) return null;
+      if (labelLookup instanceof Map) {
+        return labelLookup.get(key) || null;
+      }
+      if (typeof labelLookup === 'object') {
+        return Object.prototype.hasOwnProperty.call(labelLookup, key) ? labelLookup[key] : null;
+      }
+      return null;
+    };
+    resolvedLabel = normaliseString(fetchLabel(code));
+    if (!resolvedLabel) {
+      const numericCode = Number.parseInt(code, 10);
+      if (Number.isFinite(numericCode)) {
+        resolvedLabel = normaliseString(fetchLabel(String(numericCode)));
+      }
+    }
+  }
+  if (resolvedLabel) return resolvedLabel;
+  if (code) return `Code ${code}`;
+  return '';
+};
+
+const buildFundingAgreementInterventionsHtml = ({ interventions, interventionLabelLookup }) => {
+  const list = Array.isArray(interventions) ? interventions : [];
+  if (!list.length) {
+    return '<div class="empty-state">No interventions recorded.</div>';
+  }
+  return list.map((intervention, index) => {
+    const labelBase = resolveFundingAgreementInterventionLabelBase(intervention, interventionLabelLookup);
+    const title = labelBase ? `Intervention ${index + 1}: ${labelBase}` : `Intervention ${index + 1}`;
+    const programName = normaliseString(intervention?.programName ?? intervention?.program_name ?? null);
+    const institution = normaliseString(intervention?.institution ?? null);
+    const startDate = formatFundingDate(intervention?.startDate ?? intervention?.interventionStartDate ?? null);
+    const endDate = formatFundingDate(intervention?.endDate ?? intervention?.interventionEndDate ?? null);
+    const metaFields = [];
+    if (programName) metaFields.push({ label: 'Eligible Program', value: programName });
+    if (institution) metaFields.push({ label: 'Eligible Educational/Training Institution', value: institution });
+    if (startDate) metaFields.push({ label: 'Start Date', value: startDate });
+    if (endDate) metaFields.push({ label: 'End Date', value: endDate });
+
+    const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+    const costRows = costLines.map(line => {
+      const typeLabel = resolvePaymentTypeLabel(line?.type) || normaliseString(line?.type) || '';
+      const amountValue = parseCurrencyValue(line?.amount);
+      const amountText = formatFundingCurrency(amountValue);
+      const installments = formatCostLineInstallments(line);
+      const notes = formatMultilineHtml(line?.notes);
+      return `
+        <tr>
+          <td>${escapeHtml(typeLabel)}</td>
+          <td>${escapeHtml(amountText)}</td>
+          <td>${escapeHtml(installments || '')}</td>
+          <td>${notes}</td>
+        </tr>`;
+    }).join('');
+
+    const rowsHtml = costRows || '<tr><td colspan="4">No cost items recorded.</td></tr>';
+    const lineTotal = computeCostLinesTotal(costLines);
+    const fallbackTotal = parseCurrencyValue(intervention?.costTotal);
+    const totalValue = lineTotal !== null ? lineTotal : fallbackTotal;
+    const totalText = formatFundingCurrency(totalValue);
+    const totalRow = totalText
+      ? `<tr><td><strong>Total</strong></td><td><strong>${escapeHtml(totalText)}</strong></td><td colspan="2"></td></tr>`
+      : '';
+    const metaHtml = metaFields.length
+      ? `<div class="intervention-meta">${metaFields
+          .map(item => `<div><span class="label-inline">${escapeHtml(item.label)}:</span>${escapeHtml(item.value)}</div>`)
+          .join('')}</div>`
+      : '';
+
+    return `
+      <div class="intervention-panel">
+        <div class="intervention-title">${escapeHtml(title)}</div>
+        ${metaHtml}
+        <div class="table-panel">
+          <table>
+            <thead>
+              <tr>
+                <th>Cost item</th>
+                <th class="amount">Amount</th>
+                <th>Installments</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+              ${totalRow}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('');
+};
+
+const buildFundingAgreementLivingAllowanceSectionsHtml = ({ interventions, interventionLabelLookup }) => {
+  const list = Array.isArray(interventions) ? interventions : [];
+  const sections = [];
+  const resolveAmountPerPeriod = (line, startDate, endDate) => {
+    const recurrence = line?.recurrence || {};
+    const amountPerPeriod = parseCurrencyValue(recurrence.amountPerPeriod);
+    if (amountPerPeriod !== null) return amountPerPeriod;
+    const lineAmount = parseCurrencyValue(line?.amount);
+    const occurrencesRaw = recurrence.occurrences;
+    const occurrences = Number.isFinite(Number(occurrencesRaw)) && Number(occurrencesRaw) > 0
+      ? Number(occurrencesRaw)
+      : null;
+    const inferredOccurrences = occurrences || calculateInclusiveMonthCount(startDate, endDate);
+    if (lineAmount !== null && inferredOccurrences) {
+      return lineAmount / inferredOccurrences;
+    }
+    return lineAmount;
+  };
+
+  list.forEach((intervention, index) => {
+    const labelBase = resolveFundingAgreementInterventionLabelBase(intervention, interventionLabelLookup);
+    const interventionTitle = labelBase ? `Intervention ${index + 1}: ${labelBase}` : `Intervention ${index + 1}`;
+    const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+    const livingLines = costLines.filter(line => normalizePaymentTypeCode(line?.type) === 'LivingAllowance');
+    livingLines.forEach((line, lineIndex) => {
+      const recurrence = line?.recurrence || {};
+      const startDate =
+        recurrence.startDate ??
+        intervention?.startDate ??
+        intervention?.interventionStartDate ??
+        null;
+      const endDate =
+        recurrence.endDate ??
+        intervention?.endDate ??
+        intervention?.interventionEndDate ??
+        null;
+      const amountPerPeriod = resolveAmountPerPeriod(line, startDate, endDate);
+      const livingRowsHtml = buildLivingAllowanceRows({
+        startDate,
+        endDate,
+        amount: amountPerPeriod
+      });
+      if (!livingRowsHtml) return;
+      const lineTitle = livingLines.length > 1 ? `Living allowance ${lineIndex + 1}` : 'Living allowance';
+      sections.push(`
+        <div class="living-panel">
+          <div class="living-title">${escapeHtml(interventionTitle)} - ${escapeHtml(lineTitle)}</div>
+          <div class="table-panel">
+            <table>
+              <thead>
+                <tr>
+                  <th>Monthly Approved Amount</th>
+                  <th>Approved for Month / Year**</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${livingRowsHtml}
+              </tbody>
+            </table>
+          </div>
+        </div>`);
+    });
+  });
+  return sections.join('');
+};
+
 function resolveFundingAgreementTokens({
   applicantName,
   caseManagerName,
   caseManagerSignedDate,
   interventionLabel,
+  interventionLabelLookup,
   assessmentRow,
   interventionRow,
   interventionMetadata,
@@ -6177,6 +6620,12 @@ function resolveFundingAgreementTokens({
     otherAmount: toAmount(metadataFunding?.otherAmount ?? assessmentFunding?.otherAmount),
     total: toAmount(metadataFunding?.total)
   };
+  const interventionCode = normaliseString(
+    interventionRow?.intervention_code ??
+    interventionEsdc?.interventionCode ??
+    interventionMetadata?.code ??
+    null
+  );
   const interventionCost =
     toAmount(interventionRow?.intervention_cost) ??
     toAmount(interventionRow?.budget_amount) ??
@@ -6265,6 +6714,89 @@ function resolveFundingAgreementTokens({
     amount: funding.living
   });
 
+  const proposedInterventionsRaw =
+    assessmentRow?.proposed_interventions ??
+    assessmentRow?.assessment_proposed_interventions ??
+    assessmentRow?.proposedInterventions ??
+    assessmentRow?.assessmentProposedInterventions ??
+    null;
+  let proposedInterventions = normalizeAssessmentProposedInterventions(proposedInterventionsRaw);
+  if (!proposedInterventions.length) {
+    const fallbackCostLines = [];
+    const pushFallbackLine = (type, amount, notes, recurrence = null) => {
+      const parsed = parseCurrencyValue(amount);
+      if (!Number.isFinite(parsed) || parsed <= 0) return;
+      fallbackCostLines.push({
+        type: type || null,
+        amount: parsed,
+        notes: notes || null,
+        recurrence: recurrence || { enabled: false }
+      });
+    };
+    const childcareTotal = computeLineTotal(funding.childcare);
+    const otherTotal = computeLineTotal(funding.otherAmount);
+    const otherLineAmount = Number.isFinite(otherItemAmount) ? otherItemAmount : otherTotal;
+    const livingRecurrence = occurrences && Number.isFinite(funding.living)
+      ? {
+          enabled: true,
+          startDate,
+          endDate,
+          occurrences,
+          amountPerPeriod: funding.living
+        }
+      : { enabled: false };
+
+    pushFallbackLine('TuitionFeesDirect', tuitionTotal, 'Tuition');
+    pushFallbackLine('BooksMaterialsDirect', booksTotal, 'Books');
+    pushFallbackLine('BooksMaterialsDirect', materialsTotal, 'Materials');
+    pushFallbackLine('Childcare', childcareTotal, 'Childcare');
+    pushFallbackLine('OtherEligibleCost', otherLineAmount, cleanedLabel || 'Other');
+    pushFallbackLine('LivingAllowance', livingTotal, 'Living allowance', livingRecurrence);
+
+    const fallbackTotalCandidate = Number.isFinite(interventionCost)
+      ? interventionCost
+      : (Number.isFinite(expenseTotal) ? expenseTotal : null);
+    const fallbackHasValues = Boolean(
+      fallbackCostLines.length ||
+      programName ||
+      institution ||
+      startDate ||
+      endDate ||
+      cleanedLabel ||
+      interventionCode
+    );
+    if (fallbackHasValues) {
+      const fallbackTotal = computeCostLinesTotal(fallbackCostLines) ?? fallbackTotalCandidate;
+      proposedInterventions = [{
+        id: null,
+        code: interventionCode,
+        label: cleanedLabel || interventionLabel || null,
+        startDate,
+        endDate,
+        programName,
+        institution,
+        costLines: fallbackCostLines,
+        costTotal: fallbackTotal,
+      }];
+    }
+  }
+  const interventionsHtml = buildFundingAgreementInterventionsHtml({
+    interventions: proposedInterventions,
+    interventionLabelLookup
+  });
+  const livingAllowanceSectionsHtml = buildFundingAgreementLivingAllowanceSectionsHtml({
+    interventions: proposedInterventions,
+    interventionLabelLookup
+  });
+  const fundingTotalValue = proposedInterventions.reduce((sum, intervention) => {
+    const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+    const total = computeCostLinesTotal(costLines);
+    const fallbackTotal = parseCurrencyValue(intervention?.costTotal);
+    const resolved = total !== null ? total : fallbackTotal;
+    return Number.isFinite(resolved) ? sum + resolved : sum;
+  }, 0);
+  const fundingTotal = formatFundingCurrency(fundingTotalValue);
+
   return {
     client_name: applicantName || '',
     case_manager_signature: caseManagerName || '',
@@ -6280,7 +6812,10 @@ function resolveFundingAgreementTokens({
     living_amount: formatFundingCurrency(funding.living),
     other_item_label: cleanedLabel || '',
     other_item_amount: formatFundingCurrency(otherItemAmount),
-    living_rows_html: livingRowsHtml
+    living_rows_html: livingRowsHtml,
+    interventions_html: interventionsHtml,
+    funding_total: fundingTotal,
+    living_allowance_sections_html: livingAllowanceSectionsHtml
   };
 }
 
@@ -6995,6 +7530,38 @@ async function fetchInterventionCodeLabel(connection, code) {
     [numericCode]
   );
   return row ? row.label || null : null;
+}
+
+async function fetchInterventionCodeLabels(connection, codes = []) {
+  if (!Array.isArray(codes) || !codes.length) return new Map();
+  const numericCodes = Array.from(new Set(
+    codes
+      .map(code => {
+        const numericCode = Number.parseInt(code, 10);
+        return Number.isFinite(numericCode) ? numericCode : null;
+      })
+      .filter(code => Number.isFinite(code))
+  ));
+  if (!numericCodes.length) return new Map();
+  const placeholders = numericCodes.map(() => '?').join(',');
+  const [rows] = await connection.query(
+    `SELECT code, label
+       FROM esdc_intervention_code
+      WHERE code IN (${placeholders})
+      ORDER BY is_active DESC, display_order ASC, code ASC`,
+    numericCodes
+  );
+  const labels = new Map();
+  rows.forEach(row => {
+    const code = row?.code;
+    const label = row?.label || null;
+    if (!label || code === null || typeof code === 'undefined') return;
+    const key = String(code);
+    if (!labels.has(key)) {
+      labels.set(key, label);
+    }
+  });
+  return labels;
 }
 
 async function moveApplicationDocumentsToIntervention(connection, {
@@ -33585,7 +34152,7 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       const caseManagerName = await resolveStaffDisplayName(pool, req);
       const caseManagerSignedDate = formatFundingDate(new Date());
       const [[assessmentRow]] = await pool.query(
-        `SELECT program_name, institution, intervention_start_date, intervention_end_date, itp_payload, intervention_cost_total
+        `SELECT program_name, institution, intervention_start_date, intervention_end_date, itp_payload, intervention_cost_total, proposed_interventions
            FROM iset_case_assessment
           WHERE case_id = ?
           LIMIT 1`,
@@ -33642,6 +34209,28 @@ app.post('/api/cases/:id/messages', async (req, res) => {
         const title = normaliseString(interventionMetadata?.title || '');
         interventionLabel = title ? title.replace(/\s*intervention$/i, '') : null;
       }
+      let interventionLabelLookup = new Map();
+      try {
+        const proposedInterventionsRaw =
+          assessmentRow?.proposed_interventions ??
+          assessmentRow?.assessment_proposed_interventions ??
+          assessmentRow?.proposedInterventions ??
+          assessmentRow?.assessmentProposedInterventions ??
+          null;
+        const proposedInterventions = normalizeAssessmentProposedInterventions(proposedInterventionsRaw);
+        const codes = proposedInterventions.map(entry => entry?.code).filter(Boolean);
+        if (codes.length) {
+          interventionLabelLookup = await fetchInterventionCodeLabels(pool, codes);
+        }
+      } catch (err) {
+        console.warn('[messages] failed to resolve intervention labels:', err?.message || err);
+      }
+      if (interventionCodeRaw !== null && typeof interventionCodeRaw !== 'undefined') {
+        const key = String(interventionCodeRaw).trim();
+        if (key && !interventionLabelLookup.has(key) && interventionLabel) {
+          interventionLabelLookup.set(key, interventionLabel);
+        }
+      }
       let submissionPayload = null;
       if (caseRow?.application_id) {
         const [[submissionRow]] = await pool.query(
@@ -33672,6 +34261,7 @@ app.post('/api/cases/:id/messages', async (req, res) => {
         caseManagerName,
         caseManagerSignedDate,
         interventionLabel,
+        interventionLabelLookup,
         assessmentRow,
         interventionRow,
         interventionMetadata,
@@ -47918,6 +48508,7 @@ app.put('/api/cases/:id', async (req, res) => {
               ca.intervention_cost_total AS assessment_intervention_cost_total,
               ca.intervention_related_noc AS assessment_intervention_related_noc,
               ca.intervention_related_noc_version AS assessment_intervention_related_noc_version,
+              ca.proposed_interventions AS assessment_proposed_interventions,
               ca.intervention_budget_pot_id AS assessment_intervention_pot_id,
               bp.code AS assessment_intervention_pot_code,
               bp.name AS assessment_intervention_pot_name,

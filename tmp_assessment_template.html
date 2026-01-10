@@ -195,6 +195,62 @@
       font-size: 9.5px;
       color: var(--muted);
     }
+
+    .intervention-block {
+      border: 1px solid var(--line);
+      margin-top: 6px;
+    }
+
+    .intervention-title {
+      background: var(--bg);
+      font-weight: 700;
+      padding: 4px 6px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .intervention-table td {
+      font-size: 9.5px;
+    }
+
+    .cost-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      border: 1px solid var(--line);
+      margin-top: 4px;
+    }
+
+    .cost-table th,
+    .cost-table td {
+      border: 1px solid var(--line);
+      padding: 4px;
+      font-size: 9.5px;
+      vertical-align: top;
+    }
+
+    .cost-table th {
+      background: #f7f9fb;
+      text-align: left;
+    }
+
+    .cost-table .amount {
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .cost-total {
+      text-align: right;
+      padding: 4px 6px;
+      font-weight: 700;
+      font-size: 9.5px;
+    }
+
+    .empty-state {
+      border: 1px solid var(--line);
+      padding: 6px;
+      font-size: 9.5px;
+      color: var(--muted);
+    }
   </style>
 </head>
 <body>
@@ -342,49 +398,8 @@
       </tr>
     </table>
 
-    <div class="section-title">INTERVENTION DETAILS</div>
-    <table class="form-table">
-      <tr>
-        <td class="label">Intervention code</td>
-        <td><input type="text" data-field="intervention_code" /></td>
-        <td class="label">Delivery mode</td>
-        <td><input type="text" data-field="delivery_mode" /></td>
-      </tr>
-      <tr>
-        <td class="label">Intervention Start Date</td>
-        <td><input type="date" data-field="intervention_start_date" /></td>
-        <td class="label">Intervention End Date</td>
-        <td><input type="date" data-field="intervention_end_date" /></td>
-      </tr>
-      <tr>
-        <td class="label">Duration (days)</td>
-        <td><input type="text" data-field="intervention_duration_days" /></td>
-        <td class="label">NOC version</td>
-        <td><input type="text" data-field="intervention_noc_version" /></td>
-      </tr>
-      <tr>
-        <td class="label">NOC code</td>
-        <td><input type="text" data-field="intervention_noc" /></td>
-        <td class="label">Program Name</td>
-        <td><input type="text" data-field="program_name" /></td>
-      </tr>
-      <tr>
-        <td class="label">Training Institution / Employer</td>
-        <td colspan="3"><input type="text" data-field="training_institution_or_employer" /></td>
-      </tr>
-    </table>
-
-    <div class="section-title">DELIVERY NOTES</div>
-    <table class="form-table">
-      <tr>
-        <td class="label">ITP details</td>
-        <td colspan="3"><textarea data-field="itp_details"></textarea></td>
-      </tr>
-      <tr>
-        <td class="label">Wage subsidy details</td>
-        <td colspan="3"><textarea data-field="wage_subsidy_details"></textarea></td>
-      </tr>
-    </table>
+    <div class="section-title">PROPOSED INTERVENTIONS</div>
+    <div data-field="proposed_interventions_html"></div>
 
     <div class="section-title">CHILDCARE</div>
     <table class="form-table">
@@ -404,27 +419,10 @@
     <div class="section-title">COST SUMMARY</div>
     <table class="form-table">
       <tr>
-        <td class="label">Planned cost total</td>
+        <td class="label">Total proposed cost</td>
         <td><input type="text" data-field="intervention_cost_total" /></td>
-        <td class="label">Cost type</td>
-        <td>
-          <div class="check-grid">
-            <label class="check"><input type="radio" name="costType" data-field="cost_type" value="one_time" />One-time total</label>
-            <label class="check"><input type="radio" name="costType" data-field="cost_type" value="recurring" />Recurring schedule</label>
-          </div>
-        </td>
-      </tr>
-      <tr>
-        <td class="label">Recurrence period</td>
-        <td><input type="text" data-field="recurring_period" /></td>
-        <td class="label">Amount per period</td>
-        <td><input type="text" data-field="recurring_amount" /></td>
-      </tr>
-      <tr>
-        <td class="label">Occurrences</td>
-        <td><input type="text" data-field="recurring_occurrences" /></td>
-        <td class="label">Recurring total</td>
-        <td><input type="text" data-field="recurring_total" /></td>
+        <td class="label">Intervention count</td>
+        <td><input type="text" data-field="intervention_count" /></td>
       </tr>
       <tr>
         <td class="label">Budget pot</td>
@@ -432,87 +430,6 @@
         <td class="label">Paid from</td>
         <td><input type="text" data-field="posting_context" /></td>
       </tr>
-    </table>
-
-    <div class="section-title">INTERVENTION BREAKDOWN (ITP vs Wage Subsidy / JCP)</div>
-    <table class="breakdown">
-      <thead>
-        <tr>
-          <th colspan="2">Individual Training Purchase (ITP)</th>
-          <th colspan="2">Targeted Wage Subsidy / Job Creation Partnership</th>
-        </tr>
-        <tr>
-          <th>Funding category</th>
-          <th>Funding requested</th>
-          <th>Funding category</th>
-          <th>Funding requested</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Tuition</td>
-          <td class="money">
-            <div class="prefix"><span>$</span><input type="text" data-field="itp_tuition_amount" /></div>
-          </td>
-          <td>Wages</td>
-          <td class="money">
-            <div class="prefix"><span>$</span><input type="text" data-field="wage_wages_amount" /></div>
-          </td>
-        </tr>
-        <tr>
-          <td>Books / Materials</td>
-          <td class="money">
-            <div class="prefix"><span>$</span><input type="text" data-field="itp_books_materials_amount" /></div>
-          </td>
-          <td>MERCs</td>
-          <td class="money">
-            <div class="prefix"><span>$</span><input type="text" data-field="wage_mercs_amount" /></div>
-          </td>
-        </tr>
-        <tr>
-          <td>Living Allowance (Amount x # of months)</td>
-          <td class="money">
-            <div class="prefix"><span>$</span><input type="text" data-field="itp_living_allowance_amount" /></div>
-          </td>
-          <td>Non-wages</td>
-          <td class="money">
-            <div class="prefix"><span>$</span><input type="text" data-field="wage_non_wages_amount" /></div>
-          </td>
-        </tr>
-        <tr>
-          <td>Childcare (Amount x # of months)</td>
-          <td class="money">
-            <div class="prefix"><span>$</span><input type="text" data-field="itp_childcare_amount" /></div>
-          </td>
-          <td>Other (specify)</td>
-          <td class="money">
-            <input type="text" data-field="wage_other_1_specify" />
-            <div class="prefix"><span>$</span><input type="text" data-field="wage_other_1_amount" /></div>
-          </td>
-        </tr>
-        <tr>
-          <td>Other (specify)</td>
-          <td class="money">
-            <input type="text" data-field="itp_other_specify" />
-            <div class="prefix"><span>$</span><input type="text" data-field="itp_other_amount" /></div>
-          </td>
-          <td>Other (specify)</td>
-          <td class="money">
-            <input type="text" data-field="wage_other_2_specify" />
-            <div class="prefix"><span>$</span><input type="text" data-field="wage_other_2_amount" /></div>
-          </td>
-        </tr>
-        <tr>
-          <td><strong>Total intervention cost</strong></td>
-          <td class="money">
-            <div class="prefix"><span>$</span><input type="text" data-field="itp_total_cost" /></div>
-          </td>
-          <td><strong>Total intervention cost</strong></td>
-          <td class="money">
-            <div class="prefix"><span>$</span><input type="text" data-field="wage_total_cost" /></div>
-          </td>
-        </tr>
-      </tbody>
     </table>
 
     <div class="section-title">RECOMMENDATION AND JUSTIFICATION</div>

@@ -16,6 +16,11 @@
       margin-bottom: 12px;
     }
 
+    h2 {
+      font-size: 15px;
+      margin: 18px 0 10px;
+    }
+
     .field {
       margin-bottom: 10px;
     }
@@ -99,6 +104,51 @@
       margin-top: 6px;
     }
 
+    .intervention-panel {
+      border: 1px solid #9ba7b6;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fff;
+      margin-bottom: 12px;
+    }
+
+    .intervention-title {
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 6px;
+    }
+
+    .intervention-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 18px;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .label-inline {
+      font-weight: 600;
+      margin-right: 4px;
+    }
+
+    .empty-state {
+      border: 1px dashed #9ba7b6;
+      border-radius: 6px;
+      padding: 10px 12px;
+      color: #4b5563;
+      font-size: 13px;
+      background: #fafafa;
+    }
+
+    .living-panel {
+      margin-bottom: 12px;
+    }
+
+    .living-title {
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
     .signature-block {
       margin-top: 18px;
     }
@@ -143,84 +193,35 @@
   </div>
 </div>
 
-<div class="field-row">
-  <div class="field">
-    <div class="field-panel">
-      <div class="field-value">{{institution}}</div>
-      <div class="field-label">Eligible Educational/Training Institution</div>
-    </div>
-  </div>
-  <div class="field">
-    <div class="field-panel">
-      <div class="field-value">{{program_name}}</div>
-      <div class="field-label">Eligible Program</div>
-    </div>
-  </div>
-</div>
+<h2>Approved funding</h2>
+{{{interventions_html}}}
 
-<div class="field-row">
-  <div class="field">
-    <div class="field-panel">
-      <div class="field-value">{{start_date}}</div>
-      <div class="field-label">Start Date</div>
-    </div>
-  </div>
-  <div class="field">
-    <div class="field-panel">
-      <div class="field-value">{{end_date}}</div>
-      <div class="field-label">End Date</div>
-    </div>
+<!-- IF funding_total -->
+<div class="field">
+  <div class="field-panel">
+    <div class="field-value">{{funding_total}}</div>
+    <div class="field-label">Total approved funding</div>
   </div>
 </div>
-
-<div class="table-panel">
-  <table>
-    <thead>
-      <tr>
-        <th>Expense*</th>
-        <th class="amount">Amount</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr><td>Tuition</td><td>{{tuition_amount}}</td></tr>
-      <tr><td>Books / Program Materials</td><td>{{books_amount}}</td></tr>
-      <tr><td>School Fees</td><td>{{materials_amount}}</td></tr>
-      <!-- IF other_item_amount --><tr><td>{{other_item_label}}</td><td>{{other_item_amount}}</td></tr><!-- END other_item_amount -->
-      <tr><td>&nbsp;</td><td></td></tr>
-      <tr><td><strong>Total</strong></td><td>{{total_amount}}</td></tr>
-    </tbody>
-  </table>
-</div>
+<!-- END funding_total -->
 
 <div class="note">
-  <strong>**</strong> Payment of tuition-related expenses will be paid to the Educational/Training institution named above,
+  <strong>**</strong> Payment of tuition-related expenses will be paid to the Educational/Training institution(s) named above,
   and reimbursed to the Client only with original paid receipts.
 </div>
 
-<!-- IF living_amount -->
+<!-- IF living_allowance_sections_html -->
 <h2>Living Allowance (if applicable)</h2>
 
-<div class="table-panel">
-  <table>
-    <thead>
-      <tr>
-        <th>Monthly Approved Amount</th>
-        <th>Approved for Month / Year**</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{{living_rows_html}}}
-    </tbody>
-  </table>
-</div>
+{{{living_allowance_sections_html}}}
 
 <div class="note">
   <strong>*</strong> Client Monthly Attendance Report MUST be submitted before a living allowance is paid.
 </div>
 <div class="note">
-  <strong>**</strong> It takes 4?6 business days to process your living allowance after receiving your Attendance Report.
+  <strong>**</strong> It takes 4-6 business days to process your living allowance after receiving your Attendance Report.
 </div>
-<!-- END living_amount -->
+<!-- END living_allowance_sections_html -->
 
 <p style="margin-top:14px;">
   I, as the Client receiving funding under the Indigenous Skills and Employment Training program and signing my name below,
