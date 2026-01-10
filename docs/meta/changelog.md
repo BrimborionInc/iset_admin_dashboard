@@ -16,6 +16,9 @@ Format: YYYY-MM-DD - Category: Short description
 - API: Added runtime config endpoints for coordinator assessment costing defaults.
 - Data: Removed legacy intervention type references from schema/mapping sources.
 
+## 2026-01-10
+- Fix: Assessment intervention total now parses currency values correctly to avoid inflating approval thresholds or dashboard totals.
+
 ## 2026-01-08
 - Ops: Intake uploads now ensure a client record exists pre-upload and pin `client_id` for the session.
 - Data: Added `client.applicant_cognito_sub` and `iset_document.client_id` to anchor intake documents to clients.

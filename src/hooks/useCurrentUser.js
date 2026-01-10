@@ -12,7 +12,13 @@ function normaliseUserResponse(data) {
   const email = auth.email || profile.email || null;
   const role = auth.role || auth.primary_role || profile.role || null;
   const regionId = auth.regionId != null ? auth.regionId : (profile.region_id != null ? profile.region_id : null);
-  return { userId: userId ? String(userId) : null, displayName, email, role, regionId };
+  const authGroups = Array.isArray(auth.groups) ? auth.groups : [];
+  const claimGroups = Array.isArray(auth?.claims?.['cognito:groups']) ? auth.claims['cognito:groups'] : [];
+  const profileGroups = Array.isArray(profile.groups) ? profile.groups : [];
+  const groups = Array.from(new Set([...authGroups, ...claimGroups, ...profileGroups]))
+    .map(value => (typeof value === 'string' ? value.trim() : value))
+    .filter(Boolean);
+  return { userId: userId ? String(userId) : null, displayName, email, role, regionId, groups };
 }
 
 function readFallbackRole() {
@@ -47,6 +53,7 @@ export default function useCurrentUser() {
     email: null,
     role: null,
     regionId: null,
+    groups: [],
     error: null,
   });
 
@@ -69,6 +76,7 @@ export default function useCurrentUser() {
           email: normalised.email,
           role: fallbackRole,
           regionId: normalised.regionId ?? null,
+          groups: normalised.groups || [],
           error: null,
         });
       } catch (error) {
@@ -82,6 +90,7 @@ export default function useCurrentUser() {
           email: null,
           role: fallbackRole,
           regionId: null,
+          groups: [],
           error: error?.message || 'Unable to determine current user',
         });
       }

@@ -197,6 +197,38 @@ const parseIsoDateToUtc = (value) => {
   return Date.UTC(yyyy, mm - 1, dd);
 };
 
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const formatShortDate = (value) => {
+  const normalized = formatDate(value);
+  if (!normalized) return '';
+  const [yyyy, mm, dd] = normalized.split('-');
+  const monthIndex = Number(mm) - 1;
+  if (!yyyy || !dd || !Number.isInteger(monthIndex) || monthIndex < 0 || monthIndex > 11) return '';
+  const monthLabel = MONTH_LABELS[monthIndex];
+  return `${dd.padStart(2, '0')} ${monthLabel} ${yyyy}`;
+};
+
+const formatInterventionDates = (startDate, endDate) => {
+  const normalizedStart = formatDate(startDate);
+  const normalizedEnd = formatDate(endDate);
+  const start = formatShortDate(normalizedStart);
+  const end = formatShortDate(normalizedEnd);
+  if (!start) return '—';
+  if (!end || (normalizedStart && normalizedStart === normalizedEnd)) return start;
+  return `${start}-${end}`;
+};
+
+const isDateInPast = (value) => {
+  const normalized = formatDate(value);
+  if (!normalized) return false;
+  const dateUtc = parseIsoDateToUtc(normalized);
+  if (dateUtc === null) return false;
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return dateUtc < todayUtc;
+};
+
 const formatCaseStatusLabel = (value) => {
   if (!value) return '';
   return String(value)
@@ -706,6 +738,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [isEditingAssessment, setIsEditingAssessment] = useState(false);
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
+  const [showDecisionPendingAlert, setShowDecisionPendingAlert] = useState(true);
   const [localAssessmentSubmitted, setLocalAssessmentSubmitted] = useState(false);
   const [checklistWarningVisible, setChecklistWarningVisible] = useState(false);
   const [checklistWarningItems, setChecklistWarningItems] = useState([]);
@@ -718,7 +751,6 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [documentChecklistMissingCount, setDocumentChecklistMissingCount] = useState(0);
   const [documentChecklistLoading, setDocumentChecklistLoading] = useState(false);
   const [documentChecklistError, setDocumentChecklistError] = useState(null);
-  const [showDocsInfoAlert, setShowDocsInfoAlert] = useState(true);
   const [docsUploadLockedDismissed, setDocsUploadLockedDismissed] = useState(false);
   const [checklistUploadError, setChecklistUploadError] = useState(null);
   const [checklistUploadSuccess, setChecklistUploadSuccess] = useState(null);
@@ -764,12 +796,17 @@ const CoordinatorAssessmentWidget = forwardRef(
   const {
     userId: currentUserId,
     displayName: currentUserName,
-    role: currentUserRole
+    role: currentUserRole,
+    groups: currentUserGroups
   } = useCurrentUser();
   const userRole = currentUserRole || '';
   const normalizedRole = (userRole || '').toString().trim().toLowerCase();
   const canonicalRole = normalizedRole === 'regional manager' ? 'regional coordinator' : normalizedRole;
   const isAssessor = canonicalRole === 'application assessor';
+  const groupKeys = Array.isArray(currentUserGroups)
+    ? currentUserGroups.map(group => String(group || '').trim().toLowerCase().replace(/[\s-]+/g, '_'))
+    : [];
+  const isIsetCoordinator = groupKeys.includes('iset_coordinator');
   const roleKey = normalizedRole.replace(/[\s_-]+/g, '');
   const eligibilityRoleAllowlist = new Set([
     'systemadministrator',
@@ -2906,22 +2943,30 @@ const CoordinatorAssessmentWidget = forwardRef(
     const { mode, interventionId, draft, original } = interventionModal;
     if (!draft) return;
     const errors = {};
+    const nextStartDate = formatDate(draft.startDate);
+    const nextEndDate = formatDate(draft.endDate);
     if (!draft.code) {
       errors.code = 'Select an intervention.';
+    }
+    if (!nextStartDate) {
+      errors.startDate = 'Start date is required.';
+    }
+    const startUtc = parseIsoDateToUtc(nextStartDate);
+    const endUtc = parseIsoDateToUtc(nextEndDate);
+    if (startUtc !== null && endUtc !== null && endUtc < startUtc) {
+      errors.endDate = 'End date cannot be before start date.';
     }
     if (Object.keys(errors).length) {
       setInterventionModalErrors(errors);
       return;
     }
     if (mode === 'add') {
-      addIntervention(draft);
+      addIntervention({ ...draft, startDate: nextStartDate, endDate: nextEndDate });
       resetInterventionModal();
       return;
     }
     if (mode === 'edit' && interventionId) {
       const intervention = proposedInterventions.find(item => item.id === interventionId);
-      const nextStartDate = formatDate(draft.startDate);
-      const nextEndDate = formatDate(draft.endDate);
       const startChanged = nextStartDate !== formatDate(original?.startDate);
       const endChanged = nextEndDate !== formatDate(original?.endDate);
       if (startChanged || endChanged) {
@@ -5019,6 +5064,12 @@ const CoordinatorAssessmentWidget = forwardRef(
             }
           },
           {
+            id: 'dates',
+            header: 'Dates',
+            minWidth: 140,
+            cell: item => formatInterventionDates(item.startDate, item.endDate)
+          },
+          {
             id: 'actions',
             header: 'Actions',
             minWidth: 90,
@@ -5122,26 +5173,45 @@ const CoordinatorAssessmentWidget = forwardRef(
               {resolveInterventionLabel(intervention.code) || 'Intervention details'}
             </Header>
             {!requiresExternal && (
-              <FormField
-                label="Delivery mode"
-                description="Choose how this will run."
-              >
-                <Select
-                  selectedOption={
-                    deliveryMode === 'in_house'
-                      ? { value: 'in_house', label: 'In-house (no external partner)' }
-                      : { value: 'partner', label: 'External delivery partner' }
-                  }
-                  onChange={({ detail }) =>
-                    updateIntervention(intervention.id, { deliveryMode: detail.selectedOption?.value || 'partner' })
-                  }
-                  options={[
-                    { value: 'partner', label: 'External delivery partner' },
-                    { value: 'in_house', label: 'In-house (no external partner)' }
-                  ]}
-                  readOnly={isAssessmentDisabled}
-                />
-              </FormField>
+              <ColumnLayout columns={2} variant="text-grid">
+                <FormField
+                  label="Delivery mode"
+                  description="Choose how this will run."
+                >
+                  <Select
+                    selectedOption={
+                      deliveryMode === 'in_house'
+                        ? { value: 'in_house', label: 'In-house (no external partner)' }
+                        : { value: 'partner', label: 'External delivery partner' }
+                    }
+                    onChange={({ detail }) =>
+                      updateIntervention(intervention.id, { deliveryMode: detail.selectedOption?.value || 'partner' })
+                    }
+                    options={[
+                      { value: 'partner', label: 'External delivery partner' },
+                      { value: 'in_house', label: 'In-house (no external partner)' }
+                    ]}
+                    readOnly={isAssessmentDisabled}
+                  />
+                </FormField>
+                {deliveryMode === 'partner' ? (
+                  <FormField
+                    label="Delivery partner / provider"
+                    description="The training provider or employer."
+                    errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.institution : undefined}
+                  >
+                    <Input
+                      value={intervention.institution}
+                      onChange={({ detail }) => updateIntervention(intervention.id, { institution: detail.value })}
+                      placeholder="Training institution, employer, or provider"
+                      data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.institution ? 'true' : undefined}
+                      readOnly={isAssessmentDisabled}
+                    />
+                  </FormField>
+                ) : (
+                  <Box />
+                )}
+              </ColumnLayout>
             )}
 
             {educationCode && (
@@ -5295,26 +5365,6 @@ const CoordinatorAssessmentWidget = forwardRef(
               </SpaceBetween>
             )}
 
-            {!educationCode && !employerCode && (
-              deliveryMode === 'partner' ? (
-                <FormField
-                  label="Delivery partner / provider"
-                  errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.institution : undefined}
-                >
-                  <Input
-                    value={intervention.institution}
-                    onChange={({ detail }) => updateIntervention(intervention.id, { institution: detail.value })}
-                    placeholder="Training institution, employer, or provider"
-                    data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.institution ? 'true' : undefined}
-                    readOnly={isAssessmentDisabled}
-                  />
-                </FormField>
-              ) : (
-                <Alert type="info" header="In-house delivery">
-                  No external delivery partner needed for this intervention.
-                </Alert>
-              )
-            )}
           </SpaceBetween>
         );
       })}
@@ -5597,17 +5647,6 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const docsStepContent = (
     <SpaceBetween size="m">
-      {showDocsInfoAlert && (
-        <Alert
-          type="info"
-          header="Supporting documents"
-          dismissible
-          onDismiss={() => setShowDocsInfoAlert(false)}
-        >
-          Do not submit this assessment until all required documents are obtained. Missing checklist items below link
-          directly to uploads, and the checklist refreshes automatically after new uploads.
-        </Alert>
-      )}
       {!applicantUserId && (
         <Alert type="info" header="Checklist unavailable" statusIconAriaLabel="Info">
           Checklist items are not available until the applicant is linked to this case.
@@ -5672,24 +5711,23 @@ const CoordinatorAssessmentWidget = forwardRef(
                   onClick={handleChecklistRefresh}
                   disabled={documentChecklistLoading || !docsChecklistReady}
                 />
-                <Link
-                  href="#supporting-documents"
-                  onFollow={event => {
-                    event.preventDefault();
-                    openAssessmentWidget('supporting-documents');
+                <ButtonDropdown
+                  variant="icon"
+                  iconName="ellipsis"
+                  ariaLabel="Checklist actions"
+                  items={[
+                    { id: 'supporting-documents', text: 'Open supporting documents' },
+                    { id: 'secure-messaging', text: 'Open secure messaging' }
+                  ]}
+                  onItemClick={({ detail }) => {
+                    if (detail.id === 'supporting-documents') {
+                      openAssessmentWidget('supporting-documents');
+                    }
+                    if (detail.id === 'secure-messaging') {
+                      openAssessmentWidget('secure-messaging');
+                    }
                   }}
-                >
-                  Open Supporting Documents
-                </Link>
-                <Link
-                  href="#secure-messaging"
-                  onFollow={event => {
-                    event.preventDefault();
-                    openAssessmentWidget('secure-messaging');
-                  }}
-                >
-                  Open Secure Messaging
-                </Link>
+                />
               </SpaceBetween>
             }
           >
@@ -5697,6 +5735,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           </Header>
           <Table
             stripedRows
+            resizableColumns
             trackBy="id"
             variant="embedded"
             loading={documentChecklistLoading}
@@ -5949,24 +5988,23 @@ const CoordinatorAssessmentWidget = forwardRef(
                   onClick={handleChecklistRefresh}
                   disabled={documentChecklistLoading || !docsChecklistReady}
                 />
-                <Link
-                  href="#supporting-documents"
-                  onFollow={event => {
-                    event.preventDefault();
-                    openAssessmentWidget('supporting-documents');
+                <ButtonDropdown
+                  variant="icon"
+                  iconName="ellipsis"
+                  ariaLabel="Checklist actions"
+                  items={[
+                    { id: 'supporting-documents', text: 'Open supporting documents' },
+                    { id: 'secure-messaging', text: 'Open secure messaging' }
+                  ]}
+                  onItemClick={({ detail }) => {
+                    if (detail.id === 'supporting-documents') {
+                      openAssessmentWidget('supporting-documents');
+                    }
+                    if (detail.id === 'secure-messaging') {
+                      openAssessmentWidget('secure-messaging');
+                    }
                   }}
-                >
-                  Open Supporting Documents
-                </Link>
-                <Link
-                  href="#secure-messaging"
-                  onFollow={event => {
-                    event.preventDefault();
-                    openAssessmentWidget('secure-messaging');
-                  }}
-                >
-                  Open Secure Messaging
-                </Link>
+                />
               </SpaceBetween>
             }
           >
@@ -5974,6 +6012,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           </Header>
           <Table
             stripedRows
+            resizableColumns
             trackBy="id"
             variant="embedded"
             loading={documentChecklistLoading}
@@ -6019,13 +6058,20 @@ const CoordinatorAssessmentWidget = forwardRef(
     </SpaceBetween>
   );
 
-  const reviewAssessmentDate = assessment.dateOfAssessment || 'Set on submit';
+  const reviewOverview = assessment.overview?.trim() || '';
+  const reviewEmploymentGoals = assessment.employmentGoals?.trim() || '';
+  const reviewEligibility = assessment.esdcEligibility?.trim() || '';
+  const reviewChildcareFunding = assessment.childcareFunding?.trim() || '';
+  const reviewPreviousIsetDetails = assessment.previousISETDetails?.trim() || '';
+  const reviewOtherFunding = assessment.otherFunding?.trim() || '';
   const reviewBarriers = assessment.barriers?.length ? assessment.barriers.join(', ') : 'None';
-  const reviewBarriersOther = (assessment.barriers || []).includes('Other') ? (assessment.barriersOther || '—') : null;
+  const reviewBarriersOther = (assessment.barriers || []).includes('Other')
+    ? (assessment.barriersOther || '').trim()
+    : '';
   const reviewPriorities = assessment.priorities?.length ? assessment.priorities.join(', ') : 'None';
-  const reviewPreviousIset = assessment.previousISET === 'yes' ? 'Yes' : assessment.previousISET === 'no' ? 'No' : '—';
-  const reviewChildcareNeed = assessment.childcareNeed === 'yes' ? 'Yes' : assessment.childcareNeed === 'no' ? 'No' : '—';
-  const reviewPostingContext = selectedPostingContext?.label || (assessment.postingContext ? formatCaseStatusLabel(assessment.postingContext) : '—');
+  const reviewPreviousIset = assessment.previousISET === 'yes' ? 'Yes' : assessment.previousISET === 'no' ? 'No' : '';
+  const reviewChildcareNeed = assessment.childcareNeed === 'yes' ? 'Yes' : assessment.childcareNeed === 'no' ? 'No' : '';
+  const reviewPostingContext = selectedPostingContext?.label || (assessment.postingContext ? formatCaseStatusLabel(assessment.postingContext) : '');
   const reviewOverallCost = formatCurrencyDisplay(overallCostTotal) || '$ 0.00';
   const reviewInterventions = proposedInterventions.map(intervention => {
     const label = resolveInterventionLabel(intervention.code) || 'Intervention';
@@ -6033,17 +6079,19 @@ const CoordinatorAssessmentWidget = forwardRef(
       ? `${intervention.interventionNoc}${intervention.interventionNocVersion ? ` (${intervention.interventionNocVersion})` : ''}`
       : intervention.interventionNocVersion
         ? `NOC version ${intervention.interventionNocVersion}`
-        : '—';
+        : '';
+    const providerLabel = intervention.deliveryMode === 'in_house'
+      ? 'In House'
+      : (intervention.institution || '').trim();
     return {
       id: intervention.id,
       label,
-      deliveryMode: intervention.deliveryMode === 'in_house' ? 'In-house (no external partner)' : 'External delivery partner',
-      institution: intervention.institution || '—',
-      programName: intervention.programName || '—',
-      startDate: intervention.startDate || '—',
-      endDate: intervention.endDate || 'Not set',
-      itpDetails: intervention.itpDetails || '',
-      wageSubsidyDetails: intervention.wageSubsidyDetails || '',
+      provider: providerLabel,
+      programName: (intervention.programName || '').trim(),
+      startDate: intervention.startDate || '',
+      endDate: intervention.endDate || '',
+      itpDetails: (intervention.itpDetails || '').trim(),
+      wageSubsidyDetails: (intervention.wageSubsidyDetails || '').trim(),
       noc
     };
   });
@@ -6058,24 +6106,23 @@ const CoordinatorAssessmentWidget = forwardRef(
       <ColumnLayout columns={2} variant="text-grid">
         <Box>
           <Header variant="h4">Assessment</Header>
-          <div>Date of assessment: {reviewAssessmentDate}</div>
-          <div>Overview: {assessment.overview || '—'}</div>
-          <div>Employment goals: {assessment.employmentGoals || '—'}</div>
+          {reviewOverview ? <div>Overview: {reviewOverview}</div> : null}
+          {reviewEmploymentGoals ? <div>Employment goals: {reviewEmploymentGoals}</div> : null}
           <div>Barriers: {reviewBarriers}</div>
-          {reviewBarriersOther && <div>Other barrier details: {reviewBarriersOther}</div>}
+          {reviewBarriersOther ? <div>Other barrier details: {reviewBarriersOther}</div> : null}
           <div>Local priorities: {reviewPriorities}</div>
         </Box>
         <Box>
           <Header variant="h4">Client context</Header>
-          <div>Eligibility: {assessment.esdcEligibility || '—'}</div>
-          <div>Childcare need: {reviewChildcareNeed}</div>
-          <div>Childcare funding: {assessment.childcareFunding || '—'}</div>
-          <div>Previous ISET funding: {reviewPreviousIset}</div>
-          <div>Previous ISET details: {assessment.previousISETDetails || '—'}</div>
-          <div>Other funding sources: {assessment.otherFunding || '—'}</div>
+          {reviewEligibility ? <div>Eligibility: {reviewEligibility}</div> : null}
+          {reviewChildcareNeed ? <div>Childcare need: {reviewChildcareNeed}</div> : null}
+          {reviewChildcareFunding ? <div>Childcare funding: {reviewChildcareFunding}</div> : null}
+          {reviewPreviousIset ? <div>Previous ISET funding: {reviewPreviousIset}</div> : null}
+          {reviewPreviousIsetDetails ? <div>Previous ISET details: {reviewPreviousIsetDetails}</div> : null}
+          {reviewOtherFunding ? <div>Other funding sources: {reviewOtherFunding}</div> : null}
         </Box>
         <Box>
-          <Header variant="h4">Interventions</Header>
+          <Header variant="h4">Proposed Interventions</Header>
           {reviewInterventions.length === 0 ? (
             <div>—</div>
           ) : (
@@ -6083,14 +6130,13 @@ const CoordinatorAssessmentWidget = forwardRef(
               {reviewInterventions.map(intervention => (
                 <Box key={intervention.id}>
                   <Box fontWeight="bold">{intervention.label}</Box>
-                  <div>Delivery mode: {intervention.deliveryMode}</div>
-                  <div>Provider: {intervention.institution}</div>
-                  <div>Program name: {intervention.programName}</div>
-                  <div>NOC: {intervention.noc}</div>
+                  {intervention.provider ? <div>Provider: {intervention.provider}</div> : null}
+                  {intervention.programName ? <div>Program name: {intervention.programName}</div> : null}
+                  {intervention.noc ? <div>NOC: {intervention.noc}</div> : null}
                   {intervention.itpDetails ? <div>ITP details: {intervention.itpDetails}</div> : null}
                   {intervention.wageSubsidyDetails ? <div>Wage subsidy details: {intervention.wageSubsidyDetails}</div> : null}
-                  <div>Start: {intervention.startDate}</div>
-                  <div>End: {intervention.endDate}</div>
+                  {intervention.startDate ? <div>Start: {intervention.startDate}</div> : null}
+                  {intervention.endDate ? <div>End: {intervention.endDate}</div> : null}
                 </Box>
               ))}
             </SpaceBetween>
@@ -6112,13 +6158,17 @@ const CoordinatorAssessmentWidget = forwardRef(
                 : `Overall proposed cost: ${reviewOverallCost}`}
             </div>
           )}
-          <div>Budget pot: {selectedBudgetPotOption?.label || '—'}</div>
-          <div>Paid from: {reviewPostingContext}</div>
+          {selectedBudgetPotOption?.label ? <div>Budget pot: {selectedBudgetPotOption.label}</div> : null}
+          {reviewPostingContext ? <div>Paid from: {reviewPostingContext}</div> : null}
         </Box>
       </ColumnLayout>
       {!assessmentSubmitted && renderRecommendationSection()}
     </SpaceBetween>
   );
+
+  const hasFundingDecision = Boolean(assessment.nwacReviewStatus);
+  const shouldShowDecisionPendingAlert =
+    showDecisionPendingAlert && isIsetCoordinator && !hasFundingDecision && !isDecisionFinal;
 
   const interventionModalDraft = interventionModal.draft || null;
   const interventionModalMode = interventionModal.mode;
@@ -6127,10 +6177,20 @@ const CoordinatorAssessmentWidget = forwardRef(
     interventionModalMode === 'edit'
       ? JSON.stringify(interventionModalDraft || {}) !== JSON.stringify(interventionModal.original || {})
       : true;
+  const showStartDateWarning = Boolean(
+    interventionModalEditable && interventionModalDraft?.startDate && isDateInPast(interventionModalDraft.startDate)
+  );
   const activeInterventionErrors = {
     ...(showFramingErrors ? (interventionFieldErrors[interventionModal.interventionId] || {}) : {}),
     ...((interventionModalMode === 'add' || interventionModalMode === 'edit') ? interventionModalErrors : {})
   };
+  const interventionModalErrorList = useMemo(() => {
+    const messages = [];
+    if (interventionModalErrors.code) messages.push(interventionModalErrors.code);
+    if (interventionModalErrors.startDate) messages.push(interventionModalErrors.startDate);
+    if (interventionModalErrors.endDate) messages.push(interventionModalErrors.endDate);
+    return messages;
+  }, [interventionModalErrors]);
   const interventionCodeLabel = interventionModalDraft
     ? resolveInterventionLabel(interventionModalDraft.code) || interventionModalDraft.code || ''
     : '';
@@ -6181,6 +6241,20 @@ const CoordinatorAssessmentWidget = forwardRef(
     >
       {interventionModalDraft && (
         <SpaceBetween size="s">
+          {interventionModalErrorList.length > 0 && (
+            <Alert type="error" statusIconAriaLabel="Error" header="Please correct the following">
+              <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
+                {interventionModalErrorList.map((message, index) => (
+                  <li key={index}>{message}</li>
+                ))}
+              </ul>
+            </Alert>
+          )}
+          <Box variant="small" color="text-body-secondary">
+            You can propose multiple interventions. If you recommend approving this application,
+            include at least one proposed intervention. If the application is approved, you can add
+            more interventions later for this applicant.
+          </Box>
           <FormField
             label="Intervention code"
             description={
@@ -6210,17 +6284,43 @@ const CoordinatorAssessmentWidget = forwardRef(
             )}
           </FormField>
           <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-            <FormField label="Start date" errorText={activeInterventionErrors.startDate}>
+            <FormField
+              label="Start date"
+              description="All interventions require a start date."
+              errorText={activeInterventionErrors.startDate}
+              warningText={showStartDateWarning ? 'Start date is in the past. Update the date if needed.' : undefined}
+            >
               <DatePicker
                 value={interventionModalDraft.startDate || ''}
-                onChange={({ detail }) => updateInterventionModalDraft({ startDate: detail.value })}
+                onChange={({ detail }) => {
+                  updateInterventionModalDraft({ startDate: detail.value });
+                  setInterventionModalErrors(prev => {
+                    if (!prev.startDate && !prev.endDate) return prev;
+                    const next = { ...prev };
+                    delete next.startDate;
+                    delete next.endDate;
+                    return next;
+                  });
+                }}
                 readOnly={!interventionModalEditable || isAssessmentDisabled}
               />
             </FormField>
-            <FormField label="End date (optional)" errorText={activeInterventionErrors.endDate}>
+            <FormField
+              label="End date"
+              description="Planned end date."
+              errorText={activeInterventionErrors.endDate}
+            >
               <DatePicker
                 value={interventionModalDraft.endDate || ''}
-                onChange={({ detail }) => updateInterventionModalDraft({ endDate: detail.value })}
+                onChange={({ detail }) => {
+                  updateInterventionModalDraft({ endDate: detail.value });
+                  setInterventionModalErrors(prev => {
+                    if (!prev.endDate) return prev;
+                    const next = { ...prev };
+                    delete next.endDate;
+                    return next;
+                  });
+                }}
                 readOnly={!interventionModalEditable || isAssessmentDisabled}
               />
             </FormField>
@@ -6535,6 +6635,16 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const decisionStepContent = (
     <>
+      {shouldShowDecisionPendingAlert && (
+        <Alert
+          type="info"
+          dismissible
+          onDismiss={() => setShowDecisionPendingAlert(false)}
+          header="Funding decision pending"
+        >
+          A funding decision has not been recorded for this application yet. You will be notified as soon as one is made.
+        </Alert>
+      )}
       <Box
         style={
           isNWACFieldsDisabled || isOutcomeNoticeDisabled
@@ -6696,11 +6806,19 @@ const CoordinatorAssessmentWidget = forwardRef(
     </>
   );
 
+  const interventionCount = Array.isArray(proposedInterventions) ? proposedInterventions.length : 0;
+  const hasMultipleInterventions = interventionCount > 1;
+  const interventionRationaleTitle = hasMultipleInterventions
+    ? 'Why are these interventions needed?'
+    : STEP_LABELS.rationale;
+  const interventionTypeTitle = hasMultipleInterventions
+    ? 'How will the interventions be delivered?'
+    : STEP_LABELS.type;
   const stepDefinitionById = {
     eligibility: { title: STEP_LABELS.eligibility, content: eligibilityStepContent, isOptional: false },
     framing: { title: STEP_LABELS.framing, content: framingStepContent, isOptional: false },
-    rationale: { title: STEP_LABELS.rationale, content: rationaleStepContent, isOptional: false },
-    type: { title: STEP_LABELS.type, content: typeStepContent, isOptional: false },
+    rationale: { title: interventionRationaleTitle, content: rationaleStepContent, isOptional: false },
+    type: { title: interventionTypeTitle, content: typeStepContent, isOptional: false },
     childcare: { title: STEP_LABELS.childcare, content: childcareStepContent, isOptional: false },
     previousIset: { title: STEP_LABELS.previousIset, content: previousIsetStepContent, isOptional: false },
     barriers: { title: STEP_LABELS.barriers, content: barriersStepContent, isOptional: false },

@@ -6766,6 +6766,181 @@ const calculateDurationDaysFromDates = (startDate, endDate) => {
   return Number.isFinite(diff) && diff >= 0 ? diff : null;
 };
 
+const normalizeProposedCostLine = (raw) => {
+  if (!raw || typeof raw !== 'object') return null;
+  const typeRaw = raw.type ?? raw.paymentType ?? raw.payment_type ?? null;
+  const type = normaliseString(typeRaw);
+  const amount = parseCurrencyValue(raw.amount ?? raw.cost ?? raw.value ?? null);
+  const notes = normaliseString(raw.notes ?? raw.description ?? null);
+  const idRaw = raw.id ?? raw.lineId ?? raw.line_id ?? null;
+  const id = normaliseString(idRaw);
+  const recurrenceRaw = raw.recurrence && typeof raw.recurrence === 'object' ? raw.recurrence : {};
+  const recurrenceEnabled = Boolean(
+    recurrenceRaw.enabled ?? raw.recurrenceEnabled ?? raw.recurrence_enabled
+  );
+  const occurrencesRaw =
+    recurrenceRaw.occurrences ??
+    recurrenceRaw.occurrence ??
+    raw.recurrenceOccurrences ??
+    raw.recurrence_occurrences ??
+    null;
+  const occurrencesNumeric =
+    occurrencesRaw === null || typeof occurrencesRaw === 'undefined' || occurrencesRaw === ''
+      ? null
+      : Number(occurrencesRaw);
+  const occurrences = Number.isFinite(occurrencesNumeric) ? occurrencesNumeric : null;
+  const amountPerPeriod = parseCurrencyValue(
+    recurrenceRaw.amountPerPeriod ??
+      recurrenceRaw.amount_per_period ??
+      raw.recurrenceAmountPerPeriod ??
+      raw.recurrence_amount_per_period ??
+      null
+  );
+  const recurrenceStart = toDateOnlyString(
+    recurrenceRaw.startDate ??
+      recurrenceRaw.start_date ??
+      raw.recurrenceStartDate ??
+      raw.recurrence_start_date ??
+      null
+  );
+  const recurrenceEnd = toDateOnlyString(
+    recurrenceRaw.endDate ??
+      recurrenceRaw.end_date ??
+      raw.recurrenceEndDate ??
+      raw.recurrence_end_date ??
+      null
+  );
+  const recurrence =
+    recurrenceEnabled || recurrenceStart || recurrenceEnd || occurrences || amountPerPeriod !== null
+      ? {
+          enabled: recurrenceEnabled,
+          startDate: recurrenceStart || null,
+          endDate: recurrenceEnd || null,
+          occurrences,
+          amountPerPeriod
+        }
+      : null;
+  if (!type && amount === null && !notes && !recurrence) return null;
+  return {
+    id: id || null,
+    type: type || null,
+    amount,
+    notes: notes || null,
+    recurrence
+  };
+};
+
+const computeCostLinesTotal = (costLines) => {
+  if (!Array.isArray(costLines) || costLines.length === 0) return null;
+  let total = 0;
+  let hasAmount = false;
+  costLines.forEach(line => {
+    const amount = Number(line?.amount);
+    if (!Number.isFinite(amount)) return;
+    total += amount;
+    hasAmount = true;
+  });
+  return hasAmount ? total : null;
+};
+
+const normalizeProposedIntervention = (raw, index = 0) => {
+  if (!raw || typeof raw !== 'object') return null;
+  const code = normalizeInterventionCodeValue(
+    raw.code ?? raw.interventionCode ?? raw.intervention_code ?? null
+  );
+  const id = normaliseString(raw.id ?? raw.interventionId ?? raw.intervention_id ?? null);
+  const startDate = toDateOnlyString(
+    raw.startDate ?? raw.interventionStartDate ?? raw.intervention_start_date ?? null
+  );
+  const endDate = toDateOnlyString(
+    raw.endDate ?? raw.interventionEndDate ?? raw.intervention_end_date ?? null
+  );
+  const deliveryMode = normaliseString(raw.deliveryMode ?? raw.delivery_mode ?? null);
+  const institution = normaliseString(raw.institution ?? null);
+  const programName = normaliseString(raw.programName ?? raw.program_name ?? null);
+  const itpDetails = normaliseString(raw.itpDetails ?? raw.itp_details ?? raw.itp?.details ?? null);
+  const wageSubsidyDetails = normaliseString(
+    raw.wageSubsidyDetails ?? raw.wage_subsidy_details ?? raw.wage?.subsidyDetails ?? null
+  );
+  const noc = normaliseString(
+    raw.interventionNoc ?? raw.intervention_noc ?? raw.related_noc ?? raw.relatedNoc ?? null
+  );
+  const nocVersion = normaliseString(
+    raw.interventionNocVersion ??
+      raw.intervention_noc_version ??
+      raw.related_noc_version ??
+      raw.relatedNocVersion ??
+      null
+  );
+  const costLinesRaw = Array.isArray(raw.costLines)
+    ? raw.costLines
+    : Array.isArray(raw.cost_lines)
+    ? raw.cost_lines
+    : [];
+  const costLines = costLinesRaw.map(normalizeProposedCostLine).filter(Boolean);
+  const costCandidate = parseCurrencyValue(
+    raw.totalCost ?? raw.cost ?? raw.interventionCost ?? raw.intervention_cost ?? null
+  );
+  const costTotal = computeCostLinesTotal(costLines) ?? (Number.isFinite(costCandidate) ? costCandidate : null);
+
+  return {
+    id: id || null,
+    code: code || null,
+    startDate,
+    endDate,
+    deliveryMode: deliveryMode || null,
+    institution: institution || null,
+    programName: programName || null,
+    itpDetails: itpDetails || null,
+    wageSubsidyDetails: wageSubsidyDetails || null,
+    noc: noc || null,
+    nocVersion: nocVersion || null,
+    costLines,
+    costTotal,
+    index
+  };
+};
+
+const normalizeAssessmentProposedInterventions = (raw) => {
+  if (!raw) return [];
+  const parsed = safeJsonParse(raw, raw);
+  const list = Array.isArray(parsed) ? parsed : [];
+  return list.map(normalizeProposedIntervention).filter(Boolean);
+};
+
+const computeProposedInterventionsTotal = (interventions) => {
+  if (!Array.isArray(interventions) || interventions.length === 0) return null;
+  let total = 0;
+  let hasAmount = false;
+  interventions.forEach(intervention => {
+    const value = Number(intervention?.costTotal);
+    if (!Number.isFinite(value)) return;
+    total += value;
+    hasAmount = true;
+  });
+  return hasAmount ? total : null;
+};
+
+const resolveEarliestDate = (dates) => {
+  if (!Array.isArray(dates)) return null;
+  let earliest = null;
+  dates.forEach(date => {
+    if (!date) return;
+    if (!earliest || date < earliest) earliest = date;
+  });
+  return earliest;
+};
+
+const resolveLatestDate = (dates) => {
+  if (!Array.isArray(dates)) return null;
+  let latest = null;
+  dates.forEach(date => {
+    if (!date) return;
+    if (!latest || date > latest) latest = date;
+  });
+  return latest;
+};
+
 async function findStaffProfileIdByUserId(connection, userId) {
   if (!Number.isFinite(userId)) return null;
 
@@ -6871,26 +7046,23 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     }
   }
 
-  const codeRaw = assessmentRow.intervention_code;
-  const code = codeRaw !== null && typeof codeRaw !== 'undefined' ? String(codeRaw).trim() : '';
-  if (!code) {
+  const proposedInterventions = normalizeAssessmentProposedInterventions(assessmentRow.proposed_interventions)
+    .filter(entry => entry.code);
+  if (!proposedInterventions.length) {
     return { createdPlan: false, createdIntervention: false, interventionId: null };
   }
-
-  const startDate = toDateOnlyString(assessmentRow.intervention_start_date);
-  const endDate = toDateOnlyString(assessmentRow.intervention_end_date);
-  const storedDuration = Number.isFinite(Number(assessmentRow.intervention_duration_days))
-    ? Number(assessmentRow.intervention_duration_days)
-    : null;
-  const computedDuration = storedDuration !== null ? storedDuration : calculateDurationDaysFromDates(startDate, endDate);
-
+  const interventionsToCreate = proposedInterventions;
+  const proposedCostTotal = computeProposedInterventionsTotal(proposedInterventions);
   const storedCost = Number.isFinite(Number(assessmentRow.intervention_cost_total))
     ? Number(assessmentRow.intervention_cost_total)
     : null;
   const fundingSummary = summariseAssessmentFunding(assessmentRow);
   const computedCost = storedCost !== null
     ? storedCost
-    : (fundingSummary && Number.isFinite(Number(fundingSummary.total)) ? Number(fundingSummary.total) : null);
+    : (Number.isFinite(proposedCostTotal)
+      ? proposedCostTotal
+      : (fundingSummary && Number.isFinite(Number(fundingSummary.total)) ? Number(fundingSummary.total) : null));
+
   const caseContext = (() => {
     const raw = caseRow?.case_context_json || caseRow?.caseContext || null;
     if (!raw) return null;
@@ -6933,8 +7105,23 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
           ? false
           : null;
 
-  const programName = assessmentRow.program_name ? String(assessmentRow.program_name).trim() : null;
-  const institution = assessmentRow.institution ? String(assessmentRow.institution).trim() : null;
+  const primaryIntervention = interventionsToCreate[0] || null;
+  const code = primaryIntervention?.code || null;
+  if (!code) {
+    return { createdPlan: false, createdIntervention: false, interventionId: null };
+  }
+
+  const startDate = primaryIntervention?.startDate || null;
+  const endDate = primaryIntervention?.endDate || null;
+  const computedDuration = calculateDurationDaysFromDates(startDate, endDate);
+  const programName = normaliseString(primaryIntervention?.programName) || null;
+  const institution = normaliseString(primaryIntervention?.institution) || null;
+  const primaryNoc = normaliseString(primaryIntervention?.noc) || noc || null;
+  const primaryNocVersion = normaliseString(primaryIntervention?.nocVersion) || nocVersion || null;
+  const planStartDate =
+    resolveEarliestDate(interventionsToCreate.map(entry => entry.startDate)) || startDate || null;
+  const planEndDate =
+    resolveLatestDate(interventionsToCreate.map(entry => entry.endDate)) || endDate || null;
   const overview = assessmentRow.overview ? String(assessmentRow.overview).trim() : null;
   const justification = assessmentRow.justification ? String(assessmentRow.justification).trim() : null;
   const recommendation = assessmentRow.recommendation ? String(assessmentRow.recommendation).trim() : null;
@@ -7123,8 +7310,8 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       startDate: startDate || null,
       endDate: endDate || null,
       durationDays: computedDuration || null,
-      noc: noc || null,
-      nocVersion: nocVersion || null,
+      noc: primaryNoc || null,
+      nocVersion: primaryNocVersion || null,
       cost: computedCost || null,
       fundingBreakdown: fundingSummary ? fundingSummary.breakdown : null,
     }),
@@ -7201,8 +7388,8 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       prevEmploymentCode,
       ownerStaffProfileId || null,
       ownerUserId || null,
-      startDate || null,
-      endDate || null,
+      planStartDate || null,
+      planEndDate || null,
       null,
       justification || null,
       planMetadata ? JSON.stringify(planMetadata) : null,
@@ -7432,143 +7619,264 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   } catch (err) {
     console.warn('[auto-plan] failed to seed participant submission for plan', planId, err?.message || err);
   }
-  const interventionTitleCandidates = [
-    programName,
-    interventionLabel ? `${interventionLabel} Intervention` : null,
-    `Intervention ${code}`,
-    'Initial Intervention',
-  ].filter(Boolean);
-  const interventionTitle = interventionTitleCandidates.length ? interventionTitleCandidates[0] : 'Initial Intervention';
-
-  const assessmentFunding = parseAssessmentFundingPayload(assessmentRow.itp_payload);
-  const fundingSnapshot = (() => {
-    if (!assessmentFunding && (computedCost === null || !Number.isFinite(computedCost))) return null;
-    const base = assessmentFunding ? { ...assessmentFunding } : {};
-    if (computedCost !== null && Number.isFinite(computedCost)) {
-      base.total = computedCost;
-    }
-    return base;
-  })();
-
-  const baseInterventionMetadata = pruneNullish({
-    source: AUTO_PLAN_METADATA_SOURCE,
-    title: interventionTitle,
-    programName: programName || null,
-    trainingInstitution: institution || null,
-    noc: noc || null,
-    nocVersion: nocVersion || null,
-    durationDays: computedDuration || null,
-    childcareNeed: childcareNeed || null,
-    childcareFunding: childcareFunding || null,
-    cost: computedCost || null,
-    potId: validatedBudgetPotId || null,
-    budgetPotId: validatedBudgetPotId || null,
-    funding: fundingSnapshot || null,
-    compliance: { ilmp: 'pending', finance: 'pending' },
-    generatedAt: now.toISOString(),
-  }) || {};
-  if (assessmentCostSettings) {
-    mergeRecurringCostMetadata(
-      baseInterventionMetadata,
-      {
-        costSettings: assessmentCostSettings,
-        costType: assessmentCostSettings.type || null,
-      },
-      Number.isFinite(computedCost) ? computedCost : null
-    );
-  }
-  const interventionMetadata = Object.keys(baseInterventionMetadata).length
-    ? baseInterventionMetadata
-    : null;
-
-  const budgetAmount =
-    computedCost !== null && Number.isFinite(computedCost) ? Number(computedCost) : null;
-
-  const esdcInterventionPayload = pruneNullish({
-    interventionCode: code || null,
-    interventionStartDate: startDate || null,
-    interventionEndDate: endDate || null,
-    interventionDuration: computedDuration !== null && Number.isFinite(computedDuration) ? computedDuration : null,
-    interventionCost: budgetAmount,
-    interventionRelatedNOC: noc || null,
-    interventionRelatedNOCVersion: nocVersion || null,
-  });
-
-  const [interventionInsert] = await connection.query(
-    `INSERT INTO iset_case_intervention
-       (case_id,
-        action_plan_id,
-        intervention_code,
-        status,
-        start_date,
-        end_date,
-        duration_days,
-        budget_amount,
-        approved_amount,
-        actual_amount,
-        intervention_cost,
-        related_noc,
-        related_noc_version,
-        outcome_code,
-        notes,
-        metadata_json,
-        esdc_intervention_json,
-        created_by_staff_profile_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      caseId,
-      planId,
-      code || null,
-      'planned',
-      startDate || null,
-      endDate || null,
-      computedDuration !== null && Number.isFinite(computedDuration) ? computedDuration : null,
-      budgetAmount,
-      null,
-      null,
-      budgetAmount,
-      noc || null,
-      nocVersion || null,
-      null,
-      justification || null,
-      interventionMetadata ? JSON.stringify(interventionMetadata) : null,
-      Object.keys(esdcInterventionPayload || {}).length ? JSON.stringify(esdcInterventionPayload) : null,
-      ownerStaffProfileId || null,
-    ]
-  );
-
-  const interventionId = interventionInsert?.insertId || null;
-
-  if (validatedBudgetPotId && interventionId && budgetAmount !== null) {
-    await upsertFinanceTransactionForIntervention({
-      caseId,
-      interventionId,
-      potId: validatedBudgetPotId,
-      amount: budgetAmount,
-      status: 'submitted',
-      transactionDate: startDate || null,
-      connection,
-    });
-  }
-
-  let movedDocuments = 0;
-  if (interventionId) {
+  const postingContext = normalizePostingContext(assessmentRow.posting_context) || 'external';
+  let glProjectCodeUsed = null;
+  if (validatedBudgetPotId) {
     try {
-      const moveResult = await moveApplicationDocumentsToIntervention(connection, {
-        caseId,
-        applicationId: caseRow?.application_id,
-        interventionId,
+      const { glProjectCodeUsed: gl } = await ensureChargeablePot({
+        runner: connection,
+        potId: validatedBudgetPotId,
+        postingContext
       });
-      movedDocuments = moveResult.moved || 0;
+      glProjectCodeUsed = gl;
     } catch (err) {
-      console.warn('[auto-plan] failed to move supporting documents', err?.message || err);
+      console.warn('[auto-plan] failed to resolve GL code for pot', err?.message || err);
     }
+  }
+
+  const labelCache = new Map();
+  const resolveLabel = async (value) => {
+    const normalized = normalizeInterventionCodeValue(value);
+    if (!normalized) return null;
+    if (labelCache.has(normalized)) return labelCache.get(normalized);
+    const label = await fetchInterventionCodeLabel(connection, normalized);
+    labelCache.set(normalized, label || null);
+    return label || null;
+  };
+
+  const truncateDescription = value => {
+    if (!value) return null;
+    const trimmed = String(value).trim();
+    if (!trimmed) return null;
+    return trimmed.length > 255 ? `${trimmed.slice(0, 252)}...` : trimmed;
+  };
+
+  const interventionIds = [];
+  const financeRows = [];
+  let movedDocuments = 0;
+
+  for (let index = 0; index < interventionsToCreate.length; index += 1) {
+    const proposed = interventionsToCreate[index];
+    const interventionCode = proposed?.code || null;
+    if (!interventionCode) continue;
+    const interventionStartDate = proposed.startDate || null;
+    const interventionEndDate = proposed.endDate || null;
+    const durationDays = calculateDurationDaysFromDates(interventionStartDate, interventionEndDate);
+    const lineCostTotal = Number.isFinite(proposed.costTotal)
+      ? Number(proposed.costTotal)
+      : computeCostLinesTotal(proposed.costLines);
+    let costTotal = Number.isFinite(lineCostTotal) ? lineCostTotal : null;
+    if (costTotal === null && interventionsToCreate.length === 1 && Number.isFinite(computedCost)) {
+      costTotal = Number(computedCost);
+    }
+    const budgetAmount = costTotal !== null && Number.isFinite(costTotal)
+      ? Math.round(costTotal * 100) / 100
+      : null;
+    const interventionProgramName = normaliseString(proposed.programName) || programName || null;
+    const interventionInstitution = normaliseString(proposed.institution) || institution || null;
+    const interventionNoc = normaliseString(proposed.noc) || noc || null;
+    const interventionNocVersion = normaliseString(proposed.nocVersion) || nocVersion || null;
+    const codeLabel = await resolveLabel(interventionCode);
+    const interventionTitleCandidates = [
+      interventionProgramName,
+      codeLabel ? `${codeLabel} Intervention` : null,
+      `Intervention ${interventionCode}`,
+      index === 0 ? 'Initial Intervention' : 'Proposed Intervention',
+    ].filter(Boolean);
+    const interventionTitle = interventionTitleCandidates.length
+      ? interventionTitleCandidates[0]
+      : 'Intervention';
+
+    const fundingBreakdown = Array.isArray(proposed.costLines)
+      ? proposed.costLines
+          .map(line => {
+            const amount = Number(line?.amount);
+            if (!Number.isFinite(amount) || amount <= 0) return null;
+            return { label: line.type || null, amount: Math.round(amount * 100) / 100 };
+          })
+          .filter(Boolean)
+      : [];
+
+    const baseInterventionMetadata = pruneNullish({
+      source: AUTO_PLAN_METADATA_SOURCE,
+      title: interventionTitle,
+      programName: interventionProgramName || null,
+      trainingInstitution: interventionInstitution || null,
+      deliveryMode: proposed.deliveryMode || null,
+      itpDetails: proposed.itpDetails || null,
+      wageSubsidyDetails: proposed.wageSubsidyDetails || null,
+      noc: interventionNoc || null,
+      nocVersion: interventionNocVersion || null,
+      durationDays: durationDays || null,
+      childcareNeed: childcareNeed || null,
+      childcareFunding: childcareFunding || null,
+      cost: budgetAmount ?? null,
+      potId: validatedBudgetPotId || null,
+      budgetPotId: validatedBudgetPotId || null,
+      fundingBreakdown: fundingBreakdown.length ? fundingBreakdown : null,
+      costLines: Array.isArray(proposed.costLines) && proposed.costLines.length ? proposed.costLines : null,
+      compliance: { ilmp: 'pending', finance: 'pending' },
+      generatedAt: now.toISOString(),
+      proposedInterventionId: proposed.id || null,
+      proposedInterventionIndex: index + 1,
+    }) || {};
+    if (assessmentCostSettings && (!Array.isArray(proposed.costLines) || proposed.costLines.length === 0)) {
+      mergeRecurringCostMetadata(
+        baseInterventionMetadata,
+        {
+          costSettings: assessmentCostSettings,
+          costType: assessmentCostSettings.type || null,
+        },
+        Number.isFinite(budgetAmount) ? budgetAmount : null
+      );
+    }
+    const interventionMetadata = Object.keys(baseInterventionMetadata).length
+      ? baseInterventionMetadata
+      : null;
+
+    const esdcInterventionPayload = pruneNullish({
+      interventionCode: interventionCode || null,
+      interventionStartDate: interventionStartDate || null,
+      interventionEndDate: interventionEndDate || null,
+      interventionDuration: durationDays !== null && Number.isFinite(durationDays) ? durationDays : null,
+      interventionCost: budgetAmount,
+      interventionRelatedNOC: interventionNoc || null,
+      interventionRelatedNOCVersion: interventionNocVersion || null,
+    });
+
+    const [interventionInsert] = await connection.query(
+      `INSERT INTO iset_case_intervention
+         (case_id,
+          action_plan_id,
+          intervention_code,
+          status,
+          start_date,
+          end_date,
+          duration_days,
+          budget_amount,
+          approved_amount,
+          actual_amount,
+          intervention_cost,
+          related_noc,
+          related_noc_version,
+          outcome_code,
+          notes,
+          metadata_json,
+          esdc_intervention_json,
+          created_by_staff_profile_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        caseId,
+        planId,
+        interventionCode || null,
+        'planned',
+        interventionStartDate || null,
+        interventionEndDate || null,
+        durationDays !== null && Number.isFinite(durationDays) ? durationDays : null,
+        budgetAmount,
+        null,
+        null,
+        budgetAmount,
+        interventionNoc || null,
+        interventionNocVersion || null,
+        null,
+        justification || null,
+        interventionMetadata ? JSON.stringify(interventionMetadata) : null,
+        Object.keys(esdcInterventionPayload || {}).length ? JSON.stringify(esdcInterventionPayload) : null,
+        ownerStaffProfileId || null,
+      ]
+    );
+
+    const interventionId = interventionInsert?.insertId || null;
+    if (interventionId) {
+      interventionIds.push(interventionId);
+      try {
+        const moveResult = await moveApplicationDocumentsToIntervention(connection, {
+          caseId,
+          applicationId: caseRow?.application_id,
+          interventionId,
+        });
+        movedDocuments += moveResult.moved || 0;
+      } catch (err) {
+        console.warn('[auto-plan] failed to move supporting documents', err?.message || err);
+      }
+    }
+
+    if (validatedBudgetPotId && interventionId) {
+      const transactionDate = interventionStartDate || null;
+      const baseMeta = pruneNullish({
+        source: AUTO_PLAN_METADATA_SOURCE,
+        proposedInterventionId: proposed.id || null,
+        proposedInterventionIndex: index + 1,
+        interventionCode,
+        interventionTitle,
+      });
+      const costLines = Array.isArray(proposed.costLines) ? proposed.costLines : [];
+      const lineRows = costLines
+        .map(line => {
+          const amount = Number(line?.amount);
+          if (!Number.isFinite(amount) || amount <= 0) return null;
+          const rounded = Math.round(amount * 100) / 100;
+          const lineMeta = pruneNullish({
+            ...(baseMeta || {}),
+            line: pruneNullish({
+              id: line.id || null,
+              type: line.type || null,
+              notes: line.notes || null,
+              recurrence: line.recurrence || null,
+            })
+          });
+          return [
+            caseId,
+            interventionId,
+            validatedBudgetPotId,
+            postingContext || null,
+            glProjectCodeUsed || null,
+            rounded,
+            'CAD',
+            'submitted',
+            transactionDate,
+            truncateDescription(line.type || interventionTitle),
+            lineMeta ? JSON.stringify(lineMeta) : null,
+          ];
+        })
+        .filter(Boolean);
+      if (lineRows.length) {
+        financeRows.push(...lineRows);
+      } else if (Number.isFinite(budgetAmount) && budgetAmount > 0) {
+        const meta = baseMeta ? { ...baseMeta } : null;
+        financeRows.push([
+          caseId,
+          interventionId,
+          validatedBudgetPotId,
+          postingContext || null,
+          glProjectCodeUsed || null,
+          budgetAmount,
+          'CAD',
+          'submitted',
+          transactionDate,
+          truncateDescription(`${interventionTitle} total`),
+          meta ? JSON.stringify(meta) : null,
+        ]);
+      }
+    }
+  }
+
+  if (financeRows.length) {
+    await connection.query(
+      `INSERT INTO finance_transaction
+         (case_id, case_intervention_id, budget_pot_id, posting_context, gl_project_code_used, amount, currency, status, transaction_date, description, metadata)
+       VALUES ?`,
+      [financeRows]
+    );
+    await refreshFinancePotSums(connection);
   }
 
   return {
     createdPlan: true,
-    createdIntervention: true,
-    interventionId: interventionId || null,
+    createdIntervention: interventionIds.length > 0,
+    interventionId: interventionIds[0] || null,
+    interventionIds,
     planStatus,
     suggestedCaseStatus: 'initiated',
     movedDocuments
@@ -38228,6 +38536,131 @@ const resolveAutoPacketPayee = ({ paymentType, partnerName, clientName, fallback
   return { payeeType: fallbackPayeeType, payeeName: fallbackPayeeName };
 };
 
+const buildAutoPaymentLinesFromCostLines = ({
+  interventionRow,
+  interventionMetadata,
+  clientPayeeName,
+  partnerName,
+  fallbackPayeeType,
+  fallbackPayeeName,
+  allowedPaymentTypes,
+}) => {
+  const lines = [];
+  const isAllowed = paymentType =>
+    !allowedPaymentTypes || allowedPaymentTypes.size === 0 || allowedPaymentTypes.has(paymentType);
+  const pushLine = line => {
+    if (!line) return;
+    if (!Number.isFinite(line.amount) || line.amount <= 0) return;
+    if (!isAllowed(line.paymentType)) return;
+    lines.push(line);
+  };
+
+  const rawCostLines =
+    interventionMetadata?.costLines ||
+    interventionMetadata?.cost_lines ||
+    [];
+  const costLines = Array.isArray(rawCostLines)
+    ? rawCostLines.map(normalizeProposedCostLine).filter(Boolean)
+    : [];
+  if (!costLines.length) return lines;
+
+  const interventionStart = toDateOnly(interventionRow?.start_date || null);
+  const interventionEnd = toDateOnly(interventionRow?.end_date || null);
+
+  costLines.forEach((entry, index) => {
+    const paymentType =
+      resolveAutoPacketPaymentType(entry.type || entry.paymentType || entry.payment_type) || null;
+    if (!paymentType) return;
+    const amount = Number(entry.amount);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const recurrence = entry.recurrence && typeof entry.recurrence === 'object' ? entry.recurrence : null;
+    const recurrenceEnabled = Boolean(recurrence?.enabled);
+    const occurrences = normaliseRecurringNumber(recurrence?.occurrences);
+    const amountPerPeriod = normaliseRecurringNumber(recurrence?.amountPerPeriod);
+    const recurrenceStart = toDateOnly(recurrence?.startDate || interventionStart || null);
+    const recurrenceEnd = toDateOnly(recurrence?.endDate || interventionEnd || null);
+    const payee = resolveAutoPacketPayee({
+      paymentType,
+      partnerName,
+      clientName: clientPayeeName,
+      fallbackType: fallbackPayeeType,
+      fallbackName: fallbackPayeeName,
+    });
+    const baseMeta = pruneNullish({
+      autoGenerated: true,
+      source: 'assessment_cost_line',
+      costLineId: entry.id || null,
+      costLineIndex: index + 1,
+      costLineNotes: entry.notes || null,
+      costLineRecurrence: recurrence || null,
+    });
+
+    const isRecurring = recurrenceEnabled && recurrenceStart && (recurrenceEnd || occurrences);
+    if (isRecurring) {
+      const { periods } = buildRecurringServicePeriods({
+        startDate: recurrenceStart,
+        endDate: recurrenceEnd,
+        period: 'monthly',
+        occurrences,
+      });
+      if (periods.length) {
+        const splitAmounts =
+          Number.isFinite(amountPerPeriod) && amountPerPeriod > 0
+            ? periods.map(() => amountPerPeriod)
+            : splitRecurringAmount(amount, periods.length);
+        splitAmounts.forEach((lineAmount, periodIndex) => {
+          const periodItem = periods[periodIndex];
+          if (!periodItem) return;
+          const recurrenceMeta = {
+            period: 'monthly',
+            index: periodIndex + 1,
+            total: periods.length,
+            scheduleStart: periods[0]?.start || null,
+            scheduleEnd: periods[periods.length - 1]?.end || null,
+            autoGenerated: true,
+          };
+          pushLine({
+            paymentType,
+            payeeType: payee.payeeType,
+            payeeName: payee.payeeName,
+            amount: lineAmount,
+            currency: 'CAD',
+            servicePeriodStart: periodItem.start,
+            servicePeriodEnd: periodItem.end,
+            requestedPaymentDate: periodItem.end,
+            status: 'needs_evidence',
+            holdReason: null,
+            metadata: {
+              ...(baseMeta || {}),
+              recurrence: recurrenceMeta,
+            },
+          });
+        });
+        return;
+      }
+    }
+
+    const requiresPeriod =
+      normalizePaymentTypeKey(paymentType) === 'LivingAllowance' ||
+      normalizePaymentTypeKey(paymentType) === 'WageSubsidyEmployer';
+    pushLine({
+      paymentType,
+      payeeType: payee.payeeType,
+      payeeName: payee.payeeName,
+      amount,
+      currency: 'CAD',
+      servicePeriodStart: requiresPeriod ? recurrenceStart || interventionStart : null,
+      servicePeriodEnd: requiresPeriod ? recurrenceEnd || interventionEnd : null,
+      requestedPaymentDate: null,
+      status: 'needs_evidence',
+      holdReason: null,
+      metadata: baseMeta || {},
+    });
+  });
+
+  return lines;
+};
+
 const buildAutoPaymentLinesFromAssessment = ({
   assessmentRow,
   interventionRow,
@@ -38651,17 +39084,28 @@ async function createAutoPaymentPacketFromIntervention({
     const fundingStream = potRow?.funding_source
       ? normalizeFundingSource(potRow.funding_source)
       : null;
-    const autoLineInputs = buildAutoPaymentLinesFromAssessment({
-      assessmentRow,
+    const costLineInputs = buildAutoPaymentLinesFromCostLines({
       interventionRow,
       interventionMetadata: metadata,
-      planMetadata,
       clientPayeeName,
       partnerName,
       fallbackPayeeType,
       fallbackPayeeName,
       allowedPaymentTypes,
     });
+    const autoLineInputs = costLineInputs.length
+      ? costLineInputs
+      : buildAutoPaymentLinesFromAssessment({
+          assessmentRow,
+          interventionRow,
+          interventionMetadata: metadata,
+          planMetadata,
+          clientPayeeName,
+          partnerName,
+          fallbackPayeeType,
+          fallbackPayeeName,
+          allowedPaymentTypes,
+        });
     const fallbackPayee = resolveAutoPacketPayee({
       paymentType,
       partnerName,
@@ -46768,6 +47212,17 @@ app.put('/api/cases/:id', async (req, res) => {
     if (max !== null && num > max) return null;
     return num;
   };
+  const toCurrencyWhole = (val, { min = 0, max = null } = {}) => {
+    if (typeof val === 'undefined') return undefined;
+    if (val === null || val === '') return null;
+    const num = parseCurrencyValue(val);
+    if (num === null) return null;
+    const rounded = Math.round(num);
+    if (!Number.isFinite(rounded)) return null;
+    if (rounded < min) return null;
+    if (max !== null && rounded > max) return null;
+    return rounded;
+  };
   const normalizeConflictChoice = (val) => {
     if (typeof val !== 'string') return null;
     const normalized = val.trim().toLowerCase();
@@ -47148,7 +47603,11 @@ app.put('/api/cases/:id', async (req, res) => {
     addIfPresent('assessment_intervention_code', 'intervention_code', val => toNumericRange(val, { min: 1, max: 99 }));
     addIfPresent('assessment_intervention_outcome_code', 'intervention_outcome_code', val => toNumericRange(val, { min: 1, max: 99 }));
     addIfPresent('assessment_intervention_duration_days', 'intervention_duration_days', val => toNumericRange(val, { min: 0, max: 999 }));
-    addIfPresent('assessment_intervention_cost_total', 'intervention_cost_total', val => toNumericRange(val, { min: 0, max: 999999 }));
+    addIfPresent(
+      'assessment_intervention_cost_total',
+      'intervention_cost_total',
+      val => toCurrencyWhole(val, { min: 0, max: 999999 })
+    );
     addIfPresent('assessment_intervention_related_noc', 'intervention_related_noc', toNull);
     addIfPresent('assessment_intervention_related_noc_version', 'intervention_related_noc_version', toNull);
     addIfPresent('assessment_proposed_interventions', 'proposed_interventions', val => toJsonValue(val ?? null, null));
@@ -47350,17 +47809,23 @@ app.put('/api/cases/:id', async (req, res) => {
       await ensureEsdcParticipantSubmissionRecord(conn, caseId, applicationId);
     }
 
-    if (autoPlanSuggestion?.createdIntervention && autoPlanSuggestion?.interventionId) {
+    const autoPlanInterventionIds = Array.isArray(autoPlanSuggestion?.interventionIds)
+      ? autoPlanSuggestion.interventionIds
+      : autoPlanSuggestion?.interventionId
+      ? [autoPlanSuggestion.interventionId]
+      : [];
+    if (autoPlanSuggestion?.createdIntervention && autoPlanInterventionIds.length) {
       try {
-        const [[interventionRow]] = await conn.query(
-          'SELECT * FROM iset_case_intervention WHERE id = ? LIMIT 1',
-          [Number(autoPlanSuggestion.interventionId)]
-        );
-        if (interventionRow) {
-          const actorRole = canonicaliseAccessRole(identity.role) || identity.role || null;
-          const actorUserId = Number.isFinite(autoPlanApprovalUserId)
-            ? autoPlanApprovalUserId
-            : null;
+        const actorRole = canonicaliseAccessRole(identity.role) || identity.role || null;
+        const actorUserId = Number.isFinite(autoPlanApprovalUserId)
+          ? autoPlanApprovalUserId
+          : null;
+        for (const interventionId of autoPlanInterventionIds) {
+          const [[interventionRow]] = await conn.query(
+            'SELECT * FROM iset_case_intervention WHERE id = ? LIMIT 1',
+            [Number(interventionId)]
+          );
+          if (!interventionRow) continue;
           await createAutoPaymentPacketFromIntervention({
             interventionRow,
             actorUserId,
