@@ -56,6 +56,16 @@ const CHECKLIST_KEY = 'checklist.compliance.iset';
 const CHECKLIST_INTERVENTION_KEY = 'checklist.compliance.iset.intervention';
 const CHECKLIST_FALLBACK_PATH = path.join(__dirname, 'src', 'server', 'config', 'checklists', 'iset-compliance.json');
 const CHECKLIST_INTERVENTION_FALLBACK_PATH = path.join(__dirname, 'src', 'server', 'config', 'checklists', 'iset-intervention.json');
+const ASSESSMENT_COSTING_SCOPE = 'assessment';
+const ASSESSMENT_COSTING_KEY = 'coordinator.costing.line_item_defaults';
+const DEFAULT_ASSESSMENT_COSTING_DEFAULTS = {
+  enabled: true,
+  strategy: 'allowed',
+  paymentTypes: [
+    { code: 'LivingAllowance', recurrence: { mode: 'required' } }
+  ],
+  interventions: []
+};
 
 const CHECKLIST_CACHE_TTL_MS = 30 * 1000;
 const checklistCacheByKey = new Map();
@@ -4179,7 +4189,12 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       }
     }
 
-    const codeCandidate = metadata.code ?? intervention.code ?? esdc.interventionCode ?? intervention.intervention_type ?? null;
+    const codeCandidate =
+      metadata.code ??
+      intervention.code ??
+      intervention.intervention_code ??
+      esdc.interventionCode ??
+      null;
     const code = normaliseNumericString(codeCandidate, { min: 1, max: 999 });
 
     const isClosedStatus = ['completed', 'cancelled'].includes(statusNormalized);
@@ -7483,7 +7498,6 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     `INSERT INTO iset_case_intervention
        (case_id,
         action_plan_id,
-        intervention_type,
         intervention_code,
         status,
         start_date,
@@ -7500,11 +7514,10 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
         metadata_json,
         esdc_intervention_json,
         created_by_staff_profile_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       caseId,
       planId,
-      code,
       code || null,
       'planned',
       startDate || null,
@@ -9908,7 +9921,12 @@ function mapInterventionRow(row) {
     id: row.id,
     caseId: row.case_id || null,
     actionPlanId: row.action_plan_id || null,
-    code: row.intervention_code ?? metadata.code ?? row.intervention_type ?? null,
+    code:
+      row.intervention_code ??
+      metadata.code ??
+      metadata.interventionCode ??
+      metadata.intervention_code ??
+      null,
     title: metadata.title || metadata.description || row.notes || null,
     description: metadata.description || null,
     status,
@@ -15929,6 +15947,50 @@ async function writeChecklistConfigSnapshot(key, config) {
   return config;
 }
 
+const normaliseAssessmentCostingDefaults = (payload) => {
+  if (!payload || typeof payload !== 'object') {
+    return { ...DEFAULT_ASSESSMENT_COSTING_DEFAULTS };
+  }
+  return {
+    enabled: payload.enabled !== false,
+    strategy: typeof payload.strategy === 'string' && payload.strategy.trim() ? payload.strategy.trim() : 'allowed',
+    paymentTypes: Array.isArray(payload.paymentTypes) ? payload.paymentTypes : [],
+    interventions: Array.isArray(payload.interventions) ? payload.interventions : []
+  };
+};
+
+async function readAssessmentCostingDefaults() {
+  try {
+    await ensureRuntimeConfigTable();
+    const [[row]] = await pool.query(
+      'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      [ASSESSMENT_COSTING_SCOPE, ASSESSMENT_COSTING_KEY]
+    );
+    if (!row) {
+      return { ...DEFAULT_ASSESSMENT_COSTING_DEFAULTS, source: 'default' };
+    }
+    let value = row.v;
+    if (value && typeof value === 'string') {
+      try { value = JSON.parse(value); } catch { value = null; }
+    }
+    const normalised = normaliseAssessmentCostingDefaults(value);
+    return { ...normalised, source: 'stored', updated_at: row.updated_at };
+  } catch (err) {
+    console.warn('[assessment-costing] read config failed:', err.message);
+    return { ...DEFAULT_ASSESSMENT_COSTING_DEFAULTS, source: 'error' };
+  }
+}
+
+async function writeAssessmentCostingDefaults(payload) {
+  const normalised = normaliseAssessmentCostingDefaults(payload);
+  await ensureRuntimeConfigTable();
+  await pool.query(
+    'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+    [ASSESSMENT_COSTING_SCOPE, ASSESSMENT_COSTING_KEY, JSON.stringify(normalised)]
+  );
+  return normalised;
+}
+
 app.get('/api/config/runtime/checklists', async (_req, res) => {
   try {
     const [application, intervention] = await Promise.all([
@@ -15980,6 +16042,28 @@ app.patch('/api/config/runtime/checklists', async (req, res) => {
   } catch (err) {
     console.error('[checklist-config] update failed', err);
     res.status(500).json({ error: 'checklist_config_update_failed', message: err.message });
+  }
+});
+
+app.get('/api/config/runtime/assessment-costing', async (_req, res) => {
+  try {
+    const config = await readAssessmentCostingDefaults();
+    res.json(config);
+  } catch (err) {
+    console.error('[assessment-costing] fetch failed', err);
+    res.status(500).json({ error: 'assessment_costing_fetch_failed', message: err.message });
+  }
+});
+
+app.patch('/api/config/runtime/assessment-costing', async (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const body = req.body || {};
+    const saved = await writeAssessmentCostingDefaults(body);
+    res.json({ ok: true, config: saved });
+  } catch (err) {
+    console.error('[assessment-costing] update failed', err);
+    res.status(500).json({ error: 'assessment_costing_update_failed', message: err.message });
   }
 });
 
@@ -18789,7 +18873,6 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
       ci.case_id,
       ci.action_plan_id,
       ci.intervention_code AS intervention_code,
-      ci.intervention_type AS intervention_type,
       JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
       ci.status AS intervention_status,
       ci.start_date AS intervention_start_date,
@@ -18885,7 +18968,6 @@ app.get('/api/dashboard/intervention-milestone-items', async (req, res) => {
       ci.case_id,
       ci.action_plan_id,
       ci.intervention_code AS intervention_code,
-      ci.intervention_type AS intervention_type,
       JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
       ci.status AS intervention_status,
       ci.start_date AS intervention_start_date,
@@ -27391,6 +27473,10 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       rawAssessmentWage && typeof rawAssessmentWage === 'object'
         ? rawAssessmentWage
         : { ...DEFAULT_WAGE_PAYLOAD };
+    const proposedInterventionsValue = parseJsonField(
+      firstDefined(assessmentRow?.proposed_interventions, row.assessment_proposed_interventions),
+      null
+    );
 
     const dateOfAssessmentRaw = firstDefined(
       assessmentRow?.date_of_assessment,
@@ -27444,6 +27530,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     response.assessment_intervention_cost_total = interventionCostValue;
     response.assessment_intervention_related_noc = interventionNocValue;
     response.assessment_intervention_related_noc_version = interventionNocVersionValue;
+    response.assessment_proposed_interventions = proposedInterventionsValue;
     response.assessment_childcare_need = childcareNeedNormalised;
     response.assessment_childcare_funding_details =
       assessmentRow?.childcare_funding_details ?? row.assessment_childcare_funding_details ?? null;
@@ -28798,7 +28885,6 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       `INSERT INTO iset_case_intervention
          (case_id,
           action_plan_id,
-          intervention_type,
           intervention_code,
           status,
           start_date,
@@ -28815,16 +28901,15 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
           metadata_json,
           esdc_intervention_json,
           created_by_staff_profile_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         planRow.case_id,
         planId,
-        trimmedCode,
         trimmedCode || null,
         statusValue,
-       startDateValue || null,
-       endDateValue || null,
-       durationDaysValue !== null ? durationDaysValue : null,
+        startDateValue || null,
+        endDateValue || null,
+        durationDaysValue !== null ? durationDaysValue : null,
         Number.isFinite(plannedCostInt) ? plannedCostInt : null,
         Number.isFinite(approvedAmountValue) ? approvedAmountValue : null,
         Number.isFinite(actualAmountValue) ? actualAmountValue : null,
@@ -29129,8 +29214,6 @@ app.patch('/api/interventions/:id', async (req, res) => {
       if (!VALID_CODES.has(trimmedCode)) {
         return res.status(422).json({ error: 'invalid_code', message: 'Intervention code must be one of the ESDC codes 1-20.' });
       }
-      updates.push('intervention_type = ?');
-      params.push(trimmedCode);
       updates.push('intervention_code = ?');
       params.push(trimmedCode);
       metadata.code = trimmedCode;
@@ -30036,7 +30119,7 @@ app.post('/api/action-plans/:id/delete', async (req, res) => {
     }
 
     const [interventionRows] = await pool.query(
-      'SELECT id, intervention_type, status FROM iset_case_intervention WHERE action_plan_id = ?',
+      'SELECT id, status FROM iset_case_intervention WHERE action_plan_id = ?',
       [planId]
     );
     const mappedInterventions = interventionRows
@@ -30441,6 +30524,7 @@ app.get('/api/cases/:id', async (req, res) => {
         bp.code AS assessment_intervention_pot_code,
         bp.name AS assessment_intervention_pot_name,
         ca.posting_context AS assessment_posting_context,
+        ca.proposed_interventions AS assessment_proposed_interventions,
         ca.childcare_need AS assessment_childcare_need,
         ca.childcare_funding_details AS assessment_childcare_funding_details,
         ca.action_plan_result_code AS assessment_action_plan_result_code,
@@ -33203,7 +33287,7 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       if (requestedInterventionId) {
         const [[selectedIntervention]] = await pool.query(
           `SELECT id, status, start_date, end_date, intervention_cost, budget_amount, approved_amount,
-                  intervention_code, intervention_type, metadata_json, esdc_intervention_json, created_at
+                  intervention_code, metadata_json, esdc_intervention_json, created_at
              FROM iset_case_intervention
             WHERE id = ? AND case_id = ?
             LIMIT 1`,
@@ -33222,7 +33306,7 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       if (!interventionRow) {
         const [interventionRows] = await pool.query(
           `SELECT id, status, start_date, end_date, intervention_cost, budget_amount, approved_amount,
-                  intervention_code, intervention_type, metadata_json, esdc_intervention_json, created_at
+                  intervention_code, metadata_json, esdc_intervention_json, created_at
              FROM iset_case_intervention
             WHERE case_id = ?
             ORDER BY created_at DESC`,
@@ -33239,7 +33323,6 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       const interventionEsdc = safeJsonParse(interventionRow?.esdc_intervention_json, {}) || {};
       const interventionCodeRaw =
         interventionRow?.intervention_code ??
-        interventionRow?.intervention_type ??
         interventionEsdc?.interventionCode ??
         interventionMetadata?.code ??
         null;
@@ -35114,8 +35197,7 @@ const normalizePaymentInterventionMapping = raw => {
   const paymentTypes = Array.isArray(paymentTypesRaw)
     ? paymentTypesRaw.map(normalizePaymentTypeMappingEntry).filter(Boolean)
     : [];
-  const interventionsRaw =
-    raw.interventions || raw.interventionTypes || raw.intervention_types || [];
+  const interventionsRaw = raw.interventions || [];
   const interventionsMap = new Map();
   if (Array.isArray(interventionsRaw)) {
     interventionsRaw.forEach(entry => {
@@ -35189,7 +35271,6 @@ const resolveAllowedPaymentTypesForIntervention = (mapping, intervention) => {
       metaCode ??
       intervention?.interventionCode ??
       intervention?.code ??
-      intervention?.intervention_type ??
       null
   );
   if (!code) return null;
@@ -36604,7 +36685,6 @@ const validatePaymentLinePolicy = ({
           metaCode ??
           intervention?.interventionCode ??
           intervention?.code ??
-          intervention?.intervention_type ??
           null
       );
       errors.push({
@@ -36760,7 +36840,6 @@ const fetchInterventionsById = async ({ ids, connection }) => {
             start_date,
             end_date,
             intervention_code,
-            intervention_type,
             intervention_cost,
             budget_amount,
             approved_amount,
@@ -37494,7 +37573,7 @@ const resolveClientNameFromRow = row => {
 
 const resolveInterventionNameFromRow = row => {
   const meta = safeJsonParse(row?.intervention_metadata_json, {}) || {};
-  return meta.title || meta.description || row?.intervention_notes || row?.intervention_type || null;
+  return meta.title || meta.description || row?.intervention_notes || row?.intervention_code || null;
 };
 
 const resolveTurnaroundDays = row => {
@@ -38060,7 +38139,6 @@ const resolveAutoPacketInterventionCode = (interventionRow, metadata = {}) => {
       metaCode ??
       interventionRow?.interventionCode ??
       interventionRow?.code ??
-      interventionRow?.intervention_type ??
       null
   );
 };
@@ -38767,7 +38845,6 @@ async function fetchPaymentPacketById(packetId, connection = null) {
             ci.metadata_json AS intervention_metadata_json,
             ci.notes AS intervention_notes,
             ci.intervention_code AS intervention_code,
-            ci.intervention_type AS intervention_type,
             req.name AS requester_name,
             req.email AS requester_email,
             prog.name AS program_approver_name,
@@ -41418,7 +41495,6 @@ app.get('/api/finance/payment-packets', async (req, res) => {
               ci.metadata_json AS intervention_metadata_json,
               ci.notes AS intervention_notes,
               ci.intervention_code AS intervention_code,
-              ci.intervention_type AS intervention_type,
               req.name AS requester_name,
               req.email AS requester_email,
               prog.name AS program_approver_name,
@@ -46928,6 +47004,7 @@ app.put('/api/cases/:id', async (req, res) => {
       'assessment_intervention_related_noc',
       'assessment_intervention_related_noc_version',
       'assessment_intervention_pot_id',
+      'assessment_proposed_interventions',
       'assessment_budget_pot_id',
       'assessment_childcare_need',
       'assessment_childcare_funding_details',
@@ -47074,6 +47151,7 @@ app.put('/api/cases/:id', async (req, res) => {
     addIfPresent('assessment_intervention_cost_total', 'intervention_cost_total', val => toNumericRange(val, { min: 0, max: 999999 }));
     addIfPresent('assessment_intervention_related_noc', 'intervention_related_noc', toNull);
     addIfPresent('assessment_intervention_related_noc_version', 'intervention_related_noc_version', toNull);
+    addIfPresent('assessment_proposed_interventions', 'proposed_interventions', val => toJsonValue(val ?? null, null));
     addIfPresent('assessment_childcare_need', 'childcare_need', toTinyInt);
     addIfPresent('assessment_childcare_funding_details', 'childcare_funding_details', toNull);
     addIfPresent('assessment_action_plan_result_code', 'action_plan_result_code', toNull);

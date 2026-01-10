@@ -6,6 +6,8 @@ import { canCompleteOutcomeReview, getCaseStatusContext, getApplicationStatusCon
 import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup, Autosuggest, StatusIndicator, Wizard, Hotspot } from '@cloudscape-design/components';
 import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
+import { PAYMENT_TYPE_OPTIONS } from '../pages/finance/widgets/paymentOptions';
+import { getCurrencyInputDisplayValue } from '../utils/currencyFormat';
 
 const BARRIERS = [
   'None', 'Education', 'Lack of Marketable Skills', 'Lack of Work Experience', 'Remoteness', 'Lack of Transportation', 'Economic', 'Language', 'Lack of Labour Force Attachment', 'Dependent Care', 'Physical, Emotional, or Mental Health', 'Other'
@@ -32,13 +34,6 @@ const CHILDCARE_OPTIONS = [
 const POSTING_OPTIONS = [
   { value: 'external', label: 'External (region/PTMA)' },
   { value: 'internal', label: 'Internal (NWAC)' }
-];
-
-const RECURRING_PERIOD_OPTIONS = [
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'bi_weekly', label: 'Bi-weekly' },
-  { value: 'monthly', label: 'Monthly' },
-  { value: 'quarterly', label: 'Quarterly' }
 ];
 
 const EDUCATION_CODES = new Set([4, 5, 9, 10, 11, 12, 13]);
@@ -220,6 +215,21 @@ const calculateDurationDays = (start, end) => {
   return diff;
 };
 
+const addMonthsUtc = (startDate, monthsToAdd) => {
+  const startUtc = parseIsoDateToUtc(startDate);
+  if (startUtc === null) return '';
+  const base = new Date(startUtc);
+  const monthIndex = base.getUTCMonth() + monthsToAdd;
+  base.setUTCMonth(monthIndex);
+  if (Number.isNaN(base.getTime())) return '';
+  return base.toISOString().slice(0, 10);
+};
+
+const deriveEndDateFromOccurrences = (startDate, occurrences) => {
+  if (!startDate || !Number.isFinite(occurrences) || occurrences <= 0) return '';
+  return addMonthsUtc(startDate, occurrences - 1);
+};
+
 const autoOccurrencesFromDates = (startDate, endDate, period) => {
   if (!startDate || !endDate || !period) return null;
   const startUtc = parseIsoDateToUtc(startDate);
@@ -239,6 +249,19 @@ const autoOccurrencesFromDates = (startDate, endDate, period) => {
   const periodDays = period === 'bi_weekly' ? 14 : period === 'weekly' ? 7 : null;
   if (!periodDays) return null;
   return Math.max(1, Math.ceil(diffDays / periodDays));
+};
+
+const mergeRecurrenceDefaults = (base, overrides = {}) => {
+  const pick = (value, fallback) =>
+    value === '' || value === null || typeof value === 'undefined' ? fallback : value;
+  return {
+    ...base,
+    ...overrides,
+    startDate: pick(overrides.startDate, base.startDate),
+    endDate: pick(overrides.endDate, base.endDate),
+    occurrences: pick(overrides.occurrences, base.occurrences),
+    amountPerPeriod: pick(overrides.amountPerPeriod, base.amountPerPeriod)
+  };
 };
 
 const parseCurrencyToNumber = (value) => {
@@ -266,6 +289,251 @@ const formatCurrencyDisplay = (value) => {
   const num = parseCurrencyInput(value);
   if (num === null) return '';
   return `$ ${num.toFixed(2)}`;
+};
+
+const buildUuid = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
+
+const sanitizeCurrencyInput = (value) => {
+  if (value === null || value === undefined) return '';
+  const cleaned = String(value).replace(/[^\d.]/g, '');
+  if (!cleaned) return '';
+  const [whole, ...rest] = cleaned.split('.');
+  const decimals = rest.join('').slice(0, 2);
+  return decimals.length ? `${whole}.${decimals}` : whole;
+};
+
+const buildEmptyCostLine = (overrides = {}) => ({
+  id: buildUuid(),
+  type: '',
+  amount: '',
+  notes: '',
+  recurrence: {
+    enabled: false,
+    startDate: '',
+    endDate: '',
+    occurrences: '',
+    amountPerPeriod: ''
+  },
+  ...overrides
+});
+
+const buildEmptyIntervention = (overrides = {}) => ({
+  id: buildUuid(),
+  code: '',
+  startDate: '',
+  endDate: '',
+  deliveryMode: 'partner',
+  institution: '',
+  programName: '',
+  itpDetails: '',
+  wageSubsidyDetails: '',
+  interventionNoc: '',
+  interventionNocVersion: '',
+  suggestionsSeeded: false,
+  costLines: [],
+  ...overrides
+});
+
+const normalizeCostLine = (raw, defaults = {}) => {
+  if (!raw || typeof raw !== 'object') return null;
+  const recurrenceRaw = raw.recurrence && typeof raw.recurrence === 'object' ? raw.recurrence : {};
+  const normalized = {
+    id: raw.id || buildUuid(),
+    type: raw.type || raw.paymentType || raw.payment_type || '',
+    amount:
+      raw.amount === null || typeof raw.amount === 'undefined'
+        ? ''
+        : String(raw.amount),
+    notes: raw.notes || raw.description || '',
+    recurrence: {
+      enabled: Boolean(recurrenceRaw.enabled ?? raw.recurrenceEnabled ?? raw.recurrence_enabled),
+      startDate: formatDate(recurrenceRaw.startDate || recurrenceRaw.start_date || raw.recurrenceStartDate || raw.recurrence_start_date || ''),
+      endDate: formatDate(recurrenceRaw.endDate || recurrenceRaw.end_date || raw.recurrenceEndDate || raw.recurrence_end_date || ''),
+      occurrences:
+        recurrenceRaw.occurrences === null || typeof recurrenceRaw.occurrences === 'undefined'
+          ? ''
+          : String(recurrenceRaw.occurrences),
+      amountPerPeriod:
+        recurrenceRaw.amountPerPeriod === null || typeof recurrenceRaw.amountPerPeriod === 'undefined'
+          ? ''
+          : String(recurrenceRaw.amountPerPeriod)
+    }
+  };
+  return { ...buildEmptyCostLine(defaults), ...normalized };
+};
+
+const normalizeProposedIntervention = (raw, defaults = {}) => {
+  if (!raw || typeof raw !== 'object') return null;
+  const costLinesRaw = Array.isArray(raw.costLines) ? raw.costLines : Array.isArray(raw.cost_lines) ? raw.cost_lines : [];
+  const normalized = {
+    id: raw.id || buildUuid(),
+    code: raw.code || raw.interventionCode || raw.intervention_code || '',
+    startDate: formatDate(raw.startDate || raw.interventionStartDate || raw.intervention_start_date || ''),
+    endDate: formatDate(raw.endDate || raw.interventionEndDate || raw.intervention_end_date || ''),
+    deliveryMode: raw.deliveryMode || raw.delivery_mode || 'partner',
+    institution: raw.institution || '',
+    programName: raw.programName || raw.program_name || '',
+    itpDetails: raw.itpDetails || raw.itp_details || raw.itp?.details || '',
+    wageSubsidyDetails: raw.wageSubsidyDetails || raw.wage_subsidy_details || raw.wage?.subsidyDetails || '',
+    interventionNoc: raw.interventionNoc || raw.intervention_noc || '',
+    interventionNocVersion: raw.interventionNocVersion || raw.intervention_noc_version || '',
+    suggestionsSeeded: Boolean(raw.suggestionsSeeded ?? raw.suggestions_seeded),
+    costLines: costLinesRaw.map(item => normalizeCostLine(item)).filter(Boolean)
+  };
+  return { ...buildEmptyIntervention(defaults), ...normalized };
+};
+
+const normalizeProposedInterventions = (raw) => {
+  const list = Array.isArray(raw) ? raw : [];
+  const normalized = list.map(item => normalizeProposedIntervention(item)).filter(Boolean);
+  if (normalized.length) return normalized;
+  return [];
+};
+
+const normalizeInterventionCodeValue = (value) => {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed ? trimmed : null;
+};
+
+const buildPaymentTypeMappingLookup = (mapping) => {
+  const lookup = new Map();
+  if (!mapping || !Array.isArray(mapping.interventions)) return lookup;
+  mapping.interventions.forEach(entry => {
+    const code = normalizeInterventionCodeValue(entry?.code);
+    if (!code) return;
+    const types = Array.isArray(entry.availablePaymentTypes)
+      ? entry.availablePaymentTypes.filter(Boolean)
+      : [];
+    lookup.set(code, new Set(types));
+  });
+  return lookup;
+};
+
+const normalizeCostingDefaults = (payload) => {
+  if (!payload || payload.enabled === false) return { enabled: false };
+  const interventionsRaw = Array.isArray(payload.interventions) ? payload.interventions : [];
+  const paymentTypesRaw = Array.isArray(payload.paymentTypes) ? payload.paymentTypes : [];
+  const interventions = interventionsRaw
+    .map(entry => {
+      if (!entry || typeof entry !== 'object') return null;
+      const code = normalizeInterventionCodeValue(entry.code || entry.interventionCode || entry.intervention_code);
+      if (!code) return null;
+      const suggested = Array.isArray(entry.suggested || entry.suggestedItems || entry.suggested_items)
+        ? entry.suggested || entry.suggestedItems || entry.suggested_items
+        : [];
+      const normalizedSuggested = suggested
+        .map(item => {
+          if (typeof item === 'string') return { type: item };
+          if (item && typeof item === 'object') {
+            return {
+              type: item.type || item.paymentType || item.payment_type || '',
+              notes: item.notes || item.description || '',
+              recurrenceEnabled: item.recurrenceEnabled ?? item.recurrence_enabled ?? null
+            };
+          }
+          return null;
+        })
+        .filter(item => item && item.type);
+      return {
+        code,
+        suggested: normalizedSuggested
+      };
+    })
+    .filter(Boolean);
+  const paymentTypes = paymentTypesRaw
+    .map(entry => {
+      if (!entry || typeof entry !== 'object') return null;
+      const code = String(entry.code || entry.type || entry.paymentType || entry.payment_type || '').trim();
+      if (!code) return null;
+      const recurrence = entry.recurrence && typeof entry.recurrence === 'object' ? entry.recurrence : {};
+      return {
+        code,
+        recurrence: {
+          mode: recurrence.mode || recurrence.rule || entry.recurrenceMode || entry.recurrence_mode || 'optional'
+        }
+      };
+    })
+    .filter(Boolean);
+  return {
+    enabled: payload.enabled !== false,
+    strategy: payload.strategy || payload.defaultStrategy || 'allowed',
+    interventions,
+    paymentTypes
+  };
+};
+
+const normalizePaymentTypeMappingPayload = (payload) => {
+  if (!payload || payload.enabled === false) return null;
+  const interventionsRaw = Array.isArray(payload.interventions) ? payload.interventions : [];
+  const interventions = interventionsRaw
+    .map(entry => {
+      if (!entry || typeof entry !== 'object') return null;
+      const code = normalizeInterventionCodeValue(entry.code || entry.interventionCode || entry.intervention_code);
+      if (!code) return null;
+      const typesRaw = entry.availablePaymentTypes || entry.available_payment_types || entry.paymentTypes || entry.payment_types || [];
+      const types = Array.isArray(typesRaw)
+        ? Array.from(new Set(typesRaw.map(value => String(value || '').trim()).filter(Boolean)))
+        : [];
+      return {
+        code,
+        name: entry.name || entry.label || null,
+        availablePaymentTypes: types
+      };
+    })
+    .filter(Boolean);
+  if (!interventions.length) return null;
+  return { ...payload, interventions };
+};
+
+const isRecurrenceScheduleComplete = (line) => {
+  const recurrence = line?.recurrence || {};
+  if (!recurrence.enabled) return false;
+  const startDate = formatDate(recurrence.startDate);
+  if (!startDate) return false;
+  const occurrencesValue =
+    recurrence.occurrences === '' || recurrence.occurrences === null || typeof recurrence.occurrences === 'undefined'
+      ? null
+      : Number(recurrence.occurrences);
+  const occurrences = Number.isFinite(occurrencesValue) ? occurrencesValue : null;
+  if (!occurrences || occurrences <= 0) return false;
+  const endDate = formatDate(recurrence.endDate) || deriveEndDateFromOccurrences(startDate, occurrences);
+  if (!endDate) return false;
+  const startUtc = parseIsoDateToUtc(startDate);
+  const endUtc = parseIsoDateToUtc(endDate);
+  if (startUtc !== null && endUtc !== null && endUtc < startUtc) return false;
+  return true;
+};
+
+const recalcRecurringAmounts = ({ amount, amountPerPeriod, occurrences, adjustMode }) => {
+  const occ = Number(occurrences);
+  if (!Number.isFinite(occ) || occ <= 0) {
+    return { amount, amountPerPeriod };
+  }
+  const totalValue = parseCurrencyInput(amount);
+  const perPeriodValue = parseCurrencyInput(amountPerPeriod);
+  const normalize = (value) => (value === null || typeof value === 'undefined' ? '' : formatCurrencyDisplay(value));
+  if (adjustMode === 'total') {
+    if (Number.isFinite(perPeriodValue)) {
+      return { amount: normalize(perPeriodValue * occ), amountPerPeriod };
+    }
+    if (Number.isFinite(totalValue)) {
+      return { amount, amountPerPeriod: normalize(totalValue / occ) };
+    }
+    return { amount, amountPerPeriod };
+  }
+  if (Number.isFinite(totalValue)) {
+    return { amount, amountPerPeriod: normalize(totalValue / occ) };
+  }
+  if (Number.isFinite(perPeriodValue)) {
+    return { amount: normalize(perPeriodValue * occ), amountPerPeriod };
+  }
+  return { amount, amountPerPeriod };
 };
 
 const formatDocTypeLabel = (value) => {
@@ -314,27 +582,13 @@ const mergeAssessmentState = (current, incoming) => {
     'barriersOther',
     'otherFunding',
     'esdcEligibility',
-    'startDate',
-    'endDate',
-    'institution',
-    'programName',
-    'deliveryMode',
     'recommendation',
     'justification',
     'nwacReviewStatus',
     'nwacReview',
     'nwacReason',
-    'interventionCode',
-    'interventionDuration',
-    'interventionCost',
-    'costType',
-    'recurringPeriod',
-    'recurringAmount',
-    'recurringOccurrences',
     'interventionPotId',
     'postingContext',
-    'interventionNoc',
-    'interventionNocVersion',
     'childcareNeed',
     'childcareFunding',
   ].forEach(takeIfNonEmpty);
@@ -346,30 +600,10 @@ const mergeAssessmentState = (current, incoming) => {
     next.priorities = current.priorities;
   }
 
-  const mergeObj = (key, shape) => {
-    const incomingVal = incoming[key] || {};
-    const currentVal = current?.[key] || {};
-    const merged = { ...shape };
-    Object.keys(shape).forEach((field) => {
-      const incomingField = incomingVal[field];
-      const currentField = currentVal[field];
-      merged[field] = isEmptyString(incomingField) && !isEmptyString(currentField) ? currentField : incomingField ?? '';
-    });
-    next[key] = merged;
-  };
-  mergeObj('itp', { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' });
-  mergeObj('wage', { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' });
-  if (!Object.prototype.hasOwnProperty.call(next, 'deliveryMode') || isEmptyString(incoming.deliveryMode)) {
-    next.deliveryMode = current?.deliveryMode || 'partner';
-  }
-  if (!Object.prototype.hasOwnProperty.call(next, 'costType') || isEmptyString(incoming.costType)) {
-    next.costType = current?.costType || 'one_time';
-  }
-  if (!next.itp || typeof next.itp !== 'object') {
-    next.itp = { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' };
-  }
-  if (!next.wage || typeof next.wage !== 'object') {
-    next.wage = { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' };
+  if (Array.isArray(incoming.proposedInterventions) && incoming.proposedInterventions.length) {
+    next.proposedInterventions = incoming.proposedInterventions;
+  } else if (Array.isArray(current?.proposedInterventions) && current.proposedInterventions.length) {
+    next.proposedInterventions = current.proposedInterventions;
   }
 
   return next;
@@ -387,29 +621,14 @@ const buildEmptyAssessment = () => ({
   priorities: [],
   otherFunding: '',
   esdcEligibility: '',
-  startDate: '',
-  endDate: '',
-  institution: '',
-  programName: '',
-  itp: { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' },
-  wage: { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' },
-  deliveryMode: 'partner',
+  proposedInterventions: [],
   recommendation: '',
   justification: '',
   nwacReviewStatus: '',
   nwacReview: '',
   nwacReason: '',
-  interventionCode: '',
-  interventionDuration: '',
-  interventionCost: '',
-  costType: 'one_time',
-  recurringPeriod: '',
-  recurringAmount: '',
-  recurringOccurrences: '',
   interventionPotId: '',
   postingContext: '',
-  interventionNoc: '',
-  interventionNocVersion: '',
   childcareNeed: '',
   childcareFunding: ''
 });
@@ -564,8 +783,34 @@ const CoordinatorAssessmentWidget = forwardRef(
   const canManageEiEligibility = eligibilityRoleAllowlist.has(roleKey);
   const isEligibilityAdmin = canManageEiEligibility;
   const canUploadEiVerification = canManageEiEligibility;
-  const numericInterventionCost = useMemo(() => parseCurrencyToNumber(assessment.interventionCost), [assessment.interventionCost]);
-  const isHighCostApprovalBlocked = canonicalRole === 'regional coordinator' && Number.isFinite(numericInterventionCost) && numericInterventionCost >= APPROVAL_COST_THRESHOLD;
+  const proposedInterventions = useMemo(
+    () => (Array.isArray(assessment.proposedInterventions) ? assessment.proposedInterventions : []),
+    [assessment.proposedInterventions]
+  );
+  const primaryIntervention = proposedInterventions[0] || buildEmptyIntervention();
+  const interventionTotals = useMemo(() => {
+    const totals = new Map();
+    proposedInterventions.forEach(intervention => {
+      const lines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
+      const total = lines.reduce((sum, line) => {
+        const amount = parseCurrencyInput(line.amount);
+        return sum + (Number.isFinite(amount) ? amount : 0);
+      }, 0);
+      totals.set(intervention.id, total);
+    });
+    return totals;
+  }, [proposedInterventions]);
+  const overallCostTotal = useMemo(() => {
+    let total = 0;
+    interventionTotals.forEach(value => {
+      if (Number.isFinite(value)) total += value;
+    });
+    return total;
+  }, [interventionTotals]);
+  const isHighCostApprovalBlocked =
+    canonicalRole === 'regional coordinator' &&
+    Number.isFinite(overallCostTotal) &&
+    overallCostTotal >= APPROVAL_COST_THRESHOLD;
 
   const [interventionCodes, setInterventionCodes] = useState([]);
   const [interventionCodesLoading, setInterventionCodesLoading] = useState(false);
@@ -573,6 +818,31 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [nocVersionsLoading, setNocVersionsLoading] = useState(false);
   const [nocSuggestions, setNocSuggestions] = useState([]);
   const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
+  const [paymentTypeMapping, setPaymentTypeMapping] = useState(null);
+  const [paymentTypeMappingLoading, setPaymentTypeMappingLoading] = useState(false);
+  const [costingDefaults, setCostingDefaults] = useState(null);
+  const [costingDefaultsLoading, setCostingDefaultsLoading] = useState(false);
+  const [interventionModal, setInterventionModal] = useState({
+    visible: false,
+    mode: 'view',
+    interventionId: null,
+    draft: null,
+    original: null
+  });
+  const [interventionModalErrors, setInterventionModalErrors] = useState({});
+  const [interventionDeleteId, setInterventionDeleteId] = useState(null);
+  const [costLineModal, setCostLineModal] = useState({
+    visible: false,
+    mode: 'view',
+    interventionId: null,
+    lineId: null,
+    draft: null,
+    original: null
+  });
+  const [costLineModalErrors, setCostLineModalErrors] = useState({});
+  const [inlineAmountEditingId, setInlineAmountEditingId] = useState(null);
+  const [endDateAdjustModal, setEndDateAdjustModal] = useState(null);
+  const [occurrenceConfirmModal, setOccurrenceConfirmModal] = useState(null);
   const [conflictDeclarationSigned, setConflictDeclarationSigned] = useState(Boolean(caseData?.assessment_conflict_declaration_signed));
   const [conflictDeclarationSignedAt, setConflictDeclarationSignedAt] = useState(caseData?.assessment_conflict_declaration_signed_at || null);
   const [conflictDeclarationChoice, setConflictDeclarationChoice] = useState(caseData?.assessment_conflict_declaration_choice || '');
@@ -685,13 +955,257 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isOutcomeNoticeDisabled = isDecisionFinal;
   const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus });
   const lacksOutcomePermission = Boolean(userRole) && isPendingApprovalStatus && !canManageOutcomeReview;
-  const requiresNoc = useMemo(() => requiresNocForCode(assessment.interventionCode), [assessment.interventionCode]);
-  const isEducationIntervention = useMemo(() => isEducationCode(assessment.interventionCode), [assessment.interventionCode]);
-  const isEmployerIntervention = useMemo(() => isEmployerCode(assessment.interventionCode), [assessment.interventionCode]);
-  const isWageSubsidyIntervention = useMemo(() => isWageSubsidyCode(assessment.interventionCode), [assessment.interventionCode]);
-  const requiresExternalPartner = useMemo(
-    () => requiresExternalPartnerForCode(assessment.interventionCode),
-    [assessment.interventionCode]
+  const interventionCodeLookup = useMemo(() => {
+    const map = new Map();
+    interventionCodes.forEach(option => {
+      if (!option?.value) return;
+      map.set(String(option.value), option);
+    });
+    return map;
+  }, [interventionCodes]);
+  const resolveInterventionLabel = useCallback(
+    (code) => {
+      if (!code) return '';
+      const normalized = String(code);
+      const match = interventionCodeLookup.get(normalized);
+      if (match?.label) return match.label.replace(/^\s*\d+\s*–\s*/, '');
+      return normalized;
+    },
+    [interventionCodeLookup]
+  );
+  const paymentTypeMappingLookup = useMemo(
+    () => buildPaymentTypeMappingLookup(paymentTypeMapping),
+    [paymentTypeMapping]
+  );
+  const paymentTypeLabelLookup = useMemo(() => {
+    const map = new Map();
+    PAYMENT_TYPE_OPTIONS.forEach(option => {
+      if (!option?.value) return;
+      map.set(String(option.value), option.label || option.value);
+    });
+    return map;
+  }, []);
+  const applicationAnswers = useMemo(() => {
+    const context = caseData?.caseContext || {};
+    const candidates = [
+      context.applicationAnswers,
+      context.applicationPayload?.answers,
+      caseData?.application?.intake_payload?.answers,
+      caseData?.application?.intakePayload?.answers,
+      caseData?.application?.payload?.answers,
+      caseData?.applicationVersion?.intake_payload?.answers,
+      caseData?.applicationVersion?.payload_json?.answers,
+      caseData?.applicationVersion?.payload?.answers
+    ];
+    return candidates.find(candidate => candidate && typeof candidate === 'object') || {};
+  }, [caseData]);
+  const normalizeAnswerArray = useCallback((value) => {
+    if (value === null || typeof value === 'undefined') return [];
+    if (Array.isArray(value)) {
+      return value.map(item => String(item || '').trim()).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return [];
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.map(item => String(item || '').trim()).filter(Boolean);
+        }
+      } catch (_) {}
+      return trimmed.split(',').map(item => item.trim()).filter(Boolean);
+    }
+    if (typeof value === 'object') {
+      return Object.values(value).map(item => String(item || '').trim()).filter(Boolean);
+    }
+    return [];
+  }, []);
+  const readApplicationAnswer = useCallback(
+    (keys) => {
+      const source = applicationAnswers || {};
+      for (const key of keys) {
+        if (!key) continue;
+        if (Object.prototype.hasOwnProperty.call(source, key)) {
+          return source[key];
+        }
+      }
+      return null;
+    },
+    [applicationAnswers]
+  );
+  const requestedSupportTypes = useMemo(
+    () =>
+      normalizeAnswerArray(
+        readApplicationAnswer([
+          'financial_support_types',
+          'financial-support-types',
+          'financial_support_type',
+          'financial-support-type'
+        ])
+      ),
+    [normalizeAnswerArray, readApplicationAnswer]
+  );
+  const hasLivingAllowanceRequest = useMemo(
+    () => requestedSupportTypes.includes('living_allowance'),
+    [requestedSupportTypes]
+  );
+  const hasChildcareRequest = useMemo(() => {
+    const raw = readApplicationAnswer(['childcare_requested', 'childcare-requested']);
+    if (raw === null || typeof raw === 'undefined') return false;
+    const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : raw === true ? 'yes' : String(raw);
+    return ['yes', 'true', '1'].includes(normalized);
+  }, [readApplicationAnswer]);
+  const effectiveCostingDefaults = useMemo(() => {
+    if (costingDefaults && costingDefaults.enabled !== false) return costingDefaults;
+    return { enabled: false, strategy: 'allowed', interventions: [], paymentTypes: [] };
+  }, [costingDefaults]);
+  const recurrenceModeByType = useMemo(() => {
+    const map = new Map();
+    if (effectiveCostingDefaults && Array.isArray(effectiveCostingDefaults.paymentTypes)) {
+      effectiveCostingDefaults.paymentTypes.forEach(entry => {
+        const code = entry?.code ? String(entry.code).trim() : '';
+        if (!code) return;
+        const mode = entry?.recurrence?.mode ? String(entry.recurrence.mode).trim() : 'optional';
+        map.set(code, mode || 'optional');
+      });
+    }
+    return map;
+  }, [effectiveCostingDefaults]);
+  const getRecurrenceModeForType = useCallback(
+    (type) => {
+      if (!type) return 'optional';
+      const normalized = String(type).trim();
+      return recurrenceModeByType.get(normalized) || 'optional';
+    },
+    [recurrenceModeByType]
+  );
+  const getInstallmentText = useCallback(
+    (line) => {
+      const mode = getRecurrenceModeForType(line?.type);
+      const required = mode === 'required';
+      const enabled = Boolean(line?.recurrence?.enabled);
+      if (!enabled && !required) {
+        return 'in 1 installment';
+      }
+      const recurrence = line?.recurrence || {};
+      const occurrencesRaw =
+        recurrence.occurrences === '' || recurrence.occurrences === null || typeof recurrence.occurrences === 'undefined'
+          ? null
+          : Number(recurrence.occurrences);
+      let occurrences = Number.isFinite(occurrencesRaw) && occurrencesRaw > 0 ? occurrencesRaw : null;
+      if (!occurrences) {
+        const startDate = formatDate(recurrence.startDate);
+        const endDate = formatDate(recurrence.endDate);
+        if (startDate && endDate) {
+          const computed = autoOccurrencesFromDates(startDate, endDate, 'monthly');
+          if (computed) occurrences = computed;
+        }
+      }
+      if (!occurrences) {
+        return 'in — installments';
+      }
+      return `in ${occurrences} installment${occurrences === 1 ? '' : 's'}`;
+    },
+    [getRecurrenceModeForType]
+  );
+  const getAllowedPaymentTypesForIntervention = useCallback(
+    (code) => {
+      const normalized = normalizeInterventionCodeValue(code);
+      if (!normalized) return [];
+      const allowed = paymentTypeMappingLookup.get(normalized);
+      if (!allowed) return [];
+      return Array.from(allowed);
+    },
+    [paymentTypeMappingLookup]
+  );
+  const buildCostItemOptions = useCallback(
+    (intervention) => {
+      const allowed = new Set(getAllowedPaymentTypesForIntervention(intervention?.code));
+      const used = new Set(
+        Array.isArray(intervention?.costLines)
+          ? intervention.costLines.map(line => line?.type).filter(Boolean)
+          : []
+      );
+      return PAYMENT_TYPE_OPTIONS.filter(option => {
+        if (!option?.value) return false;
+        if (allowed.size && !allowed.has(option.value)) return false;
+        if (used.has(option.value)) return false;
+        return true;
+      });
+    },
+    [getAllowedPaymentTypesForIntervention]
+  );
+  const buildRecurrenceFromIntervention = useCallback(
+    (intervention, enabled) => {
+      if (!enabled) {
+        return {
+          enabled: false,
+          startDate: '',
+          endDate: '',
+          occurrences: '',
+          amountPerPeriod: ''
+        };
+      }
+      const startDate = intervention?.startDate || '';
+      const endDate = intervention?.endDate || '';
+      const occurrences = startDate && endDate ? autoOccurrencesFromDates(startDate, endDate, 'monthly') : null;
+      return {
+        enabled: true,
+        startDate,
+        endDate,
+        occurrences: occurrences ? String(occurrences) : '',
+        amountPerPeriod: ''
+      };
+    },
+    []
+  );
+  const buildSuggestedCostLines = useCallback(
+    (intervention) => {
+      if (!effectiveCostingDefaults.enabled) return [];
+      const code = normalizeInterventionCodeValue(intervention?.code);
+      if (!code) return [];
+      const allowed = new Set(getAllowedPaymentTypesForIntervention(code));
+      const defaultsEntry = Array.isArray(effectiveCostingDefaults.interventions)
+        ? effectiveCostingDefaults.interventions.find(entry => entry.code === code)
+        : null;
+      let suggested = defaultsEntry?.suggested || [];
+      if (!suggested.length && effectiveCostingDefaults.strategy === 'allowed') {
+        if (!allowed.size) return null;
+        suggested = Array.from(allowed).map(type => ({ type }));
+      }
+      if (!Array.isArray(suggested) || !suggested.length) return [];
+      const seen = new Set();
+      return suggested
+        .map(item => {
+          const type = item?.type ? String(item.type).trim() : '';
+          if (!type) return null;
+          if (allowed.size && !allowed.has(type)) return null;
+          if (!hasLivingAllowanceRequest && type === 'LivingAllowance') return null;
+          if (!hasChildcareRequest && type === 'Childcare') return null;
+          if (seen.has(type)) return null;
+          seen.add(type);
+          const recurrenceMode = getRecurrenceModeForType(type);
+          const recurrenceEnabled =
+            typeof item?.recurrenceEnabled === 'boolean'
+              ? item.recurrenceEnabled
+              : recurrenceMode === 'required';
+          const recurrence = buildRecurrenceFromIntervention(intervention, recurrenceEnabled);
+          return buildEmptyCostLine({
+            type,
+            notes: item?.notes || '',
+            recurrence
+          });
+        })
+        .filter(Boolean);
+    },
+    [
+      buildRecurrenceFromIntervention,
+      effectiveCostingDefaults,
+      getAllowedPaymentTypesForIntervention,
+      getRecurrenceModeForType,
+      hasChildcareRequest,
+      hasLivingAllowanceRequest
+    ]
   );
   const normalizedConflictChoice = useMemo(
     () => normalizeConflictDeclarationChoice(conflictDeclarationChoice),
@@ -775,14 +1289,6 @@ const CoordinatorAssessmentWidget = forwardRef(
   const conflictDeclarationSignedDisplayDate = conflictDeclarationSignedAt
     ? formatDate(conflictDeclarationSignedAt)
     : null;
-  const selectedInterventionCodeOption = useMemo(
-    () => interventionCodes.find(option => option.value === assessment.interventionCode) || null,
-    [interventionCodes, assessment.interventionCode]
-  );
-  const selectedNocVersionOption = useMemo(
-    () => nocVersions.find(option => option.value === assessment.interventionNocVersion) || null,
-    [nocVersions, assessment.interventionNocVersion]
-  );
   const selectedBudgetPotOption = useMemo(() => {
     const match = budgetPotOptions.find(
       option => String(option.value) === String(assessment.interventionPotId)
@@ -852,7 +1358,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     );
   }, [caseData]);
   const normalizedProvince = participantProvince ? String(participantProvince).trim().toUpperCase() : '';
-
   const deriveFundingStreamFromEligibility = useCallback((eligibility) => {
     const normalized = (eligibility || '').toString().toLowerCase();
     if (normalized.includes('ei')) return 'EI';
@@ -873,34 +1378,58 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
   }, [isAssessor, assessment.interventionPotId, assessment.postingContext]);
 
-  const buildCostSettingsPayload = useCallback(() => {
-    const costType = assessment.costType === 'recurring' ? 'recurring' : 'one_time';
-    const recurringAmount = parseCurrencyInput(assessment.recurringAmount);
-    const recurringOccurrencesRaw = assessment.recurringOccurrences;
-    const recurringOccurrencesValue =
-      recurringOccurrencesRaw === '' || recurringOccurrencesRaw === null || typeof recurringOccurrencesRaw === 'undefined'
+  const serializeCostLine = useCallback((line) => {
+    const recurrence = line?.recurrence || {};
+    const occurrencesValue =
+      recurrence.occurrences === '' || recurrence.occurrences === null || typeof recurrence.occurrences === 'undefined'
         ? null
-        : Number(recurringOccurrencesRaw);
-    const recurringOccurrences = Number.isFinite(recurringOccurrencesValue) ? recurringOccurrencesValue : null;
-    const calculatedTotal = parseCurrencyInput(assessment.interventionCost);
-    const hasRecurrenceData =
-      costType === 'recurring' ||
-      Boolean(assessment.recurringPeriod) ||
-      recurringAmount !== null ||
-      recurringOccurrences !== null;
-    const hasCostData = calculatedTotal !== null;
-    if (!hasRecurrenceData && !hasCostData) return null;
+        : Number(recurrence.occurrences);
+    const occurrences = Number.isFinite(occurrencesValue) ? occurrencesValue : null;
     return {
-      type: costType,
-      period: costType === 'recurring' ? assessment.recurringPeriod || '' : '',
-      amountPerPeriod: costType === 'recurring' ? recurringAmount : null,
-      occurrences: costType === 'recurring' ? recurringOccurrences : null,
-      calculatedTotal
+      id: line?.id || buildUuid(),
+      type: line?.type || null,
+      amount: parseCurrencyInput(line?.amount),
+      notes: line?.notes || null,
+      recurrence: {
+        enabled: Boolean(recurrence.enabled),
+        startDate: formatDate(recurrence.startDate) || null,
+        endDate: formatDate(recurrence.endDate) || null,
+        occurrences,
+        amountPerPeriod: parseCurrencyInput(recurrence.amountPerPeriod),
+      },
     };
-  }, [assessment]);
+  }, []);
+
+  const serializeProposedInterventions = useCallback(
+    (interventions) => {
+      const list = Array.isArray(interventions) ? interventions : [];
+      if (!list.length) return [];
+      return list.map(item => ({
+        id: item.id || buildUuid(),
+        code: item.code || null,
+        startDate: formatDate(item.startDate) || null,
+        endDate: formatDate(item.endDate) || null,
+        deliveryMode: item.deliveryMode === 'in_house' ? 'in_house' : 'partner',
+        institution: item.institution || null,
+        programName: item.programName || null,
+        itpDetails: item.itpDetails || null,
+        wageSubsidyDetails: item.wageSubsidyDetails || null,
+        interventionNoc: item.interventionNoc || null,
+        interventionNocVersion: item.interventionNocVersion || null,
+        suggestionsSeeded: Boolean(item.suggestionsSeeded),
+        costLines: Array.isArray(item.costLines) ? item.costLines.map(serializeCostLine) : [],
+      }));
+    },
+    [serializeCostLine]
+  );
 
   const buildAssessmentPayload = useCallback(() => {
-    const costSettingsPayload = buildCostSettingsPayload();
+    const proposedInterventionsPayload = serializeProposedInterventions(proposedInterventions);
+    const primary = proposedInterventions[0] || null;
+    const primaryStartDate = primary?.startDate || '';
+    const primaryEndDate = primary?.endDate || '';
+    const interventionDuration = calculateDurationDays(primaryStartDate, primaryEndDate);
+    const overallTotalValue = Number.isFinite(overallCostTotal) ? overallCostTotal : null;
     const payload = {
       assessment_date_of_assessment: formatDate(assessment.dateOfAssessment) || null,
       assessment_employment_goals: assessment.employmentGoals || null,
@@ -911,43 +1440,64 @@ const CoordinatorAssessmentWidget = forwardRef(
       assessment_local_area_priorities: assessment.priorities || null,
       assessment_other_funding_details: assessment.otherFunding || null,
       assessment_esdc_eligibility: isEligibilityAdmin ? (assessment.esdcEligibility || null) : undefined,
-      assessment_intervention_start_date: formatDate(assessment.startDate) || null,
-      assessment_intervention_end_date: formatDate(assessment.endDate) || null,
-      assessment_institution: assessment.institution || null,
-      assessment_program_name: assessment.programName || null,
-      assessment_itp: assessment.itp || [],
-      assessment_wage: assessment.wage || [],
+      assessment_intervention_start_date: formatDate(primaryStartDate) || null,
+      assessment_intervention_end_date: formatDate(primaryEndDate) || null,
+      assessment_institution: primary?.institution || null,
+      assessment_program_name: primary?.programName || null,
+      assessment_itp: {
+        tuition: '',
+        books: '',
+        materials: '',
+        living: '',
+        childcare: '',
+        otherLabel: '',
+        otherAmount: '',
+        details: primary?.itpDetails || ''
+      },
+      assessment_wage: {
+        wages: '',
+        mercs: '',
+        nonwages: '',
+        other1Label: '',
+        other1Amount: '',
+        other2Label: '',
+        other2Amount: '',
+        subsidyDetails: primary?.wageSubsidyDetails || ''
+      },
       assessment_recommendation: assessment.recommendation || null,
       assessment_justification: assessment.justification || null,
       assessment_nwac_review: assessment.nwacReview || null,
       assessment_nwac_reason: assessment.nwacReason || null,
-      assessment_intervention_code: assessment.interventionCode || null,
-      assessment_intervention_duration_days: assessment.interventionDuration || null,
-      assessment_intervention_cost_total: (() => {
-        const val = parseCurrencyInput(assessment.interventionCost);
-        return val !== null ? String(val) : null;
-      })(),
+      assessment_intervention_code: primary?.code || null,
+      assessment_intervention_duration_days: interventionDuration !== null ? String(interventionDuration) : null,
+      assessment_intervention_cost_total: overallTotalValue !== null ? overallTotalValue.toFixed(2) : null,
       assessment_intervention_pot_id: assessment.interventionPotId || null,
       postingContext: assessment.postingContext || null,
-      assessment_intervention_related_noc: assessment.interventionNoc || null,
-      assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
+      assessment_intervention_related_noc: primary?.interventionNoc || null,
+      assessment_intervention_related_noc_version: primary?.interventionNocVersion || null,
       assessment_childcare_need: assessment.childcareNeed || null,
       assessment_childcare_funding_details: assessment.childcareFunding || null,
-      case_summary: assessment.overview || null
+      case_summary: assessment.overview || null,
+      assessment_proposed_interventions: proposedInterventionsPayload.length ? proposedInterventionsPayload : null
     };
     const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : null;
-    const normalizedMode = assessment.deliveryMode === 'in_house' ? 'in_house' : 'partner';
     const includeLetterDrafts = letterDrafts && typeof letterDrafts === 'object';
-    if (baseContext || normalizedMode || costSettingsPayload || includeLetterDrafts) {
+    if (baseContext || includeLetterDrafts) {
       payload.caseContext = {
         ...(baseContext || {}),
-        assessmentDeliveryMode: normalizedMode,
-        assessmentCostSettings: costSettingsPayload,
         ...(includeLetterDrafts ? { decisionLetterDrafts: letterDrafts } : {})
       };
     }
     return payload;
-  }, [assessment, buildCostSettingsPayload, caseData?.caseContext, isEligibilityAdmin, letterDrafts]);
+  }, [
+    assessment,
+    caseData?.caseContext,
+    isEligibilityAdmin,
+    letterDrafts,
+    overallCostTotal,
+    proposedInterventions,
+    serializeProposedInterventions
+  ]);
   const handlePostingContextErrors = useCallback((result) => {
     const code = result?.error || result?.code;
     if (['missing_internal_gl_code', 'missing_external_gl_code', 'posting_context_not_permitted'].includes(code)) {
@@ -962,10 +1512,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     () => CHILDCARE_OPTIONS.find(option => option.value === assessment.childcareNeed) || null,
     [assessment.childcareNeed]
   );
-  const manualCostValue = useMemo(() => {
-    const val = parseCurrencyInput(assessment.interventionCost);
-    return val !== null && Number.isFinite(val) ? val : null;
-  }, [assessment.interventionCost]);
   const selectedPostingContext = useMemo(
     () => POSTING_OPTIONS.find(opt => opt.value === assessment.postingContext) || null,
     [assessment.postingContext]
@@ -1005,43 +1551,77 @@ const CoordinatorAssessmentWidget = forwardRef(
     const allowed = new Set(['system administrator', 'program administrator', 'regional manager', 'regional coordinator']);
     return allowed.has(normalizedRole);
   }, [normalizedRole]);
-  const usesCostTables = isEducationIntervention || isEmployerIntervention;
   const showChildcareFunding = assessment.childcareNeed === 'yes';
-  const showEndDate = Boolean(assessment.startDate);
-  const dateGridDefinition = useMemo(
-    () => showEndDate ? [{ colspan: 6 }, { colspan: 6 }] : [{ colspan: 6 }],
-    [showEndDate]
-  );
-  useEffect(() => {
-    if (requiresNoc) return;
-    setAssessment(prev => {
-      if (!prev.interventionNoc && !prev.interventionNocVersion) return prev;
-      return { ...prev, interventionNoc: '', interventionNocVersion: '' };
-    });
-  }, [requiresNoc]);
   useEffect(() => {
     setAssessment(prev => {
+      const current = Array.isArray(prev.proposedInterventions) ? prev.proposedInterventions : [];
+      if (!current.length) return prev;
       let changed = false;
-      const next = { ...prev };
-      if (!isEducationIntervention) {
-        if (next.itp?.details) {
-          next.itp = { ...next.itp, details: '' };
+      const nextInterventions = current.map(intervention => {
+        const next = { ...intervention };
+        const educationCode = isEducationCode(next.code);
+        const employerCode = isEmployerCode(next.code);
+        const wageSubsidyCode = isWageSubsidyCode(next.code);
+        const requiresExternal = requiresExternalPartnerForCode(next.code);
+        const needsNoc = requiresNocForCode(next.code);
+        if (!needsNoc && (next.interventionNoc || next.interventionNocVersion)) {
+          next.interventionNoc = '';
+          next.interventionNocVersion = '';
           changed = true;
         }
-      }
-      if (!(isEducationIntervention || isEmployerIntervention)) {
-        if (next.programName) {
+        if (requiresExternal && next.deliveryMode !== 'partner') {
+          next.deliveryMode = 'partner';
+          changed = true;
+        }
+        if (!educationCode && next.itpDetails) {
+          next.itpDetails = '';
+          changed = true;
+        }
+        if (!(educationCode || employerCode) && next.programName) {
           next.programName = '';
           changed = true;
         }
-      }
-      if (!isWageSubsidyIntervention && next.wage?.subsidyDetails) {
-        next.wage = { ...next.wage, subsidyDetails: '' };
-        changed = true;
-      }
-      return changed ? next : prev;
+        if (!wageSubsidyCode && next.wageSubsidyDetails) {
+          next.wageSubsidyDetails = '';
+          changed = true;
+        }
+        if (next.deliveryMode === 'in_house' && !(educationCode || employerCode)) {
+          if (next.institution) {
+            next.institution = '';
+            changed = true;
+          }
+        }
+        return next;
+      });
+      return changed ? { ...prev, proposedInterventions: nextInterventions } : prev;
     });
-  }, [isEducationIntervention, isEmployerIntervention, isWageSubsidyIntervention]);
+  }, [proposedInterventions]);
+  useEffect(() => {
+    if (costingDefaultsLoading || paymentTypeMappingLoading) return;
+    setAssessment(prev => {
+      const current = Array.isArray(prev.proposedInterventions) ? prev.proposedInterventions : [];
+      if (!current.length) return prev;
+      let changed = false;
+      const nextInterventions = current.map(intervention => {
+        if (!intervention.code) return intervention;
+        if (intervention.suggestionsSeeded) return intervention;
+        const existingLines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
+        if (existingLines.length) {
+          changed = true;
+          return { ...intervention, suggestionsSeeded: true };
+        }
+        const suggestedLines = buildSuggestedCostLines(intervention);
+        if (suggestedLines === null) return intervention;
+        changed = true;
+        return {
+          ...intervention,
+          costLines: suggestedLines,
+          suggestionsSeeded: true
+        };
+      });
+      return changed ? { ...prev, proposedInterventions: nextInterventions } : prev;
+    });
+  }, [buildSuggestedCostLines, costingDefaultsLoading, paymentTypeMappingLoading]);
   useEffect(() => {
     if (assessment.childcareNeed === 'yes') return;
     setAssessment(prev => {
@@ -1057,50 +1637,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       return { ...prev, barriersOther: '' };
     });
   }, [assessment.barriers]);
-  useEffect(() => {
-    if (!requiresExternalPartner) return;
-    setAssessment(prev => {
-      if (prev.deliveryMode === 'partner') return prev;
-      return { ...prev, deliveryMode: 'partner' };
-    });
-  }, [requiresExternalPartner]);
-  useEffect(() => {
-    if (assessment.deliveryMode !== 'in_house') return;
-    setAssessment(prev => {
-      if (!prev.institution && !prev.wage?.subsidyDetails) return prev;
-      return { ...prev, institution: '', wage: { ...prev.wage, subsidyDetails: '' } };
-    });
-  }, [assessment.deliveryMode]);
-  const calculatedFundingTotal = useMemo(() => {
-    if (!usesCostTables) return null;
-    const itp = assessment.itp || {};
-    const wage = assessment.wage || {};
-    const itpTotal = isEducationIntervention
-      ? parseCurrencyToNumber(itp.tuition) +
-        parseCurrencyToNumber(itp.books) +
-        parseCurrencyToNumber(itp.materials) +
-        parseCurrencyToNumber(itp.living) +
-        parseCurrencyToNumber(itp.childcare) +
-        parseCurrencyToNumber(itp.otherAmount)
-      : 0;
-    const wageTotal = isEmployerIntervention
-      ? parseCurrencyToNumber(wage.wages) +
-        parseCurrencyToNumber(wage.mercs) +
-        parseCurrencyToNumber(wage.nonwages) +
-        parseCurrencyToNumber(wage.other1Amount) +
-        parseCurrencyToNumber(wage.other2Amount)
-      : 0;
-    const total = itpTotal + wageTotal;
-    if (!Number.isFinite(total) || total <= 0) return null;
-    return String(Math.round(total));
-  }, [assessment.itp, assessment.wage, isEducationIntervention, isEmployerIntervention, usesCostTables]);
-  const tableCostValue = useMemo(() => {
-    if (!calculatedFundingTotal) return null;
-    const val = parseCurrencyInput(calculatedFundingTotal);
-    return val !== null && Number.isFinite(val) ? val : null;
-  }, [calculatedFundingTotal]);
-  const effectiveCostValue = manualCostValue !== null ? manualCostValue : tableCostValue;
-  const decisionHasCost = effectiveCostValue !== null && Number.isFinite(effectiveCostValue) && effectiveCostValue > 0;
+  const decisionHasCost = Number.isFinite(overallCostTotal) && overallCostTotal > 0;
   const showDecisionBudgetPot = assessment.nwacReviewStatus === 'approve' && decisionHasCost;
   useEffect(() => {
     if (assessment.nwacReviewStatus === 'approve' && decisionHasCost) return;
@@ -1109,29 +1646,9 @@ const CoordinatorAssessmentWidget = forwardRef(
       return { ...prev, interventionPotId: '', postingContext: '' };
     });
   }, [assessment.nwacReviewStatus, decisionHasCost]);
-  const showRecurrenceGroup = effectiveCostValue !== null && Number.isFinite(effectiveCostValue) && effectiveCostValue > 0;
-  const isRecurringCost = assessment.costType === 'recurring';
-  const isRecurringSchedule = showRecurrenceGroup && isRecurringCost;
-  const selectedRecurrencePeriodOption = useMemo(
-    () => RECURRING_PERIOD_OPTIONS.find(option => option.value === assessment.recurringPeriod) || null,
-    [assessment.recurringPeriod]
-  );
-  const recurringAmountValue = parseCurrencyInput(assessment.recurringAmount);
-  const recurringOccurrencesValue = (() => {
-    const raw = assessment.recurringOccurrences;
-    if (raw === '' || raw === null || typeof raw === 'undefined') return null;
-    const num = Number(raw);
-    return Number.isFinite(num) ? num : null;
-  })();
-  const recurringTotal = useMemo(() => {
-    if (!isRecurringSchedule) return null;
-    if (!Number.isFinite(recurringAmountValue) || !Number.isFinite(recurringOccurrencesValue)) return null;
-    const total = recurringAmountValue * recurringOccurrencesValue;
-    return Number.isFinite(total) ? total : null;
-  }, [isRecurringSchedule, recurringAmountValue, recurringOccurrencesValue]);
   const fetchNocSuggestions = useCallback(
-    async (queryText) => {
-      if (!requiresNoc || !assessment.interventionNocVersion) {
+    async (queryText, nocVersion) => {
+      if (!nocVersion) {
         setNocSuggestions([]);
         return;
       }
@@ -1145,7 +1662,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         const params = new URLSearchParams();
         params.set('limit', '25');
         params.set('q', query);
-        params.set('version', assessment.interventionNocVersion);
+        params.set('version', nocVersion);
         const response = await apiFetch(`/api/reference/noc-codes?${params.toString()}`, { method: 'GET' });
         if (!response.ok) throw new Error(`Failed to load NOC codes (${response.status})`);
         const data = await response.json();
@@ -1165,7 +1682,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         setNocSuggestionsLoading(false);
       }
     },
-    [assessment.interventionNocVersion, requiresNoc]
+    [apiFetch]
   );
   const activeLock = useMemo(() => {
     if (lockState.owned && lockState.lock) {
@@ -1285,20 +1802,89 @@ const CoordinatorAssessmentWidget = forwardRef(
       const normalized = raw.trim().toLowerCase();
       return normalized === 'in_house' || normalized === 'partner' ? normalized : '';
     })();
-    const contextCostSettings = (() => {
-      const raw = caseData?.caseContext?.assessmentCostSettings;
-      return raw && typeof raw === 'object' ? raw : null;
+    const parseMaybeJson = (value) => {
+      if (!value) return null;
+      if (typeof value === 'object') return value;
+      try {
+        return JSON.parse(value);
+      } catch (_) {
+        return null;
+      }
+    };
+    const legacyItp = parseOrDefault(caseData.assessment_itp, {
+      tuition: '',
+      books: '',
+      materials: '',
+      living: '',
+      childcare: '',
+      otherLabel: '',
+      otherAmount: '',
+      details: ''
+    });
+    const legacyWage = parseOrDefault(caseData.assessment_wage, {
+      wages: '',
+      mercs: '',
+      nonwages: '',
+      other1Label: '',
+      other1Amount: '',
+      other2Label: '',
+      other2Amount: '',
+      subsidyDetails: ''
+    });
+    const proposedRaw =
+      caseData.assessment_proposed_interventions ||
+      caseData.assessmentProposedInterventions ||
+      caseData.proposed_interventions ||
+      null;
+    const parsedProposed = parseMaybeJson(proposedRaw);
+    const legacyCostLine = (() => {
+      if (parsedProposed) return null;
+      if (caseData.assessment_intervention_cost_total === null || typeof caseData.assessment_intervention_cost_total === 'undefined') {
+        return null;
+      }
+      return buildEmptyCostLine({
+        type: 'OtherEligibleCost',
+        amount: String(caseData.assessment_intervention_cost_total),
+        recurrence: {
+          enabled: false,
+          startDate: '',
+          endDate: '',
+          occurrences: '',
+          amountPerPeriod: ''
+        }
+      });
     })();
-    const contextCostType = contextCostSettings?.type === 'recurring' ? 'recurring' : 'one_time';
-    const contextRecurringPeriod = typeof contextCostSettings?.period === 'string' ? contextCostSettings.period : '';
-    const contextRecurringAmount =
-      contextCostSettings?.amountPerPeriod !== null && typeof contextCostSettings?.amountPerPeriod !== 'undefined'
-        ? String(contextCostSettings.amountPerPeriod)
-        : '';
-    const contextRecurringOccurrences =
-      contextCostSettings?.occurrences !== null && typeof contextCostSettings?.occurrences !== 'undefined'
-        ? String(contextCostSettings.occurrences)
-        : '';
+    const legacyIntervention = buildEmptyIntervention({
+      code: caseData.assessment_intervention_code != null ? String(caseData.assessment_intervention_code) : '',
+      startDate: formatDate(caseData.assessment_intervention_start_date) || '',
+      endDate: formatDate(caseData.assessment_intervention_end_date) || '',
+      deliveryMode: contextDeliveryMode || 'partner',
+      institution: caseData?.assessment_institution || caseData?.institution || '',
+      programName: caseData?.assessment_program_name || '',
+      itpDetails: legacyItp.details || '',
+      wageSubsidyDetails: legacyWage.subsidyDetails || '',
+      interventionNoc: caseData.assessment_intervention_related_noc ? String(caseData.assessment_intervention_related_noc).trim() : '',
+      interventionNocVersion: caseData.assessment_intervention_related_noc_version
+        ? String(caseData.assessment_intervention_related_noc_version).trim()
+        : '',
+      suggestionsSeeded: Boolean(legacyCostLine),
+      costLines: legacyCostLine ? [legacyCostLine] : []
+    });
+    const legacyHasValues = Boolean(
+      legacyIntervention.code ||
+        legacyIntervention.startDate ||
+        legacyIntervention.endDate ||
+        legacyIntervention.institution ||
+        legacyIntervention.programName ||
+        legacyIntervention.itpDetails ||
+        legacyIntervention.wageSubsidyDetails ||
+        legacyIntervention.interventionNoc ||
+        legacyIntervention.interventionNocVersion ||
+        (Array.isArray(legacyIntervention.costLines) && legacyIntervention.costLines.length)
+    );
+    const proposedInterventions = parsedProposed
+      ? normalizeProposedInterventions(parsedProposed)
+      : (legacyHasValues ? [legacyIntervention] : []);
 
     const placeholders = {
       dateOfAssessment: caseData.assessment_date_of_assessment || '',
@@ -1332,25 +1918,12 @@ const CoordinatorAssessmentWidget = forwardRef(
         : [],
       otherFunding: caseData?.assessment_other_funding_details || caseData?.other_funding_details || '',
       esdcEligibility: caseData.assessment_esdc_eligibility || '',
-      startDate: formatDate(caseData.assessment_intervention_start_date) || '',
-      endDate: formatDate(caseData.assessment_intervention_end_date) || '',
-      institution: caseData?.assessment_institution || caseData?.institution || '',
-      programName: caseData?.assessment_program_name || '',
-      deliveryMode: contextDeliveryMode || 'partner',
-      itp: parseOrDefault(caseData.assessment_itp, { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' }),
-      wage: parseOrDefault(caseData.assessment_wage, { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' }),
+      proposedInterventions,
       recommendation: caseData.assessment_recommendation || '',
       justification: caseData.assessment_justification || '',
       nwacReview: caseData.assessment_nwac_review || '',
       nwacReviewStatus: derivedOutcomeStatus,
       nwacReason: caseData.assessment_nwac_reason || '',
-      interventionCode: caseData.assessment_intervention_code != null ? String(caseData.assessment_intervention_code) : '',
-      interventionDuration: caseData.assessment_intervention_duration_days != null ? String(caseData.assessment_intervention_duration_days) : '',
-      interventionCost: caseData.assessment_intervention_cost_total != null ? String(caseData.assessment_intervention_cost_total) : '',
-      costType: contextCostType,
-      recurringPeriod: contextRecurringPeriod,
-      recurringAmount: contextRecurringAmount,
-      recurringOccurrences: contextRecurringOccurrences,
       interventionPotId: (() => {
         if (caseData.assessment_intervention_pot_id != null) {
           return String(caseData.assessment_intervention_pot_id);
@@ -1361,8 +1934,6 @@ const CoordinatorAssessmentWidget = forwardRef(
         const planPot = firstPlan?.budgetPot ?? firstPlan?.budget_pot ?? null;
         return planPot != null ? String(planPot) : '';
       })(),
-      interventionNoc: caseData.assessment_intervention_related_noc ? String(caseData.assessment_intervention_related_noc).trim() : '',
-      interventionNocVersion: caseData.assessment_intervention_related_noc_version ? String(caseData.assessment_intervention_related_noc_version).trim() : '',
       childcareNeed: (() => {
         const raw = caseData.assessment_childcare_need;
         if (raw === null || typeof raw === 'undefined') return '';
@@ -1475,29 +2046,6 @@ const CoordinatorAssessmentWidget = forwardRef(
   const checklistUploadsLocked = isAssessmentDisabled && !isCommunicationStep;
   const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canManageOutcomeReview;
   const isEligibilityDisabled = baseAssessmentLocked || isDeclarationGateActive || !isEligibilityAdmin;
-
-  useEffect(() => {
-    if (!isRecurringSchedule || isAssessmentDisabled) return;
-    if (!assessment.startDate || !assessment.endDate || !assessment.recurringPeriod) return;
-    const nextOccurrences = autoOccurrencesFromDates(assessment.startDate, assessment.endDate, assessment.recurringPeriod);
-    if (nextOccurrences === null) return;
-    if (String(nextOccurrences) === String(assessment.recurringOccurrences || '')) return;
-    setAssessment(prev => ({ ...prev, recurringOccurrences: String(nextOccurrences) }));
-  }, [
-    assessment.endDate,
-    assessment.recurringOccurrences,
-    assessment.recurringPeriod,
-    assessment.startDate,
-    isAssessmentDisabled,
-    isRecurringSchedule
-  ]);
-
-  useEffect(() => {
-    if (!isRecurringSchedule || isAssessmentDisabled) return;
-    if (recurringTotal === null || !Number.isFinite(recurringTotal) || recurringTotal <= 0) return;
-    const formatted = formatCurrencyDisplay(recurringTotal);
-    setAssessment(prev => (prev.interventionCost === formatted ? prev : { ...prev, interventionCost: formatted }));
-  }, [isAssessmentDisabled, isRecurringSchedule, recurringTotal]);
 
   const resolveStoredWizardStep = useCallback((key, allowedSteps) => {
     if (!key) return null;
@@ -1902,6 +2450,44 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
     };
 
+    const loadPaymentTypeMapping = async () => {
+      setPaymentTypeMappingLoading(true);
+      try {
+        const response = await apiFetch('/api/finance/payment-intervention-type-map', { method: 'GET' });
+        if (!response.ok) throw new Error(`Failed to load payment type mapping (${response.status})`);
+        const payload = await response.json();
+        const normalized = normalizePaymentTypeMappingPayload(payload);
+        if (!cancelled) {
+          setPaymentTypeMapping(normalized);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPaymentTypeMapping(null);
+        }
+      } finally {
+        if (!cancelled) setPaymentTypeMappingLoading(false);
+      }
+    };
+
+    const loadCostingDefaults = async () => {
+      setCostingDefaultsLoading(true);
+      try {
+        const response = await apiFetch('/api/config/runtime/assessment-costing', { method: 'GET' });
+        if (!response.ok) throw new Error(`Failed to load costing defaults (${response.status})`);
+        const payload = await response.json();
+        const normalized = normalizeCostingDefaults(payload);
+        if (!cancelled) {
+          setCostingDefaults(normalized);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setCostingDefaults(null);
+        }
+      } finally {
+        if (!cancelled) setCostingDefaultsLoading(false);
+      }
+    };
+
     const loadBudgetPots = async (query) => {
       setBudgetPotLoading(true);
       try {
@@ -1978,6 +2564,8 @@ const CoordinatorAssessmentWidget = forwardRef(
 
     loadInterventionCodes();
     loadNocVersions();
+    loadPaymentTypeMapping();
+    loadCostingDefaults();
     if (decisionHasCost) {
       loadBudgetPots();
     } else {
@@ -1988,10 +2576,6 @@ const CoordinatorAssessmentWidget = forwardRef(
       cancelled = true;
     };
   }, [assessment.esdcEligibility, normalizedProvince, decisionHasCost, assessment.interventionPotId, deriveFundingStreamFromEligibility]);
-
-  useEffect(() => {
-    setNocSuggestions([]);
-  }, [assessment.interventionNocVersion]);
 
   // Track changes
   useEffect(() => {
@@ -2033,9 +2617,22 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, [caseData?.application_row_version, applicationRowVersionState, onRowVersionUpdate]);
 
   // Handlers
+  const updateAssessmentWithValidation = useCallback(
+    (updater) => {
+      setAssessment(prevAssessment => {
+        const nextAssessment = typeof updater === 'function' ? updater(prevAssessment) : updater;
+        if (hasSubmitted || hasAttemptedSteps) {
+          setFieldErrors(validateAssessment(nextAssessment));
+        }
+        return nextAssessment;
+      });
+    },
+    [hasAttemptedSteps, hasSubmitted, validateAssessment]
+  );
+
   // Enhanced handleField to clear error for the field if value is now valid
   const handleField = (field, value) => {
-    setAssessment(prevAssessment => {
+    updateAssessmentWithValidation(prevAssessment => {
       const nextValue = (() => {
         if (field === 'overview') return limitWords(value, OVERVIEW_WORD_LIMIT);
         if (field === 'employmentGoals') return limitWords(value, EMPLOYMENT_GOALS_WORD_LIMIT);
@@ -2050,35 +2647,6 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
       if (field === 'childcareNeed' && value !== 'yes') {
         nextAssessment.childcareFunding = '';
-      }
-      if (field === 'interventionCode' && !requiresNocForCode(value)) {
-        nextAssessment.interventionNoc = '';
-        nextAssessment.interventionNocVersion = '';
-      }
-      if (field === 'interventionCode') {
-        const educationCode = isEducationCode(value);
-        const employerCode = isEmployerCode(value);
-        nextAssessment.deliveryMode = 'partner';
-        nextAssessment.institution = '';
-        nextAssessment.programName = educationCode || employerCode ? nextAssessment.programName : '';
-        nextAssessment.itp = { ...nextAssessment.itp, details: educationCode ? nextAssessment.itp?.details || '' : '' };
-        nextAssessment.wage = { ...nextAssessment.wage, subsidyDetails: '' };
-      }
-      if (field === 'costType') {
-        if (value === 'one_time') {
-          nextAssessment.recurringPeriod = '';
-          nextAssessment.recurringAmount = '';
-          nextAssessment.recurringOccurrences = '';
-        } else if (value === 'recurring' && !nextAssessment.recurringPeriod) {
-          nextAssessment.recurringPeriod = 'weekly';
-        }
-      }
-      if (field === 'deliveryMode' && value === 'in_house') {
-        nextAssessment.institution = '';
-        nextAssessment.wage = { ...nextAssessment.wage, subsidyDetails: '' };
-      }
-      if (field === 'startDate' && !value) {
-        nextAssessment.endDate = '';
       }
       if (field === 'esdcEligibility') {
         nextAssessment.interventionPotId = '';
@@ -2095,12 +2663,705 @@ const CoordinatorAssessmentWidget = forwardRef(
         const { postingContext: _ignore, ...rest } = fieldErrors;
         setFieldErrors(rest);
       }
-      if (hasSubmitted || hasAttemptedSteps) {
-        setFieldErrors(validateAssessment(nextAssessment));
-      }
       return nextAssessment;
     });
   };
+  const updateProposedInterventions = useCallback(
+    (updater) => {
+      updateAssessmentWithValidation(prev => {
+        const current = Array.isArray(prev.proposedInterventions) ? prev.proposedInterventions : [];
+        const next = typeof updater === 'function' ? updater(current) : updater;
+        return { ...prev, proposedInterventions: next };
+      });
+    },
+    [updateAssessmentWithValidation]
+  );
+  const updateIntervention = useCallback(
+    (interventionId, updater) => {
+      if (!interventionId) return;
+      updateProposedInterventions(current =>
+        current.map(intervention => {
+          if (intervention.id !== interventionId) return intervention;
+          const updated = typeof updater === 'function' ? updater(intervention) : { ...intervention, ...updater };
+          return updated;
+        })
+      );
+    },
+    [updateProposedInterventions]
+  );
+  const addIntervention = useCallback(
+    (draft) => {
+      const nextIntervention = normalizeProposedIntervention(draft);
+      if (!nextIntervention) return;
+      updateProposedInterventions(current => [...current, nextIntervention]);
+    },
+    [updateProposedInterventions]
+  );
+  const removeIntervention = useCallback(
+    (interventionId) => {
+      updateProposedInterventions(current => current.filter(intervention => intervention.id !== interventionId));
+    },
+    [updateProposedInterventions]
+  );
+  const cloneIntervention = useCallback((intervention) => {
+    if (!intervention || typeof intervention !== 'object') return buildEmptyIntervention();
+    return {
+      ...intervention,
+      costLines: Array.isArray(intervention.costLines)
+        ? intervention.costLines.map(line => ({ ...line, recurrence: { ...(line.recurrence || {}) } }))
+        : []
+    };
+  }, []);
+  const resetInterventionModal = useCallback(() => {
+    setInterventionModal({
+      visible: false,
+      mode: 'view',
+      interventionId: null,
+      draft: null,
+      original: null
+    });
+    setInterventionModalErrors({});
+  }, []);
+  const openAddInterventionModal = useCallback(() => {
+    const draft = buildEmptyIntervention();
+    setInterventionModal({
+      visible: true,
+      mode: 'add',
+      interventionId: null,
+      draft,
+      original: draft
+    });
+    setInterventionModalErrors({});
+  }, []);
+  const openViewInterventionModal = useCallback(
+    (interventionId) => {
+      const intervention = proposedInterventions.find(item => item.id === interventionId);
+      if (!intervention) return;
+      const draft = cloneIntervention(intervention);
+      setInterventionModal({
+        visible: true,
+        mode: 'view',
+        interventionId,
+        draft,
+        original: draft
+      });
+      setInterventionModalErrors({});
+    },
+    [cloneIntervention, proposedInterventions]
+  );
+  const startInterventionEdit = useCallback(() => {
+    setInterventionModal(prev => {
+      if (!prev.draft) return prev;
+      return {
+        ...prev,
+        mode: 'edit',
+        draft: cloneIntervention(prev.draft),
+        original: prev.original || cloneIntervention(prev.draft)
+      };
+    });
+    setInterventionModalErrors({});
+  }, [cloneIntervention]);
+  const cancelInterventionEdit = useCallback(() => {
+    setInterventionModal(prev => {
+      if (!prev.original) return prev;
+      return {
+        ...prev,
+        mode: 'view',
+        draft: cloneIntervention(prev.original)
+      };
+    });
+    setInterventionModalErrors({});
+  }, [cloneIntervention]);
+  const updateInterventionModalDraft = useCallback((updater) => {
+    setInterventionModal(prev => {
+      if (!prev.draft) return prev;
+      const nextDraft = typeof updater === 'function' ? updater(prev.draft) : { ...prev.draft, ...updater };
+      return { ...prev, draft: nextDraft };
+    });
+  }, []);
+  const confirmInterventionDelete = useCallback(() => {
+    if (!interventionDeleteId) return;
+    removeIntervention(interventionDeleteId);
+    setInterventionDeleteId(null);
+  }, [interventionDeleteId, removeIntervention]);
+  const updateCostLine = useCallback(
+    (interventionId, lineId, updater) => {
+      updateIntervention(interventionId, intervention => {
+        const lines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
+        const nextLines = lines.map(line => {
+          if (line.id !== lineId) return line;
+          const updated = typeof updater === 'function' ? updater(line) : { ...line, ...updater };
+          return { ...updated, recurrence: { ...line.recurrence, ...(updated.recurrence || {}) } };
+        });
+        return { ...intervention, costLines: nextLines };
+      });
+    },
+    [updateIntervention]
+  );
+  const addCostLine = useCallback(
+    (interventionId, line) => {
+      updateIntervention(interventionId, intervention => {
+        const lines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
+        return { ...intervention, costLines: [...lines, line] };
+      });
+    },
+    [updateIntervention]
+  );
+  const removeCostLine = useCallback(
+    (interventionId, lineId) => {
+      updateIntervention(interventionId, intervention => {
+        const lines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
+        return { ...intervention, costLines: lines.filter(line => line.id !== lineId) };
+      });
+    },
+    [updateIntervention]
+  );
+  const hydrateCostLineRecurrence = useCallback(
+    (line, intervention, adjustMode = 'total', options = {}) => {
+      const { recalcOccurrences = true } = options;
+      const recurrenceMode = getRecurrenceModeForType(line?.type);
+      const recurrenceRequired = recurrenceMode === 'required';
+      const recurrenceEnabled = recurrenceRequired || Boolean(line?.recurrence?.enabled);
+      if (!recurrenceEnabled) {
+        return {
+          ...line,
+          recurrence: buildRecurrenceFromIntervention(intervention, false)
+        };
+      }
+      const fallbackRecurrence = buildRecurrenceFromIntervention(intervention, true);
+      const recurrence = {
+        ...mergeRecurrenceDefaults(fallbackRecurrence, line.recurrence || {}),
+        enabled: true
+      };
+      if (recalcOccurrences && recurrence.startDate && recurrence.endDate) {
+        const computed = autoOccurrencesFromDates(recurrence.startDate, recurrence.endDate, 'monthly');
+        if (computed) {
+          recurrence.occurrences = String(computed);
+        }
+      }
+      if (recurrence.startDate && recurrence.occurrences && !recurrence.endDate) {
+        const derivedEnd = deriveEndDateFromOccurrences(recurrence.startDate, Number(recurrence.occurrences));
+        if (derivedEnd) {
+          recurrence.endDate = derivedEnd;
+        }
+      }
+      const amounts = recalcRecurringAmounts({
+        amount: line.amount,
+        amountPerPeriod: recurrence.amountPerPeriod,
+        occurrences: recurrence.occurrences,
+        adjustMode
+      });
+      return {
+        ...line,
+        amount: amounts.amount,
+        recurrence: {
+          ...recurrence,
+          amountPerPeriod: amounts.amountPerPeriod
+        }
+      };
+    },
+    [buildRecurrenceFromIntervention, getRecurrenceModeForType]
+  );
+  const applyInterventionDateChangeToIntervention = useCallback(
+    (intervention, { startDate, endDate }, adjustMode = 'total') => {
+      const nextStartDate = typeof startDate === 'undefined' ? intervention.startDate : startDate;
+      const nextEndDate = typeof endDate === 'undefined' ? intervention.endDate : endDate;
+      const updatedLines = (Array.isArray(intervention.costLines) ? intervention.costLines : []).map(line => {
+        if (!line?.recurrence?.enabled) return line;
+        const recurrence = { ...(line.recurrence || {}) };
+        if (typeof startDate !== 'undefined') recurrence.startDate = nextStartDate || '';
+        if (typeof endDate !== 'undefined') recurrence.endDate = nextEndDate || '';
+        return hydrateCostLineRecurrence(
+          { ...line, recurrence },
+          { ...intervention, startDate: nextStartDate, endDate: nextEndDate },
+          adjustMode
+        );
+      });
+      return {
+        ...intervention,
+        startDate: nextStartDate,
+        endDate: nextEndDate,
+        costLines: updatedLines
+      };
+    },
+    [hydrateCostLineRecurrence]
+  );
+  const applyInterventionDateChange = useCallback(
+    (interventionId, nextDates, adjustMode = 'total') => {
+      updateIntervention(interventionId, intervention =>
+        applyInterventionDateChangeToIntervention(intervention, nextDates, adjustMode)
+      );
+    },
+    [applyInterventionDateChangeToIntervention, updateIntervention]
+  );
+  const hasRecurringLineWithAmount = useCallback((intervention) => {
+    const lines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+    return lines.some(line => {
+      if (!line?.recurrence?.enabled) return false;
+      const amount = parseCurrencyInput(line.amount);
+      return amount !== null && Number.isFinite(amount);
+    });
+  }, []);
+  const saveInterventionModal = useCallback(() => {
+    const { mode, interventionId, draft, original } = interventionModal;
+    if (!draft) return;
+    const errors = {};
+    if (!draft.code) {
+      errors.code = 'Select an intervention.';
+    }
+    if (Object.keys(errors).length) {
+      setInterventionModalErrors(errors);
+      return;
+    }
+    if (mode === 'add') {
+      addIntervention(draft);
+      resetInterventionModal();
+      return;
+    }
+    if (mode === 'edit' && interventionId) {
+      const intervention = proposedInterventions.find(item => item.id === interventionId);
+      const nextStartDate = formatDate(draft.startDate);
+      const nextEndDate = formatDate(draft.endDate);
+      const startChanged = nextStartDate !== formatDate(original?.startDate);
+      const endChanged = nextEndDate !== formatDate(original?.endDate);
+      if (startChanged || endChanged) {
+        const needsPrompt = endChanged && hasRecurringLineWithAmount(intervention);
+        if (needsPrompt) {
+          setEndDateAdjustModal({
+            interventionId,
+            previousEndDate: formatDate(original?.endDate),
+            nextEndDate,
+            nextStartDate,
+            mode: 'total'
+          });
+          if (startChanged) {
+            applyInterventionDateChange(interventionId, { startDate: nextStartDate }, 'total');
+          }
+        } else {
+          applyInterventionDateChange(
+            interventionId,
+            {
+              startDate: startChanged ? nextStartDate : undefined,
+              endDate: endChanged ? nextEndDate : undefined
+            },
+            'total'
+          );
+        }
+      }
+      resetInterventionModal();
+    }
+  }, [
+    addIntervention,
+    applyInterventionDateChange,
+    hasRecurringLineWithAmount,
+    interventionModal,
+    proposedInterventions,
+    resetInterventionModal
+  ]);
+  const cloneCostLine = useCallback((line) => {
+    if (!line || typeof line !== 'object') return buildEmptyCostLine();
+    return {
+      ...line,
+      recurrence: { ...(line.recurrence || {}) }
+    };
+  }, []);
+  const handleInterventionStartDateChange = useCallback(
+    (interventionId, nextStartDate) => {
+      const endDateUpdate = nextStartDate ? undefined : '';
+      applyInterventionDateChange(interventionId, { startDate: nextStartDate, endDate: endDateUpdate }, 'total');
+    },
+    [applyInterventionDateChange]
+  );
+  const handleInterventionEndDateChange = useCallback(
+    (interventionId, nextEndDate) => {
+      const intervention = proposedInterventions.find(item => item.id === interventionId);
+      if (!intervention) return;
+      if (nextEndDate === intervention.endDate) return;
+      if (hasRecurringLineWithAmount(intervention)) {
+        setEndDateAdjustModal({
+          interventionId,
+          previousEndDate: intervention.endDate || '',
+          nextEndDate: nextEndDate || '',
+          mode: 'total'
+        });
+        return;
+      }
+      applyInterventionDateChange(interventionId, { endDate: nextEndDate }, 'total');
+    },
+    [applyInterventionDateChange, hasRecurringLineWithAmount, proposedInterventions]
+  );
+  const resetCostLineModal = useCallback(() => {
+    setCostLineModal({
+      visible: false,
+      mode: 'view',
+      interventionId: null,
+      lineId: null,
+      draft: null,
+      original: null
+    });
+    setCostLineModalErrors({});
+  }, []);
+  const openCostLineModal = useCallback(
+    (interventionId, lineId) => {
+      const intervention = proposedInterventions.find(item => item.id === interventionId);
+      const line = intervention?.costLines?.find(entry => entry.id === lineId);
+      if (!line) return;
+      const draft = cloneCostLine(line);
+      setCostLineModal({
+        visible: true,
+        mode: 'view',
+        interventionId,
+        lineId,
+        draft,
+        original: draft
+      });
+      setCostLineModalErrors({});
+    },
+    [cloneCostLine, proposedInterventions]
+  );
+  const openAddCostLineModal = useCallback((interventionId) => {
+    const draft = buildEmptyCostLine();
+    setCostLineModal({
+      visible: true,
+      mode: 'add',
+      interventionId,
+      lineId: null,
+      draft,
+      original: draft
+    });
+    setCostLineModalErrors({});
+  }, []);
+  const startCostLineEdit = useCallback(() => {
+    setCostLineModal(prev => {
+      if (!prev.draft) return prev;
+      return {
+        ...prev,
+        mode: 'edit',
+        draft: cloneCostLine(prev.draft),
+        original: prev.original || cloneCostLine(prev.draft)
+      };
+    });
+    setCostLineModalErrors({});
+  }, [cloneCostLine]);
+  const cancelCostLineEdit = useCallback(() => {
+    setCostLineModal(prev => {
+      if (!prev.original) return prev;
+      return {
+        ...prev,
+        mode: 'view',
+        draft: cloneCostLine(prev.original)
+      };
+    });
+    setCostLineModalErrors({});
+  }, [cloneCostLine]);
+  const updateCostLineDraft = useCallback((updater) => {
+    setCostLineModal(prev => {
+      if (!prev.draft) return prev;
+      const nextDraft = typeof updater === 'function' ? updater(prev.draft, prev) : { ...prev.draft, ...updater };
+      return { ...prev, draft: nextDraft };
+    });
+  }, []);
+  const updateCostLineType = useCallback(
+    (nextType) => {
+      setCostLineModal(prev => {
+        if (!prev.draft) return prev;
+        const intervention = proposedInterventions.find(item => item.id === prev.interventionId);
+        if (!intervention) return prev;
+        const recurrenceMode = getRecurrenceModeForType(nextType);
+        const recurrenceEnabled =
+          recurrenceMode === 'required'
+            ? true
+            : recurrenceMode === 'disabled'
+              ? false
+              : Boolean(prev.draft.recurrence?.enabled);
+        const baseRecurrence = buildRecurrenceFromIntervention(intervention, recurrenceEnabled);
+        const mergedRecurrence = mergeRecurrenceDefaults(baseRecurrence, prev.draft.recurrence || {});
+        const recurrence = recurrenceEnabled
+          ? { ...mergedRecurrence, enabled: true }
+          : baseRecurrence;
+        return {
+          ...prev,
+          draft: {
+            ...prev.draft,
+            type: nextType,
+            recurrence
+          }
+        };
+      });
+      setCostLineModalErrors({});
+    },
+    [buildRecurrenceFromIntervention, getRecurrenceModeForType, proposedInterventions]
+  );
+  const toggleCostLineRecurrence = useCallback(
+    (enabled) => {
+      setCostLineModal(prev => {
+        if (!prev.draft) return prev;
+        const intervention = proposedInterventions.find(item => item.id === prev.interventionId);
+        if (!intervention) return prev;
+        const recurrenceMode = getRecurrenceModeForType(prev.draft.type);
+        const resolvedEnabled =
+          recurrenceMode === 'required'
+            ? true
+            : recurrenceMode === 'disabled'
+              ? false
+              : enabled;
+        const baseRecurrence = buildRecurrenceFromIntervention(intervention, resolvedEnabled);
+        const existing = prev.draft.recurrence || {};
+        const mergedRecurrence = mergeRecurrenceDefaults(baseRecurrence, existing);
+        const recurrence = resolvedEnabled
+          ? { ...mergedRecurrence, enabled: true }
+          : baseRecurrence;
+        return {
+          ...prev,
+          draft: {
+            ...prev.draft,
+            recurrence
+          }
+        };
+      });
+      setCostLineModalErrors({});
+    },
+    [buildRecurrenceFromIntervention, getRecurrenceModeForType, proposedInterventions]
+  );
+  const updateCostLineAmount = useCallback((value) => {
+    const sanitized = sanitizeCurrencyInput(value);
+    updateCostLineDraft(draft => {
+      const next = { ...draft, amount: sanitized };
+      if (draft.recurrence?.enabled && draft.recurrence?.occurrences) {
+        const occ = Number(draft.recurrence.occurrences);
+        if (Number.isFinite(occ) && occ > 0) {
+          const total = parseCurrencyInput(sanitized);
+          next.recurrence = {
+            ...draft.recurrence,
+            amountPerPeriod: total !== null ? formatCurrencyDisplay(total / occ) : ''
+          };
+        }
+      }
+      return next;
+    });
+  }, [updateCostLineDraft]);
+  const blurCostLineAmount = useCallback(() => {
+    updateCostLineDraft(draft => {
+      const formatted = formatCurrencyDisplay(draft.amount);
+      return { ...draft, amount: formatted || '' };
+    });
+  }, [updateCostLineDraft]);
+  const updateCostLineAmountPerPeriod = useCallback((value) => {
+    const sanitized = sanitizeCurrencyInput(value);
+    updateCostLineDraft(draft => {
+      const recurrence = { ...(draft.recurrence || {}), amountPerPeriod: sanitized };
+      const occ = Number(recurrence.occurrences);
+      let amount = draft.amount;
+      if (Number.isFinite(occ) && occ > 0) {
+        const per = parseCurrencyInput(sanitized);
+        if (per !== null) {
+          amount = formatCurrencyDisplay(per * occ);
+        }
+      }
+      return { ...draft, amount, recurrence };
+    });
+  }, [updateCostLineDraft]);
+  const updateCostLineOccurrences = useCallback((value) => {
+    const cleaned = String(value || '').replace(/[^\d]/g, '');
+    updateCostLineDraft(draft => {
+      const recurrence = { ...(draft.recurrence || {}), occurrences: cleaned };
+      if (recurrence.startDate && cleaned && !recurrence.endDate) {
+        const derivedEnd = deriveEndDateFromOccurrences(recurrence.startDate, Number(cleaned));
+        recurrence.endDate = derivedEnd || recurrence.endDate || '';
+      }
+      const amounts = recalcRecurringAmounts({
+        amount: draft.amount,
+        amountPerPeriod: recurrence.amountPerPeriod,
+        occurrences: recurrence.occurrences,
+        adjustMode: 'total'
+      });
+      return { ...draft, amount: amounts.amount, recurrence: { ...recurrence, amountPerPeriod: amounts.amountPerPeriod } };
+    });
+  }, [updateCostLineDraft]);
+  const updateCostLineRecurrenceStart = useCallback((value) => {
+    updateCostLineDraft(draft => {
+      const recurrence = { ...(draft.recurrence || {}), startDate: value };
+      if (recurrence.startDate && recurrence.endDate) {
+        const occ = autoOccurrencesFromDates(recurrence.startDate, recurrence.endDate, 'monthly');
+        recurrence.occurrences = occ ? String(occ) : '';
+      }
+      const amounts = recalcRecurringAmounts({
+        amount: draft.amount,
+        amountPerPeriod: recurrence.amountPerPeriod,
+        occurrences: recurrence.occurrences,
+        adjustMode: 'total'
+      });
+      return { ...draft, amount: amounts.amount, recurrence: { ...recurrence, amountPerPeriod: amounts.amountPerPeriod } };
+    });
+  }, [updateCostLineDraft]);
+  const updateCostLineRecurrenceEnd = useCallback((value) => {
+    updateCostLineDraft(draft => {
+      const recurrence = { ...(draft.recurrence || {}), endDate: value };
+      if (recurrence.startDate && recurrence.endDate) {
+        const occ = autoOccurrencesFromDates(recurrence.startDate, recurrence.endDate, 'monthly');
+        recurrence.occurrences = occ ? String(occ) : '';
+      }
+      const amounts = recalcRecurringAmounts({
+        amount: draft.amount,
+        amountPerPeriod: recurrence.amountPerPeriod,
+        occurrences: recurrence.occurrences,
+        adjustMode: 'total'
+      });
+      return { ...draft, amount: amounts.amount, recurrence: { ...recurrence, amountPerPeriod: amounts.amountPerPeriod } };
+    });
+  }, [updateCostLineDraft]);
+  const commitCostLine = useCallback(
+    (interventionId, line, mode, lineId = null) => {
+      if (mode === 'add') {
+        addCostLine(interventionId, line);
+      } else if (mode === 'edit' && lineId) {
+        updateCostLine(interventionId, lineId, line);
+      }
+    },
+    [addCostLine, updateCostLine]
+  );
+  const saveCostLineModal = useCallback(() => {
+    const { interventionId, draft, mode, lineId, original } = costLineModal;
+    if (!interventionId || !draft) return;
+    const intervention = proposedInterventions.find(item => item.id === interventionId);
+    if (!intervention) return;
+    const errors = {};
+    if (!draft.type) {
+      errors.type = 'Select a cost item.';
+    } else if (mode === 'add') {
+      const typesInUse = new Set(
+        Array.isArray(intervention.costLines) ? intervention.costLines.map(line => line.type).filter(Boolean) : []
+      );
+      if (typesInUse.has(draft.type)) {
+        errors.type = 'This cost item already exists for the intervention.';
+      }
+    }
+    const recurrenceMode = getRecurrenceModeForType(draft.type);
+    const recurrenceRequired = recurrenceMode === 'required';
+    const recurrenceEnabled = recurrenceRequired || Boolean(draft.recurrence?.enabled);
+    const recalcOccurrences = !draft.recurrence?.occurrences && Boolean(draft.recurrence?.endDate);
+    const hydratedDraft = hydrateCostLineRecurrence(
+      { ...draft, recurrence: { ...(draft.recurrence || {}), enabled: recurrenceEnabled } },
+      intervention,
+      'total',
+      { recalcOccurrences }
+    );
+    if ((recurrenceRequired || recurrenceEnabled) && !isRecurrenceScheduleComplete(hydratedDraft)) {
+      errors.recurrence = 'Complete the installments schedule.';
+    }
+    if (Object.keys(errors).length) {
+      setCostLineModalErrors(errors);
+      return;
+    }
+    const occurrencesChanged =
+      String(hydratedDraft.recurrence?.occurrences || '') !==
+      String(original?.recurrence?.occurrences || '');
+    if (recurrenceEnabled && intervention.endDate && occurrencesChanged) {
+      setOccurrenceConfirmModal({
+        interventionId,
+        lineId,
+        mode,
+        draft: hydratedDraft,
+        originalOccurrences: original?.recurrence?.occurrences || ''
+      });
+      return;
+    }
+    commitCostLine(interventionId, hydratedDraft, mode, lineId);
+    resetCostLineModal();
+  }, [
+    commitCostLine,
+    costLineModal,
+    getRecurrenceModeForType,
+    hydrateCostLineRecurrence,
+    proposedInterventions,
+    resetCostLineModal
+  ]);
+  const deleteCostLineFromModal = useCallback(() => {
+    if (!costLineModal.interventionId || !costLineModal.lineId) {
+      resetCostLineModal();
+      return;
+    }
+    removeCostLine(costLineModal.interventionId, costLineModal.lineId);
+    resetCostLineModal();
+  }, [costLineModal, removeCostLine, resetCostLineModal]);
+  const confirmOccurrencesUpdateEndDate = useCallback(() => {
+    const pending = occurrenceConfirmModal;
+    if (!pending) return;
+    const intervention = proposedInterventions.find(item => item.id === pending.interventionId);
+    if (!intervention) {
+      setOccurrenceConfirmModal(null);
+      return;
+    }
+    const occurrences = Number(pending.draft?.recurrence?.occurrences);
+    const startDate = intervention.startDate;
+    const nextEndDate =
+      startDate && Number.isFinite(occurrences) && occurrences > 0
+        ? deriveEndDateFromOccurrences(startDate, occurrences)
+        : intervention.endDate || '';
+    updateProposedInterventions(current =>
+      current.map(item => {
+        if (item.id !== pending.interventionId) return item;
+        const lines = Array.isArray(item.costLines) ? item.costLines : [];
+        const nextLines =
+          pending.mode === 'add'
+            ? [...lines, pending.draft]
+            : lines.map(line => (line.id === pending.lineId ? pending.draft : line));
+        const nextIntervention = { ...item, costLines: nextLines };
+        return applyInterventionDateChangeToIntervention(nextIntervention, { endDate: nextEndDate }, 'total');
+      })
+    );
+    setOccurrenceConfirmModal(null);
+    resetCostLineModal();
+  }, [
+    applyInterventionDateChangeToIntervention,
+    occurrenceConfirmModal,
+    proposedInterventions,
+    resetCostLineModal,
+    updateProposedInterventions
+  ]);
+  const keepOccurrencesWithoutEndDateChange = useCallback(() => {
+    const pending = occurrenceConfirmModal;
+    if (!pending) return;
+    const intervention = proposedInterventions.find(item => item.id === pending.interventionId);
+    if (!intervention) {
+      setOccurrenceConfirmModal(null);
+      return;
+    }
+    const reverted = {
+      ...pending.draft,
+      recurrence: {
+        ...(pending.draft.recurrence || {}),
+        occurrences: pending.originalOccurrences
+      }
+    };
+    const hydrated = hydrateCostLineRecurrence(reverted, intervention, 'total', { recalcOccurrences: false });
+    commitCostLine(pending.interventionId, hydrated, pending.mode, pending.lineId);
+    setOccurrenceConfirmModal(null);
+    resetCostLineModal();
+  }, [commitCostLine, hydrateCostLineRecurrence, occurrenceConfirmModal, proposedInterventions, resetCostLineModal]);
+  const handleInlineAmountChange = useCallback(
+    (interventionId, lineId, value) => {
+      const sanitized = sanitizeCurrencyInput(value);
+      updateCostLine(interventionId, lineId, line => {
+        const next = { ...line, amount: sanitized };
+        if (line.recurrence?.enabled && line.recurrence?.occurrences) {
+          const occ = Number(line.recurrence.occurrences);
+          if (Number.isFinite(occ) && occ > 0) {
+            const total = parseCurrencyInput(sanitized);
+            next.recurrence = {
+              ...line.recurrence,
+              amountPerPeriod: total !== null ? formatCurrencyDisplay(total / occ) : ''
+            };
+          }
+        }
+        return next;
+      });
+    },
+    [updateCostLine]
+  );
+  const handleInlineAmountBlur = useCallback((lineId) => {
+    setInlineAmountEditingId(prev => (prev === lineId ? null : prev));
+  }, []);
   const handleCancel = () => setShowCancelModal(true);
   const confirmCancel = () => {
     setAssessment(initialAssessment);
@@ -2418,7 +3679,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     showLockAlert,
     updateRowVersion
   ]);
-  const validateAssessment = (assessment) => {
+  function validateAssessment(assessment) {
     const errors = {};
     // 1. Overview
     if (!assessment.overview || !assessment.overview.trim()) {
@@ -2438,16 +3699,99 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!assessment.esdcEligibility) {
       errors.esdcEligibility = 'Eligibility is required.';
     }
-    // 5. Start Date (no longer mandatory)
-    // 6. End Date (no longer mandatory)
-    const startUtc = parseIsoDateToUtc(assessment.startDate);
-    const endUtc = parseIsoDateToUtc(assessment.endDate);
-    if (startUtc !== null && endUtc !== null && endUtc < startUtc) {
-      errors.endDate = 'End date cannot be before start date.';
+    // 5. Proposed interventions + dates
+    const proposed = Array.isArray(assessment.proposedInterventions) ? assessment.proposedInterventions : [];
+    const interventionErrors = {};
+    const costLineErrors = {};
+    if (!proposed.length) {
+      interventionErrors._global = 'Add at least one proposed intervention.';
     }
-    // 7. Institution (no longer mandatory)
-    // 8. Program Name (no longer mandatory)
-    // 9. ITP/Wage: validation removed, no funding required
+    proposed.forEach((intervention, interventionIndex) => {
+      const entryErrors = {};
+      const interventionKey = intervention.id || String(interventionIndex);
+      if (!intervention.code) {
+        entryErrors.code = 'Select an intervention code.';
+      }
+      if (!intervention.startDate) {
+        entryErrors.startDate = 'Start date is required.';
+      }
+      const startUtc = parseIsoDateToUtc(intervention.startDate);
+      const endUtc = parseIsoDateToUtc(intervention.endDate);
+      if (startUtc !== null && endUtc !== null && endUtc < startUtc) {
+        entryErrors.endDate = 'End date cannot be before start date.';
+      }
+      const requiresNocCode = requiresNocForCode(intervention.code);
+      if (requiresNocCode) {
+        if (!intervention.interventionNocVersion) {
+          entryErrors.interventionNocVersion = 'Select a NOC version for this intervention.';
+        }
+        if (!intervention.interventionNoc) {
+          entryErrors.interventionNoc = 'Select a NOC code for this intervention.';
+        }
+      }
+      const educationCode = isEducationCode(intervention.code);
+      const employerCode = isEmployerCode(intervention.code);
+      const wageSubsidyCode = isWageSubsidyCode(intervention.code);
+      if (educationCode) {
+        if (!intervention.institution || !intervention.institution.trim()) {
+          entryErrors.institution = 'Training institution is required for this intervention code.';
+        }
+        if (!intervention.itpDetails || !intervention.itpDetails.trim()) {
+          entryErrors.itpDetails = 'ITP details are required for this intervention code.';
+        }
+      }
+      if (employerCode) {
+        if (!intervention.institution || !intervention.institution.trim()) {
+          entryErrors.institution = 'Employer / delivery partner is required for this intervention code.';
+        }
+        if (wageSubsidyCode && (!intervention.wageSubsidyDetails || !intervention.wageSubsidyDetails.trim())) {
+          entryErrors.wageSubsidyDetails = 'Wage subsidy details are required for this intervention code.';
+        }
+      }
+      if (!educationCode && !employerCode && intervention.deliveryMode !== 'in_house') {
+        if (!intervention.institution || !intervention.institution.trim()) {
+          entryErrors.institution = 'Delivery partner / provider is required when using external delivery.';
+        }
+      }
+      if (Object.keys(entryErrors).length) {
+        interventionErrors[interventionKey] = entryErrors;
+      }
+      const lines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
+      const lineErrors = {};
+      lines.forEach((line, lineIndex) => {
+        const detailErrors = {};
+        const lineKey = line.id || `${interventionKey}-line-${lineIndex}`;
+        if (!line.type) {
+          detailErrors.type = 'Select a cost item.';
+        }
+        if (line.amount === null || typeof line.amount === 'undefined' || String(line.amount).trim() === '') {
+          detailErrors.amount = 'Enter an amount for this cost item.';
+        } else {
+          const parsedAmount = parseCurrencyInput(line.amount);
+          if (parsedAmount === null || !Number.isFinite(parsedAmount) || parsedAmount < 0) {
+            detailErrors.amount = 'Enter a valid amount in dollars.';
+          }
+        }
+        const recurrenceMode = getRecurrenceModeForType(line.type);
+        const recurrenceRequired = recurrenceMode === 'required';
+        const recurrenceEnabled = Boolean(line.recurrence?.enabled);
+        if ((recurrenceRequired || recurrenceEnabled) && !isRecurrenceScheduleComplete(line)) {
+          detailErrors.recurrence = 'Complete the installments schedule.';
+        }
+        if (Object.keys(detailErrors).length) {
+          lineErrors[lineKey] = detailErrors;
+        }
+      });
+      if (Object.keys(lineErrors).length) {
+        costLineErrors[interventionKey] = lineErrors;
+      }
+    });
+    if (Object.keys(interventionErrors).length) {
+      errors.interventions = interventionErrors;
+    }
+    if (Object.keys(costLineErrors).length) {
+      errors.costLines = costLineErrors;
+    }
     // 10. Recommendation
     if (!assessment.recommendation) {
       errors.recommendation = 'Recommendation is required.';
@@ -2464,51 +3808,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (assessment.nwacReview && !assessment.nwacReason) {
       errors.nwacReason = 'Reason for not approving is required.';
     }
-    // 14. Intervention code required
-    if (!assessment.interventionCode) {
-      errors.interventionCode = 'Select an intervention code.';
-    }
-    const requiresNocCode = requiresNocForCode(assessment.interventionCode);
-    if (requiresNocCode) {
-      if (!assessment.interventionNocVersion) {
-        errors.interventionNocVersion = 'Select a NOC version for this intervention code.';
-      }
-      if (!assessment.interventionNoc) {
-        errors.interventionNoc = 'Select a NOC code for this intervention.';
-      }
-    }
-    const educationCode = isEducationCode(assessment.interventionCode);
-    const employerCode = isEmployerCode(assessment.interventionCode);
-    const wageSubsidyCode = isWageSubsidyCode(assessment.interventionCode);
-    if (educationCode) {
-      if (!assessment.institution || !assessment.institution.trim()) {
-        errors.institution = 'Training institution is required for this intervention code.';
-      }
-      if (!assessment.itp?.details || !assessment.itp.details.trim()) {
-        errors.itpDetails = 'ITP details are required for this intervention code.';
-      }
-    }
-    if (employerCode) {
-      if (!assessment.institution || !assessment.institution.trim()) {
-        errors.institution = 'Employer / delivery partner is required for this intervention code.';
-      }
-      if (wageSubsidyCode && (!assessment.wage?.subsidyDetails || !assessment.wage.subsidyDetails.trim())) {
-        errors.wageSubsidyDetails = 'Wage subsidy details are required for this intervention code.';
-      }
-    }
-    if (!educationCode && !employerCode && assessment.deliveryMode !== 'in_house') {
-      if (!assessment.institution || !assessment.institution.trim()) {
-        errors.institution = 'Delivery partner / provider is required when using external delivery.';
-      }
-    }
-    // 15. Optional numeric fields
-    let parsedInterventionCost = null;
-    if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
-      parsedInterventionCost = parseCurrencyInput(assessment.interventionCost);
-      if (parsedInterventionCost === null || !Number.isFinite(parsedInterventionCost) || parsedInterventionCost < 0) {
-        errors.interventionCost = 'Enter a valid amount in dollars.';
-      }
-    }
+    // 14. Budget pot validation (only if set)
     if (assessment.interventionPotId) {
       const potExists = budgetPotOptions.some(opt => opt?.value === assessment.interventionPotId);
       if (!potExists) {
@@ -2519,7 +3819,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
     }
     return errors;
-  };
+  }
   const runDocumentChecklist = useCallback(
     async (onContinue, { allowBypass = true, stage = null } = {}) => {
       if (!applicantUserId) {
@@ -2737,26 +4037,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
   };
 
-  // Enhanced handleItp and handleWage to clear funding error if valid
-  const handleItp = (field, value) => {
-    setAssessment(prev => {
-      const next = { ...prev, itp: { ...prev.itp, [field]: value } };
-      if (hasSubmitted || hasAttemptedSteps) {
-        setFieldErrors(validateAssessment(next));
-      }
-      return next;
-    });
-  };
-  const handleWage = (field, value) => {
-    setAssessment(prev => {
-      const next = { ...prev, wage: { ...prev.wage, [field]: value } };
-      if (hasSubmitted || hasAttemptedSteps) {
-        setFieldErrors(validateAssessment(next));
-      }
-      return next;
-    });
-  };
-
   const updateLetterDraftField = (field, value) => {
     if (!activeLetterKey) return;
     setLetterDrafts(prev => ({
@@ -2841,34 +4121,46 @@ const CoordinatorAssessmentWidget = forwardRef(
         const amount = parseCurrencyToNumber(value);
         return amount > 0 ? amount : null;
       };
-      const itp = assessment.itp || {};
-      const wage = assessment.wage || {};
+      const primary = proposedInterventions[0] || null;
+      const costLines = Array.isArray(primary?.costLines) ? primary.costLines : [];
+      const sumByType = (types = []) =>
+        costLines.reduce((sum, line) => {
+          if (!line?.type || !types.includes(line.type)) return sum;
+          const amount = parseCurrencyToNumber(line.amount);
+          return sum + (amount > 0 ? amount : 0);
+        }, 0);
+      const knownTypes = new Set([
+        'TuitionFeesDirect',
+        'TuitionFeesReimbursement',
+        'BooksMaterialsDirect',
+        'BooksMaterialsReimbursement',
+        'LivingAllowance',
+        'Childcare',
+        'WageSubsidyEmployer'
+      ]);
+      const otherAmount = costLines.reduce((sum, line) => {
+        if (!line?.type || knownTypes.has(line.type)) return sum;
+        const amount = parseCurrencyToNumber(line.amount);
+        return sum + (amount > 0 ? amount : 0);
+      }, 0);
       const fundingBreakdown = {
-        tuition: toAmount(itp.tuition),
-        books: toAmount(itp.books),
-        materials: toAmount(itp.materials),
-        living: toAmount(itp.living),
-        childcare: toAmount(itp.childcare),
-        other_label: itp.otherLabel || null,
-        other_amount: toAmount(itp.otherAmount),
-        wage_subsidy: toAmount(wage.wages),
-        wage_mercs: toAmount(wage.mercs),
-        wage_non_wages: toAmount(wage.nonwages),
-        wage_other_1_label: wage.other1Label || null,
-        wage_other_1_amount: toAmount(wage.other1Amount),
-        wage_other_2_label: wage.other2Label || null,
-        wage_other_2_amount: toAmount(wage.other2Amount)
+        tuition: sumByType(['TuitionFeesDirect', 'TuitionFeesReimbursement']) || null,
+        books: sumByType(['BooksMaterialsDirect', 'BooksMaterialsReimbursement']) || null,
+        materials: null,
+        living: sumByType(['LivingAllowance']) || null,
+        childcare: sumByType(['Childcare']) || null,
+        other_label: null,
+        other_amount: otherAmount || null,
+        wage_subsidy: sumByType(['WageSubsidyEmployer']) || null,
+        wage_mercs: null,
+        wage_non_wages: null,
+        wage_other_1_label: null,
+        wage_other_1_amount: null,
+        wage_other_2_label: null,
+        wage_other_2_amount: null
       };
-      const totalFunding = Number.isFinite(numericInterventionCost) && numericInterventionCost > 0
-        ? numericInterventionCost
-        : null;
-      const recurringDetails = assessment.costType === 'recurring'
-        ? {
-          period: assessment.recurringPeriod || null,
-          amount: toAmount(assessment.recurringAmount),
-          occurrences: assessment.recurringOccurrences ? Number(assessment.recurringOccurrences) : null
-        }
-        : null;
+      const totalFunding = Number.isFinite(overallCostTotal) && overallCostTotal > 0 ? overallCostTotal : null;
+      const recurringDetails = null;
       const requiredDocs = requiredCommunicationChecklistItems
         .map(item => item?.label || item?.id)
         .filter(Boolean);
@@ -2885,14 +4177,14 @@ const CoordinatorAssessmentWidget = forwardRef(
         case_number: caseData?.case_number || null,
         assessment_summary: assessment.overview || null,
         employment_goals: assessment.employmentGoals || null,
-        program_name: assessment.programName || null,
-        institution: assessment.institution || null,
-        intervention_type_label: selectedInterventionCodeOption?.label || null,
-        intervention_code: assessment.interventionCode || null,
-        delivery_mode: assessment.deliveryMode || null,
-        intervention_start_date: assessment.startDate || null,
-        intervention_end_date: assessment.endDate || null,
-        intervention_cost_total: totalFunding || assessment.interventionCost || null,
+        program_name: primary?.programName || null,
+        institution: primary?.institution || null,
+        intervention_label: primary ? resolveInterventionLabel(primary.code) : null,
+        intervention_code: primary?.code || null,
+        delivery_mode: primary?.deliveryMode || null,
+        intervention_start_date: primary?.startDate || null,
+        intervention_end_date: primary?.endDate || null,
+        intervention_cost_total: totalFunding || null,
         recurring_details: recurringDetails,
         funding_breakdown: fundingBreakdown,
         required_documents: requiredDocs,
@@ -3138,17 +4430,27 @@ const CoordinatorAssessmentWidget = forwardRef(
         return true;
       }
       const errors = validateAssessment(assessment);
+      const interventionErrors = errors.interventions || {};
+      const hasInterventionFieldError = (keys = []) =>
+        Object.values(interventionErrors).some(entry => entry && keys.some(key => entry[key]));
       if (stepId === 'eligibility') {
         return !errors.esdcEligibility;
       }
       if (stepId === 'framing') {
-        return !errors.interventionCode && !errors.startDate && !errors.endDate;
+        if (interventionErrors._global) return false;
+        return !hasInterventionFieldError(['code', 'startDate', 'endDate']);
       }
       if (stepId === 'rationale') {
         return !errors.overview && !errors.employmentGoals;
       }
       if (stepId === 'type') {
-        return !errors.interventionNocVersion && !errors.interventionNoc && !errors.institution && !errors.itpDetails && !errors.wageSubsidyDetails;
+        return !hasInterventionFieldError([
+          'interventionNocVersion',
+          'interventionNoc',
+          'institution',
+          'itpDetails',
+          'wageSubsidyDetails'
+        ]);
       }
       if (stepId === 'childcare') {
         return true;
@@ -3166,7 +4468,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         return true;
       }
       if (stepId === 'cost') {
-        return !errors.interventionDuration && !errors.interventionCost && !errors.interventionPotId && !errors.postingContext;
+        return !errors.costLines || Object.keys(errors.costLines).length === 0;
       }
       if (stepId === 'docs') {
         return assessmentSubmitted ? true : docsChecklistComplete;
@@ -3203,12 +4505,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     setHasSubmitted(true);
     setValidationAlert(null);
     const errors = validateNWACReview(assessment);
-    if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
-      const parsedCost = parseCurrencyInput(assessment.interventionCost);
-      if (parsedCost === null || !Number.isFinite(parsedCost) || parsedCost < 0) {
-        errors.interventionCost = 'Enter a valid amount in dollars.';
-      }
-    }
     const isOutcomeApproved = assessment.nwacReviewStatus === 'approve';
     if (isOutcomeApproved && decisionHasCost && !assessment.interventionPotId) {
       errors.interventionPotId = 'Select a budget pot for the intervention cost.';
@@ -3247,12 +4543,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     const decision = assessment.nwacReviewStatus;
     const isOutcomeApproved = decision === 'approve';
     const isOutcomePushBack = decision === 'push_back';
-    if (assessment.interventionCost && String(assessment.interventionCost).trim() !== '') {
-      const parsedCost = parseCurrencyInput(assessment.interventionCost);
-      if (parsedCost === null || !Number.isFinite(parsedCost) || parsedCost < 0) {
-        errors.interventionCost = 'Enter a valid amount in dollars.';
-      }
-    }
     if (isOutcomeApproved && decisionHasCost && !assessment.interventionPotId) {
       errors.interventionPotId = 'Select a budget pot for the intervention cost.';
     }
@@ -3278,54 +4568,13 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!lockCheck.ok) return;
     const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
     const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
-    const costSettingsPayload = buildCostSettingsPayload();
     const payload = {
-      assessment_date_of_assessment: formatDate(assessment.dateOfAssessment) || null,
-      assessment_employment_goals: assessment.employmentGoals || null,
-      assessment_previous_iset: assessment.previousISET || null,
-      assessment_previous_iset_details: assessment.previousISETDetails || null,
-      assessment_employment_barriers: assessment.barriers || null,
-      assessment_employment_barriers_other_details: assessment.barriersOther || null,
-      assessment_local_area_priorities: assessment.priorities || null,
-      assessment_other_funding_details: assessment.otherFunding || null,
-      assessment_esdc_eligibility: assessment.esdcEligibility || null,
-      assessment_intervention_start_date: formatDate(assessment.startDate) || null,
-      assessment_intervention_end_date: formatDate(assessment.endDate) || null,
-      assessment_institution: assessment.institution || null,
-      assessment_program_name: assessment.programName || null,
-      assessment_itp: assessment.itp || [],
-      assessment_wage: assessment.wage || [],
-      assessment_recommendation: assessment.recommendation || null,
-      assessment_justification: assessment.justification || null,
-      assessment_nwac_review: assessment.nwacReview || null,
-      assessment_nwac_reason: assessment.nwacReason || null,
-      assessment_intervention_code: assessment.interventionCode || null,
-      assessment_intervention_duration_days: assessment.interventionDuration || null,
-      assessment_intervention_cost_total: (() => {
-        const val = parseCurrencyInput(assessment.interventionCost);
-        return val !== null ? String(val) : null;
-      })(),
-      assessment_intervention_pot_id: assessment.interventionPotId || null,
-      postingContext: assessment.postingContext || null,
-      assessment_intervention_related_noc: assessment.interventionNoc || null,
-      assessment_intervention_related_noc_version: assessment.interventionNocVersion || null,
-      assessment_childcare_need: assessment.childcareNeed || null,
-      assessment_childcare_funding_details: assessment.childcareFunding || null,
-      case_summary: assessment.overview || null,
+      ...buildAssessmentPayload(),
       assessment_submit_action: true,
       assessment_nwac_review_status: decision || null,
       status: isOutcomeApproved ? 'initiated' : NOT_APPROVED_CASE_STATUS,
       applicationStatus: isOutcomePushBack ? 'in_review' : DECISION_READY_STATUS
     };
-    const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : null;
-    const normalizedMode = assessment.deliveryMode === 'in_house' ? 'in_house' : 'partner';
-    if (baseContext || normalizedMode || costSettingsPayload) {
-      payload.caseContext = {
-        ...(baseContext || {}),
-        assessmentDeliveryMode: normalizedMode,
-        assessmentCostSettings: costSettingsPayload
-      };
-    }
     const requestBody = { ...payload };
     if (versionToken > 0) {
       requestBody.expectedRowVersion = versionToken;
@@ -3648,6 +4897,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const showBarriersErrors = shouldShowStepErrors('barriers');
   const showCostErrors = shouldShowStepErrors('cost');
   const showDecisionErrors = shouldShowStepErrors('decision');
+  const interventionFieldErrors = fieldErrors.interventions || {};
+  const costLineFieldErrors = fieldErrors.costLines || {};
 
   const eligibilityStepContent = (
     <SpaceBetween size="l">
@@ -3734,58 +4985,69 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const framingStepContent = (
     <SpaceBetween size="l">
-      <Grid gridDefinition={[{ colspan: 6 }]}>
-        <FormField
-          label="Intervention Code"
-          description="Select the intervention type recommended for this client."
-          errorText={showFramingErrors && fieldErrors.interventionCode ? fieldErrors.interventionCode : undefined}
-        >
-          <Select
-            selectedOption={selectedInterventionCodeOption}
-            onChange={({ detail }) => handleField('interventionCode', detail.selectedOption?.value || '')}
-            options={interventionCodes}
-            placeholder={interventionCodesLoading ? 'Loading intervention codes...' : 'Select intervention code'}
-            statusType={interventionCodesLoading ? 'loading' : 'finished'}
-            filteringType="auto"
-            data-error-focus={showFramingErrors && fieldErrors.interventionCode ? 'true' : undefined}
-            readOnly={isAssessmentDisabled}
-          />
-        </FormField>
-      </Grid>
-      <Grid gridDefinition={dateGridDefinition}>
-        <FormField
-          label="Start Date"
-          errorText={showFramingErrors && fieldErrors.startDate ? fieldErrors.startDate : undefined}
-          description="Enter the planned start date for the intervention or training."
-        >
-          <DatePicker
-            onChange={({ detail }) => handleField('startDate', detail.value)}
-            value={assessment.startDate}
-            ariaLabel="Start Date"
-            data-error-focus={showFramingErrors && fieldErrors.startDate ? 'true' : undefined}
-            tabIndex={-1}
-            readOnly={isAssessmentDisabled}
-          />
-        </FormField>
-        {showEndDate && (
-          <FormField
-            label="End Date"
-            errorText={showFramingErrors && fieldErrors.endDate ? fieldErrors.endDate : undefined}
-            description="Enter the planned end date for the intervention or training."
+      {showFramingErrors && interventionFieldErrors._global && (
+        <Alert type="error" statusIconAriaLabel="Error">
+          {interventionFieldErrors._global}
+        </Alert>
+      )}
+      <Table
+        stripedRows
+        variant="embedded"
+        trackBy="id"
+        items={proposedInterventions}
+        resizableColumns
+        columnDefinitions={[
+          {
+            id: 'intervention',
+            header: 'Intervention',
+            cell: item => {
+              const rowErrors = showFramingErrors ? (interventionFieldErrors[item.id] || {}) : {};
+              const rowErrorText = rowErrors.code || rowErrors.startDate || rowErrors.endDate;
+              return (
+                <FormField errorText={rowErrorText}>
+                  <Link
+                    onFollow={event => {
+                      event.preventDefault();
+                      openViewInterventionModal(item.id);
+                    }}
+                    data-error-focus={rowErrorText ? 'true' : undefined}
+                  >
+                    {resolveInterventionLabel(item.code) || '—'}
+                  </Link>
+                </FormField>
+              );
+            }
+          },
+          {
+            id: 'actions',
+            header: 'Actions',
+            minWidth: 90,
+            width: 90,
+            cell: item => (
+              <Button
+                variant="inline-icon"
+                iconName="remove"
+                ariaLabel="Delete intervention"
+                onClick={() => setInterventionDeleteId(item.id)}
+                disabled={isAssessmentDisabled}
+              />
+            )
+          }
+        ]}
+        header={
+          <Header
+            variant="h3"
+            actions={
+              <Button onClick={openAddInterventionModal} disabled={isAssessmentDisabled}>
+                Add intervention
+              </Button>
+            }
           >
-            <DatePicker
-              onChange={({ detail }) => handleField('endDate', detail.value)}
-              value={assessment.endDate}
-              ariaLabel="End Date"
-              data-error-focus={showFramingErrors && fieldErrors.endDate ? 'true' : undefined}
-              tabIndex={-1}
-              readOnly={isAssessmentDisabled}
-              disabled={!assessment.startDate}
-              placeholder={assessment.startDate ? undefined : 'Set a start date first'}
-            />
-          </FormField>
-        )}
-      </Grid>
+            Proposed interventions
+          </Header>
+        }
+        empty={<Box textAlign="center">No proposed interventions.</Box>}
+      />
     </SpaceBetween>
   );
 
@@ -3848,190 +5110,214 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const typeStepContent = (
     <SpaceBetween size="l">
-      {!requiresExternalPartner && (
-        <FormField
-          label="Delivery mode"
-          description="Choose how this will run. Training codes need an education provider; employer codes need a host/employer with NOC details."
-        >
-          <Select
-            selectedOption={
-              assessment.deliveryMode !== 'in_house'
-                ? { value: 'partner', label: 'External delivery partner' }
-                : { value: 'in_house', label: 'In-house (no external partner)' }
-            }
-            onChange={({ detail }) => handleField('deliveryMode', detail.selectedOption?.value || 'partner')}
-            options={[
-              { value: 'partner', label: 'External delivery partner' },
-              { value: 'in_house', label: 'In-house (no external partner)' }
-            ]}
-            readOnly={isAssessmentDisabled}
-          />
-        </FormField>
-      )}
-
-      {isEducationIntervention && (
-        <SpaceBetween size="s">
-          <ColumnLayout columns={2} variant="text-grid">
-            <FormField
-              label="Institution"
-              description="Training provider or school delivering the program."
-              errorText={showTypeErrors && fieldErrors.institution ? fieldErrors.institution : undefined}
-            >
-              <Input
-                value={assessment.institution}
-                onChange={({ detail }) => handleField('institution', detail.value)}
-                data-error-focus={showTypeErrors && fieldErrors.institution ? 'true' : undefined}
-                readOnly={isAssessmentDisabled}
-              />
-            </FormField>
-            <FormField
-              label="Program name (optional)"
-              description="Course, credential, or stream name."
-            >
-              <Input
-                value={assessment.programName}
-                onChange={({ detail }) => handleField('programName', detail.value)}
-                readOnly={isAssessmentDisabled}
-              />
-            </FormField>
-          </ColumnLayout>
-          <FormField
-            label="In-Training Plan (ITP) details"
-            description="Outline curriculum, milestones, supports, materials, and how this leads to the employment goal."
-            errorText={showTypeErrors && fieldErrors.itpDetails ? fieldErrors.itpDetails : undefined}
-          >
-            <Textarea
-              value={assessment.itp?.details || ''}
-              rows={3}
-              onChange={({ detail }) => handleItp('details', detail.value)}
-              placeholder="Summarize training plan, key milestones, supports, or materials."
-              data-error-focus={showTypeErrors && fieldErrors.itpDetails ? 'true' : undefined}
-              readOnly={isAssessmentDisabled}
-            />
-          </FormField>
-        </SpaceBetween>
-      )}
-
-      {isEmployerIntervention && (
-        <SpaceBetween size="s">
-          <ColumnLayout columns={2} variant="text-grid">
-            <FormField
-              label="Employer / delivery partner"
-              description="Employer or host organization providing the placement."
-              errorText={showTypeErrors && fieldErrors.institution ? fieldErrors.institution : undefined}
-            >
-              <Input
-                value={assessment.institution}
-                onChange={({ detail }) => handleField('institution', detail.value)}
-                data-error-focus={showTypeErrors && fieldErrors.institution ? 'true' : undefined}
-                readOnly={isAssessmentDisabled}
-              />
-            </FormField>
-            <FormField
-              label="Program name (optional)"
-              description="Job title, role, or program name if defined by the employer."
-            >
-              <Input
-                value={assessment.programName}
-                onChange={({ detail }) => handleField('programName', detail.value)}
-                readOnly={isAssessmentDisabled}
-              />
-            </FormField>
-          </ColumnLayout>
-          <ColumnLayout columns={2} variant="text-grid">
-            <FormField
-              label="NOC version"
-              description="Select the NOC version used for this job/placement."
-              errorText={showTypeErrors && fieldErrors.interventionNocVersion ? fieldErrors.interventionNocVersion : undefined}
-            >
-              <Select
-                selectedOption={selectedNocVersionOption}
-                onChange={({ detail }) => handleField('interventionNocVersion', detail.selectedOption?.value || '')}
-                options={nocVersions}
-                placeholder={nocVersionsLoading ? 'Loading NOC versions...' : 'Select NOC version'}
-                statusType={nocVersionsLoading ? 'loading' : 'finished'}
-                filteringType="auto"
-                data-error-focus={showTypeErrors && fieldErrors.interventionNocVersion ? 'true' : undefined}
-                readOnly={isAssessmentDisabled}
-                disabled={nocVersionsLoading}
-              />
-            </FormField>
-            <FormField
-              label="NOC code"
-              description="Search by code or title; aligns to the job/placement."
-              errorText={showTypeErrors && fieldErrors.interventionNoc ? fieldErrors.interventionNoc : undefined}
-            >
-              <Autosuggest
-                value={assessment.interventionNoc || ''}
-                onChange={({ detail }) => {
-                  const inputValue = detail.value || '';
-                  handleField('interventionNoc', inputValue);
-                  if (inputValue.length >= 2) {
-                    fetchNocSuggestions(inputValue);
-                  } else {
-                    setNocSuggestions([]);
+      {proposedInterventions.map(intervention => {
+        const educationCode = isEducationCode(intervention.code);
+        const employerCode = isEmployerCode(intervention.code);
+        const wageSubsidyCode = isWageSubsidyCode(intervention.code);
+        const requiresExternal = requiresExternalPartnerForCode(intervention.code);
+        const deliveryMode = intervention.deliveryMode === 'in_house' ? 'in_house' : 'partner';
+        return (
+          <SpaceBetween key={intervention.id} size="m">
+            <Header variant="h3">
+              {resolveInterventionLabel(intervention.code) || 'Intervention details'}
+            </Header>
+            {!requiresExternal && (
+              <FormField
+                label="Delivery mode"
+                description="Choose how this will run."
+              >
+                <Select
+                  selectedOption={
+                    deliveryMode === 'in_house'
+                      ? { value: 'in_house', label: 'In-house (no external partner)' }
+                      : { value: 'partner', label: 'External delivery partner' }
                   }
-                }}
-                onSelect={({ detail }) => handleField('interventionNoc', detail.value || '')}
-                onLoadItems={({ detail }) => {
-                  if (detail.filteringText) {
-                    fetchNocSuggestions(detail.filteringText);
+                  onChange={({ detail }) =>
+                    updateIntervention(intervention.id, { deliveryMode: detail.selectedOption?.value || 'partner' })
                   }
-                }}
-                options={nocSuggestions}
-                statusType={nocSuggestionsLoading ? 'loading' : 'finished'}
-                expandToViewport
-                placeholder={
-                  assessment.interventionNocVersion
-                    ? 'Type to search NOC code'
-                    : 'Select a NOC version first'
-                }
-                empty="No NOC codes found."
-                readOnly={isAssessmentDisabled}
-                disabled={!assessment.interventionNocVersion}
-                enteredTextLabel={value => `Use "${value}"`}
-                data-error-focus={showTypeErrors && fieldErrors.interventionNoc ? 'true' : undefined}
-              />
-            </FormField>
-          </ColumnLayout>
-          {isWageSubsidyIntervention && (
-            <FormField
-              label="Wage subsidy details"
-              errorText={showTypeErrors && fieldErrors.wageSubsidyDetails ? fieldErrors.wageSubsidyDetails : undefined}
-            >
-              <Textarea
-                value={assessment.wage?.subsidyDetails || ''}
-                rows={3}
-                onChange={({ detail }) => handleWage('subsidyDetails', detail.value)}
-                placeholder="Employer, wage subsidy amount/percentage, duration, expectations."
-                data-error-focus={showTypeErrors && fieldErrors.wageSubsidyDetails ? 'true' : undefined}
-                readOnly={isAssessmentDisabled}
-              />
-            </FormField>
-          )}
-        </SpaceBetween>
-      )}
+                  options={[
+                    { value: 'partner', label: 'External delivery partner' },
+                    { value: 'in_house', label: 'In-house (no external partner)' }
+                  ]}
+                  readOnly={isAssessmentDisabled}
+                />
+              </FormField>
+            )}
 
-      {!isEducationIntervention && !isEmployerIntervention && (
-        assessment.deliveryMode === 'partner' ? (
-          <FormField
-            label="Delivery partner / provider"
-            errorText={showTypeErrors && fieldErrors.institution ? fieldErrors.institution : undefined}
-          >
-            <Input
-              value={assessment.institution}
-              onChange={({ detail }) => handleField('institution', detail.value)}
-              placeholder="Training institution, employer, or provider"
-              data-error-focus={showTypeErrors && fieldErrors.institution ? 'true' : undefined}
-              readOnly={isAssessmentDisabled}
-            />
-          </FormField>
-        ) : (
-          <Alert type="info" header="In-house delivery">
-            No external delivery partner needed for this intervention.
-          </Alert>
-        )
-      )}
+            {educationCode && (
+              <SpaceBetween size="s">
+                <ColumnLayout columns={2} variant="text-grid">
+                  <FormField
+                    label="Institution"
+                    description="Training provider or school delivering the program."
+                    errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.institution : undefined}
+                  >
+                    <Input
+                      value={intervention.institution}
+                      onChange={({ detail }) => updateIntervention(intervention.id, { institution: detail.value })}
+                      data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.institution ? 'true' : undefined}
+                      readOnly={isAssessmentDisabled}
+                    />
+                  </FormField>
+                  <FormField
+                    label="Program name (optional)"
+                    description="Course, credential, or stream name."
+                  >
+                    <Input
+                      value={intervention.programName}
+                      onChange={({ detail }) => updateIntervention(intervention.id, { programName: detail.value })}
+                      readOnly={isAssessmentDisabled}
+                    />
+                  </FormField>
+                </ColumnLayout>
+                <FormField
+                  label="In-Training Plan (ITP) details"
+                  description="Outline curriculum, milestones, supports, materials, and how this leads to the employment goal."
+                  errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.itpDetails : undefined}
+                >
+                  <Textarea
+                    value={intervention.itpDetails || ''}
+                    rows={3}
+                    onChange={({ detail }) => updateIntervention(intervention.id, { itpDetails: detail.value })}
+                    placeholder="Summarize training plan, key milestones, supports, or materials."
+                    data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.itpDetails ? 'true' : undefined}
+                    readOnly={isAssessmentDisabled}
+                  />
+                </FormField>
+              </SpaceBetween>
+            )}
+
+            {employerCode && (
+              <SpaceBetween size="s">
+                <ColumnLayout columns={2} variant="text-grid">
+                  <FormField
+                    label="Employer / delivery partner"
+                    description="Employer or host organization providing the placement."
+                    errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.institution : undefined}
+                  >
+                    <Input
+                      value={intervention.institution}
+                      onChange={({ detail }) => updateIntervention(intervention.id, { institution: detail.value })}
+                      data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.institution ? 'true' : undefined}
+                      readOnly={isAssessmentDisabled}
+                    />
+                  </FormField>
+                  <FormField
+                    label="Program name (optional)"
+                    description="Job title, role, or program name if defined by the employer."
+                  >
+                    <Input
+                      value={intervention.programName}
+                      onChange={({ detail }) => updateIntervention(intervention.id, { programName: detail.value })}
+                      readOnly={isAssessmentDisabled}
+                    />
+                  </FormField>
+                </ColumnLayout>
+                <ColumnLayout columns={2} variant="text-grid">
+                  <FormField
+                    label="NOC version"
+                    description="Select the NOC version used for this job/placement."
+                    errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.interventionNocVersion : undefined}
+                  >
+                    <Select
+                      selectedOption={
+                        nocVersions.find(option => option.value === intervention.interventionNocVersion) || null
+                      }
+                      onChange={({ detail }) => {
+                        updateIntervention(intervention.id, {
+                          interventionNocVersion: detail.selectedOption?.value || '',
+                          interventionNoc: ''
+                        });
+                        setNocSuggestions([]);
+                      }}
+                      options={nocVersions}
+                      placeholder={nocVersionsLoading ? 'Loading NOC versions...' : 'Select NOC version'}
+                      statusType={nocVersionsLoading ? 'loading' : 'finished'}
+                      filteringType="auto"
+                      data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.interventionNocVersion ? 'true' : undefined}
+                      readOnly={isAssessmentDisabled}
+                      disabled={nocVersionsLoading}
+                    />
+                  </FormField>
+                  <FormField
+                    label="NOC code"
+                    description="Search by code or title; aligns to the job/placement."
+                    errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.interventionNoc : undefined}
+                  >
+                    <Autosuggest
+                      value={intervention.interventionNoc || ''}
+                      onChange={({ detail }) => {
+                        const inputValue = detail.value || '';
+                        updateIntervention(intervention.id, { interventionNoc: inputValue });
+                        if (inputValue.length >= 2 && intervention.interventionNocVersion) {
+                          fetchNocSuggestions(inputValue, intervention.interventionNocVersion);
+                        } else {
+                          setNocSuggestions([]);
+                        }
+                      }}
+                      onSelect={({ detail }) => updateIntervention(intervention.id, { interventionNoc: detail.value || '' })}
+                      onLoadItems={({ detail }) => {
+                        if (detail.filteringText && intervention.interventionNocVersion) {
+                          fetchNocSuggestions(detail.filteringText, intervention.interventionNocVersion);
+                        }
+                      }}
+                      options={nocSuggestions}
+                      statusType={nocSuggestionsLoading ? 'loading' : 'finished'}
+                      expandToViewport
+                      placeholder={
+                        intervention.interventionNocVersion
+                          ? 'Type to search NOC code'
+                          : 'Select a NOC version first'
+                      }
+                      empty="No NOC codes found."
+                      readOnly={isAssessmentDisabled}
+                      disabled={!intervention.interventionNocVersion}
+                      enteredTextLabel={value => `Use "${value}"`}
+                      data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.interventionNoc ? 'true' : undefined}
+                    />
+                  </FormField>
+                </ColumnLayout>
+                {wageSubsidyCode && (
+                  <FormField
+                    label="Wage subsidy details"
+                    errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.wageSubsidyDetails : undefined}
+                  >
+                    <Textarea
+                      value={intervention.wageSubsidyDetails || ''}
+                      rows={3}
+                      onChange={({ detail }) => updateIntervention(intervention.id, { wageSubsidyDetails: detail.value })}
+                      placeholder="Employer, wage subsidy amount/percentage, duration, expectations."
+                      data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.wageSubsidyDetails ? 'true' : undefined}
+                      readOnly={isAssessmentDisabled}
+                    />
+                  </FormField>
+                )}
+              </SpaceBetween>
+            )}
+
+            {!educationCode && !employerCode && (
+              deliveryMode === 'partner' ? (
+                <FormField
+                  label="Delivery partner / provider"
+                  errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.institution : undefined}
+                >
+                  <Input
+                    value={intervention.institution}
+                    onChange={({ detail }) => updateIntervention(intervention.id, { institution: detail.value })}
+                    placeholder="Training institution, employer, or provider"
+                    data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.institution ? 'true' : undefined}
+                    readOnly={isAssessmentDisabled}
+                  />
+                </FormField>
+              ) : (
+                <Alert type="info" header="In-house delivery">
+                  No external delivery partner needed for this intervention.
+                </Alert>
+              )
+            )}
+          </SpaceBetween>
+        );
+      })}
     </SpaceBetween>
   );
 
@@ -4195,300 +5481,117 @@ const CoordinatorAssessmentWidget = forwardRef(
     </SpaceBetween>
   );
 
-  const interventionCostLabel = usesCostTables ? 'Intervention Cost (total)' : 'Planned cost';
-  const interventionCostDescription = isRecurringSchedule
-    ? 'Calculated from the recurring schedule below.'
-    : usesCostTables
-      ? calculatedFundingTotal
-        ? `Optional. Auto-calculated from funding tables: $${calculatedFundingTotal}. Adjust if needed.`
-        : 'Optional. Enter the total planned cost (whole dollars).'
-      : `Enter the total cost for this intervention${selectedInterventionCodeOption?.label ? ` (${selectedInterventionCodeOption.label})` : ''}. Leave this blank if the intervention has no cost.`;
-  const interventionCostPlaceholder = usesCostTables ? 'e.g. $4,200.00' : '$0.00';
-  const displayInterventionCost = isRecurringSchedule && recurringTotal
-    ? formatCurrencyDisplay(recurringTotal)
-    : assessment.interventionCost;
-  const costSummaryGridDefinition = [{ colspan: 12 }];
+  const overallCostDisplay = formatCurrencyDisplay(overallCostTotal) || '$ 0.00';
 
   const costStepContent = (
     <SpaceBetween size="l">
-      {isEducationIntervention && (
-        <>
-          <Box margin={{ top: 's' }}>
-            <Header variant="h3">Individual Training Purchase (ITP)</Header>
-          </Box>
-          <Table
-            stripedRows
-            columnDefinitions={[
-              { id: 'category', header: 'Funding Category', cell: item => item.label },
-              { id: 'requested', header: 'Funding Requested', cell: item => (
-                (() => {
-                  const amountKey = item.amountKey || item.key;
-                  const amountValue = assessment.itp?.[amountKey] || '';
-                  const amountInput = (
-                    <Input
-                      type="text"
-                      value={amountValue}
-                      onChange={({ detail }) => {
-                        const raw = detail.value.replace(/[^\d.]/g, '');
-                        handleItp(amountKey, raw);
-                      }}
-                      onBlur={() => {
-                        const raw = assessment.itp?.[amountKey] || '';
-                        const num = raw ? parseFloat(raw) : '';
-                        const formatted = num !== '' && !isNaN(num) ? `$ ${num.toFixed(2)}` : '';
-                        handleItp(amountKey, formatted);
-                      }}
-                      ariaLabel={item.label}
-                      readOnly={isAssessmentDisabled}
-                    />
-                  );
-                  if (!item.labelKey) return amountInput;
-                  return (
-                    <SpaceBetween size="xs">
-                      <Input
-                        value={assessment.itp?.[item.labelKey] || ''}
-                        onChange={({ detail }) => handleItp(item.labelKey, detail.value)}
-                        placeholder="Describe..."
-                        ariaLabel={`${item.label} description`}
-                        readOnly={isAssessmentDisabled}
-                      />
-                      {amountInput}
-                    </SpaceBetween>
-                  );
-                })()
-              ) },
-              { id: 'actions', header: 'Actions', cell: item => (
-                isAssessmentDisabled ? null : (
-                  <Button
-                    size="small"
-                    variant="inline-link"
-                    onClick={() => {
-                      const amountKey = item.amountKey || item.key;
-                      if (item.labelKey) handleItp(item.labelKey, '');
-                      handleItp(amountKey, '');
-                    }}
-                  >
-                    Clear
-                  </Button>
-                )
-              ) }
-            ]}
-            items={[
-              { key: 'tuition', label: 'Tuition' },
-              { key: 'books', label: 'Books' },
-              { key: 'materials', label: 'Materials' },
-              { key: 'living', label: 'Living Allowance' },
-              { key: 'childcare', label: 'Childcare' },
-              { label: 'Other (specify)', labelKey: 'otherLabel', amountKey: 'otherAmount' }
-            ]}
-            variant="embedded"
-            header={null}
-            footer={
-              <>
-                <Box fontWeight="bold" textAlign="right">
-                  Total Intervention Cost: $
-                  {(
-                    Number((assessment.itp?.tuition || '').replace(/[^\d.]/g, '')) +
-                    Number((assessment.itp?.books || '').replace(/[^\d.]/g, '')) +
-                    Number((assessment.itp?.materials || '').replace(/[^\d.]/g, '')) +
-                    Number((assessment.itp?.living || '').replace(/[^\d.]/g, '')) +
-                    Number((assessment.itp?.childcare || '').replace(/[^\d.]/g, '')) +
-                    Number((assessment.itp?.otherAmount || '').replace(/[^\d.]/g, ''))
-                  ).toFixed(2)}
-                </Box>
-              </>
-            }
-          />
-        </>
-      )}
-      {isEmployerIntervention && (
-        <>
-          <Box margin={{ top: 'l', bottom: 's' }}>
-            <Header variant="h3">Targeted Wage Subsidy / Job Creation Partnership</Header>
-          </Box>
-          <Table
-            stripedRows
-            columnDefinitions={[
-              { id: 'category', header: 'Funding Category', cell: item => item.label },
-              { id: 'requested', header: 'Funding Requested', cell: item => (
-                (() => {
-                  const amountKey = item.amountKey || item.key;
-                  const amountValue = assessment.wage?.[amountKey] || '';
-                  const amountInput = (
-                    <Input
-                      type="text"
-                      value={amountValue}
-                      onChange={({ detail }) => {
-                        const raw = detail.value.replace(/[^\d.]/g, '');
-                        handleWage(amountKey, raw);
-                      }}
-                      onBlur={() => {
-                        const raw = assessment.wage?.[amountKey] || '';
-                        const num = raw ? parseFloat(raw) : '';
-                        const formatted = num !== '' && !isNaN(num) ? `$ ${num.toFixed(2)}` : '';
-                        handleWage(amountKey, formatted);
-                      }}
-                      ariaLabel={item.label}
-                      readOnly={isAssessmentDisabled}
-                    />
-                  );
-                  if (!item.labelKey) return amountInput;
-                  return (
-                    <SpaceBetween size="xs">
-                      <Input
-                        value={assessment.wage?.[item.labelKey] || ''}
-                        onChange={({ detail }) => handleWage(item.labelKey, detail.value)}
-                        placeholder="Describe..."
-                        ariaLabel={`${item.label} description`}
-                        readOnly={isAssessmentDisabled}
-                      />
-                      {amountInput}
-                    </SpaceBetween>
-                  );
-                })()
-              ) },
-              { id: 'actions', header: 'Actions', cell: item => (
-                isAssessmentDisabled ? null : (
-                  <Button
-                    size="small"
-                    variant="inline-link"
-                    onClick={() => {
-                      const amountKey = item.amountKey || item.key;
-                      if (item.labelKey) handleWage(item.labelKey, '');
-                      handleWage(amountKey, '');
-                    }}
-                  >
-                    Clear
-                  </Button>
-                )
-              ) }
-            ]}
-            items={[
-              { key: 'wages', label: 'Wages' },
-              { key: 'mercs', label: 'MERCs' },
-              { key: 'nonwages', label: 'Non-Wages' },
-              { label: 'Other (specify)', labelKey: 'other1Label', amountKey: 'other1Amount' },
-              { label: 'Other (specify)', labelKey: 'other2Label', amountKey: 'other2Amount' }
-            ]}
-            variant="embedded"
-            header={null}
-            footer={
-              <>
-                <Box fontWeight="bold" textAlign="right">
-                  Total Intervention Cost: $
-                  {(
-                    Number((assessment.wage?.wages || '').replace(/[^\d.]/g, '')) +
-                    Number((assessment.wage?.mercs || '').replace(/[^\d.]/g, '')) +
-                    Number((assessment.wage?.nonwages || '').replace(/[^\d.]/g, '')) +
-                    Number((assessment.wage?.other1Amount || '').replace(/[^\d.]/g, '')) +
-                    Number((assessment.wage?.other2Amount || '').replace(/[^\d.]/g, ''))
-                  ).toFixed(2)}
-                </Box>
-              </>
-            }
-          />
-        </>
-      )}
-      {!isRecurringSchedule && (
-        <>
-          <Grid gridDefinition={costSummaryGridDefinition}>
-            <FormField
-              label={interventionCostLabel}
-              description={interventionCostDescription}
-              errorText={showCostErrors && fieldErrors.interventionCost ? fieldErrors.interventionCost : undefined}
-              secondaryControl={
-                !isAssessmentDisabled && calculatedFundingTotal && assessment.interventionCost !== calculatedFundingTotal ? (
-                  <Button size="small" onClick={() => handleField('interventionCost', formatCurrencyDisplay(calculatedFundingTotal))}>
-                    Use {formatCurrencyDisplay(calculatedFundingTotal) || calculatedFundingTotal}
-                  </Button>
-                ) : null
+      <Box fontWeight="bold">Total proposed cost: {overallCostDisplay}</Box>
+      {proposedInterventions.map(intervention => {
+        const costLines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
+        const interventionTotal = interventionTotals.get(intervention.id) || 0;
+        const interventionTotalDisplay = formatCurrencyDisplay(interventionTotal) || '$ 0.00';
+        const costItemOptions = buildCostItemOptions(intervention);
+        const costLineErrors = costLineFieldErrors[intervention.id] || {};
+        const interventionLabel = resolveInterventionLabel(intervention.code) || 'Intervention';
+        return (
+          <SpaceBetween key={intervention.id} size="s">
+            <Header
+              variant="h3"
+              actions={
+                <Button
+                  onClick={() => openAddCostLineModal(intervention.id)}
+                  disabled={isAssessmentDisabled || costItemOptions.length === 0}
+                >
+                  Add cost item
+                </Button>
               }
             >
-              <Input
-                inputMode="decimal"
-                value={displayInterventionCost || ''}
-                onChange={({ detail }) => handleField('interventionCost', detail.value.replace(/[^\d.]/g, ''))}
-                onBlur={() => {
-                  const formatted = formatCurrencyDisplay(assessment.interventionCost);
-                  if (formatted) {
-                    handleField('interventionCost', formatted);
+              {interventionLabel}
+            </Header>
+            <Table
+              stripedRows
+              variant="embedded"
+              trackBy="id"
+              items={costLines}
+              resizableColumns
+              columnDefinitions={[
+                {
+                  id: 'type',
+                  header: 'Cost item',
+                  cell: item => {
+                    const label = paymentTypeLabelLookup.get(item.type) || item.type || '—';
+                    return (
+                      <Link
+                        onFollow={event => {
+                          event.preventDefault();
+                          openCostLineModal(intervention.id, item.id);
+                        }}
+                      >
+                        {label}
+                      </Link>
+                    );
                   }
-                }}
-                placeholder={interventionCostPlaceholder}
-                data-error-focus={showCostErrors && fieldErrors.interventionCost ? 'true' : undefined}
-                readOnly={isAssessmentDisabled}
-              />
-            </FormField>
-          </Grid>
-        </>
-      )}
-      {showRecurrenceGroup && (
-        <>
-          <FormField label="Cost type">
-            <RadioGroup
-              onChange={({ detail }) => handleField('costType', detail.value)}
-              value={assessment.costType || 'one_time'}
-              items={[
-                { value: 'one_time', label: 'One-time total' },
-                { value: 'recurring', label: 'Recurring schedule' }
+                },
+                {
+                  id: 'amount',
+                  header: 'Amount',
+                  cell: item => {
+                    const lineError = costLineErrors[item.id] || {};
+                    const displayValue = inlineAmountEditingId === item.id
+                      ? sanitizeCurrencyInput(item.amount)
+                      : getCurrencyInputDisplayValue(parseCurrencyInput(item.amount) ?? '', false);
+                    return (
+                      <FormField errorText={showCostErrors ? lineError.amount : undefined}>
+                        <Input
+                          inputMode="decimal"
+                          value={displayValue}
+                          onFocus={() => {
+                            if (!isAssessmentDisabled) setInlineAmountEditingId(item.id);
+                          }}
+                          onChange={({ detail }) => handleInlineAmountChange(intervention.id, item.id, detail.value)}
+                          onBlur={() => handleInlineAmountBlur(item.id)}
+                          placeholder="0.00"
+                          readOnly={isAssessmentDisabled}
+                          data-error-focus={showCostErrors && lineError.amount ? 'true' : undefined}
+                        />
+                      </FormField>
+                    );
+                  }
+                },
+                {
+                  id: 'installments',
+                  header: 'Installments',
+                  cell: item => {
+                    return getInstallmentText(item);
+                  }
+                },
+                {
+                  id: 'actions',
+                  header: '',
+                  minWidth: 64,
+                  width: 64,
+                  cell: item => (
+                    isAssessmentDisabled ? null : (
+                      <Button
+                        variant="inline-icon"
+                        iconName="remove"
+                        ariaLabel="Delete cost item"
+                        onClick={() => removeCostLine(intervention.id, item.id)}
+                      />
+                    )
+                  )
+                }
               ]}
-              readOnly={isAssessmentDisabled}
+              empty={<Box padding={{ vertical: 's' }}>Intervention has no cost items.</Box>}
+              footer={
+                <Box textAlign="right" fontWeight="bold">
+                  TOTAL: {interventionTotalDisplay}
+                </Box>
+              }
             />
-          </FormField>
-          {isRecurringSchedule && (
-            <>
-              <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-                <FormField label="Recurrence period">
-                  <Select
-                    selectedOption={selectedRecurrencePeriodOption}
-                    onChange={({ detail }) => handleField('recurringPeriod', detail.selectedOption?.value || '')}
-                    options={RECURRING_PERIOD_OPTIONS}
-                    placeholder="Select recurrence period"
-                    readOnly={isAssessmentDisabled}
-                  />
-                </FormField>
-                <FormField label="Amount per period">
-                  <Input
-                    value={assessment.recurringAmount || ''}
-                    onChange={({ detail }) => handleField('recurringAmount', detail.value.replace(/[^\d.]/g, ''))}
-                    onBlur={() => {
-                      const formatted = formatCurrencyDisplay(assessment.recurringAmount);
-                      if (formatted) {
-                        handleField('recurringAmount', formatted);
-                      }
-                    }}
-                    inputMode="decimal"
-                    placeholder="e.g. 150.00"
-                    readOnly={isAssessmentDisabled}
-                  />
-                </FormField>
-              </Grid>
-              <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-                <FormField
-                  label="Number of occurrences"
-                  description="Auto-calculated from dates and recurrence."
-                >
-                  <Input
-                    value={assessment.recurringOccurrences || ''}
-                    readOnly
-                  />
-                </FormField>
-                <FormField
-                  label={interventionCostLabel}
-                  description="Calculated total based on recurring schedule."
-                  errorText={showCostErrors && fieldErrors.interventionCost ? fieldErrors.interventionCost : undefined}
-                >
-                  <Input
-                    value={displayInterventionCost || ''}
-                    data-error-focus={showCostErrors && fieldErrors.interventionCost ? 'true' : undefined}
-                    readOnly
-                  />
-                </FormField>
-              </Grid>
-            </>
-          )}
-        </>
-      )}
+          </SpaceBetween>
+        );
+      })}
     </SpaceBetween>
   );
 
@@ -4593,6 +5696,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             Checklist
           </Header>
           <Table
+            stripedRows
             trackBy="id"
             variant="embedded"
             loading={documentChecklistLoading}
@@ -4869,6 +5973,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             Communication checklist
           </Header>
           <Table
+            stripedRows
             trackBy="id"
             variant="embedded"
             loading={documentChecklistLoading}
@@ -4921,21 +6026,32 @@ const CoordinatorAssessmentWidget = forwardRef(
   const reviewPreviousIset = assessment.previousISET === 'yes' ? 'Yes' : assessment.previousISET === 'no' ? 'No' : '—';
   const reviewChildcareNeed = assessment.childcareNeed === 'yes' ? 'Yes' : assessment.childcareNeed === 'no' ? 'No' : '—';
   const reviewPostingContext = selectedPostingContext?.label || (assessment.postingContext ? formatCaseStatusLabel(assessment.postingContext) : '—');
-  const reviewNoc = assessment.interventionNoc
-    ? `${assessment.interventionNoc}${assessment.interventionNocVersion ? ` (${assessment.interventionNocVersion})` : ''}`
-    : assessment.interventionNocVersion
-      ? `NOC version ${assessment.interventionNocVersion}`
-      : '—';
-  const reviewDeliveryMode = assessment.deliveryMode === 'in_house' ? 'In-house (no external partner)' : 'External delivery partner';
-  const reviewItpDetails = assessment.itp?.details || '—';
-  const reviewWageSubsidyDetails = assessment.wage?.subsidyDetails || '—';
-  const reviewCostType = showRecurrenceGroup ? (isRecurringCost ? 'Recurring schedule' : 'One-time total') : '—';
-  const reviewRecurrencePeriod = selectedRecurrencePeriodOption?.label || (assessment.recurringPeriod ? formatCaseStatusLabel(assessment.recurringPeriod) : '—');
-  const reviewRecurrenceAmount = assessment.recurringAmount ? formatCurrencyDisplay(assessment.recurringAmount) : '—';
-  const reviewRecurrenceOccurrences = assessment.recurringOccurrences || '—';
-  const reviewRecurrenceTotal = recurringTotal !== null
-    ? formatCurrencyDisplay(recurringTotal)
-    : formatCurrencyDisplay(assessment.interventionCost) || '—';
+  const reviewOverallCost = formatCurrencyDisplay(overallCostTotal) || '$ 0.00';
+  const reviewInterventions = proposedInterventions.map(intervention => {
+    const label = resolveInterventionLabel(intervention.code) || 'Intervention';
+    const noc = intervention.interventionNoc
+      ? `${intervention.interventionNoc}${intervention.interventionNocVersion ? ` (${intervention.interventionNocVersion})` : ''}`
+      : intervention.interventionNocVersion
+        ? `NOC version ${intervention.interventionNocVersion}`
+        : '—';
+    return {
+      id: intervention.id,
+      label,
+      deliveryMode: intervention.deliveryMode === 'in_house' ? 'In-house (no external partner)' : 'External delivery partner',
+      institution: intervention.institution || '—',
+      programName: intervention.programName || '—',
+      startDate: intervention.startDate || '—',
+      endDate: intervention.endDate || 'Not set',
+      itpDetails: intervention.itpDetails || '',
+      wageSubsidyDetails: intervention.wageSubsidyDetails || '',
+      noc
+    };
+  });
+  const reviewInterventionTotals = proposedInterventions.map(intervention => ({
+    id: intervention.id,
+    label: resolveInterventionLabel(intervention.code) || 'Intervention',
+    total: formatCurrencyDisplay(interventionTotals.get(intervention.id) || 0) || '$ 0.00'
+  }));
 
   const reviewStepContent = (
     <SpaceBetween size="m">
@@ -4959,28 +6075,42 @@ const CoordinatorAssessmentWidget = forwardRef(
           <div>Other funding sources: {assessment.otherFunding || '—'}</div>
         </Box>
         <Box>
-          <Header variant="h4">Delivery details</Header>
-          <div>Intervention code: {selectedInterventionCodeOption?.label || assessment.interventionCode || '—'}</div>
-          <div>Delivery mode: {reviewDeliveryMode}</div>
-          <div>Provider: {assessment.institution || '—'}</div>
-          <div>Program name: {assessment.programName || '—'}</div>
-          <div>NOC: {reviewNoc}</div>
-          {isEducationIntervention && <div>ITP details: {reviewItpDetails}</div>}
-          {isWageSubsidyIntervention && <div>Wage subsidy details: {reviewWageSubsidyDetails}</div>}
-          <div>Start: {assessment.startDate || '—'}</div>
-          <div>End: {assessment.endDate || 'Not set'}</div>
+          <Header variant="h4">Interventions</Header>
+          {reviewInterventions.length === 0 ? (
+            <div>—</div>
+          ) : (
+            <SpaceBetween size="s">
+              {reviewInterventions.map(intervention => (
+                <Box key={intervention.id}>
+                  <Box fontWeight="bold">{intervention.label}</Box>
+                  <div>Delivery mode: {intervention.deliveryMode}</div>
+                  <div>Provider: {intervention.institution}</div>
+                  <div>Program name: {intervention.programName}</div>
+                  <div>NOC: {intervention.noc}</div>
+                  {intervention.itpDetails ? <div>ITP details: {intervention.itpDetails}</div> : null}
+                  {intervention.wageSubsidyDetails ? <div>Wage subsidy details: {intervention.wageSubsidyDetails}</div> : null}
+                  <div>Start: {intervention.startDate}</div>
+                  <div>End: {intervention.endDate}</div>
+                </Box>
+              ))}
+            </SpaceBetween>
+          )}
         </Box>
         <Box>
           <Header variant="h4">Costs</Header>
-          <div>Total cost: {formatCurrencyDisplay(displayInterventionCost) || '—'}</div>
-          <div>Cost type: {reviewCostType}</div>
-          {isRecurringSchedule && (
+          {reviewInterventionTotals.length > 1 ? (
             <>
-              <div>Recurrence period: {reviewRecurrencePeriod}</div>
-              <div>Amount per period: {reviewRecurrenceAmount}</div>
-              <div>Occurrences: {reviewRecurrenceOccurrences}</div>
-              <div>Recurring total: {reviewRecurrenceTotal}</div>
+              <div>Overall proposed cost: {reviewOverallCost}</div>
+              {reviewInterventionTotals.map(item => (
+                <div key={item.id}>{item.label}: {item.total}</div>
+              ))}
             </>
+          ) : (
+            <div>
+              {reviewInterventionTotals[0]?.label
+                ? `${reviewInterventionTotals[0].label} total: ${reviewInterventionTotals[0].total}`
+                : `Overall proposed cost: ${reviewOverallCost}`}
+            </div>
           )}
           <div>Budget pot: {selectedBudgetPotOption?.label || '—'}</div>
           <div>Paid from: {reviewPostingContext}</div>
@@ -4988,6 +6118,380 @@ const CoordinatorAssessmentWidget = forwardRef(
       </ColumnLayout>
       {!assessmentSubmitted && renderRecommendationSection()}
     </SpaceBetween>
+  );
+
+  const interventionModalDraft = interventionModal.draft || null;
+  const interventionModalMode = interventionModal.mode;
+  const interventionModalEditable = interventionModalMode === 'add' || interventionModalMode === 'edit';
+  const interventionModalDirty =
+    interventionModalMode === 'edit'
+      ? JSON.stringify(interventionModalDraft || {}) !== JSON.stringify(interventionModal.original || {})
+      : true;
+  const activeInterventionErrors = {
+    ...(showFramingErrors ? (interventionFieldErrors[interventionModal.interventionId] || {}) : {}),
+    ...((interventionModalMode === 'add' || interventionModalMode === 'edit') ? interventionModalErrors : {})
+  };
+  const interventionCodeLabel = interventionModalDraft
+    ? resolveInterventionLabel(interventionModalDraft.code) || interventionModalDraft.code || ''
+    : '';
+
+  const interventionModalContent = (
+    <Modal
+      visible={interventionModal.visible}
+      onDismiss={resetInterventionModal}
+      header={interventionModalMode === 'add' ? 'Add intervention' : 'Intervention details'}
+      footer={
+        interventionModalMode === 'view' ? (
+          <SpaceBetween direction="horizontal" size="xs">
+            {!isAssessmentDisabled && (
+              <Button variant="primary" onClick={startInterventionEdit}>Edit</Button>
+            )}
+            {!isAssessmentDisabled && (
+              <Button
+                variant="normal"
+                onClick={() => {
+                  if (!interventionModal.interventionId) return;
+                  setInterventionDeleteId(interventionModal.interventionId);
+                  resetInterventionModal();
+                }}
+              >
+                Delete
+              </Button>
+            )}
+            <Button variant="link" onClick={resetInterventionModal}>Close</Button>
+          </SpaceBetween>
+        ) : (
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="primary"
+              onClick={saveInterventionModal}
+              disabled={isAssessmentDisabled || (interventionModalMode === 'edit' && !interventionModalDirty)}
+            >
+              {interventionModalMode === 'add' ? 'Add intervention' : 'Save changes'}
+            </Button>
+            <Button
+              variant="link"
+              onClick={interventionModalMode === 'add' ? resetInterventionModal : cancelInterventionEdit}
+            >
+              Cancel
+            </Button>
+          </SpaceBetween>
+        )
+      }
+    >
+      {interventionModalDraft && (
+        <SpaceBetween size="s">
+          <FormField
+            label="Intervention code"
+            description={
+              interventionModalMode !== 'add'
+                ? 'To change the code, delete this intervention and add a new one.'
+                : undefined
+            }
+            errorText={activeInterventionErrors.code}
+          >
+            {interventionModalMode === 'add' ? (
+              <Select
+                selectedOption={
+                  interventionCodes.find(option => String(option.value) === String(interventionModalDraft.code)) || null
+                }
+                onChange={({ detail }) => {
+                  updateInterventionModalDraft({ code: detail.selectedOption?.value || '' });
+                  setInterventionModalErrors({});
+                }}
+                options={interventionCodes}
+                placeholder={interventionCodesLoading ? 'Loading intervention codes' : 'Select intervention'}
+                statusType={interventionCodesLoading ? 'loading' : 'finished'}
+                loadingText="Loading intervention codes"
+                readOnly={isAssessmentDisabled}
+              />
+            ) : (
+              <Input value={interventionCodeLabel} readOnly />
+            )}
+          </FormField>
+          <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+            <FormField label="Start date" errorText={activeInterventionErrors.startDate}>
+              <DatePicker
+                value={interventionModalDraft.startDate || ''}
+                onChange={({ detail }) => updateInterventionModalDraft({ startDate: detail.value })}
+                readOnly={!interventionModalEditable || isAssessmentDisabled}
+              />
+            </FormField>
+            <FormField label="End date (optional)" errorText={activeInterventionErrors.endDate}>
+              <DatePicker
+                value={interventionModalDraft.endDate || ''}
+                onChange={({ detail }) => updateInterventionModalDraft({ endDate: detail.value })}
+                readOnly={!interventionModalEditable || isAssessmentDisabled}
+              />
+            </FormField>
+          </Grid>
+        </SpaceBetween>
+      )}
+    </Modal>
+  );
+
+  const interventionToDelete = interventionDeleteId
+    ? proposedInterventions.find(item => item.id === interventionDeleteId)
+    : null;
+  const interventionDeleteModal = (
+    <Modal
+      visible={Boolean(interventionDeleteId)}
+      onDismiss={() => setInterventionDeleteId(null)}
+      header="Delete intervention?"
+      footer={
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button variant="primary" onClick={confirmInterventionDelete} disabled={isAssessmentDisabled}>
+            Delete intervention
+          </Button>
+          <Button variant="normal" onClick={() => setInterventionDeleteId(null)}>Cancel</Button>
+        </SpaceBetween>
+      }
+    >
+      <SpaceBetween size="s">
+        <Alert type="warning" statusIconAriaLabel="Warning">
+          Deleting this intervention will remove all cost items linked to it.
+        </Alert>
+        <Box>
+          {interventionToDelete
+            ? `Delete ${resolveInterventionLabel(interventionToDelete.code) || 'this intervention'}?`
+            : 'Delete this intervention?'}
+        </Box>
+      </SpaceBetween>
+    </Modal>
+  );
+
+  const costLineIntervention = costLineModal.interventionId
+    ? proposedInterventions.find(item => item.id === costLineModal.interventionId)
+    : null;
+  const costLineInterventionLabel = costLineIntervention
+    ? resolveInterventionLabel(costLineIntervention.code) || 'Intervention'
+    : '';
+  const costLineDraft = costLineModal.draft || null;
+  const costLineMode = costLineModal.mode;
+  const isCostLineEditable = costLineMode === 'edit' || costLineMode === 'add';
+  const costLineTypeOptions = costLineIntervention ? buildCostItemOptions(costLineIntervention) : [];
+  const costLineTypeLabel = costLineDraft
+    ? (paymentTypeLabelLookup.get(costLineDraft.type) || costLineDraft.type || '')
+    : '';
+  const costLineRecurrenceMode = getRecurrenceModeForType(costLineDraft?.type);
+  const costLineRecurrenceRequired = costLineRecurrenceMode === 'required';
+  const costLineRecurrenceDisabled = costLineRecurrenceMode === 'disabled';
+  const costLineRecurrenceEnabled = costLineRecurrenceDisabled
+    ? false
+    : costLineRecurrenceRequired || Boolean(costLineDraft?.recurrence?.enabled);
+  const costLineDirty =
+    costLineMode === 'edit'
+      ? JSON.stringify(costLineDraft || {}) !== JSON.stringify(costLineModal.original || {})
+      : true;
+  const costLineAmountDisplay = costLineDraft
+    ? (isCostLineEditable
+      ? sanitizeCurrencyInput(costLineDraft.amount)
+      : getCurrencyInputDisplayValue(parseCurrencyInput(costLineDraft.amount) ?? '', false))
+    : '';
+  const costLineAmountPerPeriodDisplay = costLineDraft
+    ? (isCostLineEditable
+      ? sanitizeCurrencyInput(costLineDraft.recurrence?.amountPerPeriod)
+      : getCurrencyInputDisplayValue(parseCurrencyInput(costLineDraft.recurrence?.amountPerPeriod) ?? '', false))
+    : '';
+  const costLineRecurrenceStart =
+    costLineDraft?.recurrence?.startDate || costLineIntervention?.startDate || '';
+  const costLineRecurrenceEnd =
+    costLineDraft?.recurrence?.endDate || costLineIntervention?.endDate || '';
+
+  const costLineDetailModal = (
+    <Modal
+      visible={costLineModal.visible}
+      onDismiss={resetCostLineModal}
+      header={costLineMode === 'add' ? 'Add cost item' : 'Cost item details'}
+      footer={
+        costLineMode === 'view' ? (
+          <SpaceBetween direction="horizontal" size="xs">
+            {!isAssessmentDisabled && (
+              <Button variant="primary" onClick={startCostLineEdit}>Edit</Button>
+            )}
+            {!isAssessmentDisabled && (
+              <Button variant="normal" onClick={deleteCostLineFromModal}>Delete</Button>
+            )}
+            <Button variant="link" onClick={resetCostLineModal}>Close</Button>
+          </SpaceBetween>
+        ) : (
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="primary"
+              onClick={saveCostLineModal}
+              disabled={isAssessmentDisabled || (costLineMode === 'edit' && !costLineDirty)}
+            >
+              {costLineMode === 'add' ? 'Add cost item' : 'Save changes'}
+            </Button>
+            <Button
+              variant="link"
+              onClick={costLineMode === 'add' ? resetCostLineModal : cancelCostLineEdit}
+            >
+              Cancel
+            </Button>
+          </SpaceBetween>
+        )
+      }
+    >
+      {costLineDraft && (
+        <SpaceBetween size="s">
+          <Box>Intervention: {costLineInterventionLabel || '—'}</Box>
+          <FormField label="Cost item" errorText={costLineModalErrors.type}>
+            {costLineMode === 'add' ? (
+              <Select
+                selectedOption={
+                  costLineTypeOptions.find(option => option.value === costLineDraft.type) || null
+                }
+                onChange={({ detail }) => updateCostLineType(detail.selectedOption?.value || '')}
+                options={costLineTypeOptions}
+                placeholder="Select cost item"
+                readOnly={isAssessmentDisabled}
+              />
+            ) : (
+              <Input value={costLineTypeLabel} readOnly />
+            )}
+          </FormField>
+          <FormField label="Total amount">
+            <Input
+              inputMode="decimal"
+              value={costLineAmountDisplay}
+              onChange={({ detail }) => updateCostLineAmount(detail.value)}
+              onBlur={blurCostLineAmount}
+              placeholder="0.00"
+              readOnly={!isCostLineEditable || isAssessmentDisabled}
+            />
+          </FormField>
+          <FormField
+            label="Installments (monthly)"
+            errorText={costLineModalErrors.recurrence}
+          >
+            <Checkbox
+              checked={costLineRecurrenceEnabled}
+              onChange={({ detail }) => toggleCostLineRecurrence(detail.checked)}
+              disabled={!isCostLineEditable || costLineRecurrenceRequired || costLineRecurrenceDisabled || isAssessmentDisabled}
+            >
+              Enable installments
+            </Checkbox>
+          </FormField>
+          {costLineRecurrenceEnabled && (
+            <SpaceBetween size="s">
+              <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+                <FormField label="Start date">
+                  <DatePicker
+                    value={costLineRecurrenceStart}
+                    onChange={({ detail }) => updateCostLineRecurrenceStart(detail.value)}
+                    readOnly={!isCostLineEditable || isAssessmentDisabled}
+                  />
+                </FormField>
+                <FormField label="End date (optional)">
+                  <DatePicker
+                    value={costLineRecurrenceEnd}
+                    onChange={({ detail }) => updateCostLineRecurrenceEnd(detail.value)}
+                    readOnly={!isCostLineEditable || isAssessmentDisabled}
+                  />
+                </FormField>
+              </Grid>
+              <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+                <FormField label="Number of installments">
+                  <Input
+                    inputMode="numeric"
+                    value={costLineDraft.recurrence?.occurrences || ''}
+                    onChange={({ detail }) => updateCostLineOccurrences(detail.value)}
+                    readOnly={!isCostLineEditable || isAssessmentDisabled}
+                  />
+                </FormField>
+                <FormField label="Amount per month">
+                  <Input
+                    inputMode="decimal"
+                    value={costLineAmountPerPeriodDisplay}
+                    onChange={({ detail }) => updateCostLineAmountPerPeriod(detail.value)}
+                    readOnly={!isCostLineEditable || isAssessmentDisabled}
+                  />
+                </FormField>
+              </Grid>
+            </SpaceBetween>
+          )}
+          <FormField label="Notes (optional)">
+            <Textarea
+              value={costLineDraft.notes || ''}
+              rows={3}
+              onChange={({ detail }) => updateCostLineDraft({ notes: detail.value })}
+              readOnly={!isCostLineEditable || isAssessmentDisabled}
+            />
+          </FormField>
+        </SpaceBetween>
+      )}
+    </Modal>
+  );
+
+  const endDateAdjustmentModal = (
+    <Modal
+      visible={Boolean(endDateAdjustModal)}
+      onDismiss={() => setEndDateAdjustModal(null)}
+      header="Update installments schedule?"
+      footer={
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button
+            variant="primary"
+            onClick={() => {
+              if (!endDateAdjustModal) return;
+              const nextDates = { endDate: endDateAdjustModal.nextEndDate };
+              if (typeof endDateAdjustModal.nextStartDate !== 'undefined') {
+                nextDates.startDate = endDateAdjustModal.nextStartDate;
+              }
+              applyInterventionDateChange(
+                endDateAdjustModal.interventionId,
+                nextDates,
+                endDateAdjustModal.mode
+              );
+              setEndDateAdjustModal(null);
+            }}
+          >
+            Apply change
+          </Button>
+          <Button variant="normal" onClick={() => setEndDateAdjustModal(null)}>Cancel</Button>
+        </SpaceBetween>
+      }
+    >
+      <SpaceBetween size="s">
+        <Box>
+          Changing the intervention end date will adjust installments. Choose how to update recurring totals.
+        </Box>
+        <RadioGroup
+          value={endDateAdjustModal?.mode || 'total'}
+          onChange={({ detail }) => setEndDateAdjustModal(prev => (prev ? { ...prev, mode: detail.value } : prev))}
+          items={[
+            { value: 'total', label: 'Adjust total (keep monthly amount)' },
+            { value: 'per_period', label: 'Adjust monthly amount (keep total)' }
+          ]}
+        />
+      </SpaceBetween>
+    </Modal>
+  );
+
+  const occurrenceChangeModal = (
+    <Modal
+      visible={Boolean(occurrenceConfirmModal)}
+      onDismiss={() => setOccurrenceConfirmModal(null)}
+      header="Update intervention end date?"
+      footer={
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button variant="primary" onClick={confirmOccurrencesUpdateEndDate}>
+            Update end date
+          </Button>
+          <Button variant="normal" onClick={keepOccurrencesWithoutEndDateChange}>
+            Keep current end date
+          </Button>
+        </SpaceBetween>
+      }
+    >
+      <SpaceBetween size="s">
+        <Box>
+          The number of installments no longer matches the intervention end date. Do you want to update the end date to
+          match the new schedule?
+        </Box>
+      </SpaceBetween>
+    </Modal>
   );
 
   const checklistUploadModal = (
@@ -5457,6 +6961,11 @@ const CoordinatorAssessmentWidget = forwardRef(
             secondaryActions={null}
           />
         </div>
+        {interventionModalContent}
+        {interventionDeleteModal}
+        {costLineDetailModal}
+        {endDateAdjustmentModal}
+        {occurrenceChangeModal}
         {checklistUploadModal}
         <Modal
           visible={showCancelModal}

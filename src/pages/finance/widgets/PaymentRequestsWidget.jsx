@@ -763,8 +763,9 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
               item?.title ||
               item?.description ||
               item?.notes ||
-              item?.interventionType ||
-              item?.intervention_type ||
+              item?.interventionCode ||
+              item?.intervention_code ||
+              item?.code ||
               `Intervention ${id}`;
             options.push({
               value: String(id),

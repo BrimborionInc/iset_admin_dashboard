@@ -4,7 +4,6 @@ CREATE TABLE `iset_case_intervention` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `case_id` BIGINT UNSIGNED NOT NULL,
   `action_plan_id` BIGINT UNSIGNED DEFAULT NULL,
-  `intervention_type` VARCHAR(64) NOT NULL,
   `status` VARCHAR(32) NOT NULL DEFAULT 'planned',
   `start_date` DATE DEFAULT NULL,
   `end_date` DATE DEFAULT NULL,

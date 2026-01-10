@@ -2,6 +2,20 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-01-26
+- Assessment: Coordinator assessment now supports multiple proposed interventions with per-intervention cost tables, inline amount edits, and line-item modals.
+- Assessment: Proposed interventions step now uses an embedded table with modal-based editing for intervention details and delete-only row actions.
+- Assessment: Costing tables are now embedded Cloudscape tables with visible inline delete actions for cost lines.
+- Assessment: Removed the duplicate top-level total from the costing step; totals remain in each table footer.
+- Assessment: Proposed interventions and costing tables now allow column resizing.
+- Assessment: Installments column now displays text ("in X installments") instead of icons.
+- Assessment: Removed per-intervention header totals so only the table footer total is shown.
+- Assessment: Restored the overall total at the top of the costing step.
+- Assessment: Cost line modal now recalculates installments/amounts when dates or installment counts change, using intervention dates as defaults.
+- Data: Assessment submissions now persist proposed interventions + cost lines in `assessment_proposed_interventions` with runtime-config defaults for suggested items.
+- API: Added runtime config endpoints for coordinator assessment costing defaults.
+- Data: Removed legacy intervention type references from schema/mapping sources.
+
 ## 2026-01-08
 - Ops: Intake uploads now ensure a client record exists pre-upload and pin `client_id` for the session.
 - Data: Added `client.applicant_cognito_sub` and `iset_document.client_id` to anchor intake documents to clients.

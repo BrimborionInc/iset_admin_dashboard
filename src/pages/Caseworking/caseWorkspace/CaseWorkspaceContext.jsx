@@ -123,7 +123,7 @@ const buildInterventionFromApi = (planId, payload = {}) => {
   return {
     id: payload.id,
     actionPlanId: payload.actionPlanId ?? planId ?? null,
-    code: payload.code || payload.interventionType || null,
+    code: payload.code || payload.interventionCode || payload.intervention_code || null,
     title: payload.title || payload.description || payload.notes || "Untitled intervention",
     description: payload.description || null,
     status,
@@ -412,6 +412,7 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
     "assessment_intervention_cost_total",
     "assessment_intervention_related_noc",
     "assessment_intervention_related_noc_version",
+    "assessment_proposed_interventions",
     "assessment_childcare_need",
     "assessment_childcare_funding_details",
     "assessment_institution",
