@@ -141,6 +141,14 @@
   margin: 0;
 }
 
+.landing-hero__logo {
+  display: block;
+  width: clamp(12rem, 28vw, 22rem);
+  height: auto;
+  max-width: 100%;
+}
+
+
 .landing-hero__content .lead {
   font-size: 1.05rem;
   line-height: 1.6;

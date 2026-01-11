@@ -36,7 +36,8 @@ const ApplicationAssessmentHelp = () => (
     <p>
       After submission, the NWAC section unlocks for reviewers to record the decision and assurance outcome. Approved
       or Not Approved moves the application to decision ready; Push back returns it to in review. The Communication step
-      then appears to draft and send the approval or denial letter and mark communication complete.
+      then appears to draft and send the approval or denial letter. Approved cases continue to Complete funding documentation
+      to finish the checklist; denial letters complete the application.
     </p>
 
     <h3>Need to revise?</h3>
@@ -98,9 +99,10 @@ export const NwacAssessmentHelp = () => {
 NwacAssessmentHelp.aiContext = `
 You are assisting an NWAC reviewer who is completing the outcome notice at the end of the Application Assessment widget.
 Explain how to record the funding decision, assurance outcome, and required reasons, and what happens when Commit is
-selected. Approved or Not Approved moves the application to decision ready and unlocks the Communication step; Push back
-returns the assessment to the coordinator for updates. Editing is disabled after a final decision unless reopening is
-permitted. Status and audit logs update automatically.
+selected. Approved or Not Approved moves the application to decision ready and unlocks the Communication step; approvals
+then require completing the funding documentation checklist after the letter is sent, while denials complete after the letter
+is sent. Push back returns the assessment to the coordinator for updates. Editing is disabled after a final decision unless
+reopening is permitted. Status and audit logs update automatically.
 `;
 
 export default ApplicationAssessmentHelp;

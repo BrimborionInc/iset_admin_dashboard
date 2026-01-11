@@ -19,7 +19,7 @@ const copy = {
     ],
     alert: {
       header: 'Scheduled maintenance',
-      body: 'The ISET case management system will be unavailable today from 7:00–8:00 p.m. ET for maintenance. Service will resume once the window is complete.'
+      body: 'The PATH case management system will be unavailable today from 7:00–8:00 p.m. ET for maintenance. Service will resume once the window is complete.'
     },
     header: {
       signIn: 'Sign in',
@@ -27,19 +27,20 @@ const copy = {
     },
     hero: {
       eyebrow: "Native Women’s Association of Canada (NWAC)",
-      title: 'ISET Program Case Management System',
-      lead: "Sign in with your NWAC credentials to work on applications and cases. Need help? Contact the NWAC ISET program admin team. Installed modules are listed below.",
-      primaryCta: 'Sign in to ISET',
+      title: 'PATH',
+      lead: "Sign in with your NWAC credentials to work in the ISET case management system. Need help? Contact the NWAC ISET program admin team. Installed modules are listed below.",
+      primaryCta: 'Sign in to PATH',
       secondaryCta: "View the applicants' portal",
       meta: [
         'Digital Intake',
-        'Workflow Studio',
         'Application Assessment',
-        'Secure Messaging',
         'Case Management',
+        'Secure Messaging',
+        'ILMP Reporting',
+        'Payments Processing',
         'Budget Management',
-        'Reporting',
-        'ILMP Reporting'
+        'Financial Reporting',
+        'Workflow Studio'
       ]
     },
     releaseNotes: {
@@ -141,7 +142,7 @@ const copy = {
     ],
     alert: {
       header: 'Maintenance planifiée',
-      body: 'Le système ISET sera indisponible aujourd’hui de 19 h à 20 h (HE) pour entretien. Le service reprendra après la fenêtre de maintenance.'
+      body: 'Le système PATH sera indisponible aujourd’hui de 19 h à 20 h (HE) pour entretien. Le service reprendra après la fenêtre de maintenance.'
     },
     header: {
       signIn: 'Se connecter',
@@ -149,19 +150,20 @@ const copy = {
     },
     hero: {
       eyebrow: 'Association des Femmes Autochtones du Canada (AFAC)',
-      title: 'Système de gestion des dossiers du programme ISET de l’AFAC',
-      lead: "Bienvenue dans le système de gestion des dossiers du programme ISET de l’AFAC. Connectez-vous avec vos identifiants AFAC pour travailler en toute sécurité sur les demandes et dossiers. Besoin d’aide? Communiquez avec l’équipe d’administration du programme ISET de l’AFAC.",
+      title: 'PATH',
+      lead: "Bienvenue dans le système de gestion des dossiers ISET de l’AFAC. Connectez-vous avec vos identifiants AFAC pour travailler en toute sécurité sur les demandes et dossiers. Besoin d’aide? Communiquez avec l’équipe d’administration du programme ISET de l’AFAC.",
       primaryCta: 'Se connecter pour gérer les programmes de l’AFAC',
       secondaryCta: 'Voir le portail des candidates',
       meta: [
         'Accueil numérique',
-        'Studio des flux de travail',
         'Évaluation des demandes',
-        'Messagerie sécurisée',
         'Gestion des dossiers',
+        'Messagerie sécurisée',
+        'Rapports ILMP',
+        'Traitement des paiements',
         'Gestion budgétaire',
-        'Rapports',
-        'Saisie ARMS'
+        'Rapports financiers',
+        'Studio des flux de travail'
       ]
     },
     releaseNotes: {
@@ -261,6 +263,7 @@ const languageOptions = [
 const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
   const lang = currentLanguage === 'fr' ? 'fr' : 'en';
   const content = copy[lang];
+  const pathLogo = `${process.env.PUBLIC_URL || ''}/PATH-Logo.png`;
   const handleLanguageToggle = targetLang => {
     if (targetLang !== lang && typeof onLanguageChange === 'function') {
       onLanguageChange(targetLang);
@@ -365,7 +368,9 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
           </div>
           <div className="landing-hero__content">
             <p className="eyebrow">{content.hero.eyebrow}</p>
-            <h1>{content.hero.title}</h1>
+            <h1>
+              <img className="landing-hero__logo" src={pathLogo} alt={content.hero.title} />
+            </h1>
             <p className="lead">{content.hero.lead}</p>
             <div className="landing-hero__actions">
               <button type="button" className="primary" onClick={handleSignIn}>

@@ -16,8 +16,30 @@ Format: YYYY-MM-DD - Category: Short description
 - API: Added runtime config endpoints for coordinator assessment costing defaults.
 - Data: Removed legacy intervention type references from schema/mapping sources.
 
+## 2026-01-11
+- Assessment: Wizard navigation now auto-saves assessment progress on Next/Previous to preserve cost line edits without manual saves.
+- Assessment: Empty proposed intervention shells are filtered on load/save to prevent blank rows.
+- Fix: Eligibility step no longer warns about concurrent updates when auto-save runs before Next.
+- Fix: Do not persist zero-cost legacy totals when no interventions exist, avoiding blank proposed rows on new assessments.
+- Fix: Assessment submit validation alerts now flatten nested error objects to avoid React child rendering crashes.
+- UX: Decision communication step no longer shows the introductory info alert.
+- UX: Denial letter drafting omits Next steps unless a clear remedy exists and avoids carrying generic steps.
+- UX: Denial letter prompt now paraphrases assessor input into applicant-facing language instead of repeating labels or form wording.
+- UX: Denial letters no longer include the worthiness/judgment reassurance line.
+- UX: Denial letter prompt now references applicant-requested program/supports instead of assessor-proposed interventions.
+- UX: Denial letters now use narrative paragraphs (no Decision/Reason labels) and focus on requested supports in the opening.
+- UX: Communication step now sends letters on completion, hides checklist for denials, and simplifies the letter editor header text.
+- UX: Decision letters now start blank unless a draft exists, and denial letters reference requested supports in lower-case phrasing.
+- UX: Denial letter drafts now retain assessor-provided suggestions from the denial reason modal.
+- UX: Communication step title switches to "Send denial letter" when the decision is not approved.
+- UX: Approval letters now use a "Send approval letter" step and the funding checklist moved into a "Complete funding documentation" step that finalizes approved applications.
+
 ## 2026-01-10
 - Fix: Assessment intervention total now parses currency values correctly to avoid inflating approval thresholds or dashboard totals.
+
+## 2026-01-09
+- UX: Denial letter drafting now collects a single program-level denial reason with a short explanation before generating the AI draft.
+- UX: Denial letter AI prompt now enforces authority, non-judgment language, and options-forward requirements without introducing new reasons.
 
 ## 2026-01-08
 - Ops: Intake uploads now ensure a client record exists pre-upload and pin `client_id` for the session.
