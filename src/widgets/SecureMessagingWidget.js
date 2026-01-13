@@ -242,7 +242,8 @@ const SecureMessagingWidget = ({
 
   const updateStatusToDocsRequested = useCallback(async () => {
     if (!caseId) return;
-    if (!['submitted', 'in_review'].includes(canonicalApplicationStatus || '')) return;
+    const statusKey = canonicalApplicationStatus || '';
+    const shouldUpdateStatus = ['submitted', 'in_review'].includes(statusKey);
     let releaseLock = false;
     try {
       if (applicationId) {
@@ -256,7 +257,13 @@ const SecureMessagingWidget = ({
         }
         releaseLock = true;
       }
-      const payload = { applicationStatus: 'docs_requested' };
+      const payload = {
+        docsRequested: true,
+        docsRequestedSource: 'secure_message'
+      };
+      if (shouldUpdateStatus) {
+        payload.applicationStatus = 'docs_requested';
+      }
       const rowVersion =
         Number(caseData?.application_row_version ?? caseData?.applicationRowVersion ?? applicationRowVersion ?? 0) || 0;
       if (rowVersion > 0) {
@@ -273,7 +280,12 @@ const SecureMessagingWidget = ({
       if (typeof refreshCaseData === 'function') {
         try { await refreshCaseData(); } catch (_) {}
       } else if (typeof onCaseUpdate === 'function') {
-        onCaseUpdate({ applicationStatus: 'docs_requested', application_status: 'docs_requested' });
+        onCaseUpdate({
+          applicationStatus: 'docs_requested',
+          application_status: 'docs_requested',
+          docs_requested_active: true,
+          docs_requested_at: new Date().toISOString()
+        });
       }
     } finally {
       if (applicationId && releaseLock) {

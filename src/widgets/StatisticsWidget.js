@@ -48,7 +48,7 @@ const DEFAULT_SECTIONS = [
     title: 'Staff & Capacity',
     description: 'Active staff by role and recency of logins.',
     items: [
-      { id: 'program-admins', label: 'Program Admins', value: 0, format: 'number' },
+      { id: 'program-admins', label: 'NWAC Administrators', value: 0, format: 'number' },
       { id: 'regional-coordinators', label: 'Regional Managers', value: 0, format: 'number' },
       { id: 'assessors-active', label: 'ISET Coordinators (active)', value: 0, format: 'number', hint: 'ISET Coordinators who signed in within 7 days.' }
     ]

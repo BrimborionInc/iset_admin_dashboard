@@ -29,6 +29,6 @@ const ContactMessageQueueHelp = () => (
 );
 
 ContactMessageQueueHelp.aiContext =
-  "Explain the Contact Communications queue widget that lists contact_message records with status, priority, assignee, and inline actions for Program Admins.";
+  "Explain the Contact Communications queue widget that lists contact_message records with status, priority, assignee, and inline actions for NWAC Administrators.";
 
 export default ContactMessageQueueHelp;

@@ -8,7 +8,7 @@ const ContactCommunicationsHelp = () => (
 
     <h3>Purpose</h3>
     <p>
-      Provide Program Admins with a consolidated view of new and in-progress contact messages, including the
+      Provide NWAC Administrators with a consolidated view of new and in-progress contact messages, including the
       applicant context and a quick way to update status as triage progresses.
     </p>
 
@@ -40,6 +40,6 @@ const ContactCommunicationsHelp = () => (
 );
 
 ContactCommunicationsHelp.aiContext =
-  "Describe the Contact Communications dashboard that surfaces contact_message records from the public portal, shows queue status, and helps Program Admins triage applicant enquiries.";
+  "Describe the Contact Communications dashboard that surfaces contact_message records from the public portal, shows queue status, and helps NWAC Administrators triage applicant enquiries.";
 
 export default ContactCommunicationsHelp;

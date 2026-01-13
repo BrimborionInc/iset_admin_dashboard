@@ -38,13 +38,13 @@ export const PROGRAM_ADMIN_BUCKETS = [
   },
   {
     id: 'applications-awaiting-approval',
-    label: 'Application Approvals',
-    description: 'Assessed applications awaiting your review.'
+    label: 'Application Assessments',
+    description: 'Assessed ISET applications awaiting your decision.'
   },
   {
     id: 'interventions-awaiting-approval',
-    label: 'Intervention Approvals',
-    description: 'New interventions proposed for existing clients needing a decision.'
+    label: 'New Interventions',
+    description: 'Proposed additional interventions awaiting approval.'
   },
   {
     id: 'payments-issues',
@@ -53,8 +53,8 @@ export const PROGRAM_ADMIN_BUCKETS = [
   },
   {
     id: 'ilmp-issues',
-    label: 'ILMP Issues',
-    description: 'Client files with issues blocking ESDC submission.'
+    label: 'Watchlist Hits',
+    description: 'Applications with SIN numbers matching the watchlist.'
   },
   {
     id: 'marked-for-closure',
@@ -103,7 +103,7 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
     type: 'Conflict',
     applicant: 'Lakeside Skills Partnership',
     region: 'Fraser',
-    owner: 'Program Admin',
+    owner: 'NWAC Administrator',
     status: 'Pending decision',
     dueDate: '2025-02-20',
     submittedAt: '2025-02-11',
@@ -177,17 +177,19 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
     summary: 'Intervention payment on hold pending receipts and attendance confirmation.'
   },
   {
-    id: 'ILMP-77',
-    title: 'ILMP · ESDC submission blocked',
+    id: 'WATCH-12',
+    title: 'Watchlist · Returning applicant',
     bucketId: 'ilmp-issues',
-    type: 'Reporting',
-    applicant: 'Northland Indigenous Training',
+    type: 'WatchlistHit',
+    applicant: 'A. MacKenzie',
     region: 'North',
-    owner: 'Program Ops',
-    status: 'Blocked',
-    dueDate: '2025-02-25',
+    owner: 'Unassigned',
+    status: 'Submitted',
+    sin: '123 456 789',
+    notes: 'Prior overpayment; manual review required.',
+    dueDate: null,
     submittedAt: '2025-02-05',
-    summary: 'Client file missing participation update required for ILMP submission.'
+    summary: 'SIN matches a watchlist entry; review notes before assessment.'
   },
   {
     id: 'CLS-109',
@@ -205,9 +207,7 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
 ];
 
 const DISABLED_BUCKET_IDS = new Set([
-  'payments-issues',
-  'ilmp-issues',
-  'marked-for-closure'
+  'payments-issues'
 ]);
 
 const getWorkspacePath = item => {

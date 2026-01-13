@@ -105,7 +105,7 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
       .catch(() => {
         if (cancelled) return;
         setRawItems([]);
-        setError('Failed to load your watchlist. Please try again.');
+        setError('Failed to load your flagged applications. Please try again.');
       })
       .finally(() => {
         if (!cancelled) {
@@ -154,10 +154,10 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
 
       setRawItems(prev => prev.filter(watch => Number(watch?.caseId) !== numeric));
       setSelectedItems([]);
-      setInfoMessage('Flag removed. The case is no longer on your watchlist.');
+      setInfoMessage('Flag removed. The case is no longer flagged.');
     } catch (err) {
       console.error('[watchlist] clear flag failed', err);
-      setError('Unable to remove this case from your watchlist. Please try again.');
+      setError('Unable to remove this flag. Please try again.');
     } finally {
       setClearLoading(false);
     }
@@ -303,7 +303,7 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
       variant="info"
       onFollow={event => {
         event.preventDefault();
-        toggleHelpPanel(<HomeWatchlistHelp />, 'My Watchlist', HomeWatchlistHelp.aiContext || '');
+        toggleHelpPanel(<HomeWatchlistHelp />, 'My Flagged Applications', HomeWatchlistHelp.aiContext || '');
       }}
     >
       Info
@@ -328,13 +328,13 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
             iconName="refresh"
             variant="icon"
             onClick={handleRefresh}
-            ariaLabel="Refresh watchlist"
+            ariaLabel="Refresh flagged applications"
             disabled={loading}
           />
         </SpaceBetween>
       }
     >
-      My Watchlist
+      My Flagged Applications
     </Header>
   );
 
@@ -386,23 +386,23 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
           stripedRows
           wrapLines
           loading={loading}
-          loadingText="Loading watchlist"
+          loadingText="Loading flagged applications"
           renderAriaLive={({ firstIndex, lastIndex }) =>
             `Displaying items ${firstIndex} to ${lastIndex} of ${filteredItems.length}`
           }
           ariaLabels={{
-            tableLabel: 'My watchlist',
-            header: 'My watchlist',
+            tableLabel: 'My Flagged Applications',
+            header: 'My Flagged Applications',
             rowHeader: 'Applicant Name',
           }}
           empty={
             <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
-              <b>No watched cases</b>
+              <b>No flagged applications</b>
             </Box>
           }
           filter={
             <TextFilter
-              filteringPlaceholder="Filter watchlist"
+              filteringPlaceholder="Filter flagged applications"
               filteringText={filteringText}
               onChange={({ detail }) => {
                 setFilteringText(detail.filteringText);

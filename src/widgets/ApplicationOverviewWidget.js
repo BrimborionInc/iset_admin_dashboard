@@ -19,6 +19,7 @@ import {
   Input,
   Textarea,
   StatusIndicator,
+  Toggle,
   Hotspot
 } from '@cloudscape-design/components';
 import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
@@ -27,6 +28,7 @@ import ApplicationOverviewHelp from '../helpPanelContents/applicationOverviewHel
 import useCurrentUser from '../hooks/useCurrentUser';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import { toCanonicalRole } from '../context/RoleMatrixContext';
+import { buildApplicantWatchlistIdentity, formatSinDisplay } from '../utils/applicantWatchlist';
 import {
   canEditCaseStatus,
   getCaseStatusContext,
@@ -282,6 +284,8 @@ const ApplicationOverviewWidget = ({
   actions,
   application_id,
   caseData,
+  refreshCaseData,
+  onCaseUpdate,
   toggleHelpPanel,
   applicationRowVersion,
   onRowVersionUpdate,
@@ -302,6 +306,7 @@ const ApplicationOverviewWidget = ({
   const [error, setError] = useState(null);
   const [statusValue, setStatusValue] = useState('');
   const [savingStatus, setSavingStatus] = useState(false);
+  const [docsRequestSaving, setDocsRequestSaving] = useState(false);
   const [statusFeedback, setStatusFeedback] = useState(null);
   const manualStatusRef = useRef(null);
   const [slaTargets, setSlaTargets] = useState(SLA_DEFAULT_DAYS);
@@ -314,6 +319,10 @@ const ApplicationOverviewWidget = ({
   const [assignError, setAssignError] = useState(null);
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [selectedAssignee, setSelectedAssignee] = useState(null);
+  const [watchlistModalOpen, setWatchlistModalOpen] = useState(false);
+  const [watchlistNotes, setWatchlistNotes] = useState('');
+  const [watchlistError, setWatchlistError] = useState(null);
+  const [watchlistSaving, setWatchlistSaving] = useState(false);
   const [regionLookup, setRegionLookup] = useState(() => {
     if (typeof window !== 'undefined' && window.__ISET_CANADA_REGION_LOOKUP) {
       return window.__ISET_CANADA_REGION_LOOKUP;
@@ -498,6 +507,16 @@ const ApplicationOverviewWidget = ({
     }
   }, [application_id, fetchEscalation, onRowVersionUpdate]);
 
+  const refreshCasePayload = useCallback(async () => {
+    if (typeof refreshCaseData === 'function') {
+      return refreshCaseData();
+    }
+    if (typeof actions?.refreshCaseData === 'function') {
+      return actions.refreshCaseData();
+    }
+    return null;
+  }, [actions, refreshCaseData]);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -651,6 +670,33 @@ const ApplicationOverviewWidget = ({
       null,
     [application, caseData]
   );
+  const applicantName =
+    caseData?.applicant_name ||
+    caseData?.applicantName ||
+    [answers['first-name'], answers['middle-names'], answers['last-name']].filter(Boolean).join(' ');
+  const watchlistIdentity = useMemo(
+    () =>
+      buildApplicantWatchlistIdentity({
+        caseContext: caseData?.caseContext,
+        answers,
+        payload,
+        fallbackName: applicantName,
+      }),
+    [answers, applicantName, caseData?.caseContext, payload]
+  );
+  const watchlistCaseId = caseData?.id ?? caseData?.case_id ?? null;
+  const watchlistApplicationId = application_id ?? caseData?.application_id ?? null;
+  const watchlistReady =
+    Boolean(watchlistIdentity.fullName) &&
+    Boolean(watchlistIdentity.dob) &&
+    Boolean(watchlistIdentity.sin) &&
+    watchlistIdentity.sin.length === 9;
+  const canAddToWatchlist = Boolean(watchlistCaseId || watchlistApplicationId);
+  const watchlistDisplayName = watchlistIdentity.fullName || 'Unavailable';
+  const watchlistDisplayDob = watchlistIdentity.dob || 'Unavailable';
+  const watchlistDisplaySin = formatSinDisplay(watchlistIdentity.sin) || 'Unavailable';
+  const watchlistExplanation =
+    'Adding an applicant or participant to the watchlist means their future applications will be flagged for administrator review. Use this when the applicant owes money to the program or when there are similar risk concerns. If a new application is received with the same Social Insurance Number, administrators will be alerted automatically.';
   const provinceSource = useMemo(
     () =>
       caseData?.application_address_province ||
@@ -752,32 +798,40 @@ const ApplicationOverviewWidget = ({
   const statusOption = APPLICATION_STATUS_OPTIONS.find(option => option.value === fallbackStatus);
   const statusLabel = statusOption?.label || formatStatusLabel(fallbackStatus);
   const selectedStatusOption = statusOption || (fallbackStatus ? { label: statusLabel, value: fallbackStatus } : null);
-  const docsRequestedSince = application?.updated_at || caseData?.updated_at || application?.created_at || null;
   const isDocsRequestedStatus = ['docs_requested', 'action_required', 'action_required_(docs_requested)'].includes(normalizedStatusKey);
-  const docsRequestedDays = isDocsRequestedStatus ? getDaysAgo(docsRequestedSince) : null;
-  const docsRequestedSuffix = docsRequestedDays !== null
-    ? `${docsRequestedDays} day${docsRequestedDays === 1 ? '' : 's'} ago`
-    : null;
-  const badgeLabel = isDocsRequestedStatus
+  const docsRequestedActive =
+    Number(caseData?.docs_requested_active ?? application?.docs_requested_active ?? 0) === 1 || isDocsRequestedStatus;
+  const docsRequestedAt = caseData?.docs_requested_at ?? application?.docs_requested_at ?? null;
+  const docsRequestedSince = docsRequestedAt || application?.updated_at || caseData?.updated_at || application?.created_at || null;
+  const docsRequestedDays = docsRequestedActive ? getDaysAgo(docsRequestedSince) : null;
+  const docsRequestedSuffix = docsRequestedActive ? formatDaysAgo(docsRequestedSince) : null;
+  const docsRequestedLabel = docsRequestedActive
     ? `Docs Requested${docsRequestedSuffix ? ` ${docsRequestedSuffix}` : ''}`
-    : statusLabel;
+    : null;
   const docsRequestedColor = (() => {
-    if (!isDocsRequestedStatus || docsRequestedDays === null) return null;
+    if (!docsRequestedActive || docsRequestedDays === null) return null;
     if (docsRequestedDays > 28) return 'severity-critical';
     if (docsRequestedDays >= 15) return 'severity-high';
     if (docsRequestedDays >= 7) return 'severity-medium';
     if (docsRequestedDays >= 3) return 'severity-low';
     return 'grey';
   })();
-  const badgeColor = docsRequestedColor || statusColor(statusOption?.value || fallbackStatus || 'unknown');
-  const statusSelectDisabled = !canEditStatus || savingStatus || lockedByAnotherUser;
+  const statusBadgeColor = statusColor(statusOption?.value || fallbackStatus || 'unknown');
+  const statusSelectDisabled = !canEditStatus || savingStatus || docsRequestSaving || lockedByAnotherUser;
+  const docsRequestToggleDisabled =
+    docsRequestSaving || savingStatus || lockedByAnotherUser || !caseData?.id;
+  const handleDocsRequestedToggle = ({ detail }) => {
+    const nextActive = detail.checked;
+    if (nextActive === docsRequestedActive) return;
+    runDocsRequestedUpdate(nextActive);
+  };
   const hasOpenEscalation = escalation && escalation.state && escalation.state !== 'resolved';
   const escalationOwnerRole = normalizeEscalationRole(canonicalizeRole(escalation?.current_owner_role || escalation?.currentOwnerRole));
   const isEscalationOwner = Boolean(hasOpenEscalation && escalationOwnerRole && escalationOwnerRole === roleKey);
   const escalationBadgeLabel = hasOpenEscalation
     ? `Escalated to ${formatRoleLabel(escalationOwnerRole || escalation?.target_role || escalation?.targetRole || '')}`
     : null;
-  const escalationTargetRoleLabel = roleKey === 'regional_manager' ? 'Program Administrator' : 'Regional Manager';
+  const escalationTargetRoleLabel = roleKey === 'regional_manager' ? 'NWAC Administrator' : 'Regional Manager';
   const hasCaseId = Boolean(caseData?.id);
   const canAssign = hasCaseId && !ASSIGN_BLOCKED_STATUSES.has(normalizedStatusKey) && (isAdminRole || isRegionalCoordinatorRole);
   const canPutOnClosureNotice = hasCaseId && CLOSURE_NOTICE_ELIGIBLE_STATUSES.has(normalizedStatusKey);
@@ -792,41 +846,52 @@ const ApplicationOverviewWidget = ({
   const canRespondEscalation = hasOpenEscalation && isEscalationOwner;
   const canResolveEscalation = hasOpenEscalation && isEscalationOwner;
   const quickActionItems = useMemo(() => {
-    const items = [];
-    if (canAssign) {
-      items.push({ id: 'assign', text: 'Assign / reassign' });
-    }
-    if (canPutOnClosureNotice) {
-      items.push({ id: 'closure-notice', text: 'Put on closure notice' });
-    }
-    if (canResumeReview) {
-      items.push({ id: 'resume-review', text: 'Resume review' });
-    }
-    if (canCloseApplication) {
-      items.push({ id: 'close', text: 'Close application' });
-    }
-    if (canArchiveApplication) {
-      items.push({ id: 'archive', text: 'Archive application' });
-    }
-    if (canReopenApplication) {
-      items.push({ id: 'reopen', text: 'Reopen application' });
-    }
-    if (canEscalate) {
-      items.push({ id: 'escalate', text: `Escalate to ${escalationTargetRoleLabel}` });
-    }
-    if (canRespondEscalation) {
-      items.push({ id: 'respond-escalation', text: 'Respond to escalation' });
-    }
-    if (canResolveEscalation) {
-      items.push({ id: 'resolve-escalation', text: 'Resolve escalation' });
-    }
-    if (canEscalateUp) {
-      items.push({ id: 'escalate-up', text: 'Escalate to Program Administrator' });
-    }
-    items.push(...APPLICATION_LAYOUT_ACTIONS);
-    return items;
+    const layoutActions = APPLICATION_LAYOUT_ACTIONS.reduce((acc, action) => {
+      acc[action.id] = action;
+      return acc;
+    }, {});
+    const actionsById = {
+      'review-assessment': layoutActions['review-assessment'] || null,
+      'documents-messages': layoutActions['documents-messages'] || null,
+      'notes-calendar': layoutActions['notes-calendar'] || null,
+      'add-watchlist': canAddToWatchlist ? { id: 'add-watchlist', text: 'Add applicant to watchlist' } : null,
+      assign: canAssign ? { id: 'assign', text: 'Assign / reassign' } : null,
+      'resume-review': canResumeReview ? { id: 'resume-review', text: 'Resume review' } : null,
+      escalate: canEscalate ? { id: 'escalate', text: `Escalate to ${escalationTargetRoleLabel}` } : null,
+      'respond-escalation': canRespondEscalation ? { id: 'respond-escalation', text: 'Respond to escalation' } : null,
+      'resolve-escalation': canResolveEscalation ? { id: 'resolve-escalation', text: 'Resolve escalation' } : null,
+      'escalate-up': canEscalateUp ? { id: 'escalate-up', text: 'Escalate to NWAC Administrator' } : null,
+      'closure-notice': canPutOnClosureNotice ? { id: 'closure-notice', text: 'Put on closure notice' } : null,
+      close: canCloseApplication ? { id: 'close', text: 'Close application' } : null,
+      archive: canArchiveApplication ? { id: 'archive', text: 'Archive application' } : null,
+      reopen: canReopenApplication ? { id: 'reopen', text: 'Reopen application' } : null,
+      'audit-trail': layoutActions['audit-trail'] || null,
+    };
+    const order = [
+      'review-assessment',
+      'documents-messages',
+      'notes-calendar',
+      'add-watchlist',
+      'assign',
+      'resume-review',
+      'escalate',
+      'respond-escalation',
+      'resolve-escalation',
+      'escalate-up',
+      'closure-notice',
+      'close',
+      'archive',
+      'reopen',
+      'audit-trail',
+    ];
+    return order.reduce((acc, id) => {
+      const item = actionsById[id];
+      if (item) acc.push(item);
+      return acc;
+    }, []);
   }, [
     canAssign,
+    canAddToWatchlist,
     canPutOnClosureNotice,
     canResumeReview,
     canCloseApplication,
@@ -920,8 +985,8 @@ const ApplicationOverviewWidget = ({
       }
       setAssignModalVisible(false);
       setSelectedAssignee(null);
-      if (typeof actions?.refreshCaseData === 'function') {
-        await actions.refreshCaseData();
+      if (typeof refreshCaseData === 'function' || typeof actions?.refreshCaseData === 'function') {
+        await refreshCasePayload();
       } else {
         await fetchLatestApplication();
       }
@@ -930,7 +995,68 @@ const ApplicationOverviewWidget = ({
     } finally {
       setAssignSubmitting(false);
     }
-  }, [actions, caseData?.id, fetchLatestApplication, selectedAssignee]);
+  }, [actions, caseData?.id, fetchLatestApplication, refreshCaseData, refreshCasePayload, selectedAssignee]);
+
+  const handleWatchlistSubmit = useCallback(async () => {
+    if (!watchlistReady) {
+      setWatchlistError('Name, date of birth, and SIN are required to add to the watchlist.');
+      return;
+    }
+    setWatchlistSaving(true);
+    setWatchlistError(null);
+    try {
+      const response = await apiFetch('/api/applicant-watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          caseId: watchlistCaseId,
+          applicationId: watchlistApplicationId,
+          fullName: watchlistIdentity.fullName,
+          firstName: watchlistIdentity.firstName,
+          lastName: watchlistIdentity.lastName,
+          dob: watchlistIdentity.dob,
+          sin: watchlistIdentity.sin,
+          notes: watchlistNotes.trim() || null,
+        }),
+      });
+      if (response.ok) {
+        setStatusFeedback({
+          type: 'success',
+          content: 'Applicant added to the watchlist.',
+        });
+        setWatchlistModalOpen(false);
+        setWatchlistNotes('');
+        return;
+      }
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (_) {}
+      if (response.status === 409) {
+        setWatchlistError('This applicant is already on the watchlist.');
+        return;
+      }
+      if (response.status === 400 && payload?.error === 'identity_missing') {
+        setWatchlistError('Name, date of birth, and SIN are required to add to the watchlist.');
+        return;
+      }
+      if (response.status === 400 && payload?.error === 'notes_too_long') {
+        setWatchlistError(`Notes must be ${payload.max || 2000} characters or fewer.`);
+        return;
+      }
+      setWatchlistError('Unable to add to the watchlist. Please try again.');
+    } catch (_) {
+      setWatchlistError('Unable to add to the watchlist. Please try again.');
+    } finally {
+      setWatchlistSaving(false);
+    }
+  }, [
+    watchlistReady,
+    watchlistCaseId,
+    watchlistApplicationId,
+    watchlistIdentity,
+    watchlistNotes,
+  ]);
 
   const requestLayoutSwitch = useCallback(layoutId => {
     if (typeof window === 'undefined') return;
@@ -947,6 +1073,12 @@ const ApplicationOverviewWidget = ({
     const layoutId = APPLICATION_LAYOUT_ACTION_MAP[actionId];
     if (layoutId) {
       requestLayoutSwitch(layoutId);
+      return;
+    }
+    if (actionId === 'add-watchlist') {
+      setWatchlistError(null);
+      setWatchlistNotes('');
+      setWatchlistModalOpen(true);
       return;
     }
     if (lockedByAnotherUser) {
@@ -1093,8 +1225,8 @@ const ApplicationOverviewWidget = ({
       setQuickActionConfirm({
         type: 'escalation',
         actionId: 'escalate_up',
-        title: 'Escalate to Program Administrator',
-        body: 'Forward this escalation to Program Administrators. Include the context and what you are requesting.',
+        title: 'Escalate to NWAC Administrator',
+        body: 'Forward this escalation to NWAC Administrators. Include the context and what you are requesting.',
         requireNote: true
       });
       return;
@@ -1110,7 +1242,7 @@ const ApplicationOverviewWidget = ({
 
   const confirmModalVisible = Boolean(confirmStatusChange);
   const confirmTargetLabel = confirmStatusChange?.nextOption?.label || confirmStatusChange?.nextStatus;
-  const confirmCurrentLabel = badgeLabel || formatStatusLabel(canonicalStatus) || 'current status';
+  const confirmCurrentLabel = statusLabel || formatStatusLabel(canonicalStatus) || 'current status';
   const quickModalVisible = Boolean(quickActionConfirm);
 
   const buildActionNote = ({ actionLabel, fromStatus, toStatus, note }) => {
@@ -1243,9 +1375,7 @@ const ApplicationOverviewWidget = ({
           setApplication(prev => (prev ? { ...prev, row_version: currentRowVersion } : prev));
         }
         await fetchLatestApplication();
-        if (typeof actions?.refreshCaseData === 'function') {
-          try { await actions.refreshCaseData(); } catch (_) {}
-        }
+        try { await refreshCasePayload(); } catch (_) {}
         setStatusFeedback({ type: 'warning', content: 'Another user updated this application first. The latest status has been reloaded.' });
         if (releaseAfter) {
           releaseLock({ silent: true }).catch(() => {});
@@ -1270,12 +1400,10 @@ const ApplicationOverviewWidget = ({
       }
 
       await fetchLatestApplication();
-      if (typeof actions?.refreshCaseData === 'function') {
-        try {
-          await actions.refreshCaseData();
-        } catch (_) {
-          // ignore refresh failures, local state already updated
-        }
+      try {
+        await refreshCasePayload();
+      } catch (_) {
+        // ignore refresh failures, local state already updated
       }
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId: caseData.id } }));
@@ -1295,6 +1423,111 @@ const ApplicationOverviewWidget = ({
       setStatusFeedback({ type: 'error', content: err?.message || 'Failed to update status.' });
     } finally {
       setSavingStatus(false);
+      if (releaseAfter) {
+        releaseLock({ silent: true }).catch(() => {});
+      }
+    }
+  };
+
+  const runDocsRequestedUpdate = async (nextActive) => {
+    if (!caseData?.id) {
+      setStatusFeedback({ type: 'error', content: 'Case details are unavailable; cannot update document requests.' });
+      return;
+    }
+    if (lockedByAnotherUser) {
+      setStatusFeedback({ type: 'warning', content: lockAlertMessage || 'This case is currently locked by another user.' });
+      return;
+    }
+    setDocsRequestSaving(true);
+    let releaseAfter = false;
+    try {
+      if (!lockState.owned) {
+        const lockResult = await acquireLock();
+        if (!lockResult?.ok) {
+          const message = buildLockConflictMessage(lockResult);
+          setStatusFeedback({ type: 'warning', content: message });
+          return;
+        }
+        releaseAfter = Boolean(lockResult.localOwner);
+      } else if (lockHeldByCurrentUser) {
+        releaseAfter = true;
+        refreshLockHeartbeat().catch(() => {});
+      }
+
+      const expectedRowVersion = Number(rowVersion || caseData?.application_row_version || application?.row_version || 0);
+      const payload = { docsRequested: nextActive };
+      if (nextActive) {
+        payload.docsRequestedSource = 'manual';
+      }
+      if (expectedRowVersion > 0) {
+        payload.expectedRowVersion = expectedRowVersion;
+      }
+      const response = await apiFetch(`/api/cases/${caseData.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      let body = null;
+      try {
+        body = await response.json();
+      } catch (_) {
+        body = null;
+      }
+
+      if (response.status === 423) {
+        const message = buildLockConflictMessage({ reason: body?.reason || body?.error, lock: body?.lock });
+        setStatusFeedback({ type: 'warning', content: message });
+        if (releaseAfter) {
+          releaseLock({ silent: true }).catch(() => {});
+        }
+        return;
+      }
+
+      if (response.status === 409) {
+        const currentRowVersion = Number(body?.currentRowVersion ?? body?.application_row_version);
+        if (currentRowVersion) {
+          setRowVersion(prev => (currentRowVersion > prev ? currentRowVersion : prev));
+          if (typeof onRowVersionUpdate === 'function') {
+            onRowVersionUpdate(currentRowVersion);
+          }
+          setApplication(prev => (prev ? { ...prev, row_version: currentRowVersion } : prev));
+        }
+        await fetchLatestApplication();
+        try { await refreshCasePayload(); } catch (_) {}
+        setStatusFeedback({ type: 'warning', content: 'Another user updated this application first. The latest data has been reloaded.' });
+        if (releaseAfter) {
+          releaseLock({ silent: true }).catch(() => {});
+        }
+        return;
+      }
+
+      if (!response.ok) {
+        const message = body?.error || 'Failed to update document request.';
+        throw new Error(message);
+      }
+
+      if (typeof onCaseUpdate === 'function') {
+        const nowIso = new Date().toISOString();
+        onCaseUpdate({
+          docs_requested_active: nextActive ? 1 : 0,
+          docs_requested_at: nextActive ? nowIso : caseData?.docs_requested_at ?? null,
+          docs_requested_cleared_at: nextActive ? null : nowIso,
+          docs_requested_source: nextActive ? 'manual' : caseData?.docs_requested_source ?? null,
+        });
+      }
+      await fetchLatestApplication();
+      try { await refreshCasePayload(); } catch (_) {}
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId: caseData.id } }));
+      }
+      setStatusFeedback({
+        type: 'success',
+        content: nextActive ? 'Document request timer started.' : 'Document request cleared.'
+      });
+    } catch (err) {
+      setStatusFeedback({ type: 'error', content: err?.message || 'Failed to update document request.' });
+    } finally {
+      setDocsRequestSaving(false);
       if (releaseAfter) {
         releaseLock({ silent: true }).catch(() => {});
       }
@@ -1380,16 +1613,14 @@ const ApplicationOverviewWidget = ({
       }
 
       await fetchEscalation();
-      if (typeof actions?.refreshCaseData === 'function') {
-        try { await actions.refreshCaseData(); } catch (_) {}
-      }
+      try { await refreshCasePayload(); } catch (_) {}
       if (isCreate) {
         const targetEmail = body?.target_email || null;
         const targetLabel = targetEmail || 'Regional Manager';
         setStatusFeedback({ type: 'success', content: `Application escalated to ${targetLabel}.` });
       } else if (actionId === 'escalate_up' || actionId === 'escalate') {
         const targetEmail = body?.target_email || null;
-        const targetLabel = targetEmail || 'Program Administrator';
+        const targetLabel = targetEmail || 'NWAC Administrator';
         setStatusFeedback({ type: 'success', content: `Application escalated to ${targetLabel}.` });
       } else {
         setStatusFeedback({ type: 'success', content: 'Escalation updated.' });
@@ -1459,7 +1690,7 @@ const ApplicationOverviewWidget = ({
   ) : hasOpenEscalation ? (
     <Badge color="severity-medium">{escalationBadgeLabel || 'Escalated'}</Badge>
   ) : (
-    <Badge color={badgeColor}>{badgeLabel}</Badge>
+    <Badge color={statusBadgeColor}>{statusLabel}</Badge>
   );
 
   const overviewItems = [];
@@ -1482,10 +1713,24 @@ const ApplicationOverviewWidget = ({
 
   overviewItems.push({ label: 'Application Status', value: statusFormField });
 
+  const docsRequestedBadgeLabel = docsRequestedActive ? docsRequestedLabel : 'Not requested';
+  const docsRequestedBadgeColor = docsRequestedActive ? (docsRequestedColor || 'grey') : 'grey';
+  const docsRequestedContent = (
+    <SpaceBetween size="xxs">
+      <Badge color={docsRequestedBadgeColor}>{docsRequestedBadgeLabel}</Badge>
+      <Toggle
+        checked={docsRequestedActive}
+        onChange={handleDocsRequestedToggle}
+        disabled={docsRequestToggleDisabled}
+      >
+        Documents requested
+      </Toggle>
+    </SpaceBetween>
+  );
+  overviewItems.push({ label: 'Docs Requested', value: docsRequestedContent });
+
   const preferredName = answers['preferred-name'];
   if (preferredName) overviewItems.push({ label: 'Preferred Name', value: preferredName });
-
-  const applicantName = caseData?.applicant_name || [answers['first-name'], answers['middle-names'], answers['last-name']].filter(Boolean).join(' ');
 
   const contactEmail = caseData?.applicant_email || answers['contact-email-address'] || answers.email;
   if (contactEmail) {
@@ -1712,6 +1957,70 @@ const ApplicationOverviewWidget = ({
                 statusType={assignLoading ? 'loading' : 'finished'}
                 filteringType="auto"
                 disabled={assignLoading}
+              />
+            </FormField>
+          </SpaceBetween>
+        </Modal>
+        <Modal
+          visible={watchlistModalOpen}
+          onDismiss={() => {
+            if (watchlistSaving) return;
+            setWatchlistModalOpen(false);
+            setWatchlistNotes('');
+            setWatchlistError(null);
+          }}
+          header="Add applicant to watchlist"
+          closeAriaLabel="Close watchlist modal"
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button
+                onClick={() => {
+                  if (watchlistSaving) return;
+                  setWatchlistModalOpen(false);
+                  setWatchlistNotes('');
+                  setWatchlistError(null);
+                }}
+                disabled={watchlistSaving}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={watchlistSaving}
+                disabled={watchlistSaving || !watchlistReady}
+                onClick={handleWatchlistSubmit}
+              >
+                Add to watchlist
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            <Box>{watchlistExplanation}</Box>
+            {watchlistError ? <Alert type="error">{watchlistError}</Alert> : null}
+            {!watchlistReady ? (
+              <Alert type="warning">
+                Name, date of birth, and SIN are required before adding an applicant to the watchlist.
+              </Alert>
+            ) : null}
+            <FormField label="Applicant name">
+              <Input value={watchlistDisplayName} readOnly />
+            </FormField>
+            <FormField label="Date of birth">
+              <Input value={watchlistDisplayDob} readOnly />
+            </FormField>
+            <FormField label="Social Insurance Number">
+              <Input value={watchlistDisplaySin} readOnly />
+            </FormField>
+            <FormField
+              label="Notes"
+              description="Optional context for administrators reviewing this watchlist entry."
+            >
+              <Textarea
+                value={watchlistNotes}
+                onChange={({ detail }) => setWatchlistNotes(detail.value)}
+                placeholder="Add internal notes (optional)"
+                rows={4}
               />
             </FormField>
           </SpaceBetween>

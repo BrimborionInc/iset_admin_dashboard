@@ -3014,6 +3014,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'payee_profile',
   'iset_case_note',
   'iset_case_task',
+  'iset_applicant_watchlist',
   'iset_case_watch',
   'iset_case_conflict_declaration',
   'application_lock',
@@ -3051,6 +3052,8 @@ const SLA_STAGE_PLACEHOLDER = [
   { stage_key: 'assignment', display_name: 'Assignment', target_hours: 72, description: 'Time to assign a coordinator or assessor after triage.' },
   { stage_key: 'assessment', display_name: 'Assessment', target_hours: 240, description: 'Working time for assessors to complete review (10 days).' },
   { stage_key: 'program_decision', display_name: 'Program decision', target_hours: 48, description: 'Decision turnaround once assessment is complete.' },
+  { stage_key: 'docs_request_reminder', display_name: 'Docs requested reminder', target_hours: 168, description: 'Emit the reminder-due event X days after documents are requested.' },
+  { stage_key: 'docs_request_closure', display_name: 'Docs requested closure', target_hours: 672, description: 'Emit the mark-for-closure event X days after documents are requested.' },
 ];
 
 const SLA_STAGE_LABELS = SLA_STAGE_PLACEHOLDER.reduce((acc, item) => {
@@ -3893,6 +3896,54 @@ function extractPreferredName(context) {
     answers['preferred_name'] ||
     answers['preferredName']
   );
+}
+
+function resolveApplicantWatchlistIdentity({ payload = {}, answers = {}, caseContext = {}, applicantName = null }) {
+  const safePayload = payload && typeof payload === 'object' ? payload : {};
+  const safeAnswers = answers && typeof answers === 'object' ? answers : {};
+  const safeCaseContext = caseContext && typeof caseContext === 'object' ? caseContext : {};
+  const casePersonal =
+    safeCaseContext.applicationPersonal && typeof safeCaseContext.applicationPersonal === 'object'
+      ? safeCaseContext.applicationPersonal
+      : {};
+  const caseAnswers =
+    safeCaseContext.applicationAnswers && typeof safeCaseContext.applicationAnswers === 'object'
+      ? safeCaseContext.applicationAnswers
+      : {};
+  const payloadPersonal =
+    safePayload.personal && typeof safePayload.personal === 'object' ? safePayload.personal : {};
+  const mergedPayload = {
+    ...safePayload,
+    personal: {
+      ...casePersonal,
+      ...payloadPersonal,
+    },
+  };
+  const mergedAnswers = {
+    ...caseAnswers,
+    ...safeAnswers,
+  };
+  const context = { payload: mergedPayload, answers: mergedAnswers, caseContext: safeCaseContext };
+
+  const firstName = extractFirstName(context);
+  const lastName = extractLastName(context);
+  const preferredName = extractPreferredName(context);
+  const fullName =
+    normaliseString(applicantName) ||
+    [firstName, lastName].filter(Boolean).join(' ') ||
+    preferredName ||
+    null;
+  const dob = toDateOnlyString(extractDob(context));
+  const sinDigits = cleanSin(extractSin(context));
+
+  return {
+    fullName,
+    firstName,
+    lastName,
+    preferredName,
+    dob,
+    sinDigits,
+  };
 }
 
 function extractMaritalStatus(context) {
@@ -6847,6 +6898,92 @@ function resolveDecisionLetterDrafts(caseContext = {}) {
   return { approval, denial };
 }
 
+function hasHtmlTags(value) {
+  if (!value || typeof value !== 'string') return false;
+  return /<\s*\/?\s*[a-z][\s\S]*>/i.test(value);
+}
+
+function buildDecisionReasonListHtml(lines = []) {
+  const items = [];
+  let current = null;
+  lines.forEach((raw) => {
+    const line = String(raw || '').trimRight();
+    if (!line) return;
+    const nestedMatch = line.match(/^\s{2,}-\s+(.*)$/);
+    const topMatch = line.match(/^-\s+(.*)$/);
+    if (topMatch) {
+      current = { text: topMatch[1].trim(), children: [] };
+      items.push(current);
+      return;
+    }
+    if (nestedMatch) {
+      if (!current) {
+        current = { text: nestedMatch[1].trim(), children: [] };
+        items.push(current);
+        return;
+      }
+      current.children.push(nestedMatch[1].trim());
+    }
+  });
+  if (!items.length) return '';
+  const renderItem = (item) => {
+    const content = escapeHtml(item.text || '');
+    if (!item.children.length) return `<li>${content}</li>`;
+    const childrenHtml = item.children
+      .map(child => `<li>${escapeHtml(child || '')}</li>`)
+      .join('');
+    return `<li>${content}<ul class="govuk-list govuk-list--bullet">${childrenHtml}</ul></li>`;
+  };
+  return `<ul class="govuk-list govuk-list--bullet">${items.map(renderItem).join('')}</ul>`;
+}
+
+function formatDecisionReasonHtml(rawValue) {
+  const normalized = normaliseString(rawValue);
+  if (!normalized) return '';
+  if (hasHtmlTags(normalized)) return normalized;
+  const paragraphs = normalized
+    .split(/\n{2,}/)
+    .map(p => p.trim())
+    .filter(Boolean);
+  const htmlParts = [];
+  paragraphs.forEach((paragraph) => {
+    const lines = paragraph.split(/\r?\n/).map(line => line.replace(/\s+$/g, ''));
+    const firstBulletIndex = lines.findIndex(line => /^\s*-\s+/.test(line));
+    if (firstBulletIndex === -1) {
+      const text = lines.join(' ').trim();
+      if (text) {
+        htmlParts.push(`<p class="govuk-body">${escapeHtml(text)}</p>`);
+      }
+      return;
+    }
+    const preLines = lines.slice(0, firstBulletIndex).map(line => line.trim()).filter(Boolean);
+    if (preLines.length) {
+      htmlParts.push(`<p class="govuk-body">${escapeHtml(preLines.join(' '))}</p>`);
+    }
+    const listLines = [];
+    const postLines = [];
+    for (let i = firstBulletIndex; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (/^\s*-\s+/.test(line)) {
+        listLines.push(line);
+        continue;
+      }
+      if (line.trim()) {
+        postLines.push(line);
+      }
+    }
+    if (listLines.length) {
+      const listHtml = buildDecisionReasonListHtml(listLines);
+      if (listHtml) htmlParts.push(listHtml);
+    }
+    const postText = postLines.join(' ').trim();
+    if (postText) {
+      htmlParts.push(`<p class="govuk-body">${escapeHtml(postText)}</p>`);
+    }
+  });
+  return htmlParts.join('\n');
+}
+
 function resolveDecisionLetterTokens({
   draft,
   docType,
@@ -6872,6 +7009,7 @@ function resolveDecisionLetterTokens({
     decision_intro: safe(effectiveDraft.decision_intro),
     decision_label: safe(effectiveDraft.decision_label) || labelFallback,
     decision_reason: safe(effectiveDraft.decision_reason),
+    decision_reason_html: formatDecisionReasonHtml(effectiveDraft.decision_reason),
     next_step_1: nextStep1,
     next_step_2: nextStep2,
     show_next_steps: showNextSteps ? 'yes' : '',
@@ -10103,7 +10241,9 @@ function firstQueryValue(raw) {
 }
 
 const TERMINAL_APPLICATION_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
-const APPROVAL_COST_THRESHOLD = 25000;
+const APPROVAL_COST_THRESHOLD = 15000;
+const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
+const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
 function normaliseApplicationStatusValue(status) {
   if (status === undefined || status === null) return null;
   return String(status).trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -12208,17 +12348,17 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 const ASSIGNABLE_COGNITO_GROUPS = [
-  { group: 'NWAC_Administrator', label: 'Program Administrator' },
-  { group: 'Regional_Manager', label: 'Regional Coordinator' },
-  { group: 'ISET_Coordinator', label: 'Application Assessor' },
+  { group: 'NWAC_Administrator', label: 'NWAC Administrator' },
+  { group: 'Regional_Manager', label: 'Regional Manager' },
+  { group: 'ISET_Coordinator', label: 'ISET Coordinator' },
   { group: 'System_Administrator', label: 'System Administrator' }
 ];
 const ASSIGNABLE_GROUP_LABEL = new Map(ASSIGNABLE_COGNITO_GROUPS.map(entry => [entry.group, entry.label]));
 const ASSIGNABLE_GROUP_NAMES = ASSIGNABLE_COGNITO_GROUPS.map(entry => entry.group);
 const PLACEHOLDER_ASSIGNABLE_STAFF = [
-  { id: 'placeholder-program-admin', email: 'admin@nwac.ca', role: 'Program Administrator', display_name: 'Admin (Program Administrator)', region_id: null },
-  { id: 'placeholder-regional-coordinator', email: 'coordinator@nwac.ca', role: 'Regional Coordinator', display_name: 'Coordinator (Regional Coordinator)', region_id: 1 },
-  { id: 'placeholder-adjudicator', email: 'user@nwac.ca', role: 'Application Assessor', display_name: 'Assessor (Application Assessor)', region_id: 1 }
+  { id: 'placeholder-program-admin', email: 'admin@nwac.ca', role: 'Program Administrator', display_name: 'Admin (NWAC Administrator)', region_id: null },
+  { id: 'placeholder-regional-coordinator', email: 'coordinator@nwac.ca', role: 'Regional Coordinator', display_name: 'Manager (Regional Manager)', region_id: 1 },
+  { id: 'placeholder-adjudicator', email: 'user@nwac.ca', role: 'Application Assessor', display_name: 'Coordinator (ISET Coordinator)', region_id: 1 }
 ];
 const PLACEHOLDER_ASSIGNABLE_LOOKUP = new Map(PLACEHOLDER_ASSIGNABLE_STAFF.map(entry => [entry.email.toLowerCase(), entry]));
 
@@ -19713,6 +19853,218 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
     }
     console.error('[awaiting-approval-items] fetch failed:', err.message);
     return res.status(500).json({ error: 'awaiting_approval_items_fetch_failed', message: err.message });
+  }
+});
+
+// Applications matching watchlist SIN entries
+app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+    return res.json({ role, items: [] });
+  }
+  const regionCandidates = [
+    req?.auth?.regionId,
+    req?.staffProfile?.region_id
+  ];
+  let regionId = null;
+  for (const candidate of regionCandidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n)) { regionId = n; break; }
+  }
+
+  const filters = [];
+  const params = [];
+  if (role === 'Regional Coordinator') {
+    if (!Number.isFinite(regionId)) {
+      return res.json({ role, items: [] });
+    }
+    filters.push('sp.region_id = ?');
+    params.push(regionId);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+  const sinCandidateExpr = `COALESCE(
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."social-insurance-number"')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."social_insurance_number"')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."socialInsuranceNumber"')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."sin-number"')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."sin_number"')), '')
+  )`;
+  const sinDigitsExpr = `REPLACE(REPLACE(REPLACE(${sinCandidateExpr}, ' ', ''), '-', ''), '.', '')`;
+
+  const sql = `
+    SELECT
+      q.case_id,
+      q.case_number,
+      q.application_id,
+      q.application_status,
+      q.submitted_at,
+      q.application_updated_at,
+      q.tracking_id,
+      q.assigned_to_user_id,
+      q.assigned_user_email,
+      q.assigned_user_role,
+      q.assigned_user_region_id,
+      q.submission_first_name,
+      q.submission_last_name,
+      q.submission_preferred_name,
+      q.submission_address_province,
+      q.sin_digits,
+      w.notes AS watchlist_notes,
+      w.created_at AS watchlist_created_at
+    FROM (
+      SELECT
+        c.id AS case_id,
+        c.case_number,
+        a.id AS application_id,
+        a.status AS application_status,
+        a.created_at AS submitted_at,
+        a.updated_at AS application_updated_at,
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+          s.reference_number
+        ) AS tracking_id,
+        c.assigned_to_user_id,
+        sp.email AS assigned_user_email,
+        sp.primary_role AS assigned_user_role,
+        sp.region_id AS assigned_user_region_id,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."address-province"')) AS submission_address_province,
+        ${sinDigitsExpr} AS sin_digits
+      FROM iset_application a
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      LEFT JOIN iset_case c ON c.application_id = a.id
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      ${where}
+    ) q
+    JOIN iset_applicant_watchlist w ON w.sin_hash = SHA2(q.sin_digits, 256)
+    WHERE q.sin_digits IS NOT NULL AND LENGTH(q.sin_digits) = 9
+    ORDER BY q.submitted_at DESC
+    LIMIT 200
+  `;
+  try {
+    const [rows] = await pool.query(sql, params);
+    const items = Array.isArray(rows) ? rows.map(r => {
+      const preferred = normaliseString(r.submission_preferred_name);
+      const first = normaliseString(r.submission_first_name);
+      const last = normaliseString(r.submission_last_name);
+      const full = [first, last].filter(Boolean).join(' ').trim();
+      const applicantName = full || preferred || normaliseString(r.tracking_id) || 'Applicant';
+      return {
+        caseId: r.case_id || null,
+        caseNumber: r.case_number || null,
+        applicationId: r.application_id || null,
+        trackingId: r.tracking_id || null,
+        applicantName,
+        applicant_name: applicantName,
+        address_province: normaliseString(r.submission_address_province) || null,
+        sin: normaliseString(r.sin_digits) || null,
+        status: normaliseString(r.application_status) || null,
+        submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
+        owner: r.assigned_user_email || null,
+        assigned_user_id: r.assigned_to_user_id || null,
+        assigned_user_email: r.assigned_user_email || null,
+        assigned_user_role: r.assigned_user_role || null,
+        assigned_user_region_id: r.assigned_user_region_id || null,
+        watchlist_notes: normaliseString(r.watchlist_notes) || null,
+        watchlist_created_at: r.watchlist_created_at ? new Date(r.watchlist_created_at).toISOString() : null
+      };
+    }) : [];
+    return res.json({ role, regionId: regionId ?? null, items });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      return res.json({ role, regionId: regionId ?? null, items: [] });
+    }
+    console.error('[watchlist-hit-items] fetch failed:', err.message);
+    return res.status(500).json({ error: 'watchlist_hit_items_fetch_failed', message: err.message });
+  }
+});
+
+// Applications marked for closure
+app.get('/api/dashboard/marked-for-closure-items', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+    return res.json({ role, items: [] });
+  }
+  const regionCandidates = [
+    req?.auth?.regionId,
+    req?.staffProfile?.region_id
+  ];
+  let regionId = null;
+  for (const candidate of regionCandidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n)) { regionId = n; break; }
+  }
+  const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
+  const filters = [`${statusExpr} = ?`];
+  const params = ['closure_notice'];
+  if (role === 'Regional Coordinator') {
+    if (!Number.isFinite(regionId)) {
+      return res.json({ role, items: [] });
+    }
+    filters.push('sp.region_id = ?');
+    params.push(regionId);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const sql = `
+    SELECT
+      c.id AS case_id,
+      c.case_number,
+      a.id AS application_id,
+      a.status AS application_status,
+      a.created_at AS submitted_at,
+      a.updated_at AS application_updated_at,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+      c.assigned_to_user_id,
+      sp.email AS assigned_user_email,
+      sp.primary_role AS assigned_user_role,
+      sp.region_id AS assigned_user_region_id,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."address-province"')) AS submission_address_province
+    FROM iset_case c
+    JOIN iset_application a ON c.application_id = a.id
+    LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    ${where}
+    ORDER BY a.updated_at DESC, a.created_at DESC
+    LIMIT 200
+  `;
+  try {
+    const [rows] = await pool.query(sql, params);
+    const items = Array.isArray(rows) ? rows.map(r => {
+      const preferred = normaliseString(r.submission_preferred_name);
+      const first = normaliseString(r.submission_first_name);
+      const last = normaliseString(r.submission_last_name);
+      const full = [first, last].filter(Boolean).join(' ').trim();
+      const applicantName = full || preferred || normaliseString(r.tracking_id) || 'Applicant';
+      return {
+        caseId: r.case_id || null,
+        caseNumber: r.case_number || null,
+        applicationId: r.application_id || null,
+        trackingId: r.tracking_id || null,
+        applicantName,
+        applicant_name: applicantName,
+        address_province: normaliseString(r.submission_address_province) || null,
+        status: normaliseString(r.application_status) || null,
+        submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
+        owner: r.assigned_user_email || null,
+        assigned_user_id: r.assigned_to_user_id || null,
+        assigned_user_email: r.assigned_user_email || null,
+        assigned_user_role: r.assigned_user_role || null,
+        assigned_user_region_id: r.assigned_user_region_id || null
+      };
+    }) : [];
+    return res.json({ role, regionId: regionId ?? null, items });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      return res.json({ role, regionId: regionId ?? null, items: [] });
+    }
+    console.error('[marked-for-closure-items] fetch failed:', err.message);
+    return res.status(500).json({ error: 'marked_for_closure_items_fetch_failed', message: err.message });
   }
 });
 
@@ -27639,6 +27991,10 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         c.updated_at,
         c.next_action_due_at,
         c.case_context_json,
+        a.docs_requested_active,
+        a.docs_requested_at,
+        a.docs_requested_cleared_at,
+        a.docs_requested_source,
         COALESCE(task_counts.open_task_count, 0) AS open_task_count,
         COALESCE(task_counts.overdue_task_count, 0) AS overdue_task_count,
         COALESCE(intervention_counts.open_intervention_count, 0) AS open_intervention_count,
@@ -28201,6 +28557,13 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       applicantEmail: applicantEmailValue,
       applicant_email: applicantEmailValue,
       applicationStatus: applicationStatusNormalised || row.application_status || null,
+      docsRequestedActive:
+        row.docs_requested_active === null || typeof row.docs_requested_active === 'undefined'
+          ? false
+          : Number(row.docs_requested_active) === 1,
+      docsRequestedAt: toIsoDateTime(row.docs_requested_at),
+      docsRequestedClearedAt: toIsoDateTime(row.docs_requested_cleared_at),
+      docsRequestedSource: row.docs_requested_source || null,
       priority: row.priority || null,
       riskRating: row.risk_rating || null,
       openedAt: toIsoDateTime(row.opened_at),
@@ -31359,6 +31722,10 @@ app.get('/api/cases/:id', async (req, res) => {
         c.updated_at,
         c.case_context_json,
         a.row_version AS application_row_version,
+        a.docs_requested_active AS docs_requested_active,
+        a.docs_requested_at AS docs_requested_at,
+        a.docs_requested_cleared_at AS docs_requested_cleared_at,
+        a.docs_requested_source AS docs_requested_source,
         al.owner_user_id AS lock_owner_id,
         al.owner_display_name AS lock_owner_name,
         al.owner_email AS lock_owner_email,
@@ -31666,9 +32033,9 @@ app.get('/api/roles', (_req, res) => {
   // Keep in sync with navigation/feature flags as needed
   const roles = [
     { id: 'SysAdmin', name: 'System Administrator', description: 'Full administrative access to the Admin Portal.' },
-    { id: 'ProgramAdmin', name: 'Program Administrator', description: 'Manage programs, templates, and reporting.' },
-    { id: 'RegionalCoordinator', name: 'Regional Coordinator', description: 'Coordinate case assignments and oversee regional workflows.' },
-    { id: 'ApplicationAssessor', name: 'Application Assessor', description: 'Assessor-level view and updates for assigned cases.' },
+    { id: 'ProgramAdmin', name: 'NWAC Administrator', description: 'Manage programs, templates, and reporting.' },
+    { id: 'RegionalCoordinator', name: 'Regional Manager', description: 'Coordinate case assignments and oversee regional workflows.' },
+    { id: 'ApplicationAssessor', name: 'ISET Coordinator', description: 'Coordinator-level view and updates for assigned cases.' },
   ];
   res.status(200).json(roles);
 });
@@ -34716,6 +35083,156 @@ app.delete('/api/cases/:caseId/watch', async (req, res) => {
   } catch (error) {
     console.error('[case-watch] delete failed', error);
     res.status(500).json({ error: 'failed_to_remove_case_watch' });
+  }
+});
+
+app.post('/api/applicant-watchlist', async (req, res) => {
+  const body = req.body || {};
+  const toId = (value) => {
+    if (value === null || typeof value === 'undefined' || value === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+  };
+  const caseId = toId(body.caseId ?? body.case_id);
+  let applicationId = toId(body.applicationId ?? body.application_id);
+  if (!caseId && !applicationId) {
+    return res.status(400).json({ error: 'missing_case_or_application_id' });
+  }
+
+  const staffProfileId = resolveActiveStaffProfileId(req);
+  if (!staffProfileId) {
+    return res.status(401).json({ error: 'staff_profile_required' });
+  }
+
+  const parsePayload = (value) => {
+    if (!value) return {};
+    if (typeof value === 'object') return value;
+    if (typeof value !== 'string') return {};
+    const trimmed = value.trim();
+    if (!trimmed) return {};
+    try {
+      const parsed = JSON.parse(trimmed);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  };
+
+  const clamp = (value, limit) => {
+    const normalised = normaliseString(value);
+    if (!normalised) return null;
+    return normalised.length > limit ? normalised.slice(0, limit) : normalised;
+  };
+
+  try {
+    let caseContext = null;
+    let payloadJson = null;
+    if (caseId) {
+      const [[row]] = await pool.query(
+        `SELECT c.id, c.application_id, c.case_context_json, a.payload_json
+           FROM iset_case c
+           LEFT JOIN iset_application a ON a.id = c.application_id
+          WHERE c.id = ?
+          LIMIT 1`,
+        [caseId]
+      );
+      if (!row) {
+        return res.status(404).json({ error: 'case_not_found' });
+      }
+      applicationId = applicationId || toId(row.application_id);
+      caseContext = safeJsonParse(row.case_context_json, null) || null;
+      payloadJson = row.payload_json || null;
+    } else if (applicationId) {
+      const [[row]] = await pool.query(
+        'SELECT id, payload_json FROM iset_application WHERE id = ? LIMIT 1',
+        [applicationId]
+      );
+      if (!row) {
+        return res.status(404).json({ error: 'application_not_found' });
+      }
+      payloadJson = row.payload_json || null;
+    }
+
+    const payload = parsePayload(payloadJson);
+    const rawAnswers = payload.answers || payload.intake_answers || payload;
+    const answers = rawAnswers && typeof rawAnswers === 'object' ? rawAnswers : {};
+
+    const providedIdentity = {
+      fullName: normaliseString(body.fullName || body.full_name || null),
+      firstName: normaliseString(body.firstName || body.first_name || null),
+      lastName: normaliseString(body.lastName || body.last_name || null),
+      dob: toDateOnlyString(body.dob || body.dateOfBirth || body.date_of_birth || null),
+      sinDigits: cleanSin(body.sin || body.sin_number || body.socialInsuranceNumber || null),
+    };
+
+    const resolvedIdentity = resolveApplicantWatchlistIdentity({
+      payload,
+      answers,
+      caseContext,
+      applicantName: providedIdentity.fullName,
+    });
+
+    const fullName = clamp(providedIdentity.fullName || resolvedIdentity.fullName, 255);
+    const firstName = clamp(providedIdentity.firstName || resolvedIdentity.firstName, 100);
+    const lastName = clamp(providedIdentity.lastName || resolvedIdentity.lastName, 100);
+    const dob = providedIdentity.dob || resolvedIdentity.dob;
+    const sinDigits = providedIdentity.sinDigits || resolvedIdentity.sinDigits;
+
+    const missing = [];
+    if (!fullName) missing.push('name');
+    if (!dob) missing.push('dob');
+    if (!sinDigits || sinDigits.length !== 9) missing.push('sin');
+    if (missing.length) {
+      return res.status(400).json({ error: 'identity_missing', missing });
+    }
+
+    const sinHash = hashSin(sinDigits);
+    if (!sinHash) {
+      return res.status(400).json({ error: 'sin_hash_failed' });
+    }
+
+    const notesRaw = typeof body.notes === 'string' ? body.notes.trim() : '';
+    const maxNotes = 2000;
+    if (notesRaw && notesRaw.length > maxNotes) {
+      return res.status(400).json({ error: 'notes_too_long', max: maxNotes });
+    }
+    const notes = notesRaw ? notesRaw : null;
+
+    try {
+      const [result] = await pool.query(
+        `INSERT INTO iset_applicant_watchlist
+          (full_name, first_name, last_name, dob, sin, sin_hash, notes, source_case_id, source_application_id, created_by_staff_profile_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          fullName,
+          firstName,
+          lastName,
+          dob,
+          sinDigits,
+          sinHash,
+          notes,
+          caseId || null,
+          applicationId || null,
+          staffProfileId || null,
+        ]
+      );
+      return res.status(201).json({
+        id: result.insertId,
+        fullName,
+        firstName,
+        lastName,
+        dob,
+        sin: sinDigits,
+      });
+    } catch (error) {
+      if (error && error.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ error: 'already_watchlisted' });
+      }
+      throw error;
+    }
+  } catch (error) {
+    console.error('[applicant-watchlist] create failed', error);
+    res.status(500).json({ error: 'failed_to_create_watchlist_entry' });
   }
 });
 
@@ -46856,7 +47373,12 @@ app.get('/api/applications', async (req, res) => {
     // Base case + application join using new lean model.
     // Assignment user now from staff_profiles (nullable); tracking_id fallback derived from payload_json->submission_snapshot.reference_number if tracking_id column absent.
     // We'll attempt to select a.tracking_id; if schema lacks it, COALESCE will choose JSON extracted value.
-    let baseSql = `SELECT c.id AS case_id, c.application_id, a.status AS application_status, c.status AS case_status, c.assigned_to_user_id,
+    let baseSql = `SELECT c.id AS case_id, c.application_id, a.status AS application_status,
+      a.docs_requested_active AS docs_requested_active,
+      a.docs_requested_at AS docs_requested_at,
+      a.docs_requested_cleared_at AS docs_requested_cleared_at,
+      a.docs_requested_source AS docs_requested_source,
+      c.status AS case_status, c.assigned_to_user_id,
       c.created_at AS opened_at, c.updated_at AS last_activity_at,
       sp.email AS assigned_user_email, sp.primary_role AS assigned_user_role,
       sp.id AS staff_profile_id,
@@ -46958,7 +47480,12 @@ app.get('/api/applications', async (req, res) => {
     // Add unassigned submissions (applications without case) for elevated roles.
     if (role === 'Program Administrator' || role === 'System Administrator') {
       finalSql = `(${baseSql})\nUNION ALL\n(
-        SELECT NULL AS case_id, a.id AS application_id, a.status AS application_status, NULL AS case_status, NULL AS assigned_to_user_id, NULL AS opened_at, NULL AS last_activity_at,
+        SELECT NULL AS case_id, a.id AS application_id, a.status AS application_status,
+        a.docs_requested_active AS docs_requested_active,
+        a.docs_requested_at AS docs_requested_at,
+        a.docs_requested_cleared_at AS docs_requested_cleared_at,
+        a.docs_requested_source AS docs_requested_source,
+        NULL AS case_status, NULL AS assigned_to_user_id, NULL AS opened_at, NULL AS last_activity_at,
         NULL AS assigned_user_email, NULL AS assigned_user_role, NULL AS staff_profile_id,
         NULL AS lock_owner_id, NULL AS lock_owner_name, NULL AS lock_owner_email, NULL AS lock_expires_at,
   JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
@@ -47015,6 +47542,10 @@ app.get('/api/applications', async (req, res) => {
       const ageDays = (now - submittedMs) / 86400000;
       const appStatus = r.application_status || null;
       const statusLower = appStatus ? String(appStatus).toLowerCase() : null;
+      const docsRequestedActive = Number(r.docs_requested_active || 0) === 1;
+      const docsRequestedAt = r.docs_requested_at || null;
+      const docsRequestedClearedAt = r.docs_requested_cleared_at || null;
+      const docsRequestedSource = r.docs_requested_source || null;
       const sla_risk = (statusLower !== 'approved' && statusLower !== 'rejected' && ageDays > 14) ? 'overdue' : 'ok';
       const lockOwnerId = r.lock_owner_id || null;
       const lockOwnerName = r.lock_owner_name || null;
@@ -47043,6 +47574,10 @@ app.get('/api/applications', async (req, res) => {
         status: appStatus,
         application_status: appStatus,
         case_status: r.case_status || null,
+        docs_requested_active: docsRequestedActive,
+        docs_requested_at: docsRequestedAt,
+        docs_requested_cleared_at: docsRequestedClearedAt,
+        docs_requested_source: docsRequestedSource,
         assigned_user_id: r.assigned_to_user_id,
         assigned_user_email: r.assigned_user_email || null,
         assigned_user_role: r.assigned_user_role || null,
@@ -47677,7 +48212,12 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
       const normalizeStatusKey = value =>
         (value || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
       const [[caseRow]] = await pool.query(
-        `SELECT c.application_id, a.status AS application_status
+        `SELECT c.application_id,
+                a.status AS application_status,
+                a.docs_requested_active AS docs_requested_active,
+                a.docs_requested_at AS docs_requested_at,
+                a.docs_requested_cleared_at AS docs_requested_cleared_at,
+                a.docs_requested_source AS docs_requested_source
            FROM iset_case c
            JOIN iset_application a ON a.id = c.application_id
           WHERE c.id = ?
@@ -47686,7 +48226,11 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
       );
       const statusKey = normalizeStatusKey(caseRow?.application_status || '');
       const resumeStatuses = new Set(['docs_requested', 'action_required', 'action_required_(docs_requested)']);
-      if (resumeStatuses.has(statusKey)) {
+      const shouldResumeReview = resumeStatuses.has(statusKey);
+      const docsRequestedActive = Number(caseRow?.docs_requested_active || 0) === 1;
+      const docsRequestedSource = caseRow?.docs_requested_source || null;
+      const shouldClearDocsRequested = docsRequestedActive && docsRequestedSource === 'secure_message';
+      if (shouldResumeReview || shouldClearDocsRequested) {
         const [[pendingRow]] = await pool.query(
           `SELECT COUNT(*) AS pending_count
              FROM signing_request
@@ -47696,13 +48240,39 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
         );
         const pendingCount = Number(pendingRow?.pending_count || 0);
         if (pendingCount === 0 && caseRow?.application_id) {
-          await pool.query(
-            `UPDATE iset_application
-                SET status = 'in_review',
-                    row_version = row_version + 1
-              WHERE id = ?`,
-            [caseRow.application_id]
-          );
+          const updates = [];
+          if (shouldResumeReview) {
+            updates.push(`status = 'in_review'`);
+          }
+          if (shouldClearDocsRequested) {
+            updates.push('docs_requested_active = 0', 'docs_requested_cleared_at = NOW()');
+          }
+          if (updates.length) {
+            updates.push('row_version = row_version + 1');
+            await pool.query(
+              `UPDATE iset_application SET ${updates.join(', ')} WHERE id = ?`,
+              [caseRow.application_id]
+            );
+          }
+          if (shouldClearDocsRequested) {
+            const trackingId = await fetchTrackingIdForCase(caseRow.application_id, caseId);
+            await captureCaseEvent({
+              type: 'document_request_cleared',
+              caseId,
+              actorId: userId,
+              actorType: 'applicant',
+              payload: {
+                tracking_id: trackingId,
+                application_id: caseRow.application_id,
+                case_id: caseId,
+                docs_requested_at: toIsoDateTime(caseRow?.docs_requested_at),
+                docs_requested_cleared_at: new Date().toISOString(),
+                source: docsRequestedSource,
+                message: 'Document request cleared (all forms signed).'
+              },
+              trackingId
+            });
+          }
         }
       }
     }
@@ -47840,6 +48410,16 @@ app.put('/api/cases/:id', async (req, res) => {
   let normalizedStatusLower = null;
   let statusChanged = false;
   let applicationStatusChanged = false;
+  let docsRequestedChanged = false;
+  let docsRequestedChangeType = null;
+  let beforeDocsRequestedActive = false;
+  let beforeDocsRequestedAt = null;
+  let beforeDocsRequestedClearedAt = null;
+  let beforeDocsRequestedSource = null;
+  let docsRequestedSource = null;
+  let docsRequestedFieldPresent = false;
+  let docsRequestedValue = null;
+  let incomingDocsRequestedSource = null;
   let bumpApplicationRowVersion = false;
   let newRowVersion = null;
   let applicationId = null;
@@ -47866,7 +48446,12 @@ app.put('/api/cases/:id', async (req, res) => {
 
     const [[existingCase]] = await conn.query(
       `SELECT c.status, c.application_id, c.client_id, c.assigned_to_user_id, c.case_context_json,
-              a.status AS application_status, a.row_version,
+              a.status AS application_status,
+              a.row_version,
+              a.docs_requested_active AS docs_requested_active,
+              a.docs_requested_at AS docs_requested_at,
+              a.docs_requested_cleared_at AS docs_requested_cleared_at,
+              a.docs_requested_source AS docs_requested_source,
               al.owner_user_id AS lock_owner_user_id,
               al.owner_display_name AS lock_owner_display_name,
               al.owner_email AS lock_owner_email,
@@ -47886,6 +48471,10 @@ app.put('/api/cases/:id', async (req, res) => {
     beforeApplicationStatus = normaliseCaseStatusValue(existingCase.application_status) || existingCase.application_status || null;
     const beforeStatusLower = beforeStatus ? String(beforeStatus).toLowerCase() : null;
     const beforeStatusNormalised = normaliseCaseStatusValue(beforeStatus);
+    beforeDocsRequestedActive = Number(existingCase.docs_requested_active || 0) === 1;
+    beforeDocsRequestedAt = existingCase.docs_requested_at || null;
+    beforeDocsRequestedClearedAt = existingCase.docs_requested_cleared_at || null;
+    beforeDocsRequestedSource = existingCase.docs_requested_source || null;
     const beforeClientId = existingCase.client_id || null;
     let ensuredClientId = beforeClientId;
     applicationId = Number(existingCase.application_id);
@@ -48022,6 +48611,54 @@ app.put('/api/cases/:id', async (req, res) => {
       }
     }
 
+    if (Object.prototype.hasOwnProperty.call(body, 'docsRequested')) {
+      docsRequestedFieldPresent = true;
+      docsRequestedValue = toTinyInt(body.docsRequested);
+      if (docsRequestedValue === null) {
+        await conn.rollback();
+        return res.status(400).json({ success: false, error: 'docs_requested_invalid', lock: lockCheck.lock || null });
+      }
+      const sourceRaw = typeof body.docsRequestedSource === 'string' ? body.docsRequestedSource.trim() : '';
+      incomingDocsRequestedSource = sourceRaw || null;
+    }
+
+    if (!docsRequestedFieldPresent && applicationStatusToPersist === 'docs_requested' && !beforeDocsRequestedActive) {
+      docsRequestedFieldPresent = true;
+      docsRequestedValue = 1;
+      incomingDocsRequestedSource = 'status';
+    }
+
+    if (docsRequestedFieldPresent && applicationId) {
+      const nextActive = Number(docsRequestedValue || 0) === 1;
+      if (nextActive && !beforeDocsRequestedActive) {
+        docsRequestedSource = incomingDocsRequestedSource || 'manual';
+        await conn.query(
+          `UPDATE iset_application
+              SET docs_requested_active = 1,
+                  docs_requested_at = NOW(),
+                  docs_requested_cleared_at = NULL,
+                  docs_requested_source = ?
+            WHERE id = ?`,
+          [docsRequestedSource, applicationId]
+        );
+        docsRequestedChanged = true;
+        docsRequestedChangeType = 'set';
+        bumpApplicationRowVersion = true;
+      } else if (!nextActive && beforeDocsRequestedActive) {
+        await conn.query(
+          `UPDATE iset_application
+              SET docs_requested_active = 0,
+                  docs_requested_cleared_at = NOW()
+            WHERE id = ?`,
+          [applicationId]
+        );
+        docsRequestedChanged = true;
+        docsRequestedChangeType = 'cleared';
+        bumpApplicationRowVersion = true;
+        docsRequestedSource = beforeDocsRequestedSource || null;
+      }
+    }
+
     const assessmentKeys = [
       'assessment_date_of_assessment',
       'assessment_employment_goals',
@@ -48085,7 +48722,7 @@ app.put('/api/cases/:id', async (req, res) => {
         : null;
       return statusNorm === 'approved' || appStatusNorm === 'approved' || reviewStatusNorm === 'approve';
     })();
-    if (approvalRequested && canonicalRoleForApproval === 'Regional Coordinator') {
+    if (approvalRequested && (canonicalRoleForApproval === 'Regional Coordinator' || canonicalRoleForApproval === 'Program Administrator')) {
       let approvalCost = parseCostValue(
         body.assessment_intervention_cost_total ??
         body.intervention_cost_total ??
@@ -48099,14 +48736,29 @@ app.put('/api/cases/:id', async (req, res) => {
         );
         approvalCost = parseCostValue(costRow?.intervention_cost_total);
       }
-      if (approvalCost !== null && approvalCost >= APPROVAL_COST_THRESHOLD) {
-        await conn.rollback();
-        return res.status(403).json({
-          success: false,
-          error: 'approval_threshold_exceeded',
-          message: `Regional Coordinators cannot approve applications with total cost >= ${APPROVAL_COST_THRESHOLD}. Escalate to NWAC Administrators.`,
-          lock: lockCheck.lock || null
-        });
+      if (approvalCost !== null) {
+        if (canonicalRoleForApproval === 'Regional Coordinator' && approvalCost >= APPROVAL_COST_THRESHOLD) {
+          await conn.rollback();
+          return res.status(403).json({
+            success: false,
+            error: 'approval_threshold_exceeded',
+            message: `Regional Managers cannot approve applications with total cost >= ${APPROVAL_COST_THRESHOLD}. Escalate to NWAC Administrators.`,
+            lock: lockCheck.lock || null
+          });
+        }
+        if (canonicalRoleForApproval === 'Program Administrator' && approvalCost >= PROGRAM_ADMIN_APPROVAL_THRESHOLD) {
+          const approvalEmail = req?.auth?.email || req?.staffProfile?.email || (typeof req.get === 'function' ? (req.get('X-Dev-Email') || req.get('x-dev-email')) : null);
+          const normalizedApprovalEmail = (approvalEmail || '').trim().toLowerCase();
+          if (normalizedApprovalEmail !== PROGRAM_ADMIN_APPROVER_EMAIL) {
+            await conn.rollback();
+            return res.status(403).json({
+              success: false,
+              error: 'approval_threshold_exceeded',
+              message: `NWAC Administrators cannot approve applications with total cost >= ${PROGRAM_ADMIN_APPROVAL_THRESHOLD}. Only ${PROGRAM_ADMIN_APPROVER_EMAIL} can approve above this limit.`,
+              lock: lockCheck.lock || null
+            });
+          }
+        }
       }
     }
 
@@ -48478,6 +49130,10 @@ app.put('/api/cases/:id', async (req, res) => {
     const conflictSummaryStaffId = Number.isFinite(identity.userId) ? Number(identity.userId) : 0;
     const [[caseRow]] = await pool.query(
       `SELECT c.status, c.application_id, c.client_id, c.case_context_json, a.status AS application_status,
+              a.docs_requested_active AS docs_requested_active,
+              a.docs_requested_at AS docs_requested_at,
+              a.docs_requested_cleared_at AS docs_requested_cleared_at,
+              a.docs_requested_source AS docs_requested_source,
               COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
               COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
               a.row_version AS application_row_version,
@@ -48753,6 +49409,32 @@ app.put('/api/cases/:id', async (req, res) => {
       } catch (notifyErr) {
         console.error('[notifications] decision email failed', notifyErr?.message || notifyErr);
       }
+    }
+
+    if (docsRequestedChanged && docsRequestedChangeType) {
+      const docsRequestedAtIso = toIsoDateTime(caseRow?.docs_requested_at);
+      const docsRequestedClearedAtIso = toIsoDateTime(caseRow?.docs_requested_cleared_at);
+      const docsSource = caseRow?.docs_requested_source || docsRequestedSource || null;
+      const eventType = docsRequestedChangeType === 'set'
+        ? 'document_request_set'
+        : 'document_request_cleared';
+      const eventPayload = {
+        tracking_id: trackingId,
+        application_id: caseRow?.application_id || null,
+        case_id: caseId,
+        docs_requested_at: docsRequestedAtIso,
+        docs_requested_cleared_at: docsRequestedClearedAtIso,
+        source: docsSource || null,
+        message: docsRequestedChangeType === 'set' ? 'Documents requested.' : 'Document request cleared.'
+      };
+      await captureCaseEvent({
+        type: eventType,
+        caseId,
+        payload: eventPayload,
+        trackingId,
+        actorId,
+        actorName,
+      });
     }
 
     const submitActionRaw = body.assessment_submit_action;

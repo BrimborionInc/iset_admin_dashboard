@@ -6,6 +6,7 @@ This document captures the end-to-end status model in the ISET admin dashboard a
 
 ## 1. Overview
 - **Applications** track the intake lifecycle (`iset_application.status`). These reflect program decisions and remain separate from casework.
+- **Document requests** are tracked independently on `iset_application` so they can overlap any application status (e.g., `decision_ready` + docs requested).
 - **Cases** represent the ongoing service relationship (`iset_case.status`). The status is derived from application state and action plan activity via `recomputeCaseStatus`.
 - **Action plans** and **interventions** retain their own lifecycle fields; the case status derives from the aggregate state of action plans.
 - All primary APIs now return both application and case statuses so widgets can render the correct context without guessing.
@@ -34,8 +35,26 @@ Stored in `iset_application.status` (varchar). Canonical values:
 | `withdrawn` | Applicant withdrew; normalized to `closed` in UI. | Legacy/imported records or portal withdrawal. |
 
 > **Normalization:** `getApplicationStatusContext()` (in `src/utils/rbac.js`) lowercases/underscores incoming values and maps `withdrawn` to `closed`. SLA and queue logic also treat hold variants (`action_required`, `docs requested`, `closure notice`, `pending info`, `information requested`, `on_hold`) as assessment/hold states (see `APPLICATION_STATUS_HOLD_VALUES` in `isetadminserver.js`).
+> **Note:** `docs_requested` remains an application status option, but document-request timing is now tracked separately (see below) so requests can overlap any status.
 
-### 2.2 Case Statuses
+### 2.2 Document Request Tracking (independent of status)
+Document requests are recorded on `iset_application` to allow "docs requested" to coexist with any application status.
+
+**Fields**
+- `docs_requested_active` (bool)
+- `docs_requested_at` (datetime)
+- `docs_requested_cleared_at` (datetime)
+- `docs_requested_source` (varchar, e.g., `secure_message`, `manual`, `status`)
+
+**Sources**
+- Manual toggle in the Application Overview widget (sets `docs_requested_source = 'manual'`).
+- Secure messages with form attachments (sets `docs_requested_source = 'secure_message'` and may still move status to `docs_requested`).
+
+**Events**
+- `document_request_set` and `document_request_cleared` emitted on toggle/set/clear.
+- `document_request_reminder_due` and `document_request_closure_due` reserved for background jobs (thresholds configured via SLA settings).
+
+### 2.3 Case Statuses
 Stored in `iset_case.status`. Canonical set defined in `CASE_STATUS_DERIVED_VALUES` (see `isetadminserver.js`):
 
 | Canonical Value | Meaning | Trigger |
@@ -50,7 +69,7 @@ Stored in `iset_case.status`. Canonical set defined in `CASE_STATUS_DERIVED_VALU
 
 > **Note:** Stage/sub-stage columns are deprecated. All consumers must rely on the derived case status above.
 
-### 2.3 Action Plan Statuses
+### 2.4 Action Plan Statuses
 Persisted in `iset_case_action_plan.status`:
 
 - `draft` – optional staging state.
@@ -58,7 +77,7 @@ Persisted in `iset_case_action_plan.status`:
 - `closed` – plan was completed.
 - `archived` – plan retained for history, no updates allowed.
 
-### 2.4 Intervention Statuses
+### 2.5 Intervention Statuses
 Persisted in `iset_case_intervention.status`. Common values:
 
 - `planned`
@@ -84,7 +103,8 @@ The set is intentionally broad to accommodate funder reporting requirements; cas
 2. **Assessment Submitted** (`pending_approval`): triggered in `CoordinatorAssessmentWidget.handleSubmit`, which sends `status: 'pending_approval'` via `PUT /api/cases/:id`. Backend persists the new application status and recalculates action plan-derived case status (which typically remains `pending_approval` until approval).
 3. **Outcome Decision** (`approved` / `rejected`): `handleComplete` sends the final status; backend updates `iset_application.status` and recomputes the case status. When the outcome is **approved** the server also seeds an initial action plan and intervention from the NWAC recommendation. As of 2026‑02 the auto-generated plan always starts in `draft` (regardless of the recommended start date) and the intervention in `planned`, keeping the case in `initiated` until a caseworker explicitly activates the plan.
 4. **Manual Overrides**: The Application Overview widget can POST/PUT `status` changes via `PUT /api/cases/:id`. Locks ensure only one user manipulates state at a time.
-5. **Secure Messaging with forms**: Sending a secure message with attached forms from the Application Workspace while status is `submitted` or `in_review` updates the application status to `docs_requested` to reflect that applicant action is needed.
+5. **Secure Messaging with forms**: Sending a secure message with attached forms from the Application Workspace while status is `submitted` or `in_review` sets `docs_requested_active` and updates the application status to `docs_requested` so the applicant action is still visible.
+6. **Manual doc-request toggle**: The Application Overview widget can set/clear `docs_requested_active` without changing application status, and the secure-message flow auto-clears document requests once all signing requests are complete.
 
 ### 3.2 Case Status Derivation
 Implemented in `recomputeCaseStatus(caseId)` (see `isetadminserver.js`):
@@ -116,14 +136,17 @@ Implemented in `recomputeCaseStatus(caseId)` (see `isetadminserver.js`):
   - Application approval workflows (assessment submission & outcome completion).
 - **API Surface**:
   - `/api/cases/:id` now returns both `status` (case) and `application_status` (application). This query must always project `a.status AS application_status`; earlier omissions caused null application statuses downstream.
+  - `/api/cases/:id` returns `docs_requested_*` fields and accepts `docsRequested` + `docsRequestedSource` updates; these emit `document_request_set`/`document_request_cleared` events.
   - `/api/cases` summary list also surfaces both values for dashboards.
   - `/api/cases/:id/workspace` continues to provide the full workspace payload; ensure any new fields added here stay in sync with the case summary query.
+  - `/api/signing-requests/:id/sign` clears `docs_requested_active` for secure-message requests once all forms are signed and emits a `document_request_cleared` event.
 
 ### 4.2 Frontend
 - **Normalization**: `normaliseCasePayload` (in `ApplicationCaseDashboard`) copies `application_status` into `applicationStatus` for widgets. The dashboard caches responses in `window.__ISET_CASE_CACHE`; every code path must normalise before caching or rehydrating.
 - **Application Overview Widget**:
   - Reads `caseData.applicationStatus` preferentially, falling back to live `/api/applications/:id` data if needed.
   - On manual status change triggers `actions.refreshCaseData()` so sibling widgets update immediately.
+  - Displays a separate Docs Requested badge + toggle and persists `docs_requested_active` independently of status.
 - **Coordinator Assessment Widget**:
   - Uses `getApplicationStatusContext` and `getCaseStatusContext` to decide which panels to show.
   - Calls `actions.refreshCaseData()` after successful submit or outcome decision, ensuring the Application Overview widget reflects the new status without page reloads.

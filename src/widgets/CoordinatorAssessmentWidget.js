@@ -90,7 +90,10 @@ const APPROVED_CASE_STATUSES = new Set(['initiated', 'active', 'dormant', 'ready
 const OVERVIEW_WORD_LIMIT = 400;
 const EMPLOYMENT_GOALS_WORD_LIMIT = 400;
 const NOT_APPROVED_CASE_STATUS = 'in_review';
-const APPROVAL_COST_THRESHOLD = 25000;
+const APPROVAL_COST_THRESHOLD = 15000;
+const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
+const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
+const PROGRAM_ADMIN_ROLE_KEYS = new Set(['programadministrator', 'programadmin', 'nwacadministrator']);
 const ELIGIBILITY_ALLOWED_MIME_TYPES = [
   'application/pdf',
   'image/jpeg',
@@ -349,6 +352,11 @@ const formatCurrencyDisplay = (value) => {
   if (num === null) return '';
   return `$ ${num.toFixed(2)}`;
 };
+const formatCurrencyForLetter = (value) => {
+  const num = parseCurrencyInput(value);
+  if (num === null) return '';
+  return `$${num.toFixed(2)}`;
+};
 
 const normalizeAnswerValue = (value) => {
   if (value === null || typeof value === 'undefined') return '';
@@ -369,6 +377,86 @@ const formatReadableList = (items = []) => {
   if (list.length === 1) return list[0];
   if (list.length === 2) return `${list[0]} and ${list[1]}`;
   return `${list.slice(0, -1).join(', ')}, and ${list[list.length - 1]}`;
+};
+const SUPPORT_LABEL_OVERRIDES = {
+  TuitionFeesDirect: 'tuition',
+  TuitionFeesReimbursement: 'tuition',
+  BooksMaterialsDirect: 'books or program materials',
+  BooksMaterialsReimbursement: 'books or program materials',
+  LivingAllowance: 'living allowance',
+  Childcare: 'childcare',
+  Transportation: 'transportation',
+  WageSubsidyEmployer: 'targeted wage subsidy',
+  SpecializedEquipmentAdvance: 'specialized equipment',
+  SpecializedEquipmentReimbursement: 'specialized equipment',
+  JCPProjectCost: 'project costs',
+  SEBSupport: 'self-employment supports',
+  OtherEligibleCost: 'other eligible costs'
+};
+const getSupportLabelFromPaymentType = (type) => {
+  if (!type) return '';
+  const override = SUPPORT_LABEL_OVERRIDES[type];
+  if (override) return override;
+  const option = PAYMENT_TYPE_OPTIONS.find(entry => entry.value === type);
+  if (!option?.label) return '';
+  const base = option.label.replace(/\s*\([^)]*\)\s*/g, '').trim();
+  return formatSupportLabelForLetter(base);
+};
+const isLikelyPlaceholderText = (value) => {
+  if (!value || typeof value !== 'string') return true;
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  if (trimmed.length < 12) return true;
+  return /\b(test|testing|tbd|todo|lorem|sample)\b/i.test(trimmed);
+};
+const getPaymentExplanationForType = (type) => {
+  if (!type) return '';
+  if (/Reimbursement/i.test(type)) return 'reimbursed after you submit receipts';
+  if (/Direct/i.test(type)) return 'paid directly to the provider';
+  if (/Advance/i.test(type)) return 'paid in advance (details in your funding agreement)';
+  if (type === 'WageSubsidyEmployer') return 'paid directly to your employer';
+  if (type === 'LivingAllowance') return 'paid to you on a schedule';
+  return '';
+};
+const buildFundedSupportEntries = (costLines = []) => {
+  const lines = Array.isArray(costLines) ? costLines : [];
+  const entries = [];
+  const seen = new Set();
+  lines.forEach(line => {
+    if (!line?.type) return;
+    const amount = parseCurrencyToNumber(line.amount);
+    if (!(amount > 0)) return;
+    const label = getSupportLabelFromPaymentType(line.type);
+    if (!label) return;
+    const paymentExplanation = getPaymentExplanationForType(line.type);
+    const key = `${label}::${paymentExplanation}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push({
+      label,
+      payment_explanation: paymentExplanation || null
+    });
+  });
+  return entries;
+};
+const buildFundedSupportText = (entries = []) => {
+  const parts = Array.isArray(entries)
+    ? entries
+        .map(entry => {
+          if (!entry?.label) return '';
+          const payment = entry.payment_explanation ? ` (${entry.payment_explanation})` : '';
+          return `${entry.label}${payment}`;
+        })
+        .filter(Boolean)
+    : [];
+  return formatReadableList(parts);
+};
+const buildPaymentExplanationSummary = (entries = []) => {
+  const phrases = Array.isArray(entries)
+    ? entries.map(entry => entry?.payment_explanation).filter(Boolean)
+    : [];
+  const unique = Array.from(new Set(phrases));
+  return formatReadableList(unique);
 };
 
 const buildUuid = () => {
@@ -1066,6 +1154,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const {
     userId: currentUserId,
     displayName: currentUserName,
+    email: currentUserEmail,
     role: currentUserRole,
     groups: currentUserGroups
   } = useCurrentUser();
@@ -1078,6 +1167,9 @@ const CoordinatorAssessmentWidget = forwardRef(
     : [];
   const isIsetCoordinator = groupKeys.includes('iset_coordinator');
   const roleKey = normalizedRole.replace(/[\s_-]+/g, '');
+  const normalizedUserEmail = (currentUserEmail || '').trim().toLowerCase();
+  const isProgramAdminRole = PROGRAM_ADMIN_ROLE_KEYS.has(roleKey);
+  const canOverrideProgramAdminLimit = normalizedUserEmail === PROGRAM_ADMIN_APPROVER_EMAIL;
   const eligibilityRoleAllowlist = new Set([
     'systemadministrator',
     'sysadmin',
@@ -1114,10 +1206,20 @@ const CoordinatorAssessmentWidget = forwardRef(
     });
     return total;
   }, [interventionTotals]);
-  const isHighCostApprovalBlocked =
+  const isRegionalHighCostBlocked =
     canonicalRole === 'regional coordinator' &&
     Number.isFinite(overallCostTotal) &&
     overallCostTotal >= APPROVAL_COST_THRESHOLD;
+  const isProgramAdminHighCostBlocked =
+    isProgramAdminRole &&
+    Number.isFinite(overallCostTotal) &&
+    overallCostTotal >= PROGRAM_ADMIN_APPROVAL_THRESHOLD &&
+    !canOverrideProgramAdminLimit;
+  const approvalBlockMessage = isRegionalHighCostBlocked
+    ? `Regional Managers cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`
+    : isProgramAdminHighCostBlocked
+      ? `NWAC Administrators cannot approve applications with total cost \u2265 $${PROGRAM_ADMIN_APPROVAL_THRESHOLD.toLocaleString()}. Only ${PROGRAM_ADMIN_APPROVER_EMAIL} can approve above this limit.`
+      : null;
 
   const [interventionCodes, setInterventionCodes] = useState([]);
   const [interventionCodesLoading, setInterventionCodesLoading] = useState(false);
@@ -2132,10 +2234,10 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     const keyChanged = lastActiveLetterKeyRef.current !== letterContextKey;
     if (keyChanged || !letterBodyDirtyRef.current) {
-      const includeNextSteps = activeLetterKey === 'approval' ||
-        Boolean(activeLetterDraft.next_step_1 || activeLetterDraft.next_step_2);
-      const includeDecisionLabel = activeLetterKey === 'approval';
-      const includeReasonLabel = activeLetterKey === 'approval';
+      const includeNextSteps =
+        activeLetterKey === 'denial' && Boolean(activeLetterDraft.next_step_1 || activeLetterDraft.next_step_2);
+      const includeDecisionLabel = false;
+      const includeReasonLabel = false;
       const hasContent = hasDecisionLetterContent(activeLetterDraft);
       if (!hasContent) {
         setLetterBody('');
@@ -2582,7 +2684,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         : rawDocTypes.filter(type => type !== 'ei_verification');
       if (!docTypes.length) {
         if (!canUploadEiVerification && rawDocTypes.includes('ei_verification')) {
-          setChecklistUploadError('EI verification uploads are restricted to Program Administrators, Regional Coordinators/Managers, and System Administrators.');
+          setChecklistUploadError('EI verification uploads are restricted to NWAC Administrators, Regional Managers, and System Administrators.');
           return;
         }
         setChecklistUploadError('No document type is configured for this checklist item.');
@@ -4613,8 +4715,12 @@ const CoordinatorAssessmentWidget = forwardRef(
         const amount = parseCurrencyToNumber(value);
         return amount > 0 ? amount : null;
       };
-      const primary = proposedInterventions[0] || null;
-      const costLines = Array.isArray(primary?.costLines) ? primary.costLines : [];
+      const interventions = Array.isArray(proposedInterventions) ? proposedInterventions : [];
+      const multiInterventions = interventions.length > 1;
+      const primary = multiInterventions ? null : (interventions[0] || null);
+      const costLines = interventions.flatMap(intervention =>
+        Array.isArray(intervention?.costLines) ? intervention.costLines : []
+      );
       const sumByType = (types = []) =>
         costLines.reduce((sum, line) => {
           if (!line?.type || !types.includes(line.type)) return sum;
@@ -4651,6 +4757,9 @@ const CoordinatorAssessmentWidget = forwardRef(
         wage_other_2_label: null,
         wage_other_2_amount: null
       };
+      const fundedSupportItems = buildFundedSupportEntries(costLines);
+      const fundedSupportsText = buildFundedSupportText(fundedSupportItems);
+      const paymentExplanationText = buildPaymentExplanationSummary(fundedSupportItems);
       const totalFunding = Number.isFinite(overallCostTotal) && overallCostTotal > 0 ? overallCostTotal : null;
       const recurringDetails = null;
       const requiredDocs = requiredFundingDocsChecklistItems
@@ -4662,6 +4771,129 @@ const CoordinatorAssessmentWidget = forwardRef(
         .filter(Boolean);
       const decisionLabel = activeLetterKey === 'approval' ? 'Approval' : 'Denial';
       const decisionDate = formatDate(new Date());
+      if (!isDenialDraft) {
+        const submissionDate = (() => {
+          const raw =
+            caseData?.submitted_at ||
+            caseData?.application?.submitted_at ||
+            caseData?.application?.created_at ||
+            caseData?.created_at ||
+            null;
+          return formatDate(raw);
+        })();
+        const toReadablePaymentType = (value) => {
+          const raw = String(value || '').trim();
+          if (!raw) return '';
+          return raw.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
+        };
+        const getCostLineLabel = (type) => {
+          const label = getSupportLabelFromPaymentType(type);
+          if (label) return label;
+          const fallback = paymentTypeLabelLookup.get(String(type)) || toReadablePaymentType(type);
+          return formatSupportLabelForLetter(fallback);
+        };
+        const resolveOccurrences = (recurrence = {}) => {
+          const raw = recurrence.occurrences;
+          const parsed = Number(raw);
+          if (Number.isFinite(parsed) && parsed > 0) return parsed;
+          const startDate = formatDate(recurrence.startDate);
+          const endDate = formatDate(recurrence.endDate);
+          if (startDate && endDate) {
+            return autoOccurrencesFromDates(startDate, endDate, 'monthly') || null;
+          }
+          return null;
+        };
+        const buildCostLineDetail = (line) => {
+          if (!line?.type) return null;
+          const label = getCostLineLabel(line.type);
+          if (!label) return null;
+          const recurrenceMode = getRecurrenceModeForType(line?.type);
+          const recurrenceEnabled = Boolean(line?.recurrence?.enabled) || recurrenceMode === 'required';
+          if (recurrenceEnabled) {
+            const amount = parseCurrencyToNumber(line.amount);
+            const occurrences = resolveOccurrences(line.recurrence || {});
+            const perPeriodRaw = parseCurrencyToNumber(line?.recurrence?.amountPerPeriod);
+            if (!(amount > 0) && !(perPeriodRaw > 0)) return null;
+            let perPeriod = perPeriodRaw > 0 ? perPeriodRaw : null;
+            if (!perPeriod && occurrences && amount > 0) {
+              perPeriod = amount / occurrences;
+            }
+            const amountText = formatCurrencyForLetter(perPeriod || amount);
+            let detail = `${label}: ${amountText} paid in monthly installments`;
+            if (line.type === 'LivingAllowance') {
+              detail += ', subject to your submission of attendance reports';
+            }
+            return detail;
+          }
+          const amount = parseCurrencyToNumber(line.amount);
+          if (!(amount > 0)) return null;
+          const amountText = formatCurrencyForLetter(amount);
+          const paymentExplanation = getPaymentExplanationForType(line.type);
+          const method = paymentExplanation || 'payment method will be confirmed in your funding agreement';
+          return `${label}: ${amountText}${method ? ` (${method})` : ''}`;
+        };
+        const interventionsForLetter = interventions
+          .map(intervention => {
+            const labelBase =
+              resolveInterventionLabel(intervention?.code) ||
+              intervention?.programName ||
+              intervention?.institution ||
+              '';
+            const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+            const costLineDetails = costLines.map(buildCostLineDetail).filter(Boolean);
+            if (!labelBase && costLineDetails.length === 0) return null;
+            const startDate = formatDate(intervention?.startDate);
+            const endDate = formatDate(intervention?.endDate);
+            let summary = labelBase || 'Approved intervention';
+            if (startDate && endDate && startDate !== endDate) {
+              summary += ` (starting on ${startDate} and ending on ${endDate})`;
+            } else if (startDate) {
+              summary += ` (starting on ${startDate})`;
+            } else if (endDate) {
+              summary += ` (ending on ${endDate})`;
+            }
+            return { summary, costLineDetails };
+          })
+          .filter(Boolean);
+        const introParts = ['We are pleased to inform you that your application for ISET funding'];
+        if (trackingReference) {
+          introParts.push(`reference ${trackingReference}`);
+        }
+        if (submissionDate) {
+          introParts.push(`submitted on ${submissionDate}`);
+        }
+        const approvalIntro = `${introParts.join(' ')} has been approved.`;
+        let fundingParagraph = 'Funding has been approved for the supports listed in your application.';
+        if (interventionsForLetter.length) {
+          const lines = ['Funding has been approved for the following:'];
+          interventionsForLetter.forEach(intervention => {
+            lines.push(`- ${intervention.summary}`);
+            intervention.costLineDetails.forEach(detail => {
+              lines.push(`  - ${detail}`);
+            });
+          });
+          fundingParagraph = lines.join('\n');
+        }
+        const closingParagraph =
+          'NWAC will soon send the required funding forms for your signature so we can release the approved funding. Please check your secure messaging inbox for these documents.';
+        setLetterDrafts(prev => {
+          const current = prev?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
+          return {
+            ...prev,
+            [activeLetterKey]: {
+              ...current,
+              decision_date: current.decision_date || decisionDate,
+              letter_title: 'Letter of Approval',
+              decision_label: 'Approved',
+              decision_intro: approvalIntro,
+              decision_reason: [fundingParagraph, closingParagraph].filter(Boolean).join('\n\n'),
+              next_step_1: '',
+              next_step_2: ''
+            }
+          };
+        });
+        return;
+      }
       const denialReasonSelection = isDenialDraft
         ? DENIAL_REASON_OPTIONS.find(option => option.value === denialReasonChoice) || null
         : null;
@@ -4670,11 +4902,19 @@ const CoordinatorAssessmentWidget = forwardRef(
         ? denialReasonExplanation.trim()
         : '';
       const reasonSeed = isDenialDraft ? denialExplanation : assessment.justification;
+      const reasonSeedIsPlaceholder = !isDenialDraft && isLikelyPlaceholderText(reasonSeed || '');
       const decisionAuthority = "This decision was made under NWAC's ISET authority, based on review of the Case Manager recommendation.";
       const hasClearDenialRemedy = isDenialDraft && denialReasonChoice === 'documentation_missing';
       const optionsForward = hasClearDenialRemedy
         ? ['Provide the missing documentation and request a reassessment.']
         : [];
+      const approvedInterventions = interventions.map(item => ({
+        label: resolveInterventionLabel(item?.code) || null,
+        program_name: item?.programName || null,
+        institution: item?.institution || null,
+        start_date: item?.startDate || null,
+        end_date: item?.endDate || null
+      }));
       const contextPayload = {
         decision: decisionLabel,
         decision_date: decisionDate,
@@ -4698,12 +4938,18 @@ const CoordinatorAssessmentWidget = forwardRef(
         delivery_mode: useAssessorInterventionContext ? (primary?.deliveryMode || null) : null,
         intervention_start_date: useAssessorInterventionContext ? (primary?.startDate || null) : null,
         intervention_end_date: useAssessorInterventionContext ? (primary?.endDate || null) : null,
-        intervention_cost_total: useAssessorInterventionContext ? (totalFunding || null) : null,
+        intervention_cost_total: useAssessorInterventionContext && primary ? (totalFunding || null) : null,
         recurring_details: useAssessorInterventionContext ? recurringDetails : null,
         funding_breakdown: useAssessorInterventionContext ? fundingBreakdown : null,
+        funded_supports: useAssessorInterventionContext && fundedSupportItems.length ? fundedSupportItems : null,
+        funded_supports_text: useAssessorInterventionContext && fundedSupportsText ? fundedSupportsText : null,
+        payment_explanations_text: useAssessorInterventionContext && paymentExplanationText ? paymentExplanationText : null,
+        approved_interventions_count: useAssessorInterventionContext ? approvedInterventions.length : null,
+        approved_interventions: useAssessorInterventionContext ? approvedInterventions : null,
         required_documents: requiredDocs,
         missing_documents: missingDocs,
         decision_reason_seed: reasonSeed || null,
+        decision_reason_seed_is_placeholder: reasonSeedIsPlaceholder || null,
         decision_authority: decisionAuthority,
         denial_reason_label: denialReasonLabel,
         denial_reason_explanation: denialExplanation || null,
@@ -4711,7 +4957,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       };
       const prompt = isDenialDraft
         ? `Draft a concise denial letter for the NWAC ISET program. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2. Keep each field brief, professional, and trauma-informed.\n\nRequired content:\n- decision_intro: one short paragraph written as a letter (no labels, no lists). State that funding is not approved and reference the supports requested using applicant_requested_supports_text when available. Use lower-case common nouns for supports (for example: \"tuition\", \"books or program materials\", \"living allowance\"). Do not mention applicant_target_program unless supports are missing. Include the decision date and decision_authority in a natural sentence. Avoid formulaic phrasing like \"On <date>, funding is not approved for your request:\".\n- decision_reason: a short paragraph explaining why, using denial_reason_explanation as the source. Use denial_reason_label only as background guidance; do not quote or restate it. Do not mention labels, form fields, or the exact wording the assessor typed; paraphrase into applicant-facing language. Write in second person (\"you/your\"). If a name appears in denial_reason_explanation, replace it with \"you\". Include the effective date. If denial_reason_explanation contains a suggested remedy or referral, include it explicitly in this paragraph (paraphrased). Do not add suggestions that are not present. If options_going_forward is not empty and no suggestion is provided in denial_reason_explanation, include one short remedy sentence based on options_going_forward.\n- decision_label should be \"Not approved\" and letter_title should be \"Letter of Denial\".\n- next_step_1/next_step_2: only include if options_going_forward has clear remedies; otherwise return empty strings. Keep any assessor-provided suggestions in decision_reason, not in next_step_1/next_step_2.\n\nDo not include: reassurance about worthiness or judgment, colon-led lists, bullet lists, detailed evidence weighing, subjective language, financial amounts, hypothetical approvals, legal findings, or new reasons beyond denial_reason_explanation. If a field is unknown, omit it.\n\nContext:\n${JSON.stringify(contextPayload, null, 2)}`
-        : `Draft a concise ${decisionLabel.toLowerCase()} letter for the NWAC ISET program. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2. Keep each field brief and professional. Use decision_reason_seed as the basis for decision_reason when provided. If funding amounts are provided, mention them in the decision_intro or decision_reason. Next steps must focus on start/end dates and the documents required to release payment (use required_documents/missing_documents). Do not mention dollar amounts in next steps. Use the context below and omit unknown details.\n\nContext:\n${JSON.stringify(contextPayload, null, 2)}`;
+        : `Draft a concise approval letter for the NWAC ISET program. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2. Keep each field brief, professional, and applicant-facing.\n\nRequired content:\n- decision_intro: one short paragraph written as a letter (no labels, no lists). Start the paragraph with \"We are pleased to inform you\". State that funding is approved and list the funded supports using funded_supports_text when available. Use lower-case common nouns for supports. If approved_interventions_count > 1, include a short clause that the approval covers multiple interventions. If funded_supports_text is missing, use applicant_requested_supports_text or applicant_requested_support_detail. Avoid formulaic phrasing like \"On <date>\".\n- decision_reason: a second paragraph that always appears. Include the decision_authority sentence in natural language. If decision_reason_seed_is_placeholder is false and decision_reason_seed is present, include one applicant-facing sentence that paraphrases the justification without quoting or reusing phrases. If payment_explanations_text is present, include one sentence that explains reimbursement/direct payment using those phrases. If missing_documents is not empty, include a sentence listing the missing documents and stating they are required to release payment.\n- letter_title should be \"Letter of Approval\" and decision_label should be \"Approved\".\n- next_step_1/next_step_2: return empty strings.\n\nDo not include: Decision/Reason/Next steps labels, bullet lists, start/end date callouts, dollar amounts, internal notes/test language, or new reasons beyond decision_reason_seed. If a field is unknown, omit it.\n\nContext:\n${JSON.stringify(contextPayload, null, 2)}`;
       const resp = await apiFetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4733,11 +4979,14 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (!parsed || typeof parsed !== 'object') {
         throw new Error('AI draft returned invalid JSON.');
       }
-      const scrubJudgmentSentence = (value) => {
-        if (!isDenialDraft || typeof value !== 'string') return value;
-        return value
-          .replace(/\bThis decision is not a judgment[^.]*\.\s*/gi, '')
-          .replace(/^\s*(Decision|Reason)\s*:\s*/gim, '')
+      const scrubLetterText = (value) => {
+        if (typeof value !== 'string') return value;
+        let next = value;
+        if (isDenialDraft) {
+          next = next.replace(/\bThis decision is not a judgment[^.]*\.\s*/gi, '');
+        }
+        return next
+          .replace(/^\s*(Decision|Reason|Next steps?)\s*:\s*/gim, '')
           .replace(/[ \t]{2,}/g, ' ')
           .replace(/\n{3,}/g, '\n\n')
           .trim();
@@ -4765,9 +5014,9 @@ const CoordinatorAssessmentWidget = forwardRef(
             ...current,
             decision_date: isDenialDraft ? decisionDate : current.decision_date,
             letter_title: parsed.letter_title || current.letter_title,
-            decision_intro: scrubJudgmentSentence(parsed.decision_intro || current.decision_intro),
+            decision_intro: scrubLetterText(parsed.decision_intro || current.decision_intro),
             decision_label: parsed.decision_label || current.decision_label,
-            decision_reason: scrubJudgmentSentence(parsed.decision_reason || current.decision_reason),
+            decision_reason: scrubLetterText(parsed.decision_reason || current.decision_reason),
             next_step_1: nextStep1,
             next_step_2: nextStep2
           }
@@ -4837,10 +5086,18 @@ const CoordinatorAssessmentWidget = forwardRef(
         activeLetterKey === 'approval'
           ? 'Letter of Approval'
           : 'Letter of Denial';
+      const includeNextSteps =
+        activeLetterKey === 'denial' && Boolean(activeLetterDraft.next_step_1 || activeLetterDraft.next_step_2);
+      const messageBody = buildLetterBodyFromDraft(activeLetterDraft, {
+        includeNextSteps,
+        includeDecisionLabel: false,
+        includeReasonLabel: false
+      });
       const body =
-        activeLetterKey === 'approval'
+        messageBody ||
+        (activeLetterKey === 'approval'
           ? 'Please review your approval letter in the portal.'
-          : 'Please review your decision letter in the portal.';
+          : 'Please review your decision letter in the portal.');
       const payload = {
         subject,
         body,
@@ -5281,8 +5538,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   };
 
   const handleApproveClick = async () => {
-    if (isHighCostApprovalBlocked) {
-      setValidationAlert([`Regional Managers cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to Program Administrators.`]);
+    if (approvalBlockMessage) {
+      setValidationAlert([approvalBlockMessage]);
       return;
     }
     const outcomeValid = validateOutcomeBeforeApprove();
@@ -6399,7 +6656,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   );
 
   const letterGuidance = decisionOutcome === 'approved'
-    ? 'Write or generate a short approval letter explaining what is being approved and the next steps to release funding. Keep the letter policy and evidence based. If in doubt, please consult your manager.'
+    ? 'Write or generate a short approval letter explaining what is being approved, which supports are funded, and how payments/reimbursements work. Keep the letter policy and evidence based. If in doubt, please consult your manager.'
     : 'Write or generate a short letter explaining what is being denied and the reason for denial. Keep the letter policy and evidence based. If in doubt, please consult your manager.';
 
   const communicationStepContent = (
@@ -7264,8 +7521,8 @@ const CoordinatorAssessmentWidget = forwardRef(
                 <RadioGroup
                   value={assessment.nwacReviewStatus || ''}
                   onChange={({ detail }) => {
-                    if (detail.value === 'approve' && isHighCostApprovalBlocked) {
-                      setValidationAlert([`Regional Managers cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to Program Administrators.`]);
+                    if (detail.value === 'approve' && approvalBlockMessage) {
+                      setValidationAlert([approvalBlockMessage]);
                       return;
                     }
                     if (isNWACFieldsDisabled) return;
@@ -7669,7 +7926,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               header="Employment insurance eligibility not checked"
               statusIconAriaLabel="Error"
             >
-              Assessment sections are locked until a Program Administrator, Regional Coordinator/Manager, or System Administrator sets ESDC eligibility.
+              Assessment sections are locked until a NWAC Administrator, Regional Manager, or System Administrator sets ESDC eligibility.
             </Alert>
             <Box margin={{ bottom: 's' }} />
           </>

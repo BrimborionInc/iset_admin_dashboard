@@ -13,6 +13,8 @@ import {
   StatusIndicator,
   Select,
   FormField,
+  Input,
+  Textarea,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
@@ -20,6 +22,7 @@ import { apiFetch } from "../../../../auth/apiClient.js";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import { toCanonicalRole } from "../../../../context/RoleMatrixContext.js";
 import { usePaymentsData } from "../../../finance/widgets/PaymentsDataContext.jsx";
+import { buildApplicantWatchlistIdentity, formatSinDisplay } from "../../../../utils/applicantWatchlist.js";
 
 const AWAITING_SUBMISSION_STATUSES = new Set(["draft", "returned"]);
 
@@ -38,6 +41,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const { requests: paymentRequests, loading: paymentsLoading } = usePaymentsData();
   const currentUser = useCurrentUser();
   const [actionError, setActionError] = useState(null);
+  const [actionNotice, setActionNotice] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [validationModal, setValidationModal] = useState({
     visible: false,
@@ -56,6 +60,10 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [assignError, setAssignError] = useState(null);
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [selectedAssignee, setSelectedAssignee] = useState(null);
+  const [watchlistModalOpen, setWatchlistModalOpen] = useState(false);
+  const [watchlistNotes, setWatchlistNotes] = useState("");
+  const [watchlistError, setWatchlistError] = useState(null);
+  const [watchlistSaving, setWatchlistSaving] = useState(false);
   const canonicalRole = toCanonicalRole(currentUser?.role || null);
   const isSystemAdmin = canonicalRole === "System Administrator";
   const isProgramAdmin = canonicalRole === "Program Administrator";
@@ -128,6 +136,28 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   })();
   const caseNumber = caseData?.caseNumber || (caseData?.id ? `CASE-${caseData.id}` : "-");
   const clientName = caseData?.client?.name ?? "Unknown client";
+  const watchlistIdentity = useMemo(
+    () =>
+      buildApplicantWatchlistIdentity({
+        caseContext: caseData?.caseContext,
+        fallbackName: caseData?.applicant_name || caseData?.applicantName || clientName,
+        client: caseData?.client,
+      }),
+    [caseData?.applicant_name, caseData?.applicantName, caseData?.caseContext, caseData?.client, clientName]
+  );
+  const watchlistCaseId = caseData?.id ?? null;
+  const watchlistApplicationId = caseData?.applicationId ?? caseData?.application_id ?? null;
+  const watchlistReady =
+    Boolean(watchlistIdentity.fullName) &&
+    Boolean(watchlistIdentity.dob) &&
+    Boolean(watchlistIdentity.sin) &&
+    watchlistIdentity.sin.length === 9;
+  const canAddToWatchlist = Boolean(watchlistCaseId || watchlistApplicationId);
+  const watchlistDisplayName = watchlistIdentity.fullName || "Unavailable";
+  const watchlistDisplayDob = watchlistIdentity.dob || "Unavailable";
+  const watchlistDisplaySin = formatSinDisplay(watchlistIdentity.sin) || "Unavailable";
+  const watchlistExplanation =
+    "Adding an applicant or participant to the watchlist means their future applications will be flagged for administrator review. Use this when the applicant owes money to the program or when there are similar risk concerns. If a new application is received with the same Social Insurance Number, administrators will be alerted automatically.";
   const formatPlanStatus = value => {
     if (!value) return "Unknown";
     return String(value)
@@ -417,6 +447,9 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     if (canAssign) {
       items.push({ id: "assign", text: "Assign / reassign" });
     }
+    if (canAddToWatchlist) {
+      items.push({ id: "add-watchlist", text: "Add applicant to watchlist" });
+    }
     if (canPropose) {
       items.push({ id: "propose-intervention", text: "Propose new intervention" });
     }
@@ -445,6 +478,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     isSystemAdmin,
     isProgramAdmin,
     isRegionalManager,
+    canAddToWatchlist,
   ]);
 
   const compliance = caseData?.compliance ?? {};
@@ -751,6 +785,64 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     );
   }, []);
 
+  const handleWatchlistSubmit = useCallback(async () => {
+    if (!watchlistReady) {
+      setWatchlistError("Name, date of birth, and SIN are required to add to the watchlist.");
+      return;
+    }
+    setWatchlistSaving(true);
+    setWatchlistError(null);
+    try {
+      const response = await apiFetch("/api/applicant-watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caseId: watchlistCaseId,
+          applicationId: watchlistApplicationId,
+          fullName: watchlistIdentity.fullName,
+          firstName: watchlistIdentity.firstName,
+          lastName: watchlistIdentity.lastName,
+          dob: watchlistIdentity.dob,
+          sin: watchlistIdentity.sin,
+          notes: watchlistNotes.trim() || null,
+        }),
+      });
+      if (response.ok) {
+        setActionNotice({ type: "success", text: "Applicant added to the watchlist." });
+        setWatchlistModalOpen(false);
+        setWatchlistNotes("");
+        return;
+      }
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (_) {}
+      if (response.status === 409) {
+        setWatchlistError("This applicant is already on the watchlist.");
+        return;
+      }
+      if (response.status === 400 && payload?.error === "identity_missing") {
+        setWatchlistError("Name, date of birth, and SIN are required to add to the watchlist.");
+        return;
+      }
+      if (response.status === 400 && payload?.error === "notes_too_long") {
+        setWatchlistError(`Notes must be ${payload.max || 2000} characters or fewer.`);
+        return;
+      }
+      setWatchlistError("Unable to add to the watchlist. Please try again.");
+    } catch (_) {
+      setWatchlistError("Unable to add to the watchlist. Please try again.");
+    } finally {
+      setWatchlistSaving(false);
+    }
+  }, [
+    watchlistReady,
+    watchlistCaseId,
+    watchlistApplicationId,
+    watchlistIdentity,
+    watchlistNotes,
+  ]);
+
   const handleQuickAction = useCallback(
     async ({ detail }) => {
       if (!detail?.id) return;
@@ -834,6 +926,11 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         requestLayoutSwitch("documentsMessages");
       } else if (detail.id === "esdc-validation") {
         requestLayoutSwitch("esdcValidation");
+      } else if (detail.id === "add-watchlist") {
+        setWatchlistError(null);
+        setWatchlistNotes("");
+        setWatchlistModalOpen(true);
+        setActionNotice(null);
       }
     },
     [
@@ -847,6 +944,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       selectedActionPlanId,
       caseData,
       requestLayoutSwitch,
+      setActionNotice,
     ]
   );
 
@@ -899,6 +997,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           </Alert>
         ) : null}
         {actionLoading ? <StatusIndicator type="loading">Updating case…</StatusIndicator> : null}
+        {actionNotice ? <StatusIndicator type={actionNotice.type}>{actionNotice.text}</StatusIndicator> : null}
         {actionError ? <StatusIndicator type="error">{actionError}</StatusIndicator> : null}
         {error ? (
           <StatusIndicator type="error">{error}</StatusIndicator>
@@ -965,6 +1064,70 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
                 statusType={assignLoading ? "loading" : "finished"}
                 filteringType="auto"
                 disabled={assignLoading}
+              />
+            </FormField>
+          </SpaceBetween>
+        </Modal>
+        <Modal
+          visible={watchlistModalOpen}
+          onDismiss={() => {
+            if (watchlistSaving) return;
+            setWatchlistModalOpen(false);
+            setWatchlistNotes("");
+            setWatchlistError(null);
+          }}
+          header="Add applicant to watchlist"
+          closeAriaLabel="Close watchlist modal"
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button
+                onClick={() => {
+                  if (watchlistSaving) return;
+                  setWatchlistModalOpen(false);
+                  setWatchlistNotes("");
+                  setWatchlistError(null);
+                }}
+                disabled={watchlistSaving}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={watchlistSaving}
+                disabled={watchlistSaving || !watchlistReady}
+                onClick={handleWatchlistSubmit}
+              >
+                Add to watchlist
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            <Box>{watchlistExplanation}</Box>
+            {watchlistError ? <Alert type="error">{watchlistError}</Alert> : null}
+            {!watchlistReady ? (
+              <Alert type="warning">
+                Name, date of birth, and SIN are required before adding an applicant to the watchlist.
+              </Alert>
+            ) : null}
+            <FormField label="Applicant name">
+              <Input value={watchlistDisplayName} readOnly />
+            </FormField>
+            <FormField label="Date of birth">
+              <Input value={watchlistDisplayDob} readOnly />
+            </FormField>
+            <FormField label="Social Insurance Number">
+              <Input value={watchlistDisplaySin} readOnly />
+            </FormField>
+            <FormField
+              label="Notes"
+              description="Optional context for administrators reviewing this watchlist entry."
+            >
+              <Textarea
+                value={watchlistNotes}
+                onChange={({ detail }) => setWatchlistNotes(detail.value)}
+                placeholder="Add internal notes (optional)"
+                rows={4}
               />
             </FormField>
           </SpaceBetween>

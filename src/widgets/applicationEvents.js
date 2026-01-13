@@ -151,6 +151,34 @@ const formatEventMessage = (event, actorDisplay) => {
         : `Status updated to ${toLabel}`;
       return ensureSentence(`${base}${actorSuffix}`);
     }
+    case 'document_request_set': {
+      const sourceRaw = trimValue(payload.source);
+      const sourceLabel = sourceRaw ? sourceRaw.replace(/_/g, ' ') : '';
+      const baseMessage = trimValue(payload.message) || 'Documents requested';
+      const trimmedBase = baseMessage.replace(/[.!?]+$/, '');
+      const base = sourceLabel && !baseMessage.toLowerCase().includes(sourceLabel)
+        ? `${trimmedBase} (source: ${sourceLabel})`
+        : baseMessage;
+      return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
+    }
+    case 'document_request_cleared': {
+      const sourceRaw = trimValue(payload.source);
+      const sourceLabel = sourceRaw ? sourceRaw.replace(/_/g, ' ') : '';
+      const baseMessage = trimValue(payload.message) || 'Document request cleared';
+      const trimmedBase = baseMessage.replace(/[.!?]+$/, '');
+      const base = sourceLabel && !baseMessage.toLowerCase().includes(sourceLabel)
+        ? `${trimmedBase} (source: ${sourceLabel})`
+        : baseMessage;
+      return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
+    }
+    case 'document_request_reminder_due': {
+      const base = trimValue(payload.message) || 'Document request reminder due';
+      return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
+    }
+    case 'document_request_closure_due': {
+      const base = trimValue(payload.message) || 'Document request closure due';
+      return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
+    }
     case 'case_assigned': {
       const toAssignee = trimValue(payload.to_assignee_name) || trimValue(payload.to_assignee_email) || 'assigned staff member';
       const fromAssignee = trimValue(payload.from_assignee_name) || trimValue(payload.from_assignee_email);

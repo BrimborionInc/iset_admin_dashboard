@@ -97,6 +97,18 @@ const SLA_STAGE_PLACEHOLDER = [
     target_days: 2,
     description: "Time from submission to issue the program decision.",
   },
+  {
+    stage_key: "docs_request_reminder",
+    display_name: "Docs requested reminder",
+    target_days: 7,
+    description: "Emit the reminder-due event X days after documents are requested.",
+  },
+  {
+    stage_key: "docs_request_closure",
+    display_name: "Docs requested closure",
+    target_days: 28,
+    description: "Emit the mark-for-closure event X days after documents are requested.",
+  },
 ];
 
 const SLA_STAGE_ALLOWLIST = new Set(SLA_STAGE_PLACEHOLDER.map(item => item.stage_key));

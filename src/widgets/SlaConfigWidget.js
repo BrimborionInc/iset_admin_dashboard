@@ -57,7 +57,7 @@ export default function SlaConfigWidget({
     ) : undefined;
 
   const orderedItems = useMemo(() => {
-    const order = ['assignment', 'assessment', 'program_decision'];
+    const order = ['assignment', 'assessment', 'program_decision', 'docs_request_reminder', 'docs_request_closure'];
     const index = key => {
       const i = order.indexOf(key);
       return i === -1 ? Number.MAX_SAFE_INTEGER : i;

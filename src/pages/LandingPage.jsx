@@ -44,11 +44,22 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.5.0 (31 Dec 2025)',
-      description: 'Release 0.5.0 focuses on homepage monitoring, queue workflows, and admin tooling improvements.',
+      sectionTitle: 'Release Notes - v0.5.1 (12 Jan 2026)',
+      description: 'Release 0.5.1 focuses on fixes identified for the application assessment functionality.',
       features: {
         heading: 'What’s New',
         sections: [
+          {
+            title: 'Application assessment fixes',
+            paragraphs: [
+              'Multiple interventions can now be proposed in a single assessment.',
+              'Each proposed intervention can be costed with individual line items.',
+              'SIN watchlists now flag matches during assessment workflows.',
+              'Approval and denial letter handling is more reliable.',
+              'Client Application Form population is more accurate and consistent.',
+              'Application submissions are blocked until the file upload list is complete.'
+            ]
+          },
           {
             title: 'Homepage monitoring refresh',
             paragraphs: [
@@ -167,11 +178,22 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.5.0 (31 décembre 2025)',
-      description: 'La version 0.5.0 met l’accent sur la surveillance de l’accueil, les files de travail et les outils d’administration.',
+      sectionTitle: 'Notes de version - v0.5.1 (12 janvier 2026)',
+      description: 'La version 0.5.1 se concentre sur des correctifs liés à la fonctionnalité d’évaluation des demandes.',
       features: {
         heading: 'Quoi de neuf',
         sections: [
+          {
+            title: 'Correctifs pour l’évaluation des demandes',
+            paragraphs: [
+              'Plusieurs interventions peuvent désormais être proposées dans une seule évaluation.',
+              'Chaque intervention peut être budgétée avec des lignes de coûts distinctes.',
+              'Les listes de surveillance NAS (SIN) signalent maintenant les correspondances.',
+              'Le traitement des lettres d’approbation et de refus est plus fiable.',
+              'Le préremplissage du formulaire de demande client est amélioré.',
+              'La soumission des demandes est bloquée tant que la liste des téléversements n’est pas complète.'
+            ]
+          },
           {
             title: 'Actualisation de l’accueil et des files de travail',
             paragraphs: [

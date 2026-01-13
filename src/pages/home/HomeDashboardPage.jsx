@@ -4,6 +4,8 @@ import Board from '@cloudscape-design/board-components/board';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../../auth/cognito';
 import { apiFetch } from '../../auth/apiClient';
 import useCurrentUser from '../../hooks/useCurrentUser';
+import { getRoleDisplayName } from '../../utils/roleDisplay';
+import { formatSinDisplay } from '../../utils/applicantWatchlist';
 import ProgramAdminWorkQueueWidget, { PROGRAM_ADMIN_BUCKETS, PROGRAM_ADMIN_SAMPLE_ITEMS } from './widgets/ProgramAdminWorkQueueWidget';
 import IsetCoordinatorWorkQueueWidget, { ISET_COORDINATOR_BUCKETS, ISET_COORDINATOR_SAMPLE_ITEMS } from './widgets/IsetCoordinatorWorkQueueWidget';
 import WorkQueueItemsTableWidget from './widgets/WorkQueueItemsTableWidget';
@@ -25,7 +27,7 @@ const WIDGET_REGISTRY = {
         id: 'iset-coordinator-work-queue',
         component: IsetCoordinatorWorkQueueWidget,
         title: 'Work Queue (ISET Coordinator)',
-        description: 'Scaffolded queue buckets for ISET Coordinators (Application Assessors).',
+        description: 'Scaffolded queue buckets for ISET Coordinators.',
         defaultRowSpan: 16,
         defaultColumnSpan: 1
     },
@@ -48,8 +50,8 @@ const WIDGET_REGISTRY = {
     'my-watchlist': {
         id: 'my-watchlist',
         component: MyWatchlistWidget,
-        title: 'My Watchlist',
-        description: 'Cases and applications you have flagged for follow-up.',
+        title: 'My Flagged Applications',
+        description: 'Applicants you flag appear here, and you will receive notifications as if you were the assigned Case Manager.',
         defaultRowSpan: 5,
         defaultColumnSpan: 3
     },
@@ -65,7 +67,7 @@ const WIDGET_REGISTRY = {
         id: 'dev-task-tracker',
         component: DevTaskTrackerWidget,
         title: 'Development Tracker',
-        description: 'Track internal development tasks. Visible to System Admins.',
+        description: 'Track internal development tasks. Visible to System Administrators.',
         defaultRowSpan: 6,
         defaultColumnSpan: 4
     },
@@ -528,7 +530,9 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 const ownerLabel =
                     row.assigned_user_email ||
                     row.assigned_user_display_name ||
-                    (row.current_owner_role ? row.current_owner_role.toString().replace(/_/g, ' ') : 'Program Admin');
+                    (row.current_owner_role
+                      ? getRoleDisplayName(row.current_owner_role.toString().replace(/_/g, ' '))
+                      : 'NWAC Administrator');
                 return {
                     id: `esc-${row.id || idx}`,
                     title: `${tracking} · ${applicantName}`,
@@ -683,6 +687,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         owner: row.assigned_user_email || 'You',
                         assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
                         status: row.application_status || row.status || 'Submitted',
+                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
@@ -765,6 +773,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         owner: row.assigned_user_email || 'You',
                         assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
                         status: row.application_status || row.status || 'Submitted',
+                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
@@ -847,6 +859,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         owner: row.assigned_user_email || 'You',
                         assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
                         status: row.application_status || row.status || 'Action required',
+                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
@@ -929,6 +945,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         owner: row.assigned_user_email || 'You',
                         assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
                         status: row.application_status || row.status || 'Submitted',
+                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
@@ -1092,6 +1112,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         owner: row.assigned_user_email || 'You',
                         assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
                         status: row.application_status || row.status || 'Pending approval',
+                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
@@ -1187,6 +1211,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         owner: row.assigned_user_email || 'You',
                         assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
                         status: 'Funding agreement pending',
+                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
@@ -1362,6 +1390,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         owner: row.assigned_user_email || 'Unassigned',
                         assigned_user_id: row.assigned_user_id || null,
                         status: row.application_status || row.status || 'Submitted',
+                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
                         dueDate: row.nextActionDueAt || null,
                         submittedAt: submitted,
                         summary: submitted ? `Submitted ${submitted}` : 'Unassigned submission',
@@ -1684,6 +1716,153 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
             return;
         }
         let ignore = false;
+        const loadWatchlistHits = async () => {
+            try {
+                const response = await apiFetch('/api/dashboard/watchlist-hit-items', {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                const items = Array.isArray(payload?.items) ? payload.items : [];
+                const mapped = items.map((row, idx) => {
+                    const tracking =
+                        row.trackingId ||
+                        row.tracking_id ||
+                        row.caseNumber ||
+                        row.case_number ||
+                        row.applicationId ||
+                        row.application_id ||
+                        row.caseId ||
+                        row.case_id ||
+                        `watch-${idx}`;
+                    const applicantName =
+                        row.applicant_name ||
+                        row.applicantName ||
+                        row.applicant ||
+                        tracking ||
+                        'Applicant';
+                    const submitted = row.submittedAt || row.submitted_at || null;
+                    const caseId = row.caseId || row.case_id || null;
+                    const notes = row.watchlist_notes || row.notes || null;
+                    const rawSin = row.sin || row.sin_number || row.sin_digits || null;
+                    const formattedSin = formatSinDisplay(rawSin) || rawSin || null;
+                    return {
+                        id: `watch-${tracking}`,
+                        title: applicantName,
+                        trackingId: tracking,
+                        case_id: caseId,
+                        application_id: row.applicationId || row.application_id || null,
+                        bucketId: 'ilmp-issues',
+                        type: 'WatchlistHit',
+                        applicant: applicantName,
+                        applicant_name: applicantName,
+                        region: row.address_province || row.region || '—',
+                        address_province: row.address_province || null,
+                        owner: row.owner || row.assigned_user_email || 'Unassigned',
+                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        status: row.status || row.application_status || 'Submitted',
+                        sin: formattedSin,
+                        notes: notes || null,
+                        dueDate: null,
+                        submittedAt: submitted,
+                        summary: notes || 'Watchlist match',
+                        workspacePath: caseId ? `/application-case/${caseId}` : '/case-assignment-dashboard'
+                    };
+                });
+                setProgramAdminItems(current => {
+                    const nonWatchlist = current.filter(item => item.bucketId !== 'ilmp-issues');
+                    return [...mapped, ...nonWatchlist];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'ilmp-issues': mapped.length
+                }));
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadWatchlistHits();
+        return () => { ignore = true; };
+    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+
+    useEffect(() => {
+        if (!isWorkQueueRole) {
+            return;
+        }
+        let ignore = false;
+        const loadMarkedForClosure = async () => {
+            try {
+                const response = await apiFetch('/api/dashboard/marked-for-closure-items', {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                const items = Array.isArray(payload?.items) ? payload.items : [];
+                const mapped = items.map((row, idx) => {
+                    const tracking =
+                        row.trackingId ||
+                        row.tracking_id ||
+                        row.caseNumber ||
+                        row.case_number ||
+                        row.caseId ||
+                        row.case_id ||
+                        `closure-${idx}`;
+                    const applicantName =
+                        row.applicant_name ||
+                        row.applicantName ||
+                        row.applicant ||
+                        tracking ||
+                        'Applicant';
+                    const submitted = row.submittedAt || row.submitted_at || null;
+                    const caseId = row.caseId || row.case_id || null;
+                    return {
+                        id: `closure-${tracking}`,
+                        title: applicantName,
+                        trackingId: tracking,
+                        case_id: caseId,
+                        application_id: row.applicationId || row.application_id || null,
+                        bucketId: 'marked-for-closure',
+                        type: 'Application',
+                        applicant: applicantName,
+                        applicant_name: applicantName,
+                        region: row.address_province || '—',
+                        address_province: row.address_province || null,
+                        owner: row.owner || row.assigned_user_email || 'Unassigned',
+                        assigned_user_id: row.assigned_user_id || null,
+                        status: row.status || row.application_status || 'Closure notice',
+                        dueDate: null,
+                        submittedAt: submitted,
+                        summary: 'Closure notice sent; awaiting applicant response.',
+                        workspacePath: caseId ? `/application-case/${caseId}` : '/case-assignment-dashboard'
+                    };
+                });
+                setProgramAdminItems(current => {
+                    const nonClosure = current.filter(item => item.bucketId !== 'marked-for-closure');
+                    return [...mapped, ...nonClosure];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'marked-for-closure': mapped.length
+                }));
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadMarkedForClosure();
+        return () => { ignore = true; };
+    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+
+    useEffect(() => {
+        if (!isWorkQueueRole) {
+            return;
+        }
+        let ignore = false;
         const loadEscalations = async () => {
             await fetchEscalations();
         };
@@ -1758,6 +1937,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             owner: row.assigned_user_email || 'Unassigned',
                             assigned_user_id: row.assigned_user_id || null,
                             status: row.application_status || row.status || 'Submitted',
+                            docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                            docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                            docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                            docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
                             dueDate: meta.due ? meta.due.toISOString() : null,
                             submittedAt: row.submitted_at || row.created_at || null,
                             summary: meta.status ? `SLA ${meta.status}` : 'Overdue',

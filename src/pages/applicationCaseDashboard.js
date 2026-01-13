@@ -361,11 +361,34 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     return nextData;
   };
 
+  const loadCaseResponse = useCallback(async (caseId, { retries = 1 } = {}) => {
+    let attempt = 0;
+    while (true) {
+      try {
+        const res = await apiFetch(`/api/cases/${caseId}`);
+        if (res.ok) return res;
+        if (res.status >= 500 && attempt < retries) {
+          attempt += 1;
+          await new Promise(resolve => setTimeout(resolve, 250));
+          continue;
+        }
+        throw res;
+      } catch (err) {
+        const status = typeof err?.status === 'number' ? err.status : null;
+        if ((status === null || status >= 500) && attempt < retries) {
+          attempt += 1;
+          await new Promise(resolve => setTimeout(resolve, 250));
+          continue;
+        }
+        throw err;
+      }
+    }
+  }, []);
+
   const refreshCaseData = useCallback(async () => {
     if (!id) return null;
     try {
-      const res = await apiFetch(`/api/cases/${id}`);
-      if (!res.ok) throw res;
+      const res = await loadCaseResponse(id, { retries: 1 });
       const data = await res.json();
       if (!data.assigned_user_email && location?.state?.assessorEmail) {
         data.assigned_user_email = location.state.assessorEmail;
@@ -389,10 +412,13 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
           message = body?.error || body?.message || message;
         } catch (_) {}
       }
+      if (err?.status && err.status !== 200) {
+        message = `${message} (${err.status})`;
+      }
       setLoadError(message);
       return null;
     }
-  }, [id, location?.state?.assessorEmail]);
+  }, [id, location?.state?.assessorEmail, loadCaseResponse]);
 
   useEffect(() => {
     if (!id) return;
@@ -408,10 +434,9 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     const doFetch = async () => {
       try {
         if (!inflightRef.current.has(key)) {
-          inflightRef.current.set(key, apiFetch(`/api/cases/${id}`).then(r => r));
+          inflightRef.current.set(key, loadCaseResponse(id, { retries: 1 }));
         }
         const res = await inflightRef.current.get(key);
-        inflightRef.current.delete(key);
         if (!res.ok) throw res;
         const data = await res.json();
         const hydrated = { ...data };
@@ -440,10 +465,14 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         setCaseData(cacheRef.current.get(key) || null);
         try {
           const body = resErr && resErr.json ? await resErr.json() : null;
-          setLoadError(body?.error || body?.message || 'Failed to load case');
+          const statusSuffix = resErr?.status ? ` (${resErr.status})` : '';
+          setLoadError((body?.error || body?.message || 'Failed to load case') + statusSuffix);
         } catch (_) {
-          setLoadError('Failed to load case');
+          const statusSuffix = resErr?.status ? ` (${resErr.status})` : '';
+          setLoadError(`Failed to load case${statusSuffix}`);
         }
+      } finally {
+        inflightRef.current.delete(key);
       }
     };
     doFetch();

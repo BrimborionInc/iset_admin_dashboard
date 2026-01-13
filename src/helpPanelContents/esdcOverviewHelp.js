@@ -23,7 +23,7 @@ const EsdcOverviewHelp = () => (
 );
 
 EsdcOverviewHelp.aiContext = `
-ESDC submissions overview dashboard. Audience: Program and System Admins monitoring participant ILMP readiness
+ESDC submissions overview dashboard. Audience: NWAC Administrators and System Administrators monitoring participant ILMP readiness
 and agreement reporting deadlines. Provide high-level status and quick navigation guidance.
 `;
 

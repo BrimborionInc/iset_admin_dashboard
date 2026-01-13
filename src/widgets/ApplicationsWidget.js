@@ -113,6 +113,44 @@ const toDate = value => {
   return d && !Number.isNaN(d.getTime()) ? d : null;
 };
 
+const getDaysAgo = value => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const now = Date.now();
+  const diffDays = Math.floor((now - date.getTime()) / 86400000);
+  return Math.max(diffDays, 0);
+};
+
+const formatDaysAgo = value => {
+  const days = getDaysAgo(value);
+  if (days === null) return null;
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+};
+
+const toStatusKey = value =>
+  (value || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
+
+const getDocsRequestedMeta = (row, rawStatus) => {
+  const statusKey = toStatusKey(rawStatus || row?.application_status || '');
+  const statusIndicatesDocsRequested = ['docs_requested', 'action_required', 'action_required_(docs_requested)'].includes(statusKey);
+  const active = Number(row?.docs_requested_active || 0) === 1 || statusIndicatesDocsRequested;
+  if (!active) return { active: false, label: null, color: null };
+  const requestedAt = row?.docs_requested_at || row?.docsRequestedAt || null;
+  const days = getDaysAgo(requestedAt);
+  const suffix = formatDaysAgo(requestedAt);
+  const label = `Docs Requested${suffix ? ` ${suffix}` : ''}`;
+  const color = (() => {
+    if (days === null) return 'grey';
+    if (days > 28) return 'severity-critical';
+    if (days >= 15) return 'severity-high';
+    if (days >= 7) return 'severity-medium';
+    if (days >= 3) return 'severity-low';
+    return 'grey';
+  })();
+  return { active: true, label, color };
+};
+
 const PROVINCE_LABELS = {
   ab: 'Alberta',
   bc: 'British Columbia',
@@ -403,7 +441,15 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         header: 'Status',
         cell: i => {
           const statusInfo = getStatusInfo(i);
-          return <StatusIndicator type={statusInfo.statusType}>{statusInfo.statusLabel}</StatusIndicator>;
+          const docsMeta = getDocsRequestedMeta(i, statusInfo.rawStatus);
+          return (
+            <SpaceBetween size="xxs">
+              <StatusIndicator type={statusInfo.statusType}>{statusInfo.statusLabel}</StatusIndicator>
+              {docsMeta.active ? (
+                <Badge color={docsMeta.color || 'grey'}>{docsMeta.label}</Badge>
+              ) : null}
+            </SpaceBetween>
+          );
         },
         minWidth: 140,
         sortingComparator: (a, b) => compareRows('status', a, b)
@@ -1131,7 +1177,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
             {alert.content}
           </Alert>
         ))}
-        <Box variant="small">This table lists the applications you can work on. Program Admins see all applications, Regional Managers see their assigned and regional coordinator files, and ISET Coordinators see only their assigned applications.</Box>
+        <Box variant="small">This table lists the applications you can work on. NWAC Administrators see all applications, Regional Managers see their assigned and regional files, and ISET Coordinators see only their assigned applications.</Box>
         <Box>
           <SpaceBetween direction="vertical" size="xs">
             {loading ? (

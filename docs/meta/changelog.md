@@ -16,6 +16,20 @@ Format: YYYY-MM-DD - Category: Short description
 - API: Added runtime config endpoints for coordinator assessment costing defaults.
 - Data: Removed legacy intervention type references from schema/mapping sources.
 
+## 2026-01-12
+- UX: Landing page release notes updated to v0.5.1 with application assessment fixes.
+- Feature: Document request tracking is now stored independently of application status with new `docs_requested_*` fields and event emission on set/clear.
+- UX: Application Overview and work queues now show a Docs Requested badge alongside the application status, with a manual toggle to start/clear the timer.
+- Config: SLA settings include document-request reminder/closure thresholds for future event-triggered automation.
+- UX: Role labels now consistently display System Administrators, NWAC Administrators, Regional Managers, and ISET Coordinators across the admin UI.
+- Policy: Regional Manager approval threshold now escalates above $15,000.
+- Policy: NWAC Administrators can approve up to $24,999; only sstacey@nwac.ca can approve above that limit.
+- UX: Program Admin work queue labels now read "Application Assessments" and "New Interventions" with updated hint text.
+- Feature: Added applicant watchlist quick actions in Application Overview and Case Header, backed by a new applicant watchlist table and API endpoint.
+- UX: Renamed the homepage My Watchlist widget to My Flagged Applications.
+- UX: Homepage work queue now surfaces watchlist hits (applications with watchlisted SINs) in place of ILMP issues.
+- UX: Homepage work queue now loads "Marked for Closure" applications in the queue and items table.
+
 ## 2026-01-11
 - Assessment: Wizard navigation now auto-saves assessment progress on Next/Previous to preserve cost line edits without manual saves.
 - Assessment: Empty proposed intervention shells are filtered on load/save to prevent blank rows.
@@ -33,6 +47,12 @@ Format: YYYY-MM-DD - Category: Short description
 - UX: Denial letter drafts now retain assessor-provided suggestions from the denial reason modal.
 - UX: Communication step title switches to "Send denial letter" when the decision is not approved.
 - UX: Approval letters now use a "Send approval letter" step and the funding checklist moved into a "Complete funding documentation" step that finalizes approved applications.
+- UX: Approval letter drafting now lists funded supports with plain-English payment wording and removes label-style formatting.
+- UX: Approval letters now aggregate supports across all interventions and paraphrase justification text instead of quoting it.
+- UX: Approval letters now always add a second paragraph for authority, payment explanations, and missing-document requirements.
+- UX: Approval letter drafts now use a fixed three-paragraph structure with the submission reference/date and per-intervention cost line amounts plus payment methods.
+- UX: Decision letter attachments now render funding lists with proper bullet formatting in the portal and PDFs.
+- UX: Secure messages now include the full decision letter body in the message text.
 
 ## 2026-01-10
 - Fix: Assessment intervention total now parses currency values correctly to avoid inflating approval thresholds or dashboard totals.

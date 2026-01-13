@@ -23,11 +23,15 @@ import {
 import { PROGRAM_ADMIN_BUCKETS } from './ProgramAdminWorkQueueWidget';
 import { apiFetch } from '../../../auth/apiClient';
 import { buildLockConflictMessage } from '../../../hooks/useApplicationLock';
+import useCurrentUser from '../../../hooks/useCurrentUser';
 import HomeWorkQueueItemsHelp from '../../../helpPanelContents/homeWorkQueueItemsHelp';
 
 const COLUMN_WIDTHS_STORAGE_KEY = 'work-queue-items-column-widths-v1';
 const WATCHLIST_REFRESH_EVENT = 'watchlist:refresh';
-const APPROVAL_COST_THRESHOLD = 25000;
+const APPROVAL_COST_THRESHOLD = 15000;
+const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
+const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
+const PROGRAM_ADMIN_ROLE_KEYS = new Set(['programadministrator', 'programadmin', 'nwacadministrator']);
 const ESDC_OPTIONS = [
   { label: 'CRF', value: 'CRF' },
   { label: 'EI Active Claim', value: 'EI Active Claim' },
@@ -158,14 +162,14 @@ const toBudgetPotOptions = list => {
 };
 
 const ROLE_DISPLAY_MAP = {
-  sysadmin: 'System Admin',
-  'system administrator': 'System Admin',
-  'system_admin': 'System Admin',
-  'systemadministrator': 'System Admin',
-  'program admin': 'Program Admin',
-  'program administrator': 'Program Admin',
-  'program_admin': 'Program Admin',
-  'programadministrator': 'Program Admin',
+  sysadmin: 'System Administrator',
+  'system administrator': 'System Administrator',
+  'system_admin': 'System Administrator',
+  'systemadministrator': 'System Administrator',
+  'program admin': 'NWAC Administrator',
+  'program administrator': 'NWAC Administrator',
+  'program_admin': 'NWAC Administrator',
+  'programadministrator': 'NWAC Administrator',
   'regional coordinator': 'Regional Manager',
   'regional manager': 'Regional Manager',
   'regional_coordinator': 'Regional Manager',
@@ -568,7 +572,8 @@ const columnKeysByType = {
   AwaitingApproval: ['title', 'owner', 'recommendation', 'intervention', 'cost', 'startDate', 'status', 'dueDate', 'actions'],
   InterventionApproval: ['title', 'owner', 'intervention', 'cost', 'startDate', 'status', 'dueDate', 'actions'],
   Exception: ['title', 'notes', 'region', 'owner', 'status', 'dueDate', 'actions'],
-  Escalation: ['title', 'notes', 'region', 'owner', 'status', 'dueDate', 'actions']
+  Escalation: ['title', 'notes', 'region', 'owner', 'status', 'dueDate', 'actions'],
+  WatchlistHit: ['title', 'sin', 'region', 'owner', 'status', 'notes', 'actions']
 };
 
 const mixedColumnKeys = ['title', 'type', 'owner', 'status', 'dueDate', 'actions'];
@@ -643,10 +648,15 @@ const WorkQueueItemsTableWidget = ({
   onRefresh,
   toggleHelpPanel
 }) => {
+  const { email: currentUserEmail } = useCurrentUser();
   const canonicalRole = role === 'Regional Manager' ? 'Regional Coordinator' : role;
   const isAssessor = canonicalRole === 'Application Assessor';
   const canSelectPostingContext = canonicalRole === 'Regional Coordinator' || canonicalRole === 'Program Administrator';
-  const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(normalizeRoleKey(role));
+  const roleKey = normalizeRoleKey(role);
+  const isProgramAdminRole = PROGRAM_ADMIN_ROLE_KEYS.has(roleKey);
+  const normalizedUserEmail = (currentUserEmail || '').trim().toLowerCase();
+  const canOverrideProgramAdminLimit = normalizedUserEmail === PROGRAM_ADMIN_APPROVER_EMAIL;
+  const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(roleKey);
   const [filteringText, setFilteringText] = useState('');
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null);
@@ -715,10 +725,17 @@ const WorkQueueItemsTableWidget = ({
       Info
     </Link>
   ) : undefined;
-  const approvalThresholdBlocked = useMemo(
-    () => canonicalRole === 'Regional Coordinator' && interventionCostValue !== null && interventionCostValue >= APPROVAL_COST_THRESHOLD,
-    [canonicalRole, interventionCostValue]
-  );
+  const approvalBlockMessage = useMemo(() => {
+    if (interventionCostValue === null) return null;
+    if (canonicalRole === 'Regional Coordinator' && interventionCostValue >= APPROVAL_COST_THRESHOLD) {
+      return `Regional Managers cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`;
+    }
+    if (isProgramAdminRole && interventionCostValue >= PROGRAM_ADMIN_APPROVAL_THRESHOLD && !canOverrideProgramAdminLimit) {
+      return `NWAC Administrators cannot approve applications with total cost \u2265 $${PROGRAM_ADMIN_APPROVAL_THRESHOLD.toLocaleString()}. Only ${PROGRAM_ADMIN_APPROVER_EMAIL} can approve above this limit.`;
+    }
+    return null;
+  }, [canOverrideProgramAdminLimit, canonicalRole, interventionCostValue, isProgramAdminRole]);
+  const approvalThresholdBlocked = Boolean(approvalBlockMessage);
   const selectedBucket =
     useMemo(() => bucketDefinitions.find(bucket => bucket.id === selectedBucketId) || bucketDefinitions[0] || null, [
       bucketDefinitions,
@@ -796,8 +813,8 @@ const WorkQueueItemsTableWidget = ({
     }
     if (actionId === 'escalate_up') {
       return {
-        title: 'Escalate to Program Administrator',
-        body: 'Forward this escalation to Program Administrators. Include the context and what you are requesting.',
+        title: 'Escalate to NWAC Administrator',
+        body: 'Forward this escalation to NWAC Administrators. Include the context and what you are requesting.',
         submitLabel: 'Escalate',
         noteLabel: 'Escalation notes'
       };
@@ -1136,7 +1153,11 @@ const WorkQueueItemsTableWidget = ({
               const statusInfo = getStatusInfo(item);
               const normalizedKey = normalizeStatusKey(statusInfo.rawStatus || item.status || '');
               const isDocsRequestedStatus = ['docs_requested', 'action_required', 'action_required_(docs_requested)'].includes(normalizedKey);
+              const docsRequestedActive =
+                Number(item.docs_requested_active || 0) === 1 || isDocsRequestedStatus;
               const docsRequestedSince =
+                item.docs_requested_at ||
+                item.docsRequestedAt ||
                 item.updatedAt ||
                 item.updated_at ||
                 item.last_activity_at ||
@@ -1145,21 +1166,28 @@ const WorkQueueItemsTableWidget = ({
                 item.submitted_at ||
                 item.created_at ||
                 null;
-              const docsRequestedDays = isDocsRequestedStatus ? getDaysAgo(docsRequestedSince) : null;
-              const docsRequestedSuffix = isDocsRequestedStatus ? formatDaysAgo(docsRequestedSince) : null;
-              const badgeLabel = isDocsRequestedStatus
+              const docsRequestedDays = docsRequestedActive ? getDaysAgo(docsRequestedSince) : null;
+              const docsRequestedSuffix = docsRequestedActive ? formatDaysAgo(docsRequestedSince) : null;
+              const docsRequestedLabel = docsRequestedActive
                 ? `Docs Requested${docsRequestedSuffix ? ` ${docsRequestedSuffix}` : ''}`
-                : statusInfo.statusLabel;
+                : null;
               const docsRequestedColor = (() => {
-                if (!isDocsRequestedStatus || docsRequestedDays === null) return null;
+                if (!docsRequestedActive || docsRequestedDays === null) return null;
                 if (docsRequestedDays > 28) return 'severity-critical';
                 if (docsRequestedDays >= 15) return 'severity-high';
                 if (docsRequestedDays >= 7) return 'severity-medium';
                 if (docsRequestedDays >= 3) return 'severity-low';
                 return 'grey';
               })();
-              const badgeColor = docsRequestedColor || statusColor(statusInfo.rawStatus || item.status || 'unknown');
-              return <Badge color={badgeColor}>{badgeLabel}</Badge>;
+              const statusBadgeColor = statusColor(statusInfo.rawStatus || item.status || 'unknown');
+              return (
+                <SpaceBetween size="xxs">
+                  <Badge color={statusBadgeColor}>{statusInfo.statusLabel}</Badge>
+                  {docsRequestedLabel ? (
+                    <Badge color={docsRequestedColor || 'grey'}>{docsRequestedLabel}</Badge>
+                  ) : null}
+                </SpaceBetween>
+              );
             }
           };
         }
@@ -1254,7 +1282,7 @@ const WorkQueueItemsTableWidget = ({
                                 openEscalationModal(item, 'escalate_up');
                               }}
                             >
-                              Escalate to Program Admin
+                              Escalate to NWAC Administrator
                             </Link>
                           )}
                           <Link
@@ -1631,7 +1659,7 @@ const WorkQueueItemsTableWidget = ({
     const postingContext = isAssessor ? 'external' : postingContextValue || 'external';
     const assessmentEligibility = decisionTarget?.assessment_esdc_eligibility || null;
     if (approvalThresholdBlocked && decisionValue === 'approve') {
-      setDecisionError(`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`);
+      setDecisionError(approvalBlockMessage || 'Approval not permitted.');
       return;
     }
     const requiresBudgetPot = isApprove && hasInterventionCost;
@@ -1749,7 +1777,7 @@ const WorkQueueItemsTableWidget = ({
           info={infoLink}
           description={
             selectedBucket
-              ? `${selectedBucket.label} — ${queueItems.length} item(s)`
+              ? `${selectedBucket.description || selectedBucket.label} · ${queueItems.length} item(s)`
               : 'Select a work queue to view its items.'
           }
         >
@@ -1936,7 +1964,7 @@ const WorkQueueItemsTableWidget = ({
               selectedOption={selectedDecision}
               onChange={({ detail }) => {
                 if (approvalThresholdBlocked && detail.selectedOption?.value === 'approve') {
-                  setDecisionError(`Regional Coordinators cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`);
+                  setDecisionError(approvalBlockMessage || 'Approval not permitted.');
                   return;
                 }
                 if (detail.selectedOption?.value === 'push_back') {
