@@ -52,6 +52,7 @@ const DOCUMENT_TYPE_OPTIONS_FALLBACK = [
   { value: 'acceptance_letter', label: 'Letter of Acceptance', scope: 'application' },
   { value: 'band_funding_confirmation', label: 'Band funding confirmation', scope: 'application' },
   { value: 'band_funding_denial', label: 'Band funding denial', scope: 'application' },
+  { value: 'band_funding_decision', label: 'Band funding decision', scope: 'application' },
   { value: 'medical_documentation', label: 'Medical documentation', scope: 'application' },
   { value: 'resume', label: 'Resume', scope: 'client' },
   { value: 'case_assessment', label: 'Case manager assessment', scope: 'case' },

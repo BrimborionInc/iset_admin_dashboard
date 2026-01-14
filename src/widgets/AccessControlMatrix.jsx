@@ -49,7 +49,7 @@ const ROUTE_LABELS = {
   '/template-editor': 'Template Editor',
   '/manage-security-options': 'Security Settings',
   '/manage-workflows': 'Manage Workflows',
-  '/iset/cases': 'ISET Case Portfolio',
+  '/iset/cases': 'ISET Clients',
   '/cases/:caseId': 'Case Workspace',
   '/modify-component/:id': 'Modify Intake Step',
   '/modify-workflow': 'Modify Workflow',

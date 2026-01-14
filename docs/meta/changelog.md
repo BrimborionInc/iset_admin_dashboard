@@ -16,6 +16,29 @@ Format: YYYY-MM-DD - Category: Short description
 - API: Added runtime config endpoints for coordinator assessment costing defaults.
 - Data: Removed legacy intervention type references from schema/mapping sources.
 
+## 2026-01-14
+- UX: Case portfolio Cases widget no longer shows the "New Case" action button.
+- UX: Case portfolio ISET Cases search filter now renders inside the table header.
+- UX: Case portfolio headings now use "Client" wording (ISET Clients dashboard, Clients widget, ISET Clients table).
+- UX: Case portfolio Open Interventions badge uses the dormant status grey when the client is dormant.
+- UX: Case portfolio Next action due now uses the next open case reminder date with overdue severity colors.
+- UX: Case workspace Interventions table removed Duration and ESDC Outcome columns; Cost now follows Type.
+- UX: Case workspace Interventions table Start - End shows a single date when no end date or same-day range.
+- Fix: Auto-created action plans now map application childcare support status into the childcare funding code.
+- UX: Intervention edit modal no longer asks for a title and the close hint now reads "Required to close".
+- UX: Intervention edit modal now opens in a view state with an Edit toggle; close quick actions keep only closeout fields editable.
+- UX: Closure status now shows a required hint in the intervention closeout section.
+- UX: Action plan details modal now opens in view mode with Edit and closeout flows matching the intervention modal.
+- UX: Payment packet queue now shows packet labels that include the case number.
+- Data: Case creation now sets `portfolio_region_id` from the client's province to populate reporting unit data downstream.
+- Fix: Band funding decision documents now satisfy band funding evidence and checklist requirements.
+- UX: Case header quick actions now use client wording, updated labels, and the new order.
+- UX: Payment packet "Submit to finance" now shows a loading spinner and submitting label while the email is generated.
+- UX: Payment packet detail alerts are now dismissible.
+- UX: Removed Program Payments from the Current ISET Clients navigation group.
+- Fix: Action plan result date validation now compares date-only values so same-day closeouts pass.
+- UX: Action plan closeout education level options now start at the plan's education level.
+
 ## 2026-01-12
 - UX: Landing page release notes updated to v0.5.1 with application assessment fixes.
 - Feature: Document request tracking is now stored independently of application status with new `docs_requested_*` fields and event emission on set/clear.

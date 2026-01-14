@@ -182,6 +182,13 @@ const formatCaseClientName = row => {
   return combined || row?.clientName || row?.client_name || "Unknown client";
 };
 
+const formatPacketLabel = packet => {
+  const caseNumber = packet?.caseNumber || packet?.caseId || "";
+  const packetId = packet?.id || "";
+  if (caseNumber && packetId) return `${caseNumber}-${packetId}`;
+  return caseNumber || packetId || "-";
+};
+
 const buildCaseOption = row => {
   const caseNumber = row?.caseNumber || row?.case_number || row?.id;
   const label = `Case ${caseNumber || "-"} - ${formatCaseClientName(row)}`;
@@ -235,7 +242,7 @@ const columnDefinitions = [
     header: "Packet",
     cell: item => (
       <Link href="#" onFollow={event => event.preventDefault()}>
-        {item.id}
+        {formatPacketLabel(item)}
       </Link>
     ),
   },
@@ -995,6 +1002,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         const lower = filteringText.toLowerCase();
         return (
           item.id.toLowerCase().includes(lower) ||
+          (item.caseNumber ?? "").toLowerCase().includes(lower) ||
           (item.clientName ?? "").toLowerCase().includes(lower) ||
           (item.interventionName ?? "").toLowerCase().includes(lower) ||
           (item.paymentTypes ?? []).some(type => type.toLowerCase().includes(lower)) ||
@@ -1323,7 +1331,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
           filter={
             <TextFilter
               filteringText={filteringText}
-              filteringPlaceholder="Find by packet ID, client, intervention, or risk flag"
+              filteringPlaceholder="Find by packet ID, case number, client, intervention, or risk flag"
               onChange={({ detail }) => {
                 setFilteringText(detail.filteringText);
                 setCurrentPageIndex(1);

@@ -126,7 +126,7 @@ const ProgramPaymentsPage = ({
     if (typeof updateBreadcrumbs === "function") {
       updateBreadcrumbs([
         { text: "Home", href: "/" },
-        { text: "ISET Case Portfolio", href: "/iset/cases" },
+        { text: "ISET Clients", href: "/iset/cases" },
         { text: "Program Payments", href: "/iset/payments" },
       ]);
     }

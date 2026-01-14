@@ -673,9 +673,9 @@ const AppRoutes = ({
             PortfolioDashboardPage,
             [
               { text: 'Home', href: '/' },
-              { text: 'ISET Case Portfolio', href: '/iset/cases' }
+              { text: 'ISET Clients', href: '/iset/cases' }
             ],
-            'ISET Case Portfolio',
+            'ISET Clients',
             <PortfolioDashboardHelp />,
             (
               <SpaceBetween size="xs" direction="horizontal">
@@ -704,7 +704,7 @@ const AppRoutes = ({
             ProgramPaymentsPage,
             [
               { text: 'Home', href: '/' },
-              { text: 'ISET Case Portfolio', href: '/iset/cases' },
+              { text: 'ISET Clients', href: '/iset/cases' },
               { text: 'Program Payments', href: '/iset/payments' }
             ],
             'Program Payments',
@@ -785,7 +785,7 @@ const AppRoutes = ({
             CaseWorkspacePage,
             [
               { text: 'Home', href: '/' },
-              { text: 'ISET Case Portfolio', href: '/iset/cases' },
+              { text: 'ISET Clients', href: '/iset/cases' },
               { text: 'Case workspace' }
             ],
             'Case Workspace',

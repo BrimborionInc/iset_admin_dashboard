@@ -212,7 +212,8 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
   const [prevNocLoading, setPrevNocLoading] = useState(false);
   const [resultNocOptions, setResultNocOptions] = useState([]);
   const [resultNocLoading, setResultNocLoading] = useState(false);
-  const [editEnabled, setEditEnabled] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   const [showEditConfirm, setShowEditConfirm] = useState(false);
   const [showActivateConfirm, setShowActivateConfirm] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
@@ -226,6 +227,12 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
   const fundingStreamRef = useRef(defaultForm.fundingStream);
   const budgetPotRef = useRef(defaultForm.budgetPot);
   const normalizedProvinceRef = useRef("");
+  const planStatus = (plan?.status || "").toLowerCase();
+  const isClosed = planStatus === "closed";
+  const isDraft = planStatus === "draft";
+  const isActive = planStatus === "active";
+  const isFormReadOnly = !isEditing || isClosing;
+  const isCloseoutReadOnly = !isClosing && !(isClosed && isEditing);
 
   const clearFieldError = useCallback(field => {
     setFieldErrors(prev => {
@@ -407,9 +414,11 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
 
   useEffect(() => {
     if (!visible || !plan) return;
-    const status = (plan.status || "").toLowerCase();
-    setEditEnabled(status !== "closed");
+    setIsEditing(false);
+    setIsClosing(false);
     setShowEditConfirm(false);
+    setShowActivateConfirm(false);
+    setShowCloseConfirm(false);
     const planFundingStream = plan?.fundingStream || plan?.funding_stream || "";
     const derivedAgreement = deriveAgreementNumberFromFundingStream(planFundingStream);
     const agreementNumber = plan?.agreementNumber || plan?.agreement_number || derivedAgreement;
@@ -569,6 +578,10 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
   }, [form.prevEmployment, form.prevEmploymentNocVersion]);
 
   const handlePrevNocSearch = useCallback(async query => {
+    if (isFormReadOnly) {
+      setPrevNocOptions([]);
+      return;
+    }
     if (!form.prevEmploymentNocVersion) {
       setPrevNocOptions([]);
       return;
@@ -585,9 +598,13 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     } finally {
       setPrevNocLoading(false);
     }
-  }, [form.prevEmploymentNocVersion, searchNocCodes]);
+  }, [form.prevEmploymentNocVersion, searchNocCodes, isFormReadOnly]);
 
   const handleResultNocSearch = useCallback(async query => {
+    if (isCloseoutReadOnly) {
+      setResultNocOptions([]);
+      return;
+    }
     if (!form.resultNocVersion) {
       setResultNocOptions([]);
       return;
@@ -604,7 +621,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     } finally {
       setResultNocLoading(false);
     }
-  }, [form.resultNocVersion, searchNocCodes]);
+  }, [form.resultNocVersion, searchNocCodes, isCloseoutReadOnly]);
 
   const validate = () => {
     const errors = {};
@@ -650,15 +667,25 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
         errors.resultEducationLevel = `Result education cannot be lower than the plan start level (${form.educationLevel || ""}).`;
       }
       if (form.resultDate) {
-        const today = new Date();
-        const resultDt = new Date(form.resultDate);
-        if (planStart && resultDt < new Date(planStart)) {
+        const toDateOnly = value => {
+          if (!value) return null;
+          const trimmed = String(value).trim();
+          if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+          const parsed = new Date(trimmed);
+          if (Number.isNaN(parsed.getTime())) return null;
+          return parsed.toISOString().slice(0, 10);
+        };
+        const resultDay = toDateOnly(form.resultDate);
+        const planStartDay = toDateOnly(planStart);
+        const latestEndDay = toDateOnly(latestInterventionEnd);
+        const today = toDateOnly(new Date());
+        if (planStartDay && resultDay && resultDay < planStartDay) {
           errors.resultDate = "Result date cannot be before the action plan start date.";
         }
-        if (latestInterventionEnd && resultDt < new Date(latestInterventionEnd)) {
+        if (latestEndDay && resultDay && resultDay < latestEndDay) {
           errors.resultDate = "Result date cannot be before the latest intervention end date.";
         }
-        if (resultDt > today) {
+        if (today && resultDay && resultDay > today) {
           errors.resultDate = "Result date cannot be in the future.";
         }
       }
@@ -749,8 +776,8 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     ), []);
 
   const handleSubmit = async () => {
-    if (!editEnabled) {
-      setValidationError("Editing is disabled for closed action plans. Use Edit to enable changes.");
+    if (!isEditing) {
+      setValidationError("Select Edit to make changes.");
       return null;
     }
     const validation = validate();
@@ -767,7 +794,8 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
       const payload = buildPayload();
       const updated = await updateActionPlan(plan.id, payload);
       setSaving(false);
-      setEditEnabled(false);
+      setIsEditing(false);
+      setIsClosing(false);
       initialFormRef.current = { ...form };
       if (onSaved) onSaved(updated);
       return updated;
@@ -783,19 +811,125 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     }
   };
 
+  const resetFormState = () => {
+    setForm({ ...initialFormRef.current });
+    setError(null);
+    setValidationError(null);
+    setFieldErrors({});
+    setPrevNocOptions([]);
+    setResultNocOptions([]);
+  };
+
+  const handleCancel = () => {
+    if (saving) return;
+    if (isEditing) {
+      resetFormState();
+      setIsEditing(false);
+      setIsClosing(false);
+      return;
+    }
+    setIsEditing(false);
+    setIsClosing(false);
+    setShowEditConfirm(false);
+    setShowActivateConfirm(false);
+    setShowCloseConfirm(false);
+    setCloseoutExpanded(false);
+    if (typeof onDismiss === "function") {
+      onDismiss();
+    }
+  };
+
+  const handleEditClick = () => {
+    if (isClosed) {
+      setShowEditConfirm(true);
+      return;
+    }
+    setIsEditing(true);
+    setIsClosing(false);
+  };
+
+  const beginCloseout = () => {
+    if (!isActive || saving) return;
+    if (isEditing) {
+      if (isDirty) {
+        setValidationError("Save your changes before closing out this plan.");
+        return;
+      }
+      setIsEditing(false);
+    }
+    setIsClosing(true);
+    setCloseoutExpanded(true);
+    setPlanExpanded(false);
+    setFundingExpanded(false);
+    setApplicantExpanded(false);
+    setValidationError(null);
+    setFieldErrors({});
+  };
+
+  const handleActivate = () => {
+    const validation = validate();
+    if (Object.keys(validation).length) {
+      setValidationError(Object.values(validation)[0]);
+      setFieldErrors(validation);
+      setPlanExpanded(sectionHasPlanErrors(validation));
+      setFundingExpanded(sectionHasFundingErrors(validation));
+      setApplicantExpanded(sectionHasApplicantErrors(validation));
+      return;
+    }
+    setShowActivateConfirm(true);
+  };
+
+  const handleCloseoutPrompt = () => {
+    const validation = validate();
+    if (Object.keys(validation).length) {
+      setValidationError(Object.values(validation)[0]);
+      setFieldErrors(validation);
+      setCloseoutExpanded(true);
+      setPlanExpanded(sectionHasPlanErrors(validation));
+      setFundingExpanded(sectionHasFundingErrors(validation));
+      setApplicantExpanded(sectionHasApplicantErrors(validation));
+      return;
+    }
+    const hasCloseout = form.resultCode || form.resultDate || form.resultEducationLevel;
+    if (!hasCloseout) {
+      setValidationError("Result code, date, and education level are required to close this plan.");
+      setFieldErrors(prev => ({
+        ...prev,
+        resultCode: prev.resultCode || (!form.resultCode ? "Result code is required." : undefined),
+        resultDate: prev.resultDate || (!form.resultDate ? "Result date is required." : undefined),
+        resultEducationLevel:
+          prev.resultEducationLevel ||
+          (!form.resultEducationLevel ? "Action Plan Result Education Level is required." : undefined),
+      }));
+      setCloseoutExpanded(true);
+      return;
+    }
+    setShowCloseConfirm(true);
+  };
+
   if (!visible || !plan) return null;
 
   const selectedPostingContext = POSTING_CONTEXT_OPTIONS.find(opt => opt.value === form.postingContext) || POSTING_CONTEXT_OPTIONS[0];
   const selectedPrevEmployment = PREV_EMPLOYMENT_OPTIONS.find(opt => opt.value === form.prevEmployment) || null;
   const selectedEiClaimant = EI_CLAIMANT_OPTIONS.find(opt => opt.value === form.eiClaimant) || null;
   const selectedEducationLevel = EDUCATION_OPTIONS.find(opt => opt.value === form.educationLevel) || null;
+  const startEducationCode = form.educationLevel || plan?.educationLevel || "";
+  const startEducationLabel =
+    EDUCATION_OPTIONS.find(opt => opt.value === String(startEducationCode))?.label ||
+    displayValue(startEducationCode);
+  const closeoutEducationOptions = (() => {
+    const startNum = Number(startEducationCode);
+    if (!Number.isFinite(startNum)) return RESULT_EDUCATION_OPTIONS;
+    return RESULT_EDUCATION_OPTIONS.filter(opt => Number(opt.value) >= startNum);
+  })();
   const selectedEducationProvince = PROVINCE_OPTIONS.find(opt => opt.value === form.educationProvince) || null;
   const selectedSocialAssistance = YES_NO_OPTIONS.find(opt => opt.value === form.socialAssistanceRecipient) || null;
   const selectedChildcareNeed = YES_NO_OPTIONS.find(opt => opt.value === form.childcareNeed) || null;
   const selectedChildcareFunding = CHILDCARE_FUNDING_OPTIONS.find(opt => opt.value === form.childcareFunding) || null;
   const selectedPrevEmploymentNocVersion = NOC_VERSION_OPTIONS.find(opt => opt.value === form.prevEmploymentNocVersion) || null;
   const selectedResultCode = RESULT_OPTIONS.find(opt => opt.value === form.resultCode) || null;
-  const selectedResultEducation = RESULT_EDUCATION_OPTIONS.find(opt => opt.value === form.resultEducationLevel) || null;
+  const selectedResultEducation =
+    closeoutEducationOptions.find(opt => opt.value === form.resultEducationLevel) || null;
   const selectedFutureEducation = FUTURE_EDUCATION_OPTIONS.find(opt => opt.value === form.futureEducationLevel) || null;
   const selectedResultNocVersion = NOC_VERSION_OPTIONS.find(opt => opt.value === form.resultNocVersion) || null;
   const selectedBarriers = BARRIER_OPTIONS.filter(opt => (form.barriers || []).includes(opt.value));
@@ -812,125 +946,57 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     caseId: plan.caseId || caseData?.caseNumber || caseData?.trackingId || "-",
   };
 
-  const isClosed = (plan.status || "").toLowerCase() === "closed";
-  const planStatus = (plan.status || "").toLowerCase();
-  const isDraft = planStatus === "draft";
-  const isActive = planStatus === "active";
-
   return (
     <>
       <Modal
         visible={visible}
         header="Action plan details"
-        onDismiss={
-          saving
-            ? null
-            : () => {
-                setEditEnabled(!isClosed);
-        setShowEditConfirm(false);
-        setShowActivateConfirm(false);
-        setShowCloseConfirm(false);
-        setCloseoutExpanded(false);
-        onDismiss();
-      }
-        }
+        onDismiss={handleCancel}
         closeAriaLabel="Close action plan details modal"
         size="large"
         footer={
           <SpaceBetween size="xs" direction="horizontal">
-            {isClosed && !editEnabled && (
+            {isClosed && !isEditing && (
               <StatusIndicator type="stopped">
                 Closed plans are read-only. Edit only to correct mistakes.
               </StatusIndicator>
             )}
-            <Button
-              onClick={
-                saving
-                  ? null
-                  : () => {
-                      setEditEnabled(!isClosed);
-                      setShowEditConfirm(false);
-                      setCloseoutExpanded(false);
-                      onDismiss();
-                    }
-              }
-              disabled={saving}
-            >
+            <Button onClick={handleCancel} disabled={saving}>
               Cancel
             </Button>
-            {isClosed && (
-              <Button
-                variant="primary"
-                onClick={() => setShowEditConfirm(true)}
-                disabled={saving || editEnabled}
-              >
+            {!isEditing && !isClosing && (
+              <Button variant="primary" onClick={handleEditClick} disabled={saving}>
                 Edit
               </Button>
             )}
-            {isDraft && (
-              <Button
-                variant={isDirty ? "normal" : "primary"}
-                onClick={async () => {
-                  const updated = await handleSubmit();
-                  if (!updated && isDirty) return;
-                  setShowActivateConfirm(true);
-                }}
-                loading={saving}
-                disabled={saving}
-              >
+            {isDraft && !isEditing && !isClosing && (
+              <Button variant="primary" onClick={handleActivate} disabled={saving}>
                 Activate plan
               </Button>
             )}
-            {isActive && (
-              <Button
-                variant={closeoutExpanded ? "primary" : isDirty ? "normal" : "primary"}
-                onClick={async () => {
-                  const validation = validate();
-                  if (Object.keys(validation).length) {
-                    setValidationError(Object.values(validation)[0]);
-                    setFieldErrors(validation);
-                    setCloseoutExpanded(true);
-                    setPlanExpanded(sectionHasPlanErrors(validation));
-                    setFundingExpanded(sectionHasFundingErrors(validation));
-                    setApplicantExpanded(sectionHasApplicantErrors(validation));
-                    return;
-                  }
-                  if (isDirty) {
-                    const updated = await handleSubmit();
-                    if (!updated) return;
-                  }
-                  setCloseoutExpanded(true);
-                  setPlanExpanded(false);
-                  setFundingExpanded(false);
-                  setApplicantExpanded(false);
-                  const hasCloseout = form.resultCode || form.resultDate || form.resultEducationLevel;
-                  if (!hasCloseout) {
-                    setValidationError("Result code, date, and education level are required to close this plan.");
-                    setFieldErrors(prev => ({
-                      ...prev,
-                      resultCode: prev.resultCode || (!form.resultCode ? "Result code is required." : undefined),
-                      resultDate: prev.resultDate || (!form.resultDate ? "Result date is required." : undefined),
-                      resultEducationLevel:
-                        prev.resultEducationLevel ||
-                        (!form.resultEducationLevel ? "Action Plan Result Education Level is required." : undefined),
-                    }));
-                    return;
-                  }
-                  setShowCloseConfirm(true);
-                }}
-                disabled={saving}
-              >
+            {isActive && !isEditing && !isClosing && (
+              <Button onClick={beginCloseout} disabled={saving}>
                 Closeout plan
               </Button>
             )}
-            {!(isActive && closeoutExpanded) && (
+            {isEditing && (
               <Button
-                variant={isDirty ? "primary" : "normal"}
+                variant="primary"
                 onClick={handleSubmit}
                 loading={saving}
-                disabled={isClosed && !editEnabled}
+                disabled={saving || !isDirty}
               >
                 Save changes
+              </Button>
+            )}
+            {isClosing && (
+              <Button
+                variant="primary"
+                onClick={handleCloseoutPrompt}
+                loading={saving}
+                disabled={saving}
+              >
+                Close action plan
               </Button>
             )}
           </SpaceBetween>
@@ -967,8 +1033,9 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
             <FormField label="Plan name" errorText={fieldErrors.name}>
               <Input
                 value={form.name}
-                readOnly={isClosed && !editEnabled}
+                readOnly={isFormReadOnly}
                 onChange={({ detail }) => {
+                  if (isFormReadOnly) return;
                   clearFieldError("name");
                   setForm(curr => ({ ...curr, name: detail.value }));
                 }}
@@ -983,8 +1050,9 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
             <FormField label="Start date" description="When the plan becomes active." errorText={fieldErrors.startDate}>
               <DatePicker
                 value={form.startDate}
-                disabled={isClosed && !editEnabled}
+                readOnly={isFormReadOnly}
                 onChange={({ detail }) => {
+                  if (isFormReadOnly) return;
                   clearFieldError("startDate");
                   setForm(curr => ({ ...curr, startDate: detail.value }));
                 }}
@@ -998,14 +1066,15 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
             >
               <DatePicker
                 value={form.reviewDate}
-                disabled={isClosed && !editEnabled}
+                readOnly={isFormReadOnly}
                 onChange={({ detail }) => {
+                  if (isFormReadOnly) return;
                   clearFieldError("reviewDate");
                   setForm(curr => ({ ...curr, reviewDate: detail.value }));
                 }}
-              placeholder="YYYY-MM-DD"
-            />
-          </FormField>
+                placeholder="YYYY-MM-DD"
+              />
+            </FormField>
             <FormField label="Created at">
               <Input value={displayValue(metadata.createdAt)} readOnly />
             </FormField>
@@ -1027,9 +1096,12 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
             <FormField label="Plan summary" description="High-level objective for this plan.">
               <Textarea
                 value={form.summary}
-                readOnly={isClosed && !editEnabled}
+                readOnly={isFormReadOnly}
                 rows={3}
-                onChange={({ detail }) => setForm(curr => ({ ...curr, summary: detail.value }))}
+                onChange={({ detail }) => {
+                  if (isFormReadOnly) return;
+                  setForm(curr => ({ ...curr, summary: detail.value }));
+                }}
                 placeholder="High-level objective for this plan"
               />
             </FormField>
@@ -1042,70 +1114,73 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
           onChange={({ detail }) => setFundingExpanded(detail.expanded)}
         >
           <ColumnLayout columns={3} variant="text-grid">
-          <FormField label="Funding stream" description="Select funding stream for this action plan." errorText={fieldErrors.fundingStream}>
-            <Select
-              selectedOption={selectedFundingStream}
-              options={fundingStreamSelectOptions}
-              onChange={({ detail }) => {
-                clearFieldError("fundingStream");
-                setForm(current => ({
-                  ...current,
-                  fundingStream: detail.selectedOption?.value || "",
-                  budgetPot: "",
-                  agreementNumber: "",
-                }));
-                // Changing funding stream should clear dependent fields and reload filtered pots.
-                clearFieldError("budgetPot");
-                clearFieldError("agreementNumber");
-                loadPots().catch(() => {});
-              }}
-              placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
-              statusType={fundingStreamsLoading ? "loading" : "finished"}
-              empty={fundingStreamsLoading ? undefined : "No funding streams available"}
-              disabled={isClosed && !editEnabled}
-            />
-          </FormField>
-          <FormField label="Budget pot" description="Select the budget pot for this action plan." errorText={fieldErrors.budgetPot}>
-            <Select
-              selectedOption={selectedBudgetPot}
-              options={potOptions}
-              onChange={({ detail }) => {
-                clearFieldError("budgetPot");
-                setForm(current => ({ ...current, budgetPot: detail.selectedOption?.value || "" }));
-              }}
-              filteringType="auto"
-              onLoadItems={({ detail }) => {
-                if (detail?.filteringText !== undefined) {
-                  loadPots(detail.filteringText);
-                }
-              }}
-              placeholder={potLoading ? "Loading budget pots" : "Select budget pot"}
-              statusType={potLoading ? "loading" : "finished"}
-              empty={potLoading ? undefined : "No budget pots found"}
-              disabled={isClosed && !editEnabled}
-            />
-          </FormField>
-          <FormField
-            label="Paid from"
-            description="Select whether this pot is charged externally or internally."
-            errorText={fieldErrors.postingContext}
-          >
-            {isAssessor ? (
-              <Input value="External (region/PTMA)" readOnly disabled />
-            ) : (
+            <FormField label="Funding stream" description="Select funding stream for this action plan." errorText={fieldErrors.fundingStream}>
               <Select
-                selectedOption={selectedPostingContext}
-                options={POSTING_CONTEXT_OPTIONS}
+                selectedOption={selectedFundingStream}
+                options={fundingStreamSelectOptions}
                 onChange={({ detail }) => {
-                  clearFieldError("postingContext");
-                  setForm(current => ({ ...current, postingContext: detail.selectedOption?.value || "external" }));
+                  if (isFormReadOnly) return;
+                  clearFieldError("fundingStream");
+                  setForm(current => ({
+                    ...current,
+                    fundingStream: detail.selectedOption?.value || "",
+                    budgetPot: "",
+                    agreementNumber: "",
+                  }));
+                  // Changing funding stream should clear dependent fields and reload filtered pots.
+                  clearFieldError("budgetPot");
+                  clearFieldError("agreementNumber");
+                  loadPots().catch(() => {});
                 }}
-                placeholder="Select"
-                disabled={isClosed && !editEnabled}
+                placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
+                statusType={fundingStreamsLoading ? "loading" : "finished"}
+                empty={fundingStreamsLoading ? undefined : "No funding streams available"}
+                readOnly={isFormReadOnly}
               />
-            )}
-          </FormField>
-        </ColumnLayout>
+            </FormField>
+            <FormField label="Budget pot" description="Select the budget pot for this action plan." errorText={fieldErrors.budgetPot}>
+              <Select
+                selectedOption={selectedBudgetPot}
+                options={potOptions}
+                onChange={({ detail }) => {
+                  if (isFormReadOnly) return;
+                  clearFieldError("budgetPot");
+                  setForm(current => ({ ...current, budgetPot: detail.selectedOption?.value || "" }));
+                }}
+                filteringType="auto"
+                onLoadItems={({ detail }) => {
+                  if (detail?.filteringText !== undefined) {
+                    loadPots(detail.filteringText);
+                  }
+                }}
+                placeholder={potLoading ? "Loading budget pots" : "Select budget pot"}
+                statusType={potLoading ? "loading" : "finished"}
+                empty={potLoading ? undefined : "No budget pots found"}
+                readOnly={isFormReadOnly}
+              />
+            </FormField>
+            <FormField
+              label="Paid from"
+              description="Select whether this pot is charged externally or internally."
+              errorText={fieldErrors.postingContext}
+            >
+              {isAssessor ? (
+                <Input value="External (region/PTMA)" readOnly />
+              ) : (
+                <Select
+                  selectedOption={selectedPostingContext}
+                  options={POSTING_CONTEXT_OPTIONS}
+                  onChange={({ detail }) => {
+                    if (isFormReadOnly) return;
+                    clearFieldError("postingContext");
+                    setForm(current => ({ ...current, postingContext: detail.selectedOption?.value || "external" }));
+                  }}
+                  placeholder="Select"
+                  readOnly={isFormReadOnly}
+                />
+              )}
+            </FormField>
+          </ColumnLayout>
         </ExpandableSection>
 
         <ExpandableSection
@@ -1121,16 +1196,18 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
               <Multiselect
                 options={BARRIER_OPTIONS}
                 selectedOptions={selectedBarriers}
-                onChange={({ detail }) =>
+                onChange={({ detail }) => {
+                  if (isFormReadOnly) return;
                   setForm(current => ({
                     ...current,
                     barriers: (detail.selectedOptions || []).map(opt => opt.value),
-                  }))
-                }
+                  }));
+                }}
                 inlineTokens
                 tokenLimit={5}
                 deselectAriaLabel={e => `Remove ${e.option?.label || e.option?.value}`}
                 placeholder="Select barriers"
+                readOnly={isFormReadOnly}
               />
             </FormField>
             <ColumnLayout columns={3} variant="text-grid">
@@ -1139,71 +1216,83 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                   selectedOption={selectedEiClaimant}
                   options={EI_CLAIMANT_OPTIONS}
                   onChange={({ detail }) => {
+                    if (isFormReadOnly) return;
                     clearFieldError("eiClaimant");
                     setForm(curr => ({ ...curr, eiClaimant: detail.selectedOption?.value || "" }));
                   }}
-              placeholder="Select EI status"
-            />
-          </FormField>
-          <FormField label="Social Assistance Recipient" description="Is the client a Social Assistance Recipient at the time of creation of the Action Plan?" errorText={fieldErrors.socialAssistanceRecipient}>
-            <Select
-              selectedOption={selectedSocialAssistance}
-              options={YES_NO_OPTIONS}
-              onChange={({ detail }) => {
-                clearFieldError("socialAssistanceRecipient");
-                setForm(curr => ({ ...curr, socialAssistanceRecipient: detail.selectedOption?.value || "" }));
-              }}
-              placeholder="Select"
-            />
-          </FormField>
-          <FormField label="Childcare need" description="ESDC code 0 = No, 1 = Yes." errorText={fieldErrors.childcareNeed}>
-            <Select
-              selectedOption={selectedChildcareNeed}
-              options={YES_NO_OPTIONS}
-              onChange={({ detail }) => {
-                clearFieldError("childcareNeed");
-                setForm(curr => ({ ...curr, childcareNeed: detail.selectedOption?.value || "" }));
-              }}
-              placeholder="Select"
-            />
-          </FormField>
-          {normaliseYesNoCode(form.childcareNeed) === "1" && (
-            <FormField label="Childcare funding" description="ESDC code 1–7." errorText={fieldErrors.childcareFunding}>
-              <Select
-                selectedOption={selectedChildcareFunding}
-                options={CHILDCARE_FUNDING_OPTIONS}
-                onChange={({ detail }) => {
-                  clearFieldError("childcareFunding");
-                  setForm(curr => ({ ...curr, childcareFunding: detail.selectedOption?.value || "" }));
-                }}
-                placeholder="Select"
-              />
-            </FormField>
-          )}
-          <FormField label="Education Level" description="Highest level of education attained at the time of creation of Action Plan." errorText={fieldErrors.educationLevel}>
-            <Select
-              selectedOption={selectedEducationLevel}
-              options={EDUCATION_OPTIONS}
-              onChange={({ detail }) => {
-                clearFieldError("educationLevel");
-                setForm(curr => ({ ...curr, educationLevel: detail.selectedOption?.value || "" }));
-              }}
-              placeholder="Select education level"
-            />
-          </FormField>
-          {form.educationLevel && form.educationLevel !== "1" && (
-            <FormField label="Education Province" description="Province (or area outside Canada) in which the highest level of education was attained." errorText={fieldErrors.educationProvince}>
-              <Select
-                selectedOption={selectedEducationProvince}
-                options={PROVINCE_OPTIONS}
-                onChange={({ detail }) => {
-                  clearFieldError("educationProvince");
-                  setForm(curr => ({ ...curr, educationProvince: detail.selectedOption?.value || "" }));
-                }}
-                placeholder="Select province/territory"
-              />
-            </FormField>
-          )}
+                  placeholder="Select EI status"
+                  readOnly={isFormReadOnly}
+                />
+              </FormField>
+              <FormField label="Social Assistance Recipient" description="Is the client a Social Assistance Recipient at the time of creation of the Action Plan?" errorText={fieldErrors.socialAssistanceRecipient}>
+                <Select
+                  selectedOption={selectedSocialAssistance}
+                  options={YES_NO_OPTIONS}
+                  onChange={({ detail }) => {
+                    if (isFormReadOnly) return;
+                    clearFieldError("socialAssistanceRecipient");
+                    setForm(curr => ({ ...curr, socialAssistanceRecipient: detail.selectedOption?.value || "" }));
+                  }}
+                  placeholder="Select"
+                  readOnly={isFormReadOnly}
+                />
+              </FormField>
+              <FormField label="Childcare need" description="ESDC code 0 = No, 1 = Yes." errorText={fieldErrors.childcareNeed}>
+                <Select
+                  selectedOption={selectedChildcareNeed}
+                  options={YES_NO_OPTIONS}
+                  onChange={({ detail }) => {
+                    if (isFormReadOnly) return;
+                    clearFieldError("childcareNeed");
+                    setForm(curr => ({ ...curr, childcareNeed: detail.selectedOption?.value || "" }));
+                  }}
+                  placeholder="Select"
+                  readOnly={isFormReadOnly}
+                />
+              </FormField>
+              {normaliseYesNoCode(form.childcareNeed) === "1" && (
+                <FormField label="Childcare funding" description="ESDC code 1–7." errorText={fieldErrors.childcareFunding}>
+                  <Select
+                    selectedOption={selectedChildcareFunding}
+                    options={CHILDCARE_FUNDING_OPTIONS}
+                    onChange={({ detail }) => {
+                      if (isFormReadOnly) return;
+                      clearFieldError("childcareFunding");
+                      setForm(curr => ({ ...curr, childcareFunding: detail.selectedOption?.value || "" }));
+                    }}
+                    placeholder="Select"
+                    readOnly={isFormReadOnly}
+                  />
+                </FormField>
+              )}
+              <FormField label="Education Level" description="Highest level of education attained at the time of creation of Action Plan." errorText={fieldErrors.educationLevel}>
+                <Select
+                  selectedOption={selectedEducationLevel}
+                  options={EDUCATION_OPTIONS}
+                  onChange={({ detail }) => {
+                    if (isFormReadOnly) return;
+                    clearFieldError("educationLevel");
+                    setForm(curr => ({ ...curr, educationLevel: detail.selectedOption?.value || "" }));
+                  }}
+                  placeholder="Select education level"
+                  readOnly={isFormReadOnly}
+                />
+              </FormField>
+              {form.educationLevel && form.educationLevel !== "1" && (
+                <FormField label="Education Province" description="Province (or area outside Canada) in which the highest level of education was attained." errorText={fieldErrors.educationProvince}>
+                  <Select
+                    selectedOption={selectedEducationProvince}
+                    options={PROVINCE_OPTIONS}
+                    onChange={({ detail }) => {
+                      if (isFormReadOnly) return;
+                      clearFieldError("educationProvince");
+                      setForm(curr => ({ ...curr, educationProvince: detail.selectedOption?.value || "" }));
+                    }}
+                    placeholder="Select province/territory"
+                    readOnly={isFormReadOnly}
+                  />
+                </FormField>
+              )}
               <FormField
                 label="Employment status at plan start"
                 description="The client’s employment status at the start of this action plan"
@@ -1213,6 +1302,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                   selectedOption={selectedPrevEmployment}
                   options={PREV_EMPLOYMENT_OPTIONS}
                   onChange={({ detail }) => {
+                    if (isFormReadOnly) return;
                     clearFieldError("prevEmployment");
                     clearFieldError("prevEmploymentScheduleType");
                     clearFieldError("prevEmploymentNocVersion");
@@ -1220,6 +1310,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                     setForm(curr => ({ ...curr, prevEmployment: detail.selectedOption?.value || "" }));
                   }}
                   placeholder="Select status"
+                  readOnly={isFormReadOnly}
                 />
               </FormField>
               {form.prevEmployment === "2" && (
@@ -1233,11 +1324,13 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                       selectedOption={SCHEDULE_OPTIONS.find(opt => opt.value === form.prevEmploymentScheduleType) || null}
                       options={SCHEDULE_OPTIONS}
                       onChange={({ detail }) => {
+                        if (isFormReadOnly) return;
                         clearFieldError("prevEmploymentScheduleType");
                         setForm(curr => ({ ...curr, prevEmploymentScheduleType: detail.selectedOption?.value || "" }));
                       }}
                       placeholder="Select schedule type"
                       invalid={Boolean(fieldErrors.prevEmploymentScheduleType)}
+                      readOnly={isFormReadOnly}
                     />
                   </FormField>
                   <FormField
@@ -1249,11 +1342,13 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                       selectedOption={selectedPrevEmploymentNocVersion}
                       options={NOC_VERSION_OPTIONS}
                       onChange={({ detail }) => {
+                        if (isFormReadOnly) return;
                         clearFieldError("prevEmploymentNocVersion");
                         setForm(curr => ({ ...curr, prevEmploymentNocVersion: detail.selectedOption?.value || "" }));
                       }}
                       placeholder="Select NOC version"
                       invalid={Boolean(fieldErrors.prevEmploymentNocVersion)}
+                      readOnly={isFormReadOnly}
                     />
                   </FormField>
                   <FormField
@@ -1264,6 +1359,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                     <Autosuggest
                       value={form.prevEmploymentNoc || ""}
                       onChange={({ detail }) => {
+                        if (isFormReadOnly) return;
                         clearFieldError("prevEmploymentNoc");
                         setForm(curr => ({ ...curr, prevEmploymentNoc: detail.value }));
                       }}
@@ -1275,7 +1371,8 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                       statusType={prevNocLoading ? "loading" : "finished"}
                       loadingText="Searching NOC codes"
                       expandToViewport
-                      disabled={form.prevEmployment !== "2" || !form.prevEmploymentNocVersion}
+                      disabled={!isFormReadOnly && !form.prevEmploymentNocVersion}
+                      readOnly={isFormReadOnly}
                       invalid={Boolean(fieldErrors.prevEmploymentNoc)}
                     />
                   </FormField>
@@ -1292,122 +1389,142 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
             defaultExpanded={closeoutExpanded}
             onChange={({ detail }) => setCloseoutExpanded(detail.expanded)}
           >
-          <SpaceBetween size="m">
-            <ColumnLayout columns={2} variant="text-grid">
-              <FormField label="Result code" errorText={fieldErrors.resultCode}>
-                <Select
-                  selectedOption={selectedResultCode}
-                  options={RESULT_OPTIONS}
-                  onChange={({ detail }) => {
-                    clearFieldError("resultCode");
-                    setForm(curr => ({ ...curr, resultCode: detail.selectedOption?.value || "" }));
-                  }}
-                  placeholder="Select result"
-                />
-              </FormField>
-              <FormField label="Result date" errorText={fieldErrors.resultDate}>
-                <DatePicker
-                  value={form.resultDate}
-                  onChange={({ detail }) => {
-                    clearFieldError("resultDate");
-                    setForm(curr => ({ ...curr, resultDate: detail.value }));
-                  }}
-                  placeholder="YYYY-MM-DD"
-                />
-              </FormField>
-              <FormField
-                label="Action Plan Result Education Level"
-                description={`ESDC code after completion. Participant level at plan start: ${displayValue(plan.educationLevel) || "-"}. Result cannot be lower than start.`}
-                errorText={fieldErrors.resultEducationLevel}
-              >
-                <Select
-                  selectedOption={selectedResultEducation}
-                  options={RESULT_EDUCATION_OPTIONS}
-                  onChange={({ detail }) => {
-                    clearFieldError("resultEducationLevel");
-                    setForm(curr => ({ ...curr, resultEducationLevel: detail.selectedOption?.value || "" }));
-                  }}
-                  placeholder="Select education level"
-                />
-              </FormField>
-              {form.resultCode === "4" && (
+            <SpaceBetween size="m">
+              <ColumnLayout columns={2} variant="text-grid">
+                <FormField label="Result code" errorText={fieldErrors.resultCode}>
+                  <Select
+                    selectedOption={selectedResultCode}
+                    options={RESULT_OPTIONS}
+                    onChange={({ detail }) => {
+                      if (isCloseoutReadOnly) return;
+                      clearFieldError("resultCode");
+                      setForm(curr => ({ ...curr, resultCode: detail.selectedOption?.value || "" }));
+                    }}
+                    placeholder="Select result"
+                    readOnly={isCloseoutReadOnly}
+                  />
+                </FormField>
+                <FormField label="Result date" errorText={fieldErrors.resultDate}>
+                  <DatePicker
+                    value={form.resultDate}
+                    onChange={({ detail }) => {
+                      if (isCloseoutReadOnly) return;
+                      clearFieldError("resultDate");
+                      setForm(curr => ({ ...curr, resultDate: detail.value }));
+                    }}
+                    placeholder="YYYY-MM-DD"
+                    readOnly={isCloseoutReadOnly}
+                  />
+                </FormField>
                 <FormField
-                  label="Action Plan Future Education Level"
-                  description="Required when Returned to school."
-                  errorText={fieldErrors.futureEducationLevel}
+                  label="Action Plan Result Education Level"
+                  description={`ESDC code after completion. Participant level at plan start: ${startEducationLabel}. Result cannot be lower than start.`}
+                  errorText={fieldErrors.resultEducationLevel}
                 >
                   <Select
-                    selectedOption={selectedFutureEducation}
-                    options={FUTURE_EDUCATION_OPTIONS}
+                    selectedOption={selectedResultEducation}
+                    options={closeoutEducationOptions}
                     onChange={({ detail }) => {
-                      clearFieldError("futureEducationLevel");
-                      setForm(curr => ({ ...curr, futureEducationLevel: detail.selectedOption?.value || "" }));
+                      if (isCloseoutReadOnly) return;
+                      clearFieldError("resultEducationLevel");
+                      setForm(curr => ({ ...curr, resultEducationLevel: detail.selectedOption?.value || "" }));
                     }}
-                    placeholder="Select future education level"
+                    placeholder="Select education level"
+                    readOnly={isCloseoutReadOnly}
                   />
                 </FormField>
-              )}
-              {form.resultCode === "2" && (
-                <>
+                {form.resultCode === "4" && (
                   <FormField
-                    label="Result NOC Version"
-                    description="Required when result is Employed."
-                    errorText={fieldErrors.resultNocVersion}
+                    label="Action Plan Future Education Level"
+                    description="Required when Returned to school."
+                    errorText={fieldErrors.futureEducationLevel}
                   >
                     <Select
-                      selectedOption={selectedResultNocVersion}
-                      options={NOC_VERSION_OPTIONS}
+                      selectedOption={selectedFutureEducation}
+                      options={FUTURE_EDUCATION_OPTIONS}
                       onChange={({ detail }) => {
-                        clearFieldError("resultNocVersion");
-                        setForm(curr => ({ ...curr, resultNocVersion: detail.selectedOption?.value || "" }));
+                        if (isCloseoutReadOnly) return;
+                        clearFieldError("futureEducationLevel");
+                        setForm(curr => ({ ...curr, futureEducationLevel: detail.selectedOption?.value || "" }));
                       }}
-                      placeholder="Select NOC version"
+                      placeholder="Select future education level"
+                      readOnly={isCloseoutReadOnly}
                     />
                   </FormField>
-                  <FormField
-                    label="Result NOC code"
-                    description="Required when result is Employed."
-                    errorText={fieldErrors.resultNoc}
-                  >
-                  <Autosuggest
-                    value={form.resultNoc}
+                )}
+                {form.resultCode === "2" && (
+                  <>
+                    <FormField
+                      label="Result NOC Version"
+                      description="Required when result is Employed."
+                      errorText={fieldErrors.resultNocVersion}
+                    >
+                      <Select
+                        selectedOption={selectedResultNocVersion}
+                        options={NOC_VERSION_OPTIONS}
+                        onChange={({ detail }) => {
+                          if (isCloseoutReadOnly) return;
+                          clearFieldError("resultNocVersion");
+                          setForm(curr => ({ ...curr, resultNocVersion: detail.selectedOption?.value || "" }));
+                        }}
+                        placeholder="Select NOC version"
+                        readOnly={isCloseoutReadOnly}
+                      />
+                    </FormField>
+                    <FormField
+                      label="Result NOC code"
+                      description="Required when result is Employed."
+                      errorText={fieldErrors.resultNoc}
+                    >
+                      <Autosuggest
+                        value={form.resultNoc}
+                        onChange={({ detail }) => {
+                          if (isCloseoutReadOnly) return;
+                          clearFieldError("resultNoc");
+                          setForm(curr => ({ ...curr, resultNoc: detail.value }));
+                        }}
+                        onLoadItems={({ detail }) => handleResultNocSearch(detail.filteringText)}
+                        options={resultNocOptions}
+                        placeholder={form.resultNocVersion ? "Search NOC code" : "Select NOC version first"}
+                        empty="No matches"
+                        filteringType="manual"
+                        statusType={resultNocLoading ? "loading" : "finished"}
+                        loadingText="Searching NOC codes"
+                        expandToViewport
+                        disabled={!isCloseoutReadOnly && !form.resultNocVersion}
+                        readOnly={isCloseoutReadOnly}
+                      />
+                    </FormField>
+                  </>
+                )}
+              </ColumnLayout>
+              <ColumnLayout columns={2} variant="text-grid">
+                <FormField label="Outcome summary (optional)">
+                  <Textarea
+                    value={form.outcomeSummary}
+                    rows={3}
                     onChange={({ detail }) => {
-                      clearFieldError("resultNoc");
-                      setForm(curr => ({ ...curr, resultNoc: detail.value }));
+                      if (isCloseoutReadOnly) return;
+                      setForm(curr => ({ ...curr, outcomeSummary: detail.value }));
                     }}
-                    onLoadItems={({ detail }) => handleResultNocSearch(detail.filteringText)}
-                    options={resultNocOptions}
-                    placeholder={form.resultNocVersion ? "Search NOC code" : "Select NOC version first"}
-                    empty="No matches"
-                    filteringType="manual"
-                    statusType={resultNocLoading ? "loading" : "finished"}
-                    loadingText="Searching NOC codes"
-                    expandToViewport
-                    disabled={!form.resultNocVersion}
+                    placeholder="Summarize the plan outcome"
+                    readOnly={isCloseoutReadOnly}
                   />
                 </FormField>
-                </>
-              )}
-            </ColumnLayout>
-            <ColumnLayout columns={2} variant="text-grid">
-              <FormField label="Outcome summary (optional)">
-                <Textarea
-                  value={form.outcomeSummary}
-                  rows={3}
-                  onChange={({ detail }) => setForm(curr => ({ ...curr, outcomeSummary: detail.value }))}
-                  placeholder="Summarize the plan outcome"
-                />
-              </FormField>
-              <FormField label="Closure notes (optional)">
-                <Textarea
-                  value={form.closureNotes}
-                  rows={3}
-                  onChange={({ detail }) => setForm(curr => ({ ...curr, closureNotes: detail.value }))}
-                  placeholder="Internal notes"
-                />
-              </FormField>
-            </ColumnLayout>
-          </SpaceBetween>
+                <FormField label="Closure notes (optional)">
+                  <Textarea
+                    value={form.closureNotes}
+                    rows={3}
+                    onChange={({ detail }) => {
+                      if (isCloseoutReadOnly) return;
+                      setForm(curr => ({ ...curr, closureNotes: detail.value }));
+                    }}
+                    placeholder="Internal notes"
+                    readOnly={isCloseoutReadOnly}
+                  />
+                </FormField>
+              </ColumnLayout>
+            </SpaceBetween>
           </ExpandableSection>
         )}
 
@@ -1425,7 +1542,8 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
             <Button
               variant="primary"
               onClick={() => {
-                setEditEnabled(true);
+                setIsEditing(true);
+                setIsClosing(false);
                 setShowEditConfirm(false);
               }}
             >
@@ -1501,6 +1619,8 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                     closureNotes: form.closureNotes || null,
                   };
                   const updated = await closeActionPlan(plan.id, payload);
+                  setIsClosing(false);
+                  setIsEditing(false);
                   setShowCloseConfirm(false);
                   if (onSaved) onSaved(updated);
                 } catch (err) {

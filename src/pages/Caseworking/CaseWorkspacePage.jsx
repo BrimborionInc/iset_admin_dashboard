@@ -370,7 +370,7 @@ const CaseWorkspacePage = ({
     if (typeof updateBreadcrumbs === "function") {
       updateBreadcrumbs([
         { text: "Home", href: "/" },
-        { text: "Case portfolio", href: "/iset/cases" },
+        { text: "ISET Clients", href: "/iset/cases" },
         { text: caseId ?? "Case", href: `/cases/${caseId}` },
       ]);
     }

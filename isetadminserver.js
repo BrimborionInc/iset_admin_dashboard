@@ -7933,10 +7933,23 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       'not applicable': '1',
       fnicci: '2',
       'ei/crf': '3',
+      'ei-crf': '3',
+      ei_crf: '3',
       'provincial funding / subsidy': '4',
+      'provincial funding/subsidy': '4',
+      'provincial-funding-subsidy': '4',
+      provincial_funding_subsidy: '4',
       'no funding received': '5',
+      'no-funding-received': '5',
+      no_funding_received: '5',
       'daycare space not available': '6',
-      'assisted by family / self-funded': '7'
+      'daycare-not-available': '6',
+      daycare_not_available: '6',
+      'assisted by family / self-funded': '7',
+      'assisted-by-family': '7',
+      assisted_by_family: '7',
+      'self-funded': '7',
+      self_funded: '7',
     }
   };
   const toCodeApp = (value, map) => {
@@ -8036,9 +8049,34 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     if (childcareNeed === 'no') return '0';
     return null;
   })();
+  const resolveFirstChildcareStatus = value => {
+    if (Array.isArray(value)) {
+      const first = value.find(entry => entry !== null && typeof entry !== 'undefined' && String(entry).trim());
+      return first ? String(first).trim() : null;
+    }
+    if (typeof value === 'string') {
+      return value
+        .split(',')
+        .map(entry => entry.trim())
+        .filter(Boolean)[0] || null;
+    }
+    if (value !== null && typeof value !== 'undefined') {
+      const str = String(value).trim();
+      return str || null;
+    }
+    return null;
+  };
   const childcareFundingCode = (() => {
     if (childcareNeedCode === '0') return '1'; // Not applicable when no childcare need.
+    const statusRaw = resolveFirstChildcareStatus(
+      applicationAnswers['childcare-fuding-status'] ??
+        applicationAnswers['childcare_fuding_status'] ??
+        applicationAnswers['childcare-funding-status'] ??
+        applicationAnswers['childcare_funding_status'] ??
+        null
+    );
     const raw =
+      statusRaw ||
       applicationAnswers['childcare-funding'] ||
       applicationAnswers['childcare_funding'] ||
       applicationAnswers['childcare-supported'] ||
@@ -8187,7 +8225,23 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
         readFirstAnswer('employment-insurance-status', 'employment-insurance', 'ei-status', 'ei-benefits')
       );
       const applicationChildcareNeed = normaliseYesNo(readFirstAnswer('childcare-need', 'childcare-required'));
-      const applicationChildcareFunding = readFirstAnswer('childcare-funding', 'childcare-supported');
+      const applicationChildcareFunding = (() => {
+        const statusRaw =
+          readAnswer('childcare-fuding-status') ??
+          readAnswer('childcare_fuding_status') ??
+          readAnswer('childcare-funding-status') ??
+          readAnswer('childcare_funding_status') ??
+          null;
+        if (Array.isArray(statusRaw)) {
+          const cleaned = statusRaw.map(entry => String(entry).trim()).filter(Boolean);
+          if (cleaned.length) return cleaned;
+        }
+        if (typeof statusRaw === 'string') {
+          const trimmed = statusRaw.trim();
+          if (trimmed) return trimmed;
+        }
+        return readFirstAnswer('childcare-funding', 'childcare-supported');
+      })();
       const applicationEmploymentGoals = readFirstAnswer('long-term-goal', 'short-term-goal', 'employment-goals');
       const applicationEmploymentBarriers = parseArrayLocal(readFirstAnswer('barriers'));
       const applicationLocalPriorities = parseArrayLocal(readFirstAnswer('local-area-priorities'));
@@ -14546,20 +14600,41 @@ app.get('/api/staff/assignable', async (req, res) => {
       return res.json(placeholderStaff);
     }
 
+    const merged = new Map();
+    const addStaff = staff => {
+      if (!staff) return;
+      const key = staff.id ?? staff.email ?? staff.display_name ?? null;
+      if (!key) return;
+      const normalizedKey = String(key);
+      if (merged.has(normalizedKey)) return;
+      merged.set(normalizedKey, staff);
+    };
+
     if (envIamEnabled) {
       const cognitoStaff = await fetchAssignableFromCognito(pool);
-      if (Array.isArray(cognitoStaff) && cognitoStaff.length) {
-        return res.json(cognitoStaff);
+      if (Array.isArray(cognitoStaff)) {
+        cognitoStaff.forEach(addStaff);
       }
     }
 
-    const roles = ['Program Administrator','Regional Coordinator','Application Assessor'];
+    // Merge staff_profiles results so partial Cognito group listings still include known staff.
+    const roles = ['Program Administrator','Regional Coordinator','Application Assessor','System Administrator'];
     const [rows] = await pool.query(
       `SELECT id, cognito_sub, email, primary_role AS role, email AS display_name, region_id
          FROM staff_profiles
         WHERE primary_role IN (${roles.map(()=>'?').join(',')})
         ORDER BY primary_role, email`, roles);
-    res.json(rows.map(r => ({ id: r.id, email: r.email, role: r.role, display_name: r.display_name, region_id: r.region_id ?? null })));
+    rows.forEach(r => {
+      addStaff({
+        id: r.id,
+        email: r.email,
+        role: r.role,
+        display_name: r.display_name,
+        region_id: r.region_id ?? null,
+      });
+    });
+
+    res.json(Array.from(merged.values()));
   } catch (e) {
     console.error('GET /api/staff/assignable failed:', e.message);
     res.status(500).json({ error: 'assignable_fetch_failed' });
@@ -25301,7 +25376,7 @@ app.post('/api/cases', async (req, res) => {
     return res.status(400).json({ error: 'Provide either application_id or submission_id' });
   }
 
-  const [[clientRow]] = await pool.query('SELECT id FROM client WHERE id = ? LIMIT 1', [
+  const [[clientRow]] = await pool.query('SELECT id, address_json FROM client WHERE id = ? LIMIT 1', [
     resolvedClientId,
   ]);
   if (!clientRow) {
@@ -25376,11 +25451,38 @@ app.post('/api/cases', async (req, res) => {
       assignTargetId = parsedAssignee;
     }
 
+    let portfolioRegionId = null;
+    const clientAddress = safeJsonParse(clientRow.address_json, null);
+    if (clientAddress && typeof clientAddress === 'object') {
+      const addressDetails =
+        clientAddress.address && typeof clientAddress.address === 'object'
+          ? clientAddress.address
+          : clientAddress;
+      const province =
+        addressDetails?.province ||
+        addressDetails?.province_code ||
+        addressDetails?.provinceCode ||
+        clientAddress?.province ||
+        clientAddress?.province_code ||
+        clientAddress?.provinceCode ||
+        null;
+      const regionCode = normalizeRegionCode(province);
+      if (regionCode) {
+        const [[regionRow]] = await conn.query(
+          'SELECT region_id FROM canada_region WHERE code = ? LIMIT 1',
+          [regionCode]
+        );
+        if (Number.isFinite(Number(regionRow?.region_id))) {
+          portfolioRegionId = Number(regionRow.region_id);
+        }
+      }
+    }
+
     const normalizedStatus = typeof status === 'string' && status.trim() ? status.trim() : 'open';
 
     const [insertCase] = await conn.query(
-      'INSERT INTO iset_case (application_id, client_id, assigned_to_user_id, status, created_at, updated_at) VALUES (?,?,?,?,NOW(),NOW())',
-      [workingApplicationId, resolvedClientId, assignTargetId, normalizedStatus]
+      'INSERT INTO iset_case (application_id, client_id, assigned_to_user_id, status, portfolio_region_id, created_at, updated_at) VALUES (?,?,?,?,?,NOW(),NOW())',
+      [workingApplicationId, resolvedClientId, assignTargetId, normalizedStatus, portfolioRegionId]
     );
 
     await conn.commit();
@@ -27557,6 +27659,16 @@ app.get('/api/cases', async (req, res) => {
         FROM iset_case_intervention
         GROUP BY case_id
       ) intervention_counts ON intervention_counts.case_id = c.id
+      LEFT JOIN (
+        SELECT
+          case_id,
+          MIN(due_at) AS next_reminder_due_at
+        FROM iset_case_reminder
+        WHERE deleted_at IS NULL
+          AND status = 'open'
+          AND due_at IS NOT NULL
+        GROUP BY case_id
+      ) reminder_next ON reminder_next.case_id = c.id
     `;
 
   const selectSql = `
@@ -27568,7 +27680,7 @@ app.get('/api/cases', async (req, res) => {
         c.case_number,
         c.priority,
         c.risk_rating,
-        c.next_action_due_at,
+        reminder_next.next_reminder_due_at AS next_action_due_at,
         COALESCE(task_counts.open_task_count, 0) AS open_task_count,
         COALESCE(task_counts.overdue_task_count, 0) AS overdue_task_count,
         COALESCE(intervention_counts.open_intervention_count, 0) AS open_intervention_count,
@@ -35951,6 +36063,7 @@ const PAYMENT_EVIDENCE_DOCUMENT_TYPE_MAP = {
   letter_of_reference: ['IndigenousIdentity'],
   band_funding_confirmation: ['BandFundingConfirmationOrDenial'],
   band_funding_denial: ['BandFundingConfirmationOrDenial'],
+  band_funding_decision: ['BandFundingConfirmationOrDenial'],
   acceptance_letter: ['AcceptanceLetter'],
   statement_of_account: ['StatementOfAccount', 'TuitionStatementOrInvoice'],
   funding_agreement: ['FundingAgreement'],

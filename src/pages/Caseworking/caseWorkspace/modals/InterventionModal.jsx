@@ -71,7 +71,6 @@ const calculateDurationDays = (start, end) => {
 
 const defaultForm = {
   code: "",
-  title: "",
   status: "planned",
   startDate: "",
   endDate: "",
@@ -133,7 +132,6 @@ const buildInitialForm = (mode, intervention) => {
     const costSettings = intervention.metadata?.costSettings || {};
     return {
       code: intervention.code ? String(intervention.code) : "",
-      title: intervention.title || "",
       status: normaliseStatus(intervention.status || "planned"),
       startDate: intervention.startDate || "",
       endDate: intervention.endDate || "",
@@ -247,6 +245,7 @@ const InterventionModal = ({
   const [nocSuggestions, setNocSuggestions] = useState([]);
   const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [isEditing, setIsEditing] = useState(mode !== "edit");
   const [showCloseGuidance, setShowCloseGuidance] = useState(true);
   const [closeForm, setCloseForm] = useState(buildCloseForm(intervention));
   const [potOptions, setPotOptions] = useState([]);
@@ -265,6 +264,7 @@ const InterventionModal = ({
       setNocSuggestions([]);
       setNocSuggestionsLoading(false);
       setIsClosing(false);
+      setIsEditing(mode !== "edit");
       setCloseForm(buildCloseForm(null));
       return;
     }
@@ -295,6 +295,7 @@ const InterventionModal = ({
     setNocSuggestionsLoading(false);
     const isClosed = intervention && isClosedStatusValue(intervention.status);
     setIsClosing(Boolean((startInCloseMode && canClose && mode === "edit") || (mode === "edit" && isClosed)));
+    setIsEditing(mode !== "edit");
     setCloseForm(buildCloseForm(intervention));
   }, [visible, mode, intervention, startInCloseMode, canClose, plan, inheritedFundingStream]);
 
@@ -366,9 +367,16 @@ const InterventionModal = ({
 
   const interventionStatus = normaliseStatus(intervention?.status);
   const isClosedIntervention = ["completed", "cancelled"].includes(interventionStatus);
-  const isReadOnly = Boolean(readOnly || (mode === "edit" && isClosedIntervention && !canClose));
+  const isAccessReadOnly = Boolean(readOnly || (mode === "edit" && isClosedIntervention && !canClose));
+  const isViewMode = mode === "edit" && !isEditing;
+  const isFormReadOnly = isAccessReadOnly || isViewMode || (mode === "edit" && isClosing);
+  const isCloseReadOnly = isAccessReadOnly || !canClose || !isClosing;
   const modalHeader =
-    mode === "edit" ? (isReadOnly ? "View intervention" : "Edit intervention") : "Add intervention";
+    mode === "edit"
+      ? isFormReadOnly
+        ? "View intervention"
+        : "Edit intervention"
+      : "Add intervention";
   useEffect(() => {
     if (!visible) return;
     if (mode !== "edit") return;
@@ -608,8 +616,8 @@ const InterventionModal = ({
   }, [form.recurringAmount]);
   const [isActualCostFocused, setIsActualCostFocused] = useState(false);
 
-const applyFieldSideEffects = (draft, field, value) => {
-  const next = { ...draft, [field]: value };
+  const applyFieldSideEffects = (draft, field, value) => {
+    const next = { ...draft, [field]: value };
 
     if (field === "code") {
       if (!requiresNocForCode(value)) {
@@ -661,11 +669,11 @@ const applyFieldSideEffects = (draft, field, value) => {
     next.status = normaliseStatus(next.status);
     next.outcome = ensureOutcomeForStatus(next.status, next.outcome);
 
-  return next;
-};
+    return next;
+  };
 
   const handleChange = (field, value) => {
-    if (isReadOnly) return;
+    if (isFormReadOnly) return;
     setForm(current => {
       const next = applyFieldSideEffects(current, field, value);
       if (field === "code" || field === "nocVersion") {
@@ -677,7 +685,7 @@ const applyFieldSideEffects = (draft, field, value) => {
   };
 
   const handleCloseChange = (field, value) => {
-    if (isReadOnly) return;
+    if (isCloseReadOnly) return;
     setCloseForm(current => {
       const nextValue =
         field === "status" ? normaliseStatus(value) : typeof value === "string" ? value.trim() : value;
@@ -686,7 +694,7 @@ const applyFieldSideEffects = (draft, field, value) => {
   };
 
   const fetchNocSuggestions = async filteringText => {
-    if (isReadOnly) {
+    if (isFormReadOnly) {
       setNocSuggestions([]);
       return;
     }
@@ -723,6 +731,9 @@ const applyFieldSideEffects = (draft, field, value) => {
   const handleCloseSubmit = async () => {
     if (!canClose || typeof onClose !== "function") {
       setError("Closing this intervention is not available.");
+      return;
+    }
+    if (isCloseReadOnly) {
       return;
     }
     if (isDirty) {
@@ -772,23 +783,20 @@ const applyFieldSideEffects = (draft, field, value) => {
 
   const handleSubmit = async () => {
     if (loading) return;
-    if (isReadOnly) return;
     if (isClosing) {
       await handleCloseSubmit();
       return;
     }
+    if (mode === "edit" && !isEditing) return;
+    if (isAccessReadOnly) return;
     setValidationError(null);
     setFieldErrors({});
     const statusNormalized = normaliseStatus(form.status);
     const outcomeValue = ensureOutcomeForStatus(statusNormalized, form.outcome);
     const trimmedCode = (form.code ?? "").toString().trim();
-    const trimmedTitle = form.title.trim();
     const errors = {};
     if (!trimmedCode) {
       errors.code = "Intervention code is required.";
-    }
-    if (!trimmedTitle) {
-      errors.title = "Intervention title is required.";
     }
     // Funding stream is inherited from the action plan; no intervention-level validation.
     if (!form.startDate) {
@@ -897,7 +905,6 @@ const applyFieldSideEffects = (draft, field, value) => {
 
     const payload = {
       code: trimmedCode,
-      title: trimmedTitle,
       status: statusNormalized,
       startDate: form.startDate || null,
       endDate: form.endDate || null,
@@ -966,6 +973,16 @@ const applyFieldSideEffects = (draft, field, value) => {
 
   const handleCancel = () => {
     if (loading) return;
+    if (mode === "edit" && isEditing) {
+      setForm({ ...initialFormRef.current });
+      setError(null);
+      setValidationError(null);
+      setFieldErrors({});
+      setNocSuggestions([]);
+      setNocSuggestionsLoading(false);
+      setIsEditing(false);
+      return;
+    }
     setForm({ ...initialFormRef.current });
     setError(null);
     setValidationError(null);
@@ -973,6 +990,7 @@ const applyFieldSideEffects = (draft, field, value) => {
     setNocSuggestions([]);
     setNocSuggestionsLoading(false);
     setIsClosing(false);
+    setIsEditing(mode !== "edit");
     setCloseForm(buildCloseForm(intervention));
     if (typeof onDismiss === "function") {
       onDismiss();
@@ -980,7 +998,7 @@ const applyFieldSideEffects = (draft, field, value) => {
   };
 
   const saveDisabled =
-    isReadOnly ||
+    isFormReadOnly ||
     codesLoading ||
     outcomesLoading ||
     fundingStreamsLoading ||
@@ -989,18 +1007,14 @@ const applyFieldSideEffects = (draft, field, value) => {
     !isDirty;
 
   const beginClosing = () => {
-    if (!canClose || isReadOnly) return;
+    if (!canClose || isAccessReadOnly) return;
     if (isDirty) {
       setError("Save your changes before closing this intervention.");
       return;
     }
     setCloseForm(buildCloseForm(intervention));
     setIsClosing(true);
-    setError(null);
-  };
-
-  const exitCloseMode = () => {
-    setIsClosing(false);
+    setIsEditing(false);
     setError(null);
   };
 
@@ -1008,7 +1022,7 @@ const applyFieldSideEffects = (draft, field, value) => {
     !isClosing ||
     loading ||
     !canClose ||
-    isReadOnly ||
+    isCloseReadOnly ||
     !closeForm.outcome ||
     !closeForm.outcome.trim() ||
     isDirty;
@@ -1020,7 +1034,7 @@ const applyFieldSideEffects = (draft, field, value) => {
       onDismiss={handleCancel}
       closeAriaLabel={
         mode === "edit"
-          ? isReadOnly
+          ? isFormReadOnly
             ? "Close view intervention modal"
             : "Close edit intervention modal"
           : "Close new intervention modal"
@@ -1031,17 +1045,17 @@ const applyFieldSideEffects = (draft, field, value) => {
           <Button onClick={handleCancel} disabled={loading}>
             Cancel
           </Button>
-          {mode === "edit" && canClose && isClosing && !isReadOnly && (
-            <Button onClick={exitCloseMode} disabled={loading}>
-              Back to editing
+          {mode === "edit" && !isAccessReadOnly && !isClosing && !isEditing && !startInCloseMode && (
+            <Button onClick={() => setIsEditing(true)} disabled={loading}>
+              Edit
             </Button>
           )}
-          {mode === "edit" && canClose && !isClosing && !isReadOnly && (
+          {mode === "edit" && canClose && !isAccessReadOnly && !isClosing && !isEditing && (
             <Button onClick={beginClosing} disabled={loading}>
               Close intervention
             </Button>
           )}
-          {!isReadOnly && (!isClosing || mode !== "edit") && (
+          {((mode !== "edit") || (mode === "edit" && isEditing)) && !isClosing && (
             <Button
               variant="primary"
               onClick={handleSubmit}
@@ -1051,7 +1065,7 @@ const applyFieldSideEffects = (draft, field, value) => {
               {mode === "edit" ? "Save changes" : "Create intervention"}
             </Button>
           )}
-          {isClosing && !isReadOnly && (
+          {isClosing && !isCloseReadOnly && (
             <Button
               variant="primary"
               onClick={handleSubmit}
@@ -1096,40 +1110,37 @@ const applyFieldSideEffects = (draft, field, value) => {
                   : "Choose the outcome, closure status, completion date, and actual cost (if applicable) to close this intervention."}
               </Alert>
             )}
-          <ColumnLayout columns={3} variant="text-grid">
-            <FormField label="ESDC outcome" description="Required to close.">
-              <Select
-                selectedOption={selectedCloseOutcomeOption}
-                onChange={({ detail }) =>
-                  handleCloseChange("outcome", detail.selectedOption?.value || "")
-                }
-                options={outcomeSelectOptions}
-                filteringType="auto"
-                disabled={isReadOnly || !canClose}
-              />
-            </FormField>
-            <FormField label="Closure status">
-              <Select
-                selectedOption={selectedCloseStatusOption}
-                onChange={({ detail }) =>
-                  handleCloseChange("status", detail.selectedOption?.value || "completed")
+            <ColumnLayout columns={3} variant="text-grid">
+              <FormField label="ESDC outcome" description="Required to close.">
+                <Select
+                  selectedOption={selectedCloseOutcomeOption}
+                  onChange={({ detail }) =>
+                    handleCloseChange("outcome", detail.selectedOption?.value || "")
                   }
-                  options={CLOSE_STATUS_OPTIONS}
-                disabled={isReadOnly || !canClose}
+                  options={outcomeSelectOptions}
+                  filteringType="auto"
+                  readOnly={isCloseReadOnly}
                 />
               </FormField>
-              <FormField
-                label="Completion date"
-                description="Required. Must match the final intervention end date."
-              >
+              <FormField label="Closure status" description="Required to close.">
+                <Select
+                  selectedOption={selectedCloseStatusOption}
+                  onChange={({ detail }) =>
+                    handleCloseChange("status", detail.selectedOption?.value || "completed")
+                  }
+                  options={CLOSE_STATUS_OPTIONS}
+                  readOnly={isCloseReadOnly}
+                />
+              </FormField>
+              <FormField label="Completion date" description="Required to close">
                 <DatePicker
                   value={closeForm.completionDate}
                   onChange={({ detail }) => handleCloseChange("completionDate", detail.value)}
                   placeholder="YYYY-MM-DD"
-                  disabled={isReadOnly || !canClose}
-              />
-            </FormField>
-            <FormField
+                  readOnly={isCloseReadOnly}
+                />
+              </FormField>
+              <FormField
                 label="Actual cost"
                 description="Whole dollars 0–999999. Leave blank if not applicable."
               >
@@ -1139,7 +1150,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                   onFocus={() => setIsActualCostFocused(true)}
                   onBlur={() => setIsActualCostFocused(false)}
                   placeholder="e.g. 4200"
-                  disabled={isReadOnly || !canClose}
+                  readOnly={isCloseReadOnly}
                 />
               </FormField>
             </ColumnLayout>
@@ -1150,25 +1161,17 @@ const applyFieldSideEffects = (draft, field, value) => {
           <SpaceBetween size="s">
             <Header variant="h3">Intervention details</Header>
             <ColumnLayout columns={2} variant="text-grid">
-              <FormField label="Title" stretch errorText={fieldErrors.title}>
-                <Input
-                  value={form.title}
-                  onChange={({ detail }) => handleChange("title", detail.value)}
-                  readOnly={isReadOnly}
-                  disabled={isReadOnly}
-                />
-              </FormField>
               <FormField label="Status">
                 <Select
                   selectedOption={selectedStatusOption}
                   onChange={({ detail }) => handleChange("status", detail.selectedOption?.value || "planned")}
                   options={statusOptions}
-                  disabled={isReadOnly}
+                  readOnly={isFormReadOnly}
                 />
               </FormField>
               {isClosedStatusValue(form.status) && !isClosing && (
                 <FormField label="ESDC outcome">
-                  <Input value={outcomeLabel} readOnly disabled />
+                  <Input value={outcomeLabel} readOnly />
                 </FormField>
               )}
               <FormField label="Start date" errorText={fieldErrors.startDate}>
@@ -1176,7 +1179,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                   value={form.startDate}
                   onChange={({ detail }) => handleChange("startDate", detail.value)}
                   placeholder="YYYY-MM-DD"
-                  disabled={isReadOnly}
+                  readOnly={isFormReadOnly}
                 />
               </FormField>
               <FormField label="End date" errorText={fieldErrors.endDate}>
@@ -1184,14 +1187,13 @@ const applyFieldSideEffects = (draft, field, value) => {
                   value={form.endDate}
                   onChange={({ detail }) => handleChange("endDate", detail.value)}
                   placeholder="YYYY-MM-DD"
-                  disabled={isReadOnly}
+                  readOnly={isFormReadOnly}
                 />
               </FormField>
               <FormField label="Duration in days (calculated)" errorText={fieldErrors.durationDays}>
                 <Input
                   value={form.durationDays}
                   readOnly
-                  disabled
                   type="number"
                 />
               </FormField>
@@ -1208,8 +1210,9 @@ const applyFieldSideEffects = (draft, field, value) => {
                       ? undefined
                       : "No intervention codes available. Please try again later."
                   }
-                  disabled={isReadOnly || codesLoading}
-                  autoFocus={!isReadOnly}
+                  readOnly={isFormReadOnly}
+                  disabled={!isFormReadOnly && codesLoading}
+                  autoFocus={!isFormReadOnly}
                   invalid={Boolean(fieldErrors.code)}
                 />
               </FormField>
@@ -1230,7 +1233,8 @@ const applyFieldSideEffects = (draft, field, value) => {
                       empty={
                         nocVersionsLoading ? undefined : "No NOC versions available. Please try again later."
                       }
-                      disabled={isReadOnly || nocVersionsLoading}
+                      readOnly={isFormReadOnly}
+                      disabled={!isFormReadOnly && nocVersionsLoading}
                       invalid={Boolean(fieldErrors.nocVersion)}
                     />
                   </FormField>
@@ -1260,7 +1264,8 @@ const applyFieldSideEffects = (draft, field, value) => {
                           : "Type to search NOC codes"
                       }
                       empty="No NOC matches found."
-                      disabled={isReadOnly || nocVersionsLoading || !form.nocVersion}
+                      readOnly={isFormReadOnly}
+                      disabled={!isFormReadOnly && (nocVersionsLoading || !form.nocVersion)}
                       enteredTextLabel={value => `Use "${value}"`}
                       onLoadItems={({ detail }) => {
                         fetchNocSuggestions(detail.filteringText);
@@ -1277,10 +1282,10 @@ const applyFieldSideEffects = (draft, field, value) => {
             <Header variant="h3">Financial details</Header>
             <ColumnLayout columns={3} variant="text-grid">
               <FormField label="Funding Stream" description="Inherited. Adjust in parent Action Plan.">
-                <Input value={inheritedFundingStream || "Not set"} readOnly disabled />
+                <Input value={inheritedFundingStream || "Not set"} readOnly />
               </FormField>
               <FormField label="Budget Pot" description="Inherited. Adjust in parent Action Plan.">
-                <Input value={inheritedBudgetPotLabel} readOnly disabled />
+                <Input value={inheritedBudgetPotLabel} readOnly />
               </FormField>
               <FormField
                 label="Paid from"
@@ -1288,7 +1293,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                 errorText={fieldErrors.postingContext}
               >
                 {isAssessor || !canSelectPostingContext ? (
-                  <Input value="External (region/PTMA)" readOnly disabled />
+                  <Input value="External (region/PTMA)" readOnly />
                 ) : (
                   <Select
                     selectedOption={selectedPostingContext}
@@ -1303,7 +1308,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                       setForm(current => ({ ...current, postingContext: detail.selectedOption?.value || "external" }));
                     }}
                     placeholder="Select"
-                    disabled={isReadOnly}
+                    readOnly={isFormReadOnly}
                   />
                 )}
               </FormField>
@@ -1315,7 +1320,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                     { value: "one_time", label: "One-time total" },
                     { value: "recurring", label: "Recurring schedule" },
                   ]}
-                  disabled={isReadOnly}
+                  readOnly={isFormReadOnly}
                 />
               </FormField>
               {isRecurringCost && (
@@ -1328,7 +1333,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                       }
                       options={RECURRING_PERIOD_OPTIONS}
                       placeholder="Select recurrence period"
-                      disabled={isReadOnly}
+                      readOnly={isFormReadOnly}
                     />
                   </FormField>
                   <FormField label="Amount per period">
@@ -1339,8 +1344,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                       onBlur={() => setIsRecurringAmountFocused(false)}
                       inputMode="decimal"
                       placeholder="e.g. 150.00"
-                      readOnly={isReadOnly}
-                      disabled={isReadOnly}
+                      readOnly={isFormReadOnly}
                     />
                   </FormField>
                   <FormField
@@ -1350,20 +1354,18 @@ const applyFieldSideEffects = (draft, field, value) => {
                     <Input
                       value={form.recurringOccurrences}
                       readOnly
-                      disabled
                     />
                   </FormField>
-              <FormField
-                label="Planned cost"
-                description="Calculated total based on recurring schedule."
-                errorText={fieldErrors.cost}
-              >
+                  <FormField
+                    label="Planned cost"
+                    description="Calculated total based on recurring schedule."
+                    errorText={fieldErrors.cost}
+                  >
                     <Input
                       value={formattedCostDisplay}
                       onChange={({ detail }) => handleChange("cost", detail.value)}
                       placeholder="e.g. 42000"
                       readOnly
-                      disabled
                     />
                   </FormField>
                 </>
@@ -1376,8 +1378,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                     onFocus={() => setIsCostFocused(true)}
                     onBlur={() => setIsCostFocused(false)}
                     placeholder="e.g. 42000"
-                    readOnly={isReadOnly}
-                    disabled={isReadOnly}
+                    readOnly={isFormReadOnly}
                   />
                 </FormField>
               )}
@@ -1390,8 +1391,7 @@ const applyFieldSideEffects = (draft, field, value) => {
                 rows={3}
                 onChange={({ detail }) => handleChange("notes", detail.value)}
                 placeholder="Optional context or reminders"
-                readOnly={isReadOnly}
-                disabled={isReadOnly}
+                readOnly={isFormReadOnly}
               />
             </FormField>
           </SpaceBetween>

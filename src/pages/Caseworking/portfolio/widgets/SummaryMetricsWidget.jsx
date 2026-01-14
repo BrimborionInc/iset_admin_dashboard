@@ -142,7 +142,7 @@ const SummaryMetricsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
           info={infoLink}
           description={metadata.description ?? "Snapshot of workload and finance posture for visible cases."}
         >
-          {metadata.title ?? "Case summary"}
+          {metadata.title ?? "Client summary"}
         </Header>
       }
       settings={

@@ -182,7 +182,11 @@ const EVIDENCE_DOCUMENT_TYPE_MAP = {
   EIConsent: ["ei_consent"],
   EIVerification: ["ei_verification"],
   IndigenousIdentity: ["indigenous_declaration", "status_card", "letter_of_reference"],
-  BandFundingConfirmationOrDenial: ["band_funding_confirmation", "band_funding_denial"],
+  BandFundingConfirmationOrDenial: [
+    "band_funding_confirmation",
+    "band_funding_denial",
+    "band_funding_decision",
+  ],
   AcceptanceLetter: ["acceptance_letter"],
   StatementOfAccount: ["statement_of_account"],
   TuitionStatementOrInvoice: ["statement_of_account"],
@@ -247,6 +251,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [unlinkModalOpen, setUnlinkModalOpen] = useState(false);
   const [activeEvidenceRow, setActiveEvidenceRow] = useState(null);
   const [replaceMode, setReplaceMode] = useState(false);
+  const [showReplaceNotice, setShowReplaceNotice] = useState(false);
   const [evidenceFiles, setEvidenceFiles] = useState([]);
   const [evidenceUploading, setEvidenceUploading] = useState(false);
   const [evidenceError, setEvidenceError] = useState(null);
@@ -283,6 +288,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [deleteLineModalOpen, setDeleteLineModalOpen] = useState(false);
   const [deleteLineSubmitting, setDeleteLineSubmitting] = useState(false);
   const [deleteLineError, setDeleteLineError] = useState(null);
+  const [submitSubmitting, setSubmitSubmitting] = useState(false);
   const [linePotOptions, setLinePotOptions] = useState([]);
   const [linePotLoading, setLinePotLoading] = useState(false);
   const requiresLinePeriod = requiresServicePeriod(lineForm.paymentType);
@@ -403,6 +409,14 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setLineSubmitting(false);
     setLineError(null);
   }, [selectedRequest?.id]);
+
+  useEffect(() => {
+    if (replaceMode && linkModalOpen) {
+      setShowReplaceNotice(true);
+      return;
+    }
+    setShowReplaceNotice(false);
+  }, [replaceMode, linkModalOpen]);
 
   useEffect(() => {
     if (!lineModalOpen) return;
@@ -1020,7 +1034,12 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
 
   const handlePacketStatusChange = async (status, options = {}) => {
     if (!selectedRequest || !status) return;
+    const isSubmit = normalizePacketStatusKey(status) === "submitted";
+    if (isSubmit && submitSubmitting) return;
     setActionStatus(null);
+    if (isSubmit) {
+      setSubmitSubmitting(true);
+    }
     try {
       await updatePacketStatus(selectedRequest.id, status, options);
       const label = packetStatusMeta[normalizePacketStatusKey(status)]?.label || status;
@@ -1055,6 +1074,10 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         type: "error",
         message: err?.message || "Failed to update packet status.",
       });
+    } finally {
+      if (isSubmit) {
+        setSubmitSubmitting(false);
+      }
     }
   };
 
@@ -1418,9 +1441,10 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         <Button
           variant="primary"
           onClick={() => handlePacketStatusChange("submitted")}
-          disabled={!selectedRequest?.id}
+          disabled={!selectedRequest?.id || submitSubmitting}
+          loading={submitSubmitting}
         >
-          Submit to finance
+          {submitSubmitting ? "Submitting" : "Submit to finance"}
         </Button>
       ) : null}
     </SpaceBetween>
@@ -1454,7 +1478,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       {selectedRequest ? (
         <SpaceBetween size="l">
           {actionStatus && (
-            <Alert type={actionStatus.type} onDismiss={() => setActionStatus(null)}>
+            <Alert type={actionStatus.type} dismissible onDismiss={() => setActionStatus(null)}>
               {actionStatus.message}
             </Alert>
           )}
@@ -1572,7 +1596,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       >
         <SpaceBetween size="m">
           {lineError ? (
-            <Alert type="error">
+            <Alert type="error" dismissible onDismiss={() => setLineError(null)}>
               {Array.isArray(lineError) ? (
                 <SpaceBetween size="xs">
                   {lineError.map((message, index) => (
@@ -1730,7 +1754,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         }
       >
         <SpaceBetween size="s">
-          {deleteLineError ? <Alert type="error">{deleteLineError}</Alert> : null}
+          {deleteLineError ? (
+            <Alert type="error" dismissible onDismiss={() => setDeleteLineError(null)}>
+              {deleteLineError}
+            </Alert>
+          ) : null}
           <Box>
             This will permanently delete line {selectedLine?.id || "?"} from the packet.
           </Box>
@@ -1767,7 +1795,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         }
       >
         <SpaceBetween size="m">
-          {recurringError && <Alert type="error">{recurringError}</Alert>}
+          {recurringError && (
+            <Alert type="error" dismissible onDismiss={() => setRecurringError(null)}>
+              {recurringError}
+            </Alert>
+          )}
           {selectedLine ? (
             <Box variant="p">
               Template: {selectedLine.paymentType} • {formatCurrency(selectedLine.amount)} •{" "}
@@ -1861,7 +1893,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         }
       >
         <SpaceBetween size="m">
-          {evidenceError && <Alert type="error">{evidenceError}</Alert>}
+          {evidenceError && (
+            <Alert type="error" dismissible onDismiss={() => setEvidenceError(null)}>
+              {evidenceError}
+            </Alert>
+          )}
           <Box variant="awsui-key-label">Evidence requirement</Box>
           <Box variant="p">{activeEvidenceContext || "Evidence requirement not selected."}</Box>
           <Box variant="small" color="text-body-secondary">
@@ -1934,14 +1970,22 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         }
       >
         <SpaceBetween size="m">
-          {replaceMode ? (
-            <Alert type="info">
+          {replaceMode && showReplaceNotice ? (
+            <Alert type="info" dismissible onDismiss={() => setShowReplaceNotice(false)}>
               This will remove {activeEvidenceDocuments.length} linked document
               {activeEvidenceDocuments.length === 1 ? "" : "s"} before attaching the selected items.
             </Alert>
           ) : null}
-          {supportingDocumentsError && <Alert type="error">{supportingDocumentsError}</Alert>}
-          {linkError && <Alert type="error">{linkError}</Alert>}
+          {supportingDocumentsError && (
+            <Alert type="error" dismissible onDismiss={() => setSupportingDocumentsError(null)}>
+              {supportingDocumentsError}
+            </Alert>
+          )}
+          {linkError && (
+            <Alert type="error" dismissible onDismiss={() => setLinkError(null)}>
+              {linkError}
+            </Alert>
+          )}
           <Box variant="awsui-key-label">Evidence requirement</Box>
           <Box variant="p">{activeEvidenceContext || "Evidence requirement not selected."}</Box>
           {evidenceTypeFilters.length ? (
@@ -2026,7 +2070,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         }
       >
         <SpaceBetween size="m">
-          {viewError && <Alert type="error">{viewError}</Alert>}
+          {viewError && (
+            <Alert type="error" dismissible onDismiss={() => setViewError(null)}>
+              {viewError}
+            </Alert>
+          )}
           <Box variant="awsui-key-label">Evidence requirement</Box>
           <Box variant="p">{activeEvidenceContext || "Evidence requirement not selected."}</Box>
           <Table
@@ -2093,7 +2141,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         }
       >
         <SpaceBetween size="m">
-          {unlinkError && <Alert type="error">{unlinkError}</Alert>}
+          {unlinkError && (
+            <Alert type="error" dismissible onDismiss={() => setUnlinkError(null)}>
+              {unlinkError}
+            </Alert>
+          )}
           <Box variant="awsui-key-label">Evidence requirement</Box>
           <Box variant="p">{activeEvidenceContext || "Evidence requirement not selected."}</Box>
           <Box variant="small" color="text-body-secondary">

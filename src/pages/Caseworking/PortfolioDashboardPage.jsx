@@ -17,7 +17,7 @@ const widgetRegistry = {
     defaultRowSpan: 2,
     defaultColumnSpan: 4,
     component: SummaryMetricsWidget,
-    title: "Case summary",
+    title: "Client summary",
     description: "Snapshot of active, ready-to-close, and financial totals for the current filters.",
     helpComponent: PortfolioSummaryMetricsHelp,
     helpTitle: "Portfolio summary metrics",
@@ -39,10 +39,10 @@ const widgetRegistry = {
     defaultRowSpan: 6,
     defaultColumnSpan: 4,
     component: CasesTableWidget,
-    title: "Cases",
+    title: "Clients",
     description: "Monitor all cases you can access and open the case workspace for detailed management.",
     helpComponent: PortfolioCasesTableHelp,
-    helpTitle: "Portfolio cases table",
+    helpTitle: "Portfolio clients table",
     aiContext: PortfolioCasesTableHelp.aiContext,
   },
 };
@@ -175,7 +175,7 @@ const PortfolioDashboardPage = ({
       updateBreadcrumbs([
         { text: "Home", href: "/" },
         { text: "ISET Assessment", href: "/case-assignment-dashboard" },
-        { text: "Case portfolio", href: "/iset/cases" },
+        { text: "ISET Clients", href: "/iset/cases" },
       ]);
     }
   }, [updateBreadcrumbs]);

@@ -100,7 +100,8 @@
           "required": true,
           "documentTypes": [
             "band_funding_confirmation",
-            "band_funding_denial"
+            "band_funding_denial",
+            "band_funding_decision"
           ],
           "notes": "Either a funding approval or denial letter is required."
         },

@@ -171,6 +171,14 @@ const CloseActionPlanModal = ({
       }
     }
     if (resultDate) {
+      const toDateOnly = value => {
+        if (!value) return null;
+        const trimmed = String(value).trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+        const parsed = new Date(trimmed);
+        if (Number.isNaN(parsed.getTime())) return null;
+        return parsed.toISOString().slice(0, 10);
+      };
       const planStart = plan?.startDate || plan?.effectiveDate || null;
       const latestInterventionEnd = Array.isArray(plan?.interventions)
         ? plan.interventions
@@ -183,15 +191,17 @@ const CloseActionPlanModal = ({
             .sort()
             .pop()
         : null;
-      const resultDt = new Date(resultDate);
-      const today = new Date();
-      if (planStart && resultDt < new Date(planStart)) {
+      const resultDay = toDateOnly(resultDate);
+      const planStartDay = toDateOnly(planStart);
+      const latestEndDay = toDateOnly(latestInterventionEnd);
+      const today = toDateOnly(new Date());
+      if (planStartDay && resultDay && resultDay < planStartDay) {
         errors.resultDate = "Result date cannot be before the action plan start date.";
       }
-      if (latestInterventionEnd && resultDt < new Date(latestInterventionEnd)) {
+      if (latestEndDay && resultDay && resultDay < latestEndDay) {
         errors.resultDate = "Result date cannot be before the latest intervention end date.";
       }
-      if (resultDt > today) {
+      if (today && resultDay && resultDay > today) {
         errors.resultDate = "Result date cannot be in the future.";
       }
     }

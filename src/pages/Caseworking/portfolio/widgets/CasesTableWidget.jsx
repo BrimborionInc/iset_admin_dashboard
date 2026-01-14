@@ -52,13 +52,26 @@ const formatDateTime = value => {
   return date.toLocaleString();
 };
 
-const isDateOverdue = value => {
-  if (!value) return false;
+const getDayDiffFromToday = value => {
+  if (!value) return null;
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return false;
+  if (Number.isNaN(date.getTime())) return null;
+  const dueMidnight = new Date(date);
+  dueMidnight.setHours(0, 0, 0, 0);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return date < today;
+  return Math.floor((dueMidnight.getTime() - today.getTime()) / 86400000);
+};
+
+const getNextActionBadgeColor = value => {
+  const diffDays = getDayDiffFromToday(value);
+  if (diffDays === null) return null;
+  if (diffDays < 0) {
+    const overdueDays = Math.abs(diffDays);
+    return overdueDays > 7 ? "red" : "yellow";
+  }
+  if (diffDays <= 7) return "blue";
+  return "green";
 };
 
 const groupedColumns = [
@@ -131,7 +144,19 @@ const groupedColumns = [
     cell: item => {
       const open = Number.isFinite(item.openInterventions) ? item.openInterventions : 0;
       const total = Number.isFinite(item.totalInterventions) ? item.totalInterventions : 0;
-      const content = <Badge color={open > 0 ? "blue" : "green"}>{`${open} / ${total}`}</Badge>;
+      const statusValue =
+        item?.status ||
+        item?.primaryStatus ||
+        item?.singleCase?.status ||
+        item?.raw?.status ||
+        null;
+      const normalizedStatus =
+        typeof statusValue === "string"
+          ? statusValue.trim().toLowerCase().replace(/[\s-]+/g, "_")
+          : "";
+      const isDormant = normalizedStatus === "dormant";
+      const badgeColor = isDormant ? "grey" : open > 0 ? "blue" : "green";
+      const content = <Badge color={badgeColor}>{`${open} / ${total}`}</Badge>;
       if (item.isChild || item.caseCount === 1) return content;
       return "-";
     },
@@ -142,11 +167,11 @@ const groupedColumns = [
     header: "Next action due",
     cell: item => {
       const value = item.nextActionDueAt;
-      if ((item.isChild || item.caseCount === 1) && value) {
-        const overdue = isDateOverdue(value);
-        return <Box color={overdue ? "text-status-error" : undefined}>{formatDate(value)}</Box>;
+      if (item.isChild || item.caseCount === 1) {
+        const badgeColor = getNextActionBadgeColor(value);
+        if (!badgeColor) return "-";
+        return <Badge color={badgeColor}>{formatDate(value)}</Badge>;
       }
-      if (item.isChild || item.caseCount === 1) return "-";
       return "-";
     },
     minWidth: 160,
@@ -673,21 +698,6 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       </Button>
     );
   }
-  if (canManageAssignments) {
-    headerActionItems.push(
-      <Button key="new-case" variant="primary" iconName="add-plus" onClick={() => {
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(
-            new CustomEvent("iset-portfolio:newCaseRequest", {
-              detail: { source: "cases-widget" },
-            })
-          );
-        }
-      }}>
-        + New Case
-      </Button>
-    );
-  }
 
   return (
     <BoardItem
@@ -704,7 +714,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
             ) : undefined
           }
         >
-          {metadata.title ?? "Cases"}
+          {metadata.title ?? "Clients"}
         </Header>
       }
       settings={
@@ -729,15 +739,6 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
             {assignSuccess}
           </Alert>
         )}
-        <TextFilter
-          filteringText={searchText}
-          filteringPlaceholder="Search by client or owner"
-          onChange={({ detail }) => {
-            setSearchText(detail.filteringText);
-            setCurrentPageIndex(1);
-          }}
-          countText={totalMatchesText}
-        />
         <Table
           trackBy="id"
           columnDefinitions={columnsToRender}
@@ -745,8 +746,19 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           resizableColumns
           variant="embedded"
           loading={useLiveCases && liveLoading}
-          header={<Header variant="h3" counter={`(${totalCount})`}>ISET Cases</Header>}
+          header={<Header variant="h3" counter={`(${totalCount})`}>ISET Clients</Header>}
           empty={emptyState}
+          filter={
+            <TextFilter
+              filteringText={searchText}
+              filteringPlaceholder="Search by client or owner"
+              onChange={({ detail }) => {
+                setSearchText(detail.filteringText);
+                setCurrentPageIndex(1);
+              }}
+              countText={totalMatchesText}
+            />
+          }
           pagination={pagination}
           preferences={preferencesComponent}
           onColumnWidthsChange={handleColumnWidthsChange}

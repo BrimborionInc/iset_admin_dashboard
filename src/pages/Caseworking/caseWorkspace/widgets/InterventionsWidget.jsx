@@ -40,6 +40,15 @@ const formatDate = value => {
   return date.toLocaleDateString();
 };
 
+const formatDateRange = (startValue, endValue) => {
+  const startLabel = formatDate(startValue);
+  const endLabel = formatDate(endValue);
+  if (startLabel === "-" && endLabel === "-") return "-";
+  if (endLabel === "-" || startLabel === endLabel) return startLabel;
+  if (startLabel === "-") return endLabel;
+  return `${startLabel} - ${endLabel}`;
+};
+
 const parseMetadata = value => {
   if (!value) return null;
   if (typeof value === "object") return value;
@@ -180,11 +189,9 @@ const STATUS_FILTER_OPTIONS = [
 ];
 const ALL_COLUMN_IDS = [
   "code",
+  "cost",
   "status",
   "dates",
-  "outcome",
-  "duration",
-  "cost",
   "compliance",
   "actions",
 ];
@@ -574,23 +581,6 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     return map;
   }, [interventionCodes]);
 
-  const outcomeLabelMap = useMemo(() => {
-    const map = new Map();
-    (Array.isArray(interventionOutcomes) ? interventionOutcomes : []).forEach(option => {
-      if (!option) return;
-      const value = option.code ?? option.value;
-      const label = option.label ?? option.description;
-      if (value === undefined || value === null || !label) {
-        return;
-      }
-      const valueStr = String(value).trim();
-      if (!valueStr) return;
-      const padded = valueStr.length === 1 ? `0${valueStr}` : valueStr;
-      map.set(valueStr, `${padded} - ${label}`);
-    });
-    return map;
-  }, [interventionOutcomes]);
-
   const getTypeLabel = useCallback(
     item => {
       if (!item) return "-";
@@ -963,34 +953,6 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         isRowHeader: true,
       },
       {
-        id: "status",
-        header: "Status",
-        cell: item => (
-          <StatusIndicator type={statusIndicatorType(item.status)}>
-            {getStatusDisplayLabel(item)}
-          </StatusIndicator>
-        ),
-      },
-      {
-        id: "dates",
-        header: "Start - End",
-        cell: item => `${formatDate(item.startDate)} - ${formatDate(item.endDate)}`,
-      },
-      {
-        id: "outcome",
-        header: "ESDC Outcome",
-        cell: item => {
-          const value = item.outcome !== undefined && item.outcome !== null ? String(item.outcome) : "";
-          if (!value) return "-";
-          return outcomeLabelMap.get(value) ?? value;
-        },
-      },
-      {
-        id: "duration",
-        header: "Duration (weeks)",
-        cell: item => (Number.isFinite(item.durationWeeks) ? item.durationWeeks : "-"),
-      },
-      {
         id: "cost",
         header: "Cost",
         cell: item => {
@@ -1005,6 +967,20 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             </Box>
           );
         },
+      },
+      {
+        id: "status",
+        header: "Status",
+        cell: item => (
+          <StatusIndicator type={statusIndicatorType(item.status)}>
+            {getStatusDisplayLabel(item)}
+          </StatusIndicator>
+        ),
+      },
+      {
+        id: "dates",
+        header: "Start - End",
+        cell: item => formatDateRange(item.startDate, item.endDate),
       },
       {
         id: "compliance",
@@ -1068,7 +1044,6 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     );
   }, [
     codeLabelMap,
-    outcomeLabelMap,
     columnWidthsMap,
     getInterventionActionItems,
     formMode,

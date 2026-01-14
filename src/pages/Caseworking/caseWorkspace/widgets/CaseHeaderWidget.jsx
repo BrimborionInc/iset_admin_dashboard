@@ -157,7 +157,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const watchlistDisplayDob = watchlistIdentity.dob || "Unavailable";
   const watchlistDisplaySin = formatSinDisplay(watchlistIdentity.sin) || "Unavailable";
   const watchlistExplanation =
-    "Adding an applicant or participant to the watchlist means their future applications will be flagged for administrator review. Use this when the applicant owes money to the program or when there are similar risk concerns. If a new application is received with the same Social Insurance Number, administrators will be alerted automatically.";
+    "Adding a client to the watchlist means their future applications will be flagged for administrator review. Use this when the client owes money to the program or when there are similar risk concerns. If a new application is received with the same Social Insurance Number, administrators will be alerted automatically.";
   const formatPlanStatus = value => {
     if (!value) return "Unknown";
     return String(value)
@@ -447,17 +447,17 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     if (canAssign) {
       items.push({ id: "assign", text: "Assign / reassign" });
     }
-    if (canAddToWatchlist) {
-      items.push({ id: "add-watchlist", text: "Add applicant to watchlist" });
-    }
     if (canPropose) {
       items.push({ id: "propose-intervention", text: "Propose new intervention" });
     }
-    items.push({ id: "manage-plans-interventions", text: "Manage plans and interventions" });
-    items.push({ id: "manage-payments", text: "Manage payments" });
-    items.push({ id: "view-notes-calendar", text: "View notes and case calendar" });
-    items.push({ id: "documents-messages", text: "Documents and messages" });
-    items.push({ id: "esdc-validation", text: "ESDC validation" });
+    items.push({ id: "manage-plans-interventions", text: "View plans and interventions" });
+    items.push({ id: "manage-payments", text: "View payments" });
+    items.push({ id: "view-notes-calendar", text: "View notes and calendar" });
+    items.push({ id: "documents-messages", text: "View documents and messages" });
+    items.push({ id: "esdc-validation", text: "ILMP Validation and Export" });
+    if (canAddToWatchlist) {
+      items.push({ id: "add-watchlist", text: "Add client SIN to watchlist" });
+    }
     if (canMarkReady) {
       items.push({ id: "mark-ready-to-close", text: "Mark ready to close" });
     }
@@ -808,7 +808,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         }),
       });
       if (response.ok) {
-        setActionNotice({ type: "success", text: "Applicant added to the watchlist." });
+        setActionNotice({ type: "success", text: "Client SIN added to the watchlist." });
         setWatchlistModalOpen(false);
         setWatchlistNotes("");
         return;
@@ -818,7 +818,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         payload = await response.json();
       } catch (_) {}
       if (response.status === 409) {
-        setWatchlistError("This applicant is already on the watchlist.");
+        setWatchlistError("This client SIN is already on the watchlist.");
         return;
       }
       if (response.status === 400 && payload?.error === "identity_missing") {
@@ -1076,7 +1076,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
             setWatchlistNotes("");
             setWatchlistError(null);
           }}
-          header="Add applicant to watchlist"
+          header="Add client SIN to watchlist"
           closeAriaLabel="Close watchlist modal"
           footer={
             <SpaceBetween size="xs" direction="horizontal">
@@ -1107,10 +1107,10 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
             {watchlistError ? <Alert type="error">{watchlistError}</Alert> : null}
             {!watchlistReady ? (
               <Alert type="warning">
-                Name, date of birth, and SIN are required before adding an applicant to the watchlist.
+                Name, date of birth, and SIN are required before adding a client to the watchlist.
               </Alert>
             ) : null}
-            <FormField label="Applicant name">
+            <FormField label="Client name">
               <Input value={watchlistDisplayName} readOnly />
             </FormField>
             <FormField label="Date of birth">
