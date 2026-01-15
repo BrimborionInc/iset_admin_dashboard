@@ -26367,6 +26367,94 @@ app.put('/api/documents/:id', async (req, res) => {
   }
 });
 
+app.post('/api/documents/:id/link-interventions', async (req, res) => {
+  const documentId = normalisePositiveInteger(req.params.id);
+  if (!documentId) {
+    return res.status(400).json({ error: 'invalid_document_id' });
+  }
+  const interventionIds = Array.from(
+    new Set([
+      ...normalizeIdList(req.body?.interventionIds || req.body?.intervention_ids),
+      normalisePositiveInteger(req.body?.interventionId || req.body?.linkedInterventionId),
+    ].filter(Boolean))
+  );
+
+  let documentRow = null;
+  try {
+    const [rows] = await pool.query(
+      'SELECT id, document_category FROM iset_document WHERE id = ? LIMIT 1',
+      [documentId]
+    );
+    if (rows && rows[0]) documentRow = rows[0];
+  } catch (err) {
+    console.error('[admin:documents:link-interventions] lookup failed', err);
+    return res.status(500).json({ error: 'document_lookup_failed' });
+  }
+  if (!documentRow) {
+    return res.status(404).json({ error: 'document_not_found' });
+  }
+
+  const docType = normaliseString(documentRow.document_category);
+  if (!docType || docType.toLowerCase() !== 'ei_verification') {
+    return res.status(400).json({ error: 'document_type_not_supported' });
+  }
+
+  const eligibilityRoleAllowlist = new Set([
+    'systemadministrator',
+    'sysadmin',
+    'programadministrator',
+    'programadmin',
+    'nwacadministrator',
+    'regionalcoordinator',
+    'regionalmanager'
+  ]);
+  const identity = getRequesterIdentity(req);
+  const roleKeyRaw = normaliseString(identity?.role);
+  const roleKey = roleKeyRaw ? roleKeyRaw.toLowerCase().replace(/[\s_-]+/g, '') : '';
+  if (!eligibilityRoleAllowlist.has(roleKey)) {
+    return res.status(403).json({
+      error: 'ei_verification_forbidden',
+      message: 'You do not have permission to link EI verification documents.'
+    });
+  }
+
+  if (interventionIds.length) {
+    try {
+      const placeholders = interventionIds.map(() => '?').join(',');
+      const [rows] = await pool.query(
+        `SELECT id
+           FROM iset_case_intervention
+          WHERE id IN (${placeholders})`,
+        interventionIds
+      );
+      const rowMap = new Map(rows.map(row => [Number(row.id), row]));
+      const missing = interventionIds.filter(id => !rowMap.has(Number(id)));
+      if (missing.length) {
+        return res.status(400).json({ error: 'interventions_not_found', missingIds: missing });
+      }
+    } catch (err) {
+      console.error('[admin:documents:link-interventions] intervention lookup failed', err);
+      return res.status(500).json({ error: 'intervention_lookup_failed' });
+    }
+  }
+
+  try {
+    const existingMap = await fetchDocumentInterventionMap({ documentIds: [documentId] });
+    const existingLinks = existingMap.get(documentId) || [];
+    const mergedIds = interventionIds.length
+      ? Array.from(new Set([...existingLinks, ...interventionIds]))
+      : existingLinks;
+    await updateDocumentInterventionLinks({
+      documentId,
+      interventionIds: mergedIds,
+    });
+    return res.json({ ok: true, documentId, interventionIds: mergedIds });
+  } catch (err) {
+    console.error('[admin:documents:link-interventions] update failed', err);
+    return res.status(500).json({ error: 'document_link_failed' });
+  }
+});
+
 app.post('/api/documents/:id/duplicate', async (req, res) => {
   const documentId = Number(req.params.id);
   if (!Number.isFinite(documentId) || documentId <= 0) {
@@ -31112,11 +31200,11 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
     }
 
     const status = normaliseInterventionStatus(interventionRow.status);
-    if (status !== 'planned') {
+    if (!['planned', 'rejected'].includes(status)) {
       return res.status(409).json({
         error: 'invalid_status',
         detail: 'only_planned_interventions_deletable',
-        message: 'Only planned interventions can be deleted. Close or cancel instead.'
+        message: 'Only planned or rejected interventions can be deleted. Close or cancel instead.'
       });
     }
 

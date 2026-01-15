@@ -23,6 +23,7 @@ import CaseNotesHelp from "../../helpPanelContents/caseNotesHelp.js";
 import CaseCalendarHelp from "../../helpPanelContents/caseCalendarHelp.js";
 import CaseWorkspaceActionPlansHelp from "../../helpPanelContents/caseWorkspaceActionPlansHelp.js";
 import CaseWorkspaceInterventionsHelp from "../../helpPanelContents/caseWorkspaceInterventionsHelp.js";
+import CaseWorkspaceProposedInterventionsHelp from "../../helpPanelContents/caseWorkspaceProposedInterventionsHelp.js";
 import CaseWorkspaceFinancePanelHelp from "../../helpPanelContents/caseWorkspaceFinancePanelHelp.js";
 import CaseWorkspaceCompliancePanelHelp from "../../helpPanelContents/caseWorkspaceCompliancePanelHelp.js";
 import CaseWorkspaceParticipantDetailsHelp from "../../helpPanelContents/caseWorkspaceParticipantDetailsHelp.js";
@@ -117,10 +118,10 @@ const widgetRegistry = {
     defaultColumnSpan: 4,
     component: InterventionAssessmentWidget,
     title: "Intervention assessment",
-    description: "Propose a new intervention for approval.",
-    helpComponent: CaseWorkspaceInterventionsHelp,
-    helpTitle: "Intervention assessment",
-    aiContext: CaseWorkspaceInterventionsHelp.aiContext,
+    description: "Propose new interventions for approval.",
+    helpComponent: CaseWorkspaceProposedInterventionsHelp,
+    helpTitle: "Proposed interventions",
+    aiContext: CaseWorkspaceProposedInterventionsHelp.aiContext,
   },
   financePanel: {
     id: "financePanel",

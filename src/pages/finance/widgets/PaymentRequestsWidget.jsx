@@ -41,6 +41,7 @@ const BLOCKED_INTERVENTION_STATUSES = new Set([
   "submitted",
   "in_review",
   "changes_requested",
+  "rejected",
   "cancelled",
 ]);
 const AWAITING_SUBMISSION_STATUSES = new Set(["draft", "returned"]);

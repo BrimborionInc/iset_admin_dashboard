@@ -2,6 +2,13 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-01-27
+- UX: Proposed Interventions widget now includes an info link with dedicated help panel guidance and AI context.
+- UX: Proposed Interventions status badge now sits in the header actions next to Save Progress.
+- Docs: Rewrote Proposed Interventions help content to align with PATH case management guidance.
+- Fix: Proposed Interventions wizard now clears draft data after approvals or rejections so the next proposal starts clean.
+- Fix: Rejected interventions can now be deleted from the case workspace.
+
 ## 2026-01-26
 - Assessment: Coordinator assessment now supports multiple proposed interventions with per-intervention cost tables, inline amount edits, and line-item modals.
 - Assessment: Proposed interventions step now uses an embedded table with modal-based editing for intervention details and delete-only row actions.
@@ -15,6 +22,27 @@ Format: YYYY-MM-DD - Category: Short description
 - Data: Assessment submissions now persist proposed interventions + cost lines in `assessment_proposed_interventions` with runtime-config defaults for suggested items.
 - API: Added runtime config endpoints for coordinator assessment costing defaults.
 - Data: Removed legacy intervention type references from schema/mapping sources.
+
+## 2026-01-15
+- Assessment: Case workspace "Proposed Interventions" wizard rebuilt to support multi-intervention proposals with action plan selection, costing, and simplified documents.
+- Assessment: Decision step now captures approve/request changes/reject outcomes with EI verification upload required for approvals and case-note logging for changes/rejections.
+- API: Added endpoint to link EI verification documents to approved interventions.
+- UX: Proposed Interventions wizard blocks navigation past the action plan step until a plan exists.
+- UX: Proposed Interventions cost item modal now mirrors coordinator assessment behavior, including editable amount inputs and installment controls.
+- UX: Proposed Interventions wizard auto-saves draft progress when navigating between steps.
+- Fix: Proposed Interventions NOC autosuggest now matches coordinator search behavior and returns suggestions.
+- Fix: Proposed Interventions draft data now restores when returning to an incomplete proposal without a saved draft.
+- Fix: Proposed Interventions wizard validates framing data before moving forward and only auto-saves when a draft can be created.
+- Fix: Proposed Interventions wizard now shows field-level validation errors across framing, type, cost, and decision steps.
+- Fix: Proposed Interventions wizard restores submitted proposals on workspace load instead of blocking new navigation.
+- Fix: Create payment packet modal now excludes rejected interventions from the eligible list.
+- UX: Interventions widget status filter now includes Rejected.
+- UX: Interventions widget status filter moved into the header as a select control.
+- Fix: Proposed Interventions wizard defers auto-save until required NOC fields are available for NOC-required codes.
+- UX: Proposed Interventions wizard now captures delivery details (NOC, partner, ITP, wage subsidy) in the add/edit modal instead of a separate step.
+- UX: Proposed Interventions wizard disables Next on the framing step until at least one intervention is added.
+- Fix: Proposed Interventions wizard no longer errors on load when checking framing readiness.
+- Fix: Decision step navigation no longer blocked by draft auto-save logic on submitted proposals.
 
 ## 2026-01-14
 - UX: Case portfolio Cases widget no longer shows the "New Case" action button.

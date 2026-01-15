@@ -11,7 +11,7 @@ import {
   Link,
   Modal,
   Pagination,
-  SegmentedControl,
+  Select,
   SpaceBetween,
   StatusIndicator,
   Table,
@@ -183,6 +183,7 @@ const STATUS_FILTER_OPTIONS = [
   { id: "all", text: "All" },
   { id: "draft", text: "Draft" },
   { id: "submitted", text: "Submitted" },
+  { id: "rejected", text: "Rejected" },
   { id: "planned", text: "Planned" },
   { id: "in_progress", text: "In progress" },
   { id: "closed", text: "Closed" },
@@ -372,6 +373,12 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [statusFilter, setStatusFilter] = useState("all");
   const preloadCodesAttemptedRef = useRef(false);
   const preloadOutcomesAttemptedRef = useRef(false);
+  const statusFilterOptions = useMemo(
+    () => STATUS_FILTER_OPTIONS.map(option => ({ value: option.id, label: option.text })),
+    []
+  );
+  const selectedStatusOption =
+    statusFilterOptions.find(option => option.value === statusFilter) || statusFilterOptions[0];
 
   const activePlan = useMemo(
     () => caseData?.actionPlans?.find(plan => plan.id === selectedActionPlanId),
@@ -1202,13 +1209,23 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           variant="h2"
           info={infoLink}
           actions={
-            <Button
-              iconName="add-plus"
-              disabled={!canModify || hasBlockingProposal}
-              onClick={openDraftWizard}
-            >
-              Propose intervention
-            </Button>
+            <SpaceBetween direction="horizontal" size="s">
+              <Select
+                selectedOption={selectedStatusOption}
+                onChange={({ detail }) => setStatusFilter(detail.selectedOption?.value || "all")}
+                options={statusFilterOptions}
+                placeholder="Filter status"
+                disabled={!activePlan}
+                ariaLabel="Filter interventions by status"
+              />
+              <Button
+                iconName="add-plus"
+                disabled={!canModify || hasBlockingProposal}
+                onClick={openDraftWizard}
+              >
+                Propose intervention
+              </Button>
+            </SpaceBetween>
           }
         >
           {`${metadata.title ?? "Interventions"}${activePlanLabel ? ` - ${activePlanLabel}` : ""}`}
@@ -1252,15 +1269,6 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             A draft or submitted proposal already exists for this case. Resume it from the table before starting another.
           </Alert>
         )}
-        {activePlan ? (
-          <SegmentedControl
-            selectedId={statusFilter}
-            options={STATUS_FILTER_OPTIONS}
-            onChange={({ detail }) => setStatusFilter(detail.selectedId)}
-            ariaLabel="Filter interventions by status"
-            size="small"
-          />
-        ) : null}
         {activePlan ? (
           <Table
             trackBy="id"

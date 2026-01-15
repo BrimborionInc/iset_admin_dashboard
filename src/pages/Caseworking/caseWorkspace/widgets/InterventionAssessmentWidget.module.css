@@ -1,0 +1,4 @@
+.blockNext :global(button[class*="awsui_variant-primary"][class*="awsui_button"]) {
+  pointer-events: none;
+  opacity: 0.55;
+}
