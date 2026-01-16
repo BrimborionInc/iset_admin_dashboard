@@ -1138,7 +1138,27 @@ const AppRoutes = ({
               { text: 'Finance Settings', href: '/finance/settings' }
             ],
             'Finance Settings',
-            'financeSettings'
+            'financeSettings',
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeSettings:openPalette"))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeSettings:resetLayout"))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            )
           )}
         </Guard>
       </Route>

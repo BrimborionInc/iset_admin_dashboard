@@ -17193,6 +17193,59 @@ app.patch('/api/config/runtime/finance-email-routing', async (req, res) => {
   }
 });
 
+app.get('/api/config/runtime/payment-type-mapping', async (req, res) => {
+  try {
+    if (requireFinanceRole(req, res)) return;
+    const { mapping, updatedAt } = await readPaymentInterventionMappingSnapshot();
+    if (!mapping) {
+      return res.json({
+        enabled: false,
+        paymentTypes: [],
+        interventions: [],
+        notes: [],
+        version: null,
+        generatedOn: null,
+        updatedAt: null,
+      });
+    }
+    return res.json({
+      enabled: true,
+      ...serializePaymentInterventionMapping(mapping),
+      updatedAt: updatedAt || null,
+    });
+  } catch (err) {
+    console.error('[payment-intervention-map] fetch failed', err);
+    res.status(500).json({ error: 'payment_intervention_map_fetch_failed', message: err.message });
+  }
+});
+
+app.patch('/api/config/runtime/payment-type-mapping', async (req, res) => {
+  try {
+    if (requireFinanceRole(req, res)) return;
+    const body = req.body || {};
+    const { mapping, updatedAt } = await writePaymentInterventionMapping(body);
+    if (!mapping) {
+      return res.json({
+        enabled: false,
+        paymentTypes: [],
+        interventions: [],
+        notes: [],
+        version: null,
+        generatedOn: null,
+        updatedAt: updatedAt || null,
+      });
+    }
+    return res.json({
+      enabled: true,
+      ...serializePaymentInterventionMapping(mapping),
+      updatedAt: updatedAt || null,
+    });
+  } catch (err) {
+    console.error('[payment-intervention-map] update failed', err);
+    res.status(500).json({ error: 'payment_intervention_map_update_failed', message: err.message });
+  }
+});
+
 app.get('/api/config/auto-assignment', async (req, res) => {
   try {
     if (!hasSlaAdminAccess(req)) return res.status(403).json({ error: 'forbidden' });
@@ -21156,6 +21209,9 @@ const runReminderPoll = () => {
   pollRemindersForDue().catch(err => {
     console.warn('[reminders] due poll error', err?.message || err);
   });
+  pollDocsRequestedThresholds().catch(err => {
+    console.warn('[doc-requests] threshold poll error', err?.message || err);
+  });
 };
 
 const runAllocationApplyPoll = async () => {
@@ -21563,7 +21619,8 @@ const mapReminderMetadata = (row) => {
   return meta && typeof meta === 'object' ? meta : {};
 };
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const MS_PER_HOUR = 60 * 60 * 1000;
+const MS_PER_DAY = 24 * MS_PER_HOUR;
 const startOfUtcDay = (value) => {
   if (!value) return null;
   const date = new Date(value);
@@ -21648,6 +21705,388 @@ function pollRemindersForDue() {
   }
   })();
 }
+
+const DOC_REQUEST_EVENT_TYPES = Object.freeze({
+  reminder: 'document_request_reminder_due',
+  closure: 'document_request_closure_due',
+});
+
+const DOC_REQUEST_STAGE_KEYS = Object.freeze({
+  reminder: 'docs_request_reminder',
+  closure: 'docs_request_closure',
+});
+
+const DOC_REQUEST_DEFAULT_HOURS = Object.freeze({
+  reminder: 7 * 24,
+  closure: 28 * 24,
+});
+
+const normaliseThresholdHours = (value, fallback) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return fallback;
+  return Math.round(numeric);
+};
+
+const loadDocRequestThresholds = async () => {
+  try {
+    const targets = await fetchActiveSlaTargets(pool);
+    const byKey = new Map();
+    (targets || []).forEach(target => {
+      if (target?.stage_key) byKey.set(target.stage_key, target);
+    });
+    const reminderHours = normaliseThresholdHours(
+      byKey.get(DOC_REQUEST_STAGE_KEYS.reminder)?.target_hours,
+      DOC_REQUEST_DEFAULT_HOURS.reminder
+    );
+    const closureHours = normaliseThresholdHours(
+      byKey.get(DOC_REQUEST_STAGE_KEYS.closure)?.target_hours,
+      DOC_REQUEST_DEFAULT_HOURS.closure
+    );
+    return { reminderHours, closureHours };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[doc-requests] SLA target lookup failed', err?.message || err);
+    }
+    return {
+      reminderHours: DOC_REQUEST_DEFAULT_HOURS.reminder,
+      closureHours: DOC_REQUEST_DEFAULT_HOURS.closure,
+    };
+  }
+};
+
+const buildDocRequestPayload = ({
+  caseId,
+  applicationId,
+  trackingId,
+  docsRequestedAt,
+  docsRequestedSource,
+  thresholdHours,
+  hoursSinceRequested,
+  message,
+}) => {
+  const dueAt = docsRequestedAt
+    ? new Date(new Date(docsRequestedAt).getTime() + thresholdHours * MS_PER_HOUR)
+    : null;
+  const hoursSince = Math.max(0, Math.floor(hoursSinceRequested));
+  const daysSince = Math.floor(hoursSince / 24);
+  return {
+    tracking_id: trackingId || null,
+    application_id: applicationId || null,
+    case_id: caseId || null,
+    docs_requested_at: toIsoDateTime(docsRequestedAt),
+    source: docsRequestedSource || null,
+    threshold_hours: thresholdHours,
+    threshold_days: Math.floor(thresholdHours / 24),
+    hours_since_requested: hoursSince,
+    days_since_requested: daysSince,
+    due_at: toIsoDateTime(dueAt),
+    message,
+  };
+};
+
+function pollDocsRequestedThresholds() {
+  return (async () => {
+    const { reminderHours, closureHours } = await loadDocRequestThresholds();
+    const now = new Date();
+    let rows = [];
+
+    try {
+      const [result] = await pool.query(
+        `SELECT
+            c.id AS case_id,
+            c.application_id,
+            a.docs_requested_at,
+            a.docs_requested_source,
+            JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+            MAX(CASE WHEN e.event_type = ? THEN 1 ELSE 0 END) AS reminder_emitted,
+            MAX(CASE WHEN e.event_type = ? THEN 1 ELSE 0 END) AS closure_emitted
+          FROM iset_application a
+          JOIN iset_case c ON c.application_id = a.id
+          LEFT JOIN iset_event_entry e
+            ON e.subject_type = 'case'
+           AND e.subject_id = CAST(c.id AS CHAR)
+           AND e.event_type IN (?, ?)
+           AND e.captured_at >= a.docs_requested_at
+         WHERE a.docs_requested_active = 1
+           AND a.docs_requested_at IS NOT NULL
+         GROUP BY c.id, c.application_id, a.docs_requested_at, a.docs_requested_source, tracking_id
+         LIMIT 500`,
+        [
+          DOC_REQUEST_EVENT_TYPES.reminder,
+          DOC_REQUEST_EVENT_TYPES.closure,
+          DOC_REQUEST_EVENT_TYPES.reminder,
+          DOC_REQUEST_EVENT_TYPES.closure
+        ]
+      );
+      rows = result || [];
+    } catch (err) {
+      if (isMissingTableErrorLocal(err)) {
+        return;
+      }
+      console.warn('[doc-requests] threshold poll failed', err?.message || err);
+      return;
+    }
+
+    for (const row of rows) {
+      const caseId = Number(row.case_id);
+      if (!Number.isFinite(caseId)) continue;
+      const applicationId = Number(row.application_id) || null;
+      const docsRequestedAt = row.docs_requested_at || null;
+      const docsRequestedSource = row.docs_requested_source || null;
+      const trackingId = row.tracking_id || `CASE-${caseId}`;
+
+      if (!docsRequestedAt) continue;
+      const requestedDate = docsRequestedAt instanceof Date ? docsRequestedAt : new Date(docsRequestedAt);
+      if (Number.isNaN(requestedDate.getTime())) continue;
+
+      const hoursSinceRequested = (now.getTime() - requestedDate.getTime()) / MS_PER_HOUR;
+      if (!Number.isFinite(hoursSinceRequested) || hoursSinceRequested < 0) continue;
+
+      if (
+        Number.isFinite(reminderHours) &&
+        hoursSinceRequested >= reminderHours &&
+        Number(row.reminder_emitted || 0) === 0
+      ) {
+        try {
+          await captureCaseEvent({
+            type: DOC_REQUEST_EVENT_TYPES.reminder,
+            caseId,
+            payload: buildDocRequestPayload({
+              caseId,
+              applicationId,
+              trackingId,
+              docsRequestedAt: requestedDate,
+              docsRequestedSource,
+              thresholdHours: reminderHours,
+              hoursSinceRequested,
+              message: 'Document request reminder due'
+            }),
+            trackingId,
+            actorId: null,
+            actorName: null,
+            actorType: 'system',
+          });
+        } catch (eventErr) {
+          console.warn('[doc-requests] failed to emit reminder due', eventErr?.message || eventErr);
+        }
+      }
+
+      if (
+        Number.isFinite(closureHours) &&
+        hoursSinceRequested >= closureHours &&
+        Number(row.closure_emitted || 0) === 0
+      ) {
+        try {
+          await captureCaseEvent({
+            type: DOC_REQUEST_EVENT_TYPES.closure,
+            caseId,
+            payload: buildDocRequestPayload({
+              caseId,
+              applicationId,
+              trackingId,
+              docsRequestedAt: requestedDate,
+              docsRequestedSource,
+              thresholdHours: closureHours,
+              hoursSinceRequested,
+              message: 'Document request closure due'
+            }),
+            trackingId,
+            actorId: null,
+            actorName: null,
+            actorType: 'system',
+          });
+        } catch (eventErr) {
+          console.warn('[doc-requests] failed to emit closure due', eventErr?.message || eventErr);
+        }
+      }
+    }
+  })();
+}
+
+const DOC_REQUEST_REMINDER_CATEGORY = 'Docs requested';
+const DOC_REQUEST_REMINDER_SOURCE = 'docs_requested';
+const DOC_REQUEST_REMINDER_KINDS = Object.freeze({
+  reminder: 'reminder',
+  closure: 'closure',
+});
+const DOC_REQUEST_REMINDER_TITLES = Object.freeze({
+  reminder: 'Docs requested reminder',
+  closure: 'Docs requested closure',
+});
+
+const formatDocRequestThresholdLabel = (thresholdHours) => {
+  if (!Number.isFinite(thresholdHours) || thresholdHours < 0) return null;
+  const rounded = Math.round(thresholdHours);
+  if (rounded === 0) return '0 hours';
+  if (rounded % 24 === 0) {
+    const days = Math.floor(rounded / 24);
+    return `${days} day${days === 1 ? '' : 's'}`;
+  }
+  return `${rounded} hour${rounded === 1 ? '' : 's'}`;
+};
+
+const formatDocRequestReminderDescription = ({ kind, thresholdHours }) => {
+  const thresholdLabel = formatDocRequestThresholdLabel(thresholdHours);
+  if (!thresholdLabel) return null;
+  const label = kind === DOC_REQUEST_REMINDER_KINDS.closure ? 'closure' : 'reminder';
+  return `Docs requested ${label} due ${thresholdLabel} after documents were requested.`;
+};
+
+const buildDocRequestReminderMetadata = ({ kind, docsRequestedAt, docsRequestedSource, thresholdHours }) =>
+  JSON.stringify({
+    source: DOC_REQUEST_REMINDER_SOURCE,
+    kind,
+    docs_requested_at: toIsoDateTime(docsRequestedAt),
+    docs_requested_source: docsRequestedSource || null,
+    threshold_hours: thresholdHours,
+    threshold_days: Math.floor(Number(thresholdHours || 0) / 24),
+  });
+
+const fetchDocRequestReminders = async (caseId) => {
+  const [rows] = await pool.query(
+    `SELECT id,
+            status,
+            JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.kind')) AS kind
+       FROM iset_case_reminder
+      WHERE case_id = ?
+        AND deleted_at IS NULL
+        AND status = 'open'
+        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) = ?`,
+    [caseId, DOC_REQUEST_REMINDER_SOURCE]
+  );
+  return rows || [];
+};
+
+const upsertDocRequestReminders = async ({
+  caseId,
+  applicationId,
+  docsRequestedAt,
+  docsRequestedSource,
+  actorStaffProfileId
+}) => {
+  const numericCaseId = Number(caseId);
+  if (!Number.isFinite(numericCaseId) || numericCaseId <= 0) return [];
+  if (!docsRequestedAt) return [];
+  const baseDate = docsRequestedAt instanceof Date ? docsRequestedAt : new Date(docsRequestedAt);
+  if (Number.isNaN(baseDate.getTime())) return [];
+
+  let existingRows = [];
+  try {
+    existingRows = await fetchDocRequestReminders(numericCaseId);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) return [];
+    throw err;
+  }
+  const existingByKind = new Map();
+  existingRows.forEach(row => {
+    if (row?.kind) existingByKind.set(row.kind, row);
+  });
+
+  const { reminderHours, closureHours } = await loadDocRequestThresholds();
+  const thresholds = [
+    { kind: DOC_REQUEST_REMINDER_KINDS.reminder, hours: reminderHours, title: DOC_REQUEST_REMINDER_TITLES.reminder },
+    { kind: DOC_REQUEST_REMINDER_KINDS.closure, hours: closureHours, title: DOC_REQUEST_REMINDER_TITLES.closure },
+  ];
+  const createdIds = [];
+  const actorId = Number.isInteger(actorStaffProfileId) && actorStaffProfileId > 0 ? actorStaffProfileId : null;
+  const applicationIdValue = Number.isFinite(Number(applicationId)) ? Number(applicationId) : null;
+
+  for (const threshold of thresholds) {
+    if (!Number.isFinite(threshold.hours)) continue;
+    const dueAt = new Date(baseDate.getTime() + threshold.hours * MS_PER_HOUR);
+    if (Number.isNaN(dueAt.getTime())) continue;
+    const description = formatDocRequestReminderDescription({
+      kind: threshold.kind,
+      thresholdHours: threshold.hours
+    });
+    const metadataJson = buildDocRequestReminderMetadata({
+      kind: threshold.kind,
+      docsRequestedAt: baseDate,
+      docsRequestedSource,
+      thresholdHours: threshold.hours
+    });
+    const existing = existingByKind.get(threshold.kind);
+    try {
+      if (existing?.id) {
+        await pool.query(
+          `UPDATE iset_case_reminder
+              SET title = ?,
+                  description = ?,
+                  category = ?,
+                  status = 'open',
+                  due_at = ?,
+                  completed_at = NULL,
+                  completed_by_staff_profile_id = NULL,
+                  metadata_json = ?,
+                  updated_at = CURRENT_TIMESTAMP,
+                  updated_by_staff_profile_id = COALESCE(?, updated_by_staff_profile_id),
+                  deleted_at = NULL
+            WHERE id = ? AND deleted_at IS NULL`,
+          [
+            threshold.title,
+            description,
+            DOC_REQUEST_REMINDER_CATEGORY,
+            dueAt,
+            metadataJson,
+            actorId,
+            existing.id
+          ]
+        );
+      } else {
+        const [insertResult] = await pool.query(
+          `INSERT INTO iset_case_reminder
+            (case_id, application_id, title, description, category, status, due_at, metadata_json, created_by_staff_profile_id, updated_by_staff_profile_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?)`,
+          [
+            numericCaseId,
+            applicationIdValue,
+            threshold.title,
+            description,
+            DOC_REQUEST_REMINDER_CATEGORY,
+            'open',
+            dueAt,
+            metadataJson,
+            actorId,
+            actorId
+          ]
+        );
+        if (insertResult?.insertId) {
+          createdIds.push(insertResult.insertId);
+        }
+      }
+    } catch (err) {
+      if (isMissingTableErrorLocal(err)) {
+        return [];
+      }
+      throw err;
+    }
+  }
+
+  return createdIds;
+};
+
+const cancelDocRequestReminders = async ({ caseId, actorStaffProfileId }) => {
+  const numericCaseId = Number(caseId);
+  if (!Number.isFinite(numericCaseId) || numericCaseId <= 0) return;
+  const actorId = Number.isInteger(actorStaffProfileId) && actorStaffProfileId > 0 ? actorStaffProfileId : null;
+  try {
+    await pool.query(
+      `UPDATE iset_case_reminder
+          SET status = 'cancelled',
+              deleted_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP,
+              updated_by_staff_profile_id = COALESCE(?, updated_by_staff_profile_id)
+        WHERE case_id = ?
+          AND deleted_at IS NULL
+          AND status = 'open'
+          AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) = ?`,
+      [actorId, numericCaseId, DOC_REQUEST_REMINDER_SOURCE]
+    );
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) return;
+    throw err;
+  }
+};
 
 
 const listReminders = async (options = {}) => {
@@ -36745,7 +37184,9 @@ const normalizePaymentTypeMappingEntry = entry => {
   if (!code) return null;
   const labelRaw = entry.label ?? entry.name ?? null;
   const label = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw.trim() : code;
-  return { code, label };
+  const notesRaw = entry.notes ?? entry.note ?? null;
+  const notes = typeof notesRaw === 'string' && notesRaw.trim() ? notesRaw.trim() : '';
+  return { code, label, notes };
 };
 
 const normalizePaymentInterventionMappingEntry = entry => {
@@ -36848,16 +37289,70 @@ const serializePaymentInterventionMapping = mapping => {
   return rest;
 };
 
-async function readPaymentInterventionMapping(connection = null) {
+const normalizePaymentInterventionNotes = raw => {
+  if (Array.isArray(raw)) {
+    return raw
+      .map(note => (typeof note === 'string' ? note.trim() : ''))
+      .filter(Boolean);
+  }
+  if (typeof raw === 'string') {
+    return raw
+      .split(/\r?\n/)
+      .map(note => note.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
+
+const sanitizePaymentInterventionMappingPayload = raw => {
+  const payload = raw && typeof raw === 'object' ? raw : {};
+  const version = typeof payload.version === 'string' ? payload.version.trim() : null;
+  const generatedOn =
+    typeof payload.generatedOn === 'string'
+      ? payload.generatedOn.trim()
+      : typeof payload.generated_on === 'string'
+        ? payload.generated_on.trim()
+        : null;
+  const notes = normalizePaymentInterventionNotes(payload.notes);
+  const paymentTypesRaw = payload.paymentTypes || payload.payment_types || [];
+  const paymentTypesMap = new Map();
+  if (Array.isArray(paymentTypesRaw)) {
+    paymentTypesRaw.forEach(entry => {
+      const normalized = normalizePaymentTypeMappingEntry(entry);
+      if (!normalized) return;
+      const key = normalized.code.toLowerCase();
+      paymentTypesMap.set(key, normalized);
+    });
+  }
+  const interventionsRaw = Array.isArray(payload.interventions) ? payload.interventions : [];
+  const interventionsMap = new Map();
+  interventionsRaw.forEach(entry => {
+    const normalized = normalizePaymentInterventionMappingEntry(entry);
+    if (!normalized) return;
+    const key = normalized.code;
+    interventionsMap.set(key, normalized);
+  });
+  return {
+    version,
+    generatedOn,
+    notes,
+    paymentTypes: Array.from(paymentTypesMap.values()),
+    interventions: Array.from(interventionsMap.values()),
+  };
+};
+
+async function readPaymentInterventionMappingSnapshot(connection = null) {
   const runner = connection || pool;
-  if (!runner) return null;
+  if (!runner) return { mapping: null, updatedAt: null };
   try {
     await ensureRuntimeConfigTable();
     const [rows] = await runner.query(
       'SELECT v FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
       [PAYMENT_INTERVENTION_MAPPING_SCOPE, PAYMENT_INTERVENTION_MAPPING_KEY]
     );
-    if (!rows || rows.length === 0) return null;
+    if (!rows || rows.length === 0) {
+      return { mapping: null, updatedAt: null };
+    }
     let payload = rows[0].v;
     if (payload && typeof payload === 'string') {
       try {
@@ -36866,13 +37361,52 @@ async function readPaymentInterventionMapping(connection = null) {
         payload = null;
       }
     }
-    return normalizePaymentInterventionMapping(payload);
+    return {
+      mapping: normalizePaymentInterventionMapping(payload),
+      updatedAt: rows[0].updated_at || null,
+    };
   } catch (err) {
     if (!isMissingTableErrorLocal(err)) {
       console.warn('[payment-intervention-map] failed to read runtime config:', err.message);
     }
-    return null;
+    return { mapping: null, updatedAt: null };
   }
+}
+
+async function readPaymentInterventionMapping(connection = null) {
+  const { mapping } = await readPaymentInterventionMappingSnapshot(connection);
+  return mapping;
+}
+
+async function writePaymentInterventionMapping(payload, connection = null) {
+  const runner = connection || pool;
+  if (!runner) return { mapping: null, updatedAt: null };
+  const cleaned = sanitizePaymentInterventionMappingPayload(payload);
+  if (!cleaned.generatedOn && (cleaned.paymentTypes.length || cleaned.interventions.length)) {
+    cleaned.generatedOn = new Date().toISOString();
+  }
+  const normalized = normalizePaymentInterventionMapping(cleaned);
+  await ensureRuntimeConfigTable();
+  if (!normalized) {
+    await runner.query(
+      'DELETE FROM iset_runtime_config WHERE scope = ? AND k = ?',
+      [PAYMENT_INTERVENTION_MAPPING_SCOPE, PAYMENT_INTERVENTION_MAPPING_KEY]
+    );
+    return { mapping: null, updatedAt: null };
+  }
+  await runner.query(
+    'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+    [
+      PAYMENT_INTERVENTION_MAPPING_SCOPE,
+      PAYMENT_INTERVENTION_MAPPING_KEY,
+      JSON.stringify(serializePaymentInterventionMapping(normalized)),
+    ]
+  );
+  const [[row]] = await runner.query(
+    'SELECT updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+    [PAYMENT_INTERVENTION_MAPPING_SCOPE, PAYMENT_INTERVENTION_MAPPING_KEY]
+  );
+  return { mapping: normalized, updatedAt: row?.updated_at || null };
 }
 
 const resolveAllowedPaymentTypesForIntervention = (mapping, intervention) => {
@@ -48473,6 +49007,13 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
               },
               trackingId
             });
+            try {
+              await cancelDocRequestReminders({ caseId, actorStaffProfileId: null });
+            } catch (reminderErr) {
+              if (!isMissingTableErrorLocal(reminderErr)) {
+                console.warn('[doc-requests] reminder cancel failed', reminderErr?.message || reminderErr);
+              }
+            }
           }
         }
       }
@@ -49636,6 +50177,24 @@ app.put('/api/cases/:id', async (req, res) => {
         actorId,
         actorName,
       });
+      const reminderActorId = req.staffProfile?.id || null;
+      try {
+        if (docsRequestedChangeType === 'set') {
+          await upsertDocRequestReminders({
+            caseId,
+            applicationId: caseRow?.application_id || null,
+            docsRequestedAt: caseRow?.docs_requested_at,
+            docsRequestedSource: docsSource || null,
+            actorStaffProfileId: reminderActorId
+          });
+        } else {
+          await cancelDocRequestReminders({ caseId, actorStaffProfileId: reminderActorId });
+        }
+      } catch (reminderErr) {
+        if (!isMissingTableErrorLocal(reminderErr)) {
+          console.warn('[doc-requests] reminder sync failed', reminderErr?.message || reminderErr);
+        }
+      }
     }
 
     const submitActionRaw = body.assessment_submit_action;

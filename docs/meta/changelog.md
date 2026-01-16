@@ -23,6 +23,12 @@ Format: YYYY-MM-DD - Category: Short description
 - API: Added runtime config endpoints for coordinator assessment costing defaults.
 - Data: Removed legacy intervention type references from schema/mapping sources.
 
+## 2026-01-16
+- UX: Finance Settings now uses a configurable dashboard layout with widget palette controls.
+- UX: Added a Payment type mapping widget to manage intervention payment type rules.
+- API: Added runtime config endpoints for payment intervention type mapping.
+- UX: Docs requested thresholds now create case calendar reminders and clear them when the request is removed.
+
 ## 2026-01-15
 - Assessment: Case workspace "Proposed Interventions" wizard rebuilt to support multi-intervention proposals with action plan selection, costing, and simplified documents.
 - Assessment: Decision step now captures approve/request changes/reject outcomes with EI verification upload required for approvals and case-note logging for changes/rejections.

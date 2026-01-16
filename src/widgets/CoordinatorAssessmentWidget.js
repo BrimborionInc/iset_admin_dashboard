@@ -1626,8 +1626,9 @@ const CoordinatorAssessmentWidget = forwardRef(
       const defaultsEntry = Array.isArray(effectiveCostingDefaults.interventions)
         ? effectiveCostingDefaults.interventions.find(entry => entry.code === code)
         : null;
+      const hasExplicitDefaults = Boolean(defaultsEntry);
       let suggested = defaultsEntry?.suggested || [];
-      if (!suggested.length && effectiveCostingDefaults.strategy === 'allowed') {
+      if (!suggested.length && effectiveCostingDefaults.strategy === 'allowed' && !hasExplicitDefaults) {
         if (!allowed.size) return null;
         suggested = Array.from(allowed).map(type => ({ type }));
       }

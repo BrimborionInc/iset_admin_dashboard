@@ -1519,6 +1519,7 @@ const ApplicationOverviewWidget = ({
       try { await refreshCasePayload(); } catch (_) {}
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId: caseData.id } }));
+        window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId: caseData.id } }));
       }
       setStatusFeedback({
         type: 'success',

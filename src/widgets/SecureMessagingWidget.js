@@ -287,6 +287,10 @@ const SecureMessagingWidget = ({
           docs_requested_at: new Date().toISOString()
         });
       }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId } }));
+        window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId } }));
+      }
     } finally {
       if (applicationId && releaseLock) {
         try {

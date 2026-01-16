@@ -1,16 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { BoardItem } from "@cloudscape-design/board-components";
 import {
   Alert,
   Box,
   Button,
-  Container,
+  ButtonDropdown,
   Header,
   Input,
+  Link,
   SpaceBetween,
   Spinner,
   Table,
 } from "@cloudscape-design/components";
 import { apiFetch } from "../../../auth/apiClient";
+import { boardItemI18nStrings } from "./common";
 
 const normalizeRoutingMap = (value = {}) => {
   const out = {};
@@ -25,7 +28,7 @@ const normalizeRoutingMap = (value = {}) => {
   return out;
 };
 
-const FinanceEmailRoutingWidget = () => {
+const FinanceEmailRoutingWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [regions, setRegions] = useState([]);
   const [savedRouting, setSavedRouting] = useState({});
   const [draftRouting, setDraftRouting] = useState({});
@@ -126,12 +129,35 @@ const FinanceEmailRoutingWidget = () => {
     setError(null);
   };
 
+  const handleSettingsClick = ({ detail }) => {
+    if (detail?.id === "remove" && typeof actions.removeItem === "function") {
+      actions.removeItem();
+    }
+  };
+
+  const infoLink = metadata?.helpComponent && toggleHelpPanel ? (
+    <Link
+      variant="info"
+      onFollow={event => {
+        event.preventDefault();
+        const helpContent = React.createElement(metadata.helpComponent);
+        toggleHelpPanel(
+          helpContent,
+          metadata.helpTitle ?? "Finance email routing",
+          metadata.aiContext ?? ""
+        );
+      }}
+    >
+      Info
+    </Link>
+  ) : undefined;
+
   return (
-    <Container
-      variant="stacked"
+    <BoardItem
       header={
         <Header
           variant="h2"
+          info={infoLink}
           description="Configure one finance recipient per province or territory for outbound payment packets."
           actions={
             <SpaceBetween direction="horizontal" size="xs">
@@ -147,6 +173,17 @@ const FinanceEmailRoutingWidget = () => {
           Finance email routing
         </Header>
       }
+      settings={
+        typeof actions.removeItem === "function" ? (
+          <ButtonDropdown
+            ariaLabel="Finance email routing settings"
+            variant="icon"
+            items={[{ id: "remove", text: "Remove widget" }]}
+            onItemClick={handleSettingsClick}
+          />
+        ) : undefined
+      }
+      i18nStrings={boardItemI18nStrings}
     >
       {loading ? (
         <Box textAlign="center">
@@ -200,7 +237,7 @@ const FinanceEmailRoutingWidget = () => {
           </Box>
         </SpaceBetween>
       )}
-    </Container>
+    </BoardItem>
   );
 };
 
