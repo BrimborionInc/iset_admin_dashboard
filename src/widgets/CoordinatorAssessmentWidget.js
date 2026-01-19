@@ -7724,6 +7724,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     !isCompletedStatus &&
     !checkingChecklist &&
     fundingDocsChecklistComplete;
+  const isCommunicationSending = isCommunicationStep && sendingLetter;
   const wizardSubmitHandler = isFundingDocsStep
     ? (canSubmitFundingDocs ? handleFundingDocsComplete : undefined)
     : isCommunicationStep
@@ -7942,7 +7943,13 @@ const CoordinatorAssessmentWidget = forwardRef(
         <div style={{ visibility: wizardNavPriming ? 'hidden' : 'visible' }} aria-hidden={wizardNavPriming ? 'true' : undefined}>
           <Wizard
             activeStepIndex={activeStepIndex}
-            isLoadingNextStep={lockingAssessment || checkingChecklist || eiVerificationUploading || isSubmittingAssessment}
+            isLoadingNextStep={
+              lockingAssessment ||
+              checkingChecklist ||
+              eiVerificationUploading ||
+              isSubmittingAssessment ||
+              isCommunicationSending
+            }
             onNavigate={handleWizardNavigate}
             onSubmit={wizardSubmitHandler}
             onCancel={canSubmitAssessment ? handleCancel : undefined}
@@ -7957,7 +7964,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                     : 'Complete required fields before continuing.'
                   : undefined,
             }))}
-            submitButtonText={wizardSubmitHandler ? wizardSubmitLabel : 'Read only'}
+            submitButtonText={isCommunicationSending ? 'Working' : (wizardSubmitHandler ? wizardSubmitLabel : 'Read only')}
             cancelButtonText={canSubmitAssessment ? 'Cancel' : undefined}
             nextButtonText="Next"
             previousButtonText="Previous"

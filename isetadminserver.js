@@ -31,6 +31,16 @@ const ADMIN_MANUAL_UPLOAD_DIR = path.join(INTAKE_UPLOADS_ROOT, 'manual');
 const ASSESSMENT_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_assessment_template.html');
 const APPLICATION_FORM_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_application_form_template.html');
 const FINANCIAL_OVERVIEW_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_financial_overview_template.html');
+const FUNDING_AGREEMENT_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_cfa_template.html');
+const CFA_TEMPLATE_KEY = 'ISET_CFA_STANDARD';
+const CFA_SNAPSHOT_SCHEMA_VERSION = '1';
+const CFA_TEMPLATE_VERSION = '1';
+const CFA_CHANGE_REASONS = new Set([
+  'NEW_INTERVENTION_APPROVED',
+  'INTERVENTION_CHANGED',
+  'CORRECTION_AFTER_SEND',
+  'ADMIN_REISSUE'
+]);
 const ADMIN_UPLOAD_ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
   'image/jpeg',
@@ -1056,6 +1066,7 @@ function escapeHtml(value) {
 let cachedAssessmentTemplateHtml = null;
 let cachedApplicationFormTemplateHtml = null;
 let cachedFinancialOverviewTemplateHtml = null;
+let cachedFundingAgreementTemplateHtml = null;
 
 function getAssessmentTemplateHtml() {
   if (cachedAssessmentTemplateHtml) return cachedAssessmentTemplateHtml;
@@ -1088,6 +1099,17 @@ function getFinancialOverviewTemplateHtml() {
     cachedFinancialOverviewTemplateHtml = null;
   }
   return cachedFinancialOverviewTemplateHtml;
+}
+
+function getFundingAgreementTemplateHtml() {
+  if (cachedFundingAgreementTemplateHtml) return cachedFundingAgreementTemplateHtml;
+  try {
+    cachedFundingAgreementTemplateHtml = fs.readFileSync(FUNDING_AGREEMENT_PDF_TEMPLATE_PATH, 'utf8');
+  } catch (err) {
+    console.error('[funding-agreement-pdf] template load failed:', err?.message || err);
+    cachedFundingAgreementTemplateHtml = null;
+  }
+  return cachedFundingAgreementTemplateHtml;
 }
 
 const normalizeYesNoValue = (value) => {
@@ -1521,6 +1543,98 @@ async function storeDecisionLetterPdfDocument({
     docType
   ];
   const [result] = await pool.query(
+    `INSERT INTO iset_document
+       (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+     VALUES (?,?,?,?,?,?,'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+    insertPayload
+  );
+  return result?.insertId || null;
+}
+
+async function storeFundingAgreementPdfDocument({
+  caseId,
+  applicationId,
+  actionPlanId,
+  clientId,
+  applicantUserId,
+  actorUserId,
+  versionNumber,
+  trackingId,
+  cfaVersionId,
+  pdfBuffer,
+  isRedline = false,
+  connection = null
+}) {
+  if (!caseId || !applicationId || !pdfBuffer) return null;
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  const normalizedClientId = normalisePositiveInteger(clientId);
+  if (!normalizedClientId) {
+    throw new Error('client_id_required');
+  }
+  const docType = 'funding_agreement';
+  const labelBase = `CFA v${versionNumber}`;
+  const label = isRedline ? `${labelBase} (redline)` : labelBase;
+  const baseRef = normaliseString(trackingId) || String(caseId);
+  const docSlug = isRedline ? 'cfa-redline' : 'cfa';
+  const displayName = `${docSlug}-v${versionNumber}-${baseRef}.pdf`;
+  const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
+  const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
+  const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
+  const normalizedActorUserId = normalisePositiveInteger(actorUserId);
+  const storageMode = resolveUploadStorageMode();
+  let relativePath = null;
+  if (storageMode === 's3') {
+    const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+    if (DRIVER !== 's3') {
+      throw new Error('s3_upload_unavailable');
+    }
+    const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
+    const presigned = await presignPut({ key, contentType: 'application/pdf' });
+    await axios.put(presigned.url, pdfBuffer, {
+      headers: {
+        ...(presigned.headers || {}),
+        'Content-Type': 'application/pdf',
+        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+      }
+    });
+    relativePath = key;
+  } else {
+    const safeName = sanitiseUploadFilename(displayName);
+    const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, safeName);
+    await fs.promises.writeFile(targetPath, pdfBuffer);
+    relativePath = toIntakeRelativePath(targetPath);
+  }
+  if (!relativePath) {
+    throw new Error('path_resolution_failed');
+  }
+
+  const metadata = JSON.stringify({
+    label,
+    document_type: docType,
+    cfa_version_id: cfaVersionId || null,
+    cfa_version_number: versionNumber || null,
+    variant: isRedline ? 'redline' : 'clean',
+    template_key: CFA_TEMPLATE_KEY
+  });
+
+  const insertPayload = [
+    caseId,
+    applicationId,
+    normalizedActionPlanId,
+    normalizedClientId,
+    normalizedApplicantUserId,
+    normalizedActorUserId,
+    displayName,
+    relativePath,
+    'application/pdf',
+    label,
+    metadata,
+    sizeBytes,
+    checksum,
+    docType
+  ];
+  const runner = connection || pool;
+  const [result] = await runner.query(
     `INSERT INTO iset_document
        (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
      VALUES (?,?,?,?,?,?,'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
@@ -2808,6 +2922,34 @@ async function generateFinancialOverviewPdfBuffer({
     receivedAt
   });
   const html = buildAssessmentPdfHtml({ templateHtml, fields });
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'Letter',
+      printBackground: true,
+      margin: { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' }
+    });
+    await page.close();
+    return pdfBuffer;
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (_) {}
+    }
+  }
+}
+
+async function generateFundingAgreementPdfBuffer({ tokens }) {
+  const templateHtml = getFundingAgreementTemplateHtml();
+  if (!templateHtml) {
+    throw new Error('funding_agreement_template_missing');
+  }
+  const html = replaceTemplateTokens(templateHtml, tokens || {});
   let browser;
   try {
     browser = await puppeteer.launch({
@@ -6512,7 +6654,23 @@ const buildFundingAgreementInterventionsHtml = ({ interventions, interventionLab
   }
   return list.map((intervention, index) => {
     const labelBase = resolveFundingAgreementInterventionLabelBase(intervention, interventionLabelLookup);
-    const title = labelBase ? `Intervention ${index + 1}: ${labelBase}` : `Intervention ${index + 1}`;
+    const diffStatusRaw = normaliseString(intervention?.diffStatus ?? intervention?.diff_status ?? null);
+    const diffStatus = diffStatusRaw ? diffStatusRaw.toLowerCase() : null;
+    const diffLabel =
+      diffStatus === 'added'
+        ? 'Added'
+        : diffStatus === 'removed'
+        ? 'Removed'
+        : diffStatus === 'modified'
+        ? 'Updated'
+        : '';
+    const diffBadge = diffLabel
+      ? `<span class="redline-badge redline-${escapeHtml(diffStatus)}-badge">${escapeHtml(diffLabel)}</span>`
+      : '';
+    const titlePrefix = diffBadge ? `${diffBadge} ` : '';
+    const title = labelBase
+      ? `${titlePrefix}Intervention ${index + 1}: ${labelBase}`
+      : `${titlePrefix}Intervention ${index + 1}`;
     const programName = normaliseString(intervention?.programName ?? intervention?.program_name ?? null);
     const institution = normaliseString(intervention?.institution ?? null);
     const startDate = formatFundingDate(intervention?.startDate ?? intervention?.interventionStartDate ?? null);
@@ -6553,8 +6711,9 @@ const buildFundingAgreementInterventionsHtml = ({ interventions, interventionLab
           .join('')}</div>`
       : '';
 
+    const panelClassName = diffStatus ? `intervention-panel redline-${escapeHtml(diffStatus)}` : 'intervention-panel';
     return `
-      <div class="intervention-panel">
+      <div class="${panelClassName}">
         <div class="intervention-title">${escapeHtml(title)}</div>
         ${metaHtml}
         <div class="table-panel">
@@ -7516,6 +7675,714 @@ const computeCostLinesTotal = (costLines) => {
   return hasAmount ? total : null;
 };
 
+const CFA_INCLUDED_INTERVENTION_STATUSES = new Set([
+  'planned',
+  'in_progress',
+  'ready_to_close',
+  'completed',
+  'approved',
+]);
+
+function shouldIncludeInterventionForCfa(status) {
+  return CFA_INCLUDED_INTERVENTION_STATUSES.has(normaliseInterventionStatus(status));
+}
+
+function buildCfaInterventionSnapshot(row, planFundingStream = null) {
+  if (!row) return null;
+  const metadata = safeJsonParse(row.metadata_json, null) || {};
+  const snapshotSource = metadata.snapshot && typeof metadata.snapshot === 'object' ? metadata.snapshot : {};
+  const costLinesRaw = Array.isArray(metadata.costLines)
+    ? metadata.costLines
+    : Array.isArray(snapshotSource.costLines)
+    ? snapshotSource.costLines
+    : [];
+  const costLines = costLinesRaw.map(normalizeProposedCostLine).filter(Boolean);
+  const costCandidate = parseCurrencyValue(
+    metadata.costTotal ??
+    snapshotSource.costTotal ??
+    metadata.cost ??
+    row.intervention_cost ??
+    row.budget_amount ??
+    row.approved_amount ??
+    null
+  );
+  const costTotal = computeCostLinesTotal(costLines) ?? (Number.isFinite(costCandidate) ? costCandidate : null);
+  return {
+    id: row.id || null,
+    code: normaliseString(row.intervention_code ?? snapshotSource.code ?? metadata.code ?? null),
+    label: normaliseString(metadata.title ?? snapshotSource.title ?? snapshotSource.label ?? metadata.description ?? null),
+    startDate: toDateOnlyString(row.start_date ?? snapshotSource.startDate ?? null),
+    endDate: toDateOnlyString(row.end_date ?? snapshotSource.endDate ?? null),
+    programName: normaliseString(snapshotSource.programName ?? metadata.programName ?? null),
+    institution: normaliseString(snapshotSource.institution ?? metadata.institution ?? null),
+    deliveryMode: normaliseString(snapshotSource.deliveryMode ?? metadata.deliveryMode ?? null),
+    itpDetails: normaliseString(snapshotSource.itpDetails ?? metadata.itpDetails ?? null),
+    wageSubsidyDetails: normaliseString(snapshotSource.wageSubsidyDetails ?? metadata.wageSubsidyDetails ?? null),
+    noc: normaliseString(row.related_noc ?? snapshotSource.noc ?? metadata.noc ?? null),
+    nocVersion: normaliseString(row.related_noc_version ?? snapshotSource.nocVersion ?? metadata.nocVersion ?? null),
+    fundingStream: normaliseString(row.funding_stream ?? metadata.fundingStream ?? planFundingStream ?? null),
+    notes: normaliseString(metadata.notes ?? row.notes ?? null),
+    costLines,
+    costTotal,
+  };
+}
+
+function sortCfaInterventions(list) {
+  const items = Array.isArray(list) ? list.slice() : [];
+  return items.sort((a, b) => {
+    const aDate = a?.startDate || '';
+    const bDate = b?.startDate || '';
+    if (aDate && bDate && aDate !== bDate) {
+      return String(aDate).localeCompare(String(bDate));
+    }
+    if (aDate && !bDate) return -1;
+    if (!aDate && bDate) return 1;
+    const aCode = a?.code || '';
+    const bCode = b?.code || '';
+    if (aCode !== bCode) return String(aCode).localeCompare(String(bCode));
+    const aId = a?.id || 0;
+    const bId = b?.id || 0;
+    return Number(aId) - Number(bId);
+  });
+}
+
+function buildCfaInterventionKey(intervention) {
+  if (!intervention) return '';
+  if (intervention.id) return `id:${intervention.id}`;
+  const code = intervention.code || '';
+  const start = intervention.startDate || '';
+  const end = intervention.endDate || '';
+  const program = intervention.programName || '';
+  const institution = intervention.institution || '';
+  return `key:${code}|${start}|${end}|${program}|${institution}`;
+}
+
+function buildCfaInterventionSignature(intervention) {
+  const canonical = canonicalisePreviewValue({
+    code: intervention?.code || null,
+    label: intervention?.label || null,
+    startDate: intervention?.startDate || null,
+    endDate: intervention?.endDate || null,
+    programName: intervention?.programName || null,
+    institution: intervention?.institution || null,
+    deliveryMode: intervention?.deliveryMode || null,
+    itpDetails: intervention?.itpDetails || null,
+    wageSubsidyDetails: intervention?.wageSubsidyDetails || null,
+    noc: intervention?.noc || null,
+    nocVersion: intervention?.nocVersion || null,
+    fundingStream: intervention?.fundingStream || null,
+    costLines: Array.isArray(intervention?.costLines) ? intervention.costLines : [],
+    costTotal: intervention?.costTotal ?? null,
+  });
+  return JSON.stringify(canonical);
+}
+
+function buildCfaInterventionDiffList({ signedInterventions, draftInterventions }) {
+  const signedList = sortCfaInterventions(signedInterventions);
+  const draftList = sortCfaInterventions(draftInterventions);
+  const signedByKey = new Map();
+  const signedSignature = new Map();
+  signedList.forEach(item => {
+    const key = buildCfaInterventionKey(item);
+    if (!key) return;
+    signedByKey.set(key, item);
+    signedSignature.set(key, buildCfaInterventionSignature(item));
+  });
+
+  const seen = new Set();
+  const diff = [];
+
+  draftList.forEach(item => {
+    const key = buildCfaInterventionKey(item);
+    const signed = key ? signedByKey.get(key) : null;
+    if (!signed) {
+      diff.push({ ...item, diffStatus: 'added' });
+      return;
+    }
+    seen.add(key);
+    const draftSig = buildCfaInterventionSignature(item);
+    const signedSig = signedSignature.get(key);
+    if (draftSig !== signedSig) {
+      diff.push({ ...signed, diffStatus: 'removed' });
+      diff.push({ ...item, diffStatus: 'added' });
+    } else {
+      diff.push({ ...item });
+    }
+  });
+
+  signedList.forEach(item => {
+    const key = buildCfaInterventionKey(item);
+    if (!key || seen.has(key)) return;
+    diff.push({ ...item, diffStatus: 'removed' });
+  });
+
+  return diff;
+}
+
+function computeCfaSnapshotSignature(snapshot) {
+  const canonical = canonicalisePreviewValue(snapshot);
+  const canonicalJson = JSON.stringify(canonical);
+  const hash = crypto.createHash('sha256').update(canonicalJson).digest('hex');
+  return { canonicalJson, hash };
+}
+
+async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
+  const [[caseRow]] = await connection.query(
+    `SELECT c.id,
+            c.case_number,
+            c.application_id,
+            c.client_id,
+            c.case_context_json,
+            s.user_id AS applicant_user_id,
+            s.reference_number,
+            s.intake_payload
+       FROM iset_case c
+       LEFT JOIN iset_application a ON c.application_id = a.id
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      WHERE c.id = ?
+      LIMIT 1`,
+    [caseId]
+  );
+  if (!caseRow) {
+    throw new Error('case_not_found');
+  }
+  const [[planRow]] = await connection.query(
+    `SELECT id, name, funding_stream, agreement_number, effective_date
+       FROM iset_case_action_plan
+      WHERE id = ? AND case_id = ?
+      LIMIT 1`,
+    [actionPlanId, caseId]
+  );
+  if (!planRow) {
+    throw new Error('action_plan_not_found');
+  }
+  const [interventionRows] = await connection.query(
+    `SELECT id, status, intervention_code, start_date, end_date, intervention_cost, budget_amount, approved_amount,
+            related_noc, related_noc_version, funding_stream_decision AS funding_stream, metadata_json, notes
+       FROM iset_case_intervention
+      WHERE action_plan_id = ?
+      ORDER BY start_date IS NULL, start_date ASC, id ASC`,
+    [actionPlanId]
+  );
+  const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
+  const contextNameCandidates = [
+    caseContext?.preferredName,
+    caseContext?.preferred_name,
+    caseContext?.firstName && caseContext?.lastName
+      ? `${caseContext.firstName} ${caseContext.lastName}`
+      : null,
+    caseContext?.first_name && caseContext?.last_name
+      ? `${caseContext.first_name} ${caseContext.last_name}`
+      : null
+  ];
+  const fallbackName = contextNameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
+  const intakePayload = safeJsonParse(caseRow?.intake_payload, null);
+  const applicantName = resolveApplicantNameFromPayload(intakePayload, fallbackName) || null;
+
+  const interventions = Array.isArray(interventionRows)
+    ? interventionRows
+        .filter(row => shouldIncludeInterventionForCfa(row.status))
+        .map(row => buildCfaInterventionSnapshot(row, planRow?.funding_stream || null))
+        .filter(Boolean)
+    : [];
+
+  const totalsByFundingStream = interventions.reduce((acc, item) => {
+    const stream = normaliseString(item?.fundingStream) || 'unknown';
+    const total = Number(item?.costTotal);
+    if (!Number.isFinite(total)) return acc;
+    acc[stream] = (acc[stream] || 0) + total;
+    return acc;
+  }, {});
+
+  return {
+    case: {
+      id: caseRow.id,
+      caseNumber: normaliseString(caseRow.case_number) || null,
+      trackingId: normaliseString(caseRow.reference_number) || normaliseString(caseRow.case_number) || null,
+      applicationId: caseRow.application_id || null,
+      clientId: caseRow.client_id || null,
+      applicantUserId: caseRow.applicant_user_id || null,
+    },
+    client: {
+      name: applicantName,
+    },
+    plan: {
+      id: planRow.id,
+      name: normaliseString(planRow.name) || null,
+      fundingStream: normaliseString(planRow.funding_stream) || null,
+      agreementNumber: normaliseString(planRow.agreement_number) || null,
+      effectiveDate: planRow.effective_date ? toDateOnlyString(planRow.effective_date) : null,
+    },
+    interventions,
+    totalsByFundingStream,
+  };
+}
+
+async function buildCfaSnapshotFromAssessment({ connection, caseId }) {
+  const [[caseRow]] = await connection.query(
+    `SELECT c.id,
+            c.case_number,
+            c.application_id,
+            c.client_id,
+            c.case_context_json,
+            s.user_id AS applicant_user_id,
+            s.reference_number,
+            s.intake_payload
+       FROM iset_case c
+       LEFT JOIN iset_application a ON c.application_id = a.id
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      WHERE c.id = ?
+      LIMIT 1`,
+    [caseId]
+  );
+  if (!caseRow) {
+    throw new Error('case_not_found');
+  }
+  const [[assessmentRow]] = await connection.query(
+    `SELECT proposed_interventions
+       FROM iset_case_assessment
+      WHERE case_id = ?
+      LIMIT 1`,
+    [caseId]
+  );
+  if (!assessmentRow) {
+    throw new Error('assessment_not_found');
+  }
+  const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
+  const contextNameCandidates = [
+    caseContext?.preferredName,
+    caseContext?.preferred_name,
+    caseContext?.firstName && caseContext?.lastName
+      ? `${caseContext.firstName} ${caseContext.lastName}`
+      : null,
+    caseContext?.first_name && caseContext?.last_name
+      ? `${caseContext.first_name} ${caseContext.last_name}`
+      : null
+  ];
+  const fallbackName = contextNameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
+  const intakePayload = safeJsonParse(caseRow?.intake_payload, null);
+  const applicantName = resolveApplicantNameFromPayload(intakePayload, fallbackName) || null;
+
+  const proposedInterventions = normalizeAssessmentProposedInterventions(assessmentRow.proposed_interventions)
+    .filter(entry => entry.code);
+  const interventions = sortCfaInterventions(proposedInterventions);
+
+  return {
+    case: {
+      id: caseRow.id,
+      caseNumber: normaliseString(caseRow.case_number) || null,
+      trackingId: normaliseString(caseRow.reference_number) || normaliseString(caseRow.case_number) || null,
+      applicationId: caseRow.application_id || null,
+      clientId: caseRow.client_id || null,
+      applicantUserId: caseRow.applicant_user_id || null,
+    },
+    client: {
+      name: applicantName,
+    },
+    plan: {
+      id: null,
+      name: null,
+      fundingStream: null,
+      agreementNumber: null,
+      effectiveDate: null,
+    },
+    interventions,
+    totalsByFundingStream: {},
+  };
+}
+
+async function buildCfaTemplateTokens({ connection, interventions, applicantName, caseManagerName, caseManagerSignedDate }) {
+  const codes = interventions.map(item => item?.code).filter(Boolean);
+  const interventionLabelLookup = await fetchInterventionCodeLabels(connection, codes);
+  const interventionsHtml = buildFundingAgreementInterventionsHtml({
+    interventions,
+    interventionLabelLookup
+  });
+  const livingAllowanceSectionsHtml = buildFundingAgreementLivingAllowanceSectionsHtml({
+    interventions,
+    interventionLabelLookup
+  });
+  const fundingTotalValue = interventions.reduce((sum, intervention) => {
+    const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+    const total = computeCostLinesTotal(costLines);
+    const fallbackTotal = parseCurrencyValue(intervention?.costTotal);
+    const resolved = total !== null ? total : fallbackTotal;
+    return Number.isFinite(resolved) ? sum + resolved : sum;
+  }, 0);
+  const fundingTotal = formatFundingCurrency(fundingTotalValue);
+
+  return {
+    client_name: applicantName || '',
+    case_manager_signature: caseManagerName || '',
+    case_manager_signed_date: caseManagerSignedDate || '',
+    interventions_html: interventionsHtml,
+    living_allowance_sections_html: livingAllowanceSectionsHtml,
+    funding_total: fundingTotal,
+  };
+}
+
+async function ensureCfaSeries(connection, { caseId, templateKey, createdByStaffProfileId }) {
+  const [[row]] = await connection.query(
+    `SELECT id
+       FROM cfa_series
+      WHERE case_id = ? AND template_key = ?
+      LIMIT 1`,
+    [caseId, templateKey]
+  );
+  if (row?.id) return Number(row.id);
+  const [result] = await connection.query(
+    `INSERT INTO cfa_series (case_id, template_key, created_by_staff_profile_id)
+     VALUES (?, ?, ?)`,
+    [caseId, templateKey, createdByStaffProfileId || null]
+  );
+  return result.insertId;
+}
+
+async function createCfaVersionForPlan({
+  caseId,
+  actionPlanId,
+  changeReason,
+  changeSummary,
+  actorUserId,
+  staffProfileId,
+  caseManagerName,
+  connection = null
+}) {
+  let runner = connection;
+  let release = false;
+  if (!runner) {
+    runner = await pool.getConnection();
+    release = true;
+    await runner.beginTransaction();
+  }
+  try {
+    const seriesId = await ensureCfaSeries(runner, {
+      caseId,
+      templateKey: CFA_TEMPLATE_KEY,
+      createdByStaffProfileId: staffProfileId || null
+    });
+
+    await runner.query(
+      `UPDATE cfa_version
+          SET status = 'withdrawn'
+        WHERE series_id = ?
+          AND status = 'draft'`,
+      [seriesId]
+    );
+
+    const [[maxRow]] = await runner.query(
+      `SELECT MAX(version_number) AS max_version
+         FROM cfa_version
+        WHERE series_id = ?`,
+      [seriesId]
+    );
+    const nextVersionNumber = (Number(maxRow?.max_version) || 0) + 1;
+
+    const [[signedRow]] = await runner.query(
+      `SELECT id, metadata_json
+         FROM cfa_version
+        WHERE series_id = ?
+          AND status = 'signed'
+        ORDER BY version_number DESC
+        LIMIT 1`,
+      [seriesId]
+    );
+
+    const snapshot = await buildCfaSnapshot({
+      connection: runner,
+      caseId,
+      actionPlanId
+    });
+
+    if (!snapshot?.interventions?.length) {
+      if (release) await runner.commit();
+      return { skipped: true, reason: 'no_interventions' };
+    }
+
+    const { canonicalJson, hash } = computeCfaSnapshotSignature(snapshot);
+    const effectiveDate = snapshot?.plan?.effectiveDate || null;
+
+    const [insert] = await runner.query(
+      `INSERT INTO cfa_version
+        (series_id, version_number, status, supersedes_version_id, change_reason, change_summary,
+         created_by_staff_profile_id, effective_date, snapshot_schema_version, snapshot_hash,
+         rendered_template_version, metadata_json)
+       VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        seriesId,
+        nextVersionNumber,
+        signedRow?.id || null,
+        changeReason || null,
+        changeSummary || null,
+        staffProfileId || null,
+        effectiveDate,
+        CFA_SNAPSHOT_SCHEMA_VERSION,
+        hash,
+        CFA_TEMPLATE_VERSION,
+        canonicalJson
+      ]
+    );
+    const cfaVersionId = insert.insertId;
+
+    const caseManagerSignedDate = formatFundingDate(new Date());
+    const cleanTokens = await buildCfaTemplateTokens({
+      connection: runner,
+      interventions: snapshot.interventions,
+      applicantName: snapshot?.client?.name || '',
+      caseManagerName: caseManagerName || '',
+      caseManagerSignedDate
+    });
+    const cleanBuffer = await generateFundingAgreementPdfBuffer({ tokens: cleanTokens });
+    const cleanDocId = await storeFundingAgreementPdfDocument({
+      caseId,
+      applicationId: snapshot?.case?.applicationId || null,
+      actionPlanId,
+      clientId: snapshot?.case?.clientId || null,
+      applicantUserId: snapshot?.case?.applicantUserId || null,
+      actorUserId,
+      versionNumber: nextVersionNumber,
+      trackingId: snapshot?.case?.trackingId || null,
+      cfaVersionId,
+      pdfBuffer: cleanBuffer,
+      isRedline: false,
+      connection: runner
+    });
+    if (cleanDocId) {
+      await runner.query(
+        `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
+         VALUES (?, 'clean', ?)`,
+        [cfaVersionId, cleanDocId]
+      );
+    }
+
+    const signedSnapshot = signedRow?.metadata_json ? safeJsonParse(signedRow.metadata_json, null) : null;
+    if (signedSnapshot && Array.isArray(signedSnapshot.interventions) && signedSnapshot.interventions.length) {
+      const diffInterventions = buildCfaInterventionDiffList({
+        signedInterventions: signedSnapshot.interventions,
+        draftInterventions: snapshot.interventions
+      });
+      const redlineTokens = await buildCfaTemplateTokens({
+        connection: runner,
+        interventions: diffInterventions,
+        applicantName: snapshot?.client?.name || '',
+        caseManagerName: caseManagerName || '',
+        caseManagerSignedDate
+      });
+      const redlineBuffer = await generateFundingAgreementPdfBuffer({ tokens: redlineTokens });
+      const redlineDocId = await storeFundingAgreementPdfDocument({
+        caseId,
+        applicationId: snapshot?.case?.applicationId || null,
+        actionPlanId,
+        clientId: snapshot?.case?.clientId || null,
+        applicantUserId: snapshot?.case?.applicantUserId || null,
+        actorUserId,
+        versionNumber: nextVersionNumber,
+        trackingId: snapshot?.case?.trackingId || null,
+        cfaVersionId,
+        pdfBuffer: redlineBuffer,
+        isRedline: true,
+        connection: runner
+      });
+      if (redlineDocId) {
+        await runner.query(
+          `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
+           VALUES (?, 'redline', ?)`,
+          [cfaVersionId, redlineDocId]
+        );
+      }
+    }
+
+    if (release) {
+      await runner.commit();
+    }
+    return {
+      cfaVersionId,
+      versionNumber: nextVersionNumber,
+      seriesId,
+      cleanDocId: cleanDocId || null,
+      supersedesVersionId: signedRow?.id || null
+    };
+  } catch (error) {
+    if (release) {
+      try { await runner.rollback(); } catch (_) {}
+    }
+    throw error;
+  } finally {
+    if (release && runner) runner.release();
+  }
+}
+
+async function createCfaVersionFromAssessment({
+  caseId,
+  changeReason,
+  changeSummary,
+  actorUserId,
+  staffProfileId,
+  caseManagerName,
+  connection = null
+}) {
+  let runner = connection;
+  let release = false;
+  if (!runner) {
+    runner = await pool.getConnection();
+    release = true;
+    await runner.beginTransaction();
+  }
+  try {
+    const seriesId = await ensureCfaSeries(runner, {
+      caseId,
+      templateKey: CFA_TEMPLATE_KEY,
+      createdByStaffProfileId: staffProfileId || null
+    });
+
+    await runner.query(
+      `UPDATE cfa_version
+          SET status = 'withdrawn'
+        WHERE series_id = ?
+          AND status = 'draft'`,
+      [seriesId]
+    );
+
+    const [[maxRow]] = await runner.query(
+      `SELECT MAX(version_number) AS max_version
+         FROM cfa_version
+        WHERE series_id = ?`,
+      [seriesId]
+    );
+    const nextVersionNumber = (Number(maxRow?.max_version) || 0) + 1;
+
+    const [[signedRow]] = await runner.query(
+      `SELECT id, metadata_json
+         FROM cfa_version
+        WHERE series_id = ?
+          AND status = 'signed'
+        ORDER BY version_number DESC
+        LIMIT 1`,
+      [seriesId]
+    );
+
+    const snapshot = await buildCfaSnapshotFromAssessment({
+      connection: runner,
+      caseId
+    });
+
+    if (!snapshot?.interventions?.length) {
+      if (release) await runner.commit();
+      return { skipped: true, reason: 'no_interventions' };
+    }
+
+    const { canonicalJson, hash } = computeCfaSnapshotSignature(snapshot);
+
+    const [insert] = await runner.query(
+      `INSERT INTO cfa_version
+        (series_id, version_number, status, supersedes_version_id, change_reason, change_summary,
+         created_by_staff_profile_id, effective_date, snapshot_schema_version, snapshot_hash,
+         rendered_template_version, metadata_json)
+       VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        seriesId,
+        nextVersionNumber,
+        signedRow?.id || null,
+        changeReason || null,
+        changeSummary || null,
+        staffProfileId || null,
+        null,
+        CFA_SNAPSHOT_SCHEMA_VERSION,
+        hash,
+        CFA_TEMPLATE_VERSION,
+        canonicalJson
+      ]
+    );
+    const cfaVersionId = insert.insertId;
+
+    const caseManagerSignedDate = formatFundingDate(new Date());
+    const cleanTokens = await buildCfaTemplateTokens({
+      connection: runner,
+      interventions: snapshot.interventions,
+      applicantName: snapshot?.client?.name || '',
+      caseManagerName: caseManagerName || '',
+      caseManagerSignedDate
+    });
+    const cleanBuffer = await generateFundingAgreementPdfBuffer({ tokens: cleanTokens });
+    const cleanDocId = await storeFundingAgreementPdfDocument({
+      caseId,
+      applicationId: snapshot?.case?.applicationId || null,
+      actionPlanId: null,
+      clientId: snapshot?.case?.clientId || null,
+      applicantUserId: snapshot?.case?.applicantUserId || null,
+      actorUserId,
+      versionNumber: nextVersionNumber,
+      trackingId: snapshot?.case?.trackingId || null,
+      cfaVersionId,
+      pdfBuffer: cleanBuffer,
+      isRedline: false,
+      connection: runner
+    });
+    if (cleanDocId) {
+      await runner.query(
+        `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
+         VALUES (?, 'clean', ?)`,
+        [cfaVersionId, cleanDocId]
+      );
+    }
+
+    const signedSnapshot = signedRow?.metadata_json ? safeJsonParse(signedRow.metadata_json, null) : null;
+    if (signedSnapshot && Array.isArray(signedSnapshot.interventions) && signedSnapshot.interventions.length) {
+      const diffInterventions = buildCfaInterventionDiffList({
+        signedInterventions: signedSnapshot.interventions,
+        draftInterventions: snapshot.interventions
+      });
+      const redlineTokens = await buildCfaTemplateTokens({
+        connection: runner,
+        interventions: diffInterventions,
+        applicantName: snapshot?.client?.name || '',
+        caseManagerName: caseManagerName || '',
+        caseManagerSignedDate
+      });
+      const redlineBuffer = await generateFundingAgreementPdfBuffer({ tokens: redlineTokens });
+      const redlineDocId = await storeFundingAgreementPdfDocument({
+        caseId,
+        applicationId: snapshot?.case?.applicationId || null,
+        actionPlanId: null,
+        clientId: snapshot?.case?.clientId || null,
+        applicantUserId: snapshot?.case?.applicantUserId || null,
+        actorUserId,
+        versionNumber: nextVersionNumber,
+        trackingId: snapshot?.case?.trackingId || null,
+        cfaVersionId,
+        pdfBuffer: redlineBuffer,
+        isRedline: true,
+        connection: runner
+      });
+      if (redlineDocId) {
+        await runner.query(
+          `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
+           VALUES (?, 'redline', ?)`,
+          [cfaVersionId, redlineDocId]
+        );
+      }
+    }
+
+    if (release) {
+      await runner.commit();
+    }
+    return {
+      cfaVersionId,
+      versionNumber: nextVersionNumber,
+      seriesId,
+      cleanDocId: cleanDocId || null,
+      supersedesVersionId: signedRow?.id || null
+    };
+  } catch (error) {
+    if (release) {
+      try { await runner.rollback(); } catch (_) {}
+    }
+    throw error;
+  } finally {
+    if (release && runner) runner.release();
+  }
+}
+
 const normalizeProposedIntervention = (raw, index = 0) => {
   if (!raw || typeof raw !== 'object') return null;
   const code = normalizeInterventionCodeValue(
@@ -7719,7 +8586,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   budgetPotId
 }) {
   if (!Number.isInteger(caseId) || caseId <= 0) {
-    return { createdPlan: false, createdIntervention: false, interventionId: null };
+    return { createdPlan: false, createdIntervention: false, interventionId: null, planId: null };
   }
 
   const budgetPotIdNumeric = Number.isFinite(Number(budgetPotId)) && Number(budgetPotId) > 0
@@ -7738,7 +8605,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     [caseId]
   );
   if (!assessmentRow) {
-    return { createdPlan: false, createdIntervention: false, interventionId: null };
+    return { createdPlan: false, createdIntervention: false, interventionId: null, planId: null };
   }
 
   if (!validatedBudgetPotId) {
@@ -7754,7 +8621,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   const proposedInterventions = normalizeAssessmentProposedInterventions(assessmentRow.proposed_interventions)
     .filter(entry => entry.code);
   if (!proposedInterventions.length) {
-    return { createdPlan: false, createdIntervention: false, interventionId: null };
+    return { createdPlan: false, createdIntervention: false, interventionId: null, planId: null };
   }
   const interventionsToCreate = proposedInterventions;
   const proposedCostTotal = computeProposedInterventionsTotal(proposedInterventions);
@@ -7813,7 +8680,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   const primaryIntervention = interventionsToCreate[0] || null;
   const code = primaryIntervention?.code || null;
   if (!code) {
-    return { createdPlan: false, createdIntervention: false, interventionId: null };
+    return { createdPlan: false, createdIntervention: false, interventionId: null, planId: null };
   }
 
   const startDate = primaryIntervention?.startDate || null;
@@ -7839,7 +8706,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     [caseId, AUTO_PLAN_METADATA_SOURCE]
   );
   if (existingAutoPlan) {
-    return { createdPlan: false, createdIntervention: false, interventionId: null };
+    return { createdPlan: false, createdIntervention: false, interventionId: null, planId: null };
   }
 
   const [[existingPlan]] = await connection.query(
@@ -7851,7 +8718,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   );
   if (existingPlan) {
     // Preserve manually created plan; do not auto-generate duplicates.
-    return { createdPlan: false, createdIntervention: false, interventionId: null };
+    return { createdPlan: false, createdIntervention: false, interventionId: null, planId: null };
   }
 
   const interventionLabel = await fetchInterventionCodeLabel(connection, code);
@@ -8636,6 +9503,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     createdIntervention: interventionIds.length > 0,
     interventionId: interventionIds[0] || null,
     interventionIds,
+    planId,
     planStatus,
     suggestedCaseStatus: 'initiated',
     movedDocuments
@@ -30424,6 +31292,143 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
   }
 });
 
+app.get('/api/cases/:id/cfa-versions', async (req, res) => {
+  const caseId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+  try {
+    const [[caseRow]] = await pool.query(
+      `SELECT c.id, c.assigned_to_user_id, c.portfolio_region_id, sp.region_id AS owner_region_id
+         FROM iset_case c
+         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        WHERE c.id = ?
+        LIMIT 1`,
+      [caseId]
+    );
+    if (!caseRow) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+    const accessError = validateCaseAccessForPlan(req, caseRow);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+
+    const [rows] = await pool.query(
+      `SELECT v.id,
+              v.series_id,
+              v.version_number,
+              v.status,
+              v.change_reason,
+              v.change_summary,
+              v.supersedes_version_id,
+              v.created_at,
+              v.sent_at,
+              v.signed_at,
+              v.effective_date,
+              s.template_key,
+              d.document_type,
+              d.document_id,
+              doc.label,
+              doc.file_path,
+              doc.file_name
+         FROM cfa_series s
+         JOIN cfa_version v ON v.series_id = s.id
+         LEFT JOIN cfa_version_documents d ON d.cfa_version_id = v.id
+         LEFT JOIN iset_document doc ON doc.id = d.document_id
+        WHERE s.case_id = ?
+        ORDER BY v.version_number DESC, d.document_type ASC`,
+      [caseId]
+    );
+    const versionsById = new Map();
+    rows.forEach(row => {
+      if (!versionsById.has(row.id)) {
+        versionsById.set(row.id, {
+          id: row.id,
+          seriesId: row.series_id,
+          templateKey: row.template_key || null,
+          versionNumber: row.version_number,
+          status: row.status,
+          changeReason: row.change_reason || null,
+          changeSummary: row.change_summary || null,
+          supersedesVersionId: row.supersedes_version_id || null,
+          createdAt: row.created_at,
+          sentAt: row.sent_at,
+          signedAt: row.signed_at,
+          effectiveDate: row.effective_date,
+          documents: []
+        });
+      }
+      if (row.document_id) {
+        versionsById.get(row.id).documents.push({
+          documentType: row.document_type,
+          documentId: row.document_id,
+          label: row.label || null,
+          filePath: row.file_path || null,
+          fileName: row.file_name || null
+        });
+      }
+    });
+    res.json({ caseId, versions: Array.from(versionsById.values()) });
+  } catch (error) {
+    console.error('GET /api/cases/:id/cfa-versions failed:', error);
+    res.status(500).json({ error: 'cfa_versions_fetch_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.post('/api/cases/:id/cfa-versions', async (req, res) => {
+  const caseId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+  const actionPlanId = normalisePositiveInteger(req.body?.actionPlanId ?? req.body?.action_plan_id);
+  if (!actionPlanId) {
+    return res.status(400).json({ error: 'invalid_action_plan_id' });
+  }
+  const changeReasonRaw = typeof req.body?.changeReason === 'string' ? req.body.changeReason.trim() : '';
+  const changeReason = CFA_CHANGE_REASONS.has(changeReasonRaw) ? changeReasonRaw : 'ADMIN_REISSUE';
+  const changeSummary =
+    typeof req.body?.changeSummary === 'string' && req.body.changeSummary.trim()
+      ? req.body.changeSummary.trim()
+      : null;
+
+  try {
+    const planRow = await fetchActionPlanWithCase(actionPlanId);
+    if (!planRow) {
+      return res.status(404).json({ error: 'action_plan_not_found' });
+    }
+    if (Number(planRow.case_id) !== Number(caseId)) {
+      return res.status(409).json({ error: 'case_plan_mismatch' });
+    }
+    const accessError = validateCaseAccessForPlan(req, planRow);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+    const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    const caseManagerName = await resolveStaffDisplayName(pool, req);
+    const result = await createCfaVersionForPlan({
+      caseId,
+      actionPlanId,
+      changeReason,
+      changeSummary,
+      actorUserId,
+      staffProfileId,
+      caseManagerName
+    });
+    if (result?.skipped) {
+      return res.status(409).json({
+        error: 'no_interventions',
+        message: 'No eligible interventions found for funding agreement generation.'
+      });
+    }
+    res.status(201).json({ caseId, actionPlanId, ...result });
+  } catch (error) {
+    console.error('POST /api/cases/:id/cfa-versions failed:', error);
+    res.status(500).json({ error: 'cfa_version_create_failed', detail: error?.message || String(error) });
+  }
+});
+
 app.get('/api/action-plans/:id/interventions', async (req, res) => {
   const planId = Number.parseInt(req.params.id, 10);
   if (!Number.isInteger(planId) || planId <= 0) {
@@ -30828,6 +31833,25 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       });
     }
     await markIlmpNeedsReviewForCase(planRow.case_id);
+    if (shouldIncludeInterventionForCfa(statusValue)) {
+      try {
+        const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+        const staffProfileId = resolveActiveStaffProfileId(req);
+        const caseManagerName = await resolveStaffDisplayName(pool, req);
+        const summaryLabel = trimmedTitle || (trimmedCode ? `Intervention ${trimmedCode}` : 'Intervention');
+        await createCfaVersionForPlan({
+          caseId: planRow.case_id,
+          actionPlanId: planId,
+          changeReason: 'NEW_INTERVENTION_APPROVED',
+          changeSummary: `New intervention approved: ${summaryLabel}`,
+          actorUserId,
+          staffProfileId,
+          caseManagerName
+        });
+      } catch (err) {
+        console.warn('[cfa] create draft failed after intervention create', err?.message || err);
+      }
+    }
     res.status(201).json(payload);
   } catch (error) {
     console.error('POST /api/action-plans/:id/interventions failed:', error);
@@ -31037,6 +32061,17 @@ app.patch('/api/interventions/:id', async (req, res) => {
         }
       }
     }
+
+    const previousPlanFundingStream =
+      planRow?.funding_stream || interventionRow.plan_funding_stream || null;
+    const previousSnapshot = buildCfaInterventionSnapshot(
+      interventionRow,
+      previousPlanFundingStream
+    );
+    const previousSignature = previousSnapshot
+      ? buildCfaInterventionSignature(previousSnapshot)
+      : null;
+    const wasIncludedInCfa = shouldIncludeInterventionForCfa(previousStatus);
 
     const updates = [];
     const params = [];
@@ -31356,6 +32391,42 @@ app.patch('/api/interventions/:id', async (req, res) => {
     const updatedRow = await fetchInterventionWithCase(interventionId);
     const payload = mapInterventionRow(updatedRow);
     const nextStatus = statusProvided ? statusValue : previousStatus;
+    const nextPlanFundingStream =
+      planRow?.funding_stream || updatedRow?.plan_funding_stream || null;
+    const nextSnapshot = buildCfaInterventionSnapshot(updatedRow, nextPlanFundingStream);
+    const nextSignature = nextSnapshot ? buildCfaInterventionSignature(nextSnapshot) : null;
+    const isIncludedInCfa = shouldIncludeInterventionForCfa(nextStatus);
+    const snapshotChanged = previousSignature !== nextSignature;
+    const summaryLabel = payload?.title || (payload?.code ? `Intervention ${payload.code}` : 'Intervention');
+    const cfaTargets = [];
+    if (isReassigning) {
+      if (wasIncludedInCfa && Number.isInteger(originalPlanId)) {
+        cfaTargets.push({
+          actionPlanId: originalPlanId,
+          changeReason: 'INTERVENTION_CHANGED',
+          changeSummary: `Removed intervention: ${summaryLabel}`
+        });
+      }
+      if (isIncludedInCfa && Number.isInteger(planId)) {
+        cfaTargets.push({
+          actionPlanId: planId,
+          changeReason: 'NEW_INTERVENTION_APPROVED',
+          changeSummary: `New intervention approved: ${summaryLabel}`
+        });
+      }
+    } else if ((wasIncludedInCfa || isIncludedInCfa) && (snapshotChanged || wasIncludedInCfa !== isIncludedInCfa)) {
+      const changeReason = !wasIncludedInCfa && isIncludedInCfa
+        ? 'NEW_INTERVENTION_APPROVED'
+        : 'INTERVENTION_CHANGED';
+      const changeSummary = !wasIncludedInCfa && isIncludedInCfa
+        ? `New intervention approved: ${summaryLabel}`
+        : wasIncludedInCfa && !isIncludedInCfa
+          ? `Removed intervention: ${summaryLabel}`
+          : `Intervention updated: ${summaryLabel}`;
+      if (Number.isInteger(planId)) {
+        cfaTargets.push({ actionPlanId: planId, changeReason, changeSummary });
+      }
+    }
 
     // If intervention is activated and parent plan is still draft, activate the plan
     if (planRow && (statusValue === 'in_progress' || statusValue === 'active')) {
@@ -31423,6 +32494,26 @@ app.patch('/api/interventions/:id', async (req, res) => {
       }
     }
     await markIlmpNeedsReviewForCase(interventionRow.case_id || planRow?.case_id || null);
+    if (cfaTargets.length) {
+      const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+      const staffProfileId = resolveActiveStaffProfileId(req);
+      const caseManagerName = await resolveStaffDisplayName(pool, req);
+      for (const target of cfaTargets) {
+        try {
+          await createCfaVersionForPlan({
+            caseId: interventionRow.case_id || planRow?.case_id || null,
+            actionPlanId: target.actionPlanId,
+            changeReason: target.changeReason,
+            changeSummary: target.changeSummary,
+            actorUserId,
+            staffProfileId,
+            caseManagerName
+          });
+        } catch (err) {
+          console.warn('[cfa] update failed after intervention edit', err?.message || err);
+        }
+      }
+    }
     res.status(200).json(payload);
   } catch (error) {
     console.error('PATCH /api/interventions/:id failed:', error);
@@ -31639,6 +32730,7 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
     }
 
     const status = normaliseInterventionStatus(interventionRow.status);
+    const wasIncludedInCfa = shouldIncludeInterventionForCfa(status);
     if (!['planned', 'rejected'].includes(status)) {
       return res.status(409).json({
         error: 'invalid_status',
@@ -31658,6 +32750,27 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
       await recomputeCaseStatus(interventionRow.case_id, null, { allowReopenFinal: true });
     }
     await markIlmpNeedsReviewForCase(interventionRow.case_id || null);
+    if (wasIncludedInCfa && interventionRow.action_plan_id) {
+      try {
+        const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+        const staffProfileId = resolveActiveStaffProfileId(req);
+        const caseManagerName = await resolveStaffDisplayName(pool, req);
+        const summaryLabel =
+          mapInterventionRow(interventionRow)?.title ||
+          (interventionRow.intervention_code ? `Intervention ${interventionRow.intervention_code}` : 'Intervention');
+        await createCfaVersionForPlan({
+          caseId: interventionRow.case_id,
+          actionPlanId: interventionRow.action_plan_id,
+          changeReason: 'INTERVENTION_CHANGED',
+          changeSummary: `Removed intervention: ${summaryLabel}`,
+          actorUserId,
+          staffProfileId,
+          caseManagerName
+        });
+      } catch (err) {
+        console.warn('[cfa] update failed after intervention delete', err?.message || err);
+      }
+    }
     res.status(200).json({ success: true, deleted: true, id: interventionId });
   } catch (error) {
     console.error('POST /api/interventions/:id/delete failed:', error);
@@ -35153,8 +36266,69 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     const needsFundingAgreementPrefill = attachmentRows.some(
       row => row.workflow_type === 'consent-cm-prefill' && row.document_type === 'funding_agreement'
     );
+    let cfaDraft = null;
+    let cfaSnapshot = null;
     let fundingAgreementTokens = null;
     if (needsFundingAgreementPrefill) {
+      let cfaDraftRow = null;
+      [[cfaDraftRow]] = await pool.query(
+        `SELECT v.id, v.version_number, v.metadata_json, s.id AS series_id
+           FROM cfa_series s
+           JOIN cfa_version v ON v.series_id = s.id
+          WHERE s.case_id = ?
+            AND v.status = 'draft'
+          ORDER BY v.version_number DESC
+          LIMIT 1`,
+        [caseId]
+      );
+      if (!cfaDraftRow) {
+        try {
+          const staffProfileId = resolveActiveStaffProfileId(req);
+          const caseManagerName = await resolveStaffDisplayName(pool, req);
+          const created = await createCfaVersionFromAssessment({
+            caseId,
+            changeReason: 'NEW_INTERVENTION_APPROVED',
+            changeSummary: 'Initial funding agreement',
+            actorUserId: senderId,
+            staffProfileId,
+            caseManagerName
+          });
+          if (!created || created.skipped) {
+            console.warn('[cfa] assessment draft skipped for case %s', caseId);
+          }
+        } catch (err) {
+          console.warn('[cfa] assessment draft failed for case %s', caseId, err?.message || err);
+        }
+        [[cfaDraftRow]] = await pool.query(
+          `SELECT v.id, v.version_number, v.metadata_json, s.id AS series_id
+             FROM cfa_series s
+             JOIN cfa_version v ON v.series_id = s.id
+            WHERE s.case_id = ?
+              AND v.status = 'draft'
+            ORDER BY v.version_number DESC
+            LIMIT 1`,
+          [caseId]
+        );
+      }
+      if (!cfaDraftRow) {
+        return res.status(409).json({
+          error: 'cfa_draft_missing',
+          message: 'No draft funding agreement is available for this case.'
+        });
+      }
+      cfaDraft = {
+        id: Number(cfaDraftRow.id),
+        versionNumber: Number(cfaDraftRow.version_number),
+        seriesId: Number(cfaDraftRow.series_id),
+        metadataJson: cfaDraftRow.metadata_json
+      };
+      cfaSnapshot = safeJsonParse(cfaDraftRow.metadata_json, null);
+      if (!cfaSnapshot || !Array.isArray(cfaSnapshot.interventions) || !cfaSnapshot.interventions.length) {
+        return res.status(409).json({
+          error: 'cfa_draft_invalid',
+          message: 'Funding agreement draft is missing intervention details.'
+        });
+      }
       const caseManagerName = await resolveStaffDisplayName(pool, req);
       const caseManagerSignedDate = formatFundingDate(new Date());
       const [[assessmentRow]] = await pool.query(
@@ -35273,6 +36447,19 @@ app.post('/api/cases/:id/messages', async (req, res) => {
         interventionMetadata,
         interventionEsdc
       });
+      if (cfaSnapshot) {
+        const snapshotTokens = await buildCfaTemplateTokens({
+          connection: pool,
+          interventions: cfaSnapshot.interventions || [],
+          applicantName: cfaSnapshot?.client?.name || applicantName || '',
+          caseManagerName,
+          caseManagerSignedDate
+        });
+        fundingAgreementTokens = {
+          ...(fundingAgreementTokens || {}),
+          ...snapshotTokens
+        };
+      }
     }
 
     const requestedApplicationId = normalisePositiveInteger(req.body?.applicationId);
@@ -35325,6 +36512,17 @@ app.post('/api/cases/:id/messages', async (req, res) => {
           wf.document_type === 'funding_agreement'
         ) {
           resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, fundingAgreementTokens);
+        }
+        if (resolvedSchema && cfaDraft && wf.document_type === 'funding_agreement') {
+          resolvedSchema = {
+            ...resolvedSchema,
+            meta: {
+              ...(resolvedSchema?.meta || {}),
+              cfaVersionId: cfaDraft.id,
+              cfaVersionNumber: cfaDraft.versionNumber,
+              cfaSeriesId: cfaDraft.seriesId
+            }
+          };
         }
         const attachmentMeta = attachments.find(a => parseInt(a?.workflow_id, 10) === wf.id) || {};
         const docType =
@@ -35408,6 +36606,18 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       } else {
         console.warn('[decision-letter] missing application id; skipping document insert');
       }
+    }
+    if (cfaDraft) {
+      const staffProfileId = resolveActiveStaffProfileId(req);
+      await pool.query(
+        `UPDATE cfa_version
+            SET status = 'sent',
+                sent_at = NOW(),
+                sent_by_staff_profile_id = ?
+          WHERE id = ?
+            AND status = 'draft'`,
+        [staffProfileId, cfaDraft.id]
+      );
     }
     const { actorName } = resolveRequestActor(req);
     const assessorDisplayName =
@@ -48942,6 +50152,21 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
         WHERE id = ?`,
       [JSON.stringify(payload), payload.artifact_url || null, id]
     );
+    const resolvedSchema = safeJsonParse(row?.resolved_schema_json, null) || {};
+    const cfaVersionId = normalisePositiveInteger(
+      resolvedSchema?.meta?.cfaVersionId ?? resolvedSchema?.meta?.cfa_version_id ?? null
+    );
+    if (cfaVersionId) {
+      await pool.query(
+        `UPDATE cfa_version
+            SET status = 'signed',
+                signed_at = NOW(),
+                signed_by_participant_id = ?
+          WHERE id = ?
+            AND status <> 'signed'`,
+        [userId, cfaVersionId]
+      );
+    }
     const caseId = Number(row.case_id);
     if (Number.isInteger(caseId) && caseId > 0) {
       const normalizeStatusKey = value =>
@@ -49870,6 +51095,34 @@ app.put('/api/cases/:id', async (req, res) => {
 
   try {
     const conflictSummaryStaffId = Number.isFinite(identity.userId) ? Number(identity.userId) : 0;
+    if (autoPlanSuggestion?.createdIntervention && autoPlanSuggestion?.planId) {
+      try {
+        const actorUserId = autoPlanApprovalUserId || (await resolveOrCreateUserIdFromAuth(req));
+        const staffProfileId = resolveActiveStaffProfileId(req);
+        const caseManagerName = await resolveStaffDisplayName(pool, req);
+        const [[existingCfaRow]] = await pool.query(
+          `SELECT v.id
+             FROM cfa_series s
+             JOIN cfa_version v ON v.series_id = s.id
+            WHERE s.case_id = ?
+            LIMIT 1`,
+          [caseId]
+        );
+        if (!existingCfaRow) {
+          await createCfaVersionForPlan({
+            caseId,
+            actionPlanId: autoPlanSuggestion.planId,
+            changeReason: 'NEW_INTERVENTION_APPROVED',
+            changeSummary: 'Initial funding agreement',
+            actorUserId,
+            staffProfileId,
+            caseManagerName
+          });
+        }
+      } catch (err) {
+        console.warn('[cfa] auto-plan draft failed', err?.message || err);
+      }
+    }
     const [[caseRow]] = await pool.query(
       `SELECT c.status, c.application_id, c.client_id, c.case_context_json, a.status AS application_status,
               a.docs_requested_active AS docs_requested_active,

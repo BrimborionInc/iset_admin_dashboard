@@ -1901,15 +1901,15 @@ const WorkQueueItemsTableWidget = ({
                   setEligibilityFileError(file ? null : eligibilityFileError);
                 }}
               />
-              <Box variant="small" color="text-body-secondary">
-                Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
-              </Box>
               <SpaceBetween size="xs" direction="horizontal">
                 <Button onClick={() => eligibilityFileInputRef.current && eligibilityFileInputRef.current.click()}>
                   Choose file
                 </Button>
                 <Box>{eligibilityFile ? eligibilityFile.name : 'No file selected'}</Box>
               </SpaceBetween>
+              <Box variant="small" color="text-body-secondary">
+                Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
+              </Box>
             </FormField>
           </SpaceBetween>
         </Modal>
