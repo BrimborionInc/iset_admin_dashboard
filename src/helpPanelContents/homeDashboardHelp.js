@@ -23,7 +23,7 @@ const HomeDashboardHelp = () => (
       <li><strong>Work Queue Items</strong> - table view of the selected bucket with filters, flags, and direct workspace links.</li>
       <li><strong>Metrics</strong> - activity totals for this week, month, quarter, and year.</li>
       <li><strong>Recent Activity</strong> - newest assignments, status changes, and system events.</li>
-      <li><strong>My Flagged Applications</strong> - cases you have flagged for follow-up; clear flags once resolved.</li>
+      <li><strong>My Tagged Applications</strong> - cases you have flagged for follow-up; clear flags once resolved.</li>
       <li><strong>Development Tracker</strong> - internal development tasks (System Administrators only).</li>
     </ul>
 

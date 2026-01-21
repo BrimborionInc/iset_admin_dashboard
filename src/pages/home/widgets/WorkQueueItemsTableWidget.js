@@ -1103,7 +1103,7 @@ const WorkQueueItemsTableWidget = ({
     const widthsMap = new Map(columnWidths.map(entry => [entry.id, entry.width]));
     const watchColumn = {
       id: 'watch',
-      header: 'Flag',
+      header: 'Tag',
       minWidth: 45,
       width: widthsMap.get('watch'),
       cell: item => {
@@ -1123,9 +1123,9 @@ const WorkQueueItemsTableWidget = ({
             variant="icon"
             iconSvg={icon}
             disabled={!isWatchable || pending}
-            ariaLabel={isWatched ? 'Unflag case' : 'Flag case'}
+            ariaLabel={isWatched ? 'Unflag case' : 'Tag case'}
             onClick={() => handleToggleWatch(item)}
-            title={!isWatchable ? 'Case record not yet created' : (isWatched ? 'Remove flag' : 'Flag this case')}
+            title={!isWatchable ? 'Case record not yet created' : (isWatched ? 'Remove tag' : 'Tag this case')}
           />
         );
       }

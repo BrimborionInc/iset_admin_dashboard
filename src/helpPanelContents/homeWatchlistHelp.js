@@ -3,7 +3,7 @@ import { Box, SpaceBetween } from '@cloudscape-design/components';
 
 const HomeWatchlistHelp = () => (
   <SpaceBetween size="s">
-    <Box variant="h3">My Flagged Applications</Box>
+    <Box variant="h3">My Tagged Applications</Box>
     <Box>
       This widget shows the applications you have flagged for follow-up. Use the filters to find a file quickly.
     </Box>

@@ -50,7 +50,7 @@ const WIDGET_REGISTRY = {
     'my-watchlist': {
         id: 'my-watchlist',
         component: MyWatchlistWidget,
-        title: 'My Flagged Applications',
+        title: 'My Tagged Applications',
         description: 'Applicants you flag appear here, and you will receive notifications as if you were the assigned Case Manager.',
         defaultRowSpan: 5,
         defaultColumnSpan: 3

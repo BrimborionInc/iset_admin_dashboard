@@ -278,3 +278,5 @@ Format: YYYY-MM-DD - Category: Short description
 - Fix: Intervention approval queue items now open the case workspace instead of the application assessment view.
 - UX: Proposed Intervention widget now uses the wizard for draft/submitted interventions and a read-only form for other statuses.
 - Feature: Submitted intervention proposals remain in the wizard for RM/PA/SA review, with EI verification and decision steps captured in review metadata.
+## 2026-01-19
+- Fix: Align MySQL connection collation with event tables to prevent doc-request threshold poll collation errors.

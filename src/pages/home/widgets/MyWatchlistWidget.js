@@ -303,7 +303,7 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
       variant="info"
       onFollow={event => {
         event.preventDefault();
-        toggleHelpPanel(<HomeWatchlistHelp />, 'My Flagged Applications', HomeWatchlistHelp.aiContext || '');
+        toggleHelpPanel(<HomeWatchlistHelp />, 'My Tagged Applications', HomeWatchlistHelp.aiContext || '');
       }}
     >
       Info
@@ -334,7 +334,7 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
         </SpaceBetween>
       }
     >
-      My Flagged Applications
+      My Tagged Applications
     </Header>
   );
 
@@ -391,8 +391,8 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
             `Displaying items ${firstIndex} to ${lastIndex} of ${filteredItems.length}`
           }
           ariaLabels={{
-            tableLabel: 'My Flagged Applications',
-            header: 'My Flagged Applications',
+            tableLabel: 'My Tagged Applications',
+            header: 'My Tagged Applications',
             rowHeader: 'Applicant Name',
           }}
           empty={
