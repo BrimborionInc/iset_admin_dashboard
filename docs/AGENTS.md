@@ -23,6 +23,7 @@ Last Updated: 2026-01-19
 
 - Program Admin "Unassigned Applications" must use `/api/applications`, not `/api/cases`, or applicant names will be missing.
 - Avoid layering workarounds on top of known problems. Fix the root cause.
+- When changes require new files in a deployment package, update `scripts/deploy-admin-test.ps1` and/or `../ISET-intake/scripts/deploy-portal-test.ps1` to stage the additional files.
 
 ## Documentation maintenance
 
@@ -41,4 +42,3 @@ Last Updated: 2026-01-19
 
 - The admin dashboard and the public portal are separate. Do not copy env files or code between apps without approval.
 - Portal renderer: `../ISET-intake/src/renderer/renderers.js`. Admin preview renderer: `apps/web/src/features/intake/ComponentRenderer.tsx`. Confirm which one you are editing.
-

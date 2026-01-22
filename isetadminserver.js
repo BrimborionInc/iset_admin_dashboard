@@ -7939,7 +7939,7 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId }) {
     throw new Error('case_not_found');
   }
   const [[assessmentRow]] = await connection.query(
-    `SELECT proposed_interventions
+    `SELECT *
        FROM iset_case_assessment
       WHERE case_id = ?
       LIMIT 1`,
@@ -7948,6 +7948,43 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId }) {
   if (!assessmentRow) {
     throw new Error('assessment_not_found');
   }
+  const buildFallbackAssessmentIntervention = () => {
+    const itpPayload = safeJsonParse(assessmentRow?.itp_payload, null) || {};
+    const wagePayload = safeJsonParse(assessmentRow?.wage_payload, null) || {};
+    const funding = parseAssessmentFundingPayload(assessmentRow?.itp_payload);
+    const costLines = [];
+    const addCostLine = (type, amount, notes) => {
+      const parsed = parseCurrencyValue(amount);
+      if (!Number.isFinite(parsed) || parsed <= 0) return;
+      costLines.push({
+        type: type || null,
+        amount: parsed,
+        notes: notes || null,
+        recurrence: { enabled: false }
+      });
+    };
+    if (funding) {
+      addCostLine('TuitionFeesDirect', funding.tuition, 'Tuition');
+      addCostLine('BooksMaterialsDirect', funding.books, 'Books');
+      addCostLine('BooksMaterialsDirect', funding.materials, 'Materials');
+      addCostLine('LivingAllowance', funding.living, 'Living allowance');
+      addCostLine('Childcare', funding.childcare, 'Childcare');
+      addCostLine('OtherEligibleCost', funding.otherAmount, 'Other');
+    }
+    return normalizeProposedIntervention({
+      intervention_code: assessmentRow?.intervention_code ?? null,
+      intervention_start_date: assessmentRow?.intervention_start_date ?? null,
+      intervention_end_date: assessmentRow?.intervention_end_date ?? null,
+      institution: assessmentRow?.institution ?? null,
+      program_name: assessmentRow?.program_name ?? null,
+      itpDetails: itpPayload.details ?? null,
+      wageSubsidyDetails: wagePayload.subsidyDetails ?? null,
+      related_noc: assessmentRow?.intervention_related_noc ?? null,
+      related_noc_version: assessmentRow?.intervention_related_noc_version ?? null,
+      costLines,
+      totalCost: assessmentRow?.intervention_cost_total ?? null,
+    });
+  };
   const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
   const contextNameCandidates = [
     caseContext?.preferredName,
@@ -7963,8 +8000,35 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId }) {
   const intakePayload = safeJsonParse(caseRow?.intake_payload, null);
   const applicantName = resolveApplicantNameFromPayload(intakePayload, fallbackName) || null;
 
-  const proposedInterventions = normalizeAssessmentProposedInterventions(assessmentRow.proposed_interventions)
+  const proposedRaw = assessmentRow.proposed_interventions;
+  let proposedInterventions = normalizeAssessmentProposedInterventions(proposedRaw)
     .filter(entry => entry.code);
+  if (!proposedInterventions.length) {
+    const rawType = Array.isArray(proposedRaw) ? 'array' : typeof proposedRaw;
+    const rawLen = typeof proposedRaw === 'string' ? proposedRaw.length : Array.isArray(proposedRaw) ? proposedRaw.length : null;
+    console.warn(
+      '[cfa] assessment proposed_interventions empty for case %s (type=%s len=%s); attempting fallback from assessment fields.',
+      caseId,
+      rawType,
+      rawLen
+    );
+    const fallbackIntervention = buildFallbackAssessmentIntervention();
+    if (fallbackIntervention?.code) {
+      console.warn(
+        '[cfa] fallback intervention generated for case %s (code=%s, costLines=%s).',
+        caseId,
+        fallbackIntervention.code,
+        Array.isArray(fallbackIntervention.costLines) ? fallbackIntervention.costLines.length : 0
+      );
+      proposedInterventions = [fallbackIntervention];
+    } else {
+      console.warn(
+        '[cfa] fallback intervention missing code for case %s (assessment_intervention_code=%s).',
+        caseId,
+        assessmentRow?.intervention_code ?? null
+      );
+    }
+  }
   const interventions = sortCfaInterventions(proposedInterventions);
 
   return {
@@ -16293,6 +16357,78 @@ esdcRouter.post('/participants/validate-all', async (req, res, next) => {
  * POST /api/esdc/participants/batch-prepare
  * Generate batch XML for all ready participants (allows bypassing warnings).
  */
+const extractClientFragment = xml => {
+  if (!xml || typeof xml !== 'string') return null;
+  const start = xml.indexOf('<client>');
+  const end = xml.lastIndexOf('</client>');
+  if (start === -1 || end === -1) return null;
+  return xml.slice(start, end + '</client>'.length).trim();
+};
+
+const normalisePlanStatusShort = status => {
+  const key = typeof status === 'string' ? status.trim().toLowerCase() : '';
+  if (key === 'in_progress' || key === 'in-progress') return 'in_progress';
+  if (key === 'ready_to_close' || key === 'ready-to-close') return 'ready_to_close';
+  return key || '';
+};
+
+async function buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings = false } = {}) {
+  if (!Array.isArray(clientRows) || !clientRows.length) {
+    return { error: 'no_rows' };
+  }
+  const connection = await pool.getConnection();
+  try {
+    const contexts = [];
+    for (const row of clientRows) {
+      const ctx = await loadEsdcParticipantSubmissionContext(connection, row.id, {
+        caseId: row.case_id,
+        forUpdate: false
+      });
+      contexts.push(ctx);
+    }
+    const combinedPlans = contexts.flatMap(ctx => ctx.caseActionPlans || []);
+    const activePlans = combinedPlans.filter(plan => normalisePlanStatusShort(plan.status) === 'active');
+    const baseContext = [...contexts].sort((a, b) => {
+      const aTs = a?.caseRow?.updated_at ? new Date(a.caseRow.updated_at).getTime() : 0;
+      const bTs = b?.caseRow?.updated_at ? new Date(b.caseRow.updated_at).getTime() : 0;
+      return bTs - aTs;
+    })[0];
+    const combinedContext = { ...baseContext, caseActionPlans: combinedPlans };
+    const evaluation = runIlmpValidation(combinedContext);
+    const blockingIssues = [...(evaluation.blockingIssues || [])];
+    if (activePlans.length > 1) {
+      blockingIssues.push('Only one active action plan is permitted per client.');
+    }
+    const warnings = evaluation.warnings || [];
+    if (blockingIssues.length > 0) {
+      return {
+        blockingIssues,
+        warnings,
+        readinessStatus: 'blocked',
+        evaluation
+      };
+    }
+    if (warnings.length > 0 && !ignoreWarnings) {
+      return {
+        warnings,
+        blockingIssues,
+        readinessStatus: evaluation.readinessStatus || 'needs_review',
+        evaluation
+      };
+    }
+    const snapshot = buildIlmpParticipantPayload(combinedContext);
+    return {
+      evaluation,
+      blockingIssues,
+      warnings,
+      snapshot,
+      readinessStatus: evaluation.readinessStatus || 'ready'
+    };
+  } finally {
+    connection.release();
+  }
+}
+
 esdcRouter.post('/participants/batch-prepare', async (req, res, next) => {
   const { ignoreWarnings = false } = req.body || {};
   const activeInterventionStatuses = ['active', 'in_progress', 'in-progress', 'inprogress', 'suspended', 'on_hold', 'on-hold'];
@@ -16376,77 +16512,6 @@ esdcRouter.post('/participants/batch-prepare', async (req, res, next) => {
     const warnings = [];
     const participants = [];
     const clientFragments = [];
-const extractClientFragment = xml => {
-  if (!xml || typeof xml !== 'string') return null;
-  const start = xml.indexOf('<client>');
-  const end = xml.lastIndexOf('</client>');
-  if (start === -1 || end === -1) return null;
-  return xml.slice(start, end + '</client>'.length).trim();
-};
-
-const normalisePlanStatusShort = status => {
-  const key = typeof status === 'string' ? status.trim().toLowerCase() : '';
-  if (key === 'in_progress' || key === 'in-progress') return 'in_progress';
-  if (key === 'ready_to_close' || key === 'ready-to-close') return 'ready_to_close';
-  return key || '';
-};
-
-async function buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings = false } = {}) {
-  if (!Array.isArray(clientRows) || !clientRows.length) {
-    return { error: 'no_rows' };
-  }
-  const connection = await pool.getConnection();
-  try {
-    const contexts = [];
-    for (const row of clientRows) {
-      const ctx = await loadEsdcParticipantSubmissionContext(connection, row.id, {
-        caseId: row.case_id,
-        forUpdate: false
-      });
-      contexts.push(ctx);
-    }
-    const combinedPlans = contexts.flatMap(ctx => ctx.caseActionPlans || []);
-    const activePlans = combinedPlans.filter(plan => normalisePlanStatusShort(plan.status) === 'active');
-    const baseContext = [...contexts].sort((a, b) => {
-      const aTs = a?.caseRow?.updated_at ? new Date(a.caseRow.updated_at).getTime() : 0;
-      const bTs = b?.caseRow?.updated_at ? new Date(b.caseRow.updated_at).getTime() : 0;
-      return bTs - aTs;
-    })[0];
-    const combinedContext = { ...baseContext, caseActionPlans: combinedPlans };
-    const evaluation = runIlmpValidation(combinedContext);
-    const blockingIssues = [...(evaluation.blockingIssues || [])];
-    if (activePlans.length > 1) {
-      blockingIssues.push('Only one active action plan is permitted per client.');
-    }
-    const warnings = evaluation.warnings || [];
-    if (blockingIssues.length > 0) {
-      return {
-        blockingIssues,
-        warnings,
-        readinessStatus: 'blocked',
-        evaluation
-      };
-    }
-    if (warnings.length > 0 && !ignoreWarnings) {
-      return {
-        warnings,
-        blockingIssues,
-        readinessStatus: evaluation.readinessStatus || 'needs_review',
-        evaluation
-      };
-    }
-    const snapshot = buildIlmpParticipantPayload(combinedContext);
-    return {
-      evaluation,
-      blockingIssues,
-      warnings,
-      snapshot,
-      readinessStatus: evaluation.readinessStatus || 'ready'
-    };
-  } finally {
-    connection.release();
-  }
-}
 
     const clientGroups = new Map();
     rows.forEach(r => {
@@ -16618,13 +16683,6 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
     const warnings = [];
     const participants = [];
     const clientFragments = [];
-    const extractClientFragment = xml => {
-      if (!xml || typeof xml !== 'string') return null;
-      const start = xml.indexOf('<client>');
-      const end = xml.lastIndexOf('</client>');
-      if (start === -1 || end === -1) return null;
-      return xml.slice(start, end + '</client>'.length).trim();
-    };
 
     const clientGroups = new Map();
     rows.forEach(r => {
@@ -36294,10 +36352,25 @@ app.post('/api/cases/:id/messages', async (req, res) => {
             caseManagerName
           });
           if (!created || created.skipped) {
-            console.warn('[cfa] assessment draft skipped for case %s', caseId);
+            console.warn(
+              '[cfa] assessment draft skipped for case %s (reason=%s)',
+              caseId,
+              created?.reason || 'unknown'
+            );
+          } else {
+            console.info(
+              '[cfa] assessment draft created for case %s (version=%s)',
+              caseId,
+              created.versionNumber ?? 'n/a'
+            );
           }
         } catch (err) {
-          console.warn('[cfa] assessment draft failed for case %s', caseId, err?.message || err);
+          console.warn(
+            '[cfa] assessment draft failed for case %s (code=%s, message=%s)',
+            caseId,
+            err?.code || 'n/a',
+            err?.message || err
+          );
         }
         [[cfaDraftRow]] = await pool.query(
           `SELECT v.id, v.version_number, v.metadata_json, s.id AS series_id
@@ -36311,6 +36384,36 @@ app.post('/api/cases/:id/messages', async (req, res) => {
         );
       }
       if (!cfaDraftRow) {
+        try {
+          const [[assessmentDebug]] = await pool.query(
+            `SELECT intervention_code, intervention_cost_total, proposed_interventions
+               FROM iset_case_assessment
+              WHERE case_id = ?
+              LIMIT 1`,
+            [caseId]
+          );
+          const proposedRaw = assessmentDebug?.proposed_interventions ?? null;
+          const proposedType = Array.isArray(proposedRaw) ? 'array' : typeof proposedRaw;
+          const proposedLen = typeof proposedRaw === 'string'
+            ? proposedRaw.length
+            : Array.isArray(proposedRaw)
+            ? proposedRaw.length
+            : null;
+          console.warn(
+            '[cfa] draft still missing for case %s (assessment_code=%s cost_total=%s proposed_type=%s proposed_len=%s)',
+            caseId,
+            assessmentDebug?.intervention_code ?? null,
+            assessmentDebug?.intervention_cost_total ?? null,
+            proposedType,
+            proposedLen
+          );
+        } catch (err) {
+          console.warn(
+            '[cfa] failed to load assessment debug info for case %s (message=%s)',
+            caseId,
+            err?.message || err
+          );
+        }
         return res.status(409).json({
           error: 'cfa_draft_missing',
           message: 'No draft funding agreement is available for this case.'
