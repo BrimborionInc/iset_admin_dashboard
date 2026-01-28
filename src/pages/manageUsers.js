@@ -13,6 +13,7 @@ import {
   FormField,
   Input,
   Select,
+  Multiselect,
   Spinner,
   Container,
   ColumnLayout
@@ -96,7 +97,7 @@ export default function UserManagementDashboard() {
   const [showCreate, setShowCreate] = useState(false);
   const [flashItems, setFlashItems] = useState([]);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ email: '', name: '', displayName: '', role: null, regionId: '' });
+  const [form, setForm] = useState({ email: '', name: '', displayName: '', role: null, regionId: '', regionIds: [] });
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [quickFilter, setQuickFilter] = useState('all');
   const [actionBusy, setActionBusy] = useState(false);
@@ -104,6 +105,11 @@ export default function UserManagementDashboard() {
   const [roleChangeTarget, setRoleChangeTarget] = useState(null);
   const [roleChanging, setRoleChanging] = useState(false);
   const [audit, setAudit] = useState([]); // in-memory audit log
+  const [showRegionEdit, setShowRegionEdit] = useState(false);
+  const [regionEditTarget, setRegionEditTarget] = useState(null);
+  const [regionEditIds, setRegionEditIds] = useState([]);
+  const [regionEditId, setRegionEditId] = useState('');
+  const [regionEditBusy, setRegionEditBusy] = useState(false);
 
   const QUICK_FILTERS = useMemo(() => [
     { id: 'all', label: 'All', predicate: () => true },
@@ -166,15 +172,46 @@ export default function UserManagementDashboard() {
     }))
   ), [regionOptions]);
 
+  const regionOptionById = useMemo(() => {
+    const map = new Map();
+    regionSelectOptions.forEach((opt) => {
+      map.set(opt.value, opt);
+    });
+    return map;
+  }, [regionSelectOptions]);
+
+  const resolveRegionLabel = useCallback((regionIds) => {
+    const ids = Array.isArray(regionIds) ? regionIds : [];
+    const codes = ids
+      .map((id) => resolveRegionCode(id))
+      .filter((code) => code && code !== '—');
+    const uniqueCodes = Array.from(new Set(codes));
+    return uniqueCodes.length ? uniqueCodes.join(', ') : '—';
+  }, [resolveRegionCode]);
+
+  const resolveUserRegionLabel = useCallback((user) => {
+    const ids = Array.isArray(user?.regionIds) && user.regionIds.length
+      ? user.regionIds
+      : (user?.regionId != null ? [user.regionId] : []);
+    return resolveRegionLabel(ids);
+  }, [resolveRegionLabel]);
+
+  const resolveRegionOptionsByIds = useCallback((ids) => {
+    if (!Array.isArray(ids)) return [];
+    return ids
+      .map((id) => regionOptionById.get(String(id)))
+      .filter(Boolean);
+  }, [regionOptionById]);
+
   const columns = useMemo(() => ([
     { id: 'username', header: 'Username', cell: i => i.username },
     { id: 'email', header: 'Email', cell: i => i.email },
     { id: 'role', header: 'Role', cell: i => ROLE_OPTIONS.find(r => r.value === i.role)?.label || i.role },
-    { id: 'region', header: 'Region', cell: i => resolveRegionCode(i.regionId) },
+    { id: 'region', header: 'Regions', cell: i => resolveUserRegionLabel(i) },
     { id: 'status', header: 'Status', cell: i => <StatusPill status={i.status} /> },
     { id: 'mfa', header: 'MFA', cell: i => i.mfa ? <Badge color="green">Enabled</Badge> : <Badge>MISSING</Badge> },
     { id: 'last', header: 'Last Sign-In', cell: i => i.lastSignIn ? new Date(i.lastSignIn).toLocaleString() : '—' }
-  ]), [resolveRegionCode]);
+  ]), [resolveUserRegionLabel]);
 
   function pushFlash(type, content) {
     setFlashItems(cur => {
@@ -188,6 +225,81 @@ export default function UserManagementDashboard() {
 
   function recordAudit(evt) {
     setAudit(a => [{ id: Date.now().toString()+Math.random().toString(36).slice(2,6), time: new Date().toISOString(), ...evt }, ...a].slice(0,50));
+  }
+
+  function openRegionEdit(user) {
+    if (!user) return;
+    const ids = Array.isArray(user.regionIds) && user.regionIds.length
+      ? user.regionIds.map((value) => String(value))
+      : (user.regionId != null ? [String(user.regionId)] : []);
+    setRegionEditTarget(user);
+    setRegionEditIds(ids);
+    setRegionEditId(ids.length ? ids[0] : '');
+    setShowRegionEdit(true);
+  }
+
+  function closeRegionEdit() {
+    setShowRegionEdit(false);
+    setRegionEditTarget(null);
+    setRegionEditIds([]);
+    setRegionEditId('');
+    setRegionEditBusy(false);
+  }
+
+  async function saveRegionEdit() {
+    if (!regionEditTarget) return;
+    const username = regionEditTarget.username;
+    const role = regionEditTarget.role;
+    let payload = null;
+    let nextRegionIds = [];
+    let nextRegionId = null;
+
+    if (role === 'Regional_Manager') {
+      const ids = regionEditIds.map((value) => Number(value)).filter(Number.isFinite);
+      if (!ids.length) {
+        pushFlash('error', 'Select at least one region');
+        return;
+      }
+      payload = { region_ids: ids };
+      nextRegionIds = Array.from(new Set(ids));
+      nextRegionId = nextRegionIds[0] ?? null;
+    } else if (role === 'ISET_Coordinator') {
+      const numeric = Number(regionEditId);
+      if (!Number.isFinite(numeric)) {
+        pushFlash('error', 'Select a region');
+        return;
+      }
+      payload = { region_id: numeric };
+      nextRegionIds = [numeric];
+      nextRegionId = numeric;
+    } else {
+      pushFlash('error', 'Regions apply only to Regional Managers and ISET Coordinators');
+      return;
+    }
+
+    setRegionEditBusy(true);
+    try {
+      const resp = await apiFetch(`/api/admin/users/${encodeURIComponent(username)}/attributes`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+      setUsers(cur => cur.map(u => u.username === username
+        ? { ...u, regionId: nextRegionId, regionIds: nextRegionIds.length ? nextRegionIds : null }
+        : u));
+      setSelected(cur => cur.map(s => s.username === username
+        ? { ...s, regionId: nextRegionId, regionIds: nextRegionIds.length ? nextRegionIds : null }
+        : s));
+      recordAudit({ action: 'region-update', actor: 'you', detail: 'Updated regions', target: username });
+      pushFlash('success', `Updated regions for ${username}`);
+      closeRegionEdit();
+    } catch (e) {
+      pushFlash('error', `Region update failed (${e.message})`);
+    } finally {
+      setRegionEditBusy(false);
+    }
   }
 
   async function doRoleChange() {
@@ -225,13 +337,26 @@ export default function UserManagementDashboard() {
       pushFlash('error', 'Name is required');
       return;
     }
+    const regionIds = form.role === 'Regional_Manager'
+      ? form.regionIds.map((value) => Number(value)).filter(Number.isFinite)
+      : [];
+    const regionId = form.regionId ? Number(form.regionId) : null;
+    if (form.role === 'Regional_Manager' && !regionIds.length) {
+      pushFlash('error', 'At least one region is required for Regional Managers');
+      return;
+    }
+    if (form.role === 'ISET_Coordinator' && !Number.isFinite(regionId)) {
+      pushFlash('error', 'Region is required for ISET Coordinators');
+      return;
+    }
     setCreating(true);
     const payload = {
       email,
       name,
       display_name: displayName,
       role: form.role,
-      ...(form.regionId ? { region_id: Number(form.regionId) } : {})
+      ...(form.role === 'Regional_Manager' ? { region_ids: regionIds } : {}),
+      ...(form.role === 'ISET_Coordinator' && Number.isFinite(regionId) ? { region_id: regionId } : {})
     };
     apiFetch('/api/admin/users', {
       method: 'POST',
@@ -240,11 +365,12 @@ export default function UserManagementDashboard() {
     }).then(async resp => {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       // Optimistically add user (mock or real) for immediate feedback
-      setUsers(cur => ([...cur, { username: email, email, role: form.role, status: 'FORCE_CHANGE_PASSWORD', regionId: form.regionId ? Number(form.regionId) : null, mfa: false, lastSignIn: null }]));
+      const primaryRegionId = regionIds.length ? regionIds[0] : (Number.isFinite(regionId) ? regionId : null);
+      setUsers(cur => ([...cur, { username: email, email, role: form.role, status: 'FORCE_CHANGE_PASSWORD', regionId: primaryRegionId, regionIds: regionIds.length ? regionIds : null, mfa: false, lastSignIn: null }]));
       recordAudit({ action: 'create', actor: 'you', detail: `Created user as ${form.role}`, target: email });
       pushFlash('success', `Created ${email} as ${form.role}`);
       setShowCreate(false);
-      setForm({ email: '', name: '', displayName: '', role: null, regionId: '' });
+      setForm({ email: '', name: '', displayName: '', role: null, regionId: '', regionIds: [] });
     }).catch(e => {
       pushFlash('error', `Create failed (${e.message})`);
     }).finally(() => setCreating(false));
@@ -452,7 +578,8 @@ export default function UserManagementDashboard() {
                           user={selected[0]}
                           onClose={() => { setInspectorOpen(false); setSelected([]); }}
                           onChangeRole={(username, currentRole) => { setShowRoleChange(true); setRoleChangeTarget({ username, newRole: currentRole }); }}
-                          resolveRegionCode={resolveRegionCode}
+                          resolveRegionLabel={resolveUserRegionLabel}
+                          onEditRegions={openRegionEdit}
                         />
                       )}
                     </SpaceBetween>
@@ -489,11 +616,22 @@ export default function UserManagementDashboard() {
             <FormField label="Email" stretch><Input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.detail.value }))} placeholder="user@example.org" /></FormField>
             <FormField label="Name" stretch><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.detail.value }))} placeholder="e.g. Jane Doe" /></FormField>
             <FormField label="Display name" stretch description="Shown in assignments and audit trails. Defaults to Name."><Input value={form.displayName} onChange={e => setForm(f => ({ ...f, displayName: e.detail.value }))} placeholder="e.g. Jane D." /></FormField>
-            <FormField label="Role"><Select selectedOption={form.role ? ROLE_OPTIONS.find(r => r.value === form.role) : null} onChange={e => setForm(f => ({ ...f, role: e.detail.selectedOption.value }))} options={ROLE_OPTIONS} placeholder="Select role" /></FormField>
-            {form.role && ['Regional_Manager','ISET_Coordinator'].includes(form.role) && (
+            <FormField label="Role"><Select selectedOption={form.role ? ROLE_OPTIONS.find(r => r.value === form.role) : null} onChange={e => setForm(f => ({ ...f, role: e.detail.selectedOption.value, regionId: '', regionIds: [] }))} options={ROLE_OPTIONS} placeholder="Select role" /></FormField>
+            {form.role === 'Regional_Manager' && (
+              <FormField label="Regions">
+                <Multiselect
+                  selectedOptions={resolveRegionOptionsByIds(form.regionIds)}
+                  onChange={e => setForm(f => ({ ...f, regionIds: e.detail.selectedOptions.map(opt => opt.value) }))}
+                  options={regionSelectOptions}
+                  placeholder="Select regions"
+                  inlineTokens
+                />
+              </FormField>
+            )}
+            {form.role === 'ISET_Coordinator' && (
               <FormField label="Region">
                 <Select
-                  selectedOption={form.regionId ? regionSelectOptions.find(opt => opt.value === String(form.regionId)) : null}
+                  selectedOption={form.regionId ? regionOptionById.get(String(form.regionId)) : null}
                   onChange={e => setForm(f => ({ ...f, regionId: e.detail.selectedOption.value }))}
                   options={regionSelectOptions}
                   placeholder="Select region"
@@ -506,6 +644,39 @@ export default function UserManagementDashboard() {
             ) : (
               <Box variant="small" color="inherit">Cognito will email the user a temporary password they must change on first sign-in.</Box>
             )}
+          </SpaceBetween>
+        </Modal>
+      )}
+      {showRegionEdit && regionEditTarget && (
+        <Modal
+          visible
+          header={`Update regions: ${regionEditTarget.username}`}
+          onDismiss={closeRegionEdit}
+          footer={<SpaceBetween direction="horizontal" size="xs" alignItems="center"><Button onClick={closeRegionEdit} variant="link">Cancel</Button><Button onClick={saveRegionEdit} variant="primary" disabled={regionEditBusy}>{regionEditBusy ? <Spinner size="normal" /> : 'Save changes'}</Button></SpaceBetween>}
+        >
+          <SpaceBetween size="m">
+            {regionEditTarget.role === 'Regional_Manager' && (
+              <FormField label="Regions">
+                <Multiselect
+                  selectedOptions={resolveRegionOptionsByIds(regionEditIds)}
+                  onChange={e => setRegionEditIds(e.detail.selectedOptions.map(opt => opt.value))}
+                  options={regionSelectOptions}
+                  placeholder="Select regions"
+                  inlineTokens
+                />
+              </FormField>
+            )}
+            {regionEditTarget.role === 'ISET_Coordinator' && (
+              <FormField label="Region">
+                <Select
+                  selectedOption={regionEditId ? regionOptionById.get(String(regionEditId)) : null}
+                  onChange={e => setRegionEditId(e.detail.selectedOption.value)}
+                  options={regionSelectOptions}
+                  placeholder="Select region"
+                />
+              </FormField>
+            )}
+            <Box variant="small" color="inherit">Updates region access for this user.</Box>
           </SpaceBetween>
         </Modal>
       )}
@@ -585,12 +756,16 @@ function mapRoleToPermissions(role) {
   }
 }
 
-function UserInspector({ user, onClose, onChangeRole, resolveRegionCode }) {
+function UserInspector({ user, onClose, onChangeRole, resolveRegionLabel, onEditRegions }) {
+  const canEditRegions = ['Regional_Manager', 'ISET_Coordinator'].includes(user.role);
   const profileRows = [
     { label: 'Username', value: user.username },
     { label: 'Email', value: user.email },
-    { label: 'Region', value: resolveRegionCode ? resolveRegionCode(user.regionId) : (user.regionId ?? '—') }
+    { label: 'Regions', value: resolveRegionLabel ? resolveRegionLabel(user) : '—' }
   ];
+  if (canEditRegions && onEditRegions) {
+    profileRows.push({ label: 'Edit regions', value: <Button size="small" onClick={() => onEditRegions(user)}>Edit</Button> });
+  }
   const roleRows = [
     { label: 'Role', value: ROLE_OPTIONS.find(r => r.value === user.role)?.label || user.role },
     { label: 'Change Role', value: <Button size="small" onClick={() => onChangeRole(user.username, user.role)}>Change</Button> },

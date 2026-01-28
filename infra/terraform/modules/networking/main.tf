@@ -3,6 +3,8 @@ locals {
     Component = "networking"
   })
 
+  log_group_prefix = "/${replace(var.name_prefix, "-", "/")}"
+
   azs = data.aws_availability_zones.available.names
 
   private_subnet_map  = { for idx, cidr in var.private_subnet_cidrs : tostring(idx) => cidr }
@@ -198,7 +200,7 @@ resource "aws_vpc_endpoint" "dynamodb" {
 }
 
 resource "aws_cloudwatch_log_group" "flow" {
-  name              = "/nwac/test/vpc/${var.name_prefix}"
+  name              = "${local.log_group_prefix}/vpc/${var.name_prefix}"
   retention_in_days = var.log_retention_days
 
   tags = merge(local.component_tags, {

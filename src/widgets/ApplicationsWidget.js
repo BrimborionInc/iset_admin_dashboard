@@ -288,12 +288,18 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     displayName: currentUserName,
     role: currentUserRole,
     regionId: currentUserRegionId,
+    regionIds: currentUserRegionIds,
   } = useCurrentUser();
   const currentUserId = currentUserIdRaw ? String(currentUserIdRaw) : null;
   const userRole = currentUserRole || '';
   const normalizedUserRole = userRole.trim();
-  const parsedRegion = currentUserRegionId != null ? Number(currentUserRegionId) : NaN;
-  const normalizedRegionId = Number.isFinite(parsedRegion) ? parsedRegion : null;
+  const normalizedRegionIds = useMemo(() => {
+    if (Array.isArray(currentUserRegionIds) && currentUserRegionIds.length) {
+      return Array.from(new Set(currentUserRegionIds.map(Number).filter(Number.isFinite)));
+    }
+    const parsed = currentUserRegionId != null ? Number(currentUserRegionId) : NaN;
+    return Number.isFinite(parsed) ? [parsed] : [];
+  }, [currentUserRegionIds, currentUserRegionId]);
 
   // Apply incoming query param filter (e.g., status=Awaiting EI Validation)
   useEffect(() => {
@@ -314,10 +320,10 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     if (normalizedUserRole === 'Regional Coordinator') {
       if (currentUserId && String(staff.id) === String(currentUserId)) return true;
       const staffRegion = staff.region_id != null ? Number(staff.region_id) : (staff.regionId != null ? Number(staff.regionId) : null);
-      return Number.isFinite(normalizedRegionId) && Number.isFinite(staffRegion) && staffRegion === normalizedRegionId;
+      return normalizedRegionIds.length && Number.isFinite(staffRegion) && normalizedRegionIds.includes(staffRegion);
     }
     return true;
-  }, [normalizedUserRole, normalizedRegionId, currentUserId]);
+  }, [normalizedUserRole, normalizedRegionIds, currentUserId]);
 
   const filteredAssignableStaff = useMemo(() => {
     return Array.isArray(assignableStaff)

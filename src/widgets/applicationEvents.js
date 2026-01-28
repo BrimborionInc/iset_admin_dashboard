@@ -117,7 +117,6 @@ const formatActorDisplay = (event) => {
   const name = selectFirst([
     event.user_name,
     event.actor?.displayName,
-    payload.evaluator_name,
     payload.actor_name,
     payload.updated_by,
     payload.to_assignee_name,
@@ -195,12 +194,12 @@ const formatEventMessage = (event, actorDisplay) => {
       return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
     }
     case 'assessment_submitted': {
-      const name = trimValue(payload.evaluator_name) || actorDisplay;
+      const name = actorDisplay;
       const base = 'Assessment submitted';
       return ensureSentence(name ? `${base} by ${name}` : base);
     }
     case 'nwac_review_submitted': {
-      const reviewer = trimValue(payload.evaluator_name) || actorDisplay;
+      const reviewer = actorDisplay;
       const outcomeRaw = trimValue(payload.outcome);
       const outcome = outcomeRaw ? outcomeRaw.replace(/_/g, ' ') : '';
       const reason = trimValue(payload.reason);

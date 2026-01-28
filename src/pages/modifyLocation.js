@@ -7,7 +7,6 @@ import Board from '@cloudscape-design/board-components/board';
 import { useParams } from 'react-router-dom';
 import GeneralLocationInformation from '../widgets/GeneralLocationInformation'; // Import GeneralLocationInformation
 import ContactInformation from '../widgets/ContactInformation'; // Import ContactInformation
-import IsetEvaluatorsWidget from '../widgets/IsetEvaluatorsWidget'; // Import the new widget
 import PtmaIsetStatistics from '../widgets/PtmaIsetStatistics'; // Import the new widget
 
 const ModifyLocation = ({ header, headerInfo, toggleHelpPanel, updateBreadcrumbs }) => {
@@ -19,12 +18,6 @@ const ModifyLocation = ({ header, headerInfo, toggleHelpPanel, updateBreadcrumbs
       rowSpan: 4,
       columnSpan: 2,
       data: { title: 'General Information' },
-    },
-    {
-      id: 'iset-evaluators',
-      rowSpan: 4,
-      columnSpan: 2,
-      data: { title: 'ISET Evaluators' },
     },
     {
       id: 'contact-information',
@@ -81,9 +74,6 @@ const ModifyLocation = ({ header, headerInfo, toggleHelpPanel, updateBreadcrumbs
         renderItem={(item) => {
           if (item.id === 'general-information') {
             return <GeneralLocationInformation ptma={ptma} />;
-          }
-          if (item.id === 'iset-evaluators') {
-            return <IsetEvaluatorsWidget ptmaId={id} />;
           }
           if (item.id === 'contact-information') {
             return <ContactInformation ptma={ptma} />;

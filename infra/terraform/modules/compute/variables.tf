@@ -76,3 +76,21 @@ variable "portal_domain_name" {
   default     = ""
 }
 
+variable "app_min_size" {
+  description = "Minimum number of application instances in the ASG."
+  type        = number
+  default     = 2
+}
+
+variable "app_max_size" {
+  description = "Maximum number of application instances in the ASG."
+  type        = number
+  default     = 4
+}
+
+variable "app_desired_capacity" {
+  description = "Desired number of application instances in the ASG."
+  type        = number
+  default     = 2
+}
+

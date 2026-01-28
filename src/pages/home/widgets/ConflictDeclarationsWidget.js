@@ -91,7 +91,12 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
   const [assignTarget, setAssignTarget] = useState(null);
   const [resolveTarget, setResolveTarget] = useState(null);
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
-  const { userId: currentUserId, role: currentUserRole, regionId: currentUserRegionId } = useCurrentUser();
+  const {
+    userId: currentUserId,
+    role: currentUserRole,
+    regionId: currentUserRegionId,
+    regionIds: currentUserRegionIds
+  } = useCurrentUser();
 
   const load = React.useCallback(() => {
     let ignore = false;
@@ -121,20 +126,26 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
     return cleanup;
   }, [refreshKey, load]);
 
-  const normalizedRegionId = Number.isFinite(Number(currentUserRegionId)) ? Number(currentUserRegionId) : null;
+  const normalizedRegionIds = useMemo(() => {
+    if (Array.isArray(currentUserRegionIds) && currentUserRegionIds.length) {
+      return Array.from(new Set(currentUserRegionIds.map(Number).filter(Number.isFinite)));
+    }
+    const parsed = Number(currentUserRegionId);
+    return Number.isFinite(parsed) ? [parsed] : [];
+  }, [currentUserRegionIds, currentUserRegionId]);
 
   const isStaffVisible = useMemo(() => {
     const userRole = (currentUserRole || '').trim();
     return (staff) => {
       if (!staff) return false;
-      if (userRole === 'Regional Coordinator') {
-        if (currentUserId && String(staff.id) === String(currentUserId)) return true;
-        const staffRegion = staff.region_id != null ? Number(staff.region_id) : (staff.staff_region_id != null ? Number(staff.staff_region_id) : null);
-        return Number.isFinite(normalizedRegionId) && Number.isFinite(staffRegion) && staffRegion === normalizedRegionId;
-      }
-      return true;
-    };
-  }, [currentUserRole, currentUserId, normalizedRegionId]);
+        if (userRole === 'Regional Coordinator') {
+          if (currentUserId && String(staff.id) === String(currentUserId)) return true;
+          const staffRegion = staff.region_id != null ? Number(staff.region_id) : (staff.staff_region_id != null ? Number(staff.staff_region_id) : null);
+          return Number.isFinite(staffRegion) && normalizedRegionIds.length && normalizedRegionIds.includes(staffRegion);
+        }
+        return true;
+      };
+  }, [currentUserRole, currentUserId, normalizedRegionIds]);
 
   const filteredAssignableStaff = useMemo(() => {
     return Array.isArray(assignableStaff) ? assignableStaff.filter(isStaffVisible) : [];

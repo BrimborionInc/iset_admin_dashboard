@@ -2,6 +2,8 @@ locals {
   component_tags = merge(var.tags, {
     Component = "compute"
   })
+
+  ssm_parameter_path_prefix = "/${replace(var.name_prefix, "-", "/")}"
 }
 
 data "aws_caller_identity" "current" {}
@@ -179,14 +181,9 @@ resource "aws_lb_listener" "http_redirect" {
   }
 }
 
-locals {
-  https_listener_arn       = try(aws_lb_listener.https[0].arn, null)
-  http_forward_listener_arn = try(aws_lb_listener.http_forward[0].arn, null)
-}
-
 resource "aws_lb_listener_rule" "https_admin" {
-  count        = local.https_listener_arn != null && var.admin_domain_name != "" ? 1 : 0
-  listener_arn = local.https_listener_arn
+  count        = var.alb_certificate_arn != "" && var.admin_domain_name != "" ? 1 : 0
+  listener_arn = aws_lb_listener.https[0].arn
   priority     = 10
 
   action {
@@ -202,8 +199,8 @@ resource "aws_lb_listener_rule" "https_admin" {
 }
 
 resource "aws_lb_listener_rule" "https_portal" {
-  count        = local.https_listener_arn != null && var.portal_domain_name != "" ? 1 : 0
-  listener_arn = local.https_listener_arn
+  count        = var.alb_certificate_arn != "" && var.portal_domain_name != "" ? 1 : 0
+  listener_arn = aws_lb_listener.https[0].arn
   priority     = 20
 
   action {
@@ -219,8 +216,8 @@ resource "aws_lb_listener_rule" "https_portal" {
 }
 
 resource "aws_lb_listener_rule" "http_admin" {
-  count        = local.http_forward_listener_arn != null && var.admin_domain_name != "" ? 1 : 0
-  listener_arn = local.http_forward_listener_arn
+  count        = var.alb_certificate_arn == "" && var.admin_domain_name != "" ? 1 : 0
+  listener_arn = aws_lb_listener.http_forward[0].arn
   priority     = 10
 
   action {
@@ -236,8 +233,8 @@ resource "aws_lb_listener_rule" "http_admin" {
 }
 
 resource "aws_lb_listener_rule" "http_portal" {
-  count        = local.http_forward_listener_arn != null && var.portal_domain_name != "" ? 1 : 0
-  listener_arn = local.http_forward_listener_arn
+  count        = var.alb_certificate_arn == "" && var.portal_domain_name != "" ? 1 : 0
+  listener_arn = aws_lb_listener.http_forward[0].arn
   priority     = 20
 
   action {
@@ -291,7 +288,7 @@ resource "aws_iam_role_policy" "app_runtime" {
           "ssm:GetParameterHistory"
         ]
         Resource = [
-          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/nwac/test/*"
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${local.ssm_parameter_path_prefix}/*"
         ]
       },
       {
@@ -309,8 +306,8 @@ resource "aws_iam_role_policy" "app_runtime" {
           "s3:ListBucket"
         ]
         Resource = [
-          "arn:aws:s3:::nwac-test-*",
-          "arn:aws:s3:::nwac-test-*/*"
+          "arn:aws:s3:::${var.name_prefix}-*",
+          "arn:aws:s3:::${var.name_prefix}-*/*"
         ]
       }
     ]
@@ -352,9 +349,9 @@ resource "aws_launch_template" "app" {
 
 resource "aws_autoscaling_group" "app" {
   name                      = "${var.name_prefix}-asg"
-  min_size                  = 2
-  max_size                  = 4
-  desired_capacity          = 2
+  min_size                  = var.app_min_size
+  max_size                  = var.app_max_size
+  desired_capacity          = var.app_desired_capacity
   vpc_zone_identifier       = var.private_subnet_ids
   health_check_type         = "ELB"
   health_check_grace_period = 120

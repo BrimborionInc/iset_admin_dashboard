@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyInsecureTransport",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::nwac-prod-uploads-b6bb/*",
+        "arn:aws:s3:::nwac-prod-uploads-b6bb"
+      ],
+      "Condition": { "Bool": { "aws:SecureTransport": "false" } }
+    },
+    {
+      "Sid": "AllowProdAppRoleUploads",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::468278742295:role/nwac-prod-app-role" },
+      "Action": ["s3:PutObject","s3:GetObject","s3:AbortMultipartUpload","s3:ListBucketMultipartUploads"],
+      "Resource": [
+        "arn:aws:s3:::nwac-prod-uploads-b6bb",
+        "arn:aws:s3:::nwac-prod-uploads-b6bb/*"
+      ]
+    }
+  ]
+}

@@ -10807,10 +10807,12 @@ function getRequesterIdentity(req) {
   const regionRaw = req?.staffProfile?.region_id ?? req?.auth?.regionId ?? null;
   const userId = Number.parseInt(userIdRaw, 10);
   const regionId = Number.parseInt(regionRaw, 10);
+  const regionIds = resolveRequestRegionIds(req);
   return {
     role: role || null,
     userId: Number.isFinite(userId) ? userId : null,
-    regionId: Number.isFinite(regionId) ? regionId : null,
+    regionId: regionIds.length ? regionIds[0] : (Number.isFinite(regionId) ? regionId : null),
+    regionIds: regionIds.length ? regionIds : null,
   };
 }
 
@@ -10926,18 +10928,18 @@ function validateCaseAccessForPlan(req, planRow) {
   if (allowAll) return null;
 
   if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
-    const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : Number.NaN;
-    if (!Number.isFinite(regionId)) {
+    const regionIds = resolveRequestRegionIds(req);
+    if (!regionIds.length) {
       return { status: 403, body: { error: 'forbidden', detail: 'region_scope_missing' } };
     }
     const isUnassigned =
       planRow.assigned_to_user_id === null || typeof planRow.assigned_to_user_id === 'undefined';
     const portfolioMatch =
       Number.isFinite(planRow.portfolio_region_id) &&
-      Number(planRow.portfolio_region_id) === regionId;
+      regionIds.includes(Number(planRow.portfolio_region_id));
     const ownerMatch =
       Number.isFinite(planRow.owner_region_id) &&
-      Number(planRow.owner_region_id) === regionId;
+      regionIds.includes(Number(planRow.owner_region_id));
     if (!isUnassigned && !portfolioMatch && !ownerMatch) {
       return { status: 403, body: { error: 'forbidden', detail: 'region_scope_mismatch' } };
     }
@@ -10971,8 +10973,8 @@ function validateCaseAccessForIntervention(req, interventionRow) {
   if (allowAll) return null;
 
   if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
-    const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : Number.NaN;
-    if (!Number.isFinite(regionId)) {
+    const regionIds = resolveRequestRegionIds(req);
+    if (!regionIds.length) {
       return { status: 403, body: { error: 'forbidden', detail: 'region_scope_missing' } };
     }
     const isUnassigned =
@@ -10980,10 +10982,10 @@ function validateCaseAccessForIntervention(req, interventionRow) {
       typeof interventionRow.assigned_to_user_id === 'undefined';
     const portfolioMatch =
       Number.isFinite(interventionRow.portfolio_region_id) &&
-      Number(interventionRow.portfolio_region_id) === regionId;
+      regionIds.includes(Number(interventionRow.portfolio_region_id));
     const ownerMatch =
       Number.isFinite(interventionRow.owner_region_id) &&
-      Number(interventionRow.owner_region_id) === regionId;
+      regionIds.includes(Number(interventionRow.owner_region_id));
     if (!isUnassigned && !portfolioMatch && !ownerMatch) {
       return { status: 403, body: { error: 'forbidden', detail: 'region_scope_mismatch' } };
     }
@@ -11092,14 +11094,17 @@ async function fetchTrackingIdForCase(applicationId, caseId) {
 }
 
 function ensureCanAssignCase(identity, targetStaff) {
-  const { role, regionId } = identity || {};
+  const { role, regionId, regionIds } = identity || {};
   if (ASSIGN_FORBIDDEN_ROLES.has(role)) {
     return false;
   }
   if (ASSIGN_ROLE_ALLOWLIST.has(role || '')) {
     if (role === 'Regional Coordinator' || role === 'RegionalCoordinator' || role === 'Regional_Manager') {
-      if (!Number.isFinite(regionId)) return false;
-      if (targetStaff && targetStaff.regionId && Number(targetStaff.regionId) !== Number(regionId)) {
+      const allowedRegions = Array.isArray(regionIds) && regionIds.length
+        ? regionIds
+        : (Number.isFinite(regionId) ? [Number(regionId)] : []);
+      if (!allowedRegions.length) return false;
+      if (targetStaff && targetStaff.regionId && !allowedRegions.includes(Number(targetStaff.regionId))) {
         return false;
       }
     }
@@ -13283,7 +13288,25 @@ async function staffProfileMiddleware(req, res, next) {
         [rows] = await pool.query('SELECT id, cognito_sub, email, primary_role FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [sub]);
       } else throw selErr;
     }
-    if (rows && rows[0]) req.staffProfile = rows[0];
+    if (rows && rows[0]) {
+      req.staffProfile = rows[0];
+      const roleKey = typeof role === 'string' ? role.toLowerCase().replace(/[\s_-]+/g, '') : '';
+      if (roleKey === 'regionalcoordinator' || roleKey === 'regionalmanager') {
+        try {
+          const mapped = await fetchStaffRegionIdsByStaffProfileId(rows[0].id);
+          const fallback = Number.isFinite(regionId) ? [Number(regionId)] : [];
+          const regionIds = mapped.length ? mapped : fallback;
+          if (regionIds.length) {
+            req.auth.regionIds = regionIds;
+            req.staffProfile.regionIds = regionIds;
+          }
+        } catch (err) {
+          if (!isMissingTableErrorLocal(err)) {
+            console.warn('[staff_profiles] region mapping lookup failed:', err?.message || err);
+          }
+        }
+      }
+    }
   } catch (e) {
     console.warn('[staff_profiles] middleware failed (non-fatal):', e.message);
   } finally {
@@ -13797,6 +13820,69 @@ function normalizeStaffIdList(list) {
   return Array.from(new Set(normalized));
 }
 
+function normalizeRegionIdList(list) {
+  if (!Array.isArray(list)) return [];
+  const normalized = [];
+  for (const value of list) {
+    const id = Number(value);
+    if (Number.isInteger(id) && id > 0) normalized.push(id);
+  }
+  return Array.from(new Set(normalized));
+}
+
+function normalizeRegionIdInput(value) {
+  if (Array.isArray(value)) return normalizeRegionIdList(value);
+  const numeric = Number(value);
+  if (Number.isInteger(numeric) && numeric > 0) return [numeric];
+  return [];
+}
+
+function resolveRequestRegionIds(req) {
+  if (Array.isArray(req?.auth?.regionIds)) {
+    const ids = normalizeRegionIdList(req.auth.regionIds);
+    if (ids.length) return ids;
+  }
+  if (Array.isArray(req?.staffProfile?.regionIds)) {
+    const ids = normalizeRegionIdList(req.staffProfile.regionIds);
+    if (ids.length) return ids;
+  }
+  return normalizeRegionIdInput(req?.staffProfile?.region_id ?? req?.auth?.regionId ?? null);
+}
+
+async function fetchStaffRegionIdsByStaffProfileId(staffProfileId) {
+  const numeric = Number(staffProfileId);
+  if (!Number.isInteger(numeric) || numeric <= 0) return [];
+  try {
+    const [rows] = await pool.query(
+      'SELECT region_id FROM staff_region WHERE staff_profile_id = ?',
+      [numeric]
+    );
+    const ids = (rows || []).map(row => row && row.region_id).filter(Boolean);
+    return normalizeRegionIdList(ids);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) return [];
+    throw err;
+  }
+}
+
+async function fetchRegionCodesByIds(regionIds) {
+  const ids = normalizeRegionIdList(regionIds);
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  try {
+    const [rows] = await pool.query(
+      `SELECT region_id, code FROM canada_region WHERE region_id IN (${placeholders})`,
+      ids
+    );
+    return (rows || [])
+      .map(row => (row && row.code ? String(row.code).trim().toLowerCase() : null))
+      .filter(Boolean);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) return [];
+    throw err;
+  }
+}
+
 async function resolveRegionalCoordinatorContext(req) {
   if (!pool) return { valid: false, staffIds: [] };
   const headerUserIdRaw = req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
@@ -13840,16 +13926,31 @@ async function resolveRegionalCoordinatorContext(req) {
     }
   }
 
-  const normalizedRegionId = Number(regionIdRaw);
-  if (Number.isInteger(normalizedRegionId) && normalizedRegionId > 0) {
+  const candidateRegionIds = [];
+  if (regionIdRaw != null) candidateRegionIds.push(regionIdRaw);
+  if (req.staffProfile?.region_id != null) candidateRegionIds.push(req.staffProfile.region_id);
+  let regionIds = normalizeRegionIdList(candidateRegionIds);
+
+  if (coordinatorId != null) {
     try {
-      const [rows] = await pool.query('SELECT id FROM staff_profiles WHERE region_id = ?', [normalizedRegionId]);
+      const mapped = await fetchStaffRegionIdsByStaffProfileId(coordinatorId);
+      if (mapped.length) {
+        regionIds = normalizeRegionIdList([...mapped, ...regionIds]);
+      }
+    } catch (err) {
+      if (!isMissingTableErrorLocal(err)) throw err;
+    }
+  }
+
+  if (regionIds.length) {
+    const placeholders = regionIds.map(() => '?').join(',');
+    try {
+      const [rows] = await pool.query(`SELECT id FROM staff_profiles WHERE region_id IN (${placeholders})`, regionIds);
       for (const row of rows || []) {
         if (!row || row.id == null) continue;
         const id = Number(row.id);
         if (Number.isInteger(id) && id > 0 && !collected.includes(id)) collected.push(id);
       }
-      regionIdRaw = normalizedRegionId;
     } catch (err) {
       if (!isMissingTableErrorLocal(err)) throw err;
     }
@@ -13858,12 +13959,13 @@ async function resolveRegionalCoordinatorContext(req) {
   const staffIds = normalizeStaffIdList(collected);
   const coordinatorInList = coordinatorId && staffIds.includes(coordinatorId) ? coordinatorId : null;
   const staffProfileId = coordinatorInList || (staffIds.length ? staffIds[0] : null);
-  const regionId = Number.isInteger(Number(regionIdRaw)) && Number(regionIdRaw) > 0 ? Number(regionIdRaw) : null;
+  const primaryRegionId = regionIds.length ? regionIds[0] : null;
 
   return {
-    valid: Number.isInteger(staffProfileId) && staffProfileId > 0,
+    valid: Number.isInteger(staffProfileId) && staffProfileId > 0 && regionIds.length > 0,
     staffProfileId: Number.isInteger(staffProfileId) && staffProfileId > 0 ? staffProfileId : null,
-    regionId,
+    regionId: primaryRegionId,
+    regionIds,
     staffIds
   };
 }
@@ -13954,7 +14056,7 @@ async function resolveApplicationAssessorContext(req) {
 }
 
 
-async function countActiveCasesWithScope(pool, { regionId = null, ownerId = null } = {}) {
+async function countActiveCasesWithScope(pool, { regionId = null, regionIds = null, ownerId = null } = {}) {
   try {
     const filters = ['LOWER(COALESCE(ap.status, \'\')) = ?'];
     const params = [ACTION_PLAN_ACTIVE_STATUS];
@@ -13964,10 +14066,17 @@ async function countActiveCasesWithScope(pool, { regionId = null, ownerId = null
       params.push(ownerId);
     }
 
-    if (Number.isInteger(regionId) && regionId > 0) {
-      filters.push('sp.region_id = ?');
+    const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
+    if (regionList.length) {
+      if (regionList.length === 1) {
+        filters.push('sp.region_id = ?');
+        params.push(regionList[0]);
+      } else {
+        const placeholders = regionList.map(() => '?').join(',');
+        filters.push(`sp.region_id IN (${placeholders})`);
+        params.push(...regionList);
+      }
       filters.push('c.assigned_to_user_id IS NOT NULL');
-      params.push(regionId);
     }
 
     if (READY_TO_CLOSE_EXCLUDED_STATUSES.length) {
@@ -13997,9 +14106,9 @@ async function countActiveCasesAll(pool) {
 }
 
 async function countActiveCasesByRegion(pool, regionId) {
-  const numeric = Number(regionId);
-  if (!Number.isInteger(numeric) || numeric <= 0) return 0;
-  return countActiveCasesWithScope(pool, { regionId: numeric });
+  const regionList = normalizeRegionIdInput(regionId);
+  if (!regionList.length) return 0;
+  return countActiveCasesWithScope(pool, { regionIds: regionList });
 }
 
 async function countActiveCasesByOwner(pool, ownerId) {
@@ -14008,7 +14117,7 @@ async function countActiveCasesByOwner(pool, ownerId) {
   return countActiveCasesWithScope(pool, { ownerId: numeric });
 }
 
-async function countInactiveCasesWithScope(pool, { regionId = null, ownerId = null } = {}) {
+async function countInactiveCasesWithScope(pool, { regionId = null, regionIds = null, ownerId = null } = {}) {
   try {
     const filters = [];
     const params = [];
@@ -14019,10 +14128,17 @@ async function countInactiveCasesWithScope(pool, { regionId = null, ownerId = nu
       params.push(ownerId);
     }
 
-    if (Number.isInteger(regionId) && regionId > 0) {
-      filters.push('sp.region_id = ?');
+    const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
+    if (regionList.length) {
+      if (regionList.length === 1) {
+        filters.push('sp.region_id = ?');
+        params.push(regionList[0]);
+      } else {
+        const placeholders = regionList.map(() => '?').join(',');
+        filters.push(`sp.region_id IN (${placeholders})`);
+        params.push(...regionList);
+      }
       filters.push('c.assigned_to_user_id IS NOT NULL');
-      params.push(regionId);
     }
 
     if (CASE_STATUS_TERMINAL_VALUES_LOWER.length) {
@@ -14096,9 +14212,9 @@ async function countInactiveCasesAll(pool) {
 }
 
 async function countInactiveCasesByRegion(pool, regionId) {
-  const numeric = Number(regionId);
-  if (!Number.isInteger(numeric) || numeric <= 0) return 0;
-  return countInactiveCasesWithScope(pool, { regionId: numeric });
+  const regionList = normalizeRegionIdInput(regionId);
+  if (!regionList.length) return 0;
+  return countInactiveCasesWithScope(pool, { regionIds: regionList });
 }
 
 async function countInactiveCasesByOwner(pool, ownerId) {
@@ -14120,7 +14236,7 @@ const buildReadyFlagSql = () =>
       `JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '${path.replace(/'/g, "\\'")}'))`
   ).join(', ');
 
-async function countReadyToCloseCasesWithScope(pool, { regionId = null, ownerId = null } = {}) {
+async function countReadyToCloseCasesWithScope(pool, { regionId = null, regionIds = null, ownerId = null } = {}) {
   try {
     const statusExpr = 'LOWER(TRIM(COALESCE(c.status, "")))';
     const filters = [`${statusExpr} IN (?, ?)`];
@@ -14131,10 +14247,17 @@ async function countReadyToCloseCasesWithScope(pool, { regionId = null, ownerId 
       params.push(ownerId);
     }
 
-    if (Number.isInteger(regionId) && regionId > 0) {
-      filters.push('sp.region_id = ?');
+    const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
+    if (regionList.length) {
+      if (regionList.length === 1) {
+        filters.push('sp.region_id = ?');
+        params.push(regionList[0]);
+      } else {
+        const placeholders = regionList.map(() => '?').join(',');
+        filters.push(`sp.region_id IN (${placeholders})`);
+        params.push(...regionList);
+      }
       filters.push('c.assigned_to_user_id IS NOT NULL');
-      params.push(regionId);
     }
 
     if (READY_TO_CLOSE_EXCLUDED_STATUSES.length) {
@@ -14166,9 +14289,9 @@ async function countReadyToCloseCasesAll(pool) {
 }
 
 async function countReadyToCloseCasesByRegion(pool, regionId) {
-  const numeric = Number(regionId);
-  if (!Number.isInteger(numeric) || numeric <= 0) return 0;
-  return countReadyToCloseCasesWithScope(pool, { regionId: numeric });
+  const regionList = normalizeRegionIdInput(regionId);
+  if (!regionList.length) return 0;
+  return countReadyToCloseCasesWithScope(pool, { regionIds: regionList });
 }
 
 async function countReadyToCloseCasesByOwner(pool, ownerId) {
@@ -14182,7 +14305,7 @@ function getMondayStartDateExpr() {
   return 'DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)';
 }
 
-async function countNewIntakesWithScope(pool, { regionId = null, ownerId = null } = {}) {
+async function countNewIntakesWithScope(pool, { regionId = null, regionIds = null, ownerId = null } = {}) {
   try {
     const filters = [
       'cl.created_at IS NOT NULL',
@@ -14196,10 +14319,17 @@ async function countNewIntakesWithScope(pool, { regionId = null, ownerId = null 
       params.push(ownerId);
     }
 
-    if (Number.isInteger(regionId) && regionId > 0) {
+    const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
+    if (regionList.length) {
       filters.push('c.assigned_to_user_id IS NOT NULL');
-      filters.push('sp.region_id = ?');
-      params.push(regionId);
+      if (regionList.length === 1) {
+        filters.push('sp.region_id = ?');
+        params.push(regionList[0]);
+      } else {
+        const placeholders = regionList.map(() => '?').join(',');
+        filters.push(`sp.region_id IN (${placeholders})`);
+        params.push(...regionList);
+      }
     }
 
     const sql = `
@@ -14225,9 +14355,9 @@ async function countNewIntakesAll(pool) {
 }
 
 async function countNewIntakesByRegion(pool, regionId) {
-  const numeric = Number(regionId);
-  if (!Number.isInteger(numeric) || numeric <= 0) return 0;
-  return countNewIntakesWithScope(pool, { regionId: numeric });
+  const regionList = normalizeRegionIdInput(regionId);
+  if (!regionList.length) return 0;
+  return countNewIntakesWithScope(pool, { regionIds: regionList });
 }
 
 async function countNewIntakesByOwner(pool, ownerId) {
@@ -14236,7 +14366,7 @@ async function countNewIntakesByOwner(pool, ownerId) {
   return countNewIntakesWithScope(pool, { ownerId: numeric });
 }
 
-async function countFollowUpsDueWithScope(pool, { regionId = null, ownerId = null } = {}) {
+async function countFollowUpsDueWithScope(pool, { regionId = null, regionIds = null, ownerId = null } = {}) {
   const statusExpr = 'LOWER(TRIM(COALESCE(c.status, "")))';
   const filters = [`${statusExpr} NOT IN (${CASE_STATUS_TERMINAL_VALUES_LOWER.map(() => '?').join(',')})`];
   const params = [...CASE_STATUS_TERMINAL_VALUES_LOWER];
@@ -14246,10 +14376,17 @@ async function countFollowUpsDueWithScope(pool, { regionId = null, ownerId = nul
     params.push(ownerId);
   }
 
-  if (Number.isInteger(regionId) && regionId > 0) {
+  const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
+  if (regionList.length) {
     filters.push('c.assigned_to_user_id IS NOT NULL');
-    filters.push('sp.region_id = ?');
-    params.push(regionId);
+    if (regionList.length === 1) {
+      filters.push('sp.region_id = ?');
+      params.push(regionList[0]);
+    } else {
+      const placeholders = regionList.map(() => '?').join(',');
+      filters.push(`sp.region_id IN (${placeholders})`);
+      params.push(...regionList);
+    }
   }
 
   const windowExpr = `DATE_ADD(NOW(), INTERVAL ${FOLLOW_UP_WINDOW_DAYS} DAY)`;
@@ -14296,9 +14433,9 @@ async function countFollowUpsDueAll(pool) {
 }
 
 async function countFollowUpsDueByRegion(pool, regionId) {
-  const numeric = Number(regionId);
-  if (!Number.isInteger(numeric) || numeric <= 0) return 0;
-  return countFollowUpsDueWithScope(pool, { regionId: numeric });
+  const regionList = normalizeRegionIdInput(regionId);
+  if (!regionList.length) return 0;
+  return countFollowUpsDueWithScope(pool, { regionIds: regionList });
 }
 
 async function countFollowUpsDueByOwner(pool, ownerId) {
@@ -14307,7 +14444,7 @@ async function countFollowUpsDueByOwner(pool, ownerId) {
   return countFollowUpsDueWithScope(pool, { ownerId: numeric });
 }
 
-async function countIlmpIssuesWithScope(pool, { regionId = null, ownerId = null } = {}) {
+async function countIlmpIssuesWithScope(pool, { regionId = null, regionIds = null, ownerId = null } = {}) {
   const statusExpr = 'LOWER(TRIM(COALESCE(c.status, "")))';
   const filters = [`${statusExpr} NOT IN (${CASE_STATUS_TERMINAL_VALUES_LOWER.map(() => '?').join(',')})`];
   const params = [...CASE_STATUS_TERMINAL_VALUES_LOWER];
@@ -14317,10 +14454,17 @@ async function countIlmpIssuesWithScope(pool, { regionId = null, ownerId = null 
     params.push(ownerId);
   }
 
-  if (Number.isInteger(regionId) && regionId > 0) {
+  const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
+  if (regionList.length) {
     filters.push('c.assigned_to_user_id IS NOT NULL');
-    filters.push('sp.region_id = ?');
-    params.push(regionId);
+    if (regionList.length === 1) {
+      filters.push('sp.region_id = ?');
+      params.push(regionList[0]);
+    } else {
+      const placeholders = regionList.map(() => '?').join(',');
+      filters.push(`sp.region_id IN (${placeholders})`);
+      params.push(...regionList);
+    }
   }
 
   const sql = `
@@ -14351,9 +14495,9 @@ async function countIlmpIssuesAll(pool) {
 }
 
 async function countIlmpIssuesByRegion(pool, regionId) {
-  const numeric = Number(regionId);
-  if (!Number.isInteger(numeric) || numeric <= 0) return 0;
-  return countIlmpIssuesWithScope(pool, { regionId: numeric });
+  const regionList = normalizeRegionIdInput(regionId);
+  if (!regionList.length) return 0;
+  return countIlmpIssuesWithScope(pool, { regionIds: regionList });
 }
 
 async function countIlmpIssuesByOwner(pool, ownerId) {
@@ -14749,8 +14893,8 @@ async function resolveMetricsScope(req, role) {
   if (role === 'Regional Coordinator') {
     const context = await resolveRegionalCoordinatorContext(req);
     return {
-      valid: Boolean(context?.valid && context?.regionId),
-      scope: { regionId: context?.regionId || null, ownerId: null },
+      valid: Boolean(context?.valid && context?.regionIds && context.regionIds.length),
+      scope: { regionIds: context?.regionIds || [], ownerId: null },
       timeZoneRegionId: context?.regionId || fallbackRegionId
     };
   }
@@ -14901,9 +15045,9 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
 async function countRegionalAssignedToRegion(pool, staffIds, context = {}) {
   const ids = normalizeStaffIdList(staffIds);
   const coordinatorIdRaw = context?.staffProfileId ?? context?.coordinatorId ?? null;
-  const regionIdRaw = context?.regionId ?? null;
+  const regionIdsRaw = context?.regionIds?.length ? context.regionIds : context?.regionId ?? null;
   const coordinatorId = Number(coordinatorIdRaw);
-  const regionId = Number(regionIdRaw);
+  const regionIds = normalizeRegionIdInput(regionIdsRaw);
   const filters = [];
   const params = [];
 
@@ -14912,9 +15056,15 @@ async function countRegionalAssignedToRegion(pool, staffIds, context = {}) {
     params.push(coordinatorId);
   }
 
-  if (Number.isInteger(regionId) && regionId > 0) {
-    filters.push('sp.region_id = ?');
-    params.push(regionId);
+  if (regionIds.length) {
+    if (regionIds.length === 1) {
+      filters.push('sp.region_id = ?');
+      params.push(regionIds[0]);
+    } else {
+      const placeholders = regionIds.map(() => '?').join(',');
+      filters.push(`sp.region_id IN (${placeholders})`);
+      params.push(...regionIds);
+    }
   }
 
   if (!filters.length && ids.length) {
@@ -15718,18 +15868,13 @@ app.post('/api/cases/:id/conflicts/revoke', async (req, res) => {
   }
   try {
     if (role === 'Regional Coordinator') {
-      const regionCandidates = [req?.auth?.regionId, req?.staffProfile?.region_id];
-      let regionId = null;
-      for (const c of regionCandidates) {
-        const n = Number(c);
-        if (Number.isFinite(n)) { regionId = n; break; }
-      }
-      if (!Number.isFinite(regionId)) {
+      const regionIds = resolveRequestRegionIds(req);
+      if (!regionIds.length) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const [[staffRow]] = await pool.query('SELECT region_id FROM staff_profiles WHERE id=? LIMIT 1', [staff_profile_id]);
       const staffRegion = staffRow?.region_id != null ? Number(staffRow.region_id) : null;
-      if (!Number.isFinite(staffRegion) || staffRegion !== regionId) {
+      if (!Number.isFinite(staffRegion) || !regionIds.includes(staffRegion)) {
         return res.status(403).json({ error: 'forbidden' });
       }
     }
@@ -15789,14 +15934,9 @@ app.post('/api/cases/:id/conflicts/resolve', async (req, res) => {
     }
 
     if (role === 'Regional Coordinator') {
-      const regionCandidates = [req?.auth?.regionId, req?.staffProfile?.region_id];
-      let regionId = null;
-      for (const c of regionCandidates) {
-        const n = Number(c);
-        if (Number.isFinite(n)) { regionId = n; break; }
-      }
       const staffRegion = conflictRow?.staff_region_id != null ? Number(conflictRow.staff_region_id) : null;
-      if (!Number.isFinite(regionId) || !Number.isFinite(staffRegion) || staffRegion !== regionId) {
+      const regionIds = resolveRequestRegionIds(req);
+      if (!regionIds.length || !Number.isFinite(staffRegion) || !regionIds.includes(staffRegion)) {
         return res.status(403).json({ error: 'forbidden' });
       }
     }
@@ -20271,14 +20411,14 @@ app.get('/api/dashboard/case-work-queue', async (req, res) => {
 
     if (role === 'Regional Coordinator') {
       const context = await resolveRegionalCoordinatorContext(req);
-      const [newIntakesCount, followUpsDueCount, ilmpIssuesCount, activeCount, inactiveCount, readyToCloseCount] = context?.valid && context.regionId
+      const [newIntakesCount, followUpsDueCount, ilmpIssuesCount, activeCount, inactiveCount, readyToCloseCount] = context?.valid && context.regionIds && context.regionIds.length
         ? await Promise.all([
-            countNewIntakesByRegion(pool, context.regionId),
-            countFollowUpsDueByRegion(pool, context.regionId),
-            countIlmpIssuesByRegion(pool, context.regionId),
-            countActiveCasesByRegion(pool, context.regionId),
-            countInactiveCasesByRegion(pool, context.regionId),
-            countReadyToCloseCasesByRegion(pool, context.regionId)
+            countNewIntakesByRegion(pool, context.regionIds),
+            countFollowUpsDueByRegion(pool, context.regionIds),
+            countIlmpIssuesByRegion(pool, context.regionIds),
+            countActiveCasesByRegion(pool, context.regionIds),
+            countInactiveCasesByRegion(pool, context.regionIds),
+            countReadyToCloseCasesByRegion(pool, context.regionIds)
           ])
         : [0, 0, 0, 0, 0, 0];
 
@@ -20483,8 +20623,8 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
 
       const context = await resolveRegionalCoordinatorContext(req);
       if (context?.valid) {
-        const { staffIds, staffProfileId, regionId } = context;
-        const contextParams = { staffProfileId, regionId };
+        const { staffIds, staffProfileId, regionIds } = context;
+        const contextParams = { staffProfileId, regionIds };
         [
           regionQueueCount,
           needsReassignmentCount,
@@ -20638,23 +20778,22 @@ app.get('/api/dashboard/conflict-declarations', async (req, res) => {
   if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
     return res.json({ role, declarations: [] });
   }
-  const regionCandidates = [
-    req?.auth?.regionId,
-    req?.staffProfile?.region_id
-  ];
-  let regionId = null;
-  for (const candidate of regionCandidates) {
-    const n = Number(candidate);
-    if (Number.isFinite(n)) { regionId = n; break; }
-  }
+  const regionIds = resolveRequestRegionIds(req);
+  const regionId = regionIds.length ? regionIds[0] : null;
   const params = ['conflict'];
   const filters = ['cd.declaration_choice = ?', 'cd.revoked_at IS NULL'];
   if (role === 'Regional Coordinator') {
-    if (!Number.isFinite(regionId)) {
+    if (!regionIds.length) {
       return res.json({ role, declarations: [] });
     }
-    filters.push('sp.region_id = ?');
-    params.push(regionId);
+    if (regionIds.length === 1) {
+      filters.push('sp.region_id = ?');
+      params.push(regionIds[0]);
+    } else {
+      const placeholders = regionIds.map(() => '?').join(',');
+      filters.push(`sp.region_id IN (${placeholders})`);
+      params.push(...regionIds);
+    }
   }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const sql = `
@@ -20708,10 +20847,10 @@ app.get('/api/dashboard/conflict-declarations', async (req, res) => {
         signedAt: r.signed_at ? new Date(r.signed_at).toISOString() : null
       };
     }) : [];
-    return res.json({ role, regionId: regionId ?? null, declarations });
+    return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, declarations });
   } catch (err) {
     if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
-      return res.json({ role, regionId: regionId ?? null, declarations: [] });
+      return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, declarations: [] });
     }
     console.error('[conflict-declarations] fetch failed:', err.message);
     return res.status(500).json({ error: 'conflict_declarations_fetch_failed', message: err.message });
@@ -20724,23 +20863,22 @@ app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
   if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
     return res.json({ role, items: [] });
   }
-  const regionCandidates = [
-    req?.auth?.regionId,
-    req?.staffProfile?.region_id
-  ];
-  let regionId = null;
-  for (const candidate of regionCandidates) {
-    const n = Number(candidate);
-    if (Number.isFinite(n)) { regionId = n; break; }
-  }
+  const regionIds = resolveRequestRegionIds(req);
+  const regionId = regionIds.length ? regionIds[0] : null;
   const filters = ['(ca.esdc_eligibility IS NULL OR ca.esdc_eligibility = \'\')'];
   const params = [];
   if (role === 'Regional Coordinator') {
-    if (!Number.isFinite(regionId)) {
+    if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
-    filters.push('sp.region_id = ?');
-    params.push(regionId);
+    if (regionIds.length === 1) {
+      filters.push('sp.region_id = ?');
+      params.push(regionIds[0]);
+    } else {
+      const placeholders = regionIds.map(() => '?').join(',');
+      filters.push(`sp.region_id IN (${placeholders})`);
+      params.push(...regionIds);
+    }
   }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const sql = `
@@ -20799,10 +20937,10 @@ app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
       };
     }) : [];
     res.set('Cache-Control', 'no-store, max-age=0');
-    return res.json({ role, regionId: regionId ?? null, items });
+    return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items });
   } catch (err) {
     if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
-      return res.json({ role, regionId: regionId ?? null, items: [] });
+      return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items: [] });
     }
     console.error('[ei-eligibility-items] fetch failed:', err.message);
     return res.status(500).json({ error: 'ei_eligibility_items_fetch_failed', message: err.message });
@@ -20815,24 +20953,23 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
   if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
     return res.json({ role, items: [] });
   }
-  const regionCandidates = [
-    req?.auth?.regionId,
-    req?.staffProfile?.region_id
-  ];
-  let regionId = null;
-  for (const candidate of regionCandidates) {
-    const n = Number(candidate);
-    if (Number.isFinite(n)) { regionId = n; break; }
-  }
+  const regionIds = resolveRequestRegionIds(req);
+  const regionId = regionIds.length ? regionIds[0] : null;
   const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
   const filters = [`${statusExpr} = ?`];
   const params = ['pending_approval'];
   if (role === 'Regional Coordinator') {
-    if (!Number.isFinite(regionId)) {
+    if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
-    filters.push('sp.region_id = ?');
-    params.push(regionId);
+    if (regionIds.length === 1) {
+      filters.push('sp.region_id = ?');
+      params.push(regionIds[0]);
+    } else {
+      const placeholders = regionIds.map(() => '?').join(',');
+      filters.push(`sp.region_id IN (${placeholders})`);
+      params.push(...regionIds);
+    }
   }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const sql = `
@@ -20900,10 +21037,10 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
         assessment_esdc_eligibility: r.assessment_esdc_eligibility || null
       };
     }) : [];
-    return res.json({ role, regionId: regionId ?? null, items });
+    return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items });
   } catch (err) {
     if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
-      return res.json({ role, regionId: regionId ?? null, items: [] });
+      return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items: [] });
     }
     console.error('[awaiting-approval-items] fetch failed:', err.message);
     return res.status(500).json({ error: 'awaiting_approval_items_fetch_failed', message: err.message });
@@ -20916,24 +21053,23 @@ app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
   if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
     return res.json({ role, items: [] });
   }
-  const regionCandidates = [
-    req?.auth?.regionId,
-    req?.staffProfile?.region_id
-  ];
-  let regionId = null;
-  for (const candidate of regionCandidates) {
-    const n = Number(candidate);
-    if (Number.isFinite(n)) { regionId = n; break; }
-  }
+  const regionIds = resolveRequestRegionIds(req);
+  const regionId = regionIds.length ? regionIds[0] : null;
 
   const filters = [];
   const params = [];
   if (role === 'Regional Coordinator') {
-    if (!Number.isFinite(regionId)) {
+    if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
-    filters.push('sp.region_id = ?');
-    params.push(regionId);
+    if (regionIds.length === 1) {
+      filters.push('sp.region_id = ?');
+      params.push(regionIds[0]);
+    } else {
+      const placeholders = regionIds.map(() => '?').join(',');
+      filters.push(`sp.region_id IN (${placeholders})`);
+      params.push(...regionIds);
+    }
   }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
@@ -21026,10 +21162,10 @@ app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
         watchlist_created_at: r.watchlist_created_at ? new Date(r.watchlist_created_at).toISOString() : null
       };
     }) : [];
-    return res.json({ role, regionId: regionId ?? null, items });
+    return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items });
   } catch (err) {
     if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
-      return res.json({ role, regionId: regionId ?? null, items: [] });
+      return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items: [] });
     }
     console.error('[watchlist-hit-items] fetch failed:', err.message);
     return res.status(500).json({ error: 'watchlist_hit_items_fetch_failed', message: err.message });
@@ -21042,24 +21178,23 @@ app.get('/api/dashboard/marked-for-closure-items', async (req, res) => {
   if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
     return res.json({ role, items: [] });
   }
-  const regionCandidates = [
-    req?.auth?.regionId,
-    req?.staffProfile?.region_id
-  ];
-  let regionId = null;
-  for (const candidate of regionCandidates) {
-    const n = Number(candidate);
-    if (Number.isFinite(n)) { regionId = n; break; }
-  }
+  const regionIds = resolveRequestRegionIds(req);
+  const regionId = regionIds.length ? regionIds[0] : null;
   const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
   const filters = [`${statusExpr} = ?`];
   const params = ['closure_notice'];
   if (role === 'Regional Coordinator') {
-    if (!Number.isFinite(regionId)) {
+    if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
-    filters.push('sp.region_id = ?');
-    params.push(regionId);
+    if (regionIds.length === 1) {
+      filters.push('sp.region_id = ?');
+      params.push(regionIds[0]);
+    } else {
+      const placeholders = regionIds.map(() => '?').join(',');
+      filters.push(`sp.region_id IN (${placeholders})`);
+      params.push(...regionIds);
+    }
   }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const sql = `
@@ -21112,10 +21247,10 @@ app.get('/api/dashboard/marked-for-closure-items', async (req, res) => {
         assigned_user_region_id: r.assigned_user_region_id || null
       };
     }) : [];
-    return res.json({ role, regionId: regionId ?? null, items });
+    return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items });
   } catch (err) {
     if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
-      return res.json({ role, regionId: regionId ?? null, items: [] });
+      return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items: [] });
     }
     console.error('[marked-for-closure-items] fetch failed:', err.message);
     return res.status(500).json({ error: 'marked_for_closure_items_fetch_failed', message: err.message });
@@ -21128,24 +21263,23 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
   if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
     return res.json({ role, items: [] });
   }
-  const regionCandidates = [
-    req?.auth?.regionId,
-    req?.staffProfile?.region_id
-  ];
-  let regionId = null;
-  for (const candidate of regionCandidates) {
-    const n = Number(candidate);
-    if (Number.isFinite(n)) { regionId = n; break; }
-  }
+  const regionIds = resolveRequestRegionIds(req);
+  const regionId = regionIds.length ? regionIds[0] : null;
   const statusExpr = `REPLACE(LOWER(TRIM(ci.status)), ' ', '_')`;
   const filters = [`${statusExpr} IN (?, ?)`];
   const params = ['submitted', 'in_review'];
   if (role === 'Regional Coordinator') {
-    if (!Number.isFinite(regionId)) {
+    if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
-    filters.push('sp.region_id = ?');
-    params.push(regionId);
+    if (regionIds.length === 1) {
+      filters.push('sp.region_id = ?');
+      params.push(regionIds[0]);
+    } else {
+      const placeholders = regionIds.map(() => '?').join(',');
+      filters.push(`sp.region_id IN (${placeholders})`);
+      params.push(...regionIds);
+    }
   }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const sql = `
@@ -21212,10 +21346,10 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
         intervention_start_date: r.intervention_start_date || null
       };
     }) : [];
-    return res.json({ role, regionId: regionId ?? null, items });
+    return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items });
   } catch (err) {
     if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
-      return res.json({ role, regionId: regionId ?? null, items: [] });
+      return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items: [] });
     }
     console.error('[intervention-approval-items] fetch failed:', err.message);
     return res.status(500).json({ error: 'intervention_approval_items_fetch_failed', message: err.message });
@@ -21883,9 +22017,11 @@ app.post('/api/escalations/:id/respond', async (req, res) => {
       );
       targetEmail = targets && targets[0] ? targets[0].email || null : null;
     } else if (nextOwnerRoleKey === 'regional_manager') {
-      const requesterRegionId = req?.staffProfile?.region_id || null;
-      const regionParam = requesterRegionId ? [requesterRegionId] : [];
-      const regionClause = requesterRegionId ? 'AND region_id = ?' : '';
+      const requesterRegionIds = resolveRequestRegionIds(req);
+      const regionParam = requesterRegionIds.length ? requesterRegionIds : [];
+      const regionClause = requesterRegionIds.length
+        ? `AND region_id IN (${requesterRegionIds.map(() => '?').join(',')})`
+        : '';
       const [targets] = await conn.query(
         `SELECT email FROM staff_profiles WHERE primary_role = 'Regional Coordinator' ${regionClause} AND status = 'active' ORDER BY id ASC LIMIT 1`,
         regionParam
@@ -21961,15 +22097,10 @@ app.get('/api/escalations', async (req, res) => {
     }
 
     const headerRegionIdRaw = req.get('X-Dev-RegionId') || req.get('x-dev-regionid') || null;
-    const regionIdRaw =
-      headerRegionIdRaw ??
-      req.staffProfile?.region_id ??
-      req.auth?.regionId ??
-      req.auth?.claims?.region_id ??
-      req.auth?.claims?.['custom:region_id'] ??
-      null;
-    const parsedRegionId = Number(regionIdRaw);
-    const regionId = Number.isInteger(parsedRegionId) && parsedRegionId > 0 ? parsedRegionId : null;
+    const regionIds = headerRegionIdRaw != null
+      ? normalizeRegionIdInput(headerRegionIdRaw)
+      : resolveRequestRegionIds(req);
+    const regionId = regionIds.length ? regionIds[0] : null;
 
     const ownerRoleFilter = canonicalEscalationRole(firstQueryValue(req.query.ownerRole || req.query.owner_role)) || null;
     const requesterRoleFilter = canonicalEscalationRole(firstQueryValue(req.query.requesterRole || req.query.requester_role)) || null;
@@ -22004,9 +22135,10 @@ app.get('/api/escalations', async (req, res) => {
 
     const shouldScopeToRegion = !isSysAdmin && roleKey === 'regional_manager';
     if (shouldScopeToRegion) {
-      if (regionId !== null) {
-        where.push('(sp.region_id = ? OR c.portfolio_region_id = ?)');
-        params.push(regionId, regionId);
+      if (regionIds.length) {
+        const placeholders = regionIds.map(() => '?').join(',');
+        where.push(`(sp.region_id IN (${placeholders}) OR c.portfolio_region_id IN (${placeholders}))`);
+        params.push(...regionIds, ...regionIds);
       } else {
         return res.json({ count: 0, items: [] });
       }
@@ -26668,49 +26800,6 @@ app.delete('/api/steps/:id', async (req, res) => {
 
 
 /**
- * GET /api/intake-officers
- *
- * Returns all evaluators (both roles) with their PTMA assignments (if any).
- * - Only active evaluators are included.
- * - If an evaluator has multiple PTMAs, they appear once per PTMA.
- * - If an evaluator has no PTMA, ptma fields are null and label is 'Not assigned to a PTMA'.
- */
-app.get('/api/intake-officers', async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
-      SELECT 
-        e.id AS evaluator_id,
-        e.name AS evaluator_name,
-        e.email AS evaluator_email,
-        e.role AS evaluator_role,
-        p.id AS ptma_id,
-        p.name AS ptma_name,
-        p.iset_code AS ptma_code,
-        p.iset_full_name AS ptma_full_name,
-        p.iset_status AS ptma_status,
-        p.iset_province AS ptma_province,
-        p.iset_indigenous_group AS ptma_indigenous_group,
-        IFNULL(p.name, 'Not assigned to a PTMA') AS ptma_label
-      FROM iset_evaluators e
-      LEFT JOIN iset_evaluator_ptma ep ON e.id = ep.evaluator_id AND (ep.unassigned_at IS NULL OR ep.unassigned_at > CURDATE())
-      LEFT JOIN ptma p ON ep.ptma_id = p.id
-      WHERE e.status = 'active'
-      ORDER BY e.name, p.name
-    `);
-    res.status(200).json(rows);
-  } catch (error) {
-    // Graceful fallback if table(s) not present in current environment (dev migrations not applied yet)
-    if (error && (error.code === 'ER_NO_SUCH_TABLE' || /no such table/i.test(error.message))) {
-      console.warn('[intake-officers] evaluator tables missing; returning empty list fallback');
-      return res.status(200).json([]);
-    }
-    console.error('Error fetching intake officers:', error);
-    res.status(500).json({ error: 'Failed to fetch intake officers' });
-  }
-});
-
-
-/**
  * POST /api/cases
  *
  * In new minimal schema:
@@ -29016,9 +29105,7 @@ app.get('/api/cases', async (req, res) => {
     const requesterId = Number.parseInt(
       req?.staffProfile?.id ?? req?.auth?.userId ?? req?.auth?.sub ?? '', 10
     );
-    const requesterRegionId = Number.parseInt(
-      req?.staffProfile?.region_id ?? req?.auth?.regionId ?? '', 10
-    );
+    const requesterRegionIds = resolveRequestRegionIds(req);
 
     const allowAll =
       role === 'System Administrator' ||
@@ -29028,11 +29115,17 @@ app.get('/api/cases', async (req, res) => {
 
     if (!allowAll) {
       if (role === 'Regional Coordinator') {
-        if (!Number.isFinite(requesterRegionId)) {
+        if (!requesterRegionIds.length) {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
         }
-        whereClauses.push('(sp.region_id = ? OR c.assigned_to_user_id IS NULL)');
-        params.push(requesterRegionId);
+        if (requesterRegionIds.length === 1) {
+          whereClauses.push('(sp.region_id = ? OR c.assigned_to_user_id IS NULL)');
+          params.push(requesterRegionIds[0]);
+        } else {
+          const placeholders = requesterRegionIds.map(() => '?').join(',');
+          whereClauses.push(`(sp.region_id IN (${placeholders}) OR c.assigned_to_user_id IS NULL)`);
+          params.push(...requesterRegionIds);
+        }
       } else if (role === 'Application Assessor' || role === 'Adjudicator') {
         if (!Number.isFinite(requesterId)) {
           return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
@@ -29517,7 +29610,7 @@ app.post('/api/cases/:case_id/application/versions', async (req, res) => {
         current.submission_id,
         nextVersion,
         JSON.stringify(payload),
-        null, // TODO: link evaluator (need auth mapping)
+        null, // TODO: link staff user (legacy column name)
         changeSummary || null,
         sourceType,
         current.id,
@@ -29666,15 +29759,15 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
 
     if (!allowAll) {
       if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
-        const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : null;
-        if (!Number.isFinite(regionId)) {
+        const regionIds = resolveRequestRegionIds(req);
+        if (!regionIds.length) {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
         }
         const isUnassigned = typeof row.assigned_to_user_id === 'undefined' || row.assigned_to_user_id === null;
         const portfolioRegionMatch =
-          Number.isFinite(row.portfolio_region_id) && Number(row.portfolio_region_id) === regionId;
+          Number.isFinite(row.portfolio_region_id) && regionIds.includes(Number(row.portfolio_region_id));
         const ownerRegionMatch =
-          Number.isFinite(row.owner_region_id) && Number(row.owner_region_id) === regionId;
+          Number.isFinite(row.owner_region_id) && regionIds.includes(Number(row.owner_region_id));
         if (!isUnassigned && !portfolioRegionMatch && !ownerRegionMatch) {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
         }
@@ -30578,15 +30671,15 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
 
     if (!allowAll) {
       if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
-        const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : null;
-        if (!Number.isFinite(regionId)) {
+        const regionIds = resolveRequestRegionIds(req);
+        if (!regionIds.length) {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
         }
         const isUnassigned = caseRow.assigned_to_user_id === null || typeof caseRow.assigned_to_user_id === 'undefined';
         const portfolioMatch =
-          Number.isFinite(caseRow.portfolio_region_id) && Number(caseRow.portfolio_region_id) === regionId;
+          Number.isFinite(caseRow.portfolio_region_id) && regionIds.includes(Number(caseRow.portfolio_region_id));
         const ownerMatch =
-          Number.isFinite(caseRow.owner_region_id) && Number(caseRow.owner_region_id) === regionId;
+          Number.isFinite(caseRow.owner_region_id) && regionIds.includes(Number(caseRow.owner_region_id));
         if (!isUnassigned && !portfolioMatch && !ownerMatch) {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
         }
@@ -31027,15 +31120,15 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
 
   if (!allowAll) {
     if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
-      const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : null;
-      if (!Number.isFinite(regionId)) {
+      const regionIds = resolveRequestRegionIds(req);
+      if (!regionIds.length) {
         return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
       }
       const isUnassigned = caseRow.assigned_to_user_id === null || typeof caseRow.assigned_to_user_id === 'undefined';
       const portfolioMatch =
-        Number.isFinite(caseRow.portfolio_region_id) && Number(caseRow.portfolio_region_id) === regionId;
+        Number.isFinite(caseRow.portfolio_region_id) && regionIds.includes(Number(caseRow.portfolio_region_id));
       const ownerMatch =
-        Number.isFinite(caseRow.owner_region_id) && Number(caseRow.owner_region_id) === regionId;
+        Number.isFinite(caseRow.owner_region_id) && regionIds.includes(Number(caseRow.owner_region_id));
       if (!isUnassigned && !portfolioMatch && !ownerMatch) {
         return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
       }
@@ -32105,9 +32198,21 @@ app.patch('/api/interventions/:id', async (req, res) => {
         role === 'ProgramAdmin';
       if (!allowAll) {
         if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
-          const regionId = Number.isFinite(identity.regionId) ? Number(identity.regionId) : null;
-          if (!Number.isFinite(regionId) || Number(caseRow.assigned_to_user_id) !== regionId) {
-            return res.status(403).json({ error: 'forbidden' });
+          const regionIds = resolveRequestRegionIds(req);
+          if (!regionIds.length) {
+            return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
+          }
+          const isUnassigned =
+            interventionRow.assigned_to_user_id === null ||
+            typeof interventionRow.assigned_to_user_id === 'undefined';
+          const portfolioMatch =
+            Number.isFinite(interventionRow.portfolio_region_id) &&
+            regionIds.includes(Number(interventionRow.portfolio_region_id));
+          const ownerMatch =
+            Number.isFinite(interventionRow.owner_region_id) &&
+            regionIds.includes(Number(interventionRow.owner_region_id));
+          if (!isUnassigned && !portfolioMatch && !ownerMatch) {
+            return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
           }
         } else if (role === 'Application Assessor' || role === 'Adjudicator') {
           const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
@@ -48355,31 +48460,6 @@ app.delete('/api/ptmas/:id', async (req, res) => {
   }
 });
 
-// Get evaluators for a PTMA
-app.get('/api/ptmas/:ptmaId/evaluators', async (req, res) => {
-  const { ptmaId } = req.params;
-  try {
-    const [evaluators] = await pool.query(`
-      SELECT 
-        e.id, 
-        e.name, 
-        e.email, 
-        e.role,
-        ep.assigned_at,
-        ep.unassigned_at
-      FROM iset_evaluators e
-      JOIN iset_evaluator_ptma ep 
-        ON e.id = ep.evaluator_id
-      WHERE ep.ptma_id = ?
-        AND (ep.unassigned_at IS NULL OR ep.unassigned_at > CURDATE())
-      ORDER BY e.name
-    `, [ptmaId]);
-    res.status(200).json(evaluators);
-  } catch (error) {
-    console.error('Error fetching evaluators for PTMA:', error);
-    res.status(500).json({ error: 'Failed to fetch evaluators' });
-  }
-});
 // --- End PTMA Endpoints ---
 
 // Get full iset_application by application_id
@@ -48487,23 +48567,13 @@ app.get('/api/applications/:id', async (req, res) => {
     } catch (_) {}
     const [[caseRow]] = await pool.query(caseSql, caseParams);
 
-    let evaluator = null;
     let ptma = null;
-    if (caseRow) {
-      // Get evaluator info
-      const [[evalRow]] = await pool.query(
-        'SELECT id, name, email, role, status FROM iset_evaluators WHERE id = ?',
-        [caseRow.assigned_to_user_id]
+    if (caseRow && caseRow.ptma_id) {
+      const [[ptmaRow]] = await pool.query(
+        'SELECT id, name, iset_code FROM ptma WHERE id = ?',
+        [caseRow.ptma_id]
       );
-      evaluator = evalRow || null;
-      // Get PTMA info directly from iset_case.ptma_id
-      if (caseRow.ptma_id) {
-        const [[ptmaRow]] = await pool.query(
-          'SELECT id, name, iset_code FROM ptma WHERE id = ?',
-          [caseRow.ptma_id]
-        );
-        ptma = ptmaRow || null;
-      }
+      ptma = ptmaRow || null;
     }
 
     if (application.row_version !== undefined && application.row_version !== null) {
@@ -48531,53 +48601,10 @@ app.get('/api/applications/:id', async (req, res) => {
       application.lock_owner_email = null;
       application.lock_expires_at = null;
     }
-    res.status(200).json({ ...application, assigned_evaluator: evaluator, ptma, case: caseRow || null });
+    res.status(200).json({ ...application, ptma, case: caseRow || null });
   } catch (error) {
     console.error('Error fetching application:', error);
     res.status(500).json({ error: 'Failed to fetch application' });
-  }
-});
-
-/**
- * GET /api/applications/:id/ptma
- *
- * Returns the PTMA(s) for the assigned evaluator of the given application, or null if not assigned.
- */
-app.get('/api/applications/:id/ptma', async (req, res) => {
-  const applicationId = req.params.id;
-  try {
-    const visibility = await enforceApplicationVisibility(req, applicationId);
-    if (!visibility.ok) {
-      return res.status(404).json({ error: 'Application not found' });
-    }
-    // Get assigned evaluator for this application (via iset_case)
-    let s = 'SELECT assigned_to_user_id FROM iset_case c WHERE application_id = ?';
-    const sParams = [applicationId];
-    try {
-      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-      if (authProvider === 'cognito') {
-        const { scopeCases } = require('./src/lib/dbScope');
-        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
-        s += ` AND ${scopeSql}`;
-        sParams.push(...scopeParams);
-      }
-    } catch (_) {}
-    const [[caseRow]] = await pool.query(s, sParams);
-    if (!caseRow) {
-      return res.status(200).json({ ptmas: [] });
-    }
-    // Get all current PTMA assignments for this evaluator
-    const [ptmaRows] = await pool.query(
-      `SELECT p.id, p.name, p.iset_code, p.iset_full_name, p.iset_status, p.iset_province, p.iset_indigenous_group
-       FROM iset_evaluator_ptma ep
-       JOIN ptma p ON ep.ptma_id = p.id
-       WHERE ep.evaluator_id = ? AND (ep.unassigned_at IS NULL OR ep.unassigned_at > CURDATE())`,
-      [caseRow.assigned_to_user_id]
-    );
-    res.status(200).json({ ptmas: ptmaRows });
-  } catch (error) {
-    console.error('Error fetching ptma for application:', error);
-    res.status(500).json({ error: 'Failed to fetch ptma for application' });
   }
 });
 
@@ -49400,7 +49427,7 @@ app.get('/api/cases/:case_id/events', async (req, res) => {
 // GET /api/applications?status=Open,In%20Review&limit=50&offset=0
 // Role scoping rules (no client override):
 //   Program Administrator -> all cases
-//   Regional Coordinator  -> cases in their region/team (derivation TBD: using evaluator_ptma join as proxy)
+//   Regional Coordinator  -> cases in their region(s)
 //   Application Assessor  -> only cases assigned to them
 // If a submission exists with no case yet:
 //   - Visible only to Program Administrators (future) ??? currently excluded for simplicity
@@ -49410,8 +49437,7 @@ app.get('/api/applications', async (req, res) => {
     if (!req.auth || req.auth.subjectType !== 'staff') return res.status(403).json({ error: 'forbidden' });
     const { status, limit = 50, offset = 0, search } = req.query;
     const role = req.auth.role;
-    const regionId = req.auth.regionId || req.staffProfile?.region_id || null;
-    const normalizedRegionId = Number.isInteger(Number(regionId)) && Number(regionId) > 0 ? Number(regionId) : null;
+    const regionIds = role === 'Regional Coordinator' ? resolveRequestRegionIds(req) : [];
     const archivedFilter = buildArchivedApplicationFilter(req, 'a');
     const addressProvinceExpr = `COALESCE(
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."address-province"')),
@@ -49479,14 +49505,10 @@ app.get('/api/applications', async (req, res) => {
       where.push(archivedFilter);
     }
 
-    let regionCode = null;
-    if (role === 'Regional Coordinator' && normalizedRegionId) {
+    let regionCodes = [];
+    if (role === 'Regional Coordinator' && regionIds.length) {
       try {
-        const [[row]] = await pool.query(
-          'SELECT code FROM canada_region WHERE region_id = ? LIMIT 1',
-          [normalizedRegionId]
-        );
-        regionCode = typeof row?.code === 'string' ? row.code.trim().toLowerCase() : null;
+        regionCodes = await fetchRegionCodesByIds(regionIds);
       } catch (err) {
         if (!isMissingTableErrorLocal(err)) {
           throw err;
@@ -49498,15 +49520,17 @@ app.get('/api/applications', async (req, res) => {
       if (!req.staffProfile?.id) return res.json({ count: 0, rows: [] });
       where.push('c.assigned_to_user_id = ?'); params.push(req.staffProfile.id);
     } else if (role === 'Regional Coordinator') {
-      // For now: filter by shared region (when regionId present) OR assignments directly to coordinator
-      if (normalizedRegionId) {
+      // Filter by regions (multi) OR assignments directly to coordinator
+      if (regionIds.length) {
         const coordinatorId = req.staffProfile?.id || 0;
-        if (regionCode) {
-          where.push(`(sp.region_id = ? OR c.assigned_to_user_id = ? OR ((c.assigned_to_user_id IS NULL OR c.assigned_to_user_id = 0) AND LOWER(${addressProvinceExpr}) = ?))`);
-          params.push(normalizedRegionId, coordinatorId, regionCode);
+        const regionPlaceholders = regionIds.map(() => '?').join(',');
+        if (regionCodes.length) {
+          const codePlaceholders = regionCodes.map(() => '?').join(',');
+          where.push(`(sp.region_id IN (${regionPlaceholders}) OR c.assigned_to_user_id = ? OR ((c.assigned_to_user_id IS NULL OR c.assigned_to_user_id = 0) AND LOWER(${addressProvinceExpr}) IN (${codePlaceholders})))`);
+          params.push(...regionIds, coordinatorId, ...regionCodes);
         } else {
-          where.push('(sp.region_id = ? OR c.assigned_to_user_id = ?)');
-          params.push(normalizedRegionId, coordinatorId);
+          where.push(`(sp.region_id IN (${regionPlaceholders}) OR c.assigned_to_user_id = ?)`);
+          params.push(...regionIds, coordinatorId);
         }
       } else if (req.staffProfile?.id) {
         where.push('c.assigned_to_user_id = ?'); params.push(req.staffProfile.id);
@@ -51575,7 +51599,6 @@ app.put('/api/cases/:id', async (req, res) => {
         type: 'assessment_submitted',
         caseId,
         payload: {
-          evaluator_name: coordinatorName || null,
           tracking_id: trackingId,
           message: coordinatorName
             ? 'Assessment submitted by coordinator: ' + coordinatorName + '.'
@@ -51693,7 +51716,6 @@ app.put('/api/cases/:id', async (req, res) => {
         type: 'nwac_review_submitted',
         caseId,
         payload: {
-          evaluator_name: actorName || null,
           tracking_id: trackingId,
           outcome,
           outcome_label: outcomeLabel,

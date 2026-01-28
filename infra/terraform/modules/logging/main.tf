@@ -6,6 +6,7 @@ locals {
   bucket_suffix          = substr(md5(data.aws_caller_identity.current.account_id), 0, 6)
   log_bucket_name        = "${var.name_prefix}-logs-${local.bucket_suffix}"
   access_log_bucket_name = "${var.name_prefix}-logs-access-${local.bucket_suffix}"
+  log_group_prefix       = "/${replace(var.name_prefix, "-", "/")}"
 }
 
 data "aws_caller_identity" "current" {}
@@ -174,7 +175,7 @@ resource "aws_s3_bucket_policy" "log" {
 }
 
 resource "aws_cloudwatch_log_group" "cloudtrail" {
-  name              = "/nwac/test/cloudtrail/${var.name_prefix}"
+  name              = "${local.log_group_prefix}/cloudtrail/${var.name_prefix}"
   kms_key_id        = var.kms_key_arn
   retention_in_days = var.log_retention_days
 

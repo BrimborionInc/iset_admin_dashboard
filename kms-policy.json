@@ -1,0 +1,26 @@
+{
+  "Version" : "2012-10-17",
+  "Statement" : [ {
+    "Sid" : "EnableRootAccount",
+    "Effect" : "Allow",
+    "Principal" : {
+      "AWS" : "arn:aws:iam::468278742295:root"
+    },
+    "Action" : "kms:*",
+    "Resource" : "*"
+  }, {
+    "Sid" : "AllowProdAppRoleS3Uploads",
+    "Effect" : "Allow",
+    "Principal" : {
+      "AWS" : "arn:aws:iam::468278742295:role/nwac-prod-app-role"
+    },
+    "Action" : [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*",
+      "kms:DescribeKey"
+    ],
+    "Resource" : "*"
+  } ]
+}

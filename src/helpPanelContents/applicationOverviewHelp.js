@@ -19,7 +19,7 @@ const ApplicationOverviewHelp = () => (
         quick confirmation with the applicant.
       </li>
       <li>
-        <strong>Confirm ownership:</strong> See the assigned evaluator and PTMA, along with any active locks.
+        <strong>Confirm ownership:</strong> See the assigned staff member and any active locks.
         Use quick actions to assign or reassign when permitted.
       </li>
       <li>

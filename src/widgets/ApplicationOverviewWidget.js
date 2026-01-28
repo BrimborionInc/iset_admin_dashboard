@@ -344,6 +344,7 @@ const ApplicationOverviewWidget = ({
     displayName: currentUserName,
     role: currentUserRole,
     regionId: currentUserRegionId,
+    regionIds: currentUserRegionIds,
   } = useCurrentUser();
   const userRole = currentUserRole || '';
   const canonicalRole = toCanonicalRole(userRole || '');
@@ -930,8 +931,10 @@ const ApplicationOverviewWidget = ({
         }
         if (isRegionalManagerRole) {
           const staffRegion = Number(staff?.region_id ?? staff?.regionId ?? null);
-          const userRegion = Number(currentUserRegionId ?? null);
-          return Number.isFinite(staffRegion) && Number.isFinite(userRegion) && staffRegion === userRegion;
+          const userRegions = Array.isArray(currentUserRegionIds) && currentUserRegionIds.length
+            ? currentUserRegionIds.map(Number).filter(Number.isFinite)
+            : (Number.isFinite(Number(currentUserRegionId)) ? [Number(currentUserRegionId)] : []);
+          return Number.isFinite(staffRegion) && userRegions.length && userRegions.includes(staffRegion);
         }
         return false;
       });
@@ -961,6 +964,7 @@ const ApplicationOverviewWidget = ({
     caseData?.assignedUserId,
     caseData?.owner?.id,
     currentUserRegionId,
+    currentUserRegionIds,
     isProgramAdminRole,
     isRegionalManagerRole,
     isSystemAdminRole,
@@ -1761,9 +1765,7 @@ const ApplicationOverviewWidget = ({
       caseData?.assigned_user_id ||
       caseData?.assigned_to_user_id ||
       application?.assigned_user_id ||
-      application?.assigned_to_user_id ||
-      application?.assigned_evaluator ||
-      application?.assigned_evaluator_id
+      application?.assigned_to_user_id
     );
     const statusInfo = getStatusInfo({ application_status: fallbackStatus, case_status: null, case_id: null, assigned_user_id: assigned });
     const slaMeta = computeSlaMeta(application, slaTargets, statusInfo.rawStatus, assigned);
@@ -1793,15 +1795,11 @@ const ApplicationOverviewWidget = ({
     overviewItems.push({ label: 'Document Checklist', value: checklistValue });
   }
 
-  const assignedName = caseData?.assigned_user_name || application?.assigned_evaluator?.name;
-  const assignedEmail = caseData?.assigned_user_email || application?.assigned_evaluator?.email;
+  const assignedName = caseData?.assigned_user_name;
+  const assignedEmail = caseData?.assigned_user_email;
   if (assignedName || assignedEmail) {
     const display = assignedName && assignedEmail ? `${assignedName} (${assignedEmail})` : (assignedName || assignedEmail);
-    overviewItems.push({ label: 'Assigned Evaluator', value: display });
-  }
-
-  if (caseData?.assigned_user_ptma_name) {
-    overviewItems.push({ label: 'Assigned PTMA', value: caseData.assigned_user_ptma_name });
+    overviewItems.push({ label: 'Assigned Staff', value: display });
   }
 
   if (activeLock) {

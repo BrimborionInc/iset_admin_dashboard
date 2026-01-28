@@ -1,0 +1,1 @@
+{"commands":["set -e","ps -ef | grep -i pm2 | grep -v grep || true","for d in /home/ec2-user/.pm2/logs /root/.pm2/logs; do if [ -d \"$d\" ]; then echo LOGDIR:$d; ls -la \"$d\"; tail -n 200 \"$d\"/* || true; fi; done"]}

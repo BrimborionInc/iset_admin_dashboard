@@ -48,6 +48,15 @@ module "logging" {
   tags               = local.tags
 }
 
+module "artifacts" {
+  source = "../../modules/artifacts"
+
+  name_prefix     = var.name_prefix
+  kms_key_arn     = module.kms.keys.general.key_arn
+  log_bucket_name = module.logging.access_log_bucket.name
+  tags            = local.tags
+}
+
 module "security" {
   source = "../../modules/security"
 
@@ -118,6 +127,9 @@ module "compute" {
   private_subnet_ids    = module.networking.private_subnet_ids
   db_security_group_id  = module.data.cluster.security_group_id
   app_instance_type     = var.app_instance_type
+  app_min_size          = var.app_min_size
+  app_max_size          = var.app_max_size
+  app_desired_capacity  = var.app_desired_capacity
   ami_id                = data.aws_ssm_parameter.app_ami.value
   key_name              = var.app_key_name
   alb_certificate_arn   = var.alb_certificate_arn

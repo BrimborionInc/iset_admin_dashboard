@@ -82,7 +82,7 @@ Outstanding items before automation proceeds:
 ## 5. Next Steps
  - Implement PowerShell module + per-app `deploy-test.ps1`.
  - Added portal automation script at `scripts/deploy-portal-test.ps1` (run via `npm run deploy-portal-to-test` inside `ISET-intake`).
-- Update Terraform to create `nwac-test-artifacts` bucket and SSM parameters.
+- Terraform provisions `nwac-test-artifacts`; ensure IAM access and upload artifacts per release.
 - Wire CodeDeploy or SSM automation documents accordingly.
 
 Owner: _(add name)_  

@@ -9,7 +9,7 @@ locals {
 resource "random_password" "master" {
   length           = 20
   special          = true
-  override_special = "!@#%^*-_+"
+  override_special = "!#%^*-_+"
 }
 
 resource "aws_secretsmanager_secret" "master" {

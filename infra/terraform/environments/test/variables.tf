@@ -168,6 +168,24 @@ variable "app_instance_type" {
   default     = "t3.large"
 }
 
+variable "app_min_size" {
+  description = "Minimum number of app instances."
+  type        = number
+  default     = 2
+}
+
+variable "app_max_size" {
+  description = "Maximum number of app instances."
+  type        = number
+  default     = 4
+}
+
+variable "app_desired_capacity" {
+  description = "Desired number of app instances."
+  type        = number
+  default     = 2
+}
+
 variable "app_ami_parameter_name" {
   description = "SSM parameter containing the desired AMI ID."
   type        = string

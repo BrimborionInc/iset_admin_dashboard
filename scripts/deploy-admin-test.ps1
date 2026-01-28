@@ -66,6 +66,47 @@ function Ensure-Tool([string]$Name) {
     }
 }
 
+function New-PosixZip {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceDir,
+        [Parameter(Mandatory = $true)][string]$DestinationZip
+    )
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    if (Test-Path -LiteralPath $DestinationZip) {
+        Remove-Item -LiteralPath $DestinationZip -Force
+    }
+
+    $baseDir = (Resolve-Path -LiteralPath $SourceDir).Path
+    $trimmedBase = $baseDir.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $basePrefix = $trimmedBase + [System.IO.Path]::DirectorySeparatorChar
+
+    $zipStream = [System.IO.File]::Open($DestinationZip, [System.IO.FileMode]::Create)
+    try {
+        $archive = New-Object System.IO.Compression.ZipArchive($zipStream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+        try {
+            Get-ChildItem -LiteralPath $trimmedBase -File -Recurse | ForEach-Object {
+                $relativePath = $_.FullName.Substring($basePrefix.Length)
+                $entryName = $relativePath -replace '\\', '/'
+                $entry = $archive.CreateEntry($entryName, [System.IO.Compression.CompressionLevel]::Optimal)
+                $entryStream = $entry.Open()
+                $fileStream = [System.IO.File]::OpenRead($_.FullName)
+                try {
+                    $fileStream.CopyTo($entryStream)
+                } finally {
+                    $fileStream.Dispose()
+                    $entryStream.Dispose()
+                }
+            }
+        } finally {
+            $archive.Dispose()
+        }
+    } finally {
+        $zipStream.Dispose()
+    }
+}
+
 function Start-SsmCommand {
     param(
         [Parameter(Mandatory = $true)][string]$Region,
@@ -173,9 +214,6 @@ try {
     Write-Section "Pre-flight checks"
     Ensure-Tool "npm"
     Ensure-Tool "aws"
-    if (-not (Get-Command "Compress-Archive" -ErrorAction SilentlyContinue)) {
-        throw "Compress-Archive cmdlet not available. PowerShell 5.1 or later is required."
-    }
 
     if (-not $SkipBuild) {
         Write-Section "Building React app for test"
@@ -230,9 +268,7 @@ try {
 
     $archiveName = "admin-dashboard-$timestamp.zip"
     $archivePath = Join-Path $tempRoot $archiveName
-    Push-Location $stagingPath
-    Compress-Archive -Path * -DestinationPath $archivePath -Force
-    Pop-Location
+    New-PosixZip -SourceDir $stagingPath -DestinationZip $archivePath
 
     Write-Section "Uploading artefact to S3"
     $s3Key = Join-S3Key -Prefix $KeyPrefix -Name $archiveName

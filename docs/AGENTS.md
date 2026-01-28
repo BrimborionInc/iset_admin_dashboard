@@ -12,6 +12,7 @@ Last Updated: 2026-01-19
 - If anything is unclear (requirements, data, ownership, API payloads), stop and ask before coding.
 - Prefer evidence over guesses. Inspect payloads, schemas, and renderer code before claiming behavior exists.
 - If blocked (tooling, permissions, platform limits), state that clearly before proceeding.
+- Confirm prerequisite account access (e.g., org management vs. member accounts) before directing users to identity/SSO setup.
 
 ## UI and data conventions
 

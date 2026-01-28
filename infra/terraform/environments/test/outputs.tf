@@ -14,6 +14,10 @@ output "logging" {
   value = module.logging
 }
 
+output "artifacts" {
+  value = module.artifacts
+}
+
 output "security" {
   value = module.security
 }

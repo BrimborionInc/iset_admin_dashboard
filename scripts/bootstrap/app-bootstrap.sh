@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Bootstrap script for NWAC test environment application instances.
+# Bootstrap script for NWAC application instances.
 # This script is designed to be used as EC2 user data (AL2023) or invoked manually via SSM.
 #
 # Responsibilities:
@@ -19,16 +19,25 @@ LOG_FILE="/var/log/nwac-bootstrap.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
-echo "[$(date --iso-8601=seconds)] Starting NWAC bootstrap..."
+# Override defaults via environment variables (NAME_PREFIX, ADMIN_ENV_PARAMETER, ARTIFACT_BUCKET, *_ARTIFACT_S3_URI).
+NAME_PREFIX="${NAME_PREFIX:-nwac-test}"
+PARAM_PREFIX="/${NAME_PREFIX//-//}"
 
-ADMIN_ENV_PARAMETER="/nwac/test/admin/env"
-PORTAL_ENV_PARAMETER="/nwac/test/portal/env"
-DB_SECRET_ID="${DB_SECRET_ID:-nwac-test-db-credentials}"
+echo "[$(date --iso-8601=seconds)] Starting NWAC bootstrap (${NAME_PREFIX})..."
+
+ADMIN_ENV_PARAMETER="${ADMIN_ENV_PARAMETER:-${PARAM_PREFIX}/admin/env}"
+PORTAL_ENV_PARAMETER="${PORTAL_ENV_PARAMETER:-${PARAM_PREFIX}/portal/env}"
+DB_SECRET_ID="${DB_SECRET_ID:-${NAME_PREFIX}-db-credentials}"
+
+ARTIFACT_BUCKET="${ARTIFACT_BUCKET:-${NAME_PREFIX}-artifacts}"
+ADMIN_ARTIFACT_KEY="${ADMIN_ARTIFACT_KEY:-admin/admin-dashboard-20251008155202.zip}"
+PORTAL_ARTIFACT_KEY="${PORTAL_ARTIFACT_KEY:-portal/portal-20251008155228.zip}"
+SHARED_ARTIFACT_KEY="${SHARED_ARTIFACT_KEY:-shared/shared-20251008155220.zip}"
 
 # Pre-built artifacts (uploaded from workstation)
-ADMIN_ARTIFACT_S3_URI="s3://nwac-test-artifacts/admin/admin-dashboard-20251008155202.zip"
-PORTAL_ARTIFACT_S3_URI="s3://nwac-test-artifacts/portal/portal-20251008155228.zip"
-SHARED_ARTIFACT_S3_URI="s3://nwac-test-artifacts/shared/shared-20251008155220.zip"
+ADMIN_ARTIFACT_S3_URI="${ADMIN_ARTIFACT_S3_URI:-s3://${ARTIFACT_BUCKET}/${ADMIN_ARTIFACT_KEY}}"
+PORTAL_ARTIFACT_S3_URI="${PORTAL_ARTIFACT_S3_URI:-s3://${ARTIFACT_BUCKET}/${PORTAL_ARTIFACT_KEY}}"
+SHARED_ARTIFACT_S3_URI="${SHARED_ARTIFACT_S3_URI:-s3://${ARTIFACT_BUCKET}/${SHARED_ARTIFACT_KEY}}"
 
 ADMIN_ROOT="/opt/nwac/admin-dashboard"
 PORTAL_ROOT="/opt/nwac/portal"
@@ -164,6 +173,13 @@ main() {
     exit 1
   fi
 
+  download_artifact "$ADMIN_ARTIFACT_S3_URI" "$ADMIN_ROOT"
+  download_artifact "$PORTAL_ARTIFACT_S3_URI" "$PORTAL_ROOT"
+  download_shared "$SHARED_ARTIFACT_S3_URI" "$SHARED_ROOT"
+
+  log "Linking portal artifact so admin server can resolve ../ISET-intake/* modules..."
+  sudo ln -sfn "$PORTAL_ROOT" "/opt/nwac/ISET-intake"
+
   sudo tee "$CONFIG_DUMP_DIR/admin-env.json" >/dev/null <<<"$admin_env_json"
   sudo tee "$CONFIG_DUMP_DIR/portal-env.json" >/dev/null <<<"$portal_env_json"
 
@@ -172,13 +188,6 @@ main() {
 
   merge_db_credentials "$ADMIN_ROOT/.env" "$db_secret_json"
   merge_db_credentials "$PORTAL_ROOT/.env" "$db_secret_json"
-
-  download_artifact "$ADMIN_ARTIFACT_S3_URI" "$ADMIN_ROOT"
-  download_artifact "$PORTAL_ARTIFACT_S3_URI" "$PORTAL_ROOT"
-  download_shared "$SHARED_ARTIFACT_S3_URI" "$SHARED_ROOT"
-
-  log "Linking portal artifact so admin server can resolve ../ISET-intake/* modules..."
-  sudo ln -sfn "$PORTAL_ROOT" "/opt/nwac/ISET-intake"
 
   if [ -f "$ADMIN_ROOT/package.json" ]; then
     sudo rm -rf "$ADMIN_ROOT/node_modules"

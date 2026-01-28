@@ -78,7 +78,6 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
       ? null
       : applicantUserIdNum;
   const applicantName = caseData?.applicant_name || 'Applicant';
-  const assignedToUserId = caseData?.assigned_to_user_id || null;
   const assignedToName = caseData?.assigned_to_name || '';
 
   const [messages, setMessages] = useState([]);
@@ -92,7 +91,6 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
   const [attachments, setAttachments] = useState([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentsError, setAttachmentsError] = useState(null);
-  const [evaluators, setEvaluators] = useState([]);
   const [composeModalOpen, setComposeModalOpen] = useState(false);
   const [composeSubject, setComposeSubject] = useState('');
   const [composeBody, setComposeBody] = useState('');
@@ -158,21 +156,6 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
     loadMessages();
   }, [caseId, loadMessages]);
 
-  useEffect(() => {
-    let active = true;
-    apiFetch('/api/intake-officers')
-      .then(res => (res.ok ? res.json() : []))
-      .then(data => {
-        if (active) setEvaluators(resolveList(data));
-      })
-      .catch(() => {
-        if (active) setEvaluators([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
   const handleInfoClick = () => {
     if (typeof toggleHelpPanel === 'function') {
       toggleHelpPanel(
@@ -183,28 +166,15 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
     }
   };
 
-  const evaluatorList = useMemo(() => resolveList(evaluators), [evaluators]);
-
-  const getEvaluatorName = useCallback(
-    userId => {
-      if (!userId) return '';
-      const match = evaluatorList.find(
-        entry => entry.evaluator_id === userId || entry.user_id === userId
-      );
-      return match?.evaluator_name || '';
-    },
-    [evaluatorList]
-  );
-
   const getSenderName = useCallback(
     message => {
       if (!message) return '';
       if (applicantUserId && message.sender_id === applicantUserId) {
         return message.sender_name || applicantName;
       }
-      return message.sender_name || getEvaluatorName(message.sender_id) || 'Staff';
+      return message.sender_name || 'Staff';
     },
-    [applicantUserId, applicantName, getEvaluatorName]
+    [applicantUserId, applicantName]
   );
 
   const getRecipientName = useCallback(
@@ -213,9 +183,9 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
       if (applicantUserId && message.recipient_id === applicantUserId) {
         return message.recipient_name || applicantName;
       }
-      return message.recipient_name || getEvaluatorName(message.recipient_id) || 'Staff';
+      return message.recipient_name || 'Staff';
     },
-    [applicantUserId, applicantName, getEvaluatorName]
+    [applicantUserId, applicantName]
   );
 
   const inboxMessages = useMemo(() => {
@@ -546,10 +516,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
     loadMessages({ silent: true });
   };
 
-  const currentEvaluatorName = useMemo(() => {
-    if (!assignedToUserId) return assignedToName || '';
-    return getEvaluatorName(assignedToUserId) || assignedToName || '';
-  }, [assignedToUserId, assignedToName, getEvaluatorName]);
+  const currentStaffName = useMemo(() => assignedToName || '', [assignedToName]);
 
   const renderTabContent = tabId => {
     const baseItems =
@@ -796,7 +763,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
           </div>
           <div>
             <label style={{ fontWeight: 'bold' }}>From:</label>
-            <Input readOnly value={currentEvaluatorName || 'Case evaluator'} />
+            <Input readOnly value={currentStaffName || 'Case staff'} />
           </div>
           <div>
             <label style={{ fontWeight: 'bold' }}>Subject:</label>

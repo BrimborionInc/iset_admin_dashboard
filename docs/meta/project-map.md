@@ -13,6 +13,8 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 - `workflow_dev_blocksteps/` & `workflow_dev_workflows/`: Development / draft workflow definitions.
 - `tests/`: Test assets (if populated).
 - `infra/`: Deployment or infra configuration (nginx, etc.).
+- `infra/terraform/environments/`: Terraform environment roots (test and prod).
+- `infra/terraform/modules/`: Terraform building blocks (bootstrap, networking, logging, artifacts, etc.).
 - `db/` / `sql/`: Database related scripts (if present in this project; some lives in intake repo).
 
 ## Key Source Areas (`src/`)

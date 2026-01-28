@@ -16,6 +16,10 @@ locals {
 resource "aws_cognito_user_pool" "admin" {
   name = "${var.name_prefix}-admin"
 
+  username_configuration {
+    case_sensitive = false
+  }
+
   mfa_configuration = var.admin_mfa_configuration
   software_token_mfa_configuration {
     enabled = var.admin_mfa_configuration != "OFF"
@@ -62,6 +66,10 @@ resource "aws_cognito_user_pool_client" "admin" {
 # Applicant user pool
 resource "aws_cognito_user_pool" "portal" {
   name = "${var.name_prefix}-portal"
+
+  username_configuration {
+    case_sensitive = false
+  }
 
   mfa_configuration = var.portal_mfa_configuration
 

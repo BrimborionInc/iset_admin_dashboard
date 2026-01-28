@@ -1,0 +1,169 @@
+# Production Environment Guide (NWAC / ISET)
+
+Last updated: January 26, 2026
+
+This guide summarizes what is currently deployed in the production environment, how it fits together, and where to look when you need to operate or change it. Each section starts with a non-technical overview, followed by technical details.
+
+## 1) Scope and Purpose
+
+Non-technical overview  
+Production is the live environment that serves real users. It hosts the public portal and the admin console, connects to the production database, and uses production authentication and security settings.
+
+Technical details  
+The prod environment runs in a dedicated AWS account (ID `468278742295`) and uses the `ca-central-1` region. The public portal and admin console are deployed as separate artifacts but run on the same EC2 instance (managed by an Auto Scaling Group). DNS points the production domains to the AWS load balancer.
+
+## 2) Accounts and Regions
+
+Non-technical overview  
+Everything in prod lives in its own AWS account, and we keep all services in Canada (Central) to meet data residency expectations.
+
+Technical details  
+- Account ID: `468278742295`  
+- Region: `ca-central-1` (Canada Central)  
+- Production services and data should remain in this region unless an explicit architectural change is approved.
+
+## 3) Public URLs
+
+Non-technical overview  
+There are two public-facing sites: one for applicants (public portal) and one for staff (admin console).
+
+Technical details  
+- Public portal: `https://nwac-public.awentech.ca/`  
+- Admin console: `https://nwac-console.awentech.ca/`  
+- Cognito Hosted UI domains:  
+  - Admin: `https://nwac-prod-admin-458181.auth.ca-central-1.amazoncognito.com`  
+  - Portal: `https://nwac-prod-portal-8ac238.auth.ca-central-1.amazoncognito.com`
+
+## 4) Compute and App Hosting
+
+Non-technical overview  
+The apps run on a production server managed by AWS. A load balancer routes web traffic to that server.
+
+Technical details  
+- Auto Scaling Group: `nwac-prod-asg` (desired capacity 1).  
+- Load balancer: Application Load Balancer (ALB) fronting both apps.  
+- The admin app and portal are deployed to the same EC2 instance and are started with `pm2`.  
+- Paths on instance:  
+  - Admin: `/opt/nwac/admin-dashboard`  
+  - Portal: `/opt/nwac/portal`  
+  - Shared modules: `/opt/nwac/shared`  
+
+## 5) Deployment Artifacts and Bootstrap
+
+Non-technical overview  
+Builds are uploaded to an artifacts bucket. New instances pull the latest builds automatically when they start.
+
+Technical details  
+- Artifacts bucket: `nwac-prod-artifacts`  
+- Standard artifact keys:  
+  - `admin/admin-dashboard-latest.zip`  
+  - `portal/portal-latest.zip`  
+  - `shared/shared-latest.zip`  
+- Bootstrap script (run at instance start): `s3://nwac-prod-artifacts/bootstrap/app-bootstrap.sh`  
+- Local deploy scripts:  
+  - `scripts/deploy-admin-prod.ps1` (admin)  
+  - `../ISET-intake/scripts/deploy-portal-prod.ps1` (portal)
+
+## 6) Configuration and Secrets
+
+Non-technical overview  
+App configuration and secrets are stored centrally so instances can pull them at boot without hard-coding secrets into code.
+
+Technical details  
+- SSM Parameter Store (JSON):  
+  - `/nwac/prod/admin/env`  
+  - `/nwac/prod/portal/env`  
+- Database credentials are stored in Secrets Manager:  
+  - Secret name: `nwac-prod-db-credentials`  
+- The bootstrap script renders `.env` files from SSM and merges DB credentials from Secrets Manager.
+
+## 7) Database
+
+Non-technical overview  
+The production database stores all operational data. It is protected inside the AWS network and is not publicly accessible.
+
+Technical details  
+- Engine: Aurora MySQL  
+- Cluster: `nwac-prod-db`  
+- Endpoint: `nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`  
+- Database name: `iset_intake`  
+- Access is restricted to the VPC; use SSM on the instance to run SQL or load dumps.  
+- Data was loaded from `Dump20260126.sql` on January 26, 2026.
+
+## 8) Identity and Access (Cognito)
+
+Non-technical overview  
+Users sign in through AWS Cognito. Admin users are assigned roles using Cognito groups.
+
+Technical details  
+- Admin user pool: `ca-central-1_IBtdWzSIW` (`nwac-prod-admin`)  
+  - Client: `vto9m0e32fkao737pva52on5h`  
+  - MFA: optional, software token enabled  
+  - Groups: `System_Administrator`, `NWAC_Administrator`, `Regional_Manager`, `ISET_Coordinator`  
+- Portal user pool: `ca-central-1_1TMlyEAK5` (`nwac-prod-portal`)  
+  - Client: `44ner8vmv1egcuntoln8vh4bfk`  
+- OAuth code flow is enabled for the admin and portal Hosted UI clients, with callback/logout URLs set to the production domains.
+- The app instance role (`nwac-prod-app-role`) has Cognito admin permissions for listing/managing admin users in the admin pool.
+
+## 9) Storage (Uploads)
+
+Non-technical overview  
+Uploads and generated files are stored in AWS object storage rather than on the server.
+
+Technical details  
+- Upload bucket: `nwac-prod-uploads-b6bb`  
+- Access is via presigned URLs configured in the portal environment (`UPLOAD_MODE=s3`).
+
+## 10) Captcha / Bot Protection
+
+Non-technical overview  
+The public portal uses a CAPTCHA to reduce automated signups.
+
+Technical details  
+- CAPTCHA is AWS WAF CAPTCHA SDK.  
+- A prod API key is configured for the prod domains.  
+- If CAPTCHA fails, verify the API key token domains include `nwac-public.awentech.ca`.  
+- As of January 26, 2026 there are no WAF WebACLs configured in prod.
+
+## 11) DNS and Certificates
+
+Non-technical overview  
+DNS maps the production domains to AWS. TLS is handled by AWS certificates.
+
+Technical details  
+- DNS is managed in HostPapa for `awentech.ca`.  
+- The production CNAME records point to the AWS load balancer.  
+
+## 12) How the Pieces Fit Together
+
+Non-technical overview  
+Users visit the portal or admin site, authenticate through Cognito, and the apps read/write data in the Aurora database. File uploads go to S3. New deployments happen by uploading build artifacts and letting instances pull them on boot.
+
+Technical details  
+1. Browser hits `nwac-public.awentech.ca` or `nwac-console.awentech.ca`.  
+2. ALB routes to the EC2 instance in the ASG.  
+3. The apps use Cognito for authentication and get group roles from the ID token.  
+4. The apps call backend routes hosted on the same instance.  
+5. The backend connects to Aurora MySQL using credentials from Secrets Manager.  
+6. Uploads are stored in the S3 uploads bucket using presigned URLs.
+
+## 13) Operational Notes
+
+Non-technical overview  
+The main operational tasks are deployments, user access, and database migrations.
+
+Technical details  
+- Deployments: upload new artifacts, then refresh the ASG instance to pull them.  
+- User access: add users to Cognito groups for admin roles.  
+- Migrations: run SQL inside the VPC using SSM on the instance (not from the public internet).  
+  - Helper: `scripts/run-prod-sql.ps1` runs ad-hoc SQL against prod via SSM and prints results.
+  - Legacy cleanup: run `db/migrations/20260127_0002_drop_evaluator_tables.sql` to drop unused evaluator/PTMA assignment tables if present.
+
+## 14) Known Gaps / Future Work
+
+Non-technical overview  
+There are improvements that can be added later for scale and security, but they are not required for a working production system.
+
+Technical details  
+- CloudFront/WAF in front of the ALB is not yet configured.  
+- Infrastructure state is not yet fully reconciled with Terraform for prod.  

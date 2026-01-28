@@ -24,18 +24,30 @@ resource "aws_securityhub_standards_subscription" "cis" {
   count         = var.enable_security_hub_cis ? 1 : 0
   standards_arn = "arn:aws:securityhub:::ruleset/cis-aws-foundations-benchmark/v/1.2.0"
   depends_on    = [aws_securityhub_account.this]
+
+  timeouts {
+    create = "10m"
+  }
 }
 
 resource "aws_securityhub_standards_subscription" "fsbp" {
   count         = var.enable_security_hub_fsbp ? 1 : 0
   standards_arn = "arn:aws:securityhub:${data.aws_region.current.name}::standards/aws-foundational-security-best-practices/v/1.0.0"
   depends_on    = [aws_securityhub_account.this]
+
+  timeouts {
+    create = "10m"
+  }
 }
 
 resource "aws_securityhub_standards_subscription" "audit" {
   count         = var.enable_security_hub_audit ? 1 : 0
   standards_arn = "arn:aws:securityhub:${data.aws_region.current.name}::standards/aws-security-hub-best-practices/v/1.0.0"
   depends_on    = [aws_securityhub_account.this]
+
+  timeouts {
+    create = "10m"
+  }
 }
 
 # IAM Access Analyzer (account level)
@@ -51,6 +63,7 @@ resource "aws_accessanalyzer_analyzer" "this" {
 # Security Hub finding aggregator (multi-region)
 resource "aws_securityhub_finding_aggregator" "this" {
   linking_mode = "ALL_REGIONS"
+  depends_on   = [aws_securityhub_account.this]
 }
 
 # Optional SNS notifications for critical/high findings

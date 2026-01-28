@@ -3,11 +3,14 @@
 Format: YYYY-MM-DD - Category: Short description
 
 ## 2026-01-27
+- Ops: Deployment scripts now build POSIX-path zip archives to avoid Linux unzip failures.
 - UX: Proposed Interventions widget now includes an info link with dedicated help panel guidance and AI context.
 - UX: Proposed Interventions status badge now sits in the header actions next to Save Progress.
 - Docs: Rewrote Proposed Interventions help content to align with PATH case management guidance.
 - Fix: Proposed Interventions wizard now clears draft data after approvals or rejections so the next proposal starts clean.
 - Fix: Rejected interventions can now be deleted from the case workspace.
+- Feature: Regional Managers now support multi-region scoping in dev via `staff_region`, backend scoping updates, and admin user management changes.
+- Ops: Added `scripts/run-prod-sql.ps1` helper for running ad-hoc SQL against prod via SSM.
 
 ## 2026-01-28
 - Fix: Initial CFA drafts now generate from assessment data when no action plan exists, keeping secure message CFA attachments working before completion.
@@ -27,6 +30,15 @@ Format: YYYY-MM-DD - Category: Short description
 - Data: Assessment submissions now persist proposed interventions + cost lines in `assessment_proposed_interventions` with runtime-config defaults for suggested items.
 - API: Added runtime config endpoints for coordinator assessment costing defaults.
 - Data: Removed legacy intervention type references from schema/mapping sources.
+- Ops: Added production Terraform environment scaffolding under `infra/terraform/environments/prod` to keep test and prod isolated.
+- Ops: Parameterized Terraform module log group and IAM path prefixes so prod can be applied without test hard-coding.
+- Docs: Added production Terraform runbook for baseline apply steps.
+- Ops: Added Terraform-managed artifacts bucket and prod-safe bootstrap configuration.
+- Ops: Added ASG capacity controls to the compute module and staged prod to start at zero capacity until env parameters are ready.
+- Ops: Enabled S3 backend configuration blocks in Terraform env roots for remote state usage.
+- Ops: Added explicit S3 backend state keys for test/prod to avoid interactive init prompts.
+- Ops: Aligned backend lock table names with bootstrap naming convention.
+- Ops: Resolved Terraform plan-time unknown count issues in compute listener rules and artifacts bucket encryption.
 
 ## 2026-01-17
 - Feature: Funding agreements now generate versioned CFA PDFs (CFA vN) per plan when approved interventions change.
@@ -280,3 +292,8 @@ Format: YYYY-MM-DD - Category: Short description
 - Feature: Submitted intervention proposals remain in the wizard for RM/PA/SA review, with EI verification and decision steps captured in review metadata.
 ## 2026-01-19
 - Fix: Align MySQL connection collation with event tables to prevent doc-request threshold poll collation errors.
+
+## 2026-01-27
+- Cleanup: Removed legacy evaluator/PTMA assignment APIs and UI (intake-officers, PTMA evaluators, assigned evaluator display).
+- UX: Secure messaging now relies on sender/recipient names without evaluator lookups.
+- DB: Added migration to drop legacy `iset_evaluators` and `iset_evaluator_ptma` tables if present.

@@ -1,0 +1,29 @@
+aws_region = "ca-central-1"
+name_prefix = "nwac-prod"
+
+# Provide public CIDRs matching organizational IP plan if defaults do not fit.
+# vpc_cidr = "10.58.0.0/16"
+# private_subnet_cidrs = ["10.58.0.0/20", "10.58.16.0/20", "10.58.32.0/20"]
+# isolated_subnet_cidrs = ["10.58.64.0/24", "10.58.65.0/24", "10.58.66.0/24"]
+# public_subnet_cidrs  = ["10.58.96.0/24", "10.58.97.0/24", "10.58.98.0/24"]
+# enable_nat_gateway = true
+# admin_callback_urls  = ["https://nwac-console.awentech.ca/auth/callback"]
+# admin_logout_urls    = ["https://nwac-console.awentech.ca/"]
+# portal_callback_urls = ["https://nwac-public.awentech.ca/auth/callback"]
+# portal_logout_urls   = ["https://nwac-public.awentech.ca/"]
+# ses_sender_email = "noreply@example.com"
+# use_cognito_managed_emails = true
+# app_instance_type = "t3.large"
+# app_min_size = 0
+# app_max_size = 4
+# app_desired_capacity = 0
+# app_ami_name = "al2023-ami-2023.6.20250211.0-kernel-6.1-x86_64"
+# app_key_name = ""
+# alb_certificate_arn = "" # leave blank until ACM certificate issued
+# alb_allowed_ingress_cidrs = ["198.51.100.0/24"]
+# app_user_data = <<EOT
+# #!/bin/bash
+# echo "Deploy"
+# EOT
+# admin_domain_name  = "nwac-console.awentech.ca"
+# portal_domain_name = "nwac-public.awentech.ca"

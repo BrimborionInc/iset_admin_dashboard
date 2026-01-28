@@ -189,14 +189,6 @@ const SecureMessagingWidget = ({
     workspace?.applicant_name ??
     workspace?.applicantName ??
     'Applicant';
-  const assignedToUserId =
-    caseData?.assigned_to_user_id ??
-    caseData?.assignedToUserId ??
-    workspaceCaseData?.assigned_to_user_id ??
-    workspaceCaseData?.assignedToUserId ??
-    workspace?.assigned_to_user_id ??
-    workspace?.assignedToUserId ??
-    null;
   const assignedToName =
     caseData?.assigned_to_name ??
     caseData?.assignedToName ??
@@ -217,7 +209,6 @@ const SecureMessagingWidget = ({
   const [attachments, setAttachments] = useState([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentsError, setAttachmentsError] = useState(null);
-  const [evaluators, setEvaluators] = useState([]);
   const [composeModalOpen, setComposeModalOpen] = useState(false);
   const [composeSubject, setComposeSubject] = useState('');
   const [composeBody, setComposeBody] = useState('');
@@ -472,21 +463,6 @@ const SecureMessagingWidget = ({
     });
   }, [filteredWorkflowOptions, selectedWorkflowIds.length]);
 
-  useEffect(() => {
-    let active = true;
-    apiFetch('/api/intake-officers')
-      .then(res => (res.ok ? res.json() : []))
-      .then(data => {
-        if (active) setEvaluators(resolveList(data));
-      })
-      .catch(() => {
-        if (active) setEvaluators([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
   const handleInfoClick = () => {
     if (typeof toggleHelpPanel === 'function') {
       toggleHelpPanel(
@@ -497,28 +473,15 @@ const SecureMessagingWidget = ({
     }
   };
 
-  const evaluatorList = useMemo(() => resolveList(evaluators), [evaluators]);
-
-  const getEvaluatorName = useCallback(
-    userId => {
-      if (!userId) return '';
-      const match = evaluatorList.find(
-        entry => entry.evaluator_id === userId || entry.user_id === userId
-      );
-      return match?.evaluator_name || '';
-    },
-    [evaluatorList]
-  );
-
   const getSenderName = useCallback(
     message => {
       if (!message) return '';
       if (applicantUserId && message.sender_id === applicantUserId) {
         return message.sender_name || applicantName;
       }
-      return message.sender_name || getEvaluatorName(message.sender_id) || 'Staff';
+      return message.sender_name || 'Staff';
     },
-    [applicantUserId, applicantName, getEvaluatorName]
+    [applicantUserId, applicantName]
   );
 
   const getRecipientName = useCallback(
@@ -527,9 +490,9 @@ const SecureMessagingWidget = ({
       if (applicantUserId && message.recipient_id === applicantUserId) {
         return message.recipient_name || applicantName;
       }
-      return message.recipient_name || getEvaluatorName(message.recipient_id) || 'Staff';
+      return message.recipient_name || 'Staff';
     },
-    [applicantUserId, applicantName, getEvaluatorName]
+    [applicantUserId, applicantName]
   );
 
   const inboxMessages = useMemo(() => {
@@ -756,7 +719,7 @@ const SecureMessagingWidget = ({
     setComposeUrgent(false);
     setComposeError(null);
     setComposeToName(applicantName || 'Applicant');
-    setComposeFromName(currentEvaluatorName || 'Case Worker');
+    setComposeFromName(currentStaffName || 'Case Worker');
     setSelectedWorkflowIds([]);
     loadWorkflows();
     setComposeModalOpen(true);
@@ -777,7 +740,7 @@ const SecureMessagingWidget = ({
     setComposeUrgent(false);
     setComposeError(null);
     setComposeToName(getSenderName(selectedMessage) || applicantName || 'Applicant');
-    setComposeFromName(currentEvaluatorName || 'Case Worker');
+    setComposeFromName(currentStaffName || 'Case Worker');
     setSelectedWorkflowIds([]);
     loadWorkflows();
     setComposeModalOpen(true);
@@ -831,7 +794,7 @@ const SecureMessagingWidget = ({
       setComposeSubject('');
       setComposeBody('');
       setComposeToName(applicantName || 'Applicant');
-      setComposeFromName(currentEvaluatorName || 'Case Worker');
+      setComposeFromName(currentStaffName || 'Case Worker');
       setComposeUrgent(false);
       setSelectedWorkflowIds([]);
       await loadMessages({ silent: true });
@@ -929,10 +892,7 @@ const SecureMessagingWidget = ({
     loadMessages({ silent: true });
   };
 
-  const currentEvaluatorName = useMemo(() => {
-    if (!assignedToUserId) return assignedToName || '';
-    return getEvaluatorName(assignedToUserId) || assignedToName || '';
-  }, [assignedToUserId, assignedToName, getEvaluatorName]);
+  const currentStaffName = useMemo(() => assignedToName || '', [assignedToName]);
 
   const renderTabContent = tabId => {
     const baseItems =

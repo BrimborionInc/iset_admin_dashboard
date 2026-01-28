@@ -68,7 +68,9 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const isSystemAdmin = canonicalRole === "System Administrator";
   const isProgramAdmin = canonicalRole === "Program Administrator";
   const isRegionalManager = canonicalRole === "Regional Coordinator";
-  const currentRegionId = currentUser?.regionId ?? null;
+  const currentRegionIds = Array.isArray(currentUser?.regionIds) && currentUser.regionIds.length
+    ? currentUser.regionIds.map(Number).filter(Number.isFinite)
+    : (Number.isFinite(Number(currentUser?.regionId)) ? [Number(currentUser.regionId)] : []);
   const pendingManagePaymentsRef = useRef(false);
 
   const DetailItem = ({ label, value }) => (
@@ -697,8 +699,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         }
         if (isRegionalManager) {
           const staffRegion = Number(staff?.region_id ?? staff?.regionId ?? null);
-          const userRegion = Number(currentRegionId ?? null);
-          return Number.isFinite(staffRegion) && Number.isFinite(userRegion) && staffRegion === userRegion;
+          return Number.isFinite(staffRegion) && currentRegionIds.length && currentRegionIds.includes(staffRegion);
         }
         return false;
       });
@@ -717,7 +718,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     } finally {
       setAssignLoading(false);
     }
-  }, [caseData?.owner?.id, currentRegionId, isProgramAdmin, isRegionalManager, isSystemAdmin]);
+  }, [caseData?.owner?.id, currentRegionIds, isProgramAdmin, isRegionalManager, isSystemAdmin]);
 
   const handleAssignSubmit = useCallback(async () => {
     const caseId = caseData?.id;

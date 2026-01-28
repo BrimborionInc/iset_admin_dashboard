@@ -24,6 +24,7 @@
 - NAT gateways incur cost; toggle enable_nat_gateway=false in tfvars for minimalist dry runs.
 - Flow logs currently target CloudWatch Logs; ensure log group retention is set (future logging module).
 - Leave Cognito callback/logout URLs in tfvars as placeholders initially. After the first apply, update them with the ALB DNS name (or custom domain) and rerun apply.
+- Terraform now manages `nwac-test-artifacts`; import the existing bucket if it already exists before apply.
 - **Certificate bootstrap workflow**
   1. `terraform apply -target=module.acm -var-file=nwac-test.tfvars -auto-approve`
   2. Add the two DNS validation CNAME records output by Terraform at the `awentech.ca` registrar.
