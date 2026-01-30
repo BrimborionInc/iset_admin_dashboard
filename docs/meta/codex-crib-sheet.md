@@ -25,6 +25,13 @@
 - Admin backend (`isetadminserver.js`) still serves `/api/cases`, `/api/applications`, `/api/applicants/...` endpoints consumed by the widgets.
 - DemoNavigation toggle controls IAM; when IAM off, ensure dev bypass env vars are set to avoid missing-token errors.
 
+## Sage Intacct AP Bills (XML Web Services)
+- Use the Sage Intacct XML Web Services API only for AP Bills, Vendors, and Attachments.
+- Endpoint: https://api.intacct.com/ia/xml/xmlgw.phtml
+- Object specs: https://developer.intacct.com/api/
+- Generate XML requests against the Sage Intacct Web Services API using the object specs, targeting AP Bills in Draft status.
+- Do not use REST/OpenAPI; it is partial and will force workarounds later.
+
 ## Testing & Next Steps
 - Run `npm test -- --watch=false` (admin) after widget changes to satisfy lint/tests.
 - If schema evolves, update `IsetApplicationFormWidget` mappings (OPTION_LABELS, sections) accordingly.

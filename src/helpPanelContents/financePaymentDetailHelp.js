@@ -27,8 +27,17 @@ const FinancePaymentDetailHelp = () => (
     <Box>
       <strong>Actions</strong>
       <ul>
+        <li>Validate checks policy, evidence, and funding before submission.</li>
         <li>Submit to finance emails the configured region address.</li>
         <li>Submission locks edits to lines and evidence.</li>
+      </ul>
+    </Box>
+    <Box>
+      <strong>Intacct XML preview</strong>
+      <ul>
+        <li>Use the "Intacct XML (Draft)" tab to review a demo-only AP Bill payload.</li>
+        <li>Preview is read-only, uses Draft status, and is not transmitted.</li>
+        <li>Missing required fields are flagged in the preview.</li>
       </ul>
     </Box>
     <Box>
@@ -41,6 +50,6 @@ const FinancePaymentDetailHelp = () => (
 );
 
 FinancePaymentDetailHelp.aiContext =
-  "Explain the payment detail widget: line items, evidence checklist, and submit-to-finance action. Mention evidence gates and that submission emails finance and locks edits.";
+  "Explain the payment detail widget: line items, evidence checklist, validate step, submit-to-finance action, and the Intacct XML (Draft) preview tab. Mention evidence gates and that submission emails finance, locks edits, and the XML preview is read-only and not transmitted.";
 
 export default FinancePaymentDetailHelp;

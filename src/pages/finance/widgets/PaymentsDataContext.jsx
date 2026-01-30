@@ -588,6 +588,41 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
     }
   }, []);
 
+  const validatePacket = useCallback(async packetId => {
+    if (!packetId) return null;
+    try {
+      const resp = await apiFetch(
+        `/api/finance/payment-packets/${encodeURIComponent(packetId)}/validate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }
+      );
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw buildApiError(resp, payload, `Validation failed (${resp.status})`);
+      }
+      const updated = normalizePacket(payload);
+      setRequests(prev => {
+        const next = Array.isArray(prev) ? prev.slice() : [];
+        const index = next.findIndex(entry => entry.id === updated.id);
+        if (index >= 0) {
+          next[index] = updated;
+          return next;
+        }
+        return [updated, ...next];
+      });
+      setSelectedRequestId(updated.id);
+      return updated;
+    } catch (err) {
+      console.error("[Payments] failed to validate packet", err);
+      const message = err.message || "Failed to validate payment packet";
+      setError(message);
+      throw err;
+    }
+  }, []);
+
   const updateLineStatus = useCallback(async (lineId, status, options = {}) => {
     if (!lineId || !status) return null;
     try {
@@ -808,7 +843,7 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
       );
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        throw new Error(data?.message || data?.error || `Create failed (${resp.status})`);
+        throw buildApiError(resp, data, `Create failed (${resp.status})`);
       }
       const updated = normalizePacket(data);
       setRequests(prev => {
@@ -1019,6 +1054,7 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
       selectedRequestId,
       selectRequest,
       updatePacketStatus,
+      validatePacket,
       updateLineStatus,
       updateLine,
       deleteLine,
@@ -1048,6 +1084,7 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
       selectedRequestId,
       selectRequest,
       updatePacketStatus,
+      validatePacket,
       updateLineStatus,
       updateLine,
       deleteLine,

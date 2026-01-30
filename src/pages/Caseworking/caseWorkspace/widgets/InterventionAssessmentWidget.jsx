@@ -153,7 +153,8 @@ const parseIsoDateToUtc = value => {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  const parts = trimmed.split("-");
+  const normalized = trimmed.replace(/\//g, "-");
+  const parts = normalized.split("-");
   if (parts.length !== 3) return null;
   const [yyyy, mm, dd] = parts.map(part => Number.parseInt(part, 10));
   if (![yyyy, mm, dd].every(Number.isFinite)) return null;
@@ -1409,13 +1410,27 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   };
 
   const buildRecurrenceFromIntervention = useCallback(
-    (intervention, enabled) => ({
-      enabled: Boolean(enabled),
-      startDate: intervention?.startDate || "",
-      endDate: intervention?.endDate || "",
-      occurrences: "",
-      amountPerPeriod: "",
-    }),
+    (intervention, enabled) => {
+      if (!enabled) {
+        return {
+          enabled: false,
+          startDate: "",
+          endDate: "",
+          occurrences: "",
+          amountPerPeriod: "",
+        };
+      }
+      const startDate = intervention?.startDate || "";
+      const endDate = intervention?.endDate || "";
+      const occurrences = startDate && endDate ? autoOccurrencesFromDates(startDate, endDate, "monthly") : null;
+      return {
+        enabled: true,
+        startDate,
+        endDate,
+        occurrences: occurrences ? String(occurrences) : "",
+        amountPerPeriod: "",
+      };
+    },
     []
   );
 

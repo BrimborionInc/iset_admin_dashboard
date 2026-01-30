@@ -72,7 +72,25 @@ function New-PosixZip {
         [Parameter(Mandatory = $true)][string]$DestinationZip
     )
 
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    try { Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop } catch {}
+    try { Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop } catch {}
+
+    if (-not ([type]::GetType('System.IO.Compression.ZipArchiveMode', $false))) {
+        if (Get-Command "tar" -ErrorAction SilentlyContinue) {
+            if (Test-Path -LiteralPath $DestinationZip) {
+                Remove-Item -LiteralPath $DestinationZip -Force
+            }
+            tar -a -c -f $DestinationZip -C $SourceDir . | Out-Host
+            return
+        }
+        if (-not (Get-Command "Compress-Archive" -ErrorAction SilentlyContinue)) {
+            throw "ZIP tooling unavailable. Install PowerShell 5.1+ (Compress-Archive) or enable tar.exe."
+        }
+        Push-Location $SourceDir
+        Compress-Archive -Path * -DestinationPath $DestinationZip -Force
+        Pop-Location
+        return
+    }
 
     if (Test-Path -LiteralPath $DestinationZip) {
         Remove-Item -LiteralPath $DestinationZip -Force

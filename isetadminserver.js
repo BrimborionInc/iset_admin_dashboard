@@ -18234,6 +18234,29 @@ app.get('/api/config/runtime/finance-email-routing', async (req, res) => {
   }
 });
 
+app.get('/api/config/runtime/intacct-integration', async (req, res) => {
+  try {
+    if (requireFinanceRole(req, res)) return;
+    const config = await readIntacctIntegrationConfig();
+    res.json(config);
+  } catch (err) {
+    console.error('[intacct-integration] fetch failed', err);
+    res.status(500).json({ error: 'intacct_integration_fetch_failed', message: err.message });
+  }
+});
+
+app.patch('/api/config/runtime/intacct-integration', async (req, res) => {
+  try {
+    if (requireFinanceRole(req, res)) return;
+    const body = req.body || {};
+    const saved = await writeIntacctIntegrationConfig(body);
+    res.json(saved);
+  } catch (err) {
+    console.error('[intacct-integration] update failed', err);
+    res.status(500).json({ error: 'intacct_integration_update_failed', message: err.message });
+  }
+});
+
 app.patch('/api/config/runtime/finance-email-routing', async (req, res) => {
   try {
     if (requireFinanceRole(req, res)) return;
@@ -37728,6 +37751,8 @@ const FINANCE_EMAIL_TEMPLATE_KEY = 'payment_packet';
 const FINANCE_EMAIL_MAX_RECIPIENTS = 10;
 const PAYMENT_PACKET_BUNDLE_EXPIRY_DAYS = 7;
 const PAYMENT_PACKET_BUNDLE_EXPIRY_SECONDS = PAYMENT_PACKET_BUNDLE_EXPIRY_DAYS * 24 * 60 * 60;
+const INTACCT_INTEGRATION_SCOPE = 'finance';
+const INTACCT_INTEGRATION_KEY = 'intacct.integration';
 
 const normalizeEmailAddress = (value) => {
   if (!value) return null;
@@ -37788,6 +37813,69 @@ const sanitizeFinanceEmailRouting = (raw) => {
   return { regions };
 };
 
+const normalizeIntacctString = (value) => {
+  if (value === null || typeof value === 'undefined') return '';
+  return String(value).trim();
+};
+
+const normalizeIntacctBoolean = (value, fallback = false) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', 'yes', '1'].includes(normalized)) return true;
+    if (['false', 'no', '0'].includes(normalized)) return false;
+  }
+  return fallback;
+};
+
+const normalizeIntacctEnvironment = (value) => {
+  const normalized = normalizeIntacctString(value).toLowerCase();
+  if (normalized === 'production' || normalized === 'sandbox') return normalized;
+  return 'sandbox';
+};
+
+const normalizeIntacctAction = (value) => {
+  const normalized = normalizeIntacctString(value).toLowerCase();
+  if (normalized === 'submit' || normalized === 'post' || normalized === 'posted') return 'submit';
+  return 'draft';
+};
+
+const sanitizeIntacctIntegrationConfig = (raw) => {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      enabled: false,
+      environment: 'sandbox',
+      companyId: '',
+      senderId: '',
+      senderPassword: '',
+      userId: '',
+      userPassword: '',
+      useSessionAuth: true,
+      defaultLocationId: '',
+      defaultDepartmentId: '',
+      defaultAction: 'draft',
+      notes: '',
+    };
+  }
+  return {
+    enabled: raw.enabled === true,
+    environment: normalizeIntacctEnvironment(raw.environment || raw.env),
+    companyId: normalizeIntacctString(raw.companyId || raw.company_id),
+    senderId: normalizeIntacctString(raw.senderId || raw.sender_id),
+    senderPassword: normalizeIntacctString(raw.senderPassword || raw.sender_password),
+    userId: normalizeIntacctString(raw.userId || raw.user_id),
+    userPassword: normalizeIntacctString(raw.userPassword || raw.user_password),
+    useSessionAuth: normalizeIntacctBoolean(
+      raw.useSessionAuth ?? raw.use_session_auth,
+      true,
+    ),
+    defaultLocationId: normalizeIntacctString(raw.defaultLocationId || raw.default_location_id),
+    defaultDepartmentId: normalizeIntacctString(raw.defaultDepartmentId || raw.default_department_id),
+    defaultAction: normalizeIntacctAction(raw.defaultAction || raw.default_action),
+    notes: normalizeIntacctString(raw.notes || raw.note),
+  };
+};
+
 const normalizeRegionCode = (value) => {
   const raw = normaliseString(value);
   if (!raw) return null;
@@ -37846,6 +37934,46 @@ async function writeFinanceEmailRouting(next, connection = null) {
   await runner.query(
     'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
     [FINANCE_EMAIL_ROUTING_SCOPE, FINANCE_EMAIL_ROUTING_KEY, JSON.stringify(sanitized)]
+  );
+  return sanitized;
+}
+
+async function readIntacctIntegrationConfig(connection = null) {
+  const runner = connection || pool;
+  if (!runner) return sanitizeIntacctIntegrationConfig(null);
+  try {
+    await ensureRuntimeConfigTable();
+    const [rows] = await runner.query(
+      'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      [INTACCT_INTEGRATION_SCOPE, INTACCT_INTEGRATION_KEY],
+    );
+    if (!rows || rows.length === 0) return { ...sanitizeIntacctIntegrationConfig(null), updatedAt: null };
+    let payload = rows[0].v;
+    if (payload && typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch {
+        payload = null;
+      }
+    }
+    const sanitized = sanitizeIntacctIntegrationConfig(payload);
+    return { ...sanitized, updatedAt: rows[0].updated_at || null };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[intacct-integration] failed to read config:', err.message);
+    }
+    return { ...sanitizeIntacctIntegrationConfig(null), updatedAt: null };
+  }
+}
+
+async function writeIntacctIntegrationConfig(next, connection = null) {
+  const runner = connection || pool;
+  if (!runner) return sanitizeIntacctIntegrationConfig(null);
+  const sanitized = sanitizeIntacctIntegrationConfig(next);
+  await ensureRuntimeConfigTable();
+  await runner.query(
+    'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+    [INTACCT_INTEGRATION_SCOPE, INTACCT_INTEGRATION_KEY, JSON.stringify(sanitized)],
   );
   return sanitized;
 }
@@ -38252,9 +38380,13 @@ const parseFundingBreakdown = raw => {
     raw.forEach(entry => {
       if (!entry || typeof entry !== 'object') return;
       const label = entry.label || entry.category || entry.type || entry.key || null;
-      const category =
+      let category =
         resolveFundingCategoryFromLabel(label) ||
         normalizeFundingCategoryKey(entry.categoryKey || entry.category_key || entry.category || null);
+      if (!category) {
+        const paymentTypeKey = normalizePaymentTypeKey(label);
+        category = paymentTypeKey ? (PAYMENT_TYPE_FUNDING_CATEGORY_MAP[paymentTypeKey] || null) : null;
+      }
       const amount = parseFundingCapValue(entry.amount ?? entry.value ?? entry.total);
       applyFundingCap(caps, category, amount);
     });
@@ -38267,9 +38399,13 @@ const parseFundingBreakdown = raw => {
     }
     const caps = {};
     Object.entries(raw).forEach(([key, value]) => {
-      const category =
+      let category =
         normalizeFundingCategoryKey(key) ||
         resolveFundingCategoryFromLabel(key);
+      if (!category) {
+        const paymentTypeKey = normalizePaymentTypeKey(key);
+        category = paymentTypeKey ? (PAYMENT_TYPE_FUNDING_CATEGORY_MAP[paymentTypeKey] || null) : null;
+      }
       const amount = parseFundingCapValue(value);
       applyFundingCap(caps, category, amount);
     });
@@ -38969,6 +39105,100 @@ const recordPaymentOverride = async ({
       connection,
     });
   }
+};
+
+const normalizePaymentValidationStatus = value => {
+  if (typeof value !== 'string') return null;
+  const status = value.trim().toLowerCase();
+  return status === 'passed' || status === 'failed' ? status : null;
+};
+
+const normalizePaymentValidationIssues = raw => {
+  if (!raw || typeof raw !== 'object') return null;
+  const details = Array.isArray(raw.details) ? raw.details.filter(Boolean) : [];
+  const missingEvidence = Array.isArray(raw.missingEvidence)
+    ? raw.missingEvidence.filter(Boolean)
+    : Array.isArray(raw.missing_evidence)
+      ? raw.missing_evidence.filter(Boolean)
+      : [];
+  const normalized = {};
+  if (details.length) normalized.details = details;
+  if (missingEvidence.length) normalized.missingEvidence = missingEvidence;
+  return Object.keys(normalized).length ? normalized : null;
+};
+
+const normalizePaymentPacketValidation = metadata => {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const raw =
+    metadata.paymentValidation ||
+    metadata.payment_validation ||
+    metadata.validation ||
+    null;
+  if (!raw || typeof raw !== 'object') return null;
+  const status = normalizePaymentValidationStatus(raw.status || raw.state || raw.result);
+  if (!status) return null;
+  const validatedAt = raw.validatedAt || raw.validated_at || null;
+  const issues = normalizePaymentValidationIssues(raw.issues || raw.issue || raw.details || raw);
+  const validatedByUserId =
+    raw.validatedByUserId ||
+    raw.validated_by_user_id ||
+    null;
+  return {
+    status,
+    validatedAt,
+    issues,
+    validatedByUserId,
+  };
+};
+
+const setPaymentPacketValidation = async ({
+  packetId,
+  status,
+  details = [],
+  missingEvidence = [],
+  actorUserId,
+  connection,
+}) => {
+  if (!packetId || !connection) return;
+  const [[row]] = await connection.query(
+    'SELECT metadata FROM payment_packet WHERE id = ? LIMIT 1',
+    [packetId]
+  );
+  if (!row) return;
+  const meta = safeJsonParse(row.metadata, {}) || {};
+  meta.paymentValidation = {
+    status,
+    validatedAt: new Date().toISOString(),
+    issues: {
+      details: Array.isArray(details) ? details : [],
+      missingEvidence: Array.isArray(missingEvidence) ? missingEvidence : [],
+    },
+    validatedByUserId: actorUserId || null,
+  };
+  await connection.query(
+    'UPDATE payment_packet SET metadata = ?, updated_at = NOW() WHERE id = ?',
+    [JSON.stringify(meta), packetId]
+  );
+};
+
+const clearPaymentPacketValidation = async ({ packetId, connection }) => {
+  if (!packetId || !connection) return;
+  const [[row]] = await connection.query(
+    'SELECT metadata FROM payment_packet WHERE id = ? LIMIT 1',
+    [packetId]
+  );
+  if (!row) return;
+  const meta = safeJsonParse(row.metadata, {}) || {};
+  if (!meta.paymentValidation && !meta.payment_validation) {
+    await connection.query('UPDATE payment_packet SET updated_at = NOW() WHERE id = ?', [packetId]);
+    return;
+  }
+  delete meta.paymentValidation;
+  delete meta.payment_validation;
+  await connection.query(
+    'UPDATE payment_packet SET metadata = ?, updated_at = NOW() WHERE id = ?',
+    [JSON.stringify(meta), packetId]
+  );
 };
 
 const mergeEvidenceTypeLists = (...lists) => {
@@ -41099,7 +41329,7 @@ const deletePaymentLine = async ({ lineId, connection }) => {
   await connection.query('DELETE FROM payment_status_event WHERE payment_packet_line_id = ?', [lineId]);
   await connection.query('DELETE FROM payment_override WHERE payment_packet_line_id = ?', [lineId]);
   await connection.query('DELETE FROM payment_packet_line WHERE id = ? LIMIT 1', [lineId]);
-  await connection.query('UPDATE payment_packet SET updated_at = NOW() WHERE id = ?', [lineRow.payment_packet_id]);
+  await clearPaymentPacketValidation({ packetId: lineRow.payment_packet_id, connection });
 
   return { deleted: true, packetId: lineRow.payment_packet_id, status: packetStatus };
 };
@@ -41172,6 +41402,7 @@ const mapPaymentPacketRow = row => {
   const riskFlags = normalizeJsonArray(row?.risk_flags);
   const duplicateWarnings = normalizeJsonArray(metadata.duplicateWarnings || metadata.duplicate_warnings);
   const overrideHistory = normalizeJsonArray(metadata.overrideHistory || metadata.override_history);
+  const validation = normalizePaymentPacketValidation(metadata);
   const requester =
     row?.requester_name ||
     row?.requester_email ||
@@ -41206,6 +41437,7 @@ const mapPaymentPacketRow = row => {
     riskFlags,
     duplicateWarnings,
     overrideHistory,
+    validation,
     turnaroundDays: resolveTurnaroundDays(row),
     metadata,
   };
@@ -41654,6 +41886,130 @@ async function fetchMissingRequiredEvidence({ packetId, lineId = null, connectio
 
   return missing;
 }
+
+const runPaymentPacketValidation = async ({ packetRow, lineRows, connection }) => {
+  if (!packetRow || !connection) {
+    return { passed: false, details: [], missingEvidence: [] };
+  }
+  const activeLines = (lineRows || []).filter(row => row && row.status !== 'cancelled');
+  const details = [];
+
+  const policyRules = await readPaymentPolicyRules(connection);
+  const paymentTypeMap = await readPaymentInterventionMapping(connection);
+  const interventionIds = activeLines.map(line => line.intervention_id).filter(Boolean);
+  if (packetRow.intervention_id) {
+    interventionIds.push(packetRow.intervention_id);
+  }
+  const interventionMap = await fetchInterventionsById({ ids: interventionIds, connection });
+  const [evidenceRows] = await connection.query(
+    `SELECT payment_packet_line_id, evidence_type, received_at, document_id
+       FROM payment_packet_document
+      WHERE payment_packet_id = ?`,
+    [packetRow.id]
+  );
+  const evidenceMap = buildEvidenceTypeSetMap(evidenceRows || []);
+
+  activeLines.forEach(line => {
+    const intervention = line.intervention_id
+      ? interventionMap.get(Number(line.intervention_id))
+      : packetRow.intervention_id
+        ? interventionMap.get(Number(packetRow.intervention_id))
+        : null;
+    const lineEvidence = mergeEvidenceTypeSets(
+      evidenceMap.baseline,
+      evidenceMap.byLine.get(String(line.id))
+    );
+    const validationErrors = validatePaymentLinePolicy({
+      line,
+      intervention,
+      evidenceTypeKeys: lineEvidence,
+      policyRules,
+      interventionPaymentTypeMap: paymentTypeMap,
+    });
+    validationErrors.forEach(err => {
+      details.push({
+        lineId: String(line.id),
+        field: err.field,
+        error: err.code,
+        message: err.message,
+      });
+    });
+  });
+
+  if (EI_GATE_PACKET_STATUSES.has('submitted')) {
+    const eiViolations = await findEiEligibilityViolations({
+      lines: activeLines,
+      packetRow,
+      interventionMap,
+      connection,
+    });
+    eiViolations.forEach(violation => {
+      details.push({
+        lineId: violation.lineId || null,
+        field: 'eligibility',
+        error: violation.code || 'ei_active_claim',
+        message: violation.message || 'Client is not eligible for this payment.',
+      });
+    });
+  }
+
+  const requiresFundingCheck = true;
+  if (requiresFundingCheck) {
+    const interventionIdsForFunding = new Set();
+    activeLines.forEach(line => {
+      if (line.intervention_id) {
+        interventionIdsForFunding.add(Number(line.intervention_id));
+      } else if (packetRow.intervention_id) {
+        interventionIdsForFunding.add(Number(packetRow.intervention_id));
+      }
+    });
+    const interventionIdList = Array.from(interventionIdsForFunding).filter(Number.isFinite);
+    if (interventionIdList.length) {
+      const fundingInterventionMap = interventionMap?.size
+        ? interventionMap
+        : await fetchInterventionsById({ ids: interventionIdList, connection });
+      const usageMap = await fetchFundingUsageForInterventions({
+        interventionIds: interventionIdList,
+        connection,
+      });
+      const authMap = new Map();
+      for (const line of activeLines) {
+        const interventionId = line.intervention_id || packetRow.intervention_id || null;
+        if (!interventionId) continue;
+        const key = String(interventionId);
+        let auth = authMap.get(key);
+        if (auth === undefined) {
+          const interventionRow = fundingInterventionMap.get(Number(interventionId)) || null;
+          auth = await resolveFundingAuthorizationForIntervention({
+            interventionRow,
+            caseId: packetRow.case_id || interventionRow?.case_id || null,
+            connection,
+          });
+          authMap.set(key, auth || null);
+        }
+        if (!auth) continue;
+        const usage = usageMap.get(key) || { byCategory: {}, total: 0, byLine: new Map() };
+        const lineErrors = validateFundingAuthorizationForLine({ line, auth, usage });
+        lineErrors.forEach(err => {
+          details.push({
+            lineId: String(line.id),
+            field: err.field,
+            error: err.code,
+            message: err.message,
+          });
+        });
+      }
+    }
+  }
+
+  const missingEvidence = await fetchMissingRequiredEvidence({
+    packetId: packetRow.id,
+    connection,
+  });
+
+  const passed = details.length === 0 && missingEvidence.length === 0;
+  return { passed, details, missingEvidence };
+};
 
 const resolveAutoPacketPayeeType = raw => {
   const key = normalizePayeeTypeKey(raw);
@@ -45595,7 +45951,7 @@ app.post('/api/finance/payment-packets', async (req, res) => {
             ? line.payment_type.trim()
             : '';
         if (!paymentType) {
-          lineErrors.push({ index, field: 'paymentType', error: 'required' });
+          lineErrors.push({ index, field: 'paymentType', error: 'required', message: 'Payment type is required.' });
         }
         const payeeType = typeof line.payeeType === 'string'
           ? line.payeeType.trim()
@@ -45603,7 +45959,7 @@ app.post('/api/finance/payment-packets', async (req, res) => {
             ? line.payee_type.trim()
             : '';
         if (!payeeType) {
-          lineErrors.push({ index, field: 'payeeType', error: 'required' });
+          lineErrors.push({ index, field: 'payeeType', error: 'required', message: 'Payee type is required.' });
         }
         const payeeName = typeof line.payeeName === 'string'
           ? line.payeeName.trim()
@@ -45611,17 +45967,17 @@ app.post('/api/finance/payment-packets', async (req, res) => {
             ? line.payee_name.trim()
             : '';
         if (!payeeName) {
-          lineErrors.push({ index, field: 'payeeName', error: 'required' });
+          lineErrors.push({ index, field: 'payeeName', error: 'required', message: 'Payee name is required.' });
         }
         const amount = Number(line.amount);
         if (!Number.isFinite(amount) || amount <= 0) {
-          lineErrors.push({ index, field: 'amount', error: 'invalid' });
+          lineErrors.push({ index, field: 'amount', error: 'invalid', message: 'Amount must be greater than 0.' });
         }
         const potId = normalisePositiveInteger(
           line.potId || line.budgetPotId || line.budget_pot_id
         );
         if (!potId) {
-          lineErrors.push({ index, field: 'budgetPotId', error: 'required' });
+          lineErrors.push({ index, field: 'budgetPotId', error: 'required', message: 'Budget pot is required.' });
         }
         const lineStatus = normalizePaymentLineStatus(line.status) || 'needs_evidence';
         return {
@@ -45647,7 +46003,7 @@ app.post('/api/finance/payment-packets', async (req, res) => {
 
       if (lineErrors.length) {
         await conn.rollback();
-        return res.status(400).json({ error: 'invalid_line_items', details: lineErrors });
+        return res.status(400).json({ error: 'invalid_line_items', message: 'One or more payment line items are invalid.', details: lineErrors });
       }
 
       const potIds = Array.from(new Set(lineInputs.map(line => line.potId)));
@@ -45707,7 +46063,7 @@ app.post('/api/finance/payment-packets', async (req, res) => {
       });
       if (lineErrors.length) {
         await conn.rollback();
-        return res.status(400).json({ error: 'invalid_line_items', details: lineErrors });
+        return res.status(400).json({ error: 'invalid_line_items', message: 'One or more payment line items are invalid.', details: lineErrors });
       }
 
       const lineValues = lineInputs.map(line => {
@@ -45851,6 +46207,7 @@ app.put('/api/finance/payment-packets/:id', async (req, res) => {
       `UPDATE payment_packet SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ?`,
       params
     );
+    await clearPaymentPacketValidation({ packetId, connection: pool });
     const packet = await fetchPaymentPacketById(packetId);
     if (!packet) {
       return res.status(404).json({ error: 'payment_packet_not_found' });
@@ -45896,6 +46253,73 @@ app.delete('/api/finance/payment-packets/:id', async (req, res) => {
     } catch (_) {}
     console.error('[payments] failed to delete payment packet', err);
     return res.status(500).json({ error: 'failed_to_delete_payment_packet' });
+  } finally {
+    conn.release();
+  }
+});
+
+app.post('/api/finance/payment-packets/:id/validate', async (req, res) => {
+  if (requirePaymentsRole(req, res)) return;
+  const packetId = parsePaymentPacketId(req.params.id);
+  if (!Number.isFinite(packetId)) {
+    return res.status(400).json({ error: 'invalid_payment_packet_id' });
+  }
+  const actorUserId =
+    normalisePositiveInteger(req.body?.actorUserId || req.body?.actor_user_id) ||
+    req.user?.id ||
+    req.auth?.id ||
+    null;
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [[packetRow]] = await conn.query(
+      'SELECT * FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE',
+      [packetId]
+    );
+    if (!packetRow) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    if (normalizePacketWorkflowStage(packetRow.status) !== 'draft') {
+      await conn.rollback();
+      return res.status(409).json({ error: 'packet_not_editable', status: packetRow.status || null });
+    }
+
+    const [lineRows] = await conn.query(
+      `SELECT id, payment_packet_id, amount, status, payment_type, payee_name, payee_reference,
+              service_period_start, service_period_end, invoice_reference_number, requested_payment_date,
+              metadata, intervention_id, payee_type, paid_at, payment_reference
+         FROM payment_packet_line
+        WHERE payment_packet_id = ?`,
+      [packetId]
+    );
+
+    const validation = await runPaymentPacketValidation({
+      packetRow,
+      lineRows,
+      connection: conn,
+    });
+
+    await setPaymentPacketValidation({
+      packetId,
+      status: validation.passed ? 'passed' : 'failed',
+      details: validation.details,
+      missingEvidence: validation.missingEvidence,
+      actorUserId,
+      connection: conn,
+    });
+
+    await conn.commit();
+    const packet = await fetchPaymentPacketById(packetId);
+    if (!packet) {
+      return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    return res.status(200).json(packet);
+  } catch (err) {
+    await conn.rollback();
+    console.error('[payments] failed to validate payment packet', err);
+    return res.status(500).json({ error: 'failed_to_validate_payment_packet' });
   } finally {
     conn.release();
   }
@@ -46433,7 +46857,7 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
           ? line.payment_type.trim()
           : '';
       if (!paymentType) {
-        lineErrors.push({ index, field: 'paymentType', error: 'required' });
+        lineErrors.push({ index, field: 'paymentType', error: 'required', message: 'Payment type is required.' });
       }
       const payeeType = typeof line.payeeType === 'string'
         ? line.payeeType.trim()
@@ -46441,7 +46865,7 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
           ? line.payee_type.trim()
           : '';
       if (!payeeType) {
-        lineErrors.push({ index, field: 'payeeType', error: 'required' });
+        lineErrors.push({ index, field: 'payeeType', error: 'required', message: 'Payee type is required.' });
       }
       const payeeName = typeof line.payeeName === 'string'
         ? line.payeeName.trim()
@@ -46449,17 +46873,17 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
           ? line.payee_name.trim()
             : '';
       if (!payeeName) {
-        lineErrors.push({ index, field: 'payeeName', error: 'required' });
+        lineErrors.push({ index, field: 'payeeName', error: 'required', message: 'Payee name is required.' });
       }
       const amount = Number(line.amount);
       if (!Number.isFinite(amount) || amount <= 0) {
-        lineErrors.push({ index, field: 'amount', error: 'invalid' });
+        lineErrors.push({ index, field: 'amount', error: 'invalid', message: 'Amount must be greater than 0.' });
       }
       const potId = normalisePositiveInteger(
         line.potId || line.budgetPotId || line.budget_pot_id
       );
       if (!potId) {
-        lineErrors.push({ index, field: 'budgetPotId', error: 'required' });
+        lineErrors.push({ index, field: 'budgetPotId', error: 'required', message: 'Budget pot is required.' });
       }
       const lineStatus = normalizePaymentLineStatus(line.status) || 'needs_evidence';
       return {
@@ -46485,7 +46909,7 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
 
     if (lineErrors.length) {
       await conn.rollback();
-      return res.status(400).json({ error: 'invalid_line_items', details: lineErrors });
+      return res.status(400).json({ error: 'invalid_line_items', message: 'One or more payment line items are invalid.', details: lineErrors });
     }
 
     const potIds = Array.from(new Set(lineInputs.map(line => line.potId)));
@@ -46545,7 +46969,7 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
     });
     if (lineErrors.length) {
       await conn.rollback();
-      return res.status(400).json({ error: 'invalid_line_items', details: lineErrors });
+      return res.status(400).json({ error: 'invalid_line_items', message: 'One or more payment line items are invalid.', details: lineErrors });
     }
 
     const fundingErrors = await validateFundingAuthorizationForNewLines({
@@ -46556,7 +46980,7 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
     });
     if (fundingErrors.length) {
       await conn.rollback();
-      return res.status(400).json({ error: 'invalid_line_items', details: fundingErrors });
+      return res.status(400).json({ error: 'invalid_line_items', message: 'One or more payment line items exceed available funding.', details: fundingErrors });
     }
 
     const lineValues = lineInputs.map(line => {
@@ -46637,6 +47061,8 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
       interventionIds: Array.from(interventionIdsForEvidence),
       connection: conn,
     });
+
+    await clearPaymentPacketValidation({ packetId, connection: conn });
 
     await conn.commit();
     const packet = await fetchPaymentPacketById(packetId);
@@ -46903,7 +47329,7 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
     });
     if (validationErrors.length) {
       await conn.rollback();
-      return res.status(400).json({ error: 'invalid_line_items', details: validationErrors });
+      return res.status(400).json({ error: 'invalid_line_items', message: 'One or more payment line items are invalid.', details: validationErrors });
     }
 
     const fundingErrors = await validateFundingAuthorizationForNewLines({
@@ -46914,7 +47340,7 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
     });
     if (fundingErrors.length) {
       await conn.rollback();
-      return res.status(400).json({ error: 'invalid_line_items', details: fundingErrors });
+      return res.status(400).json({ error: 'invalid_line_items', message: 'One or more payment line items exceed available funding.', details: fundingErrors });
     }
 
     const lineValues = lineInputs.map(line => {
@@ -46995,6 +47421,8 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
       interventionIds: Array.from(interventionIdsForEvidence),
       connection: conn,
     });
+
+    await clearPaymentPacketValidation({ packetId, connection: conn });
 
     await conn.commit();
     const packet = await fetchPaymentPacketById(packetId);
@@ -47197,6 +47625,7 @@ app.put('/api/finance/payment-lines/:id', async (req, res) => {
     if (validationErrors.length) {
       return res.status(400).json({
         error: 'invalid_line_items',
+        message: 'One or more payment line items are invalid.',
         details: validationErrors.map(err => ({
           field: err.field,
           error: err.code,
@@ -47222,6 +47651,7 @@ app.put('/api/finance/payment-lines/:id', async (req, res) => {
       if (fundingErrors.length) {
         return res.status(400).json({
           error: 'invalid_line_items',
+          message: 'One or more payment line items exceed available funding.',
           details: fundingErrors.map(err => ({
             field: err.field,
             error: err.code,
@@ -47251,6 +47681,7 @@ app.put('/api/finance/payment-lines/:id', async (req, res) => {
         connection: pool,
       });
     }
+    await clearPaymentPacketValidation({ packetId: nextLine.payment_packet_id, connection: pool });
     const [[lineRow]] = await pool.query(
       `SELECT ppl.*, bp.name AS pot_name, bp.funding_source AS pot_funding_source
          FROM payment_packet_line ppl
@@ -47650,6 +48081,13 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
       }
     }
 
+    if (normalizePacketWorkflowStage(lineRow.packet_status) === 'draft') {
+      await clearPaymentPacketValidation({
+        packetId: lineRow.payment_packet_id,
+        connection: conn,
+      });
+    }
+
     await conn.commit();
     await refreshFinancePotSums();
     const [[updatedLine]] = await pool.query(
@@ -47766,6 +48204,7 @@ app.post('/api/finance/payment-packets/:id/documents', async (req, res) => {
         LIMIT 1`,
       [result.insertId]
     );
+    await clearPaymentPacketValidation({ packetId, connection: pool });
     res.status(201).json(mapPaymentDocumentRow(evidenceRow));
   } catch (err) {
     console.error('[payments] failed to attach payment document', err);
@@ -47844,6 +48283,9 @@ app.put('/api/finance/payment-documents/:id', async (req, res) => {
     if (!row) {
       return res.status(404).json({ error: 'payment_document_not_found' });
     }
+    if (row.payment_packet_id) {
+      await clearPaymentPacketValidation({ packetId: row.payment_packet_id, connection: pool });
+    }
     res.status(200).json(mapPaymentDocumentRow(row));
   } catch (err) {
     console.error('[payments] failed to update payment document', err);
@@ -47858,12 +48300,22 @@ app.delete('/api/finance/payment-documents/:id', async (req, res) => {
     return res.status(400).json({ error: 'invalid_payment_document_id' });
   }
   try {
+    const [[row]] = await pool.query(
+      'SELECT payment_packet_id FROM payment_packet_document WHERE id = ? LIMIT 1',
+      [documentLinkId]
+    );
+    if (!row) {
+      return res.status(404).json({ error: 'payment_document_not_found' });
+    }
     const [result] = await pool.query(
       'DELETE FROM payment_packet_document WHERE id = ?',
       [documentLinkId]
     );
     if (!result?.affectedRows) {
       return res.status(404).json({ error: 'payment_document_not_found' });
+    }
+    if (row.payment_packet_id) {
+      await clearPaymentPacketValidation({ packetId: row.payment_packet_id, connection: pool });
     }
     res.status(200).json({ ok: true, deleted: true, id: String(documentLinkId) });
   } catch (err) {

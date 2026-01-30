@@ -1,6 +1,6 @@
 Purpose: Single source for Finance module enablement decisions, milestones, and next actions.  
 Audience: Finance/Casework engineers, product, ops.  
-Last Updated: 2026-01-03
+Last Updated: 2026-01-30
 
 # Finance Module Enablement Tracker
 
@@ -34,6 +34,50 @@ Last Updated: 2026-01-03
 
 ## Payments — Remaining MUSTs
 - None. All current MUST items completed for payments enablement.
+
+## Payments — Sage Intacct XML Web Services (AP Bill) integration plan
+Goal: Submit payment packets directly to Sage Intacct as AP Bills using the XML Web Services API.
+
+### What the Intacct owner/admin must provide
+- **Company ID** (tenant/company identifier).
+- **Web Services enabled** for the tenant.
+- **Sender ID + Sender password** (developer license credentials authorized for the tenant).
+- **Web Services user** (user ID + password) or approval to use **session authentication** via `getAPISession`.
+- **Authorized dimensions**:
+  - Location/Entity IDs (if required by the tenant).
+  - Department IDs (if required by the tenant).
+  - Currency/base currency rules (if multi-currency is enabled).
+- **Vendor setup**:
+  - Vendor IDs for payees (preferred), or agreement on how vendor records will be created/mapped.
+  - Required vendor fields in the tenant (e.g., email, contact, payment terms).
+- **GL account mapping**:
+  - Account numbers or account labels to use for each budget pot or payment type.
+  - Confirmation of which dimension drives GL distribution (pot, payment type, program).
+- **Permissions/roles** for the Web Services user to create AP Bills and (optionally) attachments.
+- **API environment**: production vs sandbox tenant details.
+
+### Engineering tasks to move from preview → live submission
+- **Server endpoint**: add a secure backend route to build XML and POST to the Intacct XML gateway.
+- **Authentication**:
+  - Implement `getAPISession` (recommended for repeat calls) or login auth per request.
+  - Store credentials and session tokens server-side only (never in the client).
+- **Request/response handling**:
+  - Use unique `controlid` values per submission.
+  - Handle Intacct error responses and log full response payloads.
+  - Capture Intacct bill identifiers (e.g., `RECORDNO`) and store them on the packet.
+- **Field mapping + validation**:
+  - Map packet header to `APBILL` fields (VENDORID, BILLNO, WHENCREATED, WHENDUE, DESCRIPTION, ACTION=Draft/Submit).
+  - Map lines to `APBILLITEM` (ACCOUNTNO/ACCOUNTLABEL, TRX_AMOUNT, ENTRYDESCRIPTION, optional LOCATIONID/DEPARTMENTID).
+  - Block submission if required data is missing; surface the exact missing fields in the UI.
+- **Idempotency + retries**:
+  - Use Intacct `uniqueid` and stable `controlid` for retry safety.
+  - Implement retry rules for transient gateway errors.
+- **Audit + observability**:
+  - Persist XML payload snapshots and response logs for compliance/audit.
+  - Add a submission status timeline entry and success/failure notifications.
+- **Security + access control**:
+  - Restrict submission to finance/admin roles.
+  - Protect endpoint with auth + rate limiting.
 
 ## Payments — Completion Plan (proposed order)
 1. Auto-generate packets from approved interventions (define trigger, map approval data to packet/line, default statuses, audit event). ✅

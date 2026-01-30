@@ -46,20 +46,20 @@ function normalizeRegionIds(auth) {
   return [];
 }
 
-function scopePredicate(tableAlias, auth) {
+function scopePredicate(tableAlias, auth, regionColumn = 'region_id') {
   if (canAccessAll(auth)) return { sql: '1=1', params: [] };
   if (!isRegionScoped(auth)) return { sql: '0=1', params: [] };
   const regionIds = normalizeRegionIds(auth);
   if (!regionIds.length) return { sql: '0=1', params: [] };
   if (isRegionalCoordinatorRole(auth?.role)) {
     if (regionIds.length === 1) {
-      return { sql: `${tableAlias}.region_id = ?`, params: [regionIds[0]] };
+      return { sql: `${tableAlias}.${regionColumn} = ?`, params: [regionIds[0]] };
     }
-    return { sql: `${tableAlias}.region_id IN (${regionIds.map(() => '?').join(',')})`, params: regionIds };
+    return { sql: `${tableAlias}.${regionColumn} IN (${regionIds.map(() => '?').join(',')})`, params: regionIds };
   }
   if (isAssessorRole(auth?.role)) {
     // Both region and assignment constraints (assumes assigned_to_user_id column)
-    return { sql: `${tableAlias}.region_id = ? AND ${tableAlias}.assigned_to_user_id = ?`, params: [regionIds[0], Number(auth.userId) || -1] };
+    return { sql: `${tableAlias}.${regionColumn} = ? AND ${tableAlias}.assigned_to_user_id = ?`, params: [regionIds[0], Number(auth.userId) || -1] };
   }
   return { sql: '0=1', params: [] };
 }

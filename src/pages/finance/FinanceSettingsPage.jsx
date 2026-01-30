@@ -2,10 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Board from "@cloudscape-design/board-components/board";
 import { Box, SpaceBetween } from "@cloudscape-design/components";
 import FinanceEmailRoutingWidget from "./widgets/FinanceEmailRoutingWidget.jsx";
+import FinanceIntacctIntegrationWidget from "./widgets/FinanceIntacctIntegrationWidget.jsx";
 import FinancePaymentTypeMappingWidget from "./widgets/FinancePaymentTypeMappingWidget.jsx";
 import FinanceSettingsOverviewWidget from "./widgets/FinanceSettingsOverviewWidget.jsx";
 
-const STORAGE_KEY = "finance-settings-layout-v1";
+const STORAGE_KEY = "finance-settings-layout-v2";
 
 const widgetRegistry = {
   overview: {
@@ -41,12 +42,24 @@ const widgetRegistry = {
     helpTitle: "Finance email routing",
     aiContext: null,
   },
+  intacctIntegration: {
+    id: "intacctIntegration",
+    defaultRowSpan: 9,
+    defaultColumnSpan: 4,
+    component: FinanceIntacctIntegrationWidget,
+    title: "Sage Intacct integration",
+    description: "Store Intacct XML Web Services credentials and defaults.",
+    helpComponent: null,
+    helpTitle: "Sage Intacct integration",
+    aiContext: null,
+  },
 };
 
 const defaultLayout = [
   { id: "overview", rowSpan: 4, columnSpan: 4 },
   { id: "paymentTypeMap", rowSpan: 8, columnSpan: 4 },
   { id: "emailRouting", rowSpan: 5, columnSpan: 4 },
+  { id: "intacctIntegration", rowSpan: 9, columnSpan: 4 },
 ];
 
 const exportLayout = items =>

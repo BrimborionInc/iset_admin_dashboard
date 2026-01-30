@@ -2,7 +2,7 @@
 
 Purpose: Provide a plain-language guide for using the Payments module dashboards from draft through submission to Finance (email).  
 Audience: Program staff and admin operators; Finance receives email submissions (no sign-in).  
-Last Updated: 2026-01-04
+Last Updated: 2026-01-30
 
 ## 1) Introduction (for new users)
 The Payments module is where payment requests are created and submitted to Finance by email. A request starts as a **payment packet** with one or more payment lines; evidence must be attached before submission. The goal is to ensure submissions are compliant, auditable, and easy to report.
@@ -28,12 +28,12 @@ Access is role-based. If you do not see a button or action, your role likely doe
 ### Program Payments (`/iset/payments`)
 Widgets:
 - **Payment packet queue**: List of packets and filters (Draft, Submitted to Finance).
-- **Payment packet detail**: Packet lines, evidence checklist, and submit action.
+- **Payment packet detail**: Packet lines, evidence checklist, submit action, and an Intacct XML (Draft) preview tab.
 
 ### Finance Payments (`/finance/payments`)
 Widgets:
 - **Payment packet queue**: Draft vs submitted filters for oversight.
-- **Payment packet detail**: Read-only view of lines and evidence.
+- **Payment packet detail**: Read-only view of lines, evidence, and the Intacct XML (Draft) preview tab.
 - **Payment communications**: Email log for submissions.
 - **SLA snapshot**: Drafts needing evidence and submission age metrics.
 
@@ -90,6 +90,12 @@ What you should do:
 ### D) Submit to Finance
 1. Click **Submit to finance** once required evidence is received.
 2. The system emails the configured finance address and locks edits on the packet.
+
+### E) Intacct XML preview (Draft)
+1. Open **Intacct XML (Draft)** in the Payment packet detail tabs.
+2. Review the generated AP Bill XML; missing fields are listed and marked as `MISSING_*`.
+3. Use **Copy XML** or **Download .xml** for demos.
+4. Note: The preview is read-only and is not transmitted to Intacct.
 
 ## 7) Finance (email-only)
 Finance receives the submission email containing the packet summary, evidence list, and line details. No in-app review or confirmation steps are required.

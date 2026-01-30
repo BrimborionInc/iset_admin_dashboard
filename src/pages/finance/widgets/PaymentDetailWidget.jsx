@@ -9,14 +9,17 @@ import {
   Link,
   StatusIndicator,
   Button,
+  Tabs,
   Table,
   ExpandableSection,
   Alert,
+  Container,
   Modal,
   FormField,
   Input,
   DatePicker,
   FileUpload,
+  Textarea,
   RadioGroup,
   Select,
 } from "@cloudscape-design/components";
@@ -167,6 +170,31 @@ const formatPolicyViolationDetails = details => {
     .filter(Boolean);
 };
 
+const extractValidationIssues = validation => {
+  if (!validation || typeof validation !== "object") {
+    return { details: [], missingEvidence: [] };
+  }
+  const issues = validation.issues || validation.issue || {};
+  const details = Array.isArray(issues.details)
+    ? issues.details
+    : Array.isArray(validation.details)
+      ? validation.details
+      : [];
+  const missingEvidence = Array.isArray(issues.missingEvidence)
+    ? issues.missingEvidence
+    : Array.isArray(issues.missing_evidence)
+      ? issues.missing_evidence
+      : Array.isArray(validation.missingEvidence)
+        ? validation.missingEvidence
+        : Array.isArray(validation.missing_evidence)
+          ? validation.missing_evidence
+          : [];
+  return {
+    details: details.filter(Boolean),
+    missingEvidence: missingEvidence.filter(Boolean),
+  };
+};
+
 const buildEvidenceMeta = item => {
   if (item.required && !item.received) {
     return { indicator: "error", label: "Missing" };
@@ -221,12 +249,245 @@ const formatShortDate = value => {
   return date.toLocaleDateString();
 };
 
+const escapeXml = value =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+
+const formatIntacctDate = value => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    const mm = String(value.getMonth() + 1).padStart(2, "0");
+    const dd = String(value.getDate()).padStart(2, "0");
+    const yyyy = value.getFullYear();
+    return `${mm}/${dd}/${yyyy}`;
+  }
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    return `${isoMatch[2]}/${isoMatch[3]}/${isoMatch[1]}`;
+  }
+  const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const mm = slashMatch[1].padStart(2, "0");
+    const dd = slashMatch[2].padStart(2, "0");
+    return `${mm}/${dd}/${slashMatch[3]}`;
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+  const dd = String(parsed.getDate()).padStart(2, "0");
+  const yyyy = parsed.getFullYear();
+  return `${mm}/${dd}/${yyyy}`;
+};
+
+const toMissingPlaceholder = label =>
+  `MISSING_${String(label).toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`;
+
+const extractAccountNo = line => {
+  const direct =
+    line?.accountNo ||
+    line?.account_no ||
+    line?.glAccount ||
+    line?.gl_account ||
+    null;
+  if (direct) return String(direct).trim();
+  const potName = line?.potName;
+  if (!potName) return null;
+  const [firstPart] = String(potName).split(" - ");
+  if (!firstPart) return null;
+  const trimmed = firstPart.trim();
+  return trimmed ? trimmed : null;
+};
+
+const buildIntacctApBillPreview = (packet, config = null) => {
+  if (!packet) {
+    return { xml: "", missingFields: [] };
+  }
+  const configValues = config && typeof config === "object" && config.enabled ? config : {};
+  const resolveCredential = (value, placeholder) => {
+    const trimmed = value ? String(value).trim() : "";
+    return trimmed ? trimmed : placeholder;
+  };
+  const defaultLocationId = configValues.defaultLocationId
+    ? String(configValues.defaultLocationId).trim()
+    : "";
+  const defaultDepartmentId = configValues.defaultDepartmentId
+    ? String(configValues.defaultDepartmentId).trim()
+    : "";
+  const missingFields = [];
+  const requireValue = (label, value) => {
+    if (value === null || value === undefined || value === "") {
+      missingFields.push(label);
+      return toMissingPlaceholder(label);
+    }
+    return String(value);
+  };
+  const requireDate = (label, value) => {
+    const formatted = formatIntacctDate(value);
+    if (!formatted) {
+      missingFields.push(label);
+      return toMissingPlaceholder(label);
+    }
+    return formatted;
+  };
+  const lines = Array.isArray(packet.lines) ? packet.lines.filter(Boolean) : [];
+  const firstLine = lines[0] ?? null;
+  const vendorIdValue = requireValue(
+    "Vendor ID (VENDORID)",
+    firstLine?.payeeReference || packet?.vendorId || packet?.vendor_id
+  );
+  const billNoValue = requireValue(
+    "Bill number (BILLNO)",
+    packet?.billNumber || packet?.bill_number || packet?.id || packet?.paymentReference
+  );
+  const billDateValue = requireDate(
+    "Bill date (WHENCREATED)",
+    packet?.submittedOn || packet?.submitted_on || packet?.createdOn || packet?.created_on || firstLine?.requestedPaymentDate
+  );
+  const dueDateValue = requireDate(
+    "Due date (WHENDUE)",
+    packet?.dueBy || packet?.due_by || firstLine?.requestedPaymentDate
+  );
+  const docNumberValue =
+    firstLine?.invoiceReferenceNumber || firstLine?.invoice_reference_number || null;
+  const descriptionParts = [
+    packet?.caseNumber ? `Case ${packet.caseNumber}` : null,
+    packet?.interventionName || packet?.intervention_name || null,
+    packet?.clientName || packet?.client_name || null,
+  ].filter(Boolean);
+  const description =
+    descriptionParts.join(" • ") ||
+    `Payment packet ${packet?.id || packet?.billNumber || "preview"}`;
+
+  if (!lines.length) {
+    missingFields.push("At least one line item (APBILLITEM)");
+  }
+
+  const apBillItems = (lines.length ? lines : [null]).map((line, index) => {
+    const lineId = line?.id ?? `${index + 1}`;
+    const accountNoValue = extractAccountNo(line);
+    const resolvedAccountNo = accountNoValue
+      ? accountNoValue
+      : (() => {
+          const label = `Line ${lineId}: Account number (ACCOUNTNO)`;
+          missingFields.push(label);
+          return toMissingPlaceholder(label);
+        })();
+    const amountRaw = Number.isFinite(line?.amount) ? Number(line.amount) : null;
+    const resolvedAmount =
+      amountRaw !== null
+        ? amountRaw.toFixed(2)
+        : (() => {
+            const label = `Line ${lineId}: Amount (TRX_AMOUNT)`;
+            missingFields.push(label);
+            return toMissingPlaceholder(label);
+          })();
+    const entryDescriptionParts = [
+      line?.paymentType || line?.payment_type || null,
+      line?.payeeName || line?.payee_name || null,
+      line?.servicePeriodLabel && line?.servicePeriodLabel !== "-" ? line.servicePeriodLabel : null,
+      line?.potName || line?.pot_name ? `Pot: ${line?.potName || line?.pot_name}` : null,
+    ].filter(Boolean);
+    const entryDescription =
+      entryDescriptionParts.join(" • ") || `Payment packet line ${lineId}`;
+    const locationId =
+      line?.reportingUnit ||
+      line?.reporting_unit ||
+      packet?.reportingUnit ||
+      packet?.reporting_unit ||
+      defaultLocationId ||
+      null;
+    return {
+      lineId,
+      accountNo: resolvedAccountNo,
+      amount: resolvedAmount,
+      entryDescription,
+      locationId,
+      departmentId: defaultDepartmentId || null,
+    };
+  });
+
+  const controlId = `payment-packet-${packet?.id || "preview"}`;
+  const senderIdValue = resolveCredential(configValues.senderId, "YOUR_SENDER_ID");
+  const senderPasswordValue = resolveCredential(
+    configValues.senderPassword,
+    "YOUR_SENDER_PASSWORD"
+  );
+  const userIdValue = resolveCredential(configValues.userId, "YOUR_USER_ID");
+  const companyIdValue = resolveCredential(configValues.companyId, "YOUR_COMPANY_ID");
+  const userPasswordValue = resolveCredential(configValues.userPassword, "YOUR_USER_PASSWORD");
+  const xmlLines = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    "<request>",
+    "  <control>",
+    `    <senderid>${escapeXml(senderIdValue)}</senderid>`,
+    `    <password>${escapeXml(senderPasswordValue)}</password>`,
+    `    <controlid>${escapeXml(controlId)}</controlid>`,
+    "    <uniqueid>false</uniqueid>",
+    "    <dtdversion>3.0</dtdversion>",
+    "    <includewhitespace>false</includewhitespace>",
+    "  </control>",
+    "  <operation>",
+    "    <authentication>",
+    "      <login>",
+    `        <userid>${escapeXml(userIdValue)}</userid>`,
+    `        <companyid>${escapeXml(companyIdValue)}</companyid>`,
+    `        <password>${escapeXml(userPasswordValue)}</password>`,
+    "      </login>",
+    "    </authentication>",
+    "    <content>",
+    `      <function controlid="${escapeXml(controlId)}">`,
+    "        <create>",
+    "          <APBILL>",
+    `            <VENDORID>${escapeXml(vendorIdValue)}</VENDORID>`,
+    `            <BILLNO>${escapeXml(billNoValue)}</BILLNO>`,
+    `            <WHENCREATED>${escapeXml(billDateValue)}</WHENCREATED>`,
+    `            <WHENDUE>${escapeXml(dueDateValue)}</WHENDUE>`,
+    "            <ACTION>Draft</ACTION>",
+    docNumberValue ? `            <DOCNUMBER>${escapeXml(docNumberValue)}</DOCNUMBER>` : null,
+    `            <DESCRIPTION>${escapeXml(description)}</DESCRIPTION>`,
+    "            <APBILLITEMS>",
+    ...apBillItems.flatMap(item => {
+      const itemLines = [
+        "              <APBILLITEM>",
+        `                <ACCOUNTNO>${escapeXml(item.accountNo)}</ACCOUNTNO>`,
+        `                <TRX_AMOUNT>${escapeXml(item.amount)}</TRX_AMOUNT>`,
+        `                <ENTRYDESCRIPTION>${escapeXml(item.entryDescription)}</ENTRYDESCRIPTION>`,
+      ];
+      if (item.locationId) {
+        itemLines.push(`                <LOCATIONID>${escapeXml(item.locationId)}</LOCATIONID>`);
+      }
+      if (item.departmentId) {
+        itemLines.push(`                <DEPARTMENTID>${escapeXml(item.departmentId)}</DEPARTMENTID>`);
+      }
+      itemLines.push("              </APBILLITEM>");
+      return itemLines;
+    }),
+    "            </APBILLITEMS>",
+    "          </APBILL>",
+    "        </create>",
+    "      </function>",
+    "    </content>",
+    "  </operation>",
+    "</request>",
+  ].filter(Boolean);
+
+  return { xml: xmlLines.join("\n"), missingFields };
+};
+
 const API_BASE_URL = (process.env.REACT_APP_API_BASE_URL || "").replace(/\/$/, "");
 
 const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
     selectedRequest,
     updatePacketStatus,
+    validatePacket,
     updateLine,
     deleteLine,
     addPacketLines,
@@ -237,6 +498,12 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   } = usePaymentsData();
   const [selectedLineId, setSelectedLineId] = useState(null);
   const [actionStatus, setActionStatus] = useState(null);
+  const [activeTabId, setActiveTabId] = useState("packet-details");
+  const [xmlActionStatus, setXmlActionStatus] = useState(null);
+  const [intacctConfig, setIntacctConfig] = useState(null);
+  const [intacctConfigLoading, setIntacctConfigLoading] = useState(false);
+  const [intacctConfigError, setIntacctConfigError] = useState(null);
+  const [validationSubmitting, setValidationSubmitting] = useState(false);
   const [recurringModalOpen, setRecurringModalOpen] = useState(false);
   const [recurringSubmitting, setRecurringSubmitting] = useState(false);
   const [recurringError, setRecurringError] = useState(null);
@@ -355,6 +622,29 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     };
   }, []);
 
+  const loadIntacctConfig = useCallback(async () => {
+    setIntacctConfigLoading(true);
+    setIntacctConfigError(null);
+    try {
+      const resp = await apiFetch("/api/config/runtime/intacct-integration");
+      if (!resp.ok) {
+        const message = (await resp.json().catch(() => ({}))).message || resp.statusText;
+        throw new Error(message || "Failed to load Intacct settings");
+      }
+      const payload = await resp.json();
+      setIntacctConfig(payload || null);
+    } catch (err) {
+      setIntacctConfig(null);
+      setIntacctConfigError(err?.message || "Failed to load Intacct settings.");
+    } finally {
+      setIntacctConfigLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadIntacctConfig();
+  }, [loadIntacctConfig]);
+
   useEffect(() => {
     if (selectedRequest?.lines?.length) {
       const firstId = selectedRequest.lines[0].id;
@@ -363,6 +653,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setSelectedLineId(null);
     }
     setActionStatus(null);
+    setActiveTabId("packet-details");
+    setXmlActionStatus(null);
     setRecurringModalOpen(false);
     setRecurringSubmitting(false);
     setRecurringError(null);
@@ -436,6 +728,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
 
   const packetLines = selectedRequest?.lines ?? [];
   const packetStatusKey = normalizePacketStatusKey(selectedRequest?.status);
+  const packetValidation =
+    selectedRequest?.validation || selectedRequest?.metadata?.paymentValidation || null;
+  const validationStatus =
+    typeof packetValidation?.status === "string" ? packetValidation.status.toLowerCase() : null;
+  const isValidated = validationStatus === "passed";
 
   const selectedLine = useMemo(() => {
     if (!packetLines.length) return null;
@@ -458,6 +755,19 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     packetStatusKey === "draft";
   const canEditPacketLines = selectedRequest && packetStatusKey === "draft";
   const canUploadEvidence = packetStatusKey === "draft";
+  const intacctPreview = useMemo(
+    () => buildIntacctApBillPreview(selectedRequest, intacctConfig),
+    [selectedRequest, intacctConfig]
+  );
+  const intacctXml = intacctPreview.xml;
+  const intacctMissingFields = intacctPreview.missingFields;
+  const intacctMissingFieldsUnique = useMemo(
+    () => Array.from(new Set(intacctMissingFields)),
+    [intacctMissingFields]
+  );
+  const xmlFileName = selectedRequest?.id
+    ? `payment-packet-${selectedRequest.id}-intacct.xml`
+    : "payment-packet-intacct.xml";
   const evidenceDocumentRows = useMemo(() => {
     if (!selectedRequest) return [];
     const rows = [];
@@ -1081,6 +1391,59 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     }
   };
 
+  const handlePacketValidation = async () => {
+    if (!selectedRequest?.id || validationSubmitting) return;
+    setActionStatus(null);
+    setValidationSubmitting(true);
+    try {
+      const updated = await validatePacket(selectedRequest.id);
+      const validation =
+        updated?.validation || updated?.metadata?.paymentValidation || null;
+      const status = typeof validation?.status === "string" ? validation.status.toLowerCase() : null;
+      const { details, missingEvidence } = extractValidationIssues(validation);
+      const policySummaries = formatPolicyViolationDetails(details) || [];
+      const evidenceSummary = formatEvidenceMissingDetails(missingEvidence);
+      if (status === "passed") {
+        setActionStatus({
+          type: "success",
+          message: "Validation passed. You can submit this packet to finance.",
+        });
+        return;
+      }
+      const blockerSummaries = [
+        ...policySummaries,
+        ...(evidenceSummary ? [evidenceSummary] : []),
+      ].filter(Boolean);
+      if (blockerSummaries.length) {
+        setActionStatus({
+          type: "error",
+          message: (
+            <SpaceBetween size="xs">
+              <Box variant="strong">Validation blocked:</Box>
+              {blockerSummaries.map((summary, index) => (
+                <Box key={`${summary}-${index}`} variant="p">
+                  {summary}
+                </Box>
+              ))}
+            </SpaceBetween>
+          ),
+        });
+        return;
+      }
+      setActionStatus({
+        type: "error",
+        message: "Validation failed. Review the packet and try again.",
+      });
+    } catch (err) {
+      setActionStatus({
+        type: "error",
+        message: err?.message || "Failed to validate packet.",
+      });
+    } finally {
+      setValidationSubmitting(false);
+    }
+  };
+
   const openRecurringModal = () => {
     if (!selectedLine) return;
     const today = new Date().toISOString().slice(0, 10);
@@ -1351,6 +1714,45 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       cell: item => item.potName,
     },
   ];
+  const handleCopyXml = useCallback(async () => {
+    if (!intacctXml) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(intacctXml);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = intacctXml;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setXmlActionStatus({ type: "success", message: "XML copied to clipboard." });
+    } catch (err) {
+      setXmlActionStatus({ type: "error", message: "Failed to copy XML." });
+    }
+  }, [intacctXml]);
+
+  const handleDownloadXml = useCallback(() => {
+    if (!intacctXml) return;
+    try {
+      const blob = new Blob([intacctXml], { type: "application/xml" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = xmlFileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setXmlActionStatus({ type: "success", message: `Downloaded ${xmlFileName}.` });
+    } catch (err) {
+      setXmlActionStatus({ type: "error", message: "Failed to download XML." });
+    }
+  }, [intacctXml, xmlFileName]);
   const buildEvidenceActionItems = item => {
     const hasDocuments = (item.documentLinks?.length || 0) > 0;
     const canEdit = canUploadEvidence;
@@ -1423,7 +1825,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     },
   ];
 
-  const canSubmitPacket = packetStatusKey === "draft";
+  const canValidatePacket = packetStatusKey === "draft" && !isValidated;
+  const canSubmitPacket = packetStatusKey === "draft" && isValidated;
 
   const activeEvidenceDocuments = activeEvidenceRow?.documentLinks ?? [];
   const activeEvidenceContext = activeEvidenceRow
@@ -1437,6 +1840,16 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       <StatusIndicator type={packetStatusMeta[packetStatusKey].indicator}>
         {packetStatusMeta[packetStatusKey].label}
       </StatusIndicator>
+      {canValidatePacket ? (
+        <Button
+          variant="primary"
+          onClick={handlePacketValidation}
+          disabled={!selectedRequest?.id || validationSubmitting}
+          loading={validationSubmitting}
+        >
+          {validationSubmitting ? "Validating" : "Validate"}
+        </Button>
+      ) : null}
       {canSubmitPacket ? (
         <Button
           variant="primary"
@@ -1450,7 +1863,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     </SpaceBetween>
   ) : undefined;
   const detailDescription =
-    "Add payment lines, attach evidence, then submit to finance (submission emails finance and locks edits).";
+    "Add payment lines, attach evidence, validate, then submit to finance (submission emails finance and locks edits).";
   return (
     <BoardItem
       header={
@@ -1476,91 +1889,221 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       i18nStrings={boardItemI18nStrings}
     >
       {selectedRequest ? (
-        <SpaceBetween size="l">
-          {actionStatus && (
-            <Alert type={actionStatus.type} dismissible onDismiss={() => setActionStatus(null)}>
-              {actionStatus.message}
-            </Alert>
-          )}
-          <Table
-            trackBy="id"
-            items={packetLines}
-            selectionType="single"
-            selectedItems={selectedLine ? [selectedLine] : []}
-            onSelectionChange={({ detail }) => {
-              const nextItem = (detail.selectedItems || [])[0] || null;
-              setSelectedLineId(nextItem?.id ?? null);
-            }}
-            columnDefinitions={lineColumns}
-            variant="embedded"
-            header={
-              <Header
-                variant="h3"
-                counter={`(${packetLines.length})`}
-                actions={
-                  canEditPacketLines ? (
+        <Tabs
+          activeTabId={activeTabId}
+          onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
+          ariaLabel="Payment packet detail tabs"
+          tabs={[
+            {
+              id: "packet-details",
+              label: "Packet details",
+              content: (
+                <SpaceBetween size="l">
+                  {actionStatus && (
+                    <Alert type={actionStatus.type} dismissible onDismiss={() => setActionStatus(null)}>
+                      {actionStatus.message}
+                    </Alert>
+                  )}
+                  <Table
+                    trackBy="id"
+                    items={packetLines}
+                    selectionType="single"
+                    selectedItems={selectedLine ? [selectedLine] : []}
+                    onSelectionChange={({ detail }) => {
+                      const nextItem = (detail.selectedItems || [])[0] || null;
+                      setSelectedLineId(nextItem?.id ?? null);
+                    }}
+                    columnDefinitions={lineColumns}
+                    variant="embedded"
+                    header={
+                      <Header
+                        variant="h3"
+                        counter={`(${packetLines.length})`}
+                        actions={
+                          canEditPacketLines ? (
+                            <SpaceBetween direction="horizontal" size="xs">
+                              <Button onClick={openLineCreateModal} disabled={!canEditPacketLines}>
+                                Add line
+                              </Button>
+                              <Button
+                                onClick={openLineEditModal}
+                                disabled={!canEditPacketLines || !selectedLine}
+                              >
+                                Edit selected
+                              </Button>
+                              <Button
+                                onClick={openDeleteLineModal}
+                                disabled={!canEditPacketLines || !selectedLine}
+                              >
+                                Delete selected
+                              </Button>
+                            </SpaceBetween>
+                          ) : undefined
+                        }
+                      >
+                        Payment lines
+                      </Header>
+                    }
+                    empty={<Box padding="m">No payment lines attached to this packet.</Box>}
+                  />
+
+                  {selectedLine ? (
+                    <SpaceBetween size="m">
+                      <SpaceBetween direction="horizontal" size="xs">
+                        <Button onClick={openRecurringModal} disabled={!recurringEligible}>
+                          Generate recurring lines
+                        </Button>
+                      </SpaceBetween>
+                    </SpaceBetween>
+                  ) : (
+                    <Box variant="p">Select a payment line to view details.</Box>
+                  )}
+
+                  <ExpandableSection headerText="Evidence and documents">
+                    <SpaceBetween size="m">
+                      <Table
+                        items={evidenceDocumentRows}
+                        columnDefinitions={evidenceDocumentColumns}
+                        trackBy="id"
+                        variant="embedded"
+                        empty={<Box padding="m">No evidence or documents attached.</Box>}
+                      />
+                    </SpaceBetween>
+                  </ExpandableSection>
+
+                  {(selectedRequest.duplicateWarnings ?? []).length ? (
+                    <SpaceBetween size="xs">
+                      <Box variant="awsui-key-label">Duplicate warnings</Box>
+                      {(selectedRequest.duplicateWarnings ?? []).map(warning => (
+                        <Box key={warning} variant="p">
+                          {warning}
+                        </Box>
+                      ))}
+                    </SpaceBetween>
+                  ) : null}
+
+                </SpaceBetween>
+              ),
+            },
+            {
+              id: "intacct-xml",
+              label: "Intacct XML (Draft)",
+              content: (
+                <ColumnLayout columns={2} variant="text-grid">
+                  <SpaceBetween size="m">
+                    <Box variant="small" color="text-body-secondary">
+                      Preview only; not transmitted.
+                    </Box>
+                  <Box variant="small" color="text-body-secondary">
+                    AP Bill status in this preview is Draft.
+                  </Box>
+                  {intacctConfigLoading ? (
+                    <Box variant="small" color="text-body-secondary">
+                      Loading Intacct integration settings...
+                    </Box>
+                  ) : null}
+                  {intacctConfigError ? (
+                    <Alert type="warning" header="Intacct settings unavailable">
+                      {intacctConfigError}
+                    </Alert>
+                  ) : null}
+                  {!intacctConfigLoading && !intacctConfigError && intacctConfig?.enabled === false ? (
+                    <Alert type="info" header="Intacct settings disabled">
+                      Enable Intacct settings in Finance Settings to inject credentials into this preview.
+                    </Alert>
+                  ) : null}
+                  {intacctMissingFieldsUnique.length ? (
+                      <Alert type="warning" header="Missing fields to complete submission">
+                        <SpaceBetween size="xs">
+                          <Box variant="small">
+                            Placeholders are marked as MISSING_* in the XML.
+                          </Box>
+                          {intacctMissingFieldsUnique.map((field, index) => (
+                            <Box key={`${field}-${index}`} variant="p">
+                              {field}
+                            </Box>
+                          ))}
+                        </SpaceBetween>
+                      </Alert>
+                    ) : null}
+                    {xmlActionStatus ? (
+                      <Alert
+                        type={xmlActionStatus.type}
+                        dismissible
+                        onDismiss={() => setXmlActionStatus(null)}
+                      >
+                        {xmlActionStatus.message}
+                      </Alert>
+                    ) : null}
                     <SpaceBetween direction="horizontal" size="xs">
-                      <Button onClick={openLineCreateModal} disabled={!canEditPacketLines}>
-                        Add line
-                      </Button>
                       <Button
-                        onClick={openLineEditModal}
-                        disabled={!canEditPacketLines || !selectedLine}
+                        variant="primary"
+                        onClick={handleCopyXml}
+                        disabled={!intacctXml}
                       >
-                        Edit selected
+                        Copy XML
                       </Button>
-                      <Button
-                        onClick={openDeleteLineModal}
-                        disabled={!canEditPacketLines || !selectedLine}
-                      >
-                        Delete selected
+                      <Button onClick={handleDownloadXml} disabled={!intacctXml}>
+                        Download .xml
                       </Button>
                     </SpaceBetween>
-                  ) : undefined
-                }
-              >
-                Payment lines
-              </Header>
-            }
-            empty={<Box padding="m">No payment lines attached to this packet.</Box>}
-          />
-
-          {selectedLine ? (
-            <SpaceBetween size="m">
-              <SpaceBetween direction="horizontal" size="xs">
-                <Button onClick={openRecurringModal} disabled={!recurringEligible}>
-                  Generate recurring lines
-                </Button>
-              </SpaceBetween>
-            </SpaceBetween>
-          ) : (
-            <Box variant="p">Select a payment line to view details.</Box>
-          )}
-
-          <ExpandableSection headerText="Evidence and documents">
-            <SpaceBetween size="m">
-              <Table
-                items={evidenceDocumentRows}
-                columnDefinitions={evidenceDocumentColumns}
-                trackBy="id"
-                variant="embedded"
-                empty={<Box padding="m">No evidence or documents attached.</Box>}
-              />
-            </SpaceBetween>
-          </ExpandableSection>
-
-          {(selectedRequest.duplicateWarnings ?? []).length ? (
-            <SpaceBetween size="xs">
-              <Box variant="awsui-key-label">Duplicate warnings</Box>
-              {(selectedRequest.duplicateWarnings ?? []).map(warning => (
-                <Box key={warning} variant="p">
-                  {warning}
-                </Box>
-              ))}
-            </SpaceBetween>
-          ) : null}
-
-        </SpaceBetween>
+                    <FormField label="XML preview">
+                      <Textarea readOnly value={intacctXml || ""} rows={20} />
+                    </FormField>
+                  </SpaceBetween>
+                  <Container
+                    header={<Header variant="h3">Sage Intacct API integration overview</Header>}
+                  >
+                    <SpaceBetween size="s">
+                      <Box variant="p">
+                        This XML mirrors the Sage Intacct XML Web Services request used to create
+                        an AP Bill. A real integration would POST the XML payload to the Intacct
+                        gateway at https://api.intacct.com/ia/xml/xmlgw.phtml with Content-Type
+                        application/xml and dtdversion 3.0.
+                      </Box>
+                      <Box variant="p">
+                        Access requires two credential layers: a Web Services sender ID/password
+                        from a developer license, and company credentials (company ID + user ID +
+                        password) or a session ID. The company must enable Web Services and
+                        authorize the sender ID for the tenant, and it is recommended to create a
+                        dedicated Web Services user.
+                      </Box>
+                      <Box variant="p">
+                        Sage recommends using getAPISession to obtain a session ID and unique
+                        endpoint, then using session authentication for repeated calls.
+                      </Box>
+                      <Box variant="p">
+                        The XML request structure is: control block (sender ID, password, control
+                        ID, unique ID, dtdversion), operation/authentication, then content with a
+                        function controlid that calls create(APBILL).
+                      </Box>
+                      <Box variant="p">
+                        AP Bill data requirements depend on the Action. For Draft, fewer header
+                        fields are required. For Submit (the default), VENDORID, WHENCREATED, and
+                        WHENDUE are required. APBILLITEMS must include at least one line item.
+                      </Box>
+                      <Box variant="p">
+                        Each APBILLITEM line must include a GL account (ACCOUNTNO or ACCOUNTLABEL)
+                        and an amount (TRX_AMOUNT when not using inclusive tax). Optional fields
+                        include ENTRYDESCRIPTION and DEPARTMENTID; LOCATIONID is required in
+                        multi-entity companies.
+                      </Box>
+                      <Box variant="p">
+                        Production integrations also need response handling, idempotency (unique
+                        function control IDs), and retry logic. You can also set uniqueid=true in
+                        the control block to enforce request-level idempotence on retries.
+                      </Box>
+                      <Box variant="small" color="text-body-secondary">
+                        Demo note: This preview never sends credentials or network calls. It
+                        exists to show the shape of the XML payload required by Intacct.
+                      </Box>
+                    </SpaceBetween>
+                  </Container>
+                </ColumnLayout>
+              ),
+            },
+          ]}
+        />
       ) : (
         <Box variant="p">Select a payment packet from the queue to view its detail.</Box>
       )}

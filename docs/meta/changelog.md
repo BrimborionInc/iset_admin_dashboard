@@ -3,6 +3,7 @@
 Format: YYYY-MM-DD - Category: Short description
 
 ## 2026-01-27
+- Fix: Admin user MFA status now reflects Cognito software token MFA via AdminGetUser enrichment.
 - Ops: Deployment scripts now build POSIX-path zip archives to avoid Linux unzip failures.
 - UX: Proposed Interventions widget now includes an info link with dedicated help panel guidance and AI context.
 - UX: Proposed Interventions status badge now sits in the header actions next to Save Progress.
@@ -13,9 +14,23 @@ Format: YYYY-MM-DD - Category: Short description
 - Ops: Added `scripts/run-prod-sql.ps1` helper for running ad-hoc SQL against prod via SSM.
 
 ## 2026-01-28
+- Ops: Test deploy now falls back to tar/Compress-Archive if ZipArchive types are unavailable.
 - Fix: Initial CFA drafts now generate from assessment data when no action plan exists, keeping secure message CFA attachments working before completion.
 - Fix: CFA draft generation now uses application submission ownership fields to match the current schema.
 - Fix: CFA draft generation now selects the intervention funding stream from the current schema to avoid SQL errors and allow plan-based CFA drafts to generate.
+
+## 2026-01-29
+- Fix: Application assessment no longer blocks submissions with a "Reason for not approving" error when the recommendation is not "Do not recommend funding".
+- Fix: Case workspace cost item installment counts now handle dates entered with slashes.
+- Fix: Case workspace cost item modal now auto-calculates installments when start/end dates are already set.
+- UX: Payment line validation errors now return clearer, actionable messages instead of generic codes.
+- Fix: Case scoping now uses `portfolio_region_id` so region-filtered application queries stop failing in dev.
+- Fix: Funding authorization now recognizes payment-type labels in funding breakdowns when deriving category caps.
+- UX: Payment packet detail now adds a Validate action and only shows Submit once validation passes; edits reset validation.
+
+## 2026-01-30
+- UX: Payment packet detail now includes an Intacct XML (Draft) preview tab with copy/download actions and missing-field flags for demo use.
+- UX: Finance Settings now includes a Sage Intacct integration widget to capture XML Web Services credentials and defaults.
 
 ## 2026-01-26
 - Assessment: Coordinator assessment now supports multiple proposed interventions with per-intervention cost tables, inline amount edits, and line-item modals.

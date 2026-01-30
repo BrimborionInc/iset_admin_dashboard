@@ -60,7 +60,11 @@ function New-PosixZip {
         [Parameter(Mandatory = $true)][string]$DestinationZip
     )
 
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    try { Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop } catch {}
+    try { Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop } catch {}
+    try { [void][System.IO.Compression.ZipArchiveMode]::Create } catch {
+        throw "ZipArchive types unavailable in this PowerShell session. Ensure the System.IO.Compression assembly is loadable."
+    }
 
     if (Test-Path -LiteralPath $DestinationZip) {
         Remove-Item -LiteralPath $DestinationZip -Force
@@ -117,14 +121,21 @@ try {
     Ensure-Tool "npm"
     Ensure-Tool "aws"
 
+    $buildPath = Join-Path $repoRoot "build"
+
     if (-not $SkipBuild) {
         Write-Section "Building React app for prod"
+        if (Test-Path -LiteralPath $buildPath) {
+            Remove-Item -LiteralPath $buildPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
         npm run build:production | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "Build failed with exit code $LASTEXITCODE. Deployment aborted."
+        }
     } else {
         Write-Section "Skipping build step (per flag)"
     }
 
-    $buildPath = Join-Path $repoRoot "build"
     if (-not (Test-Path -LiteralPath $buildPath)) {
         throw "Build output not found at '$buildPath'. Ensure the build step completed successfully."
     }

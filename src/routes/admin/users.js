@@ -15,6 +15,16 @@ function getClient() {
   return new CognitoIdentityProviderClient(config);
 }
 
+function hasMfaEnabled(user) {
+  if (!user) return false;
+  const mfaList = Array.isArray(user.UserMFASettingList) ? user.UserMFASettingList : [];
+  if (mfaList.length) return true;
+  const preferred = user.PreferredMfaSetting || user.PreferredMFASetting;
+  if (preferred && String(preferred).toLowerCase() !== 'nomfa') return true;
+  const legacyOptions = Array.isArray(user.MFAOptions) ? user.MFAOptions : [];
+  return legacyOptions.length > 0;
+}
+
 // Guard matrix
 const CAN_CREATE = {
   System_Administrator: new Set(['System_Administrator', 'NWAC_Administrator', 'Regional_Manager', 'ISET_Coordinator']),
@@ -178,7 +188,7 @@ router.get('/users', async (req, res) => {
               regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : null,
               regionIds: null,
               cognitoSub,
-              mfa: !!u.MFAOptions && u.MFAOptions.length > 0,
+              mfa: hasMfaEnabled(u),
               lastSignIn: u.UserLastModifiedDate ? new Date(u.UserLastModifiedDate).toISOString() : null,
               createdAt: u.UserCreateDate ? new Date(u.UserCreateDate).toISOString() : null
             };
@@ -209,7 +219,7 @@ router.get('/users', async (req, res) => {
           status: u.UserStatus || existing.status,
           regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : existing.regionId,
           cognitoSub,
-          mfa: !!u.MFAOptions && u.MFAOptions.length > 0,
+          mfa: hasMfaEnabled(u),
           lastSignIn: u.UserLastModifiedDate ? new Date(u.UserLastModifiedDate).toISOString() : existing.lastSignIn,
           createdAt: u.UserCreateDate ? new Date(u.UserCreateDate).toISOString() : existing.createdAt
         });
@@ -221,6 +231,23 @@ router.get('/users', async (req, res) => {
       } else {
         // Non-authorization errors in enrichment phase are logged but not fatal.
         console.warn('[admin-users] Optional ListUsers enrichment failed:', enrichErr.message, 'AWS_ACCESS_KEY_ID=' + (process.env.AWS_ACCESS_KEY_ID || 'missing'), 'AWS_SECRET_ACCESS_KEY=' + (process.env.AWS_SECRET_ACCESS_KEY || 'missing'));
+      }
+    }
+
+    if (users.length) {
+      try {
+        for (const u of users) {
+          if (u.mfa) continue;
+          if (!u.username) continue;
+          const detail = await client.send(new AdminGetUserCommand({ UserPoolId: POOL_ID, Username: u.username }));
+          if (detail && hasMfaEnabled(detail)) {
+            u.mfa = true;
+          }
+        }
+      } catch (detailErr) {
+        if (!/not authorized to perform: cognito-idp:AdminGetUser/i.test(detailErr?.message || '')) {
+          console.warn('[admin-users] MFA enrichment failed:', detailErr?.message || detailErr);
+        }
       }
     }
 

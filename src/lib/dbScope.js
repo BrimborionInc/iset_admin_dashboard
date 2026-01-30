@@ -23,7 +23,7 @@ function scopeApplications(auth, alias = 'a') {
 }
 
 function scopeCases(auth, alias = 'c') {
-  return scopePredicate(alias, auth);
+  return scopePredicate(alias, auth, 'portfolio_region_id');
 }
 
 module.exports = { scopeApplications, scopeCases };

@@ -220,7 +220,8 @@ const parseIsoDateToUtc = (value) => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  const parts = trimmed.split('-');
+  const normalized = trimmed.replace(/\//g, '-');
+  const parts = normalized.split('-');
   if (parts.length !== 3) return null;
   const [yyyy, mm, dd] = parts.map(part => Number.parseInt(part, 10));
   if (![yyyy, mm, dd].every(Number.isFinite)) return null;
@@ -4324,7 +4325,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       errors.previousISETDetails = 'Details for previous ISET funding are required.';
     }
     // 13. Conditional: NWAC fields
-    if (assessment.nwacReview && !assessment.nwacReason) {
+    if (assessment.recommendation === 'no_recommend' && assessment.nwacReview && !assessment.nwacReason) {
       errors.nwacReason = 'Reason for not approving is required.';
     }
     // 14. Budget pot validation (only if set)
