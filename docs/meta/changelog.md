@@ -2,6 +2,10 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-02-01
+- Fix: Published workflow schema metadata now includes workflow type for runtime consumers.
+- Fix: Workflow publish now blocks non-main-intake types and the editor shows type labels instead of raw values.
+
 ## 2026-01-27
 - Fix: Admin user MFA status now reflects Cognito software token MFA via AdminGetUser enrichment.
 - Ops: Deployment scripts now build POSIX-path zip archives to avoid Linux unzip failures.

@@ -135,7 +135,10 @@ function slugify(s) {
 // Primary builder
 async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, schemaVersion = '1.1' }) {
   // Load workflow
-  const [[wf]] = await pool.query(`SELECT id, name, status FROM iset_intake.workflow WHERE id = ?`, [workflowId]);
+  const [[wf]] = await pool.query(
+    `SELECT id, name, status, workflow_type FROM iset_intake.workflow WHERE id = ?`,
+    [workflowId]
+  );
   if (!wf) throw Object.assign(new Error('Workflow not found'), { code: 404 });
 
   const [stepRows] = await pool.query(`
@@ -454,7 +457,7 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
           const rawMask = String(props.mask).trim();
           if (rawMask) {
             // Allow only known masks to reduce risk of arbitrary injection
-            const allowed = new Set(['phone-na','sin-ca','sin','status-rn','postal-code-ca','postal-code-us','date-iso','time-hm','currency']);
+            const allowed = new Set(['phone-na','sin-ca','sin','status-rn','bank-transit-ca','bank-institution-ca','postal-code-ca','postal-code-us','date-iso','time-hm','currency']);
             const lc = rawMask.toLowerCase();
             if (allowed.has(lc)) component.mask = lc === 'sin' ? 'sin-ca' : lc; // normalise alias
             else component.mask = lc; // fallback: still emit for forward compatibility
@@ -684,7 +687,7 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
   const meta = {
     schemaVersion,
     generatedAt: new Date().toISOString(),
-    workflow: { id: wf.id, name: wf.name, status: wf.status },
+    workflow: { id: wf.id, name: wf.name, status: wf.status, type: wf.workflow_type || null },
     counts: {
       steps: stepsOut.length,
       components: stepsOut.reduce((acc, s) => acc + (Array.isArray(s.components) ? s.components.length : 0), 0)

@@ -1,5 +1,5 @@
 // Lightweight input masking utilities for the public portal (mirrors admin side)
-// Supported masks: phone-na, sin-ca, status-rn, postal-code-ca, postal-code-us, date-iso, time-hm, currency
+// Supported masks: phone-na, sin-ca, status-rn, bank-transit-ca, bank-institution-ca, postal-code-ca, postal-code-us, date-iso, time-hm, currency
 
 function formatPhoneNa(digits: string) {
   const d = digits.slice(0, 10);
@@ -19,6 +19,14 @@ function formatStatusRn(digits: string) {
   const d = digits.slice(0, 10);
   if (d.length <= 3) return d;
   return `${d.slice(0, 3)} ${d.slice(3)}`;
+}
+
+function formatBankTransitCa(digits: string) {
+  return digits.slice(0, 5);
+}
+
+function formatBankInstitutionCa(digits: string) {
+  return digits.slice(0, 3);
 }
 
 function formatPostalCa(raw: string) {
@@ -64,6 +72,10 @@ export function applyMask(value: string, mask: string) {
       return formatSinCa(digits);
     case "status-rn":
       return formatStatusRn(digits);
+    case "bank-transit-ca":
+      return formatBankTransitCa(digits);
+    case "bank-institution-ca":
+      return formatBankInstitutionCa(digits);
     case "postal-code-ca":
       return formatPostalCa(value);
     case "postal-code-us":

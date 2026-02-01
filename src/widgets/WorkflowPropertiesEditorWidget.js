@@ -3,6 +3,14 @@ import { BoardItem } from '@cloudscape-design/board-components';
 import { Header, Grid, FormField, Input, Select, Button, Alert, SpaceBetween } from '@cloudscape-design/components';
 
 const WorkflowPropertiesEditorWidget = ({ name, status, workflowType, startUiId, startOptions = [], onChange, onSave, onPublish, saving, saveMsg, onClear, dirty }) => {
+  const typeOptions = [
+    { label: 'Main Intake', value: 'main-intake' },
+    { label: 'Form (No prefill)', value: 'consent-no-prefill' },
+    { label: 'Form (CM prefill)', value: 'consent-cm-prefill' }
+  ];
+  const normalizedType = workflowType || 'main-intake';
+  const selectedType = typeOptions.find(o => o.value === normalizedType) || { label: normalizedType, value: normalizedType };
+  const canPublish = normalizedType === 'main-intake';
   const itemI18n = {
     dragHandleAriaLabel: 'Drag handle',
     dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
@@ -12,7 +20,7 @@ const WorkflowPropertiesEditorWidget = ({ name, status, workflowType, startUiId,
 
   return (
     <BoardItem
-  header={<Header variant="h2" actions={<SpaceBetween size="xs" direction="horizontal">{dirty && <span style={{alignSelf:'center', color:'#d13212', fontSize:12}}>Unsaved changes</span>}{onPublish && <Button onClick={onPublish} disabled={saving}>Publish</Button>}<Button loading={saving} variant="primary" onClick={onSave} disabled={!dirty && !name}>Save</Button></SpaceBetween>}>Workflow</Header>}
+  header={<Header variant="h2" actions={<SpaceBetween size="xs" direction="horizontal">{dirty && <span style={{alignSelf:'center', color:'#d13212', fontSize:12}}>Unsaved changes</span>}{onPublish && <Button onClick={onPublish} disabled={saving || !canPublish}>Publish</Button>}<Button loading={saving} variant="primary" onClick={onSave} disabled={!dirty && !name}>Save</Button></SpaceBetween>}>Workflow</Header>}
       i18nStrings={itemI18n}
     >
       {saveMsg ? (
@@ -38,13 +46,9 @@ const WorkflowPropertiesEditorWidget = ({ name, status, workflowType, startUiId,
         </FormField>
         <FormField label="Type">
           <Select
-            selectedOption={{ label: workflowType || 'main-intake', value: workflowType || 'main-intake' }}
+            selectedOption={selectedType}
             onChange={({ detail }) => onChange({ workflowType: detail.selectedOption?.value || 'main-intake' })}
-            options={[
-              { label: 'Main Intake', value: 'main-intake' },
-              { label: 'Form (No prefill)', value: 'consent-no-prefill' },
-              { label: 'Form (CM prefill)', value: 'consent-cm-prefill' }
-            ]}
+            options={typeOptions}
           />
         </FormField>
         <FormField label="Start step">

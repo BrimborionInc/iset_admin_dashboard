@@ -13074,6 +13074,21 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
     return res.status(500).json({ error: 'unavailable', message: 'buildWorkflowSchema not loaded' });
   }
   try {
+    const [[wfRow]] = await pool.query(
+      'SELECT workflow_type FROM iset_intake.workflow WHERE id = ? LIMIT 1',
+      [workflowId]
+    );
+    if (!wfRow) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    const wfType = (wfRow.workflow_type || '').trim();
+    if (wfType !== 'main-intake') {
+      return res.status(409).json({
+        error: 'publish_not_allowed',
+        message: 'Publish is only available for main-intake workflows.',
+        workflow_type: wfType || null
+      });
+    }
     let schema;
     try { schema = await buildWorkflowSchema({ pool, workflowId }); } catch (eInner) {
       return res.status(500).json({ error: 'normalization_failed', message: eInner.message });

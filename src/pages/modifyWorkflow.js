@@ -326,6 +326,10 @@ export default function ModifyWorkflowEditorWidget() {
 
   const publishWorkflow = useCallback(async () => {
     if (!wfId) return;
+    if (wfType !== 'main-intake') {
+      setSaveMsg('Publish is only available for Main Intake workflows.');
+      return;
+    }
     try {
       setSaving(true); setSaveMsg('');
       const resp = await apiFetch(`/api/workflows/${wfId}/publish`, { method: 'POST' });
