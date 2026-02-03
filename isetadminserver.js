@@ -18651,6 +18651,205 @@ app.patch('/api/admin/event-capture-rules', async (req, res) => {
   }
 });
 
+function splitSqlStatements(rawSql = '') {
+  const statements = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+  let inBacktick = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let escape = false;
+
+  for (let i = 0; i < rawSql.length; i += 1) {
+    const ch = rawSql[i];
+    const next = rawSql[i + 1];
+    const nextNext = rawSql[i + 2];
+
+    if (inLineComment) {
+      current += ch;
+      if (ch === '\n') {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      current += ch;
+      if (ch === '*' && next === '/') {
+        current += '/';
+        i += 1;
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (escape) {
+      current += ch;
+      escape = false;
+      continue;
+    }
+
+    if (inSingle) {
+      current += ch;
+      if (ch === '\\') {
+        escape = true;
+      } else if (ch === '\'') {
+        inSingle = false;
+      }
+      continue;
+    }
+
+    if (inDouble) {
+      current += ch;
+      if (ch === '\\') {
+        escape = true;
+      } else if (ch === '"') {
+        inDouble = false;
+      }
+      continue;
+    }
+
+    if (inBacktick) {
+      current += ch;
+      if (ch === '`') {
+        inBacktick = false;
+      }
+      continue;
+    }
+
+    if (ch === '\'') {
+      inSingle = true;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '"') {
+      inDouble = true;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '`') {
+      inBacktick = true;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '/' && next === '*') {
+      inBlockComment = true;
+      current += ch + next;
+      i += 1;
+      continue;
+    }
+
+    if (ch === '-' && next === '-' && (!nextNext || /\s/.test(nextNext))) {
+      inLineComment = true;
+      current += ch + next;
+      i += 1;
+      continue;
+    }
+
+    if (ch === '#') {
+      inLineComment = true;
+      current += ch;
+      continue;
+    }
+
+    if (ch === ';') {
+      const trimmed = current.trim();
+      if (trimmed) statements.push(trimmed);
+      current = '';
+      continue;
+    }
+
+    current += ch;
+  }
+
+  const trimmed = current.trim();
+  if (trimmed) statements.push(trimmed);
+  return statements;
+}
+
+app.post('/api/admin/query-editor', async (req, res) => {
+  if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+  const sql = typeof req.body?.sql === 'string' ? req.body.sql.trim() : '';
+  if (!sql) {
+    return res.status(400).json({ error: 'sql_required', message: 'SQL statement is required.' });
+  }
+  if (!pool) {
+    return res.status(503).json({ error: 'db_unavailable', message: 'Database connection is unavailable.' });
+  }
+
+  const MAX_ROWS = 100;
+  const limitRows = MAX_ROWS + 1;
+  const statements = splitSqlStatements(sql);
+  if (!statements.length) {
+    return res.status(400).json({ error: 'sql_required', message: 'SQL statement is required.' });
+  }
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.query('SET SESSION sql_select_limit = ?', [limitRows]);
+    const results = [];
+    for (let i = 0; i < statements.length; i += 1) {
+      const statement = statements[i];
+      try {
+        const [rows, fields] = await connection.query(statement);
+        if (Array.isArray(rows)) {
+          const columns = Array.isArray(fields) ? fields.map(field => field.name) : [];
+          const truncated = rows.length > MAX_ROWS;
+          const sliced = truncated ? rows.slice(0, MAX_ROWS) : rows;
+          results.push({
+            statement,
+            type: 'select',
+            columns,
+            rows: sliced,
+            rowCount: sliced.length,
+            truncated
+          });
+        } else {
+          const rowsAffected = Number(rows?.affectedRows ?? 0);
+          results.push({
+            statement,
+            type: 'write',
+            rowsAffected,
+            message: rows?.message || 'OK'
+          });
+        }
+      } catch (err) {
+        err.statementIndex = i;
+        err.statement = statement;
+        throw err;
+      }
+    }
+    return res.json({
+      results,
+      statements,
+      statementCount: results.length
+    });
+  } catch (err) {
+    console.error('[query-editor] query failed:', err?.message || err);
+    const status = typeof err?.code === 'string' && err.code.startsWith('ER_') ? 400 : 500;
+    return res.status(status).json({
+      error: 'query_failed',
+      message: err?.message || 'Query failed',
+      code: err?.code,
+      sqlState: err?.sqlState,
+      errno: err?.errno,
+      statementIndex: Number.isInteger(err?.statementIndex) ? err.statementIndex : undefined,
+      statement: typeof err?.statement === 'string' ? err.statement : undefined
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.query('SET SESSION sql_select_limit = DEFAULT');
+      } catch {}
+      connection.release();
+    }
+  }
+});
+
 const DUMMY_STEP_ORDER = Object.freeze([
   'consent',
   'indigenous-declaration',

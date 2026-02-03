@@ -186,6 +186,7 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
         { type: 'link', text: 'Event Logging', href: '/configuration/events' },
         { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
+        { type: 'link', text: 'Query Editor', href: '/configuration/query-editor' },
         { type: 'link', text: 'File Upload Config', href: '/admin/upload-config' },
       ],
     },

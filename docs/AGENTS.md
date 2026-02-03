@@ -11,6 +11,8 @@ Last Updated: 2026-01-19
 - Interview rules: ask one short question at a time, wait for the answer, and only ask about requirements or desired behavior. Do not ask questions about your approach to coding. You own the code and data.
 - If anything is unclear (requirements, data, ownership, API payloads), stop and ask before coding.
 - Prefer evidence over guesses. Inspect payloads, schemas, and renderer code before claiming behavior exists.
+- Inspect the docbase and keep it updated; do not assume it is current without verifying against the codebase.
+- Own the code and technical approach; avoid unnecessary technical questions when requirements are sufficient.
 - If blocked (tooling, permissions, platform limits), state that clearly before proceeding.
 - Confirm prerequisite account access (e.g., org management vs. member accounts) before directing users to identity/SSO setup.
 
@@ -31,6 +33,34 @@ Last Updated: 2026-01-19
 - Update `docs/meta/changelog.md` for user-visible or operational changes.
 - Record structural reorganizations in `docs/meta/project-map.md`.
 - Keep credentials and environment-specific secrets out of this library.
+
+## Prod start/stop (NWAC, ca-central-1)
+
+Use these commands to shut down or restart prod for cost savings. All commands run in `ca-central-1`.
+
+Shutdown:
+- Scale ASG to zero:
+  - `aws autoscaling update-auto-scaling-group --region ca-central-1 --auto-scaling-group-name nwac-prod-asg --min-size 0 --desired-capacity 0`
+- Stop Aurora cluster:
+  - `aws rds stop-db-cluster --region ca-central-1 --db-cluster-identifier nwac-prod-db`
+- Verify:
+  - `aws autoscaling describe-auto-scaling-groups --region ca-central-1 --auto-scaling-group-names nwac-prod-asg --query 'AutoScalingGroups[0].{Min:MinSize,Desired:DesiredCapacity,Instances:Instances[].[InstanceId,LifecycleState,HealthStatus]}' --output table`
+  - `aws rds describe-db-clusters --region ca-central-1 --db-cluster-identifier nwac-prod-db --query 'DBClusters[0].Status' --output text`
+
+Restart:
+- Start Aurora cluster:
+  - `aws rds start-db-cluster --region ca-central-1 --db-cluster-identifier nwac-prod-db`
+- Scale ASG back up:
+  - `aws autoscaling update-auto-scaling-group --region ca-central-1 --auto-scaling-group-name nwac-prod-asg --min-size 1 --desired-capacity 1`
+- Optional: if you uploaded a new `admin-dashboard-latest.zip`, force replacement to ensure the new artifact is pulled:
+  - `aws autoscaling start-instance-refresh --region ca-central-1 --auto-scaling-group-name nwac-prod-asg --preferences MinHealthyPercentage=100,InstanceWarmup=900,SkipMatching=false`
+- Verify:
+  - `aws autoscaling describe-auto-scaling-groups --region ca-central-1 --auto-scaling-group-names nwac-prod-asg --query 'AutoScalingGroups[0].{Min:MinSize,Desired:DesiredCapacity,Instances:Instances[].[InstanceId,LifecycleState,HealthStatus]}' --output table`
+  - `aws rds describe-db-clusters --region ca-central-1 --db-cluster-identifier nwac-prod-db --query 'DBClusters[0].Status' --output text`
+
+Notes:
+- This stops compute + database, but ALB/NAT gateways/EIPs/VPC endpoints still incur costs unless explicitly removed.
+- Sanity check account before running: `aws sts get-caller-identity`
 
 ## DB introspection (dev)
 

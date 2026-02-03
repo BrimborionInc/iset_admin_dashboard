@@ -51,6 +51,7 @@ import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Impor
 import AuthCallback from '../pages/AuthCallback.js';
 import UploadConfigDashboard from '../pages/uploadConfigDashboard.js';
 import EventCaptureDashboard from '../pages/configuration/EventCaptureDashboard.js';
+import QueryEditorDashboard from '../pages/configuration/QueryEditorDashboard.js';
 import FinanceOverviewPage from '../pages/finance/FinanceOverviewPage.jsx';
 import FinanceOverviewHelp from '../helpPanelContents/financeOverviewHelp.js';
 import FinanceBudgetsPage from '../pages/finance/FinanceBudgetsPage.jsx';
@@ -70,6 +71,7 @@ import FinanceForecastingHelp from '../helpPanelContents/financeForecastingHelp.
 import FinancePaymentsHelp from '../helpPanelContents/financePaymentsHelp.js';
 import ContactCommunicationsDashboard from '../pages/contact/ContactCommunicationsDashboard.jsx';
 import ContactCommunicationsHelp from '../helpPanelContents/contactCommunicationsHelp.js';
+import QueryEditorHelp from '../helpPanelContents/queryEditorHelp.js';
 import MessagesDashboardPage from '../pages/messages/MessagesDashboardPage.jsx';
 import PortfolioDashboardPage from '../pages/Caseworking/PortfolioDashboardPage.jsx';
 import PortfolioDashboardHelp from '../helpPanelContents/portfolioDashboardHelp.js';
@@ -356,6 +358,38 @@ const AppRoutes = ({
                 </Button>
               </SpaceBetween>
             )
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/configuration/query-editor">
+        <Guard path="/configuration/query-editor">
+          {renderContent(
+            QueryEditorDashboard,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Configuration', href: '/configuration-settings' },
+              { text: 'Query Editor', href: '/configuration/query-editor' }
+            ],
+            'Query Editor',
+            <QueryEditorHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() => window.dispatchEvent(new CustomEvent('queryEditor:openPalette'))}
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() => window.dispatchEvent(new CustomEvent('queryEditor:resetLayout'))}
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            QueryEditorHelp.aiContext
           )}
         </Guard>
       </Route>

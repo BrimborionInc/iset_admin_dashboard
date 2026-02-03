@@ -2,6 +2,15 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-02-02
+- UX: Added Query Editor configuration dashboard scaffold with System Administrator-only access.
+- Feature: Query Editor now includes SQL input, results widgets, and admin-only query execution endpoint (100-row cap).
+- UX: Query Editor input now uses the Code Editor component for SQL entry.
+- UX: Query Editor results now render in Code View with copy support.
+- UX: Query Editor results now use tabs for Table, JSON, and CSV views.
+- UX: Query Editor results now default to CSV and use Code View for CSV output.
+- Feature: Query Editor now supports multiple SQL statements per run with per-statement selection.
+
 ## 2026-02-01
 - Fix: Published workflow schema metadata now includes workflow type for runtime consumers.
 - Fix: Workflow publish now blocks non-main-intake types and the editor shows type labels instead of raw values.

@@ -57,6 +57,9 @@
       "System Administrator",
       "Program Administrator"
     ],
+    "/configuration/query-editor": [
+      "System Administrator"
+    ],
     "/configuration-settings": [
       "System Administrator",
       "Program Administrator"

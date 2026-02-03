@@ -30,6 +30,7 @@ const ROUTE_LABELS = {
   '/messages': 'Messages',
   '/configuration-settings': 'Configuration Settings',
   '/configuration/events': 'Event Capture',
+  '/configuration/query-editor': 'Query Editor',
   '/finance/allocations': 'Allocations & Transfers',
   '/finance/budgets': 'Budgets',
   '/finance/payments': 'Finance Payments',
