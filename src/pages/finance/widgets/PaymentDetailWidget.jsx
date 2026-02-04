@@ -42,6 +42,59 @@ const normalizePacketStatusKey = status => {
   return "submitted";
 };
 
+const parsePacketMetadata = packet => {
+  if (!packet) return {};
+  const raw = packet.metadata ?? packet.meta ?? null;
+  if (!raw) return {};
+  if (typeof raw === "object") return raw;
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
+const resolveLatestIntacctAttempt = packet => {
+  const metadata = parsePacketMetadata(packet);
+  const history = Array.isArray(metadata.integrationSubmissions)
+    ? metadata.integrationSubmissions
+    : Array.isArray(metadata.integration_submissions)
+      ? metadata.integration_submissions
+      : [];
+  const intacctHistory = history.filter(entry => {
+    const mode = String(entry?.mode || "").toLowerCase();
+    return mode === "intacct_rest";
+  });
+  if (intacctHistory.length) {
+    const ordered = [...intacctHistory].sort((a, b) => {
+      const left = a?.at ? new Date(a.at).getTime() : 0;
+      const right = b?.at ? new Date(b.at).getTime() : 0;
+      return right - left;
+    });
+    return ordered[0] || null;
+  }
+  const fallback = metadata.intacctRest || metadata.intacct_rest || null;
+  return fallback && typeof fallback === "object" ? fallback : null;
+};
+
+const resolveIntacctOutcome = attempt => {
+  const status = String(attempt?.status || attempt?.outcome || "").toLowerCase();
+  if (["success", "failed", "partial"].includes(status)) return status;
+  const httpStatus = Number(attempt?.httpStatus || attempt?.statusCode || attempt?.status_code);
+  if (Number.isFinite(httpStatus) && httpStatus >= 400) return "failed";
+  const attachmentErrors = Array.isArray(attempt?.attachmentErrors)
+    ? attempt.attachmentErrors
+    : Array.isArray(attempt?.attachment_errors)
+      ? attempt.attachment_errors
+      : [];
+  if (attachmentErrors.length) return "partial";
+  if (attempt?.error || attempt?.errorCode || attempt?.error_code) return "failed";
+  return attempt ? "success" : "";
+};
+
 const packetStatusMeta = {
   draft: { label: "Draft", indicator: "pending" },
   submitted: { label: "Submitted to finance", indicator: "info" },
@@ -328,16 +381,20 @@ const buildIntacctApBillPreview = (packet, config = null) => {
     }
     return String(value);
   };
-  const requireDate = (label, value) => {
+  const requireDate = (label, value, { trackMissing = true } = {}) => {
     const formatted = formatIntacctDate(value);
     if (!formatted) {
-      missingFields.push(label);
+      if (trackMissing) {
+        missingFields.push(label);
+      }
       return toMissingPlaceholder(label);
     }
     return formatted;
   };
   const lines = Array.isArray(packet.lines) ? packet.lines.filter(Boolean) : [];
   const firstLine = lines[0] ?? null;
+  const packetStatusKey = normalizePacketStatusKey(packet?.status);
+  const warnMissingDates = packetStatusKey !== "draft";
   const vendorIdValue = requireValue(
     "Vendor ID (VENDORID)",
     firstLine?.payeeReference || packet?.vendorId || packet?.vendor_id
@@ -348,11 +405,17 @@ const buildIntacctApBillPreview = (packet, config = null) => {
   );
   const billDateValue = requireDate(
     "Bill date (WHENCREATED)",
-    packet?.submittedOn || packet?.submitted_on || packet?.createdOn || packet?.created_on || firstLine?.requestedPaymentDate
+    packet?.submittedOn ||
+      packet?.submitted_on ||
+      packet?.createdOn ||
+      packet?.created_on ||
+      firstLine?.requestedPaymentDate,
+    { trackMissing: warnMissingDates }
   );
   const dueDateValue = requireDate(
     "Due date (WHENDUE)",
-    packet?.dueBy || packet?.due_by || firstLine?.requestedPaymentDate
+    packet?.dueBy || packet?.due_by || firstLine?.requestedPaymentDate,
+    { trackMissing: warnMissingDates }
   );
   const docNumberValue =
     firstLine?.invoiceReferenceNumber || firstLine?.invoice_reference_number || null;
@@ -556,6 +619,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [deleteLineSubmitting, setDeleteLineSubmitting] = useState(false);
   const [deleteLineError, setDeleteLineError] = useState(null);
   const [submitSubmitting, setSubmitSubmitting] = useState(false);
+  const [reopenModalOpen, setReopenModalOpen] = useState(false);
+  const [reopenSubmitting, setReopenSubmitting] = useState(false);
   const [linePotOptions, setLinePotOptions] = useState([]);
   const [linePotLoading, setLinePotLoading] = useState(false);
   const requiresLinePeriod = requiresServicePeriod(lineForm.paymentType);
@@ -700,6 +765,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     });
     setLineSubmitting(false);
     setLineError(null);
+    setReopenModalOpen(false);
+    setReopenSubmitting(false);
   }, [selectedRequest?.id]);
 
   useEffect(() => {
@@ -1827,6 +1894,14 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
 
   const canValidatePacket = packetStatusKey === "draft" && !isValidated;
   const canSubmitPacket = packetStatusKey === "draft" && isValidated;
+  const latestIntacctAttempt = useMemo(
+    () => resolveLatestIntacctAttempt(selectedRequest),
+    [selectedRequest]
+  );
+  const intacctOutcome = resolveIntacctOutcome(latestIntacctAttempt);
+  const canReopenPacket =
+    packetStatusKey === "submitted" &&
+    (intacctOutcome === "failed" || intacctOutcome === "partial");
 
   const activeEvidenceDocuments = activeEvidenceRow?.documentLinks ?? [];
   const activeEvidenceContext = activeEvidenceRow
@@ -1860,10 +1935,19 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           {submitSubmitting ? "Submitting" : "Submit to finance"}
         </Button>
       ) : null}
+      {canReopenPacket ? (
+        <Button
+          variant="normal"
+          onClick={() => setReopenModalOpen(true)}
+          disabled={!selectedRequest?.id || reopenSubmitting}
+        >
+          Reopen for resubmission
+        </Button>
+      ) : null}
     </SpaceBetween>
   ) : undefined;
   const detailDescription =
-    "Add payment lines, attach evidence, validate, then submit to finance (submission emails finance and locks edits).";
+    "Add payment lines, attach evidence, validate, then submit to finance (submission emails finance or sends to Intacct and locks edits).";
   return (
     <BoardItem
       header={
@@ -2107,6 +2191,53 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       ) : (
         <Box variant="p">Select a payment packet from the queue to view its detail.</Box>
       )}
+      <Modal
+        visible={reopenModalOpen}
+        onDismiss={() => {
+          if (!reopenSubmitting) setReopenModalOpen(false);
+        }}
+        header="Reopen packet for resubmission"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="link"
+              onClick={() => setReopenModalOpen(false)}
+              disabled={reopenSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              loading={reopenSubmitting}
+              onClick={async () => {
+                if (!selectedRequest?.id) return;
+                setReopenSubmitting(true);
+                try {
+                  await handlePacketStatusChange("draft", {
+                    notes: "Reopened for Intacct resubmission.",
+                  });
+                  setReopenModalOpen(false);
+                } finally {
+                  setReopenSubmitting(false);
+                }
+              }}
+            >
+              Reopen packet
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <Box variant="p">
+            This will unlock the packet so you can correct errors and resubmit to Sage Intacct.
+            The previous submission remains in the audit history.
+          </Box>
+          <Box variant="p">
+            Reopen is only available when the latest Intacct submission failed or partially
+            completed.
+          </Box>
+        </SpaceBetween>
+      </Modal>
       <Modal
         visible={lineModalOpen}
         onDismiss={() => {

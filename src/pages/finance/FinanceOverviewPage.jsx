@@ -11,7 +11,7 @@ import FinanceTrendHelp from "../../helpPanelContents/financeTrendHelp.js";
 import FinanceDeadlinesHelp from "../../helpPanelContents/financeDeadlinesHelp.js";
 import FinanceComplianceHelp from "../../helpPanelContents/financeComplianceHelp.js";
 
-const STORAGE_KEY = "finance-overview-layout-v1";
+const STORAGE_KEY = "finance-overview-layout-v2";
 
 const widgetRegistry = {
   kpis: {
@@ -61,10 +61,7 @@ const widgetRegistry = {
 };
 
 const defaultLayout = [
-  { id: "kpis", rowSpan: 6, columnSpan: 1 },
-  { id: "trend", rowSpan: 6, columnSpan: 2 },
-  { id: "compliance", rowSpan: 6, columnSpan: 1 },
-  { id: "deadlines", rowSpan: 3, columnSpan: 4 },
+  { id: "trend", rowSpan: 6, columnSpan: 4 },
 ];
 
 const exportLayout = items =>

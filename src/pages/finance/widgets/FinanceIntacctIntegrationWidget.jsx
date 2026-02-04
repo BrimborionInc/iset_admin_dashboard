@@ -12,6 +12,7 @@ import {
   Link,
   Select,
   SpaceBetween,
+  StatusIndicator,
   Spinner,
   Textarea,
   Toggle,
@@ -19,10 +20,19 @@ import {
 import { apiFetch } from "../../../auth/apiClient";
 import { boardItemI18nStrings } from "./common";
 
+const INTACCT_REST_BASE_URL =
+  process.env.REACT_APP_INTACCT_REST_BASE_URL ||
+  process.env.REACT_APP_INTACCT_MOCK_BASE_URL ||
+  "http://localhost:4000";
+const INTACCT_TENANT_ID =
+  process.env.REACT_APP_INTACCT_TENANT_ID ||
+  process.env.REACT_APP_INTACCT_MOCK_TENANT_ID ||
+  "T-0001";
+
 const DEFAULT_CONFIG = {
   enabled: false,
   environment: "sandbox",
-  companyId: "",
+  companyId: INTACCT_TENANT_ID,
   senderId: "",
   senderPassword: "",
   userId: "",
@@ -31,13 +41,22 @@ const DEFAULT_CONFIG = {
   defaultLocationId: "",
   defaultDepartmentId: "",
   defaultAction: "draft",
+  submissionMode: "email",
   notes: "",
 };
 
 const normalizeConfig = raw => {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_CONFIG };
+  const submissionMode =
+    raw.submissionMode === "intacct_rest" ||
+    raw.submission_mode === "intacct_rest" ||
+    raw.useRestApi === true ||
+    raw.use_rest_api === true ||
+    raw.enabled === true
+      ? "intacct_rest"
+      : "email";
   return {
-    enabled: raw.enabled === true,
+    enabled: submissionMode === "intacct_rest",
     environment: raw.environment === "production" ? "production" : "sandbox",
     companyId: raw.companyId || raw.company_id || "",
     senderId: raw.senderId || raw.sender_id || "",
@@ -51,6 +70,7 @@ const normalizeConfig = raw => {
     defaultLocationId: raw.defaultLocationId || raw.default_location_id || "",
     defaultDepartmentId: raw.defaultDepartmentId || raw.default_department_id || "",
     defaultAction: raw.defaultAction === "submit" ? "submit" : "draft",
+    submissionMode,
     notes: raw.notes || raw.note || "",
   };
 };
@@ -63,6 +83,9 @@ const FinanceIntacctIntegrationWidget = ({ actions = {}, metadata = {}, toggleHe
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [showSecrets, setShowSecrets] = useState(false);
+  const [showSecurityNotice, setShowSecurityNotice] = useState(true);
+  const [testStatus, setTestStatus] = useState("idle");
+  const [testMessage, setTestMessage] = useState("Not tested");
 
   const loadConfig = useCallback(async () => {
     setLoading(true);
@@ -127,6 +150,42 @@ const FinanceIntacctIntegrationWidget = ({ actions = {}, metadata = {}, toggleHe
     setSuccess(null);
   };
 
+  const handleTestConnection = async () => {
+    setTestStatus("loading");
+    setTestMessage("Testing...");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const tokenResp = await fetch(`${INTACCT_REST_BASE_URL}/oauth2/token`, {
+        method: "POST",
+        signal: controller.signal,
+      });
+      if (!tokenResp.ok) {
+        throw new Error(`Token request failed (${tokenResp.status})`);
+      }
+      const tokenPayload = await tokenResp.json().catch(() => ({}));
+      const token = tokenPayload.access_token || "mock-access-token";
+      const vendorResp = await fetch(`${INTACCT_REST_BASE_URL}/ia/api/v1/objects/vendors`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+        signal: controller.signal,
+      });
+      if (!vendorResp.ok) {
+        throw new Error(`Vendor check failed (${vendorResp.status})`);
+      }
+      setTestStatus("success");
+      setTestMessage("Connected");
+    } catch (err) {
+      const message = err?.name === "AbortError" ? "Connection timed out" : err?.message || "Failed";
+      setTestStatus("error");
+      setTestMessage(message);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
   const handleSettingsClick = ({ detail }) => {
     if (detail?.id === "remove" && typeof actions.removeItem === "function") {
       actions.removeItem();
@@ -159,6 +218,8 @@ const FinanceIntacctIntegrationWidget = ({ actions = {}, metadata = {}, toggleHe
     { value: "submit", label: "Submit / post immediately" },
   ];
   const passwordType = showSecrets ? "text" : "password";
+  const statusIndicatorType =
+    testStatus === "loading" ? "loading" : testStatus === "success" ? "success" : testStatus === "error" ? "error" : "info";
 
   return (
     <BoardItem
@@ -166,9 +227,17 @@ const FinanceIntacctIntegrationWidget = ({ actions = {}, metadata = {}, toggleHe
         <Header
           variant="h2"
           info={infoLink}
-          description="Store Intacct XML Web Services credentials and default mapping rules for AP Bill submissions."
+          description="Store Sage Intacct integration settings for payment submissions and XML preview generation."
           actions={
             <SpaceBetween direction="horizontal" size="xs">
+              <StatusIndicator type={statusIndicatorType}>{testMessage}</StatusIndicator>
+              <Button
+                variant="normal"
+                onClick={handleTestConnection}
+                disabled={loading || saving || testStatus === "loading"}
+              >
+                Test connection
+              </Button>
               <Button variant="link" onClick={handleReset} disabled={!dirty || loading || saving}>
                 Reset
               </Button>
@@ -199,10 +268,16 @@ const FinanceIntacctIntegrationWidget = ({ actions = {}, metadata = {}, toggleHe
         </Box>
       ) : (
         <SpaceBetween size="m">
-          <Alert type="warning" header="Secrets are stored in the admin database">
-            These values are editable in-app for demo purposes. Limit access to Finance Settings
-            and avoid using production credentials here until secrets are moved to a secure store.
-          </Alert>
+          {showSecurityNotice ? (
+            <Alert
+              type="warning"
+              header="Secrets are stored in the admin database"
+              onDismiss={() => setShowSecurityNotice(false)}
+            >
+              These values are editable in-app for demo purposes. Limit access to Finance Settings
+              and avoid using production credentials here until secrets are moved to a secure store.
+            </Alert>
+          ) : null}
           {error && (
             <Alert type="error" onDismiss={() => setError(null)}>
               {error}
@@ -213,21 +288,39 @@ const FinanceIntacctIntegrationWidget = ({ actions = {}, metadata = {}, toggleHe
               {success}
             </Alert>
           )}
-          <Toggle
-            checked={draftConfig.enabled}
-            onChange={({ detail }) =>
-              setDraftConfig(current => ({ ...current, enabled: detail.checked }))
-            }
-          >
-            Enable Intacct integration settings
-          </Toggle>
-          <Toggle
-            checked={showSecrets}
-            onChange={({ detail }) => setShowSecrets(detail.checked)}
-          >
-            Show secrets
-          </Toggle>
           <ColumnLayout columns={2} variant="text-grid">
+            <Toggle
+              checked={draftConfig.submissionMode === "intacct_rest"}
+              onChange={({ detail }) =>
+                setDraftConfig(current => ({
+                  ...current,
+                  submissionMode: detail.checked ? "intacct_rest" : "email",
+                  enabled: detail.checked,
+                }))
+              }
+            >
+              Use Intacct REST for submissions
+            </Toggle>
+            <Toggle
+              checked={showSecrets}
+              onChange={({ detail }) => setShowSecrets(detail.checked)}
+            >
+              Show secrets
+            </Toggle>
+          </ColumnLayout>
+          <ColumnLayout columns={2} variant="text-grid">
+            <FormField
+              label="Intacct REST base URL"
+              description="Override via REACT_APP_INTACCT_REST_BASE_URL (or REACT_APP_INTACCT_MOCK_BASE_URL in dev)"
+            >
+              <Input value={INTACCT_REST_BASE_URL} readOnly />
+            </FormField>
+            <FormField
+              label="Tenant ID"
+              description="Override via REACT_APP_INTACCT_TENANT_ID (or REACT_APP_INTACCT_MOCK_TENANT_ID in dev)"
+            >
+              <Input value={INTACCT_TENANT_ID} readOnly />
+            </FormField>
             <FormField label="Environment">
               <Select
                 selectedOption={envOptions.find(option => option.value === draftConfig.environment)}
@@ -339,7 +432,8 @@ const FinanceIntacctIntegrationWidget = ({ actions = {}, metadata = {}, toggleHe
             />
           </FormField>
           <Box color="text-body-secondary" variant="small">
-            These settings currently feed the Intacct XML preview only. No outbound API calls are made.
+            These settings drive the Intacct XML preview and submission routing.
+            When REST submission is enabled, packets are sent to the configured REST base URL.
           </Box>
         </SpaceBetween>
       )}

@@ -6,32 +6,31 @@ const FinanceReconciliationTransactionsHelp = () => (
     <Box>
       <strong>Workflow</strong>
       <p>
-        Review inbound transactions that failed automated validation. Use the filters to focus on
-        specific exception types, funding streams, or statuses, then select transactions to open
-        detailed context or perform bulk actions.
+        Review Intacct REST submission attempts by payment packet. Use the Outcome and Reason
+        filters to focus on failures or partial uploads, then select a packet to open full context
+        in the Submission detail widget.
       </p>
     </Box>
     <Box>
       <strong>What the table shows</strong>
       <ul>
-        <li>Source data (transaction ID, date, amount, case ID).</li>
-        <li>Current pot assignment and proposed reclassification.</li>
-        <li>Exception category (missing evidence, out of period, ineligible vendor, etc.).</li>
-        <li>Validation status and evidence availability.</li>
+        <li>Packet + case identifiers, total amount, and last submission timestamp.</li>
+        <li>Latest outcome (success, partial, failed) with an Intacct reason category.</li>
+        <li>Search across packet, case, client, or intervention names.</li>
       </ul>
     </Box>
     <Box>
       <strong>Tips</strong>
       <ul>
-        <li>Use saved preferences to tailor column visibility and page size to your workflow.</li>
-        <li>Selections feed both the Exception detail and Bulk actions widgets.</li>
-        <li>Use exports to share filtered exception lists with program partners or auditors when additional input is needed.</li>
+        <li>Filter to failed submissions first to triage urgent issues.</li>
+        <li>Use the Reason filter to isolate validation vs. connectivity problems.</li>
+        <li>Resolve issues in the payment packet screens, then retry submission.</li>
       </ul>
     </Box>
   </SpaceBetween>
 );
 
 FinanceReconciliationTransactionsHelp.aiContext =
-  "Describe the Reconciliation transactions queue widget, including columns, filters, and selection behaviour.";
+  "Describe the Intacct submission queue widget, including outcome/reason filters and how selections feed submission detail.";
 
 export default FinanceReconciliationTransactionsHelp;

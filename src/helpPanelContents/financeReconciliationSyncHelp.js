@@ -6,8 +6,8 @@ const FinanceReconciliationSyncHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Surface the health of the inbound transaction feed so finance staff know if exceptions are
-        up-to-date or if there is an ingestion backlog that needs attention.
+        Surface the health of the inbound case-management feed so finance staff know if exceptions
+        are up to date or if there is an ingestion backlog that needs attention.
       </p>
     </Box>
     <Box>

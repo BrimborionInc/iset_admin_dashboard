@@ -995,13 +995,51 @@ export default function ConfigurationSettings({
       }
 
       const tokenTtl = runtimeResponse?.auth?.tokenTtl || {};
-      const sessionTemplate = scope => ({
-        access: scope?.access || "",
-        id: scope?.id || "",
-        refresh: scope?.refresh || "",
-        frontendIdle: scope?.frontendIdle || "",
-        absolute: scope?.absolute || "",
-      });
+      const sessionTemplate = scope => {
+        const frontendIdle = scope?.frontendIdle;
+        let warningCountdownSeconds =
+          scope?.warningCountdownSeconds ??
+          scope?.warningSeconds ??
+          "";
+        if (
+          (warningCountdownSeconds === "" || warningCountdownSeconds == null) &&
+          frontendIdle !== null &&
+          typeof frontendIdle !== "undefined" &&
+          frontendIdle !== ""
+        ) {
+          const idle = Number(frontendIdle);
+          if (Number.isFinite(idle)) {
+            const computed = Math.floor(idle * 0.1);
+            warningCountdownSeconds = Math.max(
+              5,
+              Math.min(Math.max(5, idle - 10), computed || 30),
+            );
+          }
+        }
+        let warningTriggerSeconds = scope?.warningTriggerSeconds;
+        if (
+          (warningTriggerSeconds === null ||
+            typeof warningTriggerSeconds === "undefined" ||
+            warningTriggerSeconds === "") &&
+          frontendIdle !== null &&
+          typeof frontendIdle !== "undefined" &&
+          frontendIdle !== "" &&
+          warningCountdownSeconds !== ""
+        ) {
+          const trigger = Number(frontendIdle) - Number(warningCountdownSeconds);
+          warningTriggerSeconds = Number.isFinite(trigger) && trigger >= 0 ? trigger : "";
+        }
+        return {
+          access: scope?.access || "",
+          id: scope?.id || "",
+          refresh: scope?.refresh || "",
+          frontendIdle: frontendIdle || "",
+          absolute: scope?.absolute || "",
+          warningTriggerSeconds: warningTriggerSeconds ?? "",
+          warningCountdownSeconds,
+          warningSeconds: scope?.warningSeconds || "",
+        };
+      };
       const adminTtlSource = runtimeResponse?.authAdmin?.tokenTtl || tokenTtl;
       const publicTtlSource = runtimeResponse?.authPublic?.tokenTtl || tokenTtl;
       const adminSession = sessionTemplate(adminTtlSource);
@@ -1227,7 +1265,10 @@ export default function ConfigurationSettings({
         sessionOriginal.id !== sessionEdits.id ||
         sessionOriginal.refresh !== sessionEdits.refresh ||
         sessionOriginal.frontendIdle !== sessionEdits.frontendIdle ||
-        sessionOriginal.absolute !== sessionEdits.absolute
+        sessionOriginal.absolute !== sessionEdits.absolute ||
+        sessionOriginal.warningTriggerSeconds !== sessionEdits.warningTriggerSeconds ||
+        sessionOriginal.warningCountdownSeconds !== sessionEdits.warningCountdownSeconds ||
+        sessionOriginal.warningSeconds !== sessionEdits.warningSeconds
       );
     },
     [scopeState],

@@ -22,7 +22,7 @@ const FinanceReconciliationBulkHelp = () => (
       <strong>Good practices</strong>
       <ul>
         <li>Review the summary list to ensure the right items are selected before committing.</li>
-        <li>Record bulk action notes; they appear in the audit history and reports.</li>
+        <li>Record bulk action notes; they are stored on the transactions and will feed the audit log.</li>
         <li>Resolve priority exceptions first—filters on the queue help feed this widget.</li>
       </ul>
     </Box>

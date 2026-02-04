@@ -6,43 +6,40 @@ const FinanceReconciliationHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Exception management area for aligning case-management transactions with finance budgets and
-        eligibility rules. This workspace exists to highlight mismatches before they impact
-        reporting timelines while preserving a full audit trail.
+        Monitor Sage Intacct REST submission attempts from PATH and understand which payment
+        packets succeeded, failed, or partially uploaded.
       </p>
     </Box>
     <Box>
       <strong>Concept</strong>
       <p>
-        Deliver a triage queue that highlights validation failures, missing evidence, and policy
-        violations so finance teams can resolve issues before reporting deadlines. The dashboard
-        pairs an actionable transaction list with detailed drill-ins, bulk fixes, and feed health
-        indicators.
+        Each time PATH submits a payment packet to Intacct (REST mode), the attempt is logged with
+        outcome, reason, and any validation details. The dashboard surfaces the latest result per
+        packet so program admins can quickly spot failures and resolve them back in the payment
+        packet screens.
       </p>
     </Box>
     <Box>
       <strong>Key user goals</strong>
       <ul>
-        <li>Review newly ingested transactions with automatic pot assignments and validation results.</li>
-        <li>Resolve exceptions (missing evidence, date out of period, ineligible vendor) with clear corrective actions.</li>
-        <li>Collaborate with program staff by requesting information and tracking responses.</li>
+        <li>See which packets failed Intacct submission and why.</li>
+        <li>Confirm successful submissions and track partial attachment uploads.</li>
+        <li>Navigate back to payment packets to fix validation issues and retry.</li>
       </ul>
     </Box>
     <Box>
       <strong>Provisional widgets</strong>
       <ul>
-        <li>Inbound transactions table with filters (exception type, funding stream, sub-agreement, status).</li>
-        <li>Exception detail panel showing transaction metadata, proposed pot reclassification, and evidence preview.</li>
-        <li>Bulk action toolbar for approving clean items or requesting documentation from case workers.</li>
-        <li>Sync status banner highlighting ingestion lag or API failures from case management.</li>
+        <li>Submission queue with outcome + reason filters.</li>
+        <li>Submission detail panel with Intacct error messages and attempt history.</li>
       </ul>
     </Box>
     <Box>
       <strong>Dependencies &amp; notes</strong>
       <ul>
-        <li>Requires mapping rules between case categories and finance pots (maintained in Finance Settings).</li>
-        <li>Should write back resolution outcomes to the Transactions &amp; Evidence registry for audit trail.</li>
-        <li>Feeds variance analysis in Reports and risk signals in Monitoring dashboards.</li>
+        <li>Only packets with at least one Intacct REST submission attempt appear here.</li>
+        <li>When PATH runs in email mode, no submission feedback is available.</li>
+        <li>Fixes should be handled in payment packet workflows, then resubmitted.</li>
       </ul>
       <Link href="/finance/settings">Open Finance Settings</Link>
     </Box>
@@ -50,6 +47,6 @@ const FinanceReconciliationHelp = () => (
 );
 
 FinanceReconciliationHelp.aiContext =
-  "Explain the Finance Reconciliation dashboard: how the queue, detail view, bulk actions, and feed health indicators help teams clear transaction exceptions before reporting.";
+  "Explain the Intacct submissions dashboard: how the submission queue and detail view help track REST outcomes and resolve failures back in payment packets.";
 
 export default FinanceReconciliationHelp;

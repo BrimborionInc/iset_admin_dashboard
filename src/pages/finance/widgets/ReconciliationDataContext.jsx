@@ -1,113 +1,36 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
-import { FINANCE_PEOPLE } from "./financeDemoData.js";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { apiFetch } from "../../../auth/apiClient";
 
 const ReconciliationDataContext = createContext(undefined);
 
-const transactionsSeed = [
-  {
-    id: "TX-90510",
-    caseId: "CASE-2103",
-    date: "2024-11-02",
-    amount: 1325.75,
-    vendor: "Coastal Skills Society",
-    potId: "ptma-bc-client",
-    potName: "BC Client Services",
-    stream: "PTMA British Columbia",
-    exceptionType: "missing_evidence",
-    status: "open",
-    evidenceCount: 0,
-    hasRequestedInfo: false,
-    proposedPotId: "ptma-bc-client",
-    notes: "EFT remittance missing after top-up disbursement; requester uploaded invoice only.",
-    createdBy: FINANCE_PEOPLE.programLead,
-    lastUpdated: "2024-11-03T09:40:00Z",
-    priority: "high",
-    attachments: [],
-  },
-  {
-    id: "TX-90524",
-    caseId: "CASE-2149",
-    date: "2024-10-29",
-    amount: 640.0,
-    vendor: "Aurora Aviation",
-    potId: "ptma-northern-client",
-    potName: "Northern Client Services",
-    stream: "PTMA Northern (YT/NT/NU)",
-    exceptionType: "out_of_period",
-    status: "in_review",
-    evidenceCount: 1,
-    hasRequestedInfo: true,
-    proposedPotId: "ptma-northern-client",
-    notes: "Travel occurred after fiscal cut-off; awaiting justification for late submission.",
-    createdBy: FINANCE_PEOPLE.monitoringLead,
-    lastUpdated: "2024-11-01T16:05:00Z",
-    priority: "medium",
-    attachments: [{ id: "EV-5720", name: "Boarding-pass.scan" }],
-  },
-  {
-    id: "TX-90533",
-    caseId: "CASE-2178",
-    date: "2024-11-04",
-    amount: 18450.0,
-    vendor: "Summit Advisory Group",
-    potId: "nwac-admin",
-    potName: "NWAC Administration",
-    stream: "NWAC Administration",
-    exceptionType: "ineligible_vendor",
-    status: "open",
-    evidenceCount: 2,
-    hasRequestedInfo: false,
-    proposedPotId: "nwac-admin",
-    notes: "Consultant not on approved vendor list for policy support contract.",
-    createdBy: "Case ingest service",
-    lastUpdated: "2024-11-04T12:18:00Z",
-    priority: "critical",
-    attachments: [
-      { id: "EV-5801", name: "Statement of work.pdf" },
-      { id: "EV-5802", name: "Contract-draft.docx" },
-    ],
-  },
-  {
-    id: "TX-90541",
-    caseId: "CASE-2195",
-    date: "2024-11-05",
-    amount: 342.2,
-    vendor: "Prairie Coach Lines",
-    potId: "ptma-prairies-client",
-    potName: "Prairies Client Services",
-    stream: "PTMA Prairies (MB/SK)",
-    exceptionType: "duplicate_claim",
-    status: "pending",
-    evidenceCount: 1,
-    hasRequestedInfo: false,
-    proposedPotId: "ptma-prairies-client",
-    notes: "Potential duplicate with TX-90198 — both reference same workshop travel.",
-    createdBy: "Case ingest service",
-    lastUpdated: "2024-11-05T08:55:00Z",
-    priority: "medium",
-    attachments: [{ id: "EV-5824", name: "Travel invoice.pdf" }],
-  },
-];
-
-const syncSeed = {
-  lastSync: "2024-10-04T11:30:00Z",
-  ingestDuration: "4m 21s",
-  backlog: {
-    critical: 3,
-    warning: 9,
-    info: 24,
-  },
-  status: "warning",
-  nextSchedule: "2024-10-04T13:00:00Z",
-  errors: [
-    {
-      id: "ERR-4508",
-      time: "2024-10-04T07:45:00Z",
-      severity: "warning",
-      message: "Case ingest queue delayed by 15 minutes.",
-      suggestedAction: "Monitor queue depth; rerun if backlog persists.",
-    },
-  ],
+const buildSyncStatusFromTransactions = (items, fetchedAt) => {
+  const unresolved = items.filter(item => item.status !== "resolved");
+  const backlog = { critical: 0, warning: 0, info: 0 };
+  unresolved.forEach(item => {
+    if (item.priority === "critical") {
+      backlog.critical += 1;
+    } else if (item.priority === "high" || item.priority === "medium") {
+      backlog.warning += 1;
+    } else {
+      backlog.info += 1;
+    }
+  });
+  const status =
+    backlog.critical > 0 ? "error" : backlog.warning > 0 ? "warning" : "info";
+  const lastUpdated = items
+    .map(item => item.lastUpdated)
+    .filter(Boolean)
+    .map(value => new Date(value))
+    .filter(date => !Number.isNaN(date.getTime()))
+    .sort((a, b) => b - a)[0];
+  return {
+    lastSync: lastUpdated ? lastUpdated.toISOString() : fetchedAt.toISOString(),
+    ingestDuration: "—",
+    backlog,
+    status,
+    nextSchedule: null,
+    errors: [],
+  };
 };
 
 const bulkActionTemplates = [
@@ -135,14 +58,74 @@ const bulkActionTemplates = [
 ];
 
 export const ReconciliationDataProvider = ({ children }) => {
-  const [transactions, setTransactions] = useState(transactionsSeed);
-  const [selectedTransactionId, setSelectedTransactionId] = useState(
-    transactionsSeed[0]?.id ?? null
-  );
+  const [transactions, setTransactions] = useState([]);
+  const [selectedTransactionId, setSelectedTransactionId] = useState(null);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState([]);
-  const [syncStatus, setSyncStatus] = useState(syncSeed);
+  const [syncStatus, setSyncStatus] = useState(
+    buildSyncStatusFromTransactions([], new Date())
+  );
   const [bulkMessage, setBulkMessage] = useState("");
   const [selectedBulkTemplate, setSelectedBulkTemplate] = useState(bulkActionTemplates[0]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [actionError, setActionError] = useState(null);
+  const selectedTransactionRef = useRef(null);
+
+  useEffect(() => {
+    selectedTransactionRef.current = selectedTransactionId;
+  }, [selectedTransactionId]);
+
+  const loadTransactions = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiFetch("/api/finance/reconciliation/transactions?limit=500", {
+        method: "GET",
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.message || payload?.error || `Fetch failed (${response.status})`);
+      }
+      const payload = await response.json().catch(() => ({}));
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      setTransactions(items);
+      if (!items.length) {
+        setSelectedTransactionId(null);
+        setSelectedTransactionIds([]);
+      } else {
+        const currentSelected = selectedTransactionRef.current;
+        const hasSelected = currentSelected
+          ? items.some(item => item.id === currentSelected)
+          : false;
+        if (!hasSelected) {
+          setSelectedTransactionId(items[0].id);
+          setSelectedTransactionIds([items[0].id]);
+        } else {
+          setSelectedTransactionIds(prev =>
+            {
+              const filtered = prev.filter(id => items.some(item => item.id === id));
+              if (!filtered.length && currentSelected) {
+                return [currentSelected];
+              }
+              return filtered;
+            }
+          );
+        }
+      }
+      setSyncStatus(buildSyncStatusFromTransactions(items, new Date()));
+    } catch (err) {
+      console.error("[Reconciliation] failed to load transactions", err);
+      setError(err?.message || "Failed to load reconciliation transactions.");
+      setTransactions([]);
+      setSyncStatus(buildSyncStatusFromTransactions([], new Date()));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTransactions();
+  }, [loadTransactions]);
 
   const selectTransaction = useCallback(transactionId => {
     setSelectedTransactionId(transactionId ?? null);
@@ -160,61 +143,72 @@ export const ReconciliationDataProvider = ({ children }) => {
     }
   }, []);
 
-  const resolveTransactions = useCallback((ids, status, note) => {
+  const resolveTransactions = useCallback(async (ids, resolution, note) => {
     if (!Array.isArray(ids) || !ids.length) {
-      return;
+      return false;
     }
-    const timestamp = new Date().toISOString();
-    setTransactions(prev =>
-      prev.map(tx =>
-        ids.includes(tx.id)
-          ? {
-              ...tx,
-              status,
-              lastUpdated: timestamp,
-              resolutionNote: note ?? "",
-            }
-          : tx
-      )
-    );
-    setSelectedTransactionIds([]);
-    if (ids.includes(selectedTransactionId)) {
-      setSelectedTransactionId(ids[0]);
+    setActionError(null);
+    try {
+      const response = await apiFetch("/api/finance/reconciliation/transactions/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids,
+          resolution,
+          note,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.message || payload?.error || `Resolve failed (${response.status})`);
+      }
+      setSelectedTransactionIds([]);
+      await loadTransactions();
+      return true;
+    } catch (err) {
+      console.error("[Reconciliation] failed to resolve transactions", err);
+      setActionError(err?.message || "Failed to resolve selected transactions.");
+      return false;
     }
-  }, [selectedTransactionId]);
+  }, [loadTransactions]);
 
-  const requestEvidence = useCallback((ids, message) => {
+  const requestEvidence = useCallback(async (ids, message) => {
     if (!Array.isArray(ids) || !ids.length) {
-      return;
+      return false;
     }
-    setTransactions(prev =>
-      prev.map(tx =>
-        ids.includes(tx.id)
-          ? {
-              ...tx,
-              hasRequestedInfo: true,
-              lastUpdated: new Date().toISOString(),
-              latestRequestMessage: message,
-            }
-          : tx
-      )
-    );
-  }, []);
+    setActionError(null);
+    try {
+      const response = await apiFetch("/api/finance/reconciliation/transactions/request-evidence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids,
+          message,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.message || payload?.error || `Request failed (${response.status})`);
+      }
+      await loadTransactions();
+      return true;
+    } catch (err) {
+      console.error("[Reconciliation] failed to request evidence", err);
+      setActionError(err?.message || "Failed to request evidence.");
+      return false;
+    }
+  }, [loadTransactions]);
 
-  const manualSync = useCallback(() => {
-    const timestamp = new Date().toISOString();
-    setSyncStatus(prev => ({
-      ...prev,
-      lastSync: timestamp,
-      backlog: { critical: 1, warning: 4, info: 12 },
-      status: "info",
-      errors: prev.errors.slice(0, 1),
-    }));
-  }, []);
+  const manualSync = useCallback(async () => {
+    await loadTransactions();
+  }, [loadTransactions]);
 
   const value = useMemo(
     () => ({
       transactions,
+      loading,
+      error,
+      actionError,
       selectedTransactionId,
       selectedTransactionIds,
       selectTransaction,
@@ -231,6 +225,9 @@ export const ReconciliationDataProvider = ({ children }) => {
     }),
     [
       transactions,
+      loading,
+      error,
+      actionError,
       selectedTransactionId,
       selectedTransactionIds,
       selectTransaction,

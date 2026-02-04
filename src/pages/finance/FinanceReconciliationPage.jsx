@@ -2,72 +2,44 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Board from "@cloudscape-design/board-components/board";
 import { SpaceBetween, Box, Button, Link } from "@cloudscape-design/components";
 
-import ReconciliationTransactionsWidget from "./widgets/ReconciliationTransactionsWidget.jsx";
-import ReconciliationExceptionDetailWidget from "./widgets/ReconciliationExceptionDetailWidget.jsx";
-import ReconciliationBulkActionsWidget from "./widgets/ReconciliationBulkActionsWidget.jsx";
-import ReconciliationSyncStatusWidget from "./widgets/ReconciliationSyncStatusWidget.jsx";
-import { ReconciliationDataProvider } from "./widgets/ReconciliationDataContext.jsx";
+import IntacctSubmissionQueueWidget from "./widgets/IntacctSubmissionQueueWidget.jsx";
+import IntacctSubmissionDetailWidget from "./widgets/IntacctSubmissionDetailWidget.jsx";
+import { IntacctSubmissionDataProvider } from "./widgets/IntacctSubmissionDataContext.jsx";
 
 import FinanceReconciliationHelp from "../../helpPanelContents/financeReconciliationHelp.js";
 import FinanceReconciliationTransactionsHelp from "../../helpPanelContents/financeReconciliationTransactionsHelp.js";
 import FinanceReconciliationDetailHelp from "../../helpPanelContents/financeReconciliationDetailHelp.js";
-import FinanceReconciliationBulkHelp from "../../helpPanelContents/financeReconciliationBulkHelp.js";
-import FinanceReconciliationSyncHelp from "../../helpPanelContents/financeReconciliationSyncHelp.js";
 
-const STORAGE_KEY = "finance-reconciliation-layout-v1";
+const STORAGE_KEY = "finance-reconciliation-layout-v2";
 
 const widgetRegistry = {
-  transactions: {
-    id: "transactions",
+  submissions: {
+    id: "submissions",
     defaultRowSpan: 6,
     defaultColumnSpan: 4,
-    component: ReconciliationTransactionsWidget,
-    title: "Transactions queue",
-    description: "Inbound transactions requiring reconciliation actions.",
+    component: IntacctSubmissionQueueWidget,
+    title: "Submission queue",
+    description: "Latest Intacct REST submission outcomes by payment packet.",
     helpComponent: FinanceReconciliationTransactionsHelp,
-    helpTitle: "Transactions queue",
+    helpTitle: "Submission queue",
     aiContext: FinanceReconciliationTransactionsHelp.aiContext,
   },
   detail: {
     id: "detail",
-    defaultRowSpan: 3,
-    defaultColumnSpan: 2,
-    component: ReconciliationExceptionDetailWidget,
-    title: "Exception detail",
-    description: "Full context for the selected transaction.",
-    helpComponent: FinanceReconciliationDetailHelp,
-    helpTitle: "Exception detail",
-    aiContext: FinanceReconciliationDetailHelp.aiContext,
-  },
-  bulkActions: {
-    id: "bulkActions",
-    defaultRowSpan: 3,
-    defaultColumnSpan: 2,
-    component: ReconciliationBulkActionsWidget,
-    title: "Bulk actions",
-    description: "Apply actions to selected transactions at once.",
-    helpComponent: FinanceReconciliationBulkHelp,
-    helpTitle: "Bulk actions",
-    aiContext: FinanceReconciliationBulkHelp.aiContext,
-  },
-  syncStatus: {
-    id: "syncStatus",
-    defaultRowSpan: 2,
+    defaultRowSpan: 4,
     defaultColumnSpan: 4,
-    component: ReconciliationSyncStatusWidget,
-    title: "Sync status",
-    description: "Monitor ingest health for reconciliation feeds.",
-    helpComponent: FinanceReconciliationSyncHelp,
-    helpTitle: "Sync status",
-    aiContext: FinanceReconciliationSyncHelp.aiContext,
+    component: IntacctSubmissionDetailWidget,
+    title: "Submission detail",
+    description: "Error context and retry guidance for the selected packet.",
+    helpComponent: FinanceReconciliationDetailHelp,
+    helpTitle: "Submission detail",
+    aiContext: FinanceReconciliationDetailHelp.aiContext,
   },
 };
 
 const defaultLayout = [
-  { id: "transactions", rowSpan: 7, columnSpan: 4 },
-  { id: "detail", rowSpan: 3, columnSpan: 2 },
-  { id: "bulkActions", rowSpan: 3, columnSpan: 2 },
-  { id: "syncStatus", rowSpan: 2, columnSpan: 4 },
+  { id: "submissions", rowSpan: 6, columnSpan: 4 },
+  { id: "detail", rowSpan: 4, columnSpan: 4 },
 ];
 
 const exportLayout = items =>
@@ -173,8 +145,8 @@ const boardI18nStrings = {
   liveAnnouncementDndCommitted: operation => `${operation} committed`,
   liveAnnouncementDndDiscarded: operation => `${operation} discarded`,
   liveAnnouncementItemRemoved: op => `Removed item ${op.item.data.title}.`,
-  navigationAriaLabel: "Reconciliation dashboard navigation",
-  navigationAriaDescription: "Use arrow keys to move between widgets on the Reconciliation dashboard.",
+  navigationAriaLabel: "Intacct submissions dashboard navigation",
+  navigationAriaDescription: "Use arrow keys to move between widgets on the Intacct submissions dashboard.",
   navigationItemAriaLabel: item => (item ? item.data.title : "Empty"),
 };
 
@@ -305,7 +277,7 @@ const FinanceReconciliationPage = ({
   }, [openPalette, resetLayout]);
 
   return (
-    <ReconciliationDataProvider>
+    <IntacctSubmissionDataProvider>
       <SpaceBetween size="l">
         <Board
           i18nStrings={boardI18nStrings}
@@ -314,7 +286,7 @@ const FinanceReconciliationPage = ({
           renderItem={renderBoardItem}
           empty={
             <Box padding="m">
-              No widgets on the Reconciliation dashboard. Use the palette to add widgets back.
+              No widgets on the Intacct submissions dashboard. Use the palette to add widgets back.
               <Box margin={{ top: "s" }}>
                 <Button
                   variant="link"
@@ -329,7 +301,7 @@ const FinanceReconciliationPage = ({
           }
         />
         <Box variant="awsui-key-label">
-          Need a refresher on Reconciliation?{" "}
+          Need a refresher on Intacct submissions?{" "}
           <Link
             href="#"
             onFollow={event => {
@@ -348,7 +320,7 @@ const FinanceReconciliationPage = ({
           </Link>
         </Box>
       </SpaceBetween>
-    </ReconciliationDataProvider>
+    </IntacctSubmissionDataProvider>
   );
 };
 

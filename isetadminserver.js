@@ -18398,7 +18398,15 @@ function deepMerge(to, from) {
 function defaultAuthConfig() {
   return {
     admin: {
-      tokenTtl: { access: 3600, id: 3600, refresh: 86400, frontendIdle: 900, absolute: 28800 },
+      tokenTtl: {
+        access: 3600,
+        id: 3600,
+        refresh: 86400,
+        frontendIdle: 900,
+        absolute: 28800,
+        warningTriggerSeconds: 870,
+        warningCountdownSeconds: 30
+      },
       policy: {
         mfaMode: 'optional',
         pkceRequired: true,
@@ -18408,7 +18416,15 @@ function defaultAuthConfig() {
       }
     },
     public: {
-      tokenTtl: { access: 3600, id: 3600, refresh: 86400, frontendIdle: 900, absolute: 28800 },
+      tokenTtl: {
+        access: 3600,
+        id: 3600,
+        refresh: 86400,
+        frontendIdle: 900,
+        absolute: 28800,
+        warningTriggerSeconds: 870,
+        warningCountdownSeconds: 30
+      },
       policy: {
         mfaMode: 'off',
         pkceRequired: true,
@@ -20136,7 +20152,32 @@ app.patch('/api/config/runtime/auth-session', async (req, res) => {
     if (scope && !['admin', 'public'].includes(scope)) return res.status(400).json({ error: 'invalid_scope' });
     const ttl = (req.body || {}).tokenTtl || {};
     const apply = target => {
-      ['access', 'id', 'refresh', 'frontendIdle', 'absolute'].forEach(k => { if (ttl[k] !== undefined) target.tokenTtl[k] = ttl[k]; });
+      [
+        'access',
+        'id',
+        'refresh',
+        'frontendIdle',
+        'absolute',
+        'warningSeconds',
+        'warningTriggerSeconds',
+        'warningCountdownSeconds'
+      ].forEach(k => {
+        if (ttl[k] !== undefined) target.tokenTtl[k] = ttl[k];
+      });
+      const trigger = Number(target.tokenTtl.warningTriggerSeconds);
+      const countdown = Number(target.tokenTtl.warningCountdownSeconds);
+      if (Number.isFinite(trigger) && Number.isFinite(countdown)) {
+        target.tokenTtl.frontendIdle = trigger + countdown;
+        target.tokenTtl.warningSeconds = countdown;
+        return;
+      }
+      const legacyIdle = Number(target.tokenTtl.frontendIdle);
+      const legacyCountdown = Number(target.tokenTtl.warningSeconds);
+      if (Number.isFinite(legacyIdle) && Number.isFinite(legacyCountdown)) {
+        const derivedTrigger = legacyIdle - legacyCountdown;
+        target.tokenTtl.warningTriggerSeconds = derivedTrigger >= 0 ? derivedTrigger : 0;
+        target.tokenTtl.warningCountdownSeconds = legacyCountdown;
+      }
     };
     if (scope) apply(__authConfig[scope]); else { apply(__authConfig.admin); apply(__authConfig.public); }
     await persistAuthConfig(__authConfig);
@@ -38054,6 +38095,54 @@ const normalizeIntacctAction = (value) => {
   return 'draft';
 };
 
+const normalizeIntacctSubmissionMode = (value) => {
+  const normalized = normalizeIntacctString(value).toLowerCase();
+  if (['intacct_rest', 'rest', 'api', 'intacct'].includes(normalized)) return 'intacct_rest';
+  return 'email';
+};
+
+const normalizeIntacctAttemptStatus = (value) => {
+  const normalized = normalizeIntacctString(value).toLowerCase();
+  if (normalized === 'success' || normalized === 'failed' || normalized === 'partial') {
+    return normalized;
+  }
+  return '';
+};
+
+const resolveIntacctAttemptStatus = (detail = {}) => {
+  const normalized = normalizeIntacctAttemptStatus(detail.status || detail.outcome);
+  if (normalized) return normalized;
+  const httpStatus = Number(detail.httpStatus || detail.statusCode || detail.status_code);
+  if (Number.isFinite(httpStatus) && httpStatus >= 400) return 'failed';
+  if (detail.error || detail.errorCode || detail.error_code) return 'failed';
+  const attachmentErrors = Array.isArray(detail.attachmentErrors)
+    ? detail.attachmentErrors
+    : Array.isArray(detail.attachment_errors)
+      ? detail.attachment_errors
+      : [];
+  if (attachmentErrors.length) return 'partial';
+  return 'success';
+};
+
+const resolveIntacctAttemptReason = (detail = {}) => {
+  const status = resolveIntacctAttemptStatus(detail);
+  if (status === 'success') return 'success';
+  if (status === 'partial') return 'attachments';
+  const httpStatus = Number(detail.httpStatus || detail.statusCode || detail.status_code);
+  const errorCode = normalizeIntacctString(detail.error || detail.errorCode || detail.error_code).toLowerCase();
+  const stage = normalizeIntacctString(detail.stage || detail.phase || detail.step).toLowerCase();
+  if (httpStatus === 400) return 'validation';
+  if ([401, 403].includes(httpStatus) || errorCode.includes('token') || stage === 'token') {
+    return 'authentication';
+  }
+  if (errorCode.includes('unreachable') || errorCode.includes('timeout') || errorCode.includes('network')) {
+    return 'connectivity';
+  }
+  if (Number.isFinite(httpStatus) && httpStatus >= 500) return 'submission';
+  if (errorCode.includes('submit') || stage === 'submit') return 'submission';
+  return 'unknown';
+};
+
 const sanitizeIntacctIntegrationConfig = (raw) => {
   if (!raw || typeof raw !== 'object') {
     return {
@@ -38068,11 +38157,19 @@ const sanitizeIntacctIntegrationConfig = (raw) => {
       defaultLocationId: '',
       defaultDepartmentId: '',
       defaultAction: 'draft',
+      submissionMode: 'email',
       notes: '',
     };
   }
+  const submissionMode = normalizeIntacctSubmissionMode(
+    raw.submissionMode ||
+      raw.submission_mode ||
+      (raw.useRestApi === true || raw.use_rest_api === true || raw.enabled === true
+        ? 'intacct_rest'
+        : null)
+  );
   return {
-    enabled: raw.enabled === true,
+    enabled: submissionMode === 'intacct_rest',
     environment: normalizeIntacctEnvironment(raw.environment || raw.env),
     companyId: normalizeIntacctString(raw.companyId || raw.company_id),
     senderId: normalizeIntacctString(raw.senderId || raw.sender_id),
@@ -38086,6 +38183,7 @@ const sanitizeIntacctIntegrationConfig = (raw) => {
     defaultLocationId: normalizeIntacctString(raw.defaultLocationId || raw.default_location_id),
     defaultDepartmentId: normalizeIntacctString(raw.defaultDepartmentId || raw.default_department_id),
     defaultAction: normalizeIntacctAction(raw.defaultAction || raw.default_action),
+    submissionMode,
     notes: normalizeIntacctString(raw.notes || raw.note),
   };
 };
@@ -39413,6 +39511,64 @@ const clearPaymentPacketValidation = async ({ packetId, connection }) => {
     'UPDATE payment_packet SET metadata = ?, updated_at = NOW() WHERE id = ?',
     [JSON.stringify(meta), packetId]
   );
+};
+
+const syncFinanceTransactionEvidenceFromPacket = async ({ packetId, connection }) => {
+  if (!packetId || !connection) return;
+  const [links] = await connection.query(
+    `SELECT DISTINCT plt.finance_transaction_id AS finance_transaction_id,
+            ppl.id AS line_id
+       FROM payment_line_transaction plt
+       LEFT JOIN payment_packet_line ppl ON ppl.id = plt.payment_packet_line_id
+      WHERE ppl.payment_packet_id = ?`,
+    [packetId]
+  );
+  if (!links || !links.length) return;
+  const [docRows] = await connection.query(
+    `SELECT payment_packet_line_id, document_id
+       FROM payment_packet_document
+      WHERE payment_packet_id = ?
+        AND document_id IS NOT NULL`,
+    [packetId]
+  );
+  const baselineDocIds = (docRows || [])
+    .filter(row => !row.payment_packet_line_id)
+    .map(row => String(row.document_id))
+    .filter(Boolean);
+  const lineDocMap = new Map();
+  (docRows || []).forEach(row => {
+    if (!row.payment_packet_line_id) return;
+    const lineId = String(row.payment_packet_line_id);
+    const docId = row.document_id ? String(row.document_id) : null;
+    if (!docId) return;
+    const list = lineDocMap.get(lineId) || [];
+    list.push(docId);
+    lineDocMap.set(lineId, list);
+  });
+  const buildDocIds = (lineId) => {
+    const combined = [
+      ...baselineDocIds,
+      ...(lineId && lineDocMap.has(lineId) ? lineDocMap.get(lineId) : []),
+    ];
+    return Array.from(new Set(combined)).filter(Boolean);
+  };
+  for (const link of links) {
+    const txId = Number(link.finance_transaction_id);
+    if (!Number.isFinite(txId)) continue;
+    const lineId = link.line_id ? String(link.line_id) : null;
+    const evidenceDocumentIds = buildDocIds(lineId);
+    const [[txRow]] = await connection.query(
+      'SELECT metadata FROM finance_transaction WHERE id = ? LIMIT 1',
+      [txId]
+    );
+    if (!txRow) continue;
+    const meta = safeJsonParse(txRow.metadata, {}) || {};
+    meta.evidenceDocumentIds = evidenceDocumentIds;
+    await connection.query(
+      'UPDATE finance_transaction SET metadata = ?, updated_at = NOW() WHERE id = ?',
+      [JSON.stringify(meta), txId]
+    );
+  }
 };
 
 const mergeEvidenceTypeLists = (...lists) => {
@@ -43579,6 +43735,752 @@ const buildPaymentPacketEmail = ({
   return { subject, bodyText, bodyHtml, attachments };
 };
 
+const recordPaymentPacketSubmissionMeta = async ({
+  packetId,
+  mode,
+  detail = {},
+  connection = null,
+}) => {
+  const runner = connection || pool;
+  if (!runner || !packetId) return;
+  const [[row]] = await runner.query(
+    'SELECT metadata FROM payment_packet WHERE id = ? LIMIT 1',
+    [packetId]
+  );
+  if (!row) return;
+  const meta = safeJsonParse(row.metadata, {}) || {};
+  const history = Array.isArray(meta.integrationSubmissions) ? meta.integrationSubmissions : [];
+  const resolvedStatus = resolveIntacctAttemptStatus(detail);
+  const resolvedReason = resolveIntacctAttemptReason({ ...detail, status: resolvedStatus });
+  const normalizedDetail = {
+    ...detail,
+    status: resolvedStatus || detail.status || detail.outcome || null,
+    reason: resolvedReason || detail.reason || null,
+  };
+  const historyEntry = {
+    mode,
+    ...normalizedDetail,
+    at: new Date().toISOString(),
+  };
+  history.push(historyEntry);
+  meta.integrationSubmissions = history;
+  if (mode === 'intacct_rest') {
+    meta.intacctRest = {
+      ...(meta.intacctRest || {}),
+      ...normalizedDetail,
+      mode,
+      status: normalizedDetail.status || resolvedStatus || null,
+      reason: normalizedDetail.reason || resolvedReason || null,
+      lastAttemptAt: historyEntry.at,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  await runner.query(
+    'UPDATE payment_packet SET metadata = ?, updated_at = NOW() WHERE id = ?',
+    [JSON.stringify(meta), packetId]
+  );
+};
+
+const resolveIntacctSubmissionAttempts = (metadata) => {
+  if (!metadata || typeof metadata !== 'object') return [];
+  const history = Array.isArray(metadata.integrationSubmissions)
+    ? metadata.integrationSubmissions
+    : [];
+  const attempts = history
+    .filter(entry => entry && typeof entry === 'object')
+    .filter(entry => normalizeIntacctSubmissionMode(entry.mode) === 'intacct_rest')
+    .map(entry => {
+      const attemptAt =
+        entry.at ||
+        entry.timestamp ||
+        entry.updatedAt ||
+        entry.updated_at ||
+        null;
+      const status = resolveIntacctAttemptStatus(entry);
+      const reason = resolveIntacctAttemptReason(entry);
+      return {
+        ...entry,
+        at: attemptAt,
+        status: status || entry.status || entry.outcome || null,
+        reason: reason || entry.reason || null,
+      };
+    });
+  if (!attempts.length && metadata.intacctRest && typeof metadata.intacctRest === 'object') {
+    const fallback = metadata.intacctRest;
+    attempts.push({
+      ...fallback,
+      mode: 'intacct_rest',
+      at: fallback.updatedAt || fallback.updated_at || null,
+      status: resolveIntacctAttemptStatus(fallback),
+      reason: resolveIntacctAttemptReason(fallback),
+    });
+  }
+  attempts.sort((a, b) => {
+    const left = a?.at ? new Date(a.at).getTime() : 0;
+    const right = b?.at ? new Date(b.at).getTime() : 0;
+    return left - right;
+  });
+  return attempts;
+};
+
+const resolveLatestIntacctAttempt = (metadata) => {
+  const attempts = resolveIntacctSubmissionAttempts(metadata);
+  if (!attempts.length) return null;
+  return attempts[attempts.length - 1] || null;
+};
+
+const resolveIntacctRestBaseUrl = () => {
+  const baseRaw =
+    process.env.INTACCT_REST_BASE_URL ||
+    process.env.INTACCT_MOCK_BASE_URL ||
+    'http://localhost:4000';
+  return /^https?:\/\//i.test(baseRaw) ? baseRaw : `http://${baseRaw}`;
+};
+
+const normalizeIntacctVendorKey = (value) => normalizeIntacctString(value).toLowerCase();
+
+const buildIntacctVendorIdFromName = (name) => {
+  const trimmed = normalizeIntacctString(name);
+  if (!trimmed) return '';
+  if (/^VENDOR[-_]/i.test(trimmed)) return trimmed;
+  const slug = trimmed
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug ? `VENDOR-${slug.slice(0, 24)}` : '';
+};
+
+const resolveVendorFromList = (vendors, payeeName) => {
+  if (!Array.isArray(vendors) || !vendors.length) return null;
+  const key = normalizeIntacctVendorKey(payeeName);
+  if (!key) return null;
+  return (
+    vendors.find(vendor => normalizeIntacctVendorKey(vendor?.id || vendor?.vendor_id) === key) ||
+    vendors.find(vendor => normalizeIntacctVendorKey(vendor?.name) === key) ||
+    null
+  );
+};
+
+const fetchIntacctRestAccessToken = async (baseUrl) => {
+  const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+  try {
+    const resp = await fetch(`${baseUrl}/oauth2/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 5000,
+    });
+    if (!resp.ok) return null;
+    const payload = await resp.json().catch(() => null);
+    return payload?.access_token || null;
+  } catch (_) {
+    return null;
+  }
+};
+
+const fetchIntacctVendors = async ({ baseUrl, accessToken }) => {
+  const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+  try {
+    const resp = await fetch(`${baseUrl}/ia/api/v1/objects/vendors`, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      timeout: 5000,
+    });
+    if (!resp.ok) return [];
+    const payload = await resp.json().catch(() => null);
+    return Array.isArray(payload?.data) ? payload.data : [];
+  } catch (_) {
+    return [];
+  }
+};
+
+const createIntacctVendor = async ({ baseUrl, accessToken, vendorId, name }) => {
+  if (!vendorId || !name) return null;
+  const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+  try {
+    const resp = await fetch(`${baseUrl}/ia/api/v1/objects/vendors`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        vendor_id: vendorId,
+        name,
+      }),
+      timeout: 5000,
+    });
+    if (!resp.ok) return null;
+    const payload = await resp.json().catch(() => null);
+    const data = payload?.data || null;
+    return data?.id || data?.vendor_id || vendorId || null;
+  } catch (_) {
+    return null;
+  }
+};
+
+const resolveMissingIntacctVendorReferences = async ({ lineRows, connection }) => {
+  if (!connection || !Array.isArray(lineRows) || !lineRows.length) return;
+  const missingLines = lineRows.filter(line => !normalizeIntacctString(line?.payee_reference));
+  if (!missingLines.length) return;
+  const baseUrl = resolveIntacctRestBaseUrl().replace(/\/$/, '');
+  const accessToken = await fetchIntacctRestAccessToken(baseUrl);
+  if (!accessToken) return;
+  const vendors = await fetchIntacctVendors({ baseUrl, accessToken });
+
+  for (const line of missingLines) {
+    const payeeName = normalizeIntacctString(line?.payee_name);
+    if (!payeeName) continue;
+    let vendorId = resolveVendorFromList(vendors, payeeName)?.id || null;
+    if (!vendorId) {
+      const candidateId = buildIntacctVendorIdFromName(payeeName);
+      vendorId = await createIntacctVendor({
+        baseUrl,
+        accessToken,
+        vendorId: candidateId,
+        name: payeeName,
+      });
+      if (vendorId) {
+        vendors.push({ id: vendorId, name: payeeName });
+      }
+    }
+    if (!vendorId && vendors.length) {
+      vendorId = vendors[0]?.id || vendors[0]?.vendor_id || null;
+    }
+    if (!vendorId) continue;
+    await connection.query(
+      'UPDATE payment_packet_line SET payee_reference = ?, updated_at = NOW() WHERE id = ?',
+      [vendorId, line.id]
+    );
+    line.payee_reference = vendorId;
+  }
+};
+
+const resolveIntacctRequiredDimensions = () => {
+  const raw = String(process.env.INTACCT_REQUIRED_DIMENSIONS || '');
+  return raw
+    .split(',')
+    .map(entry => entry.trim().toLowerCase())
+    .filter(Boolean);
+};
+
+const resolveLineMetadataValue = (line) => {
+  if (!line) return {};
+  if (line.metadata && typeof line.metadata === 'object') return line.metadata;
+  if (typeof line.metadata === 'string') return safeJsonParse(line.metadata, {}) || {};
+  return {};
+};
+
+const extractAccountNoFromPotName = (potName) => {
+  if (!potName) return null;
+  const [firstPart] = String(potName).split(' - ');
+  const trimmed = firstPart ? firstPart.trim() : '';
+  return trimmed ? trimmed : null;
+};
+
+const resolveIntacctLineGlAccount = (line) => {
+  if (!line) return null;
+  const metadata = resolveLineMetadataValue(line);
+  const direct =
+    line.gl_account ||
+    line.glAccount ||
+    line.account_no ||
+    line.accountNo ||
+    metadata.gl_account ||
+    metadata.glAccount ||
+    metadata.account_no ||
+    metadata.accountNo ||
+    null;
+  if (direct) {
+    const normalized = normalizeIntacctString(direct);
+    return normalized || null;
+  }
+  const potName = line.pot_name || line.potName || null;
+  const potCode = line.pot_code || line.potCode || null;
+  const derived = extractAccountNoFromPotName(potName) || potCode || null;
+  if (!derived) return null;
+  const normalized = normalizeIntacctString(derived);
+  return normalized || null;
+};
+
+const resolveIntacctLineLocationId = ({ line, packet, config }) => {
+  const metadata = resolveLineMetadataValue(line);
+  const candidate =
+    line?.location_id ||
+    line?.locationId ||
+    metadata?.location_id ||
+    metadata?.locationId ||
+    line?.reporting_unit ||
+    line?.reportingUnit ||
+    packet?.reporting_unit ||
+    packet?.reportingUnit ||
+    config?.defaultLocationId ||
+    null;
+  const normalized = normalizeIntacctString(candidate);
+  return normalized || null;
+};
+
+const resolveIntacctLineDepartmentId = ({ line, packet, config }) => {
+  const metadata = resolveLineMetadataValue(line);
+  const candidate =
+    line?.department_id ||
+    line?.departmentId ||
+    metadata?.department_id ||
+    metadata?.departmentId ||
+    packet?.department_id ||
+    packet?.departmentId ||
+    config?.defaultDepartmentId ||
+    null;
+  const normalized = normalizeIntacctString(candidate);
+  return normalized || null;
+};
+
+const resolveIntacctBillDate = ({ packet, lines }) => {
+  const firstLine = Array.isArray(lines) && lines.length ? lines[0] : null;
+  const candidate =
+    packet?.submitted_at ||
+    packet?.submittedOn ||
+    packet?.created_at ||
+    packet?.createdOn ||
+    firstLine?.requested_payment_date ||
+    firstLine?.requestedPaymentDate ||
+    null;
+  return toDateOnlyString(candidate);
+};
+
+const resolveIntacctDueDate = ({ packet, lines, billDate }) => {
+  const firstLine = Array.isArray(lines) && lines.length ? lines[0] : null;
+  const candidate =
+    packet?.due_by ||
+    packet?.dueBy ||
+    firstLine?.requested_payment_date ||
+    firstLine?.requestedPaymentDate ||
+    billDate ||
+    null;
+  return toDateOnlyString(candidate);
+};
+
+const validateIntacctRestRequirements = ({ packetRow, lineRows, config }) => {
+  const details = [];
+  const lines = Array.isArray(lineRows) ? lineRows : [];
+  const billDate = resolveIntacctBillDate({ packet: packetRow, lines });
+  const dueDate = resolveIntacctDueDate({ packet: packetRow, lines, billDate });
+  if (!billDate) {
+    details.push({
+      field: 'bill_date',
+      error: 'required',
+      message: 'Bill date (WHENCREATED) is required for Intacct submission.',
+    });
+  }
+  if (!dueDate) {
+    details.push({
+      field: 'due_date',
+      error: 'required',
+      message: 'Due date (WHENDUE) is required for Intacct submission.',
+    });
+  }
+  const requiredDimensions = resolveIntacctRequiredDimensions();
+  lines.forEach((line) => {
+    const lineId = line?.id ? String(line.id) : null;
+    const vendorId = normalizeIntacctString(line?.payee_reference || line?.payeeReference || '');
+    if (!vendorId) {
+      details.push({
+        lineId,
+        field: 'vendor_id',
+        error: 'required',
+        message: 'Vendor ID is required for Intacct submission.',
+      });
+    }
+    const glAccount = resolveIntacctLineGlAccount(line);
+    if (!glAccount) {
+      details.push({
+        lineId,
+        field: 'gl_account',
+        error: 'required',
+        message: 'GL account is required for Intacct submission.',
+      });
+    }
+    if (requiredDimensions.includes('location')) {
+      const locationId = resolveIntacctLineLocationId({ line, packet: packetRow, config });
+      if (!locationId) {
+        details.push({
+          lineId,
+          field: 'location_id',
+          error: 'required_dimension',
+          message: 'Location is required for Intacct submission.',
+        });
+      }
+    }
+    if (requiredDimensions.includes('department')) {
+      const departmentId = resolveIntacctLineDepartmentId({ line, packet: packetRow, config });
+      if (!departmentId) {
+        details.push({
+          lineId,
+          field: 'department_id',
+          error: 'required_dimension',
+          message: 'Department is required for Intacct submission.',
+        });
+      }
+    }
+  });
+  return details;
+};
+
+const buildIntacctRestBillPayload = ({ packet, note, config }) => {
+  const lines = Array.isArray(packet?.lines) ? packet.lines : [];
+  const firstLine = lines[0] || null;
+  const vendorId =
+    firstLine?.payeeReference ||
+    firstLine?.payee_reference ||
+    packet?.vendorId ||
+    packet?.vendor_id ||
+    'VENDOR-0001';
+  const memoParts = [
+    packet?.caseNumber ? `Case ${packet.caseNumber}` : null,
+    packet?.interventionName || packet?.intervention_name || null,
+    note || null,
+  ].filter(Boolean);
+  const memo =
+    memoParts.join(' - ') ||
+    `Payment packet ${packet?.id || packet?.packetId || 'unknown'}`;
+  const billDate = resolveIntacctBillDate({ packet, lines });
+  const dueDate = resolveIntacctDueDate({ packet, lines, billDate });
+  const payloadLines = lines.map((line, index) => ({
+    line_id: line?.id || String(index + 1),
+    amount: Number(line?.amount || 0),
+    description: [
+      line?.paymentType || line?.payment_type || null,
+      line?.payeeName || line?.payee_name || null,
+    ].filter(Boolean).join(' - ') || `Line ${index + 1}`,
+    gl_account: resolveIntacctLineGlAccount(line),
+    location_id: resolveIntacctLineLocationId({ line, packet, config }),
+    department_id: resolveIntacctLineDepartmentId({ line, packet, config }),
+  }));
+  const total = payloadLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
+  return {
+    vendor_id: vendorId,
+    memo,
+    currency: packet?.currency || packet?.currency_code || 'USD',
+    total,
+    bill_date: billDate,
+    due_date: dueDate,
+    lines: payloadLines,
+  };
+};
+
+async function sendIntacctRestForPacket({
+  packetId,
+  packetRow = null,
+  note = null,
+  req,
+  connection = null,
+  intacctConfig = null,
+}) {
+  const runner = connection || pool;
+  if (!runner || !packetId) {
+    return { error: 'invalid_payment_packet_id' };
+  }
+  let row = packetRow;
+  if (!row) {
+    [[row]] = await runner.query(
+      'SELECT * FROM payment_packet WHERE id = ? LIMIT 1',
+      [packetId]
+    );
+  }
+  if (!row) {
+    return { error: 'payment_packet_not_found' };
+  }
+  const resolvedConfig = intacctConfig || await readIntacctIntegrationConfig(runner);
+  const packet = await fetchPaymentPacketById(packetId, runner);
+  const reconciliationAttachments = buildPacketAttachmentSummary(packet).map(entry => {
+    const id = entry.documentId || entry.id || null;
+    const name = entry.name || entry.documentName || entry.document_name || null;
+    return {
+      id: id ? String(id) : name ? String(name) : null,
+      name: name ? String(name) : id ? `Document ${id}` : 'Attachment',
+    };
+  }).filter(item => item.id || item.name);
+
+  const persistReconciliationError = async ({ status, message, details }) => {
+    const [links] = await runner.query(
+      `SELECT DISTINCT plt.finance_transaction_id AS id
+         FROM payment_line_transaction plt
+         LEFT JOIN payment_packet_line ppl ON ppl.id = plt.payment_packet_line_id
+        WHERE ppl.payment_packet_id = ?`,
+      [packetId]
+    );
+    if (!links || !links.length) return;
+    const nowIso = new Date().toISOString();
+    const detailText = Array.isArray(details) && details.length
+      ? details
+          .map(detail => {
+            const field = detail?.field ? String(detail.field) : null;
+            const msg = detail?.message || detail?.code || null;
+            return [field, msg].filter(Boolean).join(': ');
+          })
+          .filter(Boolean)
+          .join(' | ')
+      : null;
+    const noteParts = [
+      'Intacct REST submission failed.',
+      message || null,
+      detailText,
+    ].filter(Boolean);
+    const notes = noteParts.join(' ');
+    const exceptionType = status === 400 ? 'policy_review' : null;
+    for (const link of links) {
+      const txId = Number(link.id);
+      if (!Number.isFinite(txId)) continue;
+      const [[txRow]] = await runner.query(
+        'SELECT metadata FROM finance_transaction WHERE id = ? LIMIT 1',
+        [txId]
+      );
+      const meta = safeJsonParse(txRow?.metadata, {}) || {};
+      const reconciliation = {
+        ...(meta.reconciliation && typeof meta.reconciliation === 'object' ? meta.reconciliation : {}),
+        exceptionType: exceptionType || meta?.reconciliation?.exceptionType || 'policy_review',
+        notes,
+        attachments: reconciliationAttachments,
+        lastUpdated: nowIso,
+      };
+      const nextMeta = { ...(meta && typeof meta === 'object' ? meta : {}), reconciliation };
+      await runner.query(
+        'UPDATE finance_transaction SET metadata = ?, updated_at = NOW() WHERE id = ?',
+        [JSON.stringify(nextMeta), txId]
+      );
+    }
+  };
+  const recordIntacctAttempt = async (detail) => {
+    try {
+      await recordPaymentPacketSubmissionMeta({
+        packetId,
+        mode: 'intacct_rest',
+        detail,
+        connection: runner,
+      });
+    } catch (err) {
+      console.warn('[intacct-rest] failed to record submission attempt', err?.message || err);
+    }
+  };
+  const baseUrl = resolveIntacctRestBaseUrl().replace(/\/$/, '');
+  const tokenUrl = `${baseUrl}/oauth2/token`;
+  const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+
+  let tokenResp;
+  let tokenText = '';
+  try {
+    tokenResp = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 5000,
+    });
+    tokenText = await tokenResp.text();
+  } catch (err) {
+    const message = err?.message || 'Intacct REST token request failed.';
+    await persistReconciliationError({ status: null, message });
+    await recordIntacctAttempt({
+      stage: 'token',
+      error: 'intacct_rest_unreachable',
+      message,
+      baseUrl,
+    });
+    return { error: 'intacct_rest_unreachable', message, baseUrl };
+  }
+  if (!tokenResp.ok) {
+    let tokenPayload = null;
+    try {
+      tokenPayload = tokenText ? JSON.parse(tokenText) : null;
+    } catch {
+      tokenPayload = null;
+    }
+    const tokenMessage =
+      tokenPayload?.error?.message ||
+      tokenPayload?.message ||
+      tokenText?.slice(0, 500) ||
+      `Token request failed (${tokenResp.status})`;
+    await persistReconciliationError({ status: tokenResp.status, message: tokenMessage });
+    await recordIntacctAttempt({
+      stage: 'token',
+      error: 'intacct_rest_token_failed',
+      message: tokenMessage,
+      httpStatus: tokenResp.status,
+      details: tokenPayload?.error?.details || tokenPayload?.details || null,
+      baseUrl,
+    });
+    return {
+      error: 'intacct_rest_token_failed',
+      message: tokenText?.slice(0, 500) || `Token request failed (${tokenResp.status})`,
+      status: tokenResp.status,
+      baseUrl,
+    };
+  }
+  let tokenPayload = null;
+  try {
+    tokenPayload = tokenText ? JSON.parse(tokenText) : null;
+  } catch {
+    tokenPayload = null;
+  }
+  const accessToken = tokenPayload?.access_token || 'mock-access-token';
+
+  const payload = buildIntacctRestBillPayload({
+    packet: { ...packet, ...row },
+    note,
+    config: resolvedConfig,
+  });
+  const submitUrl = `${baseUrl}/ia/api/v1/objects/apbills`;
+  let submitResp;
+  let submitText = '';
+  try {
+    submitResp = await fetch(submitUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload),
+      timeout: 8000,
+    });
+    submitText = await submitResp.text();
+  } catch (err) {
+    const message = err?.message || 'Intacct REST submit failed.';
+    await persistReconciliationError({ status: null, message });
+    await recordIntacctAttempt({
+      stage: 'submit',
+      error: 'intacct_rest_unreachable',
+      message,
+      baseUrl,
+    });
+    return { error: 'intacct_rest_unreachable', message, baseUrl };
+  }
+  if (!submitResp.ok) {
+    let submitErrorPayload = null;
+    try {
+      submitErrorPayload = submitText ? JSON.parse(submitText) : null;
+    } catch {
+      submitErrorPayload = null;
+    }
+    const submitMessage =
+      submitErrorPayload?.error?.message ||
+      submitErrorPayload?.message ||
+      submitText?.slice(0, 500) ||
+      `Submit failed (${submitResp.status})`;
+    const submitDetails = submitErrorPayload?.error?.details || null;
+    await persistReconciliationError({
+      status: submitResp.status,
+      message: submitMessage,
+      details: submitDetails,
+    });
+    await recordIntacctAttempt({
+      stage: 'submit',
+      error: 'intacct_rest_submit_failed',
+      message: submitMessage,
+      httpStatus: submitResp.status,
+      details: submitDetails,
+      baseUrl,
+    });
+    return {
+      error: 'intacct_rest_submit_failed',
+      message: submitText?.slice(0, 500) || `Submit failed (${submitResp.status})`,
+      status: submitResp.status,
+      baseUrl,
+    };
+  }
+  let submitPayload = null;
+  try {
+    submitPayload = submitText ? JSON.parse(submitText) : null;
+  } catch {
+    submitPayload = null;
+  }
+  const billId = submitPayload?.data?.id || null;
+
+  const attachments = buildPacketAttachmentSummary(packet);
+  const attachmentErrors = [];
+  if (billId && attachments.length) {
+    for (const attachment of attachments) {
+      try {
+        const attachResp = await fetch(
+          `${baseUrl}/ia/api/v1/objects/apbills/${billId}/attachments`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              document_id: attachment.documentId || null,
+              name: attachment.name || null,
+              type: attachment.type || null,
+            }),
+            timeout: 8000,
+          }
+        );
+        if (!attachResp.ok) {
+          attachmentErrors.push({
+            documentId: attachment.documentId || null,
+            status: attachResp.status,
+          });
+        }
+      } catch (err) {
+        attachmentErrors.push({
+          documentId: attachment.documentId || null,
+          error: err?.message || 'Attachment failed',
+        });
+      }
+    }
+  }
+
+  const senderUserId = await resolveOrCreateUserIdFromAuth(req);
+  const senderLabel =
+    req?.auth?.name ||
+    req?.staffProfile?.display_name ||
+    req?.staffProfile?.name ||
+    req?.auth?.email ||
+    req?.staffProfile?.email ||
+    null;
+  const subject = billId ? `Intacct REST submission ${billId}` : 'Intacct REST submission';
+  const communication = await createPaymentCommunication({
+    packetId,
+    direction: 'outbound',
+    channel: 'api',
+    senderUserId,
+    senderLabel,
+    recipients: { to: [] },
+    subject,
+    body: JSON.stringify({
+      billId,
+      baseUrl,
+      attachments: attachments.length,
+      attachmentErrors: attachmentErrors.length,
+    }),
+    templateKey: 'intacct_rest',
+    status: 'sent',
+    providerMessageId: billId,
+    sentAt: new Date(),
+    connection: runner,
+  });
+
+  const attachmentErrorCount = attachmentErrors.length;
+  await recordIntacctAttempt({
+    stage: attachmentErrorCount ? 'attachments' : 'submit',
+    status: attachmentErrorCount ? 'partial' : 'success',
+    billId,
+    baseUrl,
+    httpStatus: submitResp?.status || null,
+    attachments: attachments.length,
+    attachmentErrors,
+    message: attachmentErrorCount
+      ? `${attachmentErrorCount} attachment${attachmentErrorCount === 1 ? '' : 's'} failed to upload.`
+      : null,
+    communicationId: communication?.id || null,
+  });
+
+  return { ok: true, billId, communication, baseUrl, attachmentErrors };
+}
+
 async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = null, req, connection = null }) {
   const runner = connection || pool;
   if (!runner || !packetId) {
@@ -43678,6 +44580,36 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
   }
 
   return { ok: true, regionCode, recipients, communication };
+}
+
+async function submitPaymentPacketExternally({ packetId, packetRow = null, note = null, req, connection = null }) {
+  const intacctConfig = await readIntacctIntegrationConfig(connection);
+  const submissionMode = normalizeIntacctSubmissionMode(intacctConfig?.submissionMode);
+  if (submissionMode === 'intacct_rest') {
+    if (packetRow?.metadata) {
+      const meta = safeJsonParse(packetRow.metadata, {}) || {};
+      const latestAttempt = resolveLatestIntacctAttempt(meta);
+      const outcome = resolveIntacctAttemptStatus(latestAttempt);
+      if (outcome === 'success') {
+        return {
+          error: 'intacct_rest_already_accepted',
+          message: 'This packet has already been accepted by Sage Intacct.',
+          mode: 'intacct_rest',
+        };
+      }
+    }
+    const result = await sendIntacctRestForPacket({
+      packetId,
+      packetRow,
+      note,
+      req,
+      connection,
+      intacctConfig,
+    });
+    return { mode: 'intacct_rest', ...result };
+  }
+  const result = await sendFinanceEmailForPacket({ packetId, packetRow, note, req, connection });
+  return { mode: 'email', ...result };
 }
 
 async function fetchPaymentCommunicationById(commId, connection = null) {
@@ -43937,6 +44869,202 @@ const buildCsvResponse = (rows, headers) => {
     )
     .join('\n');
   return [headerLine, body].filter(Boolean).join('\n');
+};
+
+const parseReconciliationStatus = value => {
+  if (!value || typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return ['open', 'in_review', 'pending', 'resolved'].includes(normalized) ? normalized : null;
+};
+
+const parseReconciliationPriority = value => {
+  if (!value || typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return ['critical', 'high', 'medium', 'low'].includes(normalized) ? normalized : null;
+};
+
+const formatCaseLabel = (caseNumber, caseId) => {
+  if (caseNumber && String(caseNumber).trim()) return String(caseNumber).trim();
+  if (Number.isFinite(Number(caseId))) return `CASE-${caseId}`;
+  return 'Unknown case';
+};
+
+const formatTransactionDisplayId = value => {
+  if (!value && value !== 0) return '';
+  const id = String(value).trim();
+  return id ? `TX-${id}` : '';
+};
+
+const parseFiscalYearRange = value => {
+  if (!value || typeof value !== 'string') return null;
+  const parts = value.split('-').map(part => Number(part));
+  const startYear = parts[0];
+  const endYear = parts[1];
+  if (!Number.isFinite(startYear) || !Number.isFinite(endYear) || endYear !== startYear + 1) {
+    return null;
+  }
+  const start = new Date(Date.UTC(startYear, 3, 1));
+  const end = new Date(Date.UTC(endYear, 3, 1));
+  return { start, end };
+};
+
+const isDateWithinFiscalYear = (dateValue, fiscalYear) => {
+  if (!dateValue || !fiscalYear) return true;
+  const range = parseFiscalYearRange(fiscalYear);
+  if (!range) return true;
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return true;
+  return date >= range.start && date < range.end;
+};
+
+const deriveReconciliationExceptionType = ({ meta, evidenceCount, transactionDate, fiscalYear }) => {
+  const metaType = typeof meta?.reconciliation?.exceptionType === 'string'
+    ? meta.reconciliation.exceptionType.trim()
+    : null;
+  if (metaType) return metaType;
+  if (!evidenceCount) return 'missing_evidence';
+  if (!isDateWithinFiscalYear(transactionDate, fiscalYear)) return 'out_of_period';
+  return 'policy_review';
+};
+
+const deriveReconciliationPriority = ({ meta, amount }) => {
+  const metaPriority = parseReconciliationPriority(meta?.reconciliation?.priority);
+  if (metaPriority) return metaPriority;
+  const numeric = Number(amount || 0);
+  if (numeric >= 10000) return 'critical';
+  if (numeric >= 5000) return 'high';
+  if (numeric >= 1000) return 'medium';
+  return 'low';
+};
+
+const deriveReconciliationStatus = ({ metaStatus, financeStatus }) => {
+  const normalized = parseReconciliationStatus(metaStatus);
+  if (normalized) return normalized;
+  switch ((financeStatus || '').toLowerCase()) {
+    case 'posted':
+      return 'resolved';
+    case 'approved':
+      return 'in_review';
+    case 'submitted':
+      return 'open';
+    case 'draft':
+      return 'pending';
+    case 'rejected':
+      return 'resolved';
+    default:
+      return 'open';
+  }
+};
+
+const resolveEvidenceDocumentIds = (meta, evidenceRef) => {
+  if (Array.isArray(meta?.evidenceDocumentIds)) {
+    return meta.evidenceDocumentIds.map(value => String(value)).filter(Boolean);
+  }
+  if (typeof evidenceRef === 'string') {
+    return evidenceRef
+      .split(',')
+      .map(entry => entry.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
+
+const buildReconciliationAttachments = ({ meta, evidenceDocumentIds }) => {
+  if (Array.isArray(meta?.reconciliation?.attachments)) {
+    return meta.reconciliation.attachments
+      .map(item => {
+        if (!item || typeof item !== 'object') return null;
+        const id = item.id || item.documentId || item.document_id || null;
+        const name = item.name || item.label || item.filename || null;
+        if (!id && !name) return null;
+        return {
+          id: id ? String(id) : name ? String(name) : null,
+          name: name ? String(name) : id ? `Document ${id}` : 'Attachment',
+        };
+      })
+      .filter(Boolean);
+  }
+  return evidenceDocumentIds.map(id => ({ id: String(id), name: `Document ${id}` }));
+};
+
+const buildReconciliationTransaction = row => {
+  const meta = safeJsonParse(row.metadata, {}) || {};
+  const evidenceDocumentIds = resolveEvidenceDocumentIds(meta, row.evidence_ref);
+  const evidenceCount = evidenceDocumentIds.length;
+  const exceptionType = deriveReconciliationExceptionType({
+    meta,
+    evidenceCount,
+    transactionDate: row.transaction_date || row.created_at,
+    fiscalYear: row.fiscal_year || null,
+  });
+  const status = deriveReconciliationStatus({
+    metaStatus: meta?.reconciliation?.status,
+    financeStatus: row.status,
+  });
+  const priority = deriveReconciliationPriority({ meta, amount: row.amount });
+  const proposedPotId = meta?.reconciliation?.proposedPotId || row.budget_pot_id || null;
+  const proposedPotName = meta?.reconciliation?.proposedPotName || row.pot_name || null;
+  const notes = meta?.reconciliation?.notes || row.description || '';
+  const vendor =
+    row.payee_name ||
+    meta?.payeeName ||
+    meta?.vendor ||
+    (row.case_intervention_id ? 'Case intervention' : 'Case transaction');
+  return {
+    id: row.id ? String(row.id) : '',
+    displayId: formatTransactionDisplayId(row.id),
+    caseId: formatCaseLabel(row.case_number, row.case_id),
+    date: toDateOnlyString(row.transaction_date || row.created_at),
+    amount: Number(row.amount || 0),
+    vendor: vendor || 'Unknown vendor',
+    potId: row.budget_pot_id ? String(row.budget_pot_id) : null,
+    potName: row.pot_name || 'Unknown pot',
+    stream: row.funding_source || row.pot_code || null,
+    exceptionType,
+    status,
+    evidenceCount,
+    hasRequestedInfo: !!meta?.reconciliation?.hasRequestedInfo,
+    proposedPotId: proposedPotId ? String(proposedPotId) : null,
+    proposedPotName,
+    notes,
+    createdBy: row.created_by_name || 'System',
+    lastUpdated: meta?.reconciliation?.lastUpdated || row.updated_at || row.created_at,
+    priority,
+    attachments: buildReconciliationAttachments({ meta, evidenceDocumentIds }),
+    latestRequestMessage: meta?.reconciliation?.latestRequestMessage || null,
+    resolutionNote: meta?.reconciliation?.resolutionNote || null,
+  };
+};
+
+const updateReconciliationMetadata = async ({ ids = [], updates = {}, connection = null }) => {
+  const runner = connection || pool;
+  if (!runner || !ids.length) return [];
+  const nowIso = new Date().toISOString();
+  const updatedIds = [];
+  for (const rawId of ids) {
+    const id = Number(rawId);
+    if (!Number.isFinite(id)) continue;
+    const [[row]] = await runner.query(
+      'SELECT metadata FROM finance_transaction WHERE id = ? LIMIT 1',
+      [id]
+    );
+    const meta = safeJsonParse(row?.metadata, {}) || {};
+    const reconciliation = {
+      ...(meta.reconciliation && typeof meta.reconciliation === 'object' ? meta.reconciliation : {}),
+      ...updates,
+      lastUpdated: nowIso,
+    };
+    const nextMeta = {
+      ...(meta && typeof meta === 'object' ? meta : {}),
+      reconciliation,
+    };
+    await runner.query(
+      'UPDATE finance_transaction SET metadata = ?, updated_at = NOW() WHERE id = ?',
+      [JSON.stringify(nextMeta), id]
+    );
+    updatedIds.push(id);
+  }
+  return updatedIds;
 };
 
 app.get('/api/finance/budget-pots', async (req, res) => {
@@ -44796,6 +45924,195 @@ app.get('/api/finance/transactions', async (req, res) => {
   } catch (err) {
     console.error('[finance] failed to list transactions', err);
     res.status(500).json({ error: 'failed_to_list_transactions' });
+  }
+});
+
+app.get('/api/finance/intacct/submissions', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const limit = Math.min(Number(req.query.limit) || 200, 500);
+    const [rows] = await pool.query(
+      `SELECT pp.id,
+              pp.status,
+              pp.case_id,
+              pp.client_id,
+              pp.intervention_id,
+              pp.submitted_at,
+              pp.created_at,
+              pp.metadata,
+              c.case_number,
+              cl.first_name AS client_first_name,
+              cl.last_name AS client_last_name,
+              ci.metadata_json AS intervention_metadata_json,
+              ci.notes AS intervention_notes,
+              ci.intervention_code AS intervention_code
+         FROM payment_packet pp
+         LEFT JOIN iset_case c ON c.id = pp.case_id
+         LEFT JOIN client cl ON cl.id = pp.client_id
+         LEFT JOIN iset_case_intervention ci ON ci.id = pp.intervention_id
+        ORDER BY pp.updated_at DESC, pp.id DESC
+        LIMIT ?`,
+      [limit]
+    );
+    const packetIds = (rows || []).map(row => Number(row.id)).filter(Number.isFinite);
+    const totalsMap = new Map();
+    if (packetIds.length) {
+      const [totals] = await pool.query(
+        `SELECT payment_packet_id,
+                COUNT(*) AS line_count,
+                SUM(amount) AS total_amount,
+                MIN(currency) AS currency
+           FROM payment_packet_line
+          WHERE payment_packet_id IN (${packetIds.map(() => '?').join(',')})
+            AND status <> 'cancelled'
+          GROUP BY payment_packet_id`,
+        packetIds
+      );
+      (totals || []).forEach(row => {
+        totalsMap.set(String(row.payment_packet_id), {
+          lineCount: Number(row.line_count || 0),
+          totalAmount: Number(row.total_amount || 0),
+          currency: row.currency || 'CAD',
+        });
+      });
+    }
+
+    const items = [];
+    (rows || []).forEach(row => {
+      const metadata = safeJsonParse(row.metadata, {}) || {};
+      const attempts = resolveIntacctSubmissionAttempts(metadata);
+      if (!attempts.length) return;
+      const latestAttempt = attempts[attempts.length - 1];
+      const outcome = resolveIntacctAttemptStatus(latestAttempt);
+      const reason = resolveIntacctAttemptReason(latestAttempt);
+      const totals = totalsMap.get(String(row.id)) || {};
+      items.push({
+        id: String(row.id),
+        packetId: String(row.id),
+        packetLabel: formatPacketIdLabel(row.id),
+        caseId: row.case_id ? String(row.case_id) : null,
+        caseNumber: row.case_number || null,
+        clientName: resolveClientNameFromRow(row) || null,
+        interventionName: resolveInterventionNameFromRow(row) || null,
+        status: row.status || null,
+        submittedAt: row.submitted_at || null,
+        createdAt: row.created_at || null,
+        totalAmount: Number.isFinite(totals.totalAmount) ? totals.totalAmount : 0,
+        currency: totals.currency || 'CAD',
+        lineCount: Number.isFinite(totals.lineCount) ? totals.lineCount : 0,
+        attempts,
+        latestAttempt,
+        outcome,
+        reason,
+        lastAttemptAt:
+          latestAttempt?.at ||
+          latestAttempt?.updatedAt ||
+          latestAttempt?.updated_at ||
+          null,
+        message:
+          latestAttempt?.message ||
+          latestAttempt?.errorMessage ||
+          latestAttempt?.error_message ||
+          null,
+      });
+    });
+
+    res.status(200).json({ items });
+  } catch (err) {
+    console.error('[finance] failed to list intacct submissions', err);
+    res.status(500).json({ error: 'failed_to_list_intacct_submissions' });
+  }
+});
+
+app.get('/api/finance/reconciliation/transactions', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const limit = Math.min(Number(req.query.limit) || 200, 500);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const [rows] = await pool.query(
+      `SELECT ft.id,
+              ft.case_id,
+              ft.case_intervention_id,
+              c.case_number,
+              ft.budget_pot_id,
+              bp.name AS pot_name,
+              bp.code AS pot_code,
+              bp.fiscal_year,
+              bp.funding_source,
+              ft.amount,
+              ft.status,
+              ft.transaction_date,
+              ft.description,
+              ft.evidence_ref,
+              ft.metadata,
+              ft.created_at,
+              ft.updated_at,
+              u.name AS created_by_name,
+              ppl.payee_name
+         FROM finance_transaction ft
+         LEFT JOIN iset_case c ON c.id = ft.case_id
+         LEFT JOIN budget_pot bp ON bp.id = ft.budget_pot_id
+         LEFT JOIN user u ON u.id = ft.created_by_user_id
+         LEFT JOIN payment_line_transaction plt ON plt.finance_transaction_id = ft.id
+         LEFT JOIN payment_packet_line ppl ON ppl.id = plt.payment_packet_line_id
+        ORDER BY ft.updated_at DESC
+        LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+    res.status(200).json({ items: (rows || []).map(buildReconciliationTransaction) });
+  } catch (err) {
+    console.error('[finance] failed to list reconciliation transactions', err);
+    res.status(500).json({ error: 'failed_to_list_reconciliation_transactions' });
+  }
+});
+
+app.post('/api/finance/reconciliation/transactions/request-evidence', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const idsRaw = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const ids = idsRaw.map(id => Number(id)).filter(Number.isFinite);
+    if (!ids.length) {
+      return res.status(400).json({ error: 'transaction_ids_required' });
+    }
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    await updateReconciliationMetadata({
+      ids,
+      updates: {
+        hasRequestedInfo: true,
+        latestRequestMessage: message,
+        status: 'in_review',
+      },
+    });
+    res.status(200).json({ ok: true, updatedIds: ids.map(id => String(id)) });
+  } catch (err) {
+    console.error('[finance] failed to request reconciliation evidence', err);
+    res.status(500).json({ error: 'failed_to_request_reconciliation_evidence' });
+  }
+});
+
+app.post('/api/finance/reconciliation/transactions/resolve', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const idsRaw = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const ids = idsRaw.map(id => Number(id)).filter(Number.isFinite);
+    if (!ids.length) {
+      return res.status(400).json({ error: 'transaction_ids_required' });
+    }
+    const resolution = typeof req.body?.resolution === 'string' ? req.body.resolution.trim() : '';
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+    await updateReconciliationMetadata({
+      ids,
+      updates: {
+        status: 'resolved',
+        resolution: resolution || 'approved',
+        resolutionNote: note || null,
+        resolvedAt: new Date().toISOString(),
+      },
+    });
+    res.status(200).json({ ok: true, updatedIds: ids.map(id => String(id)) });
+  } catch (err) {
+    console.error('[finance] failed to resolve reconciliation transactions', err);
+    res.status(500).json({ error: 'failed_to_resolve_reconciliation_transactions' });
   }
 });
 
@@ -45932,7 +47249,7 @@ app.post('/api/finance/payment-packets/:id/send-email', async (req, res) => {
   const note = typeof req.body?.note === 'string' ? req.body.note.trim() : null;
   const conn = await pool.getConnection();
   try {
-    const result = await sendFinanceEmailForPacket({ packetId, note, req, connection: conn });
+    const result = await submitPaymentPacketExternally({ packetId, note, req, connection: conn });
     if (result?.error === 'payment_packet_not_found') {
       return res.status(404).json({ error: result.error });
     }
@@ -45948,12 +47265,16 @@ app.post('/api/finance/payment-packets/:id/send-email', async (req, res) => {
         error: result.error,
         message: result.message,
         communication: result.communication,
+        mode: result.mode,
       });
     }
     res.status(200).json({
       ok: true,
+      mode: result.mode,
       regionCode: result.regionCode,
       to: result.recipients?.to || [],
+      billId: result.billId,
+      baseUrl: result.baseUrl,
       communication: result.communication,
     });
   } catch (err) {
@@ -46501,28 +47822,51 @@ app.post('/api/finance/payment-packets/:id/validate', async (req, res) => {
     }
 
     const [lineRows] = await conn.query(
-      `SELECT id, payment_packet_id, amount, status, payment_type, payee_name, payee_reference,
-              service_period_start, service_period_end, invoice_reference_number, requested_payment_date,
-              metadata, intervention_id, payee_type, paid_at, payment_reference
-         FROM payment_packet_line
-        WHERE payment_packet_id = ?`,
+      `SELECT ppl.id, ppl.payment_packet_id, ppl.amount, ppl.status, ppl.payment_type, ppl.payee_name, ppl.payee_reference,
+              ppl.service_period_start, ppl.service_period_end, ppl.invoice_reference_number, ppl.requested_payment_date,
+              ppl.metadata, ppl.intervention_id, ppl.payee_type, ppl.paid_at, ppl.payment_reference,
+              bp.name AS pot_name, bp.code AS pot_code
+         FROM payment_packet_line ppl
+         LEFT JOIN budget_pot bp ON bp.id = ppl.budget_pot_id
+        WHERE ppl.payment_packet_id = ?`,
       [packetId]
     );
+
+    const intacctConfig = await readIntacctIntegrationConfig(conn);
+    const submissionMode = normalizeIntacctSubmissionMode(intacctConfig?.submissionMode);
+    if (submissionMode === 'intacct_rest') {
+      await resolveMissingIntacctVendorReferences({ lineRows, connection: conn });
+    }
+    const intacctValidationIssues =
+      submissionMode === 'intacct_rest'
+        ? validateIntacctRestRequirements({ packetRow, lineRows, config: intacctConfig })
+        : [];
 
     const validation = await runPaymentPacketValidation({
       packetRow,
       lineRows,
       connection: conn,
     });
+    const combinedDetails = [
+      ...(validation.details || []),
+      ...intacctValidationIssues,
+    ];
+    const combinedMissingEvidence = validation.missingEvidence || [];
+    const combinedValidation = {
+      ...validation,
+      details: combinedDetails,
+      passed: combinedDetails.length === 0 && combinedMissingEvidence.length === 0,
+    };
 
     await setPaymentPacketValidation({
       packetId,
-      status: validation.passed ? 'passed' : 'failed',
-      details: validation.details,
-      missingEvidence: validation.missingEvidence,
+      status: combinedValidation.passed ? 'passed' : 'failed',
+      details: combinedValidation.details,
+      missingEvidence: combinedMissingEvidence,
       actorUserId,
       connection: conn,
     });
+    await syncFinanceTransactionEvidenceFromPacket({ packetId, connection: conn });
 
     await conn.commit();
     const packet = await fetchPaymentPacketById(packetId);
@@ -46580,10 +47924,15 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       return res.status(404).json({ error: 'payment_packet_not_found' });
     }
     const fromStatus = packetRow.status || null;
+    const packetMeta = safeJsonParse(packetRow.metadata, {}) || {};
+    const latestIntacctAttempt = resolveLatestIntacctAttempt(packetMeta);
+    const latestIntacctOutcome = resolveIntacctAttemptStatus(latestIntacctAttempt);
+    const canReopenForIntacct = latestIntacctOutcome === 'failed' || latestIntacctOutcome === 'partial';
     if (SIMPLE_PAYMENT_WORKFLOW) {
       const fromStage = normalizePacketWorkflowStage(fromStatus);
       const nextStage = normalizePacketWorkflowStage(nextStatus);
-      if (fromStage !== 'draft' && nextStage !== fromStage) {
+      const allowReopen = nextStatus === 'draft' && fromStage !== 'draft' && canReopenForIntacct;
+      if (fromStage !== 'draft' && nextStage !== fromStage && !allowReopen) {
         await conn.rollback();
         return res.status(409).json({ error: 'payment_packet_locked', status: fromStatus });
       }
@@ -46611,6 +47960,13 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
     }, 0);
 
     if (nextStatus === 'submitted') {
+      if (latestIntacctOutcome === 'success') {
+        await conn.rollback();
+        return res.status(409).json({
+          error: 'intacct_rest_already_accepted',
+          message: 'This packet has already been accepted by Sage Intacct.',
+        });
+      }
       const policyRules = await readPaymentPolicyRules(conn);
       const paymentTypeMap = await readPaymentInterventionMapping(conn);
       const interventionIds = activeLines.map(line => line.intervention_id).filter(Boolean);
@@ -46855,37 +48211,73 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
     }
 
     if (nextStatus === 'submitted') {
-      const emailResult = await sendFinanceEmailForPacket({
+      const submissionResult = await submitPaymentPacketExternally({
         packetId,
         packetRow,
         note: notes,
         req,
         connection: conn,
       });
-      if (emailResult?.error === 'finance_email_missing') {
+      if (submissionResult?.error === 'intacct_rest_already_accepted') {
         await conn.rollback();
         return res.status(409).json({
-          error: emailResult.error,
-          message: emailResult.message,
-          regionCode: emailResult.regionCode,
+          error: submissionResult.error,
+          message: submissionResult.message,
         });
       }
-      if (emailResult?.error === 'payment_packet_not_found') {
+      if (submissionResult?.error === 'finance_email_missing') {
         await conn.rollback();
-        return res.status(404).json({ error: emailResult.error });
+        return res.status(409).json({
+          error: submissionResult.error,
+          message: submissionResult.message,
+          regionCode: submissionResult.regionCode,
+        });
       }
-      if (emailResult?.error) {
+      if (submissionResult?.error === 'payment_packet_not_found') {
         await conn.rollback();
+        return res.status(404).json({ error: submissionResult.error });
+      }
+      if (submissionResult?.error) {
+        await conn.rollback();
+        if (submissionResult?.mode === 'intacct_rest') {
+          try {
+            await recordPaymentPacketSubmissionMeta({
+              packetId,
+              mode: 'intacct_rest',
+              detail: {
+                status: 'failed',
+                reason: 'submission',
+                error: submissionResult.error,
+                message: submissionResult.message || null,
+                httpStatus: submissionResult.status || null,
+                baseUrl: submissionResult.baseUrl || null,
+              },
+              connection: pool,
+            });
+          } catch (err) {
+            console.warn('[intacct-rest] failed to record submission attempt after rollback', err?.message || err);
+          }
+        }
         return res.status(500).json({
-          error: emailResult.error,
-          message: emailResult.message,
-          communication: emailResult.communication,
+          error: submissionResult.error,
+          message: submissionResult.message,
+          communication: submissionResult.communication,
+          mode: submissionResult.mode,
         });
       }
     }
 
     const fields = ['status = ?', 'updated_at = NOW()'];
     const params = [nextStatus];
+    if (nextStatus === 'draft' && fromStatus && fromStatus !== 'draft') {
+      fields.push('submitted_at = NULL');
+      fields.push('program_approved_at = NULL');
+      fields.push('finance_approved_at = NULL');
+      fields.push('sent_at = NULL');
+      fields.push('confirmed_at = NULL');
+      fields.push('program_approved_by_user_id = NULL');
+      fields.push('finance_approved_by_user_id = NULL');
+    }
     if (!packetRow.submitted_at && nextStatus !== 'draft') {
       fields.push('submitted_at = NOW()');
     }

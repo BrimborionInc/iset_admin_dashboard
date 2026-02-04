@@ -19,7 +19,7 @@ const ReconciliationSyncStatusWidget = ({
   metadata = {},
   toggleHelpPanel,
 }) => {
-  const { syncStatus, manualSync } = useReconciliationData();
+  const { syncStatus, manualSync, loading } = useReconciliationData();
 
   const infoHelper = metadata.helpComponent
     ? metadata
@@ -51,6 +51,12 @@ const ReconciliationSyncStatusWidget = ({
       : syncStatus.status === "warning"
         ? "warning"
         : "success";
+  const statusLabel =
+    syncStatus.status === "warning"
+      ? "Backlog building - exceptions may be delayed"
+      : syncStatus.status === "error"
+        ? "Ingest blocked - exceptions may be stale"
+        : "Feed healthy - exceptions are up to date";
 
   return (
     <BoardItem
@@ -58,7 +64,7 @@ const ReconciliationSyncStatusWidget = ({
         <Header
           variant="h2"
           info={infoLink}
-          description="Monitor ingestion health for case-management transactions."
+          description="Monitor ingestion health for case-management transactions flowing into finance."
         >
           Sync status
         </Header>
@@ -80,13 +86,17 @@ const ReconciliationSyncStatusWidget = ({
       i18nStrings={boardItemI18nStrings}
     >
       <SpaceBetween size="m">
-        <StatusIndicator type={statusIndicatorType}>
-          {syncStatus.status === "warning"
-            ? "Backlog requires monitoring"
-            : syncStatus.status === "error"
-              ? "Sync blocked"
-              : "Sync healthy"}
-        </StatusIndicator>
+        {loading ? (
+          <StatusIndicator type="in-progress">Loading sync status</StatusIndicator>
+        ) : (
+          <StatusIndicator type={statusIndicatorType}>
+            {statusLabel}
+          </StatusIndicator>
+        )}
+        <Box variant="p">
+          This panel reflects the health of the inbound case-management feed. If the feed lags,
+          the transactions queue may not show the latest exceptions.
+        </Box>
 
         <ColumnLayout columns={3} variant="text-grid">
           <SpaceBetween size="xxs">
@@ -140,8 +150,10 @@ const ReconciliationSyncStatusWidget = ({
         )}
 
         <SpaceBetween direction="horizontal" size="xs">
-          <Button onClick={manualSync}>Trigger manual sync</Button>
-          <Button variant="link" href="#">
+          <Button onClick={manualSync} ariaLabel="Trigger a manual reconciliation sync">
+            Trigger manual sync
+          </Button>
+          <Button variant="link" href="#" onClick={event => event.preventDefault()}>
             View integration logs
           </Button>
         </SpaceBetween>

@@ -12,6 +12,7 @@ import {
   TextFilter,
   CollectionPreferences,
   Pagination,
+  Alert,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
 import { useReconciliationData } from "./ReconciliationDataContext.jsx";
@@ -37,34 +38,56 @@ const ALL_COLUMN_IDS = [
 ];
 const DEFAULT_PAGE_SIZE = 10;
 
+const exceptionLabels = {
+  missing_evidence: "Missing evidence",
+  out_of_period: "Out of period",
+  ineligible_vendor: "Ineligible vendor",
+  duplicate_claim: "Duplicate claim",
+  policy_review: "Policy review",
+};
+
+const statusLabels = {
+  open: "Open",
+  in_review: "In review",
+  pending: "Pending",
+  resolved: "Resolved",
+};
+
+const priorityLabels = {
+  critical: "Critical",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
 const exceptionOptions = [
   { label: "All exceptions", value: "all" },
-  { label: "Missing evidence", value: "missing_evidence" },
-  { label: "Out of period", value: "out_of_period" },
-  { label: "Ineligible vendor", value: "ineligible_vendor" },
-  { label: "Duplicate claim", value: "duplicate_claim" },
+  ...Object.entries(exceptionLabels).map(([value, label]) => ({ label, value })),
 ];
 
 const statusOptions = [
   { label: "All statuses", value: "all" },
-  { label: "Open", value: "open" },
-  { label: "In review", value: "in_review" },
-  { label: "Pending", value: "pending" },
-  { label: "Resolved", value: "resolved" },
+  ...Object.entries(statusLabels).map(([value, label]) => ({ label, value })),
 ];
 
 const priorityBadge = priority => {
   switch (priority) {
     case "critical":
-      return { type: "error", text: "Critical" };
+      return { type: "error", text: priorityLabels.critical };
     case "high":
-      return { type: "warning", text: "High" };
+      return { type: "warning", text: priorityLabels.high };
     case "medium":
-      return { type: "info", text: "Medium" };
+      return { type: "info", text: priorityLabels.medium };
     default:
-      return { type: "success", text: "Low" };
+      return { type: "success", text: priorityLabels.low };
   }
 };
+
+const formatStatusLabel = status =>
+  statusLabels[status] ?? String(status || "").replace(/_/g, " ").trim();
+
+const formatExceptionLabel = exception =>
+  exceptionLabels[exception] ?? String(exception || "").replace(/_/g, " ").trim();
 
 const loadColumnWidths = () => {
   if (typeof window === "undefined") {
@@ -163,6 +186,8 @@ const persistPreferences = ({ pageSize, visibleColumns }) => {
 const ReconciliationTransactionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
     transactions,
+    loading,
+    error,
     selectedTransactionIds,
     updateSelection,
     selectTransaction,
@@ -207,7 +232,7 @@ const ReconciliationTransactionsWidget = ({ actions = {}, metadata = {}, toggleH
         header: "Transaction",
         cell: item => (
           <SpaceBetween size="xxs">
-            <Box variant="strong">{item.id}</Box>
+            <Box variant="strong">{item.displayId || item.id}</Box>
             <Box variant="awsui-key-label">{item.caseId}</Box>
           </SpaceBetween>
         ),
@@ -230,14 +255,20 @@ const ReconciliationTransactionsWidget = ({ actions = {}, metadata = {}, toggleH
       {
         id: "exception",
         header: "Exception",
-        cell: item => item.exceptionType.replace(/_/g, " "),
+        cell: item => formatExceptionLabel(item.exceptionType),
       },
       {
         id: "status",
-        header: "Status",
+        header: "Status / priority",
         cell: item => {
           const badge = priorityBadge(item.priority);
-          return <StatusIndicator type={badge.type}>{item.status.toUpperCase()}</StatusIndicator>;
+          const statusLabel = formatStatusLabel(item.status);
+          const label =
+            item.status === "resolved"
+              ? "Resolved"
+              : `${statusLabel || "Open"} - ${badge.text}`;
+          const indicatorType = item.status === "resolved" ? "success" : badge.type;
+          return <StatusIndicator type={indicatorType}>{label}</StatusIndicator>;
         },
       },
       {
@@ -454,7 +485,7 @@ const ReconciliationTransactionsWidget = ({ actions = {}, metadata = {}, toggleH
   return (
     <BoardItem
       header={
-        <Header
+          <Header
           variant="h2"
           info={infoLinkComputed}
           actions={
@@ -463,17 +494,19 @@ const ReconciliationTransactionsWidget = ({ actions = {}, metadata = {}, toggleH
                 selectedOption={exceptionFilter}
                 options={exceptionOptions}
                 onChange={({ detail }) => setExceptionFilter(detail.selectedOption)}
-                selectedAriaLabel="Filter by exception"
+                selectedAriaLabel="Selected exception filter"
+                placeholder="Exception type"
               />
               <Select
                 selectedOption={statusFilter}
                 options={statusOptions}
                 onChange={({ detail }) => setStatusFilter(detail.selectedOption)}
-                selectedAriaLabel="Filter by status"
+                selectedAriaLabel="Selected status filter"
+                placeholder="Status"
               />
             </SpaceBetween>
           }
-          description="Review and triage inbound transactions that need attention."
+          description="Triage case-management transactions that failed finance policy or evidence checks."
         >
           Transactions queue
         </Header>
@@ -494,36 +527,53 @@ const ReconciliationTransactionsWidget = ({ actions = {}, metadata = {}, toggleH
       }
       i18nStrings={boardItemI18nStrings}
     >
-      <Table
-        trackBy="id"
-        items={pagedItems}
-        selectionType="multi"
-        selectedItems={transactions.filter(item => selectedTransactionIds.includes(item.id))}
-        onSelectionChange={handleSelectionChange}
-        columnDefinitions={columnDefinitionsForTable}
-        resizableColumns
-        onColumnWidthsChange={handleColumnWidthsChange}
-        variant="embedded"
-        filter={
-          <TextFilter
-            filteringText={filteringText}
-            onChange={({ detail }) => {
-              setFilteringText(detail.filteringText);
-              setCurrentPageIndex(1);
-            }}
-            filteringPlaceholder="Search transactions"
-            countText={`${filteredItems.length} match${filteredItems.length === 1 ? "" : "es"}`}
-          />
-        }
-        preferences={preferencesComponent}
-        pagination={paginationComponent}
-        header={
-          <Header variant="h3" counter={`(${filteredItems.length})`}>
-            Exceptions
-          </Header>
-        }
-        empty={<Box padding="m">No transactions match the selected filters.</Box>}
-      />
+      <SpaceBetween size="m">
+        <Box variant="p">
+          Source: case-management transactions ingested into finance. Use the filters to narrow the
+          queue, then select rows to open Exception detail or apply Bulk actions.
+        </Box>
+        {error ? (
+          <Alert type="error" header="Unable to load reconciliation transactions">
+            {error}
+          </Alert>
+        ) : null}
+        <Table
+          trackBy="id"
+          items={pagedItems}
+          selectionType="multi"
+          selectedItems={transactions.filter(item => selectedTransactionIds.includes(item.id))}
+          onSelectionChange={handleSelectionChange}
+          columnDefinitions={columnDefinitionsForTable}
+          resizableColumns
+          onColumnWidthsChange={handleColumnWidthsChange}
+          variant="embedded"
+          loading={loading}
+          loadingText="Loading reconciliation transactions"
+          filter={
+            <TextFilter
+              filteringText={filteringText}
+              onChange={({ detail }) => {
+                setFilteringText(detail.filteringText);
+                setCurrentPageIndex(1);
+              }}
+              filteringPlaceholder="Search by transaction, case ID, vendor, or pot"
+              countText={`${filteredItems.length} match${filteredItems.length === 1 ? "" : "es"}`}
+            />
+          }
+          preferences={preferencesComponent}
+          pagination={paginationComponent}
+          header={
+            <Header
+              variant="h3"
+              counter={`(${filteredItems.length})`}
+              description="Selections feed Exception detail and Bulk actions."
+            >
+              Exceptions
+            </Header>
+          }
+          empty={<Box padding="m">No transactions match the selected filters.</Box>}
+        />
+      </SpaceBetween>
     </BoardItem>
   );
 };

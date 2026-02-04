@@ -184,8 +184,22 @@ export default function AuthConfigWidget({
       return null;
     }
     const dirty = sessionDirty[scope];
-    const idleValue = sessionEdits.frontendIdle;
+    const toNumberOrNull = value => {
+      if (value === '' || value === null || typeof value === 'undefined') return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const warningTriggerValue = sessionEdits.warningTriggerSeconds;
+    const warningCountdownValue = sessionEdits.warningCountdownSeconds;
+    const warningTriggerSeconds = toNumberOrNull(warningTriggerValue);
+    const warningCountdownSeconds = toNumberOrNull(warningCountdownValue);
+    const computedIdle =
+      warningTriggerSeconds != null && warningCountdownSeconds != null
+        ? warningTriggerSeconds + warningCountdownSeconds
+        : null;
+    const idleValue = computedIdle != null ? computedIdle : sessionEdits.frontendIdle;
     const absoluteValue = sessionEdits.absolute;
+    const showWarningControls = scope === 'public';
     const tokenFieldsReadonly = scope === 'public';
     const readonlyTokenData = tokenFieldsReadonly ? authObj?.cognitoTokens || null : null;
     const idleExceedsAbsolute =
@@ -196,10 +210,21 @@ export default function AuthConfigWidget({
       Number(idleValue) > Number(absoluteValue);
 
     const updateField = (field, rawValue) => {
-      setSessionEdits(prev => ({
-        ...prev,
-        [field]: rawValue === '' ? '' : Number(rawValue)
-      }));
+      setSessionEdits(prev => {
+        const next = {
+          ...prev,
+          [field]: rawValue === '' ? '' : Number(rawValue)
+        };
+        if (scope === 'public') {
+          const trigger = toNumberOrNull(next.warningTriggerSeconds);
+          const countdown = toNumberOrNull(next.warningCountdownSeconds);
+          if (trigger != null && countdown != null) {
+            next.frontendIdle = trigger + countdown;
+            next.warningSeconds = countdown;
+          }
+        }
+        return next;
+      });
     };
 
     const items = [
@@ -209,21 +234,54 @@ export default function AuthConfigWidget({
         </Box>
       ),
       (
-        <ColumnLayout key="session-grid" columns={5} variant="text-grid">
-          <FormField
-            key="frontendIdle"
-            label="Frontend idle timeout"
-            description="Inactivity timeout before logout"
-            constraintText="Seconds"
-          >
-            <Input
-              type="number"
-              value={sessionEdits.frontendIdle === '' ? '' : String(sessionEdits.frontendIdle)}
-              onChange={({ detail }) => updateField('frontendIdle', detail.value)}
-              disabled={!canEditAuth || savingSession}
-              placeholder="default"
-            />
-          </FormField>
+        <ColumnLayout key="session-grid" columns={showWarningControls ? 6 : 5} variant="text-grid">
+          {showWarningControls ? (
+            <>
+              <FormField
+                key="warningTriggerSeconds"
+                label="Inactivity warning trigger"
+                description="Seconds of inactivity before the modal appears"
+                constraintText="Seconds"
+              >
+                <Input
+                  type="number"
+                  value={sessionEdits.warningTriggerSeconds === '' ? '' : String(sessionEdits.warningTriggerSeconds ?? '')}
+                  onChange={({ detail }) => updateField('warningTriggerSeconds', detail.value)}
+                  disabled={!canEditAuth || savingSession}
+                  placeholder="default"
+                />
+              </FormField>
+              <FormField
+                key="warningCountdownSeconds"
+                label="Warning countdown duration"
+                description="Seconds to respond before auto logout"
+                constraintText="Seconds"
+              >
+                <Input
+                  type="number"
+                  value={sessionEdits.warningCountdownSeconds === '' ? '' : String(sessionEdits.warningCountdownSeconds ?? '')}
+                  onChange={({ detail }) => updateField('warningCountdownSeconds', detail.value)}
+                  disabled={!canEditAuth || savingSession}
+                  placeholder="default"
+                />
+              </FormField>
+            </>
+          ) : (
+            <FormField
+              key="frontendIdle"
+              label="Frontend idle timeout"
+              description="Inactivity timeout before logout"
+              constraintText="Seconds"
+            >
+              <Input
+                type="number"
+                value={sessionEdits.frontendIdle === '' ? '' : String(sessionEdits.frontendIdle)}
+                onChange={({ detail }) => updateField('frontendIdle', detail.value)}
+                disabled={!canEditAuth || savingSession}
+                placeholder="default"
+              />
+            </FormField>
+          )}
           <FormField
             key="absolute"
             label="Absolute session limit"
@@ -312,8 +370,8 @@ export default function AuthConfigWidget({
     ];
     if (idleExceedsAbsolute) {
       items.push(
-        <Alert key="session-alert" type="warning" header="Idle timeout exceeds absolute session lifetime">
-          Set the idle timeout lower than the absolute session limit to avoid immediate logouts.
+        <Alert key="session-alert" type="warning" header="Inactivity timer exceeds absolute session lifetime">
+          Ensure the warning trigger plus countdown is lower than the absolute session limit to avoid immediate logouts.
         </Alert>
       );
     }

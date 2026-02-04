@@ -15,7 +15,9 @@ export default function AuthWidgetHelp() {
       <ul>
         <li><strong>Access / ID Token:</strong> JWT presentation & identity tokens; keep short for least privilege.</li>
         <li><strong>Refresh:</strong> Security vs re-auth trade-off; rotate periodically.</li>
-        <li><strong>Frontend Idle:</strong> Client inactivity logout threshold.</li>
+        <li><strong>Warning Trigger (applicants):</strong> Idle seconds before showing the inactivity modal.</li>
+        <li><strong>Warning Countdown (applicants):</strong> Seconds to respond before auto logout.</li>
+        <li><strong>Frontend Idle (admin):</strong> Client inactivity logout threshold.</li>
         <li><strong>Absolute Session:</strong> Hard cap regardless of refresh churn.</li>
       </ul>
       <h2>Password Policy</h2>

@@ -10,6 +10,8 @@ import {
   Button,
   StatusIndicator,
   Link,
+  FormField,
+  Alert,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
 import { useReconciliationData } from "./ReconciliationDataContext.jsx";
@@ -30,6 +32,7 @@ const ReconciliationBulkActionsWidget = ({
     setSelectedBulkTemplate,
     bulkMessage,
     setBulkMessage,
+    actionError,
   } = useReconciliationData();
 
   const [showConfirmation, setShowConfirmation] = useState(false);
@@ -69,26 +72,33 @@ const ReconciliationBulkActionsWidget = ({
     setBulkMessage(detail.selectedOption?.defaultMessage ?? "");
   };
 
-  const commitAction = (type, message) => {
+  const commitAction = async (type, message) => {
     if (!selectedItems.length) {
       return;
     }
+    let ok = false;
     switch (type) {
       case "approve":
-        resolveTransactions(selectedTransactionIds, "resolved", message);
+        ok = await resolveTransactions(selectedTransactionIds, "approved", message);
         break;
       case "nonclaimable":
-        resolveTransactions(selectedTransactionIds, "resolved", message ?? "Marked non-claimable.");
+        ok = await resolveTransactions(
+          selectedTransactionIds,
+          "nonclaimable",
+          message ?? "Marked non-claimable."
+        );
         break;
       case "request":
-        requestEvidence(selectedTransactionIds, message);
+        ok = await requestEvidence(selectedTransactionIds, message);
         break;
       default:
         break;
     }
-    setLastAction({ type, count: selectedItems.length, timestamp: new Date().toISOString() });
-    setShowConfirmation(true);
-    setBulkMessage("");
+    if (ok) {
+      setLastAction({ type, count: selectedItems.length, timestamp: new Date().toISOString() });
+      setShowConfirmation(true);
+      setBulkMessage("");
+    }
   };
 
   return (
@@ -125,21 +135,36 @@ const ReconciliationBulkActionsWidget = ({
             : "No transactions selected"}
         </Box>
 
-        <Select
-          disabled={!selectedItems.length}
-          selectedOption={selectedBulkTemplate}
-          options={bulkTemplates}
-          onChange={handleTemplateChange}
-          placeholder="Select bulk action template"
-        />
+        <Box variant="p">
+          Selections come from the Transactions queue. Use bulk actions to resolve groups of
+          similar exceptions with consistent messaging.
+        </Box>
 
-        <Textarea
-          disabled={!selectedItems.length}
-          placeholder="Message to include with the bulk action (not persisted)."
-          rows={4}
-          value={bulkMessage}
-          onChange={({ detail }) => setBulkMessage(detail.value)}
-        />
+        <FormField
+          label="Bulk action template"
+          description="Pick the intended outcome and a default message. You can edit the message before applying."
+        >
+          <Select
+            disabled={!selectedItems.length}
+            selectedOption={selectedBulkTemplate}
+            options={bulkTemplates}
+            onChange={handleTemplateChange}
+            placeholder="Select bulk action template"
+          />
+        </FormField>
+
+        <FormField
+          label="Message to record"
+          description="Used for audit notes or program follow-up. Saved with the action in transaction metadata; audit log integration is planned."
+        >
+          <Textarea
+            disabled={!selectedItems.length}
+            placeholder="Add the message that will accompany this action."
+            rows={4}
+            value={bulkMessage}
+            onChange={({ detail }) => setBulkMessage(detail.value)}
+          />
+        </FormField>
 
         <SpaceBetween direction="horizontal" size="xs">
           <Button
@@ -169,6 +194,12 @@ const ReconciliationBulkActionsWidget = ({
           </Button>
         </SpaceBetween>
 
+        {actionError ? (
+          <Alert type="error" header="Bulk action failed">
+            {actionError}
+          </Alert>
+        ) : null}
+
         {showConfirmation && lastAction ? (
           <StatusIndicator type="success">
             {`Bulk action '${lastAction.type}' applied to ${lastAction.count} transaction${
@@ -177,8 +208,8 @@ const ReconciliationBulkActionsWidget = ({
           </StatusIndicator>
         ) : (
           <Box variant="p">
-            Bulk actions will update the queue immediately. Changes will be wired to backend APIs in
-            a future phase.
+            Bulk actions update the queue immediately and store notes in transaction metadata.
+            Audit log and notification workflows will be added in a later phase.
           </Box>
         )}
       </SpaceBetween>

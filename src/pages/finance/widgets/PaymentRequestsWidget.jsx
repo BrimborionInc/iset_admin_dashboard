@@ -130,6 +130,78 @@ const statusMeta = {
   cancelled: { label: "Cancelled", indicator: "error" },
 };
 
+const parsePacketMetadata = packet => {
+  if (!packet) return {};
+  const raw = packet.metadata ?? packet.meta ?? null;
+  if (!raw) return {};
+  if (typeof raw === "object") return raw;
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
+const resolveLatestIntacctAttempt = packet => {
+  const metadata = parsePacketMetadata(packet);
+  const history = Array.isArray(metadata.integrationSubmissions)
+    ? metadata.integrationSubmissions
+    : Array.isArray(metadata.integration_submissions)
+      ? metadata.integration_submissions
+      : [];
+  const intacctHistory = history.filter(entry => {
+    const mode = String(entry?.mode || "").toLowerCase();
+    return mode === "intacct_rest";
+  });
+  if (intacctHistory.length) {
+    const ordered = [...intacctHistory].sort((a, b) => {
+      const left = a?.at ? new Date(a.at).getTime() : 0;
+      const right = b?.at ? new Date(b.at).getTime() : 0;
+      return right - left;
+    });
+    return ordered[0] || null;
+  }
+  const fallback = metadata.intacctRest || metadata.intacct_rest || null;
+  return fallback && typeof fallback === "object" ? fallback : null;
+};
+
+const resolveIntacctOutcome = attempt => {
+  const status = String(attempt?.status || attempt?.outcome || "").toLowerCase();
+  if (["success", "failed", "partial"].includes(status)) return status;
+  const httpStatus = Number(attempt?.httpStatus || attempt?.statusCode || attempt?.status_code);
+  if (Number.isFinite(httpStatus) && httpStatus >= 400) return "failed";
+  const attachmentErrors = Array.isArray(attempt?.attachmentErrors)
+    ? attempt.attachmentErrors
+    : Array.isArray(attempt?.attachment_errors)
+      ? attempt.attachment_errors
+      : [];
+  if (attachmentErrors.length) return "partial";
+  if (attempt?.error || attempt?.errorCode || attempt?.error_code) return "failed";
+  return attempt ? "success" : "";
+};
+
+const resolvePacketStatusMeta = packet => {
+  const statusKey = normalizePacketStatusKey(packet?.status);
+  if (statusKey !== "submitted") {
+    return statusMeta[statusKey] ?? { label: statusKey, indicator: "info" };
+  }
+  const attempt = resolveLatestIntacctAttempt(packet);
+  const outcome = resolveIntacctOutcome(attempt);
+  if (outcome === "success") {
+    return { label: "Draft AP in Sage", indicator: "success" };
+  }
+  if (outcome === "partial") {
+    return { label: "Sage Exceptions", indicator: "warning" };
+  }
+  if (outcome === "failed") {
+    return { label: "Sage Exceptions", indicator: "error" };
+  }
+  return statusMeta.submitted;
+};
+
 const simpleStatusOptions = [
   { value: "all", label: "All packets" },
   { value: "draft", label: "Drafts", statuses: ["draft", "returned"] },
@@ -311,8 +383,7 @@ const columnDefinitions = [
     id: "status",
     header: "Status",
     cell: item => {
-      const statusKey = normalizePacketStatusKey(item.status);
-      const meta = statusMeta[statusKey] ?? { label: statusKey, indicator: "info" };
+      const meta = resolvePacketStatusMeta(item);
       return <StatusIndicator type={meta.indicator}>{meta.label}</StatusIndicator>;
     },
   },

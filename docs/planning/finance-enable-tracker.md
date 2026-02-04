@@ -16,6 +16,8 @@ Last Updated: 2026-01-30
 - M4 — Settings (hierarchy/approvals/mapping) editable in-app; roles finalized.
 
 ## Decision Log
+- 2026-02-03: Reconciliation source-of-truth is the case-management transaction feed ingested into finance; exceptions are derived from mapping, evidence, and policy checks. UI copy and help text aligned to this model.
+- 2026-02-03: Reconciliation dashboard now reads live `finance_transaction` data and stores resolution/request state in transaction metadata (until dedicated reconciliation tables are added).
 - 2025-02-06: Core entities to add — `budget_pot`, `budget_snapshot`, `budget_allocation` (transfer), `finance_transaction` (case-linked), optional pot lookup view. Start Budgets wiring first with real pot API, plus case→pot picker reuse.
 - 2025-02-06: Migration added `budget_pot`, `budget_snapshot`, `budget_snapshot_pot`, `budget_allocation`, `finance_transaction` with full dummy hierarchy seed (files: `db/migrations/20250206_0007_create_finance_budget_tables.sql` for reference; active runner uses `sql/20250206_create_finance_budget_tables.sql`).
 - 2025-02-06: Finance pot API live (list/get/create/update + lookup); Budgets UI now consumes API instead of demo data; case Intervention modal uses lookup.

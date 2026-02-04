@@ -2,6 +2,19 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-02-03
+- UI: Authentication widget now exposes separate applicant inactivity timing fields (warning trigger + countdown duration).
+- UX: Reconciliation dashboard copy, hints, and help panel guidance now clarify the exception workflow and data source.
+- Feature: Reconciliation dashboard now loads live finance transactions and persists request/resolve actions in transaction metadata.
+
+## 2026-02-04
+- UX: Reconciliation dashboard now focuses on Sage Intacct REST submission outcomes with a packet-level submission queue and detail view.
+- API: Added Intacct submission listing endpoint for packet-level REST attempt history.
+- Data: Intacct REST submission attempts now record outcome + reason metadata for queue filtering.
+- UX: Payment packet queue now surfaces Sage Intacct submission outcomes as intelligent status labels.
+- UX: Payment packet detail now allows reopening failed/partial Sage submissions for resubmission, while blocking duplicates for accepted packets.
+- UX: Finance Overview now defaults to only the Spend trend widget; other tiles start in the palette.
+
 ## 2026-02-02
 - UX: Added Query Editor configuration dashboard scaffold with System Administrator-only access.
 - Feature: Query Editor now includes SQL input, results widgets, and admin-only query execution endpoint (100-row cap).
@@ -325,3 +338,8 @@ Format: YYYY-MM-DD - Category: Short description
 - Cleanup: Removed legacy evaluator/PTMA assignment APIs and UI (intake-officers, PTMA evaluators, assigned evaluator display).
 - UX: Secure messaging now relies on sender/recipient names without evaluator lookups.
 - DB: Added migration to drop legacy `iset_evaluators` and `iset_evaluator_ptma` tables if present.
+
+## 2026-02-04
+- UX: Intacct XML draft preview no longer flags Bill date/Due date as missing while a packet remains in draft status.
+- API: Payment packet validation now enforces Intacct REST submission requirements (vendor, GL account, required dimensions) and REST payload includes bill/due dates plus Intacct line fields.
+- API: Payment packet validation now syncs packet evidence document IDs into finance transactions for reconciliation.

@@ -6,31 +6,30 @@ const FinanceReconciliationDetailHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Provide full visibility into the currently selected transaction so reviewers can decide how
-        to resolve the exception. It consolidates metadata, validation results, evidence, and action
-        history.
+        Provide full visibility into the selected Intacct submission attempt so program admins can
+        identify why a packet failed and where to fix it.
       </p>
     </Box>
     <Box>
       <strong>Key sections</strong>
       <ul>
-        <li>Transaction summary (source, case ID, vendor, justification).</li>
-        <li>Exception analysis (rule triggered, policy references, suggested pot).</li>
-        <li>Evidence attachments and outstanding requests.</li>
-        <li>Action buttons for approve, reclassify, request info, or mark non-claimable.</li>
+        <li>Packet summary (case, client, intervention, totals, packet status).</li>
+        <li>Latest Intacct response (outcome, reason, HTTP status, bill ID).</li>
+        <li>Validation details returned by Intacct (if any).</li>
+        <li>Attempt history for repeated submissions.</li>
       </ul>
     </Box>
     <Box>
       <strong>Next steps</strong>
       <p>
-        Decisions taken here immediately update the queue, audit log, and downstream reporting. Use the comment fields
-        to capture rationale for auditors and program partners.
+        Fix validation issues back in the payment packet screens, then resubmit. This dashboard is
+        read-only and focused on submission outcomes rather than resolution workflows.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinanceReconciliationDetailHelp.aiContext =
-  "Summarise what the Reconciliation exception detail widget displays and how reviewers use it.";
+  "Summarise what the Intacct submission detail widget displays and how it helps resolve REST failures.";
 
 export default FinanceReconciliationDetailHelp;
