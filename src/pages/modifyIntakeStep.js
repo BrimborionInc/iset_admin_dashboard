@@ -2175,24 +2175,24 @@ const ModifyComponent = () => {
                                 onChange={({ detail }) => {
                                   const next = detail.selectedOption?.value || 'equals';
                                   setCondDraftOp(next);
-                                  if (['exists','notExists'].includes(next)) setCondDraftValue('');
+                                  if (['exists','notExists','emptyOrZero'].includes(next)) setCondDraftValue('');
                                 }}
-                                options={[ 'equals','notEquals','exists','notExists','>','<' ].map(o => ({ label: o, value: o }))}
+                                options={[ 'equals','notEquals','exists','notExists','emptyOrZero','>','<' ].map(o => ({ label: o, value: o }))}
                               />
                             </FormField>
-                            <FormField label="Value" description="Ignored for exists/notExists">
+                            <FormField label="Value" description="Ignored for exists/notExists/emptyOrZero">
                               <Input
                                 value={condDraftValue}
                                 onChange={({ detail }) => { setCondDraftValue(detail.value); }}
                                 placeholder="e.g. married"
-                                disabled={['exists','notExists'].includes(condDraftOp)}
+                                disabled={['exists','notExists','emptyOrZero'].includes(condDraftOp)}
                               />
                             </FormField>
                             <Button
                               onClick={() => {
                                 if (!condDraftRef) return;
                                 const rule = { ref: condDraftRef, op: condDraftOp };
-                                if (!['exists','notExists'].includes(condDraftOp)) rule.value = condDraftValue;
+                                if (!['exists','notExists','emptyOrZero'].includes(condDraftOp)) rule.value = condDraftValue;
                                 addRule(rule);
                                 // reset draft
                                 setCondDraftRef('');

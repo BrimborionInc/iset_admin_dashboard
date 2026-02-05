@@ -2,6 +2,21 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-02-05
+- Docs: Added database documentation index and overview, including demo-data guidance and schema dump pointers.
+- UX: Application assessment now includes a Deny Funding shortcut on the framing step that routes to the Review step before submitting to Pending Approval and jumping to the decision step; denial letters now mark the application as rejected after sending.
+- UX: Assessment wizard action buttons now hide once the application is finalized to avoid inert controls.
+- UX: Decision letter editor now locks after sending to prevent duplicate letters.
+- UX: Funding documentation step now preserves the primary action button label even when the checklist is incomplete.
+- UX: Added guidance above the funding documentation checklist about uploading files or sending forms via Secure Messaging.
+- Feature: Case workspace intervention approvals now auto-create draft payment packets from the proposed cost lines (no assessment fallback).
+- UX: Planned interventions are now eligible for manual payment packet creation.
+- API: Payment packet creation now blocks duplicates for interventions that already have a non-cancelled packet.
+- API: Payment initiation no longer blocks interventions in planned status.
+- API: Case workspace intervention approvals now require/derive an action plan budget pot so finance transactions can be created.
+- API: Intervention-level finance transactions now record one entry per cost line instead of a single total.
+- API: Payment packet submission now creates line-level finance transactions and posts them on confirmation.
+
 ## 2026-02-03
 - UI: Authentication widget now exposes separate applicant inactivity timing fields (warning trigger + countdown duration).
 - UX: Reconciliation dashboard copy, hints, and help panel guidance now clarify the exception workflow and data source.

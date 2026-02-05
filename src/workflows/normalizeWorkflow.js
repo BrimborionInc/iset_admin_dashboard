@@ -504,7 +504,7 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
               .filter(r => r && typeof r === 'object' && r.ref && r.op)
               .map(r => {
                 const out = { ref: String(r.ref), op: String(r.op) };
-                if (!['exists', 'notExists'].includes(r.op) && r.value !== undefined && r.value !== null && r.value !== '') out.value = String(r.value);
+                if (!['exists', 'notExists', 'emptyOrZero'].includes(r.op) && r.value !== undefined && r.value !== null && r.value !== '') out.value = String(r.value);
                 return out;
               });
             if (sanitized.length) component.conditions = { all: sanitized };

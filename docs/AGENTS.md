@@ -34,6 +34,12 @@ Last Updated: 2026-01-19
 - Record structural reorganizations in `docs/meta/project-map.md`.
 - Keep credentials and environment-specific secrets out of this library.
 
+## Database documentation
+
+- Start with `docs/data/database-documentation.md` for the database documentation index and cross-app pointers.
+- When tables/columns/relationships change, update the index plus the relevant domain docs it links to.
+- Regenerate `docs/data/DB-Structure-Dump/` via `npm run dump:dev-schema` after schema changes (not committed).
+
 ## Prod start/stop (NWAC, ca-central-1)
 
 Use these commands to shut down or restart prod for cost savings. All commands run in `ca-central-1`.

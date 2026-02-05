@@ -37,7 +37,6 @@ const DEFAULT_PAGE_SIZE = 10;
 const CASE_SEARCH_MIN_CHARS = 2;
 const BLOCKED_INTERVENTION_STATUSES = new Set([
   "draft",
-  "planned",
   "submitted",
   "in_review",
   "changes_requested",

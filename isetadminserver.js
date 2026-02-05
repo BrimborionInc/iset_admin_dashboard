@@ -11646,7 +11646,6 @@ function normaliseInterventionStatus(status) {
 
 const PAYMENT_BLOCKED_INTERVENTION_STATUSES = new Set([
   'draft',
-  'planned',
   'submitted',
   'in_review',
   'changes_requested',
@@ -32043,11 +32042,21 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         : typeof outcomeCode === 'string'
         ? outcomeCode.trim()
         : '';
-    const trimmedPotId = (() => {
+    let trimmedPotId = (() => {
       if (typeof potId === 'string') return potId.trim();
       if (Number.isFinite(potId)) return String(potId);
       return '';
     })();
+    if (!trimmedPotId && statusValue === 'planned') {
+      const planPotId = normalisePositiveInteger(planRow.budget_pot) || null;
+      if (!planPotId) {
+        return res.status(400).json({
+          error: 'budget_pot_required',
+          message: 'Select a budget pot on the action plan before approving interventions.',
+        });
+      }
+      trimmedPotId = String(planPotId);
+    }
     const trimmedFundingStream = typeof fundingStream === 'string' ? fundingStream.trim() : '';
     const trimmedNotes = typeof notes === 'string' ? notes.trim() : '';
     const trimmedNoc = typeof noc === 'string' ? noc.trim() : '';
@@ -32165,6 +32174,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     if (durationWeeksValue !== null) ensure('durationWeeks', durationWeeksValue);
     if (Number.isFinite(plannedCostInt)) ensure('cost', plannedCostInt);
     if (trimmedPotId) ensure('potId', trimmedPotId);
+    if (trimmedPotId) ensure('budgetPotId', trimmedPotId);
     ensure('postingContext', metadata.postingContext || postingContext);
     if (trimmedFundingStream) ensure('fundingStream', trimmedFundingStream);
     if (trimmedNotes) ensure('notes', trimmedNotes);
@@ -32254,6 +32264,8 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         interventionId,
         potId: trimmedPotId,
         amount: amountForFinance,
+        costLines: metadata.costLines,
+        interventionTitle: trimmedTitle,
         status: 'submitted',
         transactionDate: startDateValue || null,
         postingContext,
@@ -32279,6 +32291,21 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         });
       } catch (err) {
         console.warn('[cfa] create draft failed after intervention create', err?.message || err);
+      }
+    }
+    if (statusValue === 'planned') {
+      try {
+        const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+        const actorRole = canonicaliseAccessRole(role) || role;
+        await createAutoPaymentPacketFromIntervention({
+          interventionRow,
+          actorUserId,
+          actorRole,
+          connection: pool,
+          requireCostLines: true,
+        });
+      } catch (err) {
+        console.warn('[payments] auto-generate packet failed', err?.message || err);
       }
     }
     res.status(201).json(payload);
@@ -32547,6 +32574,24 @@ app.patch('/api/interventions/:id', async (req, res) => {
     if (metadata.postingContext !== postingContext) {
       metadata.postingContext = postingContext;
       metadataChanged = true;
+    }
+
+    if (statusProvided && statusValue === 'planned') {
+      const resolvedPotId =
+        normalisePositiveInteger(body.potId || body.budgetPotId || body.budget_pot_id) ||
+        normalisePositiveInteger(planRow?.budget_pot) ||
+        null;
+      if (!resolvedPotId) {
+        return res.status(400).json({
+          error: 'budget_pot_required',
+          message: 'Select a budget pot on the action plan before approving interventions.',
+        });
+      }
+      if (!metadata.potId && !metadata.budgetPotId) {
+        metadata.potId = resolvedPotId;
+        metadata.budgetPotId = resolvedPotId;
+        metadataChanged = true;
+      }
     }
 
     // Mark ILMP compliance as pending on intervention change
@@ -32913,6 +32958,8 @@ app.patch('/api/interventions/:id', async (req, res) => {
         interventionId,
         potId: potFromBody,
         amount: amountForFinance,
+        costLines: metadata.costLines,
+        interventionTitle: payload?.title || metadata?.title || null,
         status: 'submitted',
         transactionDate: payload.startDate || null,
         postingContext,
@@ -32929,6 +32976,21 @@ app.patch('/api/interventions/:id', async (req, res) => {
           actorUserId,
           actorRole,
           connection: pool,
+        });
+      } catch (err) {
+        console.error('[payments] auto-generate packet failed', err);
+      }
+    }
+    if (previousStatus !== 'planned' && nextStatus === 'planned') {
+      try {
+        const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+        const actorRole = canonicaliseAccessRole(role) || role;
+        await createAutoPaymentPacketFromIntervention({
+          interventionRow: updatedRow,
+          actorUserId,
+          actorRole,
+          connection: pool,
+          requireCostLines: true,
         });
       } catch (err) {
         console.error('[payments] auto-generate packet failed', err);
@@ -38110,6 +38172,7 @@ const normalizeIntacctAttemptStatus = (value) => {
 };
 
 const resolveIntacctAttemptStatus = (detail = {}) => {
+  if (!detail || typeof detail !== 'object') return '';
   const normalized = normalizeIntacctAttemptStatus(detail.status || detail.outcome);
   if (normalized) return normalized;
   const httpStatus = Number(detail.httpStatus || detail.statusCode || detail.status_code);
@@ -42899,6 +42962,7 @@ async function createAutoPaymentPacketFromIntervention({
   actorUserId = null,
   actorRole = null,
   connection = null,
+  requireCostLines = false,
 } = {}) {
   const runner = connection || pool;
   if (!runner || !interventionRow) return null;
@@ -43025,6 +43089,19 @@ async function createAutoPaymentPacketFromIntervention({
     ? resolveAllowedPaymentTypesForIntervention(paymentTypeMapping, interventionRow)
     : null;
 
+  const costLineInputs = buildAutoPaymentLinesFromCostLines({
+    interventionRow,
+    interventionMetadata: metadata,
+    clientPayeeName,
+    partnerName,
+    fallbackPayeeType,
+    fallbackPayeeName,
+    allowedPaymentTypes,
+  });
+  if (requireCostLines && !costLineInputs.length) {
+    return { packetId: null, created: false, reason: 'missing_cost_lines' };
+  }
+
   let requesterName =
     metadata.requesterName ||
     metadata.requester_name ||
@@ -43070,15 +43147,6 @@ async function createAutoPaymentPacketFromIntervention({
     const fundingStream = potRow?.funding_source
       ? normalizeFundingSource(potRow.funding_source)
       : null;
-    const costLineInputs = buildAutoPaymentLinesFromCostLines({
-      interventionRow,
-      interventionMetadata: metadata,
-      clientPayeeName,
-      partnerName,
-      fallbackPayeeType,
-      fallbackPayeeName,
-      allowedPaymentTypes,
-    });
     const autoLineInputs = costLineInputs.length
       ? costLineInputs
       : buildAutoPaymentLinesFromAssessment({
@@ -43177,7 +43245,7 @@ async function createAutoPaymentPacketFromIntervention({
   return { packetId: String(packetId), created: true };
 }
 
-async function createFinanceTransactionForLine({ lineRow, packetRow, connection = null }) {
+async function createFinanceTransactionForLine({ lineRow, packetRow, connection = null, status = 'posted', transactionDate = null }) {
   if (!lineRow) return null;
   const runner = connection || pool;
   const lineId = Number(lineRow.id);
@@ -43186,10 +43254,6 @@ async function createFinanceTransactionForLine({ lineRow, packetRow, connection 
     'SELECT finance_transaction_id FROM payment_line_transaction WHERE payment_packet_line_id = ? LIMIT 1',
     [lineId]
   );
-  if (existingLink?.finance_transaction_id) {
-    return existingLink.finance_transaction_id;
-  }
-
   const lineMeta = safeJsonParse(lineRow.metadata, {}) || {};
   const packetMeta = safeJsonParse(packetRow?.metadata, {}) || {};
   const postingContextRaw =
@@ -43206,7 +43270,8 @@ async function createFinanceTransactionForLine({ lineRow, packetRow, connection 
   });
   const amount = Number(lineRow.amount || 0);
   const currency = lineRow.currency || 'CAD';
-  const transactionDate = lineRow?.paid_at || lineRow?.paidAt || packetRow?.confirmed_at || new Date();
+  const resolvedTransactionDate =
+    transactionDate || lineRow?.paid_at || lineRow?.paidAt || packetRow?.confirmed_at || new Date();
   let reportingUnit =
     packetRow?.reporting_unit ||
     packetRow?.reportingUnit ||
@@ -43240,10 +43305,28 @@ async function createFinanceTransactionForLine({ lineRow, packetRow, connection 
     evidenceTypes: evidence.evidenceTypes,
   };
   const evidenceRef = evidence.documentIds.length ? evidence.documentIds.join(',') : null;
+  if (existingLink?.finance_transaction_id) {
+    await runner.query(
+      `UPDATE finance_transaction
+         SET amount = ?, currency = ?, status = ?, transaction_date = ?, evidence_ref = ?, metadata = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [
+        amount,
+        currency,
+        status,
+        resolvedTransactionDate,
+        evidenceRef,
+        JSON.stringify(txMetadata),
+        existingLink.finance_transaction_id,
+      ]
+    );
+    return existingLink.finance_transaction_id;
+  }
+
   const [result] = await runner.query(
     `INSERT INTO finance_transaction
        (case_id, case_intervention_id, budget_pot_id, posting_context, gl_project_code_used, amount, currency, status, transaction_date, evidence_ref, metadata, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'posted', ?, ?, ?, NOW(), NOW())`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
     [
       packetRow?.case_id || null,
       lineRow.intervention_id || packetRow?.intervention_id || null,
@@ -43252,7 +43335,8 @@ async function createFinanceTransactionForLine({ lineRow, packetRow, connection 
       glProjectCodeUsed,
       amount,
       currency,
-      transactionDate,
+      status,
+      resolvedTransactionDate,
       evidenceRef,
       JSON.stringify(txMetadata),
     ]
@@ -44768,6 +44852,8 @@ async function upsertFinanceTransactionForIntervention({
   interventionId,
   potId,
   amount,
+  costLines = null,
+  interventionTitle = null,
   status = 'submitted',
   transactionDate = null,
   postingContext = 'external',
@@ -44783,16 +44869,50 @@ async function upsertFinanceTransactionForIntervention({
     const amt = Number(amount);
     const normalizedAmount = Number.isFinite(amt) ? amt : 0;
     const txDate = transactionDate || null;
-    const [[existing] = []] = await runner.query(
-      'SELECT id FROM finance_transaction WHERE case_intervention_id = ? LIMIT 1',
+    const lineItems = Array.isArray(costLines) ? costLines : [];
+    const lineRows = lineItems
+      .map(line => {
+        const lineAmount = Number(line?.amount);
+        if (!Number.isFinite(lineAmount) || lineAmount <= 0) return null;
+        const lineMeta = pruneNullish({
+          source: 'intervention',
+          interventionTitle: interventionTitle || null,
+          line: pruneNullish({
+            id: line?.id || null,
+            type: line?.type || null,
+            notes: line?.notes || null,
+            recurrence: line?.recurrence || null,
+          })
+        });
+        return [
+          caseId,
+          interventionId,
+          potNumeric,
+          postingContext,
+          glProjectCodeUsed,
+          Math.round(lineAmount * 100) / 100,
+          'CAD',
+          status,
+          txDate,
+          line?.type || interventionTitle || null,
+          lineMeta ? JSON.stringify(lineMeta) : null,
+        ];
+      })
+      .filter(Boolean);
+
+    await runner.query(
+      `DELETE FROM finance_transaction
+        WHERE case_intervention_id = ?
+          AND status IN ('draft','submitted','approved')`,
       [interventionId]
     );
-    if (existing) {
+
+    if (lineRows.length) {
       await runner.query(
-        `UPDATE finance_transaction
-         SET budget_pot_id = ?, amount = ?, status = ?, transaction_date = ?, posting_context = ?, gl_project_code_used = ?, updated_at = NOW()
-         WHERE id = ?`,
-        [potNumeric, normalizedAmount, status, txDate, postingContext, glProjectCodeUsed, existing.id]
+        `INSERT INTO finance_transaction
+           (case_id, case_intervention_id, budget_pot_id, posting_context, gl_project_code_used, amount, currency, status, transaction_date, description, metadata)
+         VALUES ?`,
+        [lineRows]
       );
     } else {
       await runner.query(
@@ -44812,16 +44932,18 @@ async function updateFinanceTransactionStatusForIntervention({ interventionId, a
   try {
     const amt = Number(amount);
     const normalizedAmount = Number.isFinite(amt) ? amt : null;
-    const [[existing] = []] = await pool.query(
-      'SELECT id FROM finance_transaction WHERE case_intervention_id = ? LIMIT 1',
+    const [[countRow] = []] = await pool.query(
+      'SELECT COUNT(*) AS total FROM finance_transaction WHERE case_intervention_id = ?',
       [interventionId]
     );
-    if (!existing) return;
+    const totalRows = Number(countRow?.total || 0);
+    if (!totalRows) return;
+    const amountToUse = totalRows === 1 ? normalizedAmount : null;
     await pool.query(
       `UPDATE finance_transaction
        SET status = ?, amount = COALESCE(?, amount), transaction_date = ?, updated_at = NOW()
-       WHERE id = ?`,
-      [status, normalizedAmount, transactionDate || null, existing.id]
+       WHERE case_intervention_id = ?`,
+      [status, amountToUse, transactionDate || null, interventionId]
     );
     await refreshFinancePotSums();
   } catch (err) {
@@ -47442,9 +47564,39 @@ app.post('/api/finance/payment-packets', async (req, res) => {
   const sentAt = sentStages.has(status) ? now : null;
   const confirmedAt = confirmedStages.has(status) ? now : null;
 
+  const interventionIdsForPacket = new Set();
+  if (interventionId) {
+    interventionIdsForPacket.add(interventionId);
+  }
+  if (linesPayload.length) {
+    linesPayload.forEach(line => {
+      const lineInterventionId = normalisePositiveInteger(line?.interventionId || line?.intervention_id);
+      if (lineInterventionId) {
+        interventionIdsForPacket.add(lineInterventionId);
+      }
+    });
+  }
+
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    if (interventionIdsForPacket.size) {
+      const ids = Array.from(interventionIdsForPacket);
+      const [existingPackets] = await conn.query(
+        `SELECT id, intervention_id, status
+           FROM payment_packet
+          WHERE intervention_id IN (${ids.map(() => '?').join(',')})
+            AND (status IS NULL OR status <> 'cancelled')`,
+        ids
+      );
+      if (existingPackets.length) {
+        await conn.rollback();
+        return res.status(409).json({
+          error: 'payment_packet_already_exists',
+          interventionIds: Array.from(new Set(existingPackets.map(row => Number(row.intervention_id)).filter(Boolean))),
+        });
+      }
+    }
     const [result] = await conn.query(
       `INSERT INTO payment_packet
         (case_id, client_id, intervention_id, reporting_unit, status, requester_user_id, program_approved_by_user_id, finance_approved_by_user_id,
@@ -48337,6 +48489,40 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       }
     }
 
+    if (nextStatus === 'submitted') {
+      const [lineRows] = await conn.query(
+        'SELECT * FROM payment_packet_line WHERE payment_packet_id = ? AND status <> "cancelled"',
+        [packetId]
+      );
+      const packetSnapshot = {
+        case_id: packetRow.case_id,
+        intervention_id: packetRow.intervention_id,
+        submitted_at: packetRow.submitted_at || new Date(),
+        reporting_unit: packetRow.reporting_unit,
+        metadata: packetRow.metadata,
+      };
+      for (const line of lineRows) {
+        await createFinanceTransactionForLine({
+          lineRow: line,
+          packetRow: packetSnapshot,
+          connection: conn,
+          status: 'submitted',
+          transactionDate: packetSnapshot.submitted_at,
+        });
+      }
+    }
+
+    if (nextStatus === 'draft' && fromStatus && fromStatus !== 'draft') {
+      await conn.query(
+        `UPDATE finance_transaction ft
+          JOIN payment_line_transaction plt ON plt.finance_transaction_id = ft.id
+          JOIN payment_packet_line ppl ON ppl.id = plt.payment_packet_line_id
+         SET ft.status = 'cancelled', ft.updated_at = NOW()
+       WHERE ppl.payment_packet_id = ?`,
+        [packetId]
+      );
+    }
+
     await conn.query(
       `INSERT INTO payment_status_event
         (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, notes, metadata, created_at)
@@ -48396,7 +48582,13 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
           }
         }
         if (line.status !== 'cancelled') {
-          await createFinanceTransactionForLine({ lineRow: line, packetRow: packetSnapshot, connection: conn });
+          await createFinanceTransactionForLine({
+            lineRow: line,
+            packetRow: packetSnapshot,
+            connection: conn,
+            status: 'posted',
+            transactionDate: packetSnapshot.confirmed_at || new Date(),
+          });
         }
       }
       if (lineEventValues.length) {

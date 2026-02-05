@@ -27,7 +27,7 @@ Stored in `iset_application.status` (varchar). Canonical values:
 | `pending_approval` | Assessor submitted their review; awaiting NWAC outcome decision. | `CoordinatorAssessmentWidget.handleSubmit`. |
 | `approved` | NWAC outcome marked as approved. | `CoordinatorAssessmentWidget.handleComplete` with `approve`. |
 | `completed` | Post-approval processing completed (future use). | Finance/closure flows. |
-| `rejected` | NWAC outcome rejected. | `CoordinatorAssessmentWidget.handleComplete` with `reject`. |
+| `rejected` | NWAC outcome rejected. | `CoordinatorAssessmentWidget.handleCommunicationComplete` after the denial letter is sent. |
 | `declined` | Legacy decision status treated as rejected/terminal. | Legacy/imported records. |
 | `cancelled` | Legacy terminal status for cancelled applications. | Legacy/imported records. |
 | `closed` | Application closed (e.g., applicant withdrew or file closed administratively). | Manual status change or automation. |
@@ -101,7 +101,7 @@ The set is intentionally broad to accommodate funder reporting requirements; cas
 ### 3.1 Application → Case Interactions
 1. **Submission** (`submitted`): auto-created `iset_case` row defaults to `pending_approval`.
 2. **Assessment Submitted** (`pending_approval`): triggered in `CoordinatorAssessmentWidget.handleSubmit`, which sends `status: 'pending_approval'` via `PUT /api/cases/:id`. Backend persists the new application status and recalculates action plan-derived case status (which typically remains `pending_approval` until approval).
-3. **Outcome Decision** (`approved` / `rejected`): `handleComplete` sends the final status; backend updates `iset_application.status` and recomputes the case status. When the outcome is **approved** the server also seeds an initial action plan and intervention from the NWAC recommendation. As of 2026‑02 the auto-generated plan always starts in `draft` (regardless of the recommended start date) and the intervention in `planned`, keeping the case in `initiated` until a caseworker explicitly activates the plan.
+3. **Outcome Decision** (`approved` / `rejected`): `handleComplete` records the decision and moves the application to `decision_ready`. For denials, the application status moves to `rejected` only after the denial letter is sent in the communication step; approvals continue to follow the approval/funding-docs path. When the outcome is **approved** the server also seeds an initial action plan and intervention from the NWAC recommendation. As of 2026‑02 the auto-generated plan always starts in `draft` (regardless of the recommended start date) and the intervention in `planned`, keeping the case in `initiated` until a caseworker explicitly activates the plan.
 4. **Manual Overrides**: The Application Overview widget can POST/PUT `status` changes via `PUT /api/cases/:id`. Locks ensure only one user manipulates state at a time.
 5. **Secure Messaging with forms**: Sending a secure message with attached forms from the Application Workspace while status is `submitted` or `in_review` sets `docs_requested_active` and updates the application status to `docs_requested` so the applicant action is still visible.
 6. **Manual doc-request toggle**: The Application Overview widget can set/clear `docs_requested_active` without changing application status, and the secure-message flow auto-clears document requests once all signing requests are complete.

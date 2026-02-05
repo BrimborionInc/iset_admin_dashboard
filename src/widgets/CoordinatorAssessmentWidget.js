@@ -2,7 +2,7 @@ import React, { forwardRef, useState, useEffect, useRef, useCallback, useMemo } 
 import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
-import { canCompleteOutcomeReview, getCaseStatusContext, getApplicationStatusContext } from '../utils/rbac';
+import { canCompleteOutcomeReview, getCaseStatusContext, getApplicationStatusContext, getRoleGroups } from '../utils/rbac';
 import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup, Autosuggest, StatusIndicator, Wizard, Hotspot } from '@cloudscape-design/components';
 import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
@@ -1062,6 +1062,10 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [denialReasonChoice, setDenialReasonChoice] = useState('');
   const [denialReasonExplanation, setDenialReasonExplanation] = useState('');
   const [denialReasonErrors, setDenialReasonErrors] = useState({});
+  const [denyFundingModalVisible, setDenyFundingModalVisible] = useState(false);
+  const [denyFundingLoading, setDenyFundingLoading] = useState(false);
+  const [pendingDecisionJump, setPendingDecisionJump] = useState(false);
+  const [denyFundingFlowActive, setDenyFundingFlowActive] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [alert, setAlert] = useState(null);
   const [applicationRowVersionState, setApplicationRowVersion] = useState(() =>
@@ -1163,6 +1167,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const normalizedRole = (userRole || '').toString().trim().toLowerCase();
   const canonicalRole = normalizedRole === 'regional manager' ? 'regional coordinator' : normalizedRole;
   const isAssessor = canonicalRole === 'application assessor';
+  const { isOutcomeReviewerRole } = getRoleGroups(userRole);
   const groupKeys = Array.isArray(currentUserGroups)
     ? currentUserGroups.map(group => String(group || '').trim().toLowerCase().replace(/[\s-]+/g, '_'))
     : [];
@@ -1686,6 +1691,12 @@ const CoordinatorAssessmentWidget = forwardRef(
     const steps = [...afterSubmit, ...COMMUNICATION_STEP_IDS];
     return showFundingDocsStep ? [...steps, ...FUNDING_DOCS_STEP_IDS] : steps;
   }, [showNWACSection, showCommunicationStep, showFundingDocsStep]);
+  useEffect(() => {
+    if (!pendingDecisionJump) return;
+    if (!activeStepIds.includes('decision')) return;
+    setCurrentStep('decision');
+    setPendingDecisionJump(false);
+  }, [pendingDecisionJump, activeStepIds]);
   const docsChecklistReady = Boolean(applicantUserId && applicationId);
   const docsChecklistComplete = Boolean(
     docsChecklistReady &&
@@ -2217,7 +2228,8 @@ const CoordinatorAssessmentWidget = forwardRef(
     return letterDrafts?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
   }, [activeLetterKey, letterDrafts]);
   const letterWorkflowId = activeLetterKey ? letterWorkflows?.[activeLetterKey] : null;
-  const isLetterEditingDisabled = lockedByAnotherUser || isCompletedStatus;
+  const letterAlreadySent = Boolean(activeLetterKey && decisionLetterSent?.[activeLetterKey]);
+  const isLetterEditingDisabled = lockedByAnotherUser || isCompletedStatus || letterAlreadySent;
   const canGenerateLetterDraft = Boolean(activeLetterKey) && !isLetterEditingDisabled && !draftingLetter;
   const canSaveLetterDraft = Boolean(activeLetterKey) && !isLetterEditingDisabled;
   const canSendLetter =
@@ -2558,6 +2570,17 @@ const CoordinatorAssessmentWidget = forwardRef(
   const checklistUploadsLocked = isAssessmentDisabled && !isCommunicationStep && !isFundingDocsStep;
   const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canManageOutcomeReview;
   const isEligibilityDisabled = baseAssessmentLocked || isDeclarationGateActive || !isEligibilityAdmin;
+  const showDenyFundingShortcut = !isDecisionFinal && !isDecisionReadyStatus;
+  const denyFundingBlockedReason = (() => {
+    if (!showDenyFundingShortcut) return '';
+    if (!caseId) return 'Save progress to create a case before denying funding.';
+    if (!isOutcomeReviewerRole) return 'You do not have permission to record funding decisions.';
+    if (lockedByAnotherUser) return 'This case is currently locked by another user.';
+    if (isEligibilityGateActive) return 'Set ESDC eligibility before denying funding.';
+    if (isLockedStatus) return 'This application is locked and cannot be updated.';
+    return '';
+  })();
+  const canUseDenyFundingShortcut = showDenyFundingShortcut && !denyFundingBlockedReason;
 
   const resolveStoredWizardStep = useCallback((key, allowedSteps) => {
     if (!key) return null;
@@ -3888,6 +3911,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     setLetterDrafts(initialLetterDrafts);
     setShowCancelModal(false);
     setAlert(null);
+    setDenyFundingFlowActive(false);
     setIsEditingAssessment(false);
     releaseLock({ silent: true }).catch(() => {});
   };
@@ -4340,6 +4364,17 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     return errors;
   }
+
+  function validateAssessmentForDeny(assessment) {
+    const errors = {};
+    if (!assessment.recommendation) {
+      errors.recommendation = 'Recommendation is required.';
+    }
+    if (!assessment.justification || !assessment.justification.trim()) {
+      errors.justification = 'Justification is required.';
+    }
+    return errors;
+  }
   const buildValidationMessages = (errors) => {
     const messages = [];
     const seen = new Set();
@@ -4421,7 +4456,9 @@ const CoordinatorAssessmentWidget = forwardRef(
     try {
       setHasSubmitted(true);
       setValidationAlert(null);
-      const errors = validateAssessment(assessment);
+      const errors = denyFundingFlowActive
+        ? validateAssessmentForDeny(assessment)
+        : validateAssessment(assessment);
       setFieldErrors(errors);
       if (Object.keys(errors).length > 0) {
         setValidationAlert(buildValidationMessages(errors));
@@ -4560,6 +4597,10 @@ const CoordinatorAssessmentWidget = forwardRef(
             statusIconAriaLabel: 'Success'
           });
           setValidationAlert(null);
+          if (denyFundingFlowActive) {
+            setDenyFundingFlowActive(false);
+            setPendingDecisionJump(true);
+          }
           if (releaseAfterSuccess) {
             releaseLock({ silent: true }).catch(() => {});
           }
@@ -4570,7 +4611,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       };
 
       const checklistOk = await runDocumentChecklist(submitAssessment, {
-        allowBypass: false,
+        allowBypass: denyFundingFlowActive,
         stage: SUBMIT_ASSESSMENT_STAGE
       });
       if (!checklistOk) return;
@@ -5343,6 +5384,10 @@ const CoordinatorAssessmentWidget = forwardRef(
         return assessmentSubmitted ? true : docsChecklistComplete;
       }
       if (stepId === 'review') {
+        if (denyFundingFlowActive) {
+          const denyErrors = validateAssessmentForDeny(assessment);
+          return !denyErrors.recommendation && !denyErrors.justification;
+        }
         const requiredStepsValid = REQUIRED_STEP_IDS.every(id => validateWizardStep(id));
         return requiredStepsValid && !errors.recommendation && !errors.justification;
       }
@@ -5364,10 +5409,12 @@ const CoordinatorAssessmentWidget = forwardRef(
       assessmentSubmitted,
       canManageOutcomeReview,
       docsChecklistComplete,
+      denyFundingFlowActive,
       fundingDocsChecklistComplete,
       isAssessmentDisabled,
       isNWACFieldsDisabled,
       validateAssessment,
+      validateAssessmentForDeny,
       validateNWACReview
     ]
   );
@@ -5557,14 +5604,20 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
   };
 
-  const markApplicationCompleted = useCallback(
-    async ({ successMessage = 'Communication complete. Application marked as completed.' } = {}) => {
-      if (!caseId) return { ok: false };
+  const updateApplicationStatus = useCallback(
+    async ({
+      nextStatus,
+      successMessage,
+      errorMessage = 'Failed to update the application status.',
+      refreshDocs = false,
+      resetSubmitted = false
+    } = {}) => {
+      if (!caseId || !nextStatus) return { ok: false };
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return { ok: false };
       const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
       const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
-      const payload = { applicationStatus: 'completed' };
+      const payload = { applicationStatus: nextStatus };
       if (versionToken > 0) {
         payload.expectedRowVersion = versionToken;
       }
@@ -5593,14 +5646,14 @@ const CoordinatorAssessmentWidget = forwardRef(
           return { ok: false };
         }
         if (!res.ok || !result?.success) {
-          throw new Error(result?.error || 'Failed to complete the application.');
+          throw new Error(result?.error || errorMessage);
         }
         const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
         if (updatedRowVersion) {
           updateRowVersion(updatedRowVersion);
         }
         if (typeof onCaseUpdate === 'function') {
-          const updates = { applicationStatus: 'completed' };
+          const updates = { applicationStatus: nextStatus };
           if (updatedRowVersion) updates.application_row_version = updatedRowVersion;
           onCaseUpdate(updates);
         }
@@ -5609,23 +5662,35 @@ const CoordinatorAssessmentWidget = forwardRef(
             await actions.refreshCaseData();
           } catch (_) {}
         }
-        dispatchSupportingDocsRefresh();
-        setAlert({
-          type: 'success',
-          content: successMessage,
-          dismissible: true,
-          statusIconAriaLabel: 'Success'
-        });
-        setHasSubmitted(false);
+        if (refreshDocs) {
+          dispatchSupportingDocsRefresh();
+        }
+        if (successMessage) {
+          setAlert({
+            type: 'success',
+            content: successMessage,
+            dismissible: true,
+            statusIconAriaLabel: 'Success'
+          });
+        }
+        if (resetSubmitted) {
+          setHasSubmitted(false);
+        }
         scrollAfterAction();
+        return { ok: true };
+      } catch (err) {
+        setAlert({
+          type: 'error',
+          content: err.message || errorMessage,
+          dismissible: true,
+          statusIconAriaLabel: 'Error'
+        });
+        scrollAfterAction();
+        return { ok: false };
+      } finally {
         if (releaseAfterSuccess) {
           releaseLock({ silent: true }).catch(() => {});
         }
-        return { ok: true };
-      } catch (err) {
-        setAlert({ type: 'error', content: err.message || 'Failed to complete the application.', dismissible: true, statusIconAriaLabel: 'Error' });
-        scrollAfterAction();
-        return { ok: false };
       }
     },
     [
@@ -5643,6 +5708,52 @@ const CoordinatorAssessmentWidget = forwardRef(
     ]
   );
 
+  const denyFundingConfirmMessage = 'This will skip the remaining assessment steps and take you to the recommendation to deny funding.';
+
+  const handleDenyFundingConfirm = async () => {
+    if (denyFundingLoading) return;
+    if (!canUseDenyFundingShortcut) {
+      if (denyFundingBlockedReason) {
+        setAlert({
+          type: 'warning',
+          content: denyFundingBlockedReason,
+          dismissible: true,
+          statusIconAriaLabel: 'Warning'
+        });
+        scrollAfterAction();
+      }
+      setDenyFundingModalVisible(false);
+      return;
+    }
+    setDenyFundingLoading(true);
+    try {
+      const lockCheck = await ensureLockForOperation();
+      if (!lockCheck.ok) return;
+      setIsEditingAssessment(true);
+      setShowEditConfirmModal(false);
+      setShowCancelModal(false);
+      setAlert(null);
+      setDenyFundingFlowActive(true);
+      handleField('recommendation', 'no_recommend');
+      setDenyFundingModalVisible(false);
+      setCurrentStep('review');
+    } finally {
+      setDenyFundingLoading(false);
+    }
+  };
+
+  const markApplicationCompleted = useCallback(
+    async ({ successMessage = 'Communication complete. Application marked as completed.' } = {}) =>
+      updateApplicationStatus({
+        nextStatus: 'completed',
+        successMessage,
+        errorMessage: 'Failed to complete the application.',
+        refreshDocs: true,
+        resetSubmitted: true
+      }),
+    [updateApplicationStatus]
+  );
+
   const handleCommunicationComplete = async () => {
     if (!showCommunicationStep || isCompletedStatus) {
       return;
@@ -5652,6 +5763,15 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!letterResult.ok) return;
     if (decisionOutcome === 'approved') {
       setHasSubmitted(false);
+      return;
+    }
+    if (decisionOutcome === 'denied') {
+      await updateApplicationStatus({
+        nextStatus: 'rejected',
+        successMessage: 'Denial letter sent. Application marked as rejected.',
+        errorMessage: 'Failed to mark application as rejected.',
+        resetSubmitted: true
+      });
       return;
     }
     await markApplicationCompleted();
@@ -5765,8 +5885,8 @@ const CoordinatorAssessmentWidget = forwardRef(
     />
   );
 
-  const renderRecommendationSection = () => {
-    const showReviewErrors = shouldShowStepErrors('review');
+  const renderRecommendationSection = ({ readOnly = isAssessmentDisabled, showErrors = shouldShowStepErrors('review') } = {}) => {
+    const showReviewErrors = Boolean(showErrors);
     return (
       <>
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
@@ -5783,7 +5903,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             ariaLabel="Recommendation"
             data-error-focus={showReviewErrors && fieldErrors.recommendation ? 'true' : undefined}
             tabIndex={-1}
-            readOnly={isAssessmentDisabled}
+            readOnly={readOnly}
           />
           </FormField>
           <FormField
@@ -5798,7 +5918,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 onChange={({ detail }) => handleField('justification', detail.value)}
                 data-error-focus={showReviewErrors && fieldErrors.justification ? 'true' : undefined}
                 tabIndex={-1}
-                readOnly={isAssessmentDisabled}
+                readOnly={readOnly}
               />
             </Box>
           </FormField>
@@ -5902,6 +6022,29 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const framingStepContent = (
     <SpaceBetween size="l">
+      {showDenyFundingShortcut && (
+        <Box>
+          <SpaceBetween size="xs">
+            <Box variant="small" color="text-body-secondary">
+              Need to deny funding without completing the assessment? Skip the remaining steps and go straight to the decision.
+            </Box>
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="normal"
+                onClick={() => setDenyFundingModalVisible(true)}
+                disabled={!canUseDenyFundingShortcut}
+              >
+                Deny Funding
+              </Button>
+              {denyFundingBlockedReason ? (
+                <Box variant="small" color="text-body-secondary">
+                  {denyFundingBlockedReason}
+                </Box>
+              ) : null}
+            </SpaceBetween>
+          </SpaceBetween>
+        </Box>
+      )}
       {showFramingErrors && interventionFieldErrors._global && (
         <Alert type="error" statusIconAriaLabel="Error">
           {interventionFieldErrors._global}
@@ -6809,6 +6952,9 @@ const CoordinatorAssessmentWidget = forwardRef(
           >
             Funding documentation checklist
           </Header>
+          <Box variant="small" color="text-body-secondary" margin={{ bottom: 's' }}>
+            Click a document name to upload a file, or send the forms to the applicant for signature using Secure Messaging.
+          </Box>
           <Table
             stripedRows
             resizableColumns
@@ -6961,7 +7107,10 @@ const CoordinatorAssessmentWidget = forwardRef(
           {reviewPostingContext ? <div>Paid from: {reviewPostingContext}</div> : null}
         </Box>
       </ColumnLayout>
-      {!assessmentSubmitted && renderRecommendationSection()}
+      {renderRecommendationSection({
+        readOnly: isAssessmentDisabled || (assessmentSubmitted && !isEditingAssessment),
+        showErrors: !assessmentSubmitted
+      })}
     </SpaceBetween>
   );
 
@@ -7457,6 +7606,50 @@ const CoordinatorAssessmentWidget = forwardRef(
     </Modal>
   );
 
+  const denyFundingModal = (
+    <Modal
+      visible={denyFundingModalVisible}
+      onDismiss={() => {
+        if (denyFundingLoading) return;
+        setDenyFundingModalVisible(false);
+      }}
+      header="Deny funding?"
+      footer={
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button
+            variant="link"
+            onClick={() => setDenyFundingModalVisible(false)}
+            disabled={denyFundingLoading}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleDenyFundingConfirm}
+            loading={denyFundingLoading}
+            disabled={!canUseDenyFundingShortcut || denyFundingLoading}
+          >
+            Continue
+          </Button>
+        </SpaceBetween>
+      }
+    >
+      <SpaceBetween size="s">
+        <Box>{denyFundingConfirmMessage}</Box>
+        {denyFundingBlockedReason ? (
+          <Alert type="warning">
+            {denyFundingBlockedReason}
+          </Alert>
+        ) : null}
+        {isChanged ? (
+          <Alert type="warning">
+            You have unsaved assessment changes. Save progress if you need to keep them before denying funding.
+          </Alert>
+        ) : null}
+      </SpaceBetween>
+    </Modal>
+  );
+
   const checklistUploadModal = (
     <Modal
       visible={checklistUploadModalVisible}
@@ -7736,6 +7929,14 @@ const CoordinatorAssessmentWidget = forwardRef(
     : isCommunicationStep
       ? 'Send Letter'
       : (showNWACSection ? 'Commit' : 'Submit assessment');
+  const wizardReadOnlyLabel = 'Read only';
+  const hideWizardActions = !wizardSubmitHandler && (isDecisionFinal || isLockedStatus) && !isFundingDocsStep;
+  const wizardSubmitText =
+    isCommunicationSending
+      ? 'Working'
+      : (wizardSubmitHandler
+        ? wizardSubmitLabel
+        : (isFundingDocsStep ? wizardSubmitLabel : (hideWizardActions ? undefined : wizardReadOnlyLabel)));
   const conflictHoldModal = (
     <Modal
       visible={conflictHoldModalVisible}
@@ -7965,10 +8166,10 @@ const CoordinatorAssessmentWidget = forwardRef(
                     : 'Complete required fields before continuing.'
                   : undefined,
             }))}
-            submitButtonText={isCommunicationSending ? 'Working' : (wizardSubmitHandler ? wizardSubmitLabel : 'Read only')}
-            cancelButtonText={canSubmitAssessment ? 'Cancel' : undefined}
-            nextButtonText="Next"
-            previousButtonText="Previous"
+            submitButtonText={wizardSubmitText}
+            cancelButtonText={hideWizardActions ? undefined : (canSubmitAssessment ? 'Cancel' : undefined)}
+            nextButtonText={hideWizardActions ? undefined : 'Next'}
+            previousButtonText={hideWizardActions ? undefined : 'Previous'}
             secondaryActions={null}
           />
         </div>
@@ -7978,6 +8179,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         {endDateAdjustmentModal}
         {occurrenceChangeModal}
         {denialReasonModal}
+        {denyFundingModal}
         {checklistUploadModal}
         <Modal
           visible={showCancelModal}

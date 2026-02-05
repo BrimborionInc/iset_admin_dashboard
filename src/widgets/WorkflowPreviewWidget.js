@@ -381,6 +381,12 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
         case 'notExists':
           if (valueExists(raw)) return false;
           break;
+        case 'emptyOrZero': {
+          if (!valueExists(raw)) break;
+          const ln = coerceForCompare(raw);
+          if (ln === 0) break;
+          return false;
+        }
         case 'equals': {
           const lhs = raw;
           const rhs = r.value;
