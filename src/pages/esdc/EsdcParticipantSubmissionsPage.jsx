@@ -12,13 +12,13 @@ import EsdcParticipantValidationHelp from '../../helpPanelContents/esdcParticipa
 import EsdcParticipantHistoryHelp from '../../helpPanelContents/esdcParticipantHistoryHelp.js';
 import EsdcBatchSubmissionHelp from '../../helpPanelContents/esdcBatchSubmissionHelp.js';
 
-const STORAGE_KEY = 'esdc-participants-layout-v3';
+const STORAGE_KEY = 'esdc-participants-layout-v4';
 
 const widgetRegistry = {
   queue: {
     id: 'queue',
     defaultRowSpan: 3,
-    defaultColumnSpan: 4,
+    defaultColumnSpan: 2,
     component: EsdcParticipantQueueWidget,
     title: 'Participant submission queue',
     description: 'Participants awaiting validation or export.',
@@ -28,7 +28,7 @@ const widgetRegistry = {
   },
   batch: {
     id: 'batch',
-    defaultRowSpan: 4,
+    defaultRowSpan: 5,
     defaultColumnSpan: 2,
     component: EsdcBatchSubmissionWidget,
     title: 'Batch submission',
@@ -39,7 +39,7 @@ const widgetRegistry = {
   },
   validation: {
     id: 'validation',
-    defaultRowSpan: 4,
+    defaultRowSpan: 3,
     defaultColumnSpan: 2,
     component: EsdcParticipantValidationWidget,
     title: 'Validation summary',
@@ -50,8 +50,8 @@ const widgetRegistry = {
   },
   history: {
     id: 'history',
-    defaultRowSpan: 3,
-    defaultColumnSpan: 4,
+    defaultRowSpan: 5,
+    defaultColumnSpan: 2,
     component: EsdcParticipantHistoryWidget,
     title: 'Recent participant submissions',
     description: 'Latest submissions and outcomes.',
@@ -62,10 +62,10 @@ const widgetRegistry = {
 };
 
 const defaultLayout = [
-  { id: 'queue', rowSpan: 3, columnSpan: 4 },
-  { id: 'validation', rowSpan: 4, columnSpan: 2 },
-  { id: 'batch', rowSpan: 4, columnSpan: 2 },
-  { id: 'history', rowSpan: 3, columnSpan: 4 }
+  { id: 'queue', rowSpan: 3, columnSpan: 2 },
+  { id: 'validation', rowSpan: 3, columnSpan: 2 },
+  { id: 'batch', rowSpan: 5, columnSpan: 2 },
+  { id: 'history', rowSpan: 5, columnSpan: 2 }
 ];
 
 const exportLayout = items =>

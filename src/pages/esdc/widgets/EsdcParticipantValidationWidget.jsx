@@ -23,7 +23,6 @@ const EsdcParticipantValidationWidget = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [validatingAll, setValidatingAll] = useState(false);
-  const [validateMessage, setValidateMessage] = useState(null);
 
   const handleSettingsClick = ({ detail }) => {
     if (detail?.id === 'remove' && typeof actions.removeItem === 'function') {
@@ -86,21 +85,19 @@ const EsdcParticipantValidationWidget = ({
 
   const handleValidateAll = async () => {
     setValidatingAll(true);
-    setValidateMessage(null);
     try {
       const resp = await apiFetch('/api/esdc/participants/validate-all', { method: 'POST' });
       const body = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         throw new Error(body.error || body.message || `Validation failed with ${resp.status}`);
       }
-      setValidateMessage(`Validated ${body.validated || 0} of ${body.total || 0}${body.failures?.length ? `, failures: ${body.failures.length}` : ''}`);
       // Refresh summary and queue
       loadSummary();
       try {
         window.dispatchEvent(new CustomEvent('esdcParticipants:refresh'));
       } catch (_) {}
-    } catch (err) {
-      setValidateMessage(err?.message || 'Validation failed');
+    } catch (_) {
+      // Intentionally no inline status message here.
     } finally {
       setValidatingAll(false);
     }
@@ -127,48 +124,65 @@ const EsdcParticipantValidationWidget = ({
   }, [items]);
 
   const issues = useMemo(() => {
+    const normalizeIssueList = value => {
+      if (!value) return [];
+      if (Array.isArray(value)) return value.filter(Boolean);
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) return parsed.filter(Boolean);
+        } catch (_) {}
+        return value.trim() ? [value] : [];
+      }
+      return [];
+    };
+
     const extractIssues = item => {
-      const warnings = (() => {
-        if (!item.warnings) return [];
-        if (Array.isArray(item.warnings)) return item.warnings;
-        if (typeof item.warnings === 'string') {
-          try { const parsed = JSON.parse(item.warnings); if (Array.isArray(parsed)) return parsed; } catch (_) {}
-          return [item.warnings];
-        }
-        return [];
-      })();
-      const blocking = (() => {
-        if (!item.blocking_issues) return [];
-        if (Array.isArray(item.blocking_issues)) return item.blocking_issues;
-        if (typeof item.blocking_issues === 'string') {
-          try { const parsed = JSON.parse(item.blocking_issues); if (Array.isArray(parsed)) return parsed; } catch (_) {}
-          return [item.blocking_issues];
-        }
-        return [];
-      })();
+      let warnings = normalizeIssueList(item.warnings);
+      let blocking = normalizeIssueList(item.blocking_issues);
+
+      if (Array.isArray(item.children) && item.children.length) {
+        const childWarnings = [];
+        const childBlocking = [];
+        item.children.forEach(child => {
+          const readiness = (child.readiness_status || '').toLowerCase();
+          const childWarns = normalizeIssueList(child.warnings);
+          const childBlocks = normalizeIssueList(child.blocking_issues);
+          if (readiness === 'blocked') {
+            childBlocking.push(...childBlocks);
+            childWarnings.push(...childWarns);
+            return;
+          }
+          if (readiness === 'needs_review') {
+            childWarnings.push(...childWarns);
+          }
+        });
+        warnings = Array.from(new Set([...warnings, ...childWarnings]));
+        blocking = Array.from(new Set([...blocking, ...childBlocking]));
+      }
+
       return { warnings, blocking };
     };
 
     const formatDetail = (item) => {
       const { warnings, blocking } = extractIssues(item);
       const list = (item.readiness || item.readiness_status) === 'blocked' ? blocking : [...blocking, ...warnings];
-      if (!list.length) {
-        if ((item.readiness || item.readiness_status) === 'blocked') return 'Blocking issues present';
-        if ((item.readiness || item.readiness_status) === 'needs_review') return 'Warnings or soft mandatory issues';
-        return '';
-      }
+      if (!list.length) return '';
       const [first, ...rest] = list;
       return rest.length ? `${first} (+${rest.length} other issue${rest.length > 1 ? 's' : ''})` : first;
     };
 
-    const toRow = item => ({
-      id: item.id,
-      participant: item.participant_name || item.tracking_id || `Submission #${item.id}`,
-      readiness: (item.readiness_status || '').toLowerCase() || 'needs_review',
-      caseId: item.case_id,
-      caseNumber: item.case_number || item.tracking_id,
-      detail: formatDetail(item)
-    });
+    const toRow = item => {
+      const participant = item.participant_name || item.tracking_id || `Submission #${item.id}`;
+      const caseId = item.case_id || item.children?.find(child => child.case_id)?.case_id;
+      return {
+        id: item.id,
+        participant,
+        readiness: (item.readiness_status || '').toLowerCase() || 'needs_review',
+        caseId,
+        detail: formatDetail(item)
+      };
+    };
     return [
       ...counts.blockedItems.map(toRow),
       ...counts.needsReviewItems.map(toRow)
@@ -212,14 +226,6 @@ const EsdcParticipantValidationWidget = ({
           {statBox('Needs review', counts.needsReview, 'info', 'Non-blocking issues (warnings or soft mandatory gaps); review before submission.')}
           {statBox('Blocked', counts.blocked, 'error', 'Hard failures (required fields/rules missing); must fix before submission.')}
         </ColumnLayout>
-        <ColumnLayout columns={3} variant="text-grid">
-          {statBox('Pending submission', counts.pending, 'info', 'Ready state not yet submitted.')}
-          {statBox('Rejected (resubmit)', counts.rejected, 'warning', 'Previously rejected by ESDC; requires correction and resubmit.')}
-          {statBox('Awaiting validation', counts.awaitingValidation, 'pending', 'Never validated; run validation to see readiness.')}
-        </ColumnLayout>
-        <Box variant="p">
-          Total queued participants: <strong>{counts.total}</strong>. Use the queue to open a participant workspace and run validation or prepare an ILMP payload. Batch validate/file generation to be added.
-        </Box>
         {issues.length > 0 && (
           <Table
             variant="embedded"
@@ -229,9 +235,9 @@ const EsdcParticipantValidationWidget = ({
                 id: 'participant',
                 header: 'Participant',
                 cell: item => (
-                  <Link href={`/cases/${item.caseId || item.case_id || item.id}`}>
-                    {item.participant} ({item.caseNumber || `Case ${item.caseId || item.case_id || item.id}`})
-                  </Link>
+                  item.caseId
+                    ? <Link href={`/cases/${item.caseId}`}>{item.participant}</Link>
+                    : item.participant
                 )
               },
               {
@@ -247,7 +253,7 @@ const EsdcParticipantValidationWidget = ({
               {
                 id: 'detail',
                 header: 'Detail',
-                cell: item => item.detail || 'See workspace for rule details'
+                cell: item => item.detail || '—'
               }
             ]}
             items={issues}
@@ -296,7 +302,6 @@ const EsdcParticipantValidationWidget = ({
       i18nStrings={boardItemI18nStrings}
     >
       <SpaceBetween size="m">
-        {validateMessage ? <StatusIndicator type="info">{validateMessage}</StatusIndicator> : null}
         {renderBody()}
       </SpaceBetween>
     </BoardItem>

@@ -1354,7 +1354,8 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         <SpaceBetween size="s">
           <Box>
             Delete this intervention? Draft, submitted, in-review, changes requested, approved, rejected,
-            and planned interventions can be deleted. Active or closed interventions should be closed
+            and planned interventions can be deleted. Deleting will also remove any draft payment packages
+            and budget cost items tied to this intervention. Active or closed interventions should be closed
             instead to maintain history.
           </Box>
           {pendingDelete ? (

@@ -5,14 +5,10 @@ import {
   Table,
   Box,
   Badge,
-  Button,
   Link,
   CollectionPreferences,
   Pagination,
-  ButtonDropdown,
-  TextFilter,
-  Select,
-  SpaceBetween
+  ButtonDropdown
 } from '@cloudscape-design/components';
 import { boardItemI18nStrings } from './common';
 import { apiFetch } from '../../../auth/apiClient';
@@ -26,6 +22,43 @@ const readinessBadge = status => {
   return <Badge color="grey">{value || 'Needs review'}</Badge>;
 };
 
+const submissionReason = item => {
+  const status = (item.submission_status || 'pending').toLowerCase();
+  if (status === 'rejected') return 'Resubmission required';
+  const planStatus = (item.action_plan_status || '').toLowerCase();
+  const hasFinalResult = Boolean(item.action_plan_result_code && item.action_plan_result_date);
+  const isFinalPlan = ['closed', 'ready_to_close', 'ready-to-close', 'ready to close'].includes(planStatus);
+  if (isFinalPlan && hasFinalResult) return 'Action plan closed';
+  if (planStatus === 'active') return 'Action plan activated';
+  if (planStatus === 'draft') return 'Action plan created';
+  if (!item.action_plan_id && !planStatus) return 'New client';
+  return 'Pending submission';
+};
+
+const normalizeIssueList = value => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+    } catch (_) {}
+    return value.trim() ? [value] : [];
+  }
+  return [];
+};
+
+const submissionDetail = item => {
+  if (!item.last_validated_at) return '—';
+  const warnings = normalizeIssueList(item.warnings);
+  const blocking = normalizeIssueList(item.blocking_issues);
+  const readiness = (item.readiness_status || '').toLowerCase();
+  const list = readiness === 'blocked' ? blocking : [...blocking, ...warnings];
+  if (!list.length) return '—';
+  const [first, ...rest] = list;
+  return rest.length ? `${first} (+${rest.length} other issue${rest.length > 1 ? 's' : ''})` : first;
+};
+
 const preferencesKey = 'esdc-participant-queue-preferences-v1';
 
 const EsdcParticipantQueueWidget = ({
@@ -33,8 +66,6 @@ const EsdcParticipantQueueWidget = ({
   metadata = {},
   toggleHelpPanel
 }) => {
-  const [search, setSearch] = useState('');
-  const [readiness, setReadiness] = useState('all');
   const [refreshTick, setRefreshTick] = useState(0);
   const [preferences, setPreferences] = useState(() => {
     try {
@@ -50,13 +81,6 @@ const EsdcParticipantQueueWidget = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expandedItems, setExpandedItems] = useState([]);
-  const readinessOptions = [
-    { label: 'All readiness', value: 'all' },
-    { label: 'Ready', value: 'ready' },
-    { label: 'Needs review', value: 'needs_review' },
-    { label: 'Blocked', value: 'blocked' }
-  ];
-  const selectedReadinessOption = readinessOptions.find(opt => opt.value === readiness) || readinessOptions[0];
 
   const handleSettingsClick = ({ detail }) => {
     if (detail?.id === 'remove' && typeof actions.removeItem === 'function') {
@@ -97,14 +121,7 @@ const EsdcParticipantQueueWidget = ({
           limit: String(preferences.pageSize),
           offset: String((currentPageIndex - 1) * preferences.pageSize)
         });
-        const trimmedSearch = search.trim();
-        if (trimmedSearch) {
-          params.set('search', trimmedSearch);
-        }
-        if (readiness && readiness !== 'all') {
-          params.set('readiness', readiness);
-        }
-        params.set('groupByClient', 'true');
+        params.set('groupByClient', 'false');
         const resp = await apiFetch(`/api/esdc/participants?${params}`, {
           signal: controller.signal
         });
@@ -135,7 +152,7 @@ const EsdcParticipantQueueWidget = ({
       cancelled = true;
       controller.abort();
     };
-  }, [currentPageIndex, preferences.pageSize, readiness, search, refreshTick]);
+  }, [currentPageIndex, preferences.pageSize, refreshTick]);
 
   useEffect(() => {
     const handler = () => setRefreshTick(tick => tick + 1);
@@ -159,46 +176,12 @@ const EsdcParticipantQueueWidget = ({
     return <Box textAlign="center">No participants waiting for submission.</Box>;
   };
 
-  const formatDateTime = value => {
-    if (!value) return '—';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString();
-  };
-
-  const formatDateOnly = value => {
-    if (!value) return '—';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleDateString();
-  };
-
-  const openWorkspace = () => {
-    if (!items.length) return;
-    const targetId = items[0].id;
-    if (targetId) {
-      window.location.href = `/esdc/participants/${targetId}`;
-    }
-  };
-
   return (
     <BoardItem
       header={(
         <Header
           variant="h2"
           info={infoLink}
-          actions={(
-            <SpaceBetween size="xs" direction="horizontal">
-              <Select
-                selectedOption={selectedReadinessOption}
-                onChange={({ detail }) => {
-                  setReadiness(detail.selectedOption.value);
-                  setCurrentPageIndex(1);
-                }}
-                options={readinessOptions}
-              />
-            </SpaceBetween>
-          )}
         >
           Participant submission queue
         </Header>
@@ -224,17 +207,15 @@ const EsdcParticipantQueueWidget = ({
             id: 'participant',
             header: 'Participant',
             cell: item => (
-              <Link href={`/esdc/participants/${item.id}`}>
-                {item.participant_name || `Submission #${item.id}`}
-              </Link>
+              item.case_id
+                ? (
+                  <Link href={`/cases/${item.case_id}`}>
+                    {item.participant_name || `Submission #${item.id}`}
+                  </Link>
+                )
+                : (item.participant_name || `Submission #${item.id}`)
             ),
             sortingField: 'participant_name'
-          },
-          {
-            id: 'referenceId',
-            header: 'Reference ID',
-            cell: item => item.case_number || item.tracking_id || '—',
-            sortingField: 'tracking_id'
           },
           {
             id: 'readiness',
@@ -244,43 +225,13 @@ const EsdcParticipantQueueWidget = ({
           },
           {
             id: 'submissionStatus',
-            header: 'Submission status',
-            cell: item => item.submission_status || 'pending',
-            sortingField: 'submission_status'
+            header: 'Submission reason',
+            cell: item => submissionReason(item)
           },
           {
-            id: 'planStatus',
-            header: 'Plan status',
-            cell: item => item.action_plan_status || '—',
-            sortingField: 'action_plan_status'
-          },
-          {
-            id: 'planStart',
-            header: 'Plan start',
-            cell: item => formatDateOnly(item.action_plan_start_date),
-            sortingField: 'action_plan_start_date'
-          },
-          {
-            id: 'planResult',
-            header: 'Plan result',
-            cell: item => {
-              if (!item.action_plan_result_code && !item.action_plan_result_date) return '—';
-              const date = formatDateOnly(item.action_plan_result_date);
-              return `${item.action_plan_result_code || '—'}${date !== '—' ? ` (${date})` : ''}`;
-            },
-            sortingField: 'action_plan_result_date'
-          },
-          {
-            id: 'lastValidated',
-            header: 'Last validated',
-            cell: item => formatDateTime(item.last_validated_at),
-            sortingField: 'last_validated_at'
-          },
-          {
-            id: 'submittedAt',
-            header: 'Submitted',
-            cell: item => formatDateTime(item.submitted_at),
-            sortingField: 'submitted_at'
+            id: 'detail',
+            header: 'Detail',
+            cell: item => submissionDetail(item)
           }
         ]}
         items={pageItems}
@@ -306,17 +257,6 @@ const EsdcParticipantQueueWidget = ({
             });
           }
         }}
-        filter={(
-          <TextFilter
-            filteringText={search}
-            filteringPlaceholder="Search by name or reference"
-            onChange={({ detail }) => {
-              setSearch(detail.filteringText);
-              setCurrentPageIndex(1);
-            }}
-            countText={`${totalItems} matching`}
-          />
-        )}
         pagination={
           <Pagination
             currentPageIndex={currentPageIndex}

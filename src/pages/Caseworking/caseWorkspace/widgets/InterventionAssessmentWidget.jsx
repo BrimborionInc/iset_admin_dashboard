@@ -3787,7 +3787,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           </SpaceBetween>
         }
       >
-        Proposed Interventions
+        Propose new intervention
       </Header>
     } i18nStrings={boardItemI18nStrings} settings={
       <ButtonDropdown

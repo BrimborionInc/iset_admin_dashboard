@@ -33242,6 +33242,39 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
       });
     }
 
+    const [draftPacketRows] = await pool.query(
+      "SELECT id FROM payment_packet WHERE intervention_id = ? AND status = 'draft'",
+      [interventionId]
+    );
+    const draftPacketIds = draftPacketRows.map(row => row.id).filter(Boolean);
+    if (draftPacketIds.length) {
+      const packetPlaceholders = draftPacketIds.map(() => '?').join(',');
+      const [lineRows] = await pool.query(
+        `SELECT id FROM payment_packet_line WHERE payment_packet_id IN (${packetPlaceholders})`,
+        draftPacketIds
+      );
+      const lineIds = lineRows.map(row => row.id).filter(Boolean);
+      if (lineIds.length) {
+        const linePlaceholders = lineIds.map(() => '?').join(',');
+        await pool.query(
+          `DELETE FROM payment_batch_line WHERE payment_packet_line_id IN (${linePlaceholders})`,
+          lineIds
+        );
+        await pool.query(
+          `DELETE FROM payment_override WHERE payment_packet_line_id IN (${linePlaceholders})`,
+          lineIds
+        );
+      }
+      await pool.query(
+        `DELETE FROM payment_override WHERE payment_packet_id IN (${packetPlaceholders})`,
+        draftPacketIds
+      );
+      await pool.query(
+        `DELETE FROM payment_packet WHERE id IN (${packetPlaceholders})`,
+        draftPacketIds
+      );
+    }
+
     // Remove linked finance transactions first so FK cascade (if any) cannot null out the link
     await pool.query('DELETE FROM finance_transaction WHERE case_intervention_id = ?', [interventionId]);
     await pool.query('DELETE FROM iset_case_intervention WHERE id = ? LIMIT 1', [interventionId]);

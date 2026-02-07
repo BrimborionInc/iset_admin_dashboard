@@ -354,7 +354,7 @@ const EsdcBatchSubmissionWidget = ({
               type="text"
               value={downloadPath}
               onChange={e => setDownloadPath(e.target.value)}
-              placeholder="e.g. C:\\Users\\you\\Downloads"
+              placeholder={String.raw`e.g. C:\Users\you\Downloads`}
               style={{ width: '100%', padding: '8px', borderRadius: 4, border: '1px solid #ccc' }}
             />
           </SpaceBetween>
