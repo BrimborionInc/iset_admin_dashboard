@@ -2,6 +2,12 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-02-10
+- Feature: Added an ISET Coordinator "Take a tour" intro hands-on tutorial with a one-time sign-in prompt (Start tour / Not now).
+- Data: Tutorial completion/dismissal is now persisted per staff in MySQL (`staff_tutorial_progress`) instead of browser-only localStorage.
+- API: Added tutorial progress endpoints (`/api/me/tutorial-progress`) plus a localStorage-to-DB migration helper (`/api/me/tutorial-progress/bulk-complete`).
+- Ops: Admin deploy scripts now stage `sql/` so the server migration runner can apply new migrations.
+
 ## 2026-02-05
 - Docs: Added database documentation index and overview, including demo-data guidance and schema dump pointers.
 - UX: Application assessment now includes a Deny Funding shortcut on the framing step that routes to the Review step before submitting to Pending Approval and jumping to the decision step; denial letters now mark the application as rejected after sending.
@@ -358,3 +364,7 @@ Format: YYYY-MM-DD - Category: Short description
 - UX: Intacct XML draft preview no longer flags Bill date/Due date as missing while a packet remains in draft status.
 - API: Payment packet validation now enforces Intacct REST submission requirements (vendor, GL account, required dimensions) and REST payload includes bill/due dates plus Intacct line fields.
 - API: Payment packet validation now syncs packet evidence document IDs into finance transactions for reconciliation.
+
+## 2026-02-10
+- Feature: Implemented Tutorials dashboard (`/tutorials-dashboard`) under Support to run hands-on tutorials and view per-staff completion state.
+- Feature: Added self-service reset endpoint to clear tutorial completion/dismissal state (`POST /api/me/tutorial-progress/reset`), used by the Tutorials dashboard Actions widget.

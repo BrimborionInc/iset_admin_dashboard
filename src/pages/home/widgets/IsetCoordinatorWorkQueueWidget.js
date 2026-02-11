@@ -1,6 +1,16 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { Box, Button, ButtonDropdown, Cards, Header, Link, SpaceBetween } from '@cloudscape-design/components';
+import {
+  Box,
+  Button,
+  ButtonDropdown,
+  Cards,
+  CollectionPreferences,
+  Header,
+  Hotspot,
+  Link,
+  SpaceBetween
+} from '@cloudscape-design/components';
 import HomeCoordinatorWorkQueueHelp from '../../../helpPanelContents/homeCoordinatorWorkQueueHelp';
 
 export const ISET_COORDINATOR_BUCKETS = [
@@ -8,11 +18,6 @@ export const ISET_COORDINATOR_BUCKETS = [
     id: 'my-new-applications',
     label: 'My Applications',
     description: 'Applications assigned to you.'
-  },
-  {
-    id: 'missing-docs',
-    label: 'Missing Docs / Follow-ups Needed',
-    description: 'Applications waiting on documents or a response from the applicant.'
   },
   {
     id: 'ei-consent-verification',
@@ -23,6 +28,11 @@ export const ISET_COORDINATOR_BUCKETS = [
     id: 'file-complete-processing-due',
     label: 'Ready to assess',
     description: 'Assigned applications ready for assessment after EI verification is complete.'
+  },
+  {
+    id: 'missing-docs',
+    label: 'Missing Docs / Follow-ups Needed',
+    description: 'Applications waiting on documents or a response from the applicant.'
   },
   {
     id: 'approvals-pipeline',
@@ -58,16 +68,70 @@ export const ISET_COORDINATOR_BUCKETS = [
 
 const ENABLED_BUCKET_IDS = new Set([
   'my-new-applications',
-  'missing-docs',
   'ei-consent-verification',
   'file-complete-processing-due',
+  'missing-docs',
   'approvals-pipeline',
   'funding-agreements',
-  'active-clients-checkins'
+  'active-clients-checkins',
+  'payments-proof-due',
+  'followups-closure',
+  'overdue'
 ]);
 const DISABLED_BUCKET_IDS = new Set(
   ISET_COORDINATOR_BUCKETS.map(bucket => bucket.id).filter(id => !ENABLED_BUCKET_IDS.has(id))
 );
+
+const BUCKET_PREFERENCES_STORAGE_KEY = 'home-iset-coordinator-work-queue-preferences-v1';
+const DEFAULT_VISIBLE_BUCKET_IDS = ISET_COORDINATOR_BUCKETS.map(bucket => bucket.id);
+
+const loadStoredBucketPreferences = () => {
+  if (typeof window === 'undefined') {
+    return { visibleContent: DEFAULT_VISIBLE_BUCKET_IDS };
+  }
+  try {
+    const raw = window.localStorage.getItem(BUCKET_PREFERENCES_STORAGE_KEY);
+    if (!raw) return { visibleContent: DEFAULT_VISIBLE_BUCKET_IDS };
+    const parsed = JSON.parse(raw);
+
+    const candidate = Array.isArray(parsed?.visibleContent)
+      ? parsed.visibleContent
+      : Array.isArray(parsed?.visibleBucketIds)
+        ? parsed.visibleBucketIds
+        : Array.isArray(parsed)
+          ? parsed
+          : null;
+
+    if (!candidate) return { visibleContent: DEFAULT_VISIBLE_BUCKET_IDS };
+    const allowed = new Set(DEFAULT_VISIBLE_BUCKET_IDS);
+    const deduped = [];
+    const seen = new Set();
+    candidate.forEach(value => {
+      const id = typeof value === 'string' ? value : null;
+      if (!id || !allowed.has(id) || seen.has(id)) return;
+      seen.add(id);
+      deduped.push(id);
+    });
+
+    return { visibleContent: deduped.length ? deduped : DEFAULT_VISIBLE_BUCKET_IDS };
+  } catch {
+    return { visibleContent: DEFAULT_VISIBLE_BUCKET_IDS };
+  }
+};
+
+const storeBucketPreferences = (visibleContent = []) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      BUCKET_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ visibleContent: Array.isArray(visibleContent) ? visibleContent : [] })
+    );
+  } catch {
+    // ignore storage errors
+  }
+};
 
 export const ISET_COORDINATOR_SAMPLE_ITEMS = [
   {
@@ -245,6 +309,10 @@ const IsetCoordinatorWorkQueueWidget = ({
   onRefresh,
   toggleHelpPanel
 }) => {
+  const [bucketPreferences, setBucketPreferences] = useState(() => loadStoredBucketPreferences());
+  const visibleBucketIds = bucketPreferences?.visibleContent || DEFAULT_VISIBLE_BUCKET_IDS;
+  const visibleBucketIdSet = useMemo(() => new Set(visibleBucketIds), [visibleBucketIds]);
+
   const bucketCounts = useMemo(() => {
     return ISET_COORDINATOR_BUCKETS.map(bucket => {
       const override = countsByBucket[bucket.id];
@@ -258,8 +326,27 @@ const IsetCoordinatorWorkQueueWidget = ({
     });
   }, [countsByBucket, items]);
 
+  const visibleBucketCounts = useMemo(
+    () => bucketCounts.filter(bucket => visibleBucketIdSet.has(bucket.id)),
+    [bucketCounts, visibleBucketIdSet]
+  );
+
+  const firstSelectableBucketId = useMemo(() => {
+    const first = visibleBucketCounts.find(bucket => !DISABLED_BUCKET_IDS.has(bucket.id));
+    return first?.id || null;
+  }, [visibleBucketCounts]);
+
+  useEffect(() => {
+    if (typeof onSelectBucket !== 'function') return;
+    if (!firstSelectableBucketId) return;
+    if (selectedBucketId && visibleBucketIdSet.has(selectedBucketId) && !DISABLED_BUCKET_IDS.has(selectedBucketId)) {
+      return;
+    }
+    onSelectBucket(firstSelectableBucketId);
+  }, [firstSelectableBucketId, onSelectBucket, selectedBucketId, visibleBucketIdSet]);
+
   const selectedBucket =
-    bucketCounts.find(bucket => bucket.id === selectedBucketId) || bucketCounts[0] || null;
+    visibleBucketCounts.find(bucket => bucket.id === selectedBucketId) || visibleBucketCounts[0] || null;
   const infoLink = toggleHelpPanel ? (
     <Link
       variant="info"
@@ -284,18 +371,58 @@ const IsetCoordinatorWorkQueueWidget = ({
           info={infoLink}
           description="Select a work queue to view the assigned items."
           actions={
-            typeof onRefresh === 'function'
-              ? (
+            <SpaceBetween direction="horizontal" size="xs">
+              <CollectionPreferences
+                title="Work queue preferences"
+                confirmLabel="Confirm"
+                cancelLabel="Cancel"
+                preferences={bucketPreferences}
+                contentBefore={
+                  <Box variant="p" margin={{ bottom: 's' }}>
+                    Choose which queue buckets appear in this widget. Preferences are saved in this browser.
+                  </Box>
+                }
+                onConfirm={({ detail }) => {
+                  const candidate = Array.isArray(detail?.visibleContent) ? detail.visibleContent : [];
+                  const allowed = new Set(DEFAULT_VISIBLE_BUCKET_IDS);
+                  const deduped = [];
+                  const seen = new Set();
+                  candidate.forEach(value => {
+                    const id = typeof value === 'string' ? value : null;
+                    if (!id || !allowed.has(id) || seen.has(id)) return;
+                    seen.add(id);
+                    deduped.push(id);
+                  });
+                  const nextVisible = deduped.length ? deduped : DEFAULT_VISIBLE_BUCKET_IDS;
+                  const nextPreferences = { visibleContent: nextVisible };
+                  setBucketPreferences(nextPreferences);
+                  storeBucketPreferences(nextVisible);
+                }}
+                visibleContentPreference={{
+                  title: 'Select visible queue buckets',
+                  options: [
+                    {
+                      label: 'Buckets',
+                      options: ISET_COORDINATOR_BUCKETS.map(bucket => ({
+                        id: bucket.id,
+                        label: bucket.label
+                      }))
+                    }
+                  ]
+                }}
+              />
+              {typeof onRefresh === 'function' ? (
                 <Button
                   iconName="refresh"
                   variant="icon"
                   ariaLabel="Refresh work queue"
                   onClick={() => onRefresh()}
                 />
-              )
-              : undefined
+              ) : null}
+            </SpaceBetween>
           }
         >
+          <Hotspot hotspotId="home-coordinator-work-queue" direction="right" />
           Work Queue (ISET Coordinator)
         </Header>
       }
@@ -333,7 +460,7 @@ const IsetCoordinatorWorkQueueWidget = ({
             { minWidth: 920, cards: 4 },
             { minWidth: 1200, cards: 5 }
           ]}
-          items={bucketCounts}
+          items={visibleBucketCounts}
           selectionType="single"
           trackBy="id"
           selectedItems={selectedBucket ? [selectedBucket] : []}
@@ -347,9 +474,6 @@ const IsetCoordinatorWorkQueueWidget = ({
           }}
           empty={<Box variant="p">No queues available for this role.</Box>}
         />
-        <Box fontSize="body-s" color="text-status-inactive">
-          Additional queues will be enabled as their feeds are wired.
-        </Box>
       </SpaceBetween>
     </BoardItem>
   );

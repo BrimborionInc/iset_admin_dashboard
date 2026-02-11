@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useHistory } from 'react-router-dom';
-import { SideNavigation as CloudscapeSideNavigation, Badge } from '@cloudscape-design/components';
+import { SideNavigation as CloudscapeSideNavigation, Badge, Hotspot } from '@cloudscape-design/components';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '../auth/cognito';
 import { useRoleMatrix, toCanonicalRole } from '../context/RoleMatrixContext';
 import { apiFetch } from '../auth/apiClient';
 
-const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotifications, notificationsLoading = false }) => {
+const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificationCount = 0, refreshNotifications, notificationsLoading = false }) => {
   const pruneSections = (items = []) =>
     items.filter(item => {
       if (!item) return false;
@@ -38,6 +38,16 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
   useEffect(() => {
     try { sessionStorage.setItem('sideNavExpanded', JSON.stringify(Array.from(expandedSections))); } catch {}
   }, [expandedSections]);
+
+  useEffect(() => {
+    if (!showTutorialHotspots) return;
+    setExpandedSections(prev => {
+      if (prev.has('Support')) return prev;
+      const next = new Set(prev);
+      next.add('Support');
+      return next;
+    });
+  }, [showTutorialHotspots]);
 
   const iamOn = isIamOn();
   const simSignedOut = (() => { try { return sessionStorage.getItem('simulateSignedOut') === 'true'; } catch { return false; } })();
@@ -206,7 +216,14 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
       defaultExpanded: false,
       items: [
         { type: 'link', text: 'Guidance', href: '/documentation' },
-        { type: 'link', text: 'Tutorials', href: '/tutorials-dashboard' },
+        {
+          type: 'link',
+          text: 'Tutorials',
+          href: '/tutorials-dashboard',
+          info: showTutorialHotspots ? (
+            <Hotspot hotspotId="intro-tutorials-link" direction="right" />
+          ) : undefined,
+        },
         { type: 'link', text: 'Help and Support', href: '/help-support-dashboard' },
       ],
     },
@@ -336,51 +353,53 @@ const SideNavigation = ({ currentRole, notificationCount = 0, refreshNotificatio
   }, [filteredNavItems, expandedSections]);
 
   return (
-    <CloudscapeSideNavigation
-      header={{
-        href: '/',
-        text: 'Homepage',
-      }}
-      items={itemsWithExpandState}
-      onChange={(e) => {
-        const detail = e?.detail;
-        const item = detail?.item;
-        if (item?.type === 'section') {
-          const key = item.text || item.href || JSON.stringify(item);
-          setExpandedSections(prev => {
-            const next = new Set(prev);
-            if (detail?.expanded) next.add(key); else next.delete(key);
-            return next;
-          });
-        }
-      }}
-      onFollow={(e) => {
-        const detail = e?.detail;
-        const item = detail?.item;
-        if (item?.id === 'footer-notifications') {
-          e.preventDefault();
-          if (notificationsLoading) {
+    <Hotspot hotspotId="intro-side-navigation" direction="right">
+      <CloudscapeSideNavigation
+        header={{
+          href: '/',
+          text: 'Homepage',
+        }}
+        items={itemsWithExpandState}
+        onChange={(e) => {
+          const detail = e?.detail;
+          const item = detail?.item;
+          if (item?.type === 'section') {
+            const key = item.text || item.href || JSON.stringify(item);
+            setExpandedSections(prev => {
+              const next = new Set(prev);
+              if (detail?.expanded) next.add(key); else next.delete(key);
+              return next;
+            });
+          }
+        }}
+        onFollow={(e) => {
+          const detail = e?.detail;
+          const item = detail?.item;
+          if (item?.id === 'footer-notifications') {
+            e.preventDefault();
+            if (notificationsLoading) {
+              return;
+            }
+            if (typeof refreshNotifications === 'function') {
+              try {
+                const result = refreshNotifications();
+                if (result && typeof result.catch === 'function') {
+                  result.catch(err => console.error('[SideNavigation] notification refresh failed', err));
+                }
+              } catch (err) {
+                console.error('[SideNavigation] notification refresh failed', err);
+              }
+            }
             return;
           }
-          if (typeof refreshNotifications === 'function') {
-            try {
-              const result = refreshNotifications();
-              if (result && typeof result.catch === 'function') {
-                result.catch(err => console.error('[SideNavigation] notification refresh failed', err));
-              }
-            } catch (err) {
-              console.error('[SideNavigation] notification refresh failed', err);
-            }
-          }
-          return;
-        }
 
-        if (detail && detail.href && !detail.external) {
-          e.preventDefault();
-          history.push(detail.href);
-        }
-      }}
-    />
+          if (detail && detail.href && !detail.external) {
+            e.preventDefault();
+            history.push(detail.href);
+          }
+        }}
+      />
+    </Hotspot>
   );
 };
 

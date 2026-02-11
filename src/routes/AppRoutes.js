@@ -88,6 +88,8 @@ import EsdcReportingHelp from '../helpPanelContents/esdcReportingHelp.js';
 import EsdcSubmissionDashboardHelp from '../helpPanelContents/esdcSubmissionDashboardHelp.js';
 import DocumentationLibrary from '../pages/documentation/DocumentationLibrary.jsx';
 import HomeDashboardHelp from '../helpPanelContents/homeDashboardHelp.js';
+import TutorialsDashboardPage from '../pages/support/TutorialsDashboardPage.jsx';
+import TutorialsDashboardHelp from '../helpPanelContents/tutorialsDashboardHelp.js';
 
 const AppRoutes = ({
   toggleHelpPanel,
@@ -1222,6 +1224,24 @@ const AppRoutes = ({
           '',
           "Quick links to guidance resources and reference guides you use most often. Each card shows what the doc covers, who it's for, and where to open it."
         )}
+      </Route>
+
+      <Route path="/tutorials-dashboard">
+        <Guard path="/tutorials-dashboard">
+          {renderContent(
+            TutorialsDashboardPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Support', href: '/help-support-dashboard' },
+              { text: 'Tutorials', href: '/tutorials-dashboard' }
+            ],
+            'Tutorials',
+            <TutorialsDashboardHelp />,
+            null,
+            TutorialsDashboardHelp.aiContext,
+            'Reset tutorial progress so tours may prompt again when visiting supported pages.'
+          )}
+        </Guard>
       </Route>
 
       <Route path="/">

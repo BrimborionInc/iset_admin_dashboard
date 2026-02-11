@@ -18,7 +18,8 @@ import {
   SpaceBetween,
   StatusIndicator,
   Table,
-  TextFilter
+  TextFilter,
+  Hotspot
 } from '@cloudscape-design/components';
 import { PROGRAM_ADMIN_BUCKETS } from './ProgramAdminWorkQueueWidget';
 import { apiFetch } from '../../../auth/apiClient';
@@ -1094,6 +1095,7 @@ const WorkQueueItemsTableWidget = ({
     });
     const isMilestoneQueue =
       selectedBucketId === 'active-clients-checkins' ||
+      selectedBucketId === 'followups-closure' ||
       (itemTypes.length === 1 && itemTypes[0] === 'InterventionMilestone');
     if (isAssessor) {
       keys = dedupedKeys.filter(key => key !== 'owner');
@@ -1202,6 +1204,14 @@ const WorkQueueItemsTableWidget = ({
                 const color = item.milestoneStatus || 'grey';
                 return <Badge color={color}>{label}</Badge>;
               }
+            };
+          }
+          if (selectedBucketId === 'overdue' || selectedBucketId === 'payments-proof-due') {
+            return {
+              ...base,
+              header: 'Due',
+              width: widthOverride,
+              cell: item => formatDateOnly(item.dueDate) || '—'
             };
           }
           return {
@@ -1781,6 +1791,7 @@ const WorkQueueItemsTableWidget = ({
               : 'Select a work queue to view its items.'
           }
         >
+          <Hotspot hotspotId="home-work-queue-items" direction="right" />
           {selectedBucket ? `${selectedBucket.label} Items` : 'Work Queue Items'}
         </Header>
       }

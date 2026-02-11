@@ -4,7 +4,7 @@ Purpose: Quick map for Codex and developers. Use this for first-pass answers, th
 
 ## Orientation
 - Admin dashboard and public portal share the `iset_intake` MySQL schema.
-- Migrations and schema changes live in `db/migrations/` (admin dashboard). Ad-hoc DDL lives in `sql/`.
+- Admin dashboard schema changes are applied via the admin server migration runner reading `sql/` (tracked by `iset_migration`; see `docs/ops/migration-runner.md`). `db/migrations/` exists but is not applied by the admin server runner.
 - Dev DB runs on the Windows host. From WSL, use the Windows MySQL client as described in `docs/AGENTS.md`.
 
 ## Logical relationships (from current docs)
@@ -32,6 +32,7 @@ Notes:
 - Clients and orgs: `client`, `organization`, `ptma`, `staff_profiles`, `staff_region`, `user`.
 - Documents and uploads: `iset_document`, `iset_document_intervention`, `iset_application_file`, `pending_uploads`, `document_type`, `payment_packet_document`, `message_attachment`.
 - Messaging: `messages`, `message_attachment`, `message_signing_request`, `signing_request`, `staff_message`, `staff_message_item`, `staff_message_thread`, `staff_message_thread_participant`.
+- Hands-on tutorials: `staff_tutorial_progress`.
 - Finance and payments: `payment_packet`, `payment_packet_line`, `payment_batch`, `payment_batch_line`, `payment_line_transaction`, `payment_status_event`, `payee_profile`, `finance_transaction`, `finance_saved_view`, `budget_*`, `funding_stream`, `payment_override`, `payment_packet_communication`.
 - Workflow authoring: `workflow`, `workflow_step`, `workflow_route`, `workflow_route_option`, `step`, `step_component`, `component`, `component_template`, `component_template_backup`, `blockstep`.
 - Runtime/config/audit: `iset_runtime_config`, `system_config`, `system_config_audit`, `__migrations`, `schema_migrations`, `iset_migration`.

@@ -261,7 +261,7 @@ try {
     Copy-Item -Path (Join-Path $repoRoot "tmp_financial_overview_template.html") -Destination (Join-Path $stagingPath "tmp_financial_overview_template.html") -Force
     Copy-Item -Path (Join-Path $repoRoot "tmp_cfa_template.html") -Destination (Join-Path $stagingPath "tmp_cfa_template.html") -Force
 
-    $directoriesToStage = @("src", "shared", "templates", "blocksteps", "public")
+    $directoriesToStage = @("src", "shared", "templates", "blocksteps", "public", "sql")
     $stagedDirectories = @()
     foreach ($dir in $directoriesToStage) {
         $sourceDir = Join-Path $repoRoot $dir

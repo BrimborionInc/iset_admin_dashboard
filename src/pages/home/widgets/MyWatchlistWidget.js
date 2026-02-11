@@ -5,6 +5,7 @@ import {
   Button,
   ButtonDropdown,
   Header,
+  Hotspot,
   Link,
   Pagination,
   SpaceBetween,
@@ -334,6 +335,7 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
         </SpaceBetween>
       }
     >
+      <Hotspot hotspotId="home-my-tagged-applications" direction="right" />
       My Tagged Applications
     </Header>
   );

@@ -21733,6 +21733,188 @@ app.get('/api/dashboard/intervention-milestone-items', async (req, res) => {
   }
 });
 
+// Payment packets/lines where evidence or payment proof is outstanding (for ISET Coordinators)
+app.get('/api/dashboard/payment-proof-due-items', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role !== 'Application Assessor') {
+    return res.json({ role, items: [] });
+  }
+  const context = await resolveApplicationAssessorContext(req);
+  const staffId = context?.staffProfileId || null;
+  if (!context?.valid || !staffId) {
+    return res.json({ role, items: [] });
+  }
+
+  const normaliseStatusKey = (value) =>
+    String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+
+  const excludedPacketStatuses = new Set(['cancelled', 'canceled', 'closed']);
+  const sql = `
+    SELECT
+      pp.id AS payment_packet_id,
+      pp.status AS payment_packet_status,
+      pp.updated_at AS payment_packet_updated_at,
+      pp.case_id,
+      c.case_number,
+      c.assigned_to_user_id,
+      a.id AS application_id,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."address-province"')) AS submission_address_province,
+      ppl.id AS payment_packet_line_id,
+      ppl.status AS payment_line_status,
+      ppl.payment_type,
+      ppl.payee_type,
+      ppl.amount,
+      ppl.paid_at,
+      ppl.payment_reference,
+      ppl.payment_proof_document_id,
+      ppl.intervention_id,
+      ci.intervention_code,
+      ic.label AS intervention_label,
+      JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title
+    FROM payment_packet pp
+    JOIN iset_case c ON c.id = pp.case_id
+    JOIN payment_packet_line ppl ON ppl.payment_packet_id = pp.id AND ppl.status <> 'cancelled'
+    LEFT JOIN iset_case_intervention ci ON ci.id = ppl.intervention_id
+    LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
+    LEFT JOIN iset_application a ON a.id = c.application_id
+    LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+    WHERE c.assigned_to_user_id = ?
+    ORDER BY COALESCE(pp.updated_at, pp.created_at) DESC, pp.id DESC, ppl.id ASC
+    LIMIT 300
+  `;
+
+  try {
+    const [rows] = await pool.query(sql, [staffId]);
+    const packetRows = Array.isArray(rows) ? rows : [];
+    const packetMap = new Map();
+    packetRows.forEach(row => {
+      const packetId = row?.payment_packet_id ? Number(row.payment_packet_id) : null;
+      if (!Number.isFinite(packetId) || packetId <= 0) return;
+      const statusKey = normaliseStatusKey(row.payment_packet_status);
+      if (statusKey && excludedPacketStatuses.has(statusKey)) return;
+      let entry = packetMap.get(packetId);
+      if (!entry) {
+        const preferred = normaliseString(row.submission_preferred_name);
+        const first = normaliseString(row.submission_first_name);
+        const last = normaliseString(row.submission_last_name);
+        const full = [first, last].filter(Boolean).join(' ').trim();
+        const applicantName = full || preferred || normaliseString(row.tracking_id) || 'Applicant';
+        entry = {
+          packetId,
+          packetStatus: row.payment_packet_status || null,
+          caseId: row.case_id || null,
+          applicationId: row.application_id || null,
+          trackingId: row.tracking_id || null,
+          applicantName,
+          address_province: normaliseString(row.submission_address_province) || null,
+          updatedAt: row.payment_packet_updated_at ? new Date(row.payment_packet_updated_at).toISOString() : null,
+          lines: []
+        };
+        packetMap.set(packetId, entry);
+      }
+      entry.lines.push({
+        lineId: row.payment_packet_line_id || null,
+        status: row.payment_line_status || null,
+        paymentType: row.payment_type || null,
+        payeeType: row.payee_type || null,
+        amount: row.amount ?? null,
+        paidAt: row.paid_at ? new Date(row.paid_at).toISOString() : null,
+        paymentReference: row.payment_reference || null,
+        paymentProofDocumentId: row.payment_proof_document_id || null,
+        interventionId: row.intervention_id || null,
+        intervention_code: row.intervention_code || null,
+        intervention_label: normaliseString(row.intervention_label) || normaliseString(row.intervention_title) || null
+      });
+    });
+
+    const packetIds = Array.from(packetMap.keys()).slice(0, 120);
+    const missingByPacket = new Map();
+    for (const packetId of packetIds) {
+      try {
+        // Uses the same evidence rules as the finance gates. We treat missing evidence as "proof due".
+        const missing = await fetchMissingRequiredEvidence({ packetId, connection: pool });
+        missingByPacket.set(packetId, Array.isArray(missing) ? missing : []);
+      } catch (_) {
+        missingByPacket.set(packetId, []);
+      }
+    }
+
+    const items = [];
+    for (const packetId of packetIds) {
+      const packet = packetMap.get(packetId);
+      if (!packet) continue;
+      const missing = missingByPacket.get(packetId) || [];
+
+      const baselineMissing = missing
+        .filter(m => !m?.lineId && m?.evidenceType)
+        .map(m => String(m.evidenceType))
+        .filter(Boolean);
+      if (baselineMissing.length) {
+        items.push({
+          packetId: String(packetId),
+          packetStatus: packet.packetStatus || null,
+          caseId: packet.caseId || null,
+          applicationId: packet.applicationId || null,
+          trackingId: packet.trackingId || null,
+          applicantName: packet.applicantName,
+          applicant_name: packet.applicantName,
+          address_province: packet.address_province,
+          updatedAt: packet.updatedAt || null,
+          lineId: null,
+          kind: 'baseline_evidence_missing',
+          missingEvidence: baselineMissing
+        });
+      }
+
+      const missingByLine = new Map();
+      missing
+        .filter(m => m?.lineId && m?.evidenceType)
+        .forEach(m => {
+          const key = String(m.lineId);
+          const list = missingByLine.get(key) || [];
+          list.push(String(m.evidenceType));
+          missingByLine.set(key, list);
+        });
+
+      (packet.lines || []).forEach(line => {
+        const lineId = line?.lineId ? String(line.lineId) : null;
+        const evidenceMissing = lineId ? (missingByLine.get(lineId) || []) : [];
+        const proofMissing = normaliseStatusKey(line?.status) === 'paid' && !line?.paymentProofDocumentId;
+        if (!evidenceMissing.length && !proofMissing) return;
+        items.push({
+          packetId: String(packetId),
+          packetStatus: packet.packetStatus || null,
+          caseId: packet.caseId || null,
+          applicationId: packet.applicationId || null,
+          trackingId: packet.trackingId || null,
+          applicantName: packet.applicantName,
+          applicant_name: packet.applicantName,
+          address_province: packet.address_province,
+          updatedAt: packet.updatedAt || null,
+          lineId: lineId,
+          paymentType: line?.paymentType || null,
+          lineStatus: line?.status || null,
+          intervention_label: line?.intervention_label || null,
+          kind: proofMissing ? 'payment_proof_missing' : 'evidence_missing',
+          missingEvidence: evidenceMissing,
+        });
+      });
+    }
+
+    return res.json({ role, items });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      return res.json({ role, items: [] });
+    }
+    console.error('[payment-proof-due-items] fetch failed:', err.message);
+    return res.status(500).json({ error: 'payment_proof_due_items_fetch_failed', message: err.message });
+  }
+});
+
 // Homepage metrics (activity snapshot)
 app.get('/api/dashboard/metrics', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
@@ -29430,10 +29612,10 @@ app.get('/api/cases', async (req, res) => {
       LEFT JOIN client cl ON c.client_id = cl.id
       LEFT JOIN iset_application a ON c.application_id = a.id
       LEFT JOIN staff_profiles sp ON c.assigned_to_user_id = sp.id
-      LEFT JOIN (
-        SELECT
-          case_id,
-          SUM(
+	      LEFT JOIN (
+	        SELECT
+	          case_id,
+	          SUM(
             CASE
               WHEN LOWER(COALESCE(status, '')) IN ('open', 'in_progress', 'in-progress', 'inprogress')
               THEN 1
@@ -29448,10 +29630,20 @@ app.get('/api/cases', async (req, res) => {
               THEN 1
               ELSE 0
             END
-          ) AS overdue_task_count
-        FROM iset_case_task
-        GROUP BY case_id
-      ) task_counts ON task_counts.case_id = c.id
+	          ) AS overdue_task_count
+	          ,
+	          MIN(
+	            CASE
+	              WHEN LOWER(COALESCE(status, '')) IN ('open', 'in_progress', 'in-progress', 'inprogress')
+	                AND due_at IS NOT NULL
+	                AND due_at < NOW()
+	              THEN due_at
+	              ELSE NULL
+	            END
+	          ) AS next_overdue_task_due_at
+	        FROM iset_case_task
+	        GROUP BY case_id
+	      ) task_counts ON task_counts.case_id = c.id
       LEFT JOIN (
         SELECT
           case_id,
@@ -29501,14 +29693,15 @@ app.get('/api/cases', async (req, res) => {
         a.status AS application_status,
         a.status AS application_status,
         c.case_number,
-        c.priority,
-        c.risk_rating,
-        reminder_next.next_reminder_due_at AS next_action_due_at,
-        COALESCE(task_counts.open_task_count, 0) AS open_task_count,
-        COALESCE(task_counts.overdue_task_count, 0) AS overdue_task_count,
-        COALESCE(intervention_counts.open_intervention_count, 0) AS open_intervention_count,
-        COALESCE(intervention_counts.total_intervention_count, 0) AS total_intervention_count,
-        c.application_id,
+	        c.priority,
+	        c.risk_rating,
+	        reminder_next.next_reminder_due_at AS next_action_due_at,
+	        COALESCE(task_counts.open_task_count, 0) AS open_task_count,
+	        COALESCE(task_counts.overdue_task_count, 0) AS overdue_task_count,
+	        task_counts.next_overdue_task_due_at AS next_overdue_task_due_at,
+	        COALESCE(intervention_counts.open_intervention_count, 0) AS open_intervention_count,
+	        COALESCE(intervention_counts.total_intervention_count, 0) AS total_intervention_count,
+	        c.application_id,
         c.client_id,
         c.assigned_to_user_id,
         c.created_at,
@@ -29637,14 +29830,15 @@ app.get('/api/cases', async (req, res) => {
         statusRaw: row.status || null,
         priority: row.priority || null,
         riskRating: row.risk_rating || null,
-        openedAt: toIsoString(row.created_at),
-        closedAt: null,
-        lastActivityAt: toIsoString(row.updated_at),
-        nextActionDueAt: toIsoString(row.next_action_due_at),
-        applicationId: row.application_id || null,
-        trackingId:
-          row.tracking_id ||
-          payloadSubmission.reference_number ||
+	        openedAt: toIsoString(row.created_at),
+	        closedAt: null,
+	        lastActivityAt: toIsoString(row.updated_at),
+	        nextActionDueAt: toIsoString(row.next_action_due_at),
+	        nextOverdueTaskDueAt: toIsoString(row.next_overdue_task_due_at),
+	        applicationId: row.application_id || null,
+	        trackingId:
+	          row.tracking_id ||
+	          payloadSubmission.reference_number ||
           (row.id ? `CASE-${row.id}` : null),
         submittedAt: toIsoString(row.submitted_at),
         owner,
@@ -37241,6 +37435,209 @@ app.post('/api/cases/:id/messages', async (req, res) => {
   } catch (e) {
     console.error('POST /api/cases/:id/messages failed:', e.message);
     res.status(500).json({ error: 'failed_to_send_message' });
+  }
+});
+
+// --- Hands-on tutorials (Cloudscape AnnotationContext) progress -------------------
+// Stores per-staff completion/dismissal in the DB so tutorial state follows users across devices.
+let __tutorialProgressTableReady = false;
+async function ensureStaffTutorialProgressTable(connection = pool) {
+  if (__tutorialProgressTableReady) return;
+  await connection.query(`CREATE TABLE IF NOT EXISTS staff_tutorial_progress (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    staff_profile_id INT NOT NULL,
+    tutorial_id VARCHAR(128) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    completed_at DATETIME NULL,
+    dismissed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_staff_tutorial (staff_profile_id, tutorial_id),
+    INDEX idx_staff_profile (staff_profile_id),
+    INDEX idx_tutorial (tutorial_id),
+    INDEX idx_status (status)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`);
+  __tutorialProgressTableReady = true;
+}
+
+function normaliseTutorialStatus(raw) {
+  const value = String(raw || '').trim().toLowerCase();
+  if (value === 'completed') return 'completed';
+  if (value === 'dismissed') return 'dismissed';
+  return null;
+}
+
+function normaliseTutorialId(raw) {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value) return null;
+  if (value.length > 128) return null;
+  return value;
+}
+
+app.get('/api/me/tutorial-progress', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+
+    await ensureStaffTutorialProgressTable();
+
+    const [rows] = await pool.query(
+      `SELECT tutorial_id, status, completed_at, dismissed_at
+         FROM staff_tutorial_progress
+        WHERE staff_profile_id = ?
+        ORDER BY tutorial_id ASC`,
+      [staffProfileId]
+    );
+
+    const items = (rows || [])
+      .map((row) => {
+        const tutorialId = normaliseTutorialId(row.tutorial_id);
+        const status = normaliseTutorialStatus(row.status);
+        if (!tutorialId || !status) return null;
+        return {
+          tutorialId,
+          status,
+          completedAt: row.completed_at || null,
+          dismissedAt: row.dismissed_at || null,
+        };
+      })
+      .filter(Boolean);
+
+    return res.status(200).json({ items });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(200).json({ items: [] });
+    }
+    console.error('[tutorial-progress] GET failed', err);
+    return res.status(500).json({ error: 'failed_to_load_tutorial_progress' });
+  }
+});
+
+app.post('/api/me/tutorial-progress', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+
+    const tutorialId = normaliseTutorialId(req.body?.tutorialId ?? req.body?.tutorial_id ?? req.body?.id);
+    if (!tutorialId) {
+      return res.status(400).json({ error: 'tutorial_id_required' });
+    }
+
+    const status = normaliseTutorialStatus(req.body?.status);
+    if (!status) {
+      return res.status(400).json({ error: 'invalid_status', allowed: ['completed', 'dismissed'] });
+    }
+
+    await ensureStaffTutorialProgressTable();
+
+    const [[existing]] = await pool.query(
+      'SELECT status FROM staff_tutorial_progress WHERE staff_profile_id = ? AND tutorial_id = ? LIMIT 1',
+      [staffProfileId, tutorialId]
+    );
+    if (existing?.status === 'completed' && status === 'dismissed') {
+      return res.status(200).json({ ok: true, ignored: true, status: 'completed' });
+    }
+
+    const completedAtExpr = status === 'completed' ? 'NOW()' : 'NULL';
+    const dismissedAtExpr = status === 'dismissed' ? 'NOW()' : 'NULL';
+    await pool.query(
+      `INSERT INTO staff_tutorial_progress (staff_profile_id, tutorial_id, status, completed_at, dismissed_at)
+       VALUES (?, ?, ?, ${completedAtExpr}, ${dismissedAtExpr})
+       ON DUPLICATE KEY UPDATE
+         status = VALUES(status),
+         completed_at = VALUES(completed_at),
+         dismissed_at = VALUES(dismissed_at),
+         updated_at = CURRENT_TIMESTAMP`,
+      [staffProfileId, tutorialId, status]
+    );
+
+    return res.status(200).json({ ok: true, tutorialId, status });
+  } catch (err) {
+    console.error('[tutorial-progress] POST failed', err);
+    return res.status(500).json({ error: 'failed_to_save_tutorial_progress' });
+  }
+});
+
+app.post('/api/me/tutorial-progress/bulk-complete', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+
+    const rawIds = req.body?.tutorialIds ?? req.body?.tutorial_ids ?? req.body?.tutorials ?? [];
+    const list = Array.isArray(rawIds) ? rawIds : [];
+    const tutorialIds = Array.from(new Set(list.map(normaliseTutorialId).filter(Boolean))).slice(0, 500);
+    if (!tutorialIds.length) {
+      return res.status(400).json({ error: 'tutorial_ids_required' });
+    }
+
+    await ensureStaffTutorialProgressTable();
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      for (const tutorialId of tutorialIds) {
+        await connection.query(
+          `INSERT INTO staff_tutorial_progress (staff_profile_id, tutorial_id, status, completed_at, dismissed_at)
+           VALUES (?, ?, 'completed', NOW(), NULL)
+           ON DUPLICATE KEY UPDATE
+             status = 'completed',
+             completed_at = COALESCE(completed_at, NOW()),
+             dismissed_at = NULL,
+             updated_at = CURRENT_TIMESTAMP`,
+          [staffProfileId, tutorialId]
+        );
+      }
+      await connection.commit();
+    } catch (err) {
+      try { await connection.rollback(); } catch (_) {}
+      throw err;
+    } finally {
+      connection.release();
+    }
+
+    return res.status(200).json({ ok: true, count: tutorialIds.length });
+  } catch (err) {
+    console.error('[tutorial-progress] bulk complete failed', err);
+    return res.status(500).json({ error: 'failed_to_bulk_complete_tutorials' });
+  }
+});
+
+app.post('/api/me/tutorial-progress/reset', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+
+    const tutorialId = normaliseTutorialId(req.body?.tutorialId ?? req.body?.tutorial_id ?? null);
+
+    await ensureStaffTutorialProgressTable();
+
+    if (tutorialId) {
+      const [result] = await pool.query(
+        'DELETE FROM staff_tutorial_progress WHERE staff_profile_id = ? AND tutorial_id = ?',
+        [staffProfileId, tutorialId]
+      );
+      return res.status(200).json({ ok: true, mode: 'single', tutorialId, affected: result?.affectedRows ?? 0 });
+    }
+
+    const [result] = await pool.query(
+      'DELETE FROM staff_tutorial_progress WHERE staff_profile_id = ?',
+      [staffProfileId]
+    );
+    return res.status(200).json({ ok: true, mode: 'all', affected: result?.affectedRows ?? 0 });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(200).json({ ok: true, mode: 'all', affected: 0 });
+    }
+    console.error('[tutorial-progress] reset failed', err);
+    return res.status(500).json({ error: 'failed_to_reset_tutorial_progress' });
   }
 });
 

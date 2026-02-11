@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Button, SpaceBetween } from '@cloudscape-design/components';
+import { Box, Button, Hotspot, SpaceBetween } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../../auth/cognito';
 import { apiFetch } from '../../auth/apiClient';
@@ -1337,6 +1337,347 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
     }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole, coordinatorMilestoneWindowParam]);
 
     useEffect(() => {
+        if (!isIsetCoordinatorRole) {
+            return;
+        }
+        let ignore = false;
+        const loadClosureFollowups = async () => {
+            try {
+                const windowDays = 180;
+                const response = await apiFetch(`/api/dashboard/intervention-milestone-items?windowDays=${windowDays}`, {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                const now = new Date();
+                const rows = Array.isArray(payload.items) ? payload.items : [];
+                const mapped = rows.map((row, idx) => {
+                    const endRaw = row.intervention_end_date || row.interventionEndDate || null;
+                    if (!endRaw) return null;
+                    const endDate = new Date(endRaw);
+                    if (Number.isNaN(endDate.getTime())) return null;
+                    if (endDate.getTime() > now.getTime()) return null; // not ended yet
+
+                    const diffDays = Math.floor((now.getTime() - endDate.getTime()) / (1000 * 60 * 60 * 24));
+                    if (!Number.isFinite(diffDays) || diffDays < 0 || diffDays > 180) return null;
+
+                    const statusKey = String(row.intervention_status || row.status || '').trim().toLowerCase();
+                    if (['closed', 'complete', 'completed', 'cancelled', 'canceled', 'withdrawn', 'archived'].includes(statusKey)) {
+                        return null;
+                    }
+
+                    const applicantName =
+                        row.applicant_name ||
+                        row.applicantName ||
+                        row.applicant ||
+                        [row.submission_first_name, row.submission_last_name].filter(Boolean).join(' ') ||
+                        row.trackingId ||
+                        row.tracking_id ||
+                        'Applicant';
+
+                    const interventionId = row.interventionId || row.intervention_id || null;
+                    const caseId = row.caseId || row.case_id || null;
+                    const milestoneLabel = `Ended ${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+                    const milestoneStatus =
+                        diffDays >= 30 ? 'severity-critical' :
+                        diffDays >= 14 ? 'severity-high' :
+                        'severity-medium';
+
+                    return {
+                        id: interventionId ? `closure-${interventionId}` : `closure-${idx}`,
+                        title: applicantName,
+                        trackingId: row.trackingId || row.tracking_id || null,
+                        application_id: row.applicationId || row.application_id || null,
+                        case_id: caseId,
+                        intervention_id: interventionId,
+                        bucketId: 'followups-closure',
+                        type: 'InterventionMilestone',
+                        applicant: applicantName,
+                        applicant_name: applicantName,
+                        region: row.region || row.address_province || '—',
+                        address_province: row.address_province || row.region || null,
+                        owner: row.assigned_user_email || 'You',
+                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        status: row.intervention_status || row.status || 'Active',
+                        dueDate: endDate.toISOString().slice(0, 10),
+                        milestoneLabel,
+                        milestoneStatus,
+                        milestoneDate: endDate.toISOString(),
+                        milestoneDiffDays: diffDays,
+                        submittedAt: row.submittedAt || row.submitted_at || null,
+                        updatedAt: row.updatedAt || row.updated_at || null,
+                        summary: milestoneLabel,
+                        intervention_code: row.intervention_code || null,
+                        intervention_label: row.intervention_label || null,
+                        intervention_start_date: row.intervention_start_date || null,
+                        intervention_end_date: row.intervention_end_date || null,
+                        workspacePath: caseId ? `/cases/${caseId}` : '/iset/cases'
+                    };
+                }).filter(Boolean);
+
+                setProgramAdminItems(current => {
+                    const nonClosure = current.filter(item => item.bucketId !== 'followups-closure');
+                    return [...mapped, ...nonClosure];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'followups-closure': mapped.length
+                }));
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadClosureFollowups();
+        return () => { ignore = true; };
+    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole]);
+
+    useEffect(() => {
+        if (!isIsetCoordinatorRole) {
+            return;
+        }
+        let ignore = false;
+        const loadPaymentsProofDue = async () => {
+            try {
+                const response = await apiFetch('/api/dashboard/payment-proof-due-items', {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                const rows = Array.isArray(payload.items) ? payload.items : [];
+                const mapped = rows.map((row, idx) => {
+                    const caseId = row.caseId || row.case_id || null;
+                    const applicantName =
+                        row.applicantName ||
+                        row.applicant_name ||
+                        row.applicant ||
+                        row.trackingId ||
+                        row.tracking_id ||
+                        'Applicant';
+                    const packetId = row.packetId || row.payment_packet_id || null;
+                    const lineId = row.lineId || row.payment_packet_line_id || null;
+                    const interventionLabel = row.intervention_label || null;
+                    const missingEvidence = Array.isArray(row.missingEvidence) ? row.missingEvidence.filter(Boolean) : [];
+                    const proofKind = row.kind === 'payment_proof_missing' ? 'Proof missing' : 'Evidence missing';
+                    const evidenceSuffix = missingEvidence.length ? `: ${missingEvidence.join(', ')}` : '';
+                    const titlePrefix = packetId ? `PAY-${packetId}` : `PAY-${idx + 1}`;
+                    const lineSuffix = lineId ? ` · Line ${lineId}` : '';
+                    const title = `${titlePrefix}${lineSuffix} · ${applicantName}`;
+
+                    return {
+                        id: packetId && lineId ? `pay-${packetId}-${lineId}` : packetId ? `pay-${packetId}` : `pay-${idx}`,
+                        title,
+                        trackingId: row.trackingId || row.tracking_id || null,
+                        application_id: row.applicationId || row.application_id || null,
+                        case_id: caseId,
+                        bucketId: 'payments-proof-due',
+                        type: 'Payment',
+                        applicant: applicantName,
+                        applicant_name: applicantName,
+                        region: row.address_province || '—',
+                        address_province: row.address_province || null,
+                        owner: 'You',
+                        status: row.lineStatus || row.line_status || row.packetStatus || row.packet_status || 'Action required',
+                        dueDate: null,
+                        submittedAt: row.updatedAt || row.updated_at || null,
+                        updatedAt: row.updatedAt || row.updated_at || null,
+                        summary: `${proofKind}${interventionLabel ? ` • ${interventionLabel}` : ''}${evidenceSuffix}`,
+                        workspacePath: caseId ? `/cases/${caseId}` : '/iset/cases'
+                    };
+                });
+                setProgramAdminItems(current => {
+                    const nonPay = current.filter(item => item.bucketId !== 'payments-proof-due');
+                    return [...mapped, ...nonPay];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'payments-proof-due': mapped.length
+                }));
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadPaymentsProofDue();
+        return () => { ignore = true; };
+    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole]);
+
+    useEffect(() => {
+        if (!isIsetCoordinatorRole) {
+            return;
+        }
+        let ignore = false;
+        const loadOverdueCombined = async () => {
+            try {
+                const now = new Date();
+                const toDate = (value) => {
+                    if (!value) return null;
+                    const d = new Date(value);
+                    return Number.isNaN(d.getTime()) ? null : d;
+                };
+
+                let slaTargets = { ...SLA_DEFAULT_DAYS };
+                try {
+                    const slaRes = await apiFetch('/api/config/sla-targets', { headers: buildDevHeaders(role) });
+                    if (slaRes.ok) {
+                        const data = await slaRes.json();
+                        const targets = Array.isArray(data?.targets) ? data.targets : [];
+                        targets.forEach(item => {
+                            const key = item.stage_key || item.stage;
+                            const hours = item.target_hours ?? item.targetHours;
+                            if (key && hours !== undefined && hours !== null) {
+                                const days = Number(hours) / 24;
+                                if (!Number.isNaN(days) && days > 0) {
+                                    slaTargets[key] = Math.round(days);
+                                }
+                            }
+                        });
+                    }
+                } catch (_) {}
+
+                const caseRes = await apiFetch('/api/cases?page=1&pageSize=200&sort=updatedAt&direction=desc', {
+                    headers: buildDevHeaders(role)
+                });
+                let casePayload = null;
+                try { casePayload = await caseRes.json(); } catch { casePayload = null; }
+                const caseRows = Array.isArray(casePayload?.items) ? casePayload.items : [];
+                const overdueCases = caseRows.filter(row => {
+                    const overdueTasks = Number(row?.overdueTasks ?? 0);
+                    if (Number.isFinite(overdueTasks) && overdueTasks > 0) return true;
+                    const due = toDate(row?.nextActionDueAt);
+                    return Boolean(due && due.getTime() < now.getTime());
+                });
+                const overdueCaseIdSet = new Set(
+                    overdueCases
+                        .map(row => Number(row?.id))
+                        .filter(id => Number.isFinite(id) && id > 0)
+                );
+                const mappedCaseItems = overdueCases.map((row, idx) => {
+                    const caseId = Number(row?.id);
+                    const clientName = [
+                        row?.client?.firstName,
+                        row?.client?.lastName
+                    ].filter(Boolean).join(' ').trim() || row?.trackingId || (Number.isFinite(caseId) ? `Case ${caseId}` : `Case ${idx + 1}`);
+
+                    const overdueTasks = Number(row?.overdueTasks ?? 0);
+                    const reminderDue = toDate(row?.nextActionDueAt);
+                    const taskDue = toDate(row?.nextOverdueTaskDueAt);
+                    const dueCandidates = [reminderDue, taskDue].filter(Boolean);
+                    const dueDate = dueCandidates.length
+                        ? new Date(Math.min(...dueCandidates.map(d => d.getTime()))).toISOString()
+                        : null;
+
+                    const reasons = [];
+                    if (Number.isFinite(overdueTasks) && overdueTasks > 0) {
+                        reasons.push(`${overdueTasks} task${overdueTasks === 1 ? '' : 's'} overdue`);
+                    }
+                    if (reminderDue && reminderDue.getTime() < now.getTime()) {
+                        reasons.push('reminder overdue');
+                    }
+
+                    return {
+                        id: Number.isFinite(caseId) ? `case-${caseId}` : `case-${idx}`,
+                        title: clientName,
+                        trackingId: row?.trackingId || (Number.isFinite(caseId) ? `CASE-${caseId}` : null),
+                        case_id: Number.isFinite(caseId) ? caseId : null,
+                        application_id: row?.applicationId || null,
+                        bucketId: 'overdue',
+                        type: 'Case',
+                        applicant: clientName,
+                        applicant_name: clientName,
+                        region: '—',
+                        address_province: null,
+                        owner: row?.owner?.email || row?.owner?.name || 'You',
+                        assigned_user_id: row?.owner?.id || null,
+                        status: row?.status || 'open',
+                        dueDate,
+                        submittedAt: row?.submittedAt || row?.openedAt || null,
+                        updatedAt: row?.lastActivityAt || null,
+                        summary: reasons.length ? reasons.join(' • ') : 'Overdue',
+                        workspacePath: Number.isFinite(caseId) ? `/cases/${caseId}` : '/iset/cases'
+                    };
+                });
+
+                const appRes = await apiFetch('/api/applications?limit=300&offset=0', {
+                    headers: buildDevHeaders(role)
+                });
+                if (!appRes.ok) throw new Error(`Request failed: ${appRes.status}`);
+                const appPayload = await appRes.json();
+                if (ignore) return;
+                const rows = Array.isArray(appPayload?.rows) ? appPayload.rows : [];
+                const mappedApplications = rows
+                    .map((row, idx) => {
+                        const status = row.application_status || row.status || 'submitted';
+                        const meta = computeSlaMeta(row, slaTargets, status, Boolean(row.assigned_user_id));
+                        const isOverdue = meta.status === 'critical-overdue' || meta.status === 'high-overdue';
+                        if (!isOverdue) return null;
+
+                        const caseIdRaw = row.case_id || row.caseId || null;
+                        const caseId = Number(caseIdRaw);
+                        if (Number.isFinite(caseId) && overdueCaseIdSet.has(caseId)) {
+                            return null;
+                        }
+
+                        const id = row.tracking_id || row.case_id || row.application_id || `overdue-${idx}`;
+                        const applicantName =
+                            row.applicant_name ||
+                            row.applicantName ||
+                            row.client?.displayName ||
+                            row.client?.name ||
+                            [row.client?.firstName, row.client?.lastName].filter(Boolean).join(' ') ||
+                            row.client?.firstName ||
+                            row.client?.lastName ||
+                            [row.client?.first_name, row.client?.last_name].filter(Boolean).join(' ') ||
+                            row.client?.first_name ||
+                            row.client?.last_name ||
+                            row.tracking_id ||
+                            'Applicant';
+                        return {
+                            id,
+                            title: applicantName,
+                            trackingId: row.tracking_id || null,
+                            case_id: row.case_id || null,
+                            application_id: row.application_id || null,
+                            bucketId: 'overdue',
+                            type: 'Application',
+                            applicant: applicantName,
+                            applicant_name: applicantName,
+                            region: row.address_province || '—',
+                            address_province: row.address_province || null,
+                            owner: row.assigned_user_email || 'You',
+                            assigned_user_id: row.assigned_user_id || null,
+                            status: row.application_status || row.status || 'Submitted',
+                            dueDate: meta.due ? meta.due.toISOString() : null,
+                            submittedAt: row.submitted_at || row.created_at || null,
+                            updatedAt: row.application_updated_at || row.last_activity_at || row.submitted_at || row.created_at || null,
+                            summary: meta.status ? `Application SLA ${meta.status}` : 'Overdue',
+                            workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                        };
+                    })
+                    .filter(Boolean);
+
+                const mapped = [...mappedCaseItems, ...mappedApplications];
+                setProgramAdminItems(current => {
+                    const nonOverdue = current.filter(item => item.bucketId !== 'overdue');
+                    return [...mapped, ...nonOverdue];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    overdue: mapped.length
+                }));
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadOverdueCombined();
+        return () => { ignore = true; };
+    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole]);
+
+    useEffect(() => {
         if (!isWorkQueueRole) {
             return;
         }
@@ -2109,6 +2450,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
 
     return (
         <SpaceBetween size="l">
+            <Hotspot hotspotId="home-overview" direction="bottom" />
             <Board
                 renderItem={renderBoardItem}
                 items={boardItems}

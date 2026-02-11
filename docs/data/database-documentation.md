@@ -6,13 +6,15 @@ Purpose: Single entrypoint for database documentation across the admin dashboard
 - `docs/data/database-overview.md` - Quick orientation, logical relationships, and demo-data guidance.
 - `docs/data/case-finance-data-architecture.md` - Case/finance ERM narrative and key table relationships.
 - `docs/data/documents-model.md` - Unified document model and linking rules.
+- `docs/data/tutorial-progress.md` - Hands-on tutorial completion/dismissal tracking (`staff_tutorial_progress`).
 - `docs/planning/document-model-erm-adjustment.md` - ERM changes and rationale for document relationships.
 - `docs/data/record-locking.md` - `application_lock` and optimistic/pessimistic concurrency tables.
 - `docs/architecture/integrations/public-admin-integration-notes.md` - Cross-app data flow and shared-DB context.
 - `../ISET-intake/docs/data/key-tables.md` - Portal-focused key tables and notes.
 
 ## Schema source of truth
-- Admin dashboard migrations live in `db/migrations/`; ad-hoc DDL or data scripts live in `sql/`.
+- Admin dashboard schema changes are applied via the admin server migration runner reading `sql/` (tracked by `iset_migration`). See `docs/ops/migration-runner.md`.
+- `db/migrations/` exists but is not applied by the admin server migration runner (treat as legacy/historical unless you have a separate runner).
 - Portal DB artifacts live in `../ISET-intake/database/` (procedures) and `../ISET-intake/local_db_dump.sql` (historical dump).
 
 ## Schema snapshots (dev)

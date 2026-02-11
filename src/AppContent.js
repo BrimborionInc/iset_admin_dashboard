@@ -5,6 +5,7 @@ import {
   HelpPanel,
   Box,
   Button,
+  Modal,
   Header,
   SpaceBetween,
   Container,
@@ -17,18 +18,24 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SideNavigation from './layouts/SideNavigation.js';
 import { apiFetch } from './auth/apiClient';
+import { getIdTokenClaims, getRoleFromClaims, hasValidSession, isIamOn } from './auth/cognito';
 import AppRoutes from './routes/AppRoutes.js'; // Ensure this matches the export in AppRoutes.js
 import { helpMessages } from './utils/helpMessages.js';
 import CustomSplitPanel from './layouts/CustomSplitPanel.js';
 import { LocationProvider } from './context/LocationContext';
 import { TutorialsContext } from './context/TutorialsContext';
 import AdminDashboardHelp from './helpPanelContents/adminDashboardHelp.js';
-import AdminConsoleIntroHelp from './helpPanelContents/adminConsoleIntroHelp.js';
-import { MessagingProvider } from './pages/messages/MessagingContext.js';
-import FloatingMessageWindow from './pages/messages/FloatingMessageWindow.jsx';
-import { buildApplicationWorkspaceTutorials } from './tutorials/applicationWorkspaceTutorials';
-import { buildNwacAssessmentTutorials } from './tutorials/nwacAssessmentTutorials';
-import { annotationContextI18nStrings } from './tutorials/tutorialI18n';
+	import AdminConsoleIntroHelp from './helpPanelContents/adminConsoleIntroHelp.js';
+	import IsetCoordinatorIntroTourHelp from './helpPanelContents/isetCoordinatorIntroTourHelp.js';
+	import ApplicationCaseDashboardHelp from './helpPanelContents/applicationCaseDashboardHelp.js';
+	import ApplicationAssessmentHelp, { NwacAssessmentHelp } from './helpPanelContents/applicationAssessmentHelp.js';
+	import { MessagingProvider } from './pages/messages/MessagingContext.js';
+	import FloatingMessageWindow from './pages/messages/FloatingMessageWindow.jsx';
+	import { buildApplicationWorkspaceTutorials, APPLICATION_WORKSPACE_TUTORIAL_ID } from './tutorials/applicationWorkspaceTutorials';
+	import { buildIsetCoordinatorIntroTutorials, ISET_COORDINATOR_INTRO_TUTORIAL_ID } from './tutorials/isetCoordinatorIntroTutorials';
+	import { buildNwacAssessmentTutorials, NWAC_ASSESSMENT_TUTORIAL_ID } from './tutorials/nwacAssessmentTutorials';
+	import { annotationContextI18nStrings } from './tutorials/tutorialI18n';
+	import { useHistory, useLocation } from 'react-router-dom';
 
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_STORED_MESSAGES = 24;
@@ -90,7 +97,7 @@ const buildSystemPrompt = ({ focusTitle, aiContext }) => {
   return sections.join('\n');
 };
 
-const loadTutorialCompletionMap = () => {
+const loadTutorialCompletionMapFromLocalStorage = () => {
   if (typeof window === 'undefined') {
     return {};
   }
@@ -115,15 +122,12 @@ const loadTutorialCompletionMap = () => {
   return {};
 };
 
-const persistTutorialCompletionMap = (nextValue) => {
+const clearTutorialCompletionMapInLocalStorage = () => {
   if (typeof window === 'undefined') {
     return;
   }
   try {
-    window.localStorage?.setItem(
-      TUTORIAL_COMPLETION_STORAGE_KEY,
-      JSON.stringify(nextValue || {})
-    );
+    window.localStorage?.removeItem(TUTORIAL_COMPLETION_STORAGE_KEY);
   } catch (_) {
     // Ignore persistence failures (private mode, quota, etc.)
   }
@@ -529,22 +533,231 @@ const AppContent = ({ currentRole }) => {
   const [splitPanelOpen, setSplitPanelOpen] = useState(false); // State for SplitPanel, initially closed
   const [splitPanelSize, setSplitPanelSize] = useState(360); // State for SplitPanel size
   const [splitPanelPreferences, setSplitPanelPreferences] = useState({ position: 'side' }); // State for SplitPanel preferences
-  const [availableItems, setAvailableItems] = useState([]); // State for available items (palette)
+	const [availableItems, setAvailableItems] = useState([]); // State for available items (palette)
   const [contentDensity, setContentDensity] = useState(() => {
     if (typeof window === "undefined") return "comfortable";
     const stored = window.localStorage?.getItem(CONTENT_DENSITY_STORAGE_KEY);
     return stored === "compact" ? "compact" : "comfortable";
   });
-  const [completedTutorials, setCompletedTutorials] = useState(() => loadTutorialCompletionMap());
+	const location = useLocation();
+	const history = useHistory();
+	const [tutorialStatusMap, setTutorialStatusMap] = useState({});
+  const [tutorialProgressLoading, setTutorialProgressLoading] = useState(true);
+  const migrateTutorialProgressRef = useRef(false);
   const [currentTutorial, setCurrentTutorial] = useState(null);
+	  const [introPromptVisible, setIntroPromptVisible] = useState(false);
+	  const introPromptShownRef = useRef(false);
+	  const [pageTutorialPrompt, setPageTutorialPrompt] = useState({ visible: false, tutorialId: null });
+	  const pageTutorialPromptShownRef = useRef(new Set());
+
+  const effectiveRole = useMemo(() => {
+    const iamOnFlag = isIamOn();
+    const signedIn = hasValidSession();
+    const claimsRole = getRoleFromClaims(getIdTokenClaims());
+    const roleFallback = currentRole?.value || currentRole?.label || currentRole;
+    return (iamOnFlag && signedIn && claimsRole) ? claimsRole : roleFallback;
+  }, [currentRole]);
+
+  const completedTutorials = useMemo(() => {
+    const next = {};
+    Object.entries(tutorialStatusMap || {}).forEach(([tutorialId, status]) => {
+      if (status === 'completed') {
+        next[tutorialId] = true;
+      }
+    });
+    return next;
+  }, [tutorialStatusMap]);
 
   const tutorials = useMemo(
     () => [
+      ...buildIsetCoordinatorIntroTutorials({ completedMap: completedTutorials }),
       ...buildApplicationWorkspaceTutorials({ completedMap: completedTutorials }),
       ...buildNwacAssessmentTutorials({ completedMap: completedTutorials })
     ],
     [completedTutorials]
   );
+
+  const loadTutorialProgress = useCallback(async () => {
+    setTutorialProgressLoading(true);
+    try {
+      const response = await apiFetch('/api/me/tutorial-progress');
+      let data = null;
+      try { data = await response.json(); } catch { data = null; }
+      if (!response.ok) {
+        const message = data?.error || 'Failed to load tutorial progress';
+        throw new Error(message);
+      }
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const map = items.reduce((acc, item) => {
+        const tutorialId = typeof item?.tutorialId === 'string' ? item.tutorialId.trim() : '';
+        const status = typeof item?.status === 'string' ? item.status.trim().toLowerCase() : '';
+        if (tutorialId && (status === 'completed' || status === 'dismissed')) {
+          acc[tutorialId] = status;
+        }
+        return acc;
+      }, {});
+      setTutorialStatusMap(map);
+      return map;
+    } catch (error) {
+      console.error('[tutorials] load progress failed', error);
+      setTutorialStatusMap({});
+      return null;
+    } finally {
+      setTutorialProgressLoading(false);
+    }
+  }, []);
+
+  const persistTutorialStatus = useCallback(async (tutorialId, status) => {
+    const id = typeof tutorialId === 'string' ? tutorialId.trim() : '';
+    const normalisedStatus = typeof status === 'string' ? status.trim().toLowerCase() : '';
+    if (!id) return false;
+    if (!['completed', 'dismissed'].includes(normalisedStatus)) return false;
+    try {
+      const response = await apiFetch('/api/me/tutorial-progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tutorialId: id, status: normalisedStatus })
+      });
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || `Failed to persist tutorial status (${response.status})`);
+      }
+      setTutorialStatusMap(prev => ({ ...(prev || {}), [id]: normalisedStatus }));
+      return true;
+    } catch (error) {
+      console.error('[tutorials] persist failed', error);
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTutorialProgress();
+  }, [loadTutorialProgress]);
+
+  useEffect(() => {
+    const handleAuthChange = () => {
+      loadTutorialProgress();
+    };
+    window.addEventListener('auth:session-changed', handleAuthChange);
+    window.addEventListener('storage', handleAuthChange);
+    return () => {
+      window.removeEventListener('auth:session-changed', handleAuthChange);
+      window.removeEventListener('storage', handleAuthChange);
+    };
+  }, [loadTutorialProgress]);
+
+  useEffect(() => {
+    const handler = () => {
+      loadTutorialProgress();
+    };
+    window.addEventListener('tutorials:refresh', handler);
+    return () => window.removeEventListener('tutorials:refresh', handler);
+  }, [loadTutorialProgress]);
+
+  useEffect(() => {
+    if (tutorialProgressLoading) return;
+    if (migrateTutorialProgressRef.current) return;
+    migrateTutorialProgressRef.current = true;
+
+    const localCompletedMap = loadTutorialCompletionMapFromLocalStorage();
+    const localIds = Object.keys(localCompletedMap || {}).filter((key) => localCompletedMap[key]);
+    if (!localIds.length) {
+      clearTutorialCompletionMapInLocalStorage();
+      return;
+    }
+
+    const missing = localIds.filter((id) => tutorialStatusMap[id] !== 'completed');
+    if (!missing.length) {
+      clearTutorialCompletionMapInLocalStorage();
+      return;
+    }
+
+    (async () => {
+      try {
+        const response = await apiFetch('/api/me/tutorial-progress/bulk-complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tutorialIds: missing })
+        });
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(message || `Failed to migrate tutorial progress (${response.status})`);
+        }
+        clearTutorialCompletionMapInLocalStorage();
+        await loadTutorialProgress();
+      } catch (error) {
+        console.error('[tutorials] migration failed', error);
+      }
+    })();
+  }, [tutorialProgressLoading, tutorialStatusMap, loadTutorialProgress]);
+
+	  useEffect(() => {
+	    if (introPromptShownRef.current) return;
+	    if (tutorialProgressLoading) return;
+	    if ((location?.pathname || '/') !== '/') return;
+	    if (effectiveRole !== 'Application Assessor') return;
+	    const status = tutorialStatusMap[ISET_COORDINATOR_INTRO_TUTORIAL_ID];
+	    if (status === 'completed' || status === 'dismissed') return;
+	    introPromptShownRef.current = true;
+	    setIntroPromptVisible(true);
+	  }, [effectiveRole, location?.pathname, tutorialProgressLoading, tutorialStatusMap]);
+
+	  useEffect(() => {
+	    if (introPromptVisible) return;
+	    if (pageTutorialPrompt.visible) return;
+	    if (tutorialProgressLoading) return;
+
+	    const path = location?.pathname || '/';
+	    const match = path.match(/^\/application-case\/(\d+)/);
+	    if (!match) return;
+	    const caseId = match[1];
+
+	    // Application workspace tutorial: prompt for coordinators on first visit to a workspace.
+	    if (effectiveRole === 'Application Assessor') {
+	      const status = tutorialStatusMap[APPLICATION_WORKSPACE_TUTORIAL_ID];
+	      if (status === 'completed' || status === 'dismissed') return;
+	      const key = `${APPLICATION_WORKSPACE_TUTORIAL_ID}:${caseId}`;
+	      if (pageTutorialPromptShownRef.current.has(key)) return;
+	      pageTutorialPromptShownRef.current.add(key);
+	      setPageTutorialPrompt({ visible: true, tutorialId: APPLICATION_WORKSPACE_TUTORIAL_ID });
+	      return;
+	    }
+
+	    // NWAC decision tutorial: prompt NWAC admins only when the case is in pending approval.
+	    if (effectiveRole === 'Program Administrator' || effectiveRole === 'System Administrator') {
+	      const status = tutorialStatusMap[NWAC_ASSESSMENT_TUTORIAL_ID];
+	      if (status === 'completed' || status === 'dismissed') return;
+	      const key = `${NWAC_ASSESSMENT_TUTORIAL_ID}:${caseId}`;
+	      if (pageTutorialPromptShownRef.current.has(key)) return;
+
+	      let cancelled = false;
+	      (async () => {
+	        try {
+	          const resp = await apiFetch(`/api/cases/${caseId}`);
+	          const json = await resp.json().catch(() => null);
+	          if (cancelled || !resp.ok) return;
+	          const caseStatus = json?.status || json?.case?.status || null;
+	          const appStatus = json?.application_status || json?.applicationStatus || null;
+	          const normalized = String(appStatus || caseStatus || '').trim().toLowerCase();
+	          if (normalized !== 'pending_approval') return;
+
+	          pageTutorialPromptShownRef.current.add(key);
+	          setPageTutorialPrompt({ visible: true, tutorialId: NWAC_ASSESSMENT_TUTORIAL_ID });
+	        } catch (_) {
+	          // ignore; don't prompt if we can't determine state
+	        }
+	      })();
+
+	      return () => { cancelled = true; };
+	    }
+	  }, [
+	    introPromptVisible,
+	    pageTutorialPrompt.visible,
+	    effectiveRole,
+	    location?.pathname,
+	    tutorialProgressLoading,
+	    tutorialStatusMap,
+	  ]);
 
   // Notifications state (moved inside component)
   const [notifications, setNotifications] = useState([]);
@@ -618,10 +831,6 @@ const AppContent = ({ currentRole }) => {
     }
     return undefined;
   }, [contentDensity]);
-
-  useEffect(() => {
-    persistTutorialCompletionMap(completedTutorials);
-  }, [completedTutorials]);
 
   const handleDismissNotification = useCallback(async (notificationId) => {
     try {
@@ -713,37 +922,158 @@ const AppContent = ({ currentRole }) => {
           id: `notification-${n.id}`,
         };
       }),
-  [notifications, handleDismissNotification, mapSeverityToType]);
+  [notifications, handleDismissNotification, mapSeverityToType, daysSinceUtc]);
 
   const refreshNotifications = useCallback(() => loadNotifications({ scrollIntoView: true }), [loadNotifications]);
 
   const [aiContext, setAiContext] = useState(AdminDashboardHelp.aiContext || ""); // State to hold AI context
 
-  const toggleHelpPanel = (content, title = "Help and Tutorials", context = "") => {
+  const toggleHelpPanel = useCallback((content, title = "Help and Tutorials", context = "") => {
     setCurrentHelpContent(content);
     setHelpPanelTitle(title);
     const fallbackContext = AdminDashboardHelp.aiContext || "";
     const nextContext = typeof context === 'string' && context.trim() ? context : fallbackContext;
     setAiContext(nextContext); // Set the AI context
     setIsHelpPanelOpen(true);
-  };
+  }, []);
 
   const markTutorialCompleted = useCallback((tutorial) => {
     const tutorialId = getTutorialId(tutorial);
     if (!tutorialId) return;
-    setCompletedTutorials(prev => {
-      if (prev[tutorialId]) return prev;
-      return { ...prev, [tutorialId]: true };
-    });
-  }, []);
+    persistTutorialStatus(tutorialId, 'completed');
+  }, [persistTutorialStatus]);
 
-  const handleStartTutorial = useCallback(({ detail }) => {
-    setCurrentTutorial(detail?.tutorial || null);
-  }, []);
+	  const handleIntroNotNow = useCallback(() => {
+	    setIntroPromptVisible(false);
+	    persistTutorialStatus(ISET_COORDINATOR_INTRO_TUTORIAL_ID, 'dismissed');
+	  }, [persistTutorialStatus]);
 
-  const handleExitTutorial = useCallback(() => {
-    setCurrentTutorial(null);
-  }, []);
+	  const handleIntroStartTour = useCallback(() => {
+	    setIntroPromptVisible(false);
+	    toggleHelpPanel(<IsetCoordinatorIntroTourHelp />, 'Take a tour');
+	    const introTutorial = (tutorials || []).find(
+	      tutorial => getTutorialId(tutorial) === ISET_COORDINATOR_INTRO_TUTORIAL_ID
+	    );
+	    if (introTutorial) {
+	      setCurrentTutorial(introTutorial);
+	    }
+	  }, [toggleHelpPanel, tutorials]);
+
+		  const resolveTutorialStartPath = useCallback(async (tutorial) => {
+		    const tutorialId = getTutorialId(tutorial);
+		    const category = tutorial?.category || null;
+	
+	    if (tutorialId === ISET_COORDINATOR_INTRO_TUTORIAL_ID) {
+	      return '/';
+	    }
+	
+	    // Tutorials that depend on hotspots inside the application workspace need a case context.
+	    if (category === 'application-workspace' || category === 'nwac-assessment') {
+	      const fetchFirstCaseIdFromCases = async (statusList) => {
+	        const params = new URLSearchParams({
+	          page: '1',
+	          pageSize: '1',
+	          sort: 'updatedAt',
+	          direction: 'desc',
+	        });
+	        if (statusList) params.set('status', statusList);
+	        const resp = await apiFetch(`/api/cases?${params.toString()}`);
+	        if (!resp.ok) return null;
+	        const json = await resp.json().catch(() => null);
+	        const items = Array.isArray(json?.items) ? json.items : [];
+	        if (!items.length) return null;
+	        const row = items[0] || {};
+	        const caseId = row.id || row.caseId || row.case_id || null;
+	        const n = Number(caseId);
+	        return Number.isFinite(n) && n > 0 ? n : null;
+	      };
+	
+	      // Prefer an actual pending-approval file for NWAC tutorials when possible.
+	      if (category === 'nwac-assessment') {
+	        const pending = await fetchFirstCaseIdFromCases('pending_approval');
+	        if (pending) return `/application-case/${pending}`;
+	      }
+	
+	      const any = await fetchFirstCaseIdFromCases(null);
+	      if (any) return `/application-case/${any}`;
+	
+	      // Fallback: at least bring them to the place where they can open an application.
+	      return '/case-assignment-dashboard';
+	    }
+	
+	    return null;
+	  }, []);
+	
+	  const openHelpForTutorial = useCallback((tutorial) => {
+	    const tutorialId = getTutorialId(tutorial);
+	    const category = tutorial?.category || null;
+	
+	    if (tutorialId === ISET_COORDINATOR_INTRO_TUTORIAL_ID) {
+	      toggleHelpPanel(<IsetCoordinatorIntroTourHelp />, 'Take a tour');
+	      return;
+	    }
+	    if (category === 'application-workspace') {
+	      toggleHelpPanel(<ApplicationCaseDashboardHelp />, 'Application workspace tour', ApplicationCaseDashboardHelp.aiContext || '');
+	      return;
+	    }
+	    if (category === 'nwac-assessment') {
+	      toggleHelpPanel(<NwacAssessmentHelp />, 'NWAC assessment tour', NwacAssessmentHelp.aiContext || '');
+	      return;
+	    }
+	
+	    // Default: open the general help panel, but keep the tutorial running.
+	    toggleHelpPanel(<ApplicationAssessmentHelp />, 'Help and Tutorials', ApplicationAssessmentHelp.aiContext || '');
+	  }, [toggleHelpPanel]);
+
+	  const activePagePromptTutorial = useMemo(() => {
+	    const id = pageTutorialPrompt?.tutorialId;
+	    if (!id) return null;
+	    return (tutorials || []).find(t => getTutorialId(t) === id) || null;
+	  }, [pageTutorialPrompt?.tutorialId, tutorials]);
+
+	  const handlePageTutorialSkip = useCallback(() => {
+	    const id = pageTutorialPrompt?.tutorialId;
+	    setPageTutorialPrompt({ visible: false, tutorialId: null });
+	    if (id) {
+	      persistTutorialStatus(id, 'dismissed');
+	    }
+	  }, [pageTutorialPrompt?.tutorialId, persistTutorialStatus]);
+
+	  const handlePageTutorialStart = useCallback(() => {
+	    const tutorial = activePagePromptTutorial;
+	    setPageTutorialPrompt({ visible: false, tutorialId: null });
+	    if (!tutorial) return;
+	    openHelpForTutorial(tutorial);
+	    setCurrentTutorial(tutorial);
+	  }, [activePagePromptTutorial, openHelpForTutorial]);
+	
+	  const handleStartTutorial = useCallback(({ detail }) => {
+	    const tutorial = detail?.tutorial || null;
+	    if (!tutorial) {
+	      setCurrentTutorial(null);
+	      return;
+	    }
+	
+	    (async () => {
+	      try {
+	        openHelpForTutorial(tutorial);
+	        const target = await resolveTutorialStartPath(tutorial);
+	        if (target && (location?.pathname || '/') !== target) {
+	          try { history.push(target); } catch (_) {}
+	        }
+	      } finally {
+	        setCurrentTutorial(tutorial);
+	      }
+	    })();
+	  }, [history, location?.pathname, openHelpForTutorial, resolveTutorialStartPath]);
+
+	  const handleExitTutorial = useCallback(() => {
+	    const tutorialId = getTutorialId(currentTutorial);
+	    if (tutorialId) {
+	      persistTutorialStatus(tutorialId, 'dismissed');
+	    }
+	    setCurrentTutorial(null);
+	  }, [currentTutorial, persistTutorialStatus]);
 
   const handleFinishTutorial = useCallback(() => {
     if (currentTutorial) {
@@ -785,7 +1115,7 @@ const AppContent = ({ currentRole }) => {
     };
     window.addEventListener('help:open-topnav', handleTopNavHelp);
     return () => window.removeEventListener('help:open-topnav', handleTopNavHelp);
-  }, []);
+  }, [toggleHelpPanel]);
 
   // Listen for page requests to open the tools palette (avoids prop drilling)
   useEffect(() => {
@@ -818,12 +1148,59 @@ const AppContent = ({ currentRole }) => {
             onFinish={handleFinishTutorial}
             i18nStrings={annotationContextI18nStrings}
           >
-            <AppLayout
-              navigationOpen={isNavigationOpen}
-              onNavigationChange={({ detail }) => setIsNavigationOpen(detail.open)}
-              navigation={
-                <SideNavigation
+	            {introPromptVisible && (
+	              <Modal
+	                visible={introPromptVisible}
+	                header="Take a tour"
+	                closeAriaLabel="Close tour prompt"
+	                onDismiss={handleIntroNotNow}
+                footer={
+                  <SpaceBetween size="xs" direction="horizontal">
+                    <Button onClick={handleIntroNotNow}>Not now</Button>
+                    <Button variant="primary" onClick={handleIntroStartTour}>Start tour</Button>
+                  </SpaceBetween>
+                }
+              >
+                <SpaceBetween size="m">
+                  <Box>
+                    Welcome. This quick tour will walk you through the home page, the main widgets, and how to find help.
+                  </Box>
+                  <Box>
+                    You can always run tutorials later from the Tutorials page under Support.
+                  </Box>
+                </SpaceBetween>
+	              </Modal>
+	            )}
+	            {pageTutorialPrompt.visible && activePagePromptTutorial && (
+	              <Modal
+	                visible={pageTutorialPrompt.visible}
+	                header={activePagePromptTutorial.title || 'Take a tour'}
+	                closeAriaLabel="Close tutorial prompt"
+	                onDismiss={handlePageTutorialSkip}
+	                footer={
+	                  <SpaceBetween size="xs" direction="horizontal">
+	                    <Button onClick={handlePageTutorialSkip}>Skip</Button>
+	                    <Button variant="primary" onClick={handlePageTutorialStart}>Start tutorial</Button>
+	                  </SpaceBetween>
+	                }
+	              >
+	                <SpaceBetween size="m">
+	                  <Box variant="p">
+	                    This guided tutorial will highlight key areas on this page.
+	                  </Box>
+	                  <Box variant="p">
+	                    You can reset tutorial progress later from the Tutorials page under Support.
+	                  </Box>
+	                </SpaceBetween>
+	              </Modal>
+	            )}
+	            <AppLayout
+	              navigationOpen={isNavigationOpen}
+	              onNavigationChange={({ detail }) => setIsNavigationOpen(detail.open)}
+	              navigation={
+	                <SideNavigation
                   currentRole={currentRole}
+                  showTutorialHotspots={getTutorialId(currentTutorial) === ISET_COORDINATOR_INTRO_TUTORIAL_ID}
                   notificationCount={notifications.length}
                   refreshNotifications={refreshNotifications}
                   notificationsLoading={notificationsLoading}
